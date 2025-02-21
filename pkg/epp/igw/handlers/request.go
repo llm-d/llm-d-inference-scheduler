@@ -119,7 +119,7 @@ func (s *Server) HandleRequestBody(
 	headers := []*configPb.HeaderValueOption{
 		{
 			Header: &configPb.HeaderValue{
-				Key:      s.targetEndpointKey,
+				Key:      s.destinationEndpointHintKey,
 				RawValue: []byte(endpoint),
 			},
 		},
@@ -135,6 +135,29 @@ func (s *Server) HandleRequestBody(
 	// Print headers for debugging
 	for _, header := range headers {
 		logger.V(logutil.DEBUG).Info("Request body header", "key", header.Header.Key, "value", header.Header.RawValue)
+	}
+
+	targetEndpointValue := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			s.destinationEndpointHintKey: {
+				Kind: &structpb.Value_StringValue{
+					StringValue: endpoint,
+				},
+			},
+		},
+	}
+	dynamicMetadata := targetEndpointValue
+	if s.destinationEndpointHintMetadataNamespace != "" {
+		// If a namespace is defined, wrap the selected endpoint with that.
+		dynamicMetadata = &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				s.destinationEndpointHintMetadataNamespace: {
+					Kind: &structpb.Value_StructValue{
+						StructValue: targetEndpointValue,
+					},
+				},
+			},
+		}
 	}
 
 	resp := &extProcPb.ProcessingResponse{
@@ -155,15 +178,7 @@ func (s *Server) HandleRequestBody(
 				},
 			},
 		},
-		DynamicMetadata: &structpb.Struct{
-			Fields: map[string]*structpb.Value{
-				s.targetEndpointKey: {
-					Kind: &structpb.Value_StringValue{
-						StringValue: endpoint,
-					},
-				},
-			},
-		},
+		DynamicMetadata: dynamicMetadata,
 	}
 	return resp, nil
 }
