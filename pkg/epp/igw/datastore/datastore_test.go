@@ -280,6 +280,25 @@ func TestRandomWeightedDraw(t *testing.T) {
 			},
 			want: "v1.1",
 		},
+		{
+			name: "weighted distribution with weight unset",
+			model: &v1alpha2.InferenceModel{
+				Spec: v1alpha2.InferenceModelSpec{
+					TargetModels: []v1alpha2.TargetModel{
+						{
+							Name: "canary",
+						},
+						{
+							Name: "v1.1",
+						},
+						{
+							Name: "v1",
+						},
+					},
+				},
+			},
+			want: "canary",
+		},
 	}
 	var seedVal int64 = 420
 	for _, test := range tests {
@@ -287,7 +306,7 @@ func TestRandomWeightedDraw(t *testing.T) {
 			for range 10000 {
 				model := RandomWeightedDraw(logger, test.model, seedVal)
 				if model != test.want {
-					t.Errorf("Model returned!: %v", model)
+					t.Errorf("Model returned: %v != %v", model, test.want)
 					break
 				}
 			}
