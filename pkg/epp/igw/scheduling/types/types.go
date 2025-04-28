@@ -43,9 +43,12 @@ func (r *LLMRequest) String() string {
 type Pod interface {
 	GetPod() *backendmetrics.Pod
 	GetMetrics() *backendmetrics.Metrics
-	SetScore(float64)
-	Score() float64
 	String() string
+}
+
+type ScoredPod struct {
+	Pod   Pod
+	Score float64
 }
 
 // SchedulingContext holds contextual information during a scheduling operation.
@@ -71,16 +74,7 @@ func (pm *PodMetrics) GetMetrics() *backendmetrics.Metrics {
 	return pm.Metrics
 }
 
-func (pm *PodMetrics) SetScore(score float64) {
-	pm.score = score
-}
-
-func (pm *PodMetrics) Score() float64 {
-	return pm.score
-}
-
 type PodMetrics struct {
-	score float64
 	*backendmetrics.Pod
 	*backendmetrics.Metrics
 }

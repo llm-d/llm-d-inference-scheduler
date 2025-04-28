@@ -49,22 +49,23 @@ type Filter interface {
 	Filter(ctx *types.SchedulingContext, pods []types.Pod) []types.Pod
 }
 
-// Scorer defines the interface for scoring pods based on context.
+// Scorer defines the interface for scoring a list of pods based on context.
+// Scorers must score pods with a value within the range of [0,1] where 1 is the highest score.
 type Scorer interface {
 	Plugin
-	Score(ctx *types.SchedulingContext, pod types.Pod) float64
+	Score(ctx *types.SchedulingContext, pods []types.Pod) map[types.Pod]float64
+}
+
+// Picker picks the final pod(s) to send the request to.
+type Picker interface {
+	Plugin
+	Pick(ctx *types.SchedulingContext, scoredPods []*types.ScoredPod) *types.Result
 }
 
 // PostSchedule is called by the scheduler after it selects a targetPod for the request.
 type PostSchedule interface {
 	Plugin
 	PostSchedule(ctx *types.SchedulingContext, res *types.Result)
-}
-
-// Picker picks the final pod(s) to send the request to.
-type Picker interface {
-	Plugin
-	Pick(ctx *types.SchedulingContext, pods []types.Pod) *types.Result
 }
 
 // PostResponse is called by the scheduler after a successful response was sent.

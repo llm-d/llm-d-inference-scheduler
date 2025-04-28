@@ -20,18 +20,22 @@ import (
 	"fmt"
 	"math/rand"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
+var _ plugins.Picker = &RandomPicker{}
+
+// RandomPicker picks a random pod from the list of candidates.
 type RandomPicker struct{}
 
 func (rp *RandomPicker) Name() string {
 	return "random"
 }
 
-func (rp *RandomPicker) Pick(ctx *types.SchedulingContext, pods []types.Pod) *types.Result {
-	ctx.Logger.V(logutil.DEBUG).Info(fmt.Sprintf("Selecting a random pod from %d candidates: %+v", len(pods), pods))
-	i := rand.Intn(len(pods))
-	return &types.Result{TargetPod: pods[i]}
+func (rp *RandomPicker) Pick(ctx *types.SchedulingContext, scoredPods []*types.ScoredPod) *types.Result {
+	ctx.Logger.V(logutil.DEBUG).Info(fmt.Sprintf("Selecting a random pod from %d candidates: %+v", len(scoredPods), scoredPods))
+	i := rand.Intn(len(scoredPods))
+	return &types.Result{TargetPod: scoredPods[i].Pod}
 }
