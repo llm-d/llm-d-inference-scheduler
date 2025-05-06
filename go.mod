@@ -4,7 +4,7 @@ go 1.24.0
 
 toolchain go1.24.2
 
-replace sigs.k8s.io/gateway-api-inference-extension => github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250505151158-a305927da234
+replace sigs.k8s.io/gateway-api-inference-extension => github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250506180814-c5bf03637bec
 
 require (
 	github.com/envoyproxy/go-control-plane/envoy v1.32.4
