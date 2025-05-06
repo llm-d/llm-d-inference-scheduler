@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: endpoint-picker
+  labels:
+    app: endpoint-picker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: endpoint-picker
+  template:
+    metadata:
+      labels:
+        app: endpoint-picker
+    spec:
+      serviceAccountName: endpoint-picker
+      terminationGracePeriodSeconds: 130
+      containers:
+      - name: epp
+        image: quay.io/llm-d/gateway-api-inference-extension/epp:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - -poolName
+        - "${POOL_NAME}"
+        - -v
+        - "4"
+        - --zap-encoder
+        - "json"
+        - -grpcPort
+        - "9002"
+        - -grpcHealthPort
+        - "9003"
+        ports:
+        - containerPort: 9002
+        - containerPort: 9003
+        - name: metrics
+          containerPort: 9090
+        livenessProbe:
+          grpc:
+            port: 9003
+            service: inference-extension
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          grpc:
+            port: 9003
+            service: inference-extension
+          initialDelaySeconds: 5
+          periodSeconds: 10
