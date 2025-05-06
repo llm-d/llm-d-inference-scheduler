@@ -349,3 +349,10 @@ print-project-name: ## Print the current project name
 .PHONY: install-hooks
 install-hooks: ## Install git hooks
 	git config core.hooksPath hooks
+
+# TODO: remove this once we're no longer using a GIE fork
+.PHONY: sync-gie-fork
+sync-gie-fork:
+	perl -pi -e 's/(replace\s+sigs\.k8s\.io\/gateway-api-inference-extension\s+=>\s+github\.com\/neuralmagic\/gateway-api-inference-extension\s+)\S+/$$1upstream-sync/' go.mod
+	go mod tidy
+	go mod verify

@@ -4,9 +4,10 @@ go 1.24.0
 
 toolchain go1.24.2
 
-replace sigs.k8s.io/gateway-api-inference-extension => github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250505151158-a305927da234
+replace sigs.k8s.io/gateway-api-inference-extension => github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250506180814-c5bf03637bec
 
 require (
+	github.com/envoyproxy/go-control-plane/envoy v1.32.4
 	github.com/go-logr/logr v1.4.2
 	github.com/prometheus/client_golang v1.22.0
 	github.com/stretchr/testify v1.10.0
@@ -31,7 +32,6 @@ require (
 	github.com/cncf/xds/go v0.0.0-20250121191232-2f005788dc42 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.12.0 // indirect
-	github.com/envoyproxy/go-control-plane/envoy v1.32.4 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.2.1 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

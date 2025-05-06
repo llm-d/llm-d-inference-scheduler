@@ -23,3 +23,29 @@ plugins needed by LLM-D (e.g. custom scorers, P/D Disaggregation, etc).
 [Gateway API]:https://github.com/kubernetes-sigs/gateway-api
 [Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
 
+## Development
+
+### Temporary Fork
+
+We're temporarily working with a fork of the [Gateway API Inference Extension
+(GIE)] instead of upstream:
+
+https://github.com/neuralmagic/gateway-api-inference-extension
+
+We're specifically using a branch called `upstream-sync` which is being kept
+up-to-date with upstream GIE, but includes some features that are being staged
+there while PRs are being worked on with upstream.
+
+To synchronize with this branch in the interim, you can't simply run `go get` as
+it will complain that the module name doesn't match. The following will provide
+a workaround to automatically synchronize the branch:
+
+```console
+make sync-gie-fork
+```
+
+This will fetch the latest `HEAD` of the `upstream-sync` branch, and will
+update both the `go.mod` and `go.sum` accordingly, which can then be checked in
+to git.
+
+[Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
