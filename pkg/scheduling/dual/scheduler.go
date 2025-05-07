@@ -66,7 +66,7 @@ func NewScheduler(threshold float32, datastore datastore.Datastore) *Scheduler {
 
 // Schedule selects a Pod for the given request and context
 func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types.Result, error) {
-	logger := log.FromContext(ctx).WithName("PD").WithValues("request", req)
+	logger := log.FromContext(ctx).WithName("PD-scheduler").WithValues("request", req)
 	loggerDebug := logger.V(logutil.DEBUG)
 
 	scheduleStart := time.Now()
