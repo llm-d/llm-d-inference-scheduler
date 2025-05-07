@@ -1,25 +1,15 @@
-/*
-Copyright 2025 The Kubernetes Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package filter
 
 import (
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+)
+
+const (
+	roleLabel   = "llm-d.ai/role"
+	rolePrefill = "prefill"
+	roleDecode  = "decode"
+	roleBoth    = "both"
 )
 
 // PrefillFilter - filters out pods that are not marked with role Prefill
@@ -37,7 +27,8 @@ func (pf *PrefillFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
-		if pod.GetPod().Role == backend.Prefill {
+		role := pod.GetPod().Labels[roleLabel]
+		if role == rolePrefill {
 			filteredPods = append(filteredPods, pod)
 		}
 	}
@@ -54,12 +45,13 @@ func (df *DecodeFilter) Name() string {
 	return "decode-filter"
 }
 
-// decodeFilterFunc filters out all pods that are not marked as "decode" or "both"
-func (pf *DecodeFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
+// Filter removes all pods that are not marked as "decode" or "both"
+func (df *DecodeFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
-		if pod.GetPod().Role == backend.Decode || pod.GetPod().Role == backend.Both {
+		role := pod.GetPod().Labels[roleLabel]
+		if role == roleDecode || role == roleBoth {
 			filteredPods = append(filteredPods, pod)
 		}
 	}
