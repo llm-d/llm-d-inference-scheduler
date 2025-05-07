@@ -89,6 +89,7 @@ func TestLoadBasedScorer(t *testing.T) {
 					},
 					Score: 0.5,
 				},
+				MutatedHeaders: map[string]string{},
 			},
 		},
 	}
