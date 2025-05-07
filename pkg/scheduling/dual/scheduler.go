@@ -6,15 +6,17 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
 	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
@@ -24,13 +26,17 @@ import (
 // determining when each is invoked.
 type Scheduler struct {
 	threshold float32
+	store     datastore.Datastore
 	primary   handlers.Scheduler
 	secondary handlers.Scheduler
 }
 
 // NewScheduler create a new scheduler with the given datastore and threshold
 func NewScheduler(threshold float32, datastore datastore.Datastore) *Scheduler {
-	scheduler := &Scheduler{threshold: threshold}
+	scheduler := &Scheduler{
+		threshold: threshold,
+		store:     datastore,
+	}
 
 	scheduler.primary = scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig(
 		[]plugins.PreSchedule{},
@@ -59,13 +65,31 @@ func NewScheduler(threshold float32, datastore datastore.Datastore) *Scheduler {
 }
 
 // Schedule selects a Pod for the given request and context
-func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (result *types.Result, err error) {
-	logger := log.FromContext(ctx).WithValues("request", req)
-	debugLog := logger.V(logging.DEBUG)
+func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types.Result, error) {
+	logger := log.FromContext(ctx).WithName("PD").WithValues("request", req)
+	loggerDebug := logger.V(logutil.DEBUG)
 
-	debugLog.Info(fmt.Sprintf("Scheduling a request %+v", req))
+	scheduleStart := time.Now()
+	defer func() {
+		metrics.RecordSchedulerE2ELatency(time.Since(scheduleStart))
+	}()
 
-	primary, err := s.primary.Schedule(ctx, req)
+	if rand.Float32() > s.threshold { // choose a primary only
+		return s.primary.Schedule(ctx, req)
+	}
+
+	sCtx := types.NewSchedulingContext(ctx, req, types.ToSchedulerPodMetrics(s.store.PodGetAll()))
+	loggerDebug.Info(fmt.Sprintf("Scheduling a request, Metrics: %+v", sCtx.PodsSnapshot))
+	return s.ScheduleWithContext(sCtx, req)
+
+}
+
+// ScheduleWithContext calls the primary and secondary schedulers using
+// the given scheduling context
+func (s *Scheduler) ScheduleWithContext(sCtx *types.SchedulingContext, req *types.LLMRequest) (*types.Result, error) {
+	debugLog := log.FromContext(sCtx).V(logutil.DEBUG)
+
+	primary, err := s.primary.ScheduleWithContext(sCtx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +97,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (result
 
 	// TODO: this is demo behavior we need to replace once we know what we want.
 	if rand.Float32() < s.threshold { // choose a secondary as well
-		secondary, err := s.secondary.Schedule(ctx, req)
+		secondary, err := s.secondary.ScheduleWithContext(sCtx, req)
 		if err != nil {
 			debugLog.Info(fmt.Sprintf("Secondary scheduler failed %+v, returning primary", err))
 		}

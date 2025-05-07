@@ -99,8 +99,8 @@ github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9G
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
-github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250506180814-c5bf03637bec h1:PScRN/GSHphoCct97liuaLoW6w0G0wkjHs99dv32Sd8=
-github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250506180814-c5bf03637bec/go.mod h1:wMmJREvsRwqKlhMEmsAHxwZpbsP6UYdffgumHq298rE=
+github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250507165421-b1a63e386383 h1:XuMOWYDWNRuk3lbTtpUooDGmblFot5OkFQD01y1Ib4c=
+github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250507165421-b1a63e386383/go.mod h1:wMmJREvsRwqKlhMEmsAHxwZpbsP6UYdffgumHq298rE=
 github.com/onsi/ginkgo/v2 v2.23.4 h1:ktYTpKJAVZnDT4VjxSbiBenUjmlL/5QkBEocaWXiQus=
 github.com/onsi/ginkgo/v2 v2.23.4/go.mod h1:Bt66ApGPBFzHyR+JO10Zbt0Gsp4uWxu5mIOTusL46e8=
 github.com/onsi/gomega v1.37.0 h1:CdEG8g0S133B4OswTDC/5XPSzE1OeP29QOioj2PID2Y=
