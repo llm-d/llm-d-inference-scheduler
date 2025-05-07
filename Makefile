@@ -231,7 +231,7 @@ extract-version-info: check-jq
 load-version-json: check-jq
 	@if [ "$(DEV_VERSION)" = "0.0.1" ]; then \
 	  DEV_VERSION=$$(jq -r '."dev-version"' .version.json); \
-	  PROD_VERSION=$$(jq -r '."dev-version"' .version.json); \
+	  PROD_VERSION=$$(jq -r '."prod-version"' .version.json); \
 	  echo "✔ Loaded DEV_VERSION from .version.json: $$DEV_VERSION"; \
 	  echo "✔ Loaded PROD_VERSION from .version.json: $$PROD_VERSION"; \
 	  export DEV_VERSION; \
