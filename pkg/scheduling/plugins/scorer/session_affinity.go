@@ -31,7 +31,7 @@ func NewSessionAffinity() *SessionAffinity {
 
 // Name returns the scorer's name
 func (s *SessionAffinity) Name() string {
-	return "session affinity scorer"
+	return "session-affinity-scorer"
 }
 
 // Score assign a high score to the pod used in previous requests and zero to others
