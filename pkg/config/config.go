@@ -7,7 +7,6 @@ import (
 	"math"
 
 	"github.com/go-logr/logr"
-	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/utils"
 )
 
 const (
@@ -91,17 +90,17 @@ func (c *Config) LoadConfig() {
 	c.loadScorerInfo(c.PrefillSchedulerScorers, prefixScorerName, prefillPrefixAwareScorerEnablementEnvVar, prefillPrefixAwareScorerWeightEnvVar)
 	c.loadScorerInfo(c.PrefillSchedulerScorers, sessionAwareScorerName, prefillSessionAwareScorerEnablementEnvVar, prefillSessionAwareScorerWeightEnvVar)
 
-	c.PDEnabled = utils.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
-	c.PDThreshold = utils.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
+	c.PDEnabled = GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
+	c.PDThreshold = GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
 }
 
 func (c *Config) loadScorerInfo(scorers map[string]float64, scorerName string, enablementKey string, weightKey string) {
-	if utils.GetEnvString(enablementKey, "false", c.logger) != "true" {
+	if GetEnvString(enablementKey, "false", c.logger) != "true" {
 		c.logger.Info(fmt.Sprintf("Skipping %s creation as it is not enabled", scorerName))
 		return
 	}
 
-	weight := utils.GetEnvFloat(weightKey, 1, c.logger)
+	weight := GetEnvFloat(weightKey, 1, c.logger)
 
 	scorers[scorerName] = weight
 	c.logger.Info("Initialized scorer", "scorer", scorerName, "weight", weight)

@@ -1,5 +1,4 @@
-// Package utils contains commonly used utilities
-package utils
+package config
 
 import (
 	"os"
