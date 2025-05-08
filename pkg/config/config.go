@@ -23,8 +23,7 @@ const (
 	decodeKvCacheScorerWeightEnvVar    = "DECODE_KVCACHE_AWARE_SCORER_WEIGHT"
 	decodeLoadAwareScorerWeightEnvVar  = "DECODE_LOAD_AWARE_SCORER_WEIGHT"
 
-	pdEnabledEnvKey = "PD_ENABLED"
-
+	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
 	pdPromptLenThresholdDefault = 10
 )
