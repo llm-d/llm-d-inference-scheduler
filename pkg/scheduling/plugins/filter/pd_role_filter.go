@@ -6,10 +6,14 @@ import (
 )
 
 const (
-	roleLabel   = "llm-d.ai/role"
-	rolePrefill = "prefill"
-	roleDecode  = "decode"
-	roleBoth    = "both"
+	// RoleLabel name
+	RoleLabel = "llm-d.ai/role"
+	// RolePrefill set for designated prefill workers
+	RolePrefill = "prefill"
+	// RoleDecode set for designated decode workers
+	RoleDecode = "decode"
+	// RoleBoth set for workers that can act as both prefill and decode
+	RoleBoth = "both"
 )
 
 // PrefillFilter - filters out pods that are not marked with role Prefill
@@ -27,8 +31,8 @@ func (pf *PrefillFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
-		role := pod.GetPod().Labels[roleLabel]
-		if role == rolePrefill {
+		role := pod.GetPod().Labels[RoleLabel]
+		if role == RolePrefill { // TODO: doesn't RoleBoth also imply Prefill?
 			filteredPods = append(filteredPods, pod)
 		}
 	}
@@ -50,8 +54,8 @@ func (df *DecodeFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []t
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
-		role := pod.GetPod().Labels[roleLabel]
-		if role == roleDecode || role == roleBoth {
+		role := pod.GetPod().Labels[RoleLabel]
+		if role == RoleDecode || role == RoleBoth {
 			filteredPods = append(filteredPods, pod)
 		}
 	}
