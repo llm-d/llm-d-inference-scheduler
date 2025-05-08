@@ -8,8 +8,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	prefillPodHeader = "x-prefiller-url"
+	// PrefillPodHeader is the HTTP header name used to indicate Prefill worker
+	PrefillPodHeader = "x-prefiller-url"
 )
 
 // Scheduler implements the disaggreagted P/D scheduling logic
@@ -28,11 +29,11 @@ type Scheduler struct {
 	threshold  int
 	targetPort int32
 	store      scheduling.Datastore
-	prefill    handlers.Scheduler
-	decode     handlers.Scheduler
+	prefill    requestcontrol.Scheduler
+	decode     requestcontrol.Scheduler
 }
 
-var _ handlers.Scheduler = &Scheduler{} // validate interface conformance
+var _ requestcontrol.Scheduler = &Scheduler{} // validate interface conformance
 
 // Datastore portion used by scheduler
 type Datastore interface {
@@ -44,6 +45,8 @@ type Datastore interface {
 
 // NewScheduler returns a new disaggregated Prefill/Decode filter, using the
 // provided prompt length threshold.
+// TODO: accept a configuration object with pd-enable, threshold,
+// scorers and their weights, etc. (tracked in issue #9).
 func NewScheduler(threshold int, ds Datastore) (*Scheduler, error) {
 	pool, err := ds.PoolGet()
 	if err != nil {
@@ -82,41 +85,33 @@ func NewScheduler(threshold int, ds Datastore) (*Scheduler, error) {
 // and communicated back to the inference gateway.
 func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types.Result, error) {
 	logger := log.FromContext(ctx).WithName("PD").WithValues("request", req)
-	loggerDebug := logger.V(logutil.DEBUG)
+	debugLog := logger.V(logutil.DEBUG)
 
 	scheduleStart := time.Now()
 	defer func() {
 		metrics.RecordSchedulerE2ELatency(time.Since(scheduleStart))
 	}()
 
-	if len(req.Prompt) < s.threshold { // schedule on decode only
-		fmt.Println("==== short prompt, decode only")
+	if len(req.Prompt) < s.threshold { // schedule on decode only (TODO: or p/d disabled)
+		debugLog.Info("Scheduling to decode worker only")
 		return s.decode.Schedule(ctx, req)
 	}
 
-	// prompt is over threshold - schedule both prefill and decode workers
-	sCtx := types.NewSchedulingContext(ctx, req, types.ToSchedulerPodMetrics(s.store.PodGetAll()))
-	loggerDebug.Info(fmt.Sprintf("Scheduling a request, Metrics: %+v", sCtx.PodsSnapshot))
+	debugLog.Info("Scheduling to separate Prefill and Decode workers")
 
-	// prefill pod
-	res, err := s.prefill.Schedule(sCtx, req)
+	res, err := s.prefill.Schedule(ctx, req) // prefill pod
 	if err != nil {
 		return nil, err
 	}
 
-	prefillURL := ""
-	if res.TargetPod != nil {
+	if res.TargetPod != nil { // record the prefill worker
 		// TODO: should the scheme be conifgurable (e.g., https://)?
-		prefillURL = fmt.Sprintf("http://%s:%d", res.TargetPod.GetPod().Address, s.targetPort)
+		prefillURL := fmt.Sprintf("http://%s:%d", res.TargetPod.GetPod().Address, s.targetPort)
+		if req.Headers == nil { // TODO should always be populated?
+			req.Headers = make(map[string]string)
+		}
+		req.Headers[PrefillPodHeader] = prefillURL
 	}
 
-	// decode pod
-	res, err = s.decode.Schedule(sCtx, req)
-	if err != nil {
-		return nil, err
-	}
-	if prefillURL != "" { // update decode worker of prefill URL
-		sCtx.MutatedHeaders[prefillPodHeader] = prefillURL
-	}
-	return res, nil
+	return s.decode.Schedule(ctx, req) // decode pod
 }

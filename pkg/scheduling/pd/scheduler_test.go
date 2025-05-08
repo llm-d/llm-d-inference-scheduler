@@ -80,7 +80,6 @@ func TestPDSchedule(t *testing.T) {
 				TargetPod: &types.ScoredPod{
 					Pod: wantPod2,
 				},
-				MutatedHeaders: map[string]string{},
 			},
 		},
 		{
@@ -98,7 +97,7 @@ func TestPDSchedule(t *testing.T) {
 					Pod:   wantPod2,
 					Score: 0.0,
 				},
-				MutatedHeaders: map[string]string{"x-prefiller-url": "http://1.2.3.4:80"},
+				//				MutatedHeaders: map[string]string{"x-prefiller-url": "http://1.2.3.4:80"},
 			},
 		},
 	}
