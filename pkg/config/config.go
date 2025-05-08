@@ -10,10 +10,14 @@ import (
 )
 
 const (
-	kvCacheScorerName      = "KVCACHE_AWARE_SCORER"
-	loadAwareScorerName    = "LOAD_AWARE_SCORER"
-	prefixScorerName       = "PREFIX_AWARE_SCORER"
-	sessionAwareScorerName = "SESSION_AWARE_SCORER"
+	// KVCacheScorerName name of the kv-cache scorer in configuration
+	KVCacheScorerName = "KVCACHE_AWARE_SCORER"
+	// LoadAwareScorerName name of the load aware scorer in configuration
+	LoadAwareScorerName = "LOAD_AWARE_SCORER"
+	// PrefixScorerName name of the prefix scorer in configuration
+	PrefixScorerName = "PREFIX_AWARE_SCORER"
+	// SessionAwareScorerName name of the session aware scorer in configuration
+	SessionAwareScorerName = "SESSION_AWARE_SCORER"
 
 	kvCacheScorerEnablementEnvVar      = "ENABLE_KVCACHE_AWARE_SCORER"
 	loadAwareScorerEnablementEnvVar    = "ENABLE_LOAD_AWARE_SCORER"
@@ -53,9 +57,9 @@ const (
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
 type Config struct {
 	logger                  logr.Logger
-	DefaultSchedulerScorers map[string]float64
-	DecodeSchedulerScorers  map[string]float64
-	PrefillSchedulerScorers map[string]float64
+	DefaultSchedulerScorers map[string]int
+	DecodeSchedulerScorers  map[string]int
+	PrefillSchedulerScorers map[string]int
 
 	PDEnabled   bool
 	PDThreshold int
@@ -65,9 +69,9 @@ type Config struct {
 func NewConfig(logger logr.Logger) *Config {
 	return &Config{
 		logger:                  logger,
-		DefaultSchedulerScorers: map[string]float64{},
-		DecodeSchedulerScorers:  map[string]float64{},
-		PrefillSchedulerScorers: map[string]float64{},
+		DefaultSchedulerScorers: map[string]int{},
+		DecodeSchedulerScorers:  map[string]int{},
+		PrefillSchedulerScorers: map[string]int{},
 		PDEnabled:               false,
 		PDThreshold:             math.MaxInt,
 	}
@@ -75,32 +79,32 @@ func NewConfig(logger logr.Logger) *Config {
 
 // LoadConfig loads configuration from environment variables
 func (c *Config) LoadConfig() {
-	c.loadScorerInfo(c.DefaultSchedulerScorers, kvCacheScorerName, kvCacheScorerEnablementEnvVar, kvCacheScorerWeightEnvVar)
-	c.loadScorerInfo(c.DefaultSchedulerScorers, loadAwareScorerName, loadAwareScorerEnablementEnvVar, loadAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.DefaultSchedulerScorers, prefixScorerName, prefixScorerEnablementEnvVar, prefixScorerWeightEnvVar)
-	c.loadScorerInfo(c.DefaultSchedulerScorers, sessionAwareScorerName, sessionAwareScorerEnablementEnvVar, sessionAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.DefaultSchedulerScorers, KVCacheScorerName, kvCacheScorerEnablementEnvVar, kvCacheScorerWeightEnvVar)
+	c.loadScorerInfo(c.DefaultSchedulerScorers, LoadAwareScorerName, loadAwareScorerEnablementEnvVar, loadAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.DefaultSchedulerScorers, PrefixScorerName, prefixScorerEnablementEnvVar, prefixScorerWeightEnvVar)
+	c.loadScorerInfo(c.DefaultSchedulerScorers, SessionAwareScorerName, sessionAwareScorerEnablementEnvVar, sessionAwareScorerWeightEnvVar)
 
-	c.loadScorerInfo(c.DecodeSchedulerScorers, kvCacheScorerName, decodeKvCacheScorerEnablementEnvVar, decodeKvCacheScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, loadAwareScorerName, decodeLoadAwareScorerEnablementEnvVar, decodeLoadAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, prefixScorerName, decodePrefixAwareScorerEnablementEnvVar, decodePrefixAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, sessionAwareScorerName, decodeSessionAwareScorerEnablementEnvVar, decodeSessionAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, KVCacheScorerName, decodeKvCacheScorerEnablementEnvVar, decodeKvCacheScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, LoadAwareScorerName, decodeLoadAwareScorerEnablementEnvVar, decodeLoadAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, PrefixScorerName, decodePrefixAwareScorerEnablementEnvVar, decodePrefixAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, SessionAwareScorerName, decodeSessionAwareScorerEnablementEnvVar, decodeSessionAwareScorerWeightEnvVar)
 
-	c.loadScorerInfo(c.PrefillSchedulerScorers, kvCacheScorerName, prefillKvCacheScorerEnablementEnvVar, prefillKvCacheScorerWeightEnvVar)
-	c.loadScorerInfo(c.PrefillSchedulerScorers, loadAwareScorerName, prefillLoadAwareScorerEnablementEnvVar, prefillLoadAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.PrefillSchedulerScorers, prefixScorerName, prefillPrefixAwareScorerEnablementEnvVar, prefillPrefixAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.PrefillSchedulerScorers, sessionAwareScorerName, prefillSessionAwareScorerEnablementEnvVar, prefillSessionAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.PrefillSchedulerScorers, KVCacheScorerName, prefillKvCacheScorerEnablementEnvVar, prefillKvCacheScorerWeightEnvVar)
+	c.loadScorerInfo(c.PrefillSchedulerScorers, LoadAwareScorerName, prefillLoadAwareScorerEnablementEnvVar, prefillLoadAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.PrefillSchedulerScorers, PrefixScorerName, prefillPrefixAwareScorerEnablementEnvVar, prefillPrefixAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.PrefillSchedulerScorers, SessionAwareScorerName, prefillSessionAwareScorerEnablementEnvVar, prefillSessionAwareScorerWeightEnvVar)
 
 	c.PDEnabled = GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
 }
 
-func (c *Config) loadScorerInfo(scorers map[string]float64, scorerName string, enablementKey string, weightKey string) {
+func (c *Config) loadScorerInfo(scorers map[string]int, scorerName string, enablementKey string, weightKey string) {
 	if GetEnvString(enablementKey, "false", c.logger) != "true" {
 		c.logger.Info(fmt.Sprintf("Skipping %s creation as it is not enabled", scorerName))
 		return
 	}
 
-	weight := GetEnvFloat(weightKey, 1, c.logger)
+	weight := GetEnvInt(weightKey, 1, c.logger)
 
 	scorers[scorerName] = weight
 	c.logger.Info("Initialized scorer", "scorer", scorerName, "weight", weight)

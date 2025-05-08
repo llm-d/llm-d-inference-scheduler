@@ -7,19 +7,19 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
+	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/config"
 	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/pd"
 	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
 )
 
 // Tests the default scheduler configuration and expected behavior.
 func TestPDSchedule(t *testing.T) {
-	const promptLengthThreshold = 10
-
 	pod1 := &backendmetrics.FakePodMetrics{
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
@@ -104,8 +104,13 @@ func TestPDSchedule(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			scheduler, _ := pd.NewScheduler(promptLengthThreshold, &fakeDataStore{pods: test.input})
-			got, err := scheduler.Schedule(context.Background(), test.req)
+			ctx := context.Background()
+			logger := log.FromContext(ctx)
+
+			schedCfg := config.NewConfig(logger)
+			// TODO - unsure that default config is ok here (no scorers)
+			scheduler, _ := pd.NewScheduler(ctx, schedCfg, &fakeDataStore{pods: test.input})
+			got, err := scheduler.Schedule(ctx, test.req)
 
 			fmt.Printf("Test %s:\n", test.name)
 			fmt.Printf("Result: %#v\n", got)

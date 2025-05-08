@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
+	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/config"
 	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
 	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
 )
@@ -25,16 +26,16 @@ import (
 // Scheduler implements the dual scheduler concept, along with a threshold
 // determining when each is invoked.
 type Scheduler struct {
-	threshold float32
+	threshold int
 	store     datastore.Datastore
 	primary   requestcontrol.Scheduler
 	secondary requestcontrol.Scheduler
 }
 
 // NewScheduler create a new scheduler with the given datastore and threshold
-func NewScheduler(threshold float32, datastore datastore.Datastore) *Scheduler {
+func NewScheduler(schedCfg *config.Config, datastore datastore.Datastore) *Scheduler {
 	scheduler := &Scheduler{
-		threshold: threshold,
+		threshold: schedCfg.PDThreshold,
 		store:     datastore,
 	}
 
@@ -74,7 +75,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 		metrics.RecordSchedulerE2ELatency(time.Since(scheduleStart))
 	}()
 
-	if rand.Float32() > s.threshold { // choose a primary only
+	if rand.Int() > s.threshold { // choose a primary only
 		return s.primary.Schedule(ctx, req)
 	}
 
@@ -85,13 +86,13 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	debugLog.Info(fmt.Sprintf("Primary scheduler selected %+v", primary))
 
 	// TODO: this is demo behavior we need to replace once we know what we want.
-	if rand.Float32() < s.threshold { // choose a secondary as well
+	if rand.Int() < s.threshold { // choose a secondary as well
 		secondary, err := s.secondary.Schedule(ctx, req)
 		if err != nil {
 			debugLog.Info(fmt.Sprintf("Secondary scheduler failed %+v, returning primary", err))
 		}
 		debugLog.Info(fmt.Sprintf("Secondary scheduler selected %+v", secondary))
-		if rand.Float32() < s.threshold { // lucky again: return the secondary
+		if rand.Int() < s.threshold { // lucky again: return the secondary
 			return secondary, nil
 		}
 	}

@@ -46,7 +46,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/neuralmagic/llm-d-inference-scheduler/internal/controller/runnable"
-	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/dual"
+	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/config"
+	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/pd"
 )
 
 const (
@@ -171,8 +172,15 @@ func run() error {
 	// Setup runner.
 	ctx := ctrl.SetupSignalHandler()
 
+	schedCfg := config.NewConfig(setupLog)
+	schedCfg.LoadConfig()
+
 	datastore := datastore.NewDatastore(ctx, pmf)
-	scheduler := dual.NewScheduler(0.2, datastore)
+	scheduler, err := pd.NewScheduler(ctx, schedCfg, datastore)
+	if err != nil {
+		setupLog.Error(err, "Failed to create PD scheduler")
+		return err
+	}
 
 	serverRunner := &runserver.ExtProcServerRunner{
 		GrpcPort:                                 *grpcPort,

@@ -16,7 +16,9 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
+	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/config"
 	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
+	"github.com/neuralmagic/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
 )
 
 const (
@@ -27,6 +29,7 @@ const (
 // Scheduler implements the disaggreagted P/D scheduling logic
 type Scheduler struct {
 	threshold  int
+	pdEnabled  bool
 	targetPort int32
 	store      scheduling.Datastore
 	prefill    requestcontrol.Scheduler
@@ -44,17 +47,16 @@ type Datastore interface {
 }
 
 // NewScheduler returns a new disaggregated Prefill/Decode filter, using the
-// provided prompt length threshold.
-// TODO: accept a configuration object with pd-enable, threshold,
-// scorers and their weights, etc. (tracked in issue #9).
-func NewScheduler(threshold int, ds Datastore) (*Scheduler, error) {
+// provided configuration.
+func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*Scheduler, error) {
 	pool, err := ds.PoolGet()
 	if err != nil {
 		return nil, err
 	}
 
 	scheduler := &Scheduler{
-		threshold:  threshold,
+		threshold:  schedCfg.PDThreshold,
+		pdEnabled:  schedCfg.PDEnabled,
 		targetPort: pool.Spec.TargetPortNumber,
 		store:      ds,
 	}
@@ -62,14 +64,14 @@ func NewScheduler(threshold int, ds Datastore) (*Scheduler, error) {
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
 		[]plugins.PreSchedule{},
 		[]plugins.Filter{&filter.PrefillFilter{}},
-		map[plugins.Scorer]int{}, // TODO: KVCacheAware, LoadBased and weights
+		scheduler.createScorersFromConfig(ctx, schedCfg.PrefillSchedulerScorers),
 		picker.NewMaxScorePicker(),
 		[]plugins.PostSchedule{},
 	))
 	scheduler.decode = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
 		[]plugins.PreSchedule{},
 		[]plugins.Filter{&filter.DecodeFilter{}},
-		map[plugins.Scorer]int{}, // TODO: KVCacheAware, LoadBased
+		scheduler.createScorersFromConfig(ctx, schedCfg.DecodeSchedulerScorers),
 		picker.NewMaxScorePicker(),
 		[]plugins.PostSchedule{},
 	))
@@ -91,6 +93,12 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	defer func() {
 		metrics.RecordSchedulerE2ELatency(time.Since(scheduleStart))
 	}()
+
+	if !s.pdEnabled {
+		// disagregated pd is disabled - use deocde only for processing
+		debugLog.Info("PD disabled - scheduling to decode worker only")
+		return s.decode.Schedule(ctx, req)
+	}
 
 	if len(req.Prompt) < s.threshold { // schedule on decode only (TODO: or p/d disabled)
 		debugLog.Info("Scheduling to decode worker only")
@@ -114,4 +122,27 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	}
 
 	return s.decode.Schedule(ctx, req) // decode pod
+}
+
+func (s *Scheduler) createScorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[plugins.Scorer]int {
+	scorers := map[plugins.Scorer]int{}
+
+	for scorerName, scorerWeight := range scorersConfig {
+		switch scorerName {
+		case config.KVCacheScorerName:
+			scorer, err := scorer.NewKVCacheAwareScorer(ctx)
+			if err == nil {
+				scorers[scorer] = scorerWeight
+			}
+		case config.LoadAwareScorerName:
+			scorers[&scorer.LoadAwareScorer{}] = scorerWeight
+		case config.PrefixScorerName:
+			// TODO - create config? based on what?
+			scorers[scorer.NewPrefixAwareScorer(nil)] = scorerWeight
+		case config.SessionAwareScorerName:
+			scorers[scorer.NewSessionAffinity()] = scorerWeight
+		}
+	}
+
+	return scorers
 }
