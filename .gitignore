@@ -26,3 +26,7 @@ go.work.sum
 # Environment Files
 .DS_Store
 .env
+
+# lib (e.g., C libraries)
+lib/
+
