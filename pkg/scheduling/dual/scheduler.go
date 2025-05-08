@@ -10,8 +10,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
@@ -27,8 +27,8 @@ import (
 type Scheduler struct {
 	threshold float32
 	store     datastore.Datastore
-	primary   handlers.Scheduler
-	secondary handlers.Scheduler
+	primary   requestcontrol.Scheduler
+	secondary requestcontrol.Scheduler
 }
 
 // NewScheduler create a new scheduler with the given datastore and threshold
@@ -67,7 +67,7 @@ func NewScheduler(threshold float32, datastore datastore.Datastore) *Scheduler {
 // Schedule selects a Pod for the given request and context
 func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types.Result, error) {
 	logger := log.FromContext(ctx).WithName("PD-scheduler").WithValues("request", req)
-	loggerDebug := logger.V(logutil.DEBUG)
+	debugLog := logger.V(logutil.DEBUG)
 
 	scheduleStart := time.Now()
 	defer func() {
@@ -78,18 +78,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 		return s.primary.Schedule(ctx, req)
 	}
 
-	sCtx := types.NewSchedulingContext(ctx, req, types.ToSchedulerPodMetrics(s.store.PodGetAll()))
-	loggerDebug.Info(fmt.Sprintf("Scheduling a request, Metrics: %+v", sCtx.PodsSnapshot))
-	return s.ScheduleWithContext(sCtx, req)
-
-}
-
-// ScheduleWithContext calls the primary and secondary schedulers using
-// the given scheduling context
-func (s *Scheduler) ScheduleWithContext(sCtx *types.SchedulingContext, req *types.LLMRequest) (*types.Result, error) {
-	debugLog := log.FromContext(sCtx).V(logutil.DEBUG)
-
-	primary, err := s.primary.ScheduleWithContext(sCtx, req)
+	primary, err := s.primary.Schedule(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +86,7 @@ func (s *Scheduler) ScheduleWithContext(sCtx *types.SchedulingContext, req *type
 
 	// TODO: this is demo behavior we need to replace once we know what we want.
 	if rand.Float32() < s.threshold { // choose a secondary as well
-		secondary, err := s.secondary.ScheduleWithContext(sCtx, req)
+		secondary, err := s.secondary.Schedule(ctx, req)
 		if err != nil {
 			debugLog.Info(fmt.Sprintf("Secondary scheduler failed %+v, returning primary", err))
 		}
