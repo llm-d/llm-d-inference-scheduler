@@ -1,4 +1,5 @@
-package env
+// Package utils contains commonly used utilities
+package utils
 
 import (
 	"os"
@@ -7,7 +8,7 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// getEnvFloat gets a float64 from an environment variable with a default value
+// GetEnvFloat gets a float64 from an environment variable with a default value
 func GetEnvFloat(key string, defaultVal float64, logger logr.Logger) float64 {
 	val, exists := os.LookupEnv(key)
 	if !exists {
@@ -28,7 +29,7 @@ func GetEnvFloat(key string, defaultVal float64, logger logr.Logger) float64 {
 	return floatVal
 }
 
-// getEnvInt gets an int from an environment variable with a default value
+// GetEnvInt gets an int from an environment variable with a default value
 func GetEnvInt(key string, defaultVal int, logger logr.Logger) int {
 	val, exists := os.LookupEnv(key)
 	if !exists {
