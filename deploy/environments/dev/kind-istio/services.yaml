@@ -7,7 +7,7 @@ metadata:
     gateway.istio.io/managed: istio.io-gateway-controller
     gateway.networking.k8s.io/gateway-name: inference-gateway
     istio.io/enable-inference-extproc: "true"
-  name: inference-gateway-istio
+  name: inference-gateway-istio-nodeport
   namespace: default
 spec:
   type: NodePort
