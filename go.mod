@@ -4,7 +4,7 @@ go 1.24.1
 
 toolchain go1.24.2
 
-replace sigs.k8s.io/gateway-api-inference-extension => github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250508070031-fd1ddfa1c42e
+replace sigs.k8s.io/gateway-api-inference-extension => github.com/neuralmagic/gateway-api-inference-extension v0.0.0-20250508120544-18148a9ecda7
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
