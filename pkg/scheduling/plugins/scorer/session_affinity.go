@@ -63,5 +63,5 @@ func (s *SessionAffinity) Score(ctx *types.SchedulingContext, pods []types.Pod) 
 // cookie values if present.
 // Tracked in https://github.com/neuralmagic/llm-d-inference-scheduler/issues/28
 func (s *SessionAffinity) PostResponse(ctx *types.SchedulingContext, pod types.Pod) {
-	ctx.MutatedHeaders[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(pod.GetPod().NamespacedName.String()))
+	ctx.Req.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(pod.GetPod().NamespacedName.String()))
 }
