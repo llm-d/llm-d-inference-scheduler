@@ -8,7 +8,14 @@ IMAGE_TAG_BASE ?= quay.io/llm-d/$(PROJECT_NAME)
 IMG = $(IMAGE_TAG_BASE):$(DEV_VERSION)
 NAMESPACE ?= hc4ai-operator
 
-CONTAINER_TOOL := $(shell command -v docker >/dev/null 2>&1 && echo docker || command -v podman >/dev/null 2>&1 && echo podman || echo "")
+CONTAINER_TOOL := $(shell \
+	if command -v docker >/dev/null 2>&1; then \
+		echo docker; \
+	elif command -v podman >/dev/null 2>&1; then \
+		echo podman; \
+	else \
+		echo ""; \
+	fi)
 BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_TOOL))
 PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
 
