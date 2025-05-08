@@ -59,7 +59,7 @@ func (s *SessionAffinity) Score(ctx *types.SchedulingContext, pods []types.Pod) 
 }
 
 // PostResponse sets the session header on the response sent to the client
-// TODO: this should be using a cookie and ensure not overriding ny other
+// TODO: this should be using a cookie and ensure not overriding any other
 // cookie values if present.
 func (s *SessionAffinity) PostResponse(ctx *types.SchedulingContext, pod types.Pod) {
 	ctx.MutatedHeaders[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(pod.GetPod().NamespacedName.String()))
