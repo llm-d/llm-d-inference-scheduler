@@ -1,8 +1,8 @@
-# vLLM-d Inference Router Architecture
+# llm-d Inference Router Architecture
 
 ## Overview
 
-**vLLM-d** is an extensible architecture designed to route inference requests efficiently across model-serving pods. A central component of this architecture is the **Inference Gateway**, which builds on the Kubernetes-native **Gateway API Inference Extension (GIE)** to enable scalable, flexible, and pluggable routing of requests.
+**llm-d** is an extensible architecture designed to route inference requests efficiently across model-serving pods. A central component of this architecture is the **Inference Gateway**, which builds on the Kubernetes-native **Gateway API Inference Extension (GIE)** to enable scalable, flexible, and pluggable routing of requests.
 
 The design enables:
 - Support for **multiple base models** and **LoRA adapters** within a shared cluster [Not supported in Phase1]
