@@ -28,12 +28,11 @@ const (
 
 // Scheduler implements the disaggreagted P/D scheduling logic
 type Scheduler struct {
-	threshold  int
-	pdEnabled  bool
-	targetPort int32
-	store      scheduling.Datastore
-	prefill    requestcontrol.Scheduler
-	decode     requestcontrol.Scheduler
+	threshold int
+	pdEnabled bool
+	store     Datastore
+	prefill   requestcontrol.Scheduler
+	decode    requestcontrol.Scheduler
 }
 
 var _ requestcontrol.Scheduler = &Scheduler{} // validate interface conformance
@@ -49,16 +48,10 @@ type Datastore interface {
 // NewScheduler returns a new disaggregated Prefill/Decode filter, using the
 // provided configuration.
 func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*Scheduler, error) {
-	pool, err := ds.PoolGet()
-	if err != nil {
-		return nil, err
-	}
-
 	scheduler := &Scheduler{
-		threshold:  schedCfg.PDThreshold,
-		pdEnabled:  schedCfg.PDEnabled,
-		targetPort: pool.Spec.TargetPortNumber,
-		store:      ds,
+		threshold: schedCfg.PDThreshold,
+		pdEnabled: schedCfg.PDEnabled,
+		store:     ds,
 	}
 
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
@@ -95,7 +88,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	}()
 
 	if !s.pdEnabled {
-		debugLog.Info("disagregated prefill/decode disabled - scheduling to decode worker only")
+		debugLog.Info("Disagregated prefill/decode disabled - scheduling to decode worker only")
 		return s.decode.Schedule(ctx, req)
 	}
 
@@ -104,21 +97,27 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 		return s.decode.Schedule(ctx, req)
 	}
 
-	debugLog.Info("Scheduling to separate Prefill and Decode workers")
-
 	res, err := s.prefill.Schedule(ctx, req) // prefill pod
 	if err != nil {
 		return nil, err
 	}
 
 	if res.TargetPod != nil { // record the prefill worker
+		pool, err := s.store.PoolGet()
+		if err != nil {
+			debugLog.Error(err, "Get inference pool failed - scheduling to decode worker only")
+			return s.decode.Schedule(ctx, req)
+		}
+
 		// TODO: should the scheme be conifgurable (e.g., https://)?
-		prefillURL := fmt.Sprintf("http://%s:%d", res.TargetPod.GetPod().Address, s.targetPort)
+		prefillURL := fmt.Sprintf("http://%s:%d", res.TargetPod.GetPod().Address, pool.Spec.TargetPortNumber)
 		if req.Headers == nil { // TODO should always be populated?
 			req.Headers = make(map[string]string)
 		}
 		req.Headers[PrefillPodHeader] = prefillURL
 	}
+
+	debugLog.Info("Scheduling to separate Prefill and Decode workers")
 
 	return s.decode.Schedule(ctx, req) // decode pod
 }
