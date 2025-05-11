@@ -54,8 +54,8 @@ func (df *DecodeFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []t
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
-		role := pod.GetPod().Labels[RoleLabel]
-		if role == RoleDecode || role == RoleBoth {
+		role, defined := pod.GetPod().Labels[RoleLabel]
+		if !defined || role == RoleDecode || role == RoleBoth {
 			filteredPods = append(filteredPods, pod)
 		}
 	}
