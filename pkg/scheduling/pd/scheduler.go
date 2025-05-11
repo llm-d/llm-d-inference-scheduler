@@ -64,14 +64,14 @@ func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
 		[]plugins.PreSchedule{},
 		[]plugins.Filter{&filter.PrefillFilter{}},
-		scheduler.createScorersFromConfig(ctx, schedCfg.PrefillSchedulerScorers),
+		scorersFromConfig(ctx, schedCfg.PrefillSchedulerScorers),
 		picker.NewMaxScorePicker(),
 		[]plugins.PostSchedule{},
 	))
 	scheduler.decode = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
 		[]plugins.PreSchedule{},
 		[]plugins.Filter{&filter.DecodeFilter{}},
-		scheduler.createScorersFromConfig(ctx, schedCfg.DecodeSchedulerScorers),
+		scorersFromConfig(ctx, schedCfg.DecodeSchedulerScorers),
 		picker.NewMaxScorePicker(),
 		[]plugins.PostSchedule{},
 	))
@@ -95,8 +95,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	}()
 
 	if !s.pdEnabled {
-		// disagregated pd is disabled - use deocde only for processing
-		debugLog.Info("PD disabled - scheduling to decode worker only")
+		debugLog.Info("disagregated prefill/decode disabled - scheduling to decode worker only")
 		return s.decode.Schedule(ctx, req)
 	}
 
@@ -124,7 +123,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	return s.decode.Schedule(ctx, req) // decode pod
 }
 
-func (s *Scheduler) createScorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[plugins.Scorer]int {
+func scorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[plugins.Scorer]int {
 	scorers := map[plugins.Scorer]int{}
 
 	for scorerName, scorerWeight := range scorersConfig {
@@ -137,7 +136,7 @@ func (s *Scheduler) createScorersFromConfig(ctx context.Context, scorersConfig m
 		case config.LoadAwareScorerName:
 			scorers[&scorer.LoadAwareScorer{}] = scorerWeight
 		case config.PrefixScorerName:
-			// TODO - create config? based on what?
+			// TODO - create config? based on what? - issue #55
 			scorers[scorer.NewPrefixAwareScorer(nil)] = scorerWeight
 		case config.SessionAwareScorerName:
 			scorers[scorer.NewSessionAffinity()] = scorerWeight

@@ -108,7 +108,7 @@ func TestPDSchedule(t *testing.T) {
 			logger := log.FromContext(ctx)
 
 			schedCfg := config.NewConfig(logger)
-			// TODO - unsure that default config is ok here (no scorers)
+			// TODO - ensure that default config is ok here (no scorers) - issue #56
 			scheduler, _ := pd.NewScheduler(ctx, schedCfg, &fakeDataStore{pods: test.input})
 			got, err := scheduler.Schedule(ctx, test.req)
 
