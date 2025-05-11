@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/go-logr/logr/testr"
+
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
@@ -105,7 +106,7 @@ func TestPDSchedule(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			logger := log.FromContext(ctx)
+			logger := testr.New(t)
 
 			schedCfg := config.NewConfig(logger)
 			// TODO - ensure that default config is ok here (no scorers) - issue #56
