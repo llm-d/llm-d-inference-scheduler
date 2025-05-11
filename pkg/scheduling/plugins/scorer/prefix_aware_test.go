@@ -2,7 +2,10 @@ package scorer_test
 
 import (
 	"context"
+	"math/rand"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -140,4 +143,83 @@ func TestPrefixAwareScorer(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrefixAwareScorerProfiling(t *testing.T) {
+	const testName = "profiling_test"
+	const modelName = "test1" // store contains single cache for this model
+	const nPodsTotal = 200
+	const nPodsInStore = 100 // number of chunks stored for pod is proportional to the pod number
+
+	ctx := context.Background()
+	logger := log.FromContext(ctx)
+	ctx = log.IntoContext(ctx, logger)
+
+	name2Pod := createPods(nPodsTotal)
+	config := scorer.DefaultPrefixStoreConfig()
+	text := generateNonRepeatingText(config.BlockSize * nPodsInStore)
+	t.Run(testName, func(t *testing.T) {
+		start := time.Now() // record start time
+		config := scorer.DefaultPrefixStoreConfig()
+		s := scorer.NewPrefixAwareScorer(config)
+		for i := range nPodsInStore {
+			prompt := text[0 : (i+1)*config.BlockSize-1]
+			err := s.GetPrefixStore().AddEntry(modelName, prompt, &name2Pod["pod"+strconv.Itoa(i)].NamespacedName)
+			if err != nil {
+				t.Errorf("Failed to add entry to prefix store: %v", err)
+			}
+		}
+		sCtx := types.NewSchedulingContext(ctx, &types.LLMRequest{
+			Prompt:              text,
+			ResolvedTargetModel: modelName,
+			Model:               modelName,
+		}, nil, []types.Pod{})
+
+		// Score pods
+		pods := make([]types.Pod, 0, len(name2Pod))
+		for _, v := range name2Pod {
+			pods = append(pods, v)
+		}
+
+		scores := s.Score(sCtx, pods)
+
+		highestScore := scores[name2Pod["pod"+strconv.Itoa(nPodsInStore-1)]]
+		if highestScore < 0.99 {
+			t.Error("Failed to calculate scores")
+		}
+
+		// use 'elapsed' time when built-in profiler is not suitable because of short time periods
+		elapsed := time.Since(start) // calculate duration
+		t.Log("Time spent in microsec: " + strconv.FormatInt(elapsed.Microseconds(), 10))
+	})
+
+}
+
+func createPods(nPods int) map[string]*types.PodMetrics {
+	res := map[string]*types.PodMetrics{}
+	for i := range nPods {
+		pShortName := "pod" + strconv.Itoa(i)
+		pod := &types.PodMetrics{
+			Pod: &backend.Pod{
+				NamespacedName: k8stypes.NamespacedName{
+					Name:      pShortName,
+					Namespace: "default",
+				},
+			},
+			Metrics: &backendmetrics.Metrics{},
+		}
+		res[pShortName] = pod
+	}
+	return res
+}
+
+func generateNonRepeatingText(length int) string {
+	rand.Seed(time.Now().UnixNano())
+	chars := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?;:-_[]{}()<>|@#$%^&*+=")
+
+	result := make([]rune, length)
+	for i := range result {
+		result[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(result)
 }
