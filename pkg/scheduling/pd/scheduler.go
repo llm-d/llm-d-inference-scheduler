@@ -113,7 +113,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	}
 
 	// if the request is short enough, use the default scheduler
-	hitPercentage := s.prefixScorer.GetCachedPercentage(decodeRes.TargetPod.GetPod().NamespacedName.String(), req.Prompt, logger)
+	hitPercentage := s.prefixScorer.GetCachedPercentage(decodeRes.TargetPod.GetPod().NamespacedName.String(), req.Prompt)
 	if hitPercentage > 0 && (1.0-hitPercentage)*float64(len(req.Prompt)) < float64(s.threshold) {
 		logger.Info("Non-cached suffix is smaller than threshold, using decode scheduler",
 			"hitPercentage", hitPercentage)

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -70,18 +69,14 @@ func (s *PrefixAwareScorer) Score(ctx *types.SchedulingContext, pods []types.Pod
 		return nil
 	}
 
-	loggerDebug.Info(">>> Going to update hits maps")
+	loggerDebug.Info("Going to update hits maps")
 	for pod, score := range scores {
-		loggerDebug.Info(">>> In for", "pod", pod)
-
 		if pod == "" {
-			loggerDebug.Info(">>> Pod id is empty - skip")
 			continue
 		}
 
 		rawPromptHitsInfo, _ := s.podToPromptHits.LoadOrStore(pod, &promptHits{lastUpdate: time.Now()})
 		if promptHitsInfo, ok := rawPromptHitsInfo.(*promptHits); ok {
-			loggerDebug.Info(">>> Set score for pod+prompt", "pod", pod, "score", score, "prompt len", len(ctx.Req.Prompt))
 			promptHitsInfo.lastUpdate = time.Now()
 			promptHitsInfo.hits.Store(ctx.Req.Prompt, score)
 		}
@@ -129,28 +124,23 @@ func (s *PrefixAwareScorer) GetPrefixStore() *PrefixStore {
 }
 
 // GetCachedPercentage returns the percentage of the prompt that is cached for the given pod.
-func (s *PrefixAwareScorer) GetCachedPercentage(pod, prompt string, logger logr.Logger) float64 {
-	logger.Info(">>> Going to get score", "pod", pod, "prompt len", len(prompt))
+func (s *PrefixAwareScorer) GetCachedPercentage(pod, prompt string) float64 {
 	rawHitsForPod, ok := s.podToPromptHits.Load(pod)
 	if !ok {
-		logger.Info(">>> Get score: pod is not in cache - return 0")
 		return 0.0
 	}
 
 	hitsForPod, ok := rawHitsForPod.(*promptHits)
 	if !ok {
-		logger.Info(">>> Get score: pod's hits object of wrong type - return 0")
 		return 0.0
 	}
 
 	rawVal, ok := hitsForPod.hits.Load(prompt)
 	if !ok {
-		logger.Info(">>> Get score: score for this prompt NOT in the cache - return 0")
 		return 0.0
 	}
 
-	intVal, ok := rawVal.(int)
-	logger.Info(">>> Get score: score for this prompt is in cache", "score", intVal)
+	intVal, _ := rawVal.(int)
 	return float64(intVal*s.prefixStore.blockSize) / float64(len(prompt))
 }
 
