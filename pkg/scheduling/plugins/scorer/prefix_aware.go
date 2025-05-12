@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -19,7 +20,8 @@ const (
 
 type promptHits struct {
 	lastUpdate time.Time
-	hits       map[string]int
+	// hits map from string to int
+	hits sync.Map
 }
 
 // PrefixAwareScorer is a routing scorer that scores pods based on the longest prefix match
@@ -28,7 +30,7 @@ type promptHits struct {
 type PrefixAwareScorer struct {
 	prefixStore *PrefixStore
 
-	// podToPromptHits map from podID(string) to *promptHits
+	// podToPromptHits map from podID(string) to promptHits
 	podToPromptHits sync.Map
 }
 
@@ -68,20 +70,20 @@ func (s *PrefixAwareScorer) Score(ctx *types.SchedulingContext, pods []types.Pod
 		return nil
 	}
 
+	loggerDebug.Info(">>> Going to update hits maps")
 	for pod, score := range scores {
+		loggerDebug.Info(">>> In for", "pod", pod)
+
 		if pod == "" {
+			loggerDebug.Info(">>> Pod id is empty - skip")
 			continue
 		}
 
-		rawPromptHitsInfo, _ := s.podToPromptHits.LoadOrStore(pod, &promptHits{
-			lastUpdate: time.Now(),
-			hits:       map[string]int{},
-		})
-
-		if promptHitsInfo, ok := rawPromptHitsInfo.(promptHits); ok {
-			promptHitsInfo.hits[ctx.Req.Prompt] = score
+		rawPromptHitsInfo, _ := s.podToPromptHits.LoadOrStore(pod, &promptHits{lastUpdate: time.Now()})
+		if promptHitsInfo, ok := rawPromptHitsInfo.(*promptHits); ok {
+			loggerDebug.Info(">>> Set score for pod+prompt", "pod", pod, "score", score, "prompt len", len(ctx.Req.Prompt))
 			promptHitsInfo.lastUpdate = time.Now()
-			s.podToPromptHits.Store(pod, promptHitsInfo)
+			promptHitsInfo.hits.Store(ctx.Req.Prompt, score)
 		}
 	}
 
@@ -127,22 +129,29 @@ func (s *PrefixAwareScorer) GetPrefixStore() *PrefixStore {
 }
 
 // GetCachedPercentage returns the percentage of the prompt that is cached for the given pod.
-func (s *PrefixAwareScorer) GetCachedPercentage(pod, prompt string) float64 {
+func (s *PrefixAwareScorer) GetCachedPercentage(pod, prompt string, logger logr.Logger) float64 {
+	logger.Info(">>> Going to get score", "pod", pod, "prompt len", len(prompt))
 	rawHitsForPod, ok := s.podToPromptHits.Load(pod)
 	if !ok {
+		logger.Info(">>> Get score: pod is not in cache - return 0")
 		return 0.0
 	}
 
-	hitsForPod, ok := rawHitsForPod.(promptHits)
+	hitsForPod, ok := rawHitsForPod.(*promptHits)
 	if !ok {
+		logger.Info(">>> Get score: pod's hits object of wrong type - return 0")
 		return 0.0
 	}
 
-	if _, ok := hitsForPod.hits[prompt]; !ok {
+	rawVal, ok := hitsForPod.hits.Load(prompt)
+	if !ok {
+		logger.Info(">>> Get score: score for this prompt NOT in the cache - return 0")
 		return 0.0
 	}
 
-	return float64(hitsForPod.hits[prompt]*s.prefixStore.blockSize) / float64(len(prompt))
+	intVal, ok := rawVal.(int)
+	logger.Info(">>> Get score: score for this prompt is in cache", "score", intVal)
+	return float64(intVal*s.prefixStore.blockSize) / float64(len(prompt))
 }
 
 // cleanup Cleans up hits map
