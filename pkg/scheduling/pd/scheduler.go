@@ -2,6 +2,7 @@ package pd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -33,6 +34,11 @@ type Scheduler struct {
 	store     Datastore
 	prefill   requestcontrol.Scheduler
 	decode    requestcontrol.Scheduler
+
+	// prefixScorer is a prefix scorer which will be used for decission if prefill step is required
+	// if pd is enabled, prefix scorers should be the same instance in all:
+	// prefill scheduler, decode scheduler and prefixScorer
+	prefixScorer *scorer.PrefixAwareScorer
 }
 
 var _ requestcontrol.Scheduler = &Scheduler{} // validate interface conformance
@@ -49,27 +55,30 @@ type Datastore interface {
 // provided configuration.
 func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*Scheduler, error) {
 	scheduler := &Scheduler{
-		threshold: schedCfg.PDThreshold,
-		pdEnabled: schedCfg.PDEnabled,
-		store:     ds,
+		threshold:    schedCfg.PDThreshold,
+		pdEnabled:    schedCfg.PDEnabled,
+		store:        ds,
+		prefixScorer: scorer.NewPrefixAwareScorer(ctx, nil),
 	}
 
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
 		[]plugins.PreSchedule{},
 		[]plugins.Filter{&filter.PrefillFilter{}},
-		scorersFromConfig(ctx, schedCfg.PrefillSchedulerScorers),
+		scheduler.scorersFromConfig(ctx, schedCfg.PrefillSchedulerScorers),
 		picker.NewMaxScorePicker(),
 		[]plugins.PostSchedule{},
 		[]plugins.PostResponse{},
 	))
+
 	scheduler.decode = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
 		[]plugins.PreSchedule{},
 		[]plugins.Filter{&filter.DecodeFilter{}},
-		scorersFromConfig(ctx, schedCfg.DecodeSchedulerScorers),
+		scheduler.scorersFromConfig(ctx, schedCfg.DecodeSchedulerScorers),
 		picker.NewMaxScorePicker(),
 		[]plugins.PostSchedule{},
 		[]plugins.PostResponse{},
 	))
+
 	return scheduler, nil
 }
 
@@ -94,17 +103,28 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 		return s.decode.Schedule(ctx, req)
 	}
 
-	if len(req.Prompt) < s.threshold { // schedule on decode only (TODO: or p/d disabled)
-		debugLog.Info("Scheduling to decode worker only")
-		return s.decode.Schedule(ctx, req)
+	// find the best pod for decode
+	// assumes that prefix scorer was activated
+	decodeRes, err := s.decode.Schedule(ctx, req)
+
+	if decodeRes.TargetPod == nil {
+		logger.Info("No decode pod found, skipping scheduling")
+		return nil, errors.New("no decode pod found")
 	}
 
-	res, err := s.prefill.Schedule(ctx, req) // prefill pod
-	if err != nil {
-		return nil, err
+	// if the request is short enough, use the default scheduler
+	hitPercentage := s.prefixScorer.GetCachedPercentage(decodeRes.TargetPod.GetPod().NamespacedName.String(), req.Prompt)
+	if hitPercentage > 0 && (1.0-hitPercentage)*float64(len(req.Prompt)) < float64(s.threshold) {
+		logger.Info("Non-cached suffix is smaller than threshold, using decode scheduler",
+			"hitPercentage", hitPercentage)
+		return decodeRes, err
 	}
 
-	if res.TargetPod != nil { // record the prefill worker
+	logger.Info("Non-cached suffix is larger than threshold, using PD scheduler",
+		"hitPercentage", hitPercentage)
+	prefillRes, prefillErr := s.prefill.Schedule(ctx, req)
+
+	if prefillErr == nil && prefillRes.TargetPod != nil { // record the prefill worker
 		pool, err := s.store.PoolGet()
 		if err != nil {
 			debugLog.Error(err, "Get inference pool failed - scheduling to decode worker only")
@@ -112,7 +132,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 		}
 
 		// TODO: should the scheme be conifgurable (e.g., https://)?
-		prefillURL := fmt.Sprintf("http://%s:%d", res.TargetPod.GetPod().Address, pool.Spec.TargetPortNumber)
+		prefillURL := fmt.Sprintf("http://%s:%d", prefillRes.TargetPod.GetPod().Address, pool.Spec.TargetPortNumber)
 		if req.Headers == nil { // TODO should always be populated?
 			req.Headers = make(map[string]string)
 		}
@@ -121,7 +141,7 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 
 	debugLog.Info("Scheduling to separate Prefill and Decode workers")
 
-	return s.decode.Schedule(ctx, req) // decode pod
+	return decodeRes, nil // decode pod
 }
 
 // OnResponse normally processes all LLMResponses it is a no-op for the P/D
@@ -130,8 +150,11 @@ func (s *Scheduler) OnResponse(_ context.Context, _ *types.LLMResponse, _ string
 	// no-op
 }
 
-func scorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[plugins.Scorer]int {
+func (s *Scheduler) scorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[plugins.Scorer]int {
+	logger := log.FromContext(ctx)
+
 	scorers := map[plugins.Scorer]int{}
+	prefixWasAdded := false
 
 	for scorerName, scorerWeight := range scorersConfig {
 		switch scorerName {
@@ -139,15 +162,23 @@ func scorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[pl
 			scorer, err := scorer.NewKVCacheAwareScorer(ctx)
 			if err == nil {
 				scorers[scorer] = scorerWeight
+			} else {
+				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
 			scorers[&scorer.LoadAwareScorer{}] = scorerWeight
 		case config.PrefixScorerName:
 			// TODO - create config? based on what? - issue #55
-			scorers[scorer.NewPrefixAwareScorer(nil)] = scorerWeight
+			// use the same instance
+			scorers[s.prefixScorer] = scorerWeight
+			prefixWasAdded = true
 		case config.SessionAwareScorerName:
 			scorers[scorer.NewSessionAffinity()] = scorerWeight
 		}
+	}
+
+	if !prefixWasAdded {
+		scorers[s.prefixScorer] = 0.0
 	}
 
 	return scorers

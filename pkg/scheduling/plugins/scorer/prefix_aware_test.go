@@ -115,7 +115,7 @@ func TestPrefixAwareScorer(t *testing.T) {
 			config := scorer.DefaultPrefixStoreConfig()
 			config.BlockSize = 5 // set small chunking for testing
 
-			s := scorer.NewPrefixAwareScorer(config)
+			s := scorer.NewPrefixAwareScorer(ctx, config)
 
 			// Add prefix if specified
 			if tt.prefixToAdd != "" {
