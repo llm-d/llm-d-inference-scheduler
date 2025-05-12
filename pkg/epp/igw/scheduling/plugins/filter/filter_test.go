@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/uuid"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
@@ -170,7 +171,7 @@ func TestFilter(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := types.NewSchedulingContext(context.Background(), test.req, test.input)
+			ctx := types.NewSchedulingContext(context.Background(), test.req, nil, test.input)
 			got := test.filter.Filter(ctx, test.input)
 
 			if diff := cmp.Diff(test.output, got); diff != "" {
@@ -205,6 +206,7 @@ func TestLoRASoftAffinityDistribution(t *testing.T) {
 	// Create a test request and pods
 	req := &types.LLMRequest{
 		TargetModel: testAffinityModel,
+		RequestId:   uuid.NewString(),
 	}
 
 	// Test setup: One affinity pod and one available pod
@@ -226,7 +228,7 @@ func TestLoRASoftAffinityDistribution(t *testing.T) {
 			},
 		},
 	}
-	ctx := types.NewSchedulingContext(context.Background(), req, pods)
+	ctx := types.NewSchedulingContext(context.Background(), req, nil, pods)
 
 	// Run the filter function multiple times and count the results
 	affinityCount := 0

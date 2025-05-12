@@ -23,13 +23,14 @@ import (
 
 // NewSchedulerConfig creates a new SchedulerConfig object with the given plugins.
 func NewSchedulerConfig(preSchedulePlugins []plugins.PreSchedule, filters []plugins.Filter, scorers map[plugins.Scorer]int,
-	picker plugins.Picker, postSchedulePlugins []plugins.PostSchedule, opts ...ConfigOption) *SchedulerConfig {
+	picker plugins.Picker, postSchedulePlugins []plugins.PostSchedule, postResponsePlugins []plugins.PostResponse, opts ...ConfigOption) *SchedulerConfig {
 	config := &SchedulerConfig{
 		preSchedulePlugins:  preSchedulePlugins,
 		filters:             filters,
 		scorers:             scorers,
 		picker:              picker,
 		postSchedulePlugins: postSchedulePlugins,
+		postResponsePlugins: postResponsePlugins,
 	}
 	for _, opt := range opts {
 		opt(config)
@@ -44,6 +45,7 @@ type SchedulerConfig struct {
 	scorers             map[plugins.Scorer]int // map from scorer to weight
 	picker              plugins.Picker
 	postSchedulePlugins []plugins.PostSchedule
+	postResponsePlugins []plugins.PostResponse
 }
 
 type ConfigOption func(*SchedulerConfig)

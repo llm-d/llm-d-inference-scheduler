@@ -27,7 +27,7 @@ func TestPrefixPlugin(t *testing.T) {
 		TargetModel: "test-model1",
 		Prompt:      "aaaaaa",
 	}
-	ctx := types.NewSchedulingContext(context.Background(), req1, pods)
+	ctx := types.NewSchedulingContext(context.Background(), req1, nil, pods)
 	plugin.PreSchedule(ctx)
 	state, err := plugin.getPrefixState(ctx.CycleState)
 	assert.NoError(t, err)
@@ -51,7 +51,7 @@ func TestPrefixPlugin(t *testing.T) {
 		TargetModel: "test-model2",
 		Prompt:      "bbbbbb",
 	}
-	ctx = types.NewSchedulingContext(context.Background(), req2, pods)
+	ctx = types.NewSchedulingContext(context.Background(), req2, nil, pods)
 	plugin.PreSchedule(ctx)
 	state, err = plugin.getPrefixState(ctx.CycleState)
 	assert.NoError(t, err)
@@ -74,7 +74,7 @@ func TestPrefixPlugin(t *testing.T) {
 		TargetModel: "test-model1",
 		Prompt:      "aaaabbbb",
 	}
-	ctx = types.NewSchedulingContext(context.Background(), req3, pods)
+	ctx = types.NewSchedulingContext(context.Background(), req3, nil, pods)
 	plugin.PreSchedule(ctx)
 	state, err = plugin.getPrefixState(ctx.CycleState)
 	assert.NoError(t, err)
@@ -96,7 +96,7 @@ func TestPrefixPlugin(t *testing.T) {
 		TargetModel: "test-model-new",
 		Prompt:      "aaaabbbb",
 	}
-	ctx = types.NewSchedulingContext(context.Background(), req4, pods)
+	ctx = types.NewSchedulingContext(context.Background(), req4, nil, pods)
 	plugin.PreSchedule(ctx)
 	state, err = plugin.getPrefixState(ctx.CycleState)
 	assert.NoError(t, err)
@@ -118,7 +118,7 @@ func TestPrefixPlugin(t *testing.T) {
 		TargetModel: "test-model1",
 		Prompt:      "aaaabbbbcccc",
 	}
-	ctx = types.NewSchedulingContext(context.Background(), req5, pods)
+	ctx = types.NewSchedulingContext(context.Background(), req5, nil, pods)
 	plugin.PreSchedule(ctx)
 	state, err = plugin.getPrefixState(ctx.CycleState)
 	assert.NoError(t, err)
