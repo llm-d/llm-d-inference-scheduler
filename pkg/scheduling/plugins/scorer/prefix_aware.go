@@ -69,7 +69,6 @@ func (s *PrefixAwareScorer) Score(ctx *types.SchedulingContext, pods []types.Pod
 		return nil
 	}
 
-	loggerDebug.Info("Going to update hits maps")
 	for pod, score := range scores {
 		if pod == "" {
 			continue
