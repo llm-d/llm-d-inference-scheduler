@@ -214,12 +214,12 @@ func createPods(nPods int) map[string]*types.PodMetrics {
 }
 
 func generateNonRepeatingText(length int) string {
-	rand.Seed(time.Now().UnixNano())
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	chars := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?;:-_[]{}()<>|@#$%^&*+=")
 
 	result := make([]rune, length)
 	for i := range result {
-		result[i] = chars[rand.Intn(len(chars))]
+		result[i] = chars[r.Intn(len(chars))]
 	}
 	return string(result)
 }
