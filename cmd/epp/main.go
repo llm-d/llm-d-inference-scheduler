@@ -14,6 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/**
+ * This file is adapted from Gateway API Inference Extension
+ * Original source: https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/cmd/epp/main.go
+ * Licensed under the Apache License, Version 2.0
+ */
+
 // Package main contains the "Endpoint Picker (EPP)" program for scheduling
 // inference requests.
 package main

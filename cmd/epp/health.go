@@ -14,6 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/**
+ * This file is adapted from Gateway API Inference Extension
+ * Original source: https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/cmd/epp/health.go
+ * Licensed under the Apache License, Version 2.0
+ */
+
 package main
 
 import (

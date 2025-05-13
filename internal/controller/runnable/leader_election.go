@@ -1,3 +1,9 @@
+/**
+ * This file is adapted from Gateway API Inference Extension
+ * Original source: https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/internal/runnable/leader_election.go
+ * Licensed under the Apache License, Version 2.0
+ */
+
 package runnable
 
 import (
