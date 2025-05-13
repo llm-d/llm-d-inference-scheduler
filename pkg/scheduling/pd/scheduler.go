@@ -178,7 +178,7 @@ func (s *Scheduler) scorersFromConfig(ctx context.Context, scorersConfig map[str
 	return scorers
 }
 
-func (s *Scheduler) generateSchedulerConfig(ctx context.Context, scorersConfig map[string]int, filter plugins.Filter) *scheduling.SchedulerConfig {
+func (s *Scheduler) generateSchedulerConfig(ctx context.Context, scorersConfig map[string]int, filters ...plugins.Filter) *scheduling.SchedulerConfig {
 	scorers := s.scorersFromConfig(ctx, scorersConfig)
 	preSchedulePlugins := []plugins.PreSchedule{}
 	postSchedulePlugins := []plugins.PostSchedule{}
@@ -198,7 +198,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, scorersConfig m
 
 	return scheduling.NewSchedulerConfig(
 		preSchedulePlugins,
-		[]plugins.Filter{filter},
+		filters,
 		scorers,
 		picker.NewMaxScorePicker(),
 		postSchedulePlugins,
