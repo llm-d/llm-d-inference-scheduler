@@ -31,9 +31,9 @@ details with you. See [DEVELOPMENT.md](/DEVELOPMENT.md) for details on how to
 work with the codebase.
 
 Note that in general features should go to the upstream [Gateway API Inference
-Extension (GIE)] project _first_ if applicable. The GIE a major dependency of
-ours where most _general purpose_ inference features live, so if you have
-something general purpose it probably should go to the GIE, and if you have
+Extension (GIE)] project _first_ if applicable. The GIE is a major dependency of
+ours, and where most _general purpose_ inference features live. If you have
+something that you feel is general purpose or use, it probably should go to the GIE. If you have
 something that's _llm-d specific_ then it should go here. If you're not sure
 whether your feature belongs here or in the GIE, feel free to create a
 [discussion] or ask on [Slack].

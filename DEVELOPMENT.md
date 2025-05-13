@@ -38,14 +38,14 @@ There are several ways to access the gateway:
 **Port forward**:
 
 ```console
-$ kubectl --context kind-gie-dev port-forward service/inference-gateway 8080:80
+$ kubectl --context llm-d-inference-scheduler-dev port-forward service/inference-gateway 8080:80
 ```
 
 **NodePort**
 
 ```console
 # Determine the k8s node address
-$ kubectl --context kind-gie-dev get node -o yaml | grep address
+$ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep address
 # The service is accessible over port 80 of the worker IP address.
 ```
 
@@ -54,7 +54,7 @@ $ kubectl --context kind-gie-dev get node -o yaml | grep address
 ```console
 # Install and run cloud-provider-kind:
 $ go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
-$ kubectl --context kind-gie-dev get service inference-gateway
+$ kubectl --context llm-d-inference-scheduler-dev get service inference-gateway
 # Wait for the LoadBalancer External-IP to become available. The service is accessible over port 80.
 ```
 
@@ -84,7 +84,7 @@ access the inference gatyeway.
 
 ### Development Cycle
 
-To test your changes to the GIE in this environment, make your changes locally
+To test your changes to `llm-d-inferernce-scheduler` in this environment, make your changes locally
 and then re-run the deployment:
 
 ```console
@@ -92,7 +92,10 @@ make env-dev-kind
 ```
 
 This will build images with your recent changes and load the new images to the
-cluster.
+cluster. Note that built image tag should be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
+
+```console
+EPP_TAG=0.0.4 make env-dev-kind
 
 **NOTE**: If you are working on a MacOS with Apple Silicon, it is required to add
 the environment variable `GOOS=linux`.
