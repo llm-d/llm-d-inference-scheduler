@@ -4,7 +4,7 @@ ARG TARGETOS
 ARG TARGETARCH
 
 # Install build tools
-RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel && dnf clean all
+RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
 
 WORKDIR /workspace
 
