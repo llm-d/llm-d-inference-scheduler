@@ -61,23 +61,17 @@ func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*
 		prefixScorer: scorer.NewPrefixAwareScorer(ctx, nil),
 	}
 
-	scheduler.prefill = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
-		[]plugins.PreSchedule{},
-		[]plugins.Filter{&filter.PrefillFilter{}},
-		scheduler.scorersFromConfig(ctx, schedCfg.PrefillSchedulerScorers),
-		picker.NewMaxScorePicker(),
-		[]plugins.PostSchedule{scheduler.prefixScorer},
-		[]plugins.PostResponse{},
-	))
+	scheduler.prefill = scheduling.NewSchedulerWithConfig(
+		ds,
+		scheduler.generateSchedulerConfig(ctx, schedCfg.PrefillSchedulerScorers,
+			&filter.PrefillFilter{}),
+	)
 
-	scheduler.decode = scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(
-		[]plugins.PreSchedule{},
-		[]plugins.Filter{&filter.DecodeFilter{}},
-		scheduler.scorersFromConfig(ctx, schedCfg.DecodeSchedulerScorers),
-		picker.NewMaxScorePicker(),
-		[]plugins.PostSchedule{scheduler.prefixScorer},
-		[]plugins.PostResponse{},
-	))
+	scheduler.decode = scheduling.NewSchedulerWithConfig(
+		ds,
+		scheduler.generateSchedulerConfig(ctx, schedCfg.DecodeSchedulerScorers,
+			&filter.DecodeFilter{}),
+	)
 
 	return scheduler, nil
 }
@@ -182,4 +176,32 @@ func (s *Scheduler) scorersFromConfig(ctx context.Context, scorersConfig map[str
 	}
 
 	return scorers
+}
+
+func (s *Scheduler) generateSchedulerConfig(ctx context.Context, scorersConfig map[string]int, filter plugins.Filter) *scheduling.SchedulerConfig {
+	scorers := s.scorersFromConfig(ctx, scorersConfig)
+	preSchedulePlugins := []plugins.PreSchedule{}
+	postSchedulePlugins := []plugins.PostSchedule{}
+	postResponsePlugins := []plugins.PostResponse{}
+
+	for scorer, _ := range scorers {
+		if preSchedule, ok := scorer.(plugins.PreSchedule); ok {
+			preSchedulePlugins = append(preSchedulePlugins, preSchedule)
+		}
+		if postSchedule, ok := scorer.(plugins.PostSchedule); ok {
+			postSchedulePlugins = append(postSchedulePlugins, postSchedule)
+		}
+		if postResponse, ok := scorer.(plugins.PostResponse); ok {
+			postResponsePlugins = append(postResponsePlugins, postResponse)
+		}
+	}
+
+	return scheduling.NewSchedulerConfig(
+		preSchedulePlugins,
+		[]plugins.Filter{filter},
+		scorers,
+		picker.NewMaxScorePicker(),
+		postSchedulePlugins,
+		postResponsePlugins,
+	)
 }
