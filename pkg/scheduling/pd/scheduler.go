@@ -184,7 +184,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, scorersConfig m
 	postSchedulePlugins := []plugins.PostSchedule{}
 	postResponsePlugins := []plugins.PostResponse{}
 
-	for scorer, _ := range scorers {
+	for scorer := range scorers {
 		if preSchedule, ok := scorer.(plugins.PreSchedule); ok {
 			preSchedulePlugins = append(preSchedulePlugins, preSchedule)
 		}
