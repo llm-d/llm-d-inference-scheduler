@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/go-logr/logr"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
 
 const (
@@ -39,16 +40,6 @@ const (
 	prefillPrefixAwareScorerWeightEnvVar  = "PREFILL_PREFIX_AWARE_SCORER_WEIGHT"
 	prefillSessionAwareScorerWeightEnvVar = "PREFILL_SESSION_AWARE_SCORER_WEIGHT"
 
-	decodeKvCacheScorerEnablementEnvVar      = "DECODE_ENABLE_KVCACHE_AWARE_SCORER"
-	decodeLoadAwareScorerEnablementEnvVar    = "DECODE_ENABLE_LOAD_AWARE_SCORER"
-	decodePrefixAwareScorerEnablementEnvVar  = "DECODE_ENABLE_PREFIX_AWARE_SCORER"
-	decodeSessionAwareScorerEnablementEnvVar = "DECODE_ENABLE_SESSION_AWARE_SCORER"
-
-	decodeKvCacheScorerWeightEnvVar      = "DECODE_KVCACHE_AWARE_SCORER_WEIGHT"
-	decodeLoadAwareScorerWeightEnvVar    = "DECODE_LOAD_AWARE_SCORER_WEIGHT"
-	decodePrefixAwareScorerWeightEnvVar  = "DECODE_PREFIX_AWARE_SCORER_WEIGHT"
-	decodeSessionAwareScorerWeightEnvVar = "DECODE_SESSION_AWARE_SCORER_WEIGHT"
-
 	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
 	pdPromptLenThresholdDefault = 100
@@ -57,7 +48,6 @@ const (
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
 type Config struct {
 	logger                  logr.Logger
-	DefaultSchedulerScorers map[string]int
 	DecodeSchedulerScorers  map[string]int
 	PrefillSchedulerScorers map[string]int
 
@@ -69,7 +59,6 @@ type Config struct {
 func NewConfig(logger logr.Logger) *Config {
 	return &Config{
 		logger:                  logger,
-		DefaultSchedulerScorers: map[string]int{},
 		DecodeSchedulerScorers:  map[string]int{},
 		PrefillSchedulerScorers: map[string]int{},
 		PDEnabled:               false,
@@ -79,32 +68,27 @@ func NewConfig(logger logr.Logger) *Config {
 
 // LoadConfig loads configuration from environment variables
 func (c *Config) LoadConfig() {
-	c.loadScorerInfo(c.DefaultSchedulerScorers, KVCacheScorerName, kvCacheScorerEnablementEnvVar, kvCacheScorerWeightEnvVar)
-	c.loadScorerInfo(c.DefaultSchedulerScorers, LoadAwareScorerName, loadAwareScorerEnablementEnvVar, loadAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.DefaultSchedulerScorers, PrefixScorerName, prefixScorerEnablementEnvVar, prefixScorerWeightEnvVar)
-	c.loadScorerInfo(c.DefaultSchedulerScorers, SessionAwareScorerName, sessionAwareScorerEnablementEnvVar, sessionAwareScorerWeightEnvVar)
-
-	c.loadScorerInfo(c.DecodeSchedulerScorers, KVCacheScorerName, decodeKvCacheScorerEnablementEnvVar, decodeKvCacheScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, LoadAwareScorerName, decodeLoadAwareScorerEnablementEnvVar, decodeLoadAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, PrefixScorerName, decodePrefixAwareScorerEnablementEnvVar, decodePrefixAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, SessionAwareScorerName, decodeSessionAwareScorerEnablementEnvVar, decodeSessionAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, KVCacheScorerName, kvCacheScorerEnablementEnvVar, kvCacheScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, LoadAwareScorerName, loadAwareScorerEnablementEnvVar, loadAwareScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, PrefixScorerName, prefixScorerEnablementEnvVar, prefixScorerWeightEnvVar)
+	c.loadScorerInfo(c.DecodeSchedulerScorers, SessionAwareScorerName, sessionAwareScorerEnablementEnvVar, sessionAwareScorerWeightEnvVar)
 
 	c.loadScorerInfo(c.PrefillSchedulerScorers, KVCacheScorerName, prefillKvCacheScorerEnablementEnvVar, prefillKvCacheScorerWeightEnvVar)
 	c.loadScorerInfo(c.PrefillSchedulerScorers, LoadAwareScorerName, prefillLoadAwareScorerEnablementEnvVar, prefillLoadAwareScorerWeightEnvVar)
 	c.loadScorerInfo(c.PrefillSchedulerScorers, PrefixScorerName, prefillPrefixAwareScorerEnablementEnvVar, prefillPrefixAwareScorerWeightEnvVar)
 	c.loadScorerInfo(c.PrefillSchedulerScorers, SessionAwareScorerName, prefillSessionAwareScorerEnablementEnvVar, prefillSessionAwareScorerWeightEnvVar)
 
-	c.PDEnabled = GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
-	c.PDThreshold = GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
+	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
+	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
 }
 
 func (c *Config) loadScorerInfo(scorers map[string]int, scorerName string, enablementKey string, weightKey string) {
-	if GetEnvString(enablementKey, "false", c.logger) != "true" {
+	if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
 		c.logger.Info(fmt.Sprintf("Skipping %s creation as it is not enabled", scorerName))
 		return
 	}
 
-	weight := GetEnvInt(weightKey, 1, c.logger)
+	weight := env.GetEnvInt(weightKey, 1, c.logger)
 
 	scorers[scorerName] = weight
 	c.logger.Info("Initialized scorer", "scorer", scorerName, "weight", weight)
