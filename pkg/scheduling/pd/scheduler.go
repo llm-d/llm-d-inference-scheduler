@@ -166,7 +166,7 @@ func (s *Scheduler) scorersFromConfig(ctx context.Context, scorersConfig map[str
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			scorers[&scorer.LoadAwareScorer{}] = scorerWeight
+			scorers[scorer.NewLoadAwareScorer(ctx)] = scorerWeight
 		case config.PrefixScorerName:
 			// TODO - create config? based on what? - issue #55
 			// use the same instance
