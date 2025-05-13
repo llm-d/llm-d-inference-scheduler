@@ -17,6 +17,7 @@ import (
 )
 
 func TestLoadBasedScorer(t *testing.T) {
+	ctx := context.Background()
 	tests := []struct {
 		name    string
 		scorer  plugins.Scorer
@@ -27,7 +28,7 @@ func TestLoadBasedScorer(t *testing.T) {
 	}{
 		{
 			name:   "load based scorer",
-			scorer: scorer.NewLoadAwareScorer(),
+			scorer: scorer.NewLoadAwareScorer(ctx),
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 				Critical:    true,
