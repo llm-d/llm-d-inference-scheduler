@@ -130,6 +130,9 @@ make env-dev-kind
 This will build images with your recent changes and load the new images to the
 cluster.
 
+**NOTE**: If you are working on a MacOS with Apple Silicon, it is required to add
+the environment variable `GOOS=linux`.
+
 Then do a rollout of the EPP `Deployment` so that your recent changes are
 reflected:
 
