@@ -13,7 +13,6 @@ spec:
     metadata:
       labels:
         app: ${POOL_NAME}
-        ai-aware-router-pod: "true"
     spec:
       containers:
       - name: vllm
