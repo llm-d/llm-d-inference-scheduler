@@ -119,6 +119,7 @@ func New(config Config) *Plugin {
 	return m
 }
 
+// Name returns the name of the plugin.
 func (m *Plugin) Name() string {
 	return "prefix-cache"
 }
@@ -131,7 +132,7 @@ func (m *Plugin) PreSchedule(ctx *types.SchedulingContext) {
 	}
 
 	ctx.CycleState.Write(types.StateKey(m.Name()), state)
-	ctx.Logger.V(logutil.DEBUG).Info(fmt.Sprintf("PreSchedule, cached servers: %+v", state.PrefixCacheServers), "hashes", state.PrefixHashes)
+	ctx.Logger.V(logutil.TRACE).Info(fmt.Sprintf("PreSchedule, cached servers: %+v", state.PrefixCacheServers), "hashes", state.PrefixHashes)
 }
 
 // If a request was routed to a server, record it in the cache:
@@ -148,6 +149,7 @@ func (m *Plugin) PostSchedule(ctx *types.SchedulingContext, res *types.Result) {
 	metrics.RecordPrefixCacheMatch(matchLen*m.HashBlockSize, total*m.HashBlockSize)
 }
 
+// Score returns the scoring result for the given list of pods based on context.
 func (m *Plugin) Score(ctx *types.SchedulingContext, pods []types.Pod) map[types.Pod]float64 {
 	scores := make(map[types.Pod]float64, len(pods))
 
@@ -184,7 +186,7 @@ func (m *Plugin) matchLongestPrefix(ctx *types.SchedulingContext, hashes []Block
 		hash := hashes[i]
 		cachedServers := m.indexer.Get(hash)
 		if len(cachedServers) > 0 {
-			ctx.Logger.V(logutil.DEBUG).Info("Found cached servers", "cachedServers", cachedServers, "total # blocks", len(hashes), "longest prefix", i)
+			ctx.Logger.V(logutil.TRACE).Info("Found cached servers", "cachedServers", cachedServers, "total # blocks", len(hashes), "longest prefix", i)
 			for server := range cachedServers {
 				// Update servers with their longest prefix match.
 				// If we already found this server with longer prefix match, don't update it.
