@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
+	k8sfilter "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/filter"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/prefix"
 	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
@@ -172,9 +173,21 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 			plugins[scorer.NewSessionAffinity()] = scorerWeight
 
 		// Plugins from upstream
+
+		case config.K8SLeastKVCacheFilterName:
+			plugins[k8sfilter.NewLeastKVCacheFilter()] = scorerWeight
+		case config.K8SLeastQueueFilterName:
+			plugins[k8sfilter.NewLeastQueueFilter()] = scorerWeight
+		case config.K8SLoraAffinityFilterName:
+			plugins[k8sfilter.NewLoraAffinityFilter()] = scorerWeight
+		case config.K8SLowQueueFilterName:
+			plugins[k8sfilter.NewLowQueueFilter()] = scorerWeight
+		case config.K8SSheddableCapacityFilterName:
+			plugins[k8sfilter.NewSheddableCapacityFilter()] = scorerWeight
 		case config.K8SKVCacheScorerName:
 			plugins[&k8sscorer.KVCacheScorer{}] = scorerWeight
 		case config.K8SPrefixScorerName:
+			// For now use the default configuration
 			prefixConfig := prefix.Config{
 				HashBlockSize:          prefix.DefaultHashBlockSize,
 				MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
