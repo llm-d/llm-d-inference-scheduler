@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/prefix"
 	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	envutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
@@ -189,9 +190,9 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 		case config.K8SPrefixScorerName:
 			// For now use the default configuration
 			prefixConfig := prefix.Config{
-				HashBlockSize:          prefix.DefaultHashBlockSize,
-				MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
-				LRUIndexerCapacity:     prefix.DefaultLRUIndexerCapacity,
+				HashBlockSize:          envutil.GetEnvInt("PREFIX_CACHE_HASH_BLOCK_SIZE", prefix.DefaultHashBlockSize, logger),
+				MaxPrefixBlocksToMatch: envutil.GetEnvInt("PREFIX_CACHE_MAX_PREFIX_BLOCKS", prefix.DefaultMaxPrefixBlocks, logger),
+				LRUIndexerCapacity:     envutil.GetEnvInt("PREFIX_CACHE_LRU_CAPACITY", prefix.DefaultLRUIndexerCapacity, logger),
 			}
 			plugins[prefix.New(prefixConfig)] = scorerWeight
 		case config.K8SQueueScorerName:
