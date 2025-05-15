@@ -200,7 +200,9 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 		}
 	}
 
-	if !prefixWasAdded {
+	// only in case pd is enabled and prefix scorer was not enabled for decode scheduler
+	// add prefix scorer to list of all scorers to collect information used for decision if PD should be acrivated
+	if s.pdEnabled && !prefixWasAdded {
 		plugins[s.prefixScorer] = 0.0
 	}
 
