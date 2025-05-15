@@ -622,7 +622,7 @@ spec:
   workspaces:
     - name: container-storage
       persistentVolumeClaim:
-        claimName: buildah-cache9
+        claimName: buildah-cache10
     - name: source
       volumeClaimTemplate:
         spec:
