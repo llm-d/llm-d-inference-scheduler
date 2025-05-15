@@ -271,6 +271,8 @@ sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250512170515-baf3d7d18bf7 h
 sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250512170515-baf3d7d18bf7/go.mod h1:qRPXOlVZzeSDeh+ExJqF/h4Tv5cus8SLhE+Qnpe882Y=
 sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250514202720-c2e3fa9e5a46 h1:VuInpiVLmF13UypQcRpdN7Hrp2pVU3hhalXqKzDl5+4=
 sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250514202720-c2e3fa9e5a46/go.mod h1:qRPXOlVZzeSDeh+ExJqF/h4Tv5cus8SLhE+Qnpe882Y=
+sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250515212313-6e8a2effa41c h1:DzAckfomFqkROfuWVO6QYv1K0+0JZJ20hHkDw5ljYIo=
+sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250515212313-6e8a2effa41c/go.mod h1:qRPXOlVZzeSDeh+ExJqF/h4Tv5cus8SLhE+Qnpe882Y=
 sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 h1:/Rv+M11QRah1itp8VhT6HoVx1Ray9eB4DBr+K+/sCJ8=
 sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3/go.mod h1:18nIHnGi6636UCz6m8i4DhaJ65T6EruyzmoQqI2BVDo=
 sigs.k8s.io/randfill v0.0.0-20250304075658-069ef1bbf016/go.mod h1:XeLlZ/jmk4i1HRopwe7/aU3H5n1zNUcX6TM94b3QxOY=
