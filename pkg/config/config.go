@@ -3,7 +3,6 @@
 package config
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/go-logr/logr"
@@ -102,7 +101,7 @@ func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginName
 		}
 
 		if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
-			c.logger.Info(fmt.Sprintf("Skipping %s creation as it is not enabled", pluginName))
+			c.logger.Info("Skipping plugin creation as it is not enabled", "name", pluginName)
 		} else {
 			weight := env.GetEnvInt(weightKey, 1, c.logger)
 
