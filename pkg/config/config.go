@@ -36,7 +36,7 @@ const (
 	K8SKVCacheScorerName = "K8S_KVCACHE_SCORER"
 	// K8SQueueScorerName name of the k8s queue scorer in configuration
 	K8SQueueScorerName = "K8S_QUEUE_SCORER"
-	// K8SPrefixPluginName name of the k8s prefix plugin in configuration
+	// K8SPrefixScorerName name of the k8s prefix plugin in configuration
 	K8SPrefixScorerName = "K8S_PREFIX_SCORER"
 
 	pdEnabledEnvKey             = "PD_ENABLED"
