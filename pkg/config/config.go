@@ -19,11 +19,24 @@ const (
 	PrefixScorerName = "PREFIX_AWARE_SCORER"
 	// SessionAwareScorerName name of the session aware scorer in configuration
 	SessionAwareScorerName = "SESSION_AWARE_SCORER"
-	// K8SKVCacheScorer name of the k8s kv-cache scorer in configuration
+
+	// Plugins from Upstream
+
+	// K8SLeastKVCacheFilterName name of the k8s least kv-cache filter in configuration
+	K8SLeastKVCacheFilterName = "K8S_LEAST_KVCACHE_FILTER"
+	// K8SLeastQueueFilterName name of the k8s least queue filter in configuration
+	K8SLeastQueueFilterName = "K8S_LEAST_QUEUE_FILTER"
+	// K8SLoraAffinityFilterName name of the k8s LoRA affinity filter in configuration
+	K8SLoraAffinityFilterName = "K8S_LORA_AFFINITY_FILTER"
+	// K8SLowQueueFilterName name of the k8s low queue filter in configuration
+	K8SLowQueueFilterName = "K8S_LOW_QUEUE_FILTER"
+	// K8SSheddableCapacityFilterName name of the k8s sheddable capacity filter in configuration
+	K8SSheddableCapacityFilterName = "K8S_SHEDDABLE_CAPACITY_FILTER"
+	// K8SKVCacheScorerName name of the k8s kv-cache scorer in configuration
 	K8SKVCacheScorerName = "K8S_KVCACHE_SCORER"
-	// K8SQueueScorer name of the k8s queue scorer in configuration
+	// K8SQueueScorerName name of the k8s queue scorer in configuration
 	K8SQueueScorerName = "K8S_QUEUE_SCORER"
-	// K8SPrefixPlugin name of the k8s prefix plugin in configuration
+	// K8SPrefixPluginName name of the k8s prefix plugin in configuration
 	K8SPrefixScorerName = "K8S_PREFIX_SCORER"
 
 	pdEnabledEnvKey             = "PD_ENABLED"
@@ -56,10 +69,14 @@ func NewConfig(logger logr.Logger) *Config {
 func (c *Config) LoadConfig() {
 	c.loadPluginInfo(c.DecodeSchedulerPlugins, false,
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
+		K8SLeastKVCacheFilterName, K8SLeastQueueFilterName, K8SLoraAffinityFilterName,
+		K8SLowQueueFilterName, K8SSheddableCapacityFilterName,
 		K8SKVCacheScorerName, K8SQueueScorerName, K8SPrefixScorerName)
 
 	c.loadPluginInfo(c.PrefillSchedulerPlugins, true,
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
+		K8SLeastKVCacheFilterName, K8SLeastQueueFilterName, K8SLoraAffinityFilterName,
+		K8SLowQueueFilterName, K8SSheddableCapacityFilterName,
 		K8SKVCacheScorerName, K8SQueueScorerName, K8SPrefixScorerName)
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
