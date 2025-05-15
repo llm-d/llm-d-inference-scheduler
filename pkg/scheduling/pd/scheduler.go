@@ -175,17 +175,17 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 
 		// Plugins from upstream
 
-		case config.K8SLeastKVCacheFilterName:
+		case config.GIELeastKVCacheFilterName:
 			plugins[k8sfilter.NewLeastKVCacheFilter()] = pluginWeight
-		case config.K8SLeastQueueFilterName:
+		case config.GIELeastQueueFilterName:
 			plugins[k8sfilter.NewLeastQueueFilter()] = pluginWeight
-		case config.K8SLoraAffinityFilterName:
+		case config.GIELoraAffinityFilterName:
 			plugins[k8sfilter.NewLoraAffinityFilter()] = pluginWeight
-		case config.K8SLowQueueFilterName:
+		case config.GIELowQueueFilterName:
 			plugins[k8sfilter.NewLowQueueFilter()] = pluginWeight
-		case config.K8SSheddableCapacityFilterName:
+		case config.GIESheddableCapacityFilterName:
 			plugins[k8sfilter.NewSheddableCapacityFilter()] = pluginWeight
-		case config.K8SKVCacheScorerName:
+		case config.GIEKVCacheScorerName:
 			plugins[&k8sscorer.KVCacheScorer{}] = pluginWeight
 		case config.K8SPrefixScorerName:
 			// For now use the default configuration
@@ -195,7 +195,7 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 				LRUIndexerCapacity:     envutil.GetEnvInt("PREFIX_CACHE_LRU_CAPACITY", prefix.DefaultLRUIndexerCapacity, logger),
 			}
 			plugins[prefix.New(prefixConfig)] = pluginWeight
-		case config.K8SQueueScorerName:
+		case config.GIEQueueScorerName:
 			plugins[&k8sscorer.QueueScorer{}] = pluginWeight
 		}
 	}
