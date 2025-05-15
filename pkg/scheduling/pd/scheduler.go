@@ -154,39 +154,39 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 	plugins := map[plugins.Plugin]int{}
 	prefixWasAdded := false
 
-	for pluginName, scorerWeight := range pluginsConfig {
+	for pluginName, pluginWeight := range pluginsConfig {
 		switch pluginName {
 		case config.KVCacheScorerName:
 			scorer, err := scorer.NewKVCacheAwareScorer(ctx)
 			if err == nil {
-				plugins[scorer] = scorerWeight
+				plugins[scorer] = pluginWeight
 			} else {
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			plugins[scorer.NewLoadAwareScorer(ctx)] = scorerWeight
+			plugins[scorer.NewLoadAwareScorer(ctx)] = pluginWeight
 		case config.PrefixScorerName:
 			// TODO - create config? based on what? - issue #55
 			// use the same instance
-			plugins[s.prefixScorer] = scorerWeight
+			plugins[s.prefixScorer] = pluginWeight
 			prefixWasAdded = true
 		case config.SessionAwareScorerName:
-			plugins[scorer.NewSessionAffinity()] = scorerWeight
+			plugins[scorer.NewSessionAffinity()] = pluginWeight
 
 		// Plugins from upstream
 
 		case config.K8SLeastKVCacheFilterName:
-			plugins[k8sfilter.NewLeastKVCacheFilter()] = scorerWeight
+			plugins[k8sfilter.NewLeastKVCacheFilter()] = pluginWeight
 		case config.K8SLeastQueueFilterName:
-			plugins[k8sfilter.NewLeastQueueFilter()] = scorerWeight
+			plugins[k8sfilter.NewLeastQueueFilter()] = pluginWeight
 		case config.K8SLoraAffinityFilterName:
-			plugins[k8sfilter.NewLoraAffinityFilter()] = scorerWeight
+			plugins[k8sfilter.NewLoraAffinityFilter()] = pluginWeight
 		case config.K8SLowQueueFilterName:
-			plugins[k8sfilter.NewLowQueueFilter()] = scorerWeight
+			plugins[k8sfilter.NewLowQueueFilter()] = pluginWeight
 		case config.K8SSheddableCapacityFilterName:
-			plugins[k8sfilter.NewSheddableCapacityFilter()] = scorerWeight
+			plugins[k8sfilter.NewSheddableCapacityFilter()] = pluginWeight
 		case config.K8SKVCacheScorerName:
-			plugins[&k8sscorer.KVCacheScorer{}] = scorerWeight
+			plugins[&k8sscorer.KVCacheScorer{}] = pluginWeight
 		case config.K8SPrefixScorerName:
 			// For now use the default configuration
 			prefixConfig := prefix.Config{
@@ -194,9 +194,9 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 				MaxPrefixBlocksToMatch: envutil.GetEnvInt("PREFIX_CACHE_MAX_PREFIX_BLOCKS", prefix.DefaultMaxPrefixBlocks, logger),
 				LRUIndexerCapacity:     envutil.GetEnvInt("PREFIX_CACHE_LRU_CAPACITY", prefix.DefaultLRUIndexerCapacity, logger),
 			}
-			plugins[prefix.New(prefixConfig)] = scorerWeight
+			plugins[prefix.New(prefixConfig)] = pluginWeight
 		case config.K8SQueueScorerName:
-			plugins[&k8sscorer.QueueScorer{}] = scorerWeight
+			plugins[&k8sscorer.QueueScorer{}] = pluginWeight
 		}
 	}
 
@@ -217,7 +217,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 
 	filters = append(filters, extraFilters...)
 
-	for plugin, scorerWeight := range thePlugins {
+	for plugin, pluginWeight := range thePlugins {
 		if preSchedule, ok := plugin.(plugins.PreSchedule); ok {
 			preSchedulePlugins = append(preSchedulePlugins, preSchedule)
 		}
@@ -225,7 +225,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 			filters = append(filters, filter)
 		}
 		if scorer, ok := plugin.(plugins.Scorer); ok {
-			scorers[scorer] = scorerWeight
+			scorers[scorer] = pluginWeight
 		}
 		if postSchedule, ok := plugin.(plugins.PostSchedule); ok {
 			postSchedulePlugins = append(postSchedulePlugins, postSchedule)

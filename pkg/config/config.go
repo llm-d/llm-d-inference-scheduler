@@ -97,12 +97,11 @@ func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginName
 
 		if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
 			c.logger.Info(fmt.Sprintf("Skipping %s creation as it is not enabled", pluginName))
-			return
+		} else {
+			weight := env.GetEnvInt(weightKey, 1, c.logger)
+
+			plugins[pluginName] = weight
+			c.logger.Info("Initialized plugin", "plugin", pluginName, "weight", weight)
 		}
-
-		weight := env.GetEnvInt(weightKey, 1, c.logger)
-
-		plugins[pluginName] = weight
-		c.logger.Info("Initialized plugin", "plugin", pluginName, "weight", weight)
 	}
 }
