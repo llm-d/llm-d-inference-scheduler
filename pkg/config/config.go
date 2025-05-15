@@ -38,8 +38,8 @@ const (
 	GIELowQueueFilterName = "GIE_LOW_QUEUE_FILTER"
 	// GIESheddableCapacityFilterName name of the GIE sheddable capacity filter in configuration
 	GIESheddableCapacityFilterName = "GIE_SHEDDABLE_CAPACITY_FILTER"
-	// GIEKVCacheScorerName name of the GIE kv-cache scorer in configuration
-	GIEKVCacheScorerName = "GIE_KVCACHE_SCORER"
+	// GIEKVCacheUtilizationScorerName name of the GIE kv-cache utilization scorer in configuration
+	GIEKVCacheUtilizationScorerName = "GIE_KVCACHE_UTILIZATION_SCORER"
 	// GIEQueueScorerName name of the GIE queue scorer in configuration
 	GIEQueueScorerName = "GIE_QUEUE_SCORER"
 	// K8SPrefixScorerName name of the GIE prefix plugin in configuration
@@ -77,13 +77,13 @@ func (c *Config) LoadConfig() {
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
 		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheScorerName, GIEQueueScorerName, K8SPrefixScorerName)
+		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, K8SPrefixScorerName)
 
 	c.loadPluginInfo(c.PrefillSchedulerPlugins, true,
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
 		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheScorerName, GIEQueueScorerName, K8SPrefixScorerName)
+		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, K8SPrefixScorerName)
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)

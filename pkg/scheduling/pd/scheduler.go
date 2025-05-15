@@ -185,7 +185,7 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 			plugins[k8sfilter.NewLowQueueFilter()] = pluginWeight
 		case config.GIESheddableCapacityFilterName:
 			plugins[k8sfilter.NewSheddableCapacityFilter()] = pluginWeight
-		case config.GIEKVCacheScorerName:
+		case config.GIEKVCacheUtilizationScorerName:
 			plugins[&k8sscorer.KVCacheScorer{}] = pluginWeight
 		case config.K8SPrefixScorerName:
 			// For now use the default configuration
