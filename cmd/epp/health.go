@@ -40,17 +40,19 @@ type healthServer struct {
 }
 
 func (s *healthServer) Check(_ context.Context, in *healthPb.HealthCheckRequest) (*healthPb.HealthCheckResponse, error) {
-	if in.Service != extProcPb.ExternalProcessor_ServiceDesc.ServiceName {
-		s.logger.V(logutil.DEFAULT).Info("gRPC health check requested unknown service", "available-services", []string{extProcPb.ExternalProcessor_ServiceDesc.ServiceName}, "requested-service", in.Service)
-		return &healthPb.HealthCheckResponse{Status: healthPb.HealthCheckResponse_SERVICE_UNKNOWN}, nil
-	}
+	// TODO: we're accepting ANY service name for now as a temporary hack in alignment with
+	// upstream issues. See https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/788
+	// if in.Service != extProcPb.ExternalProcessor_ServiceDesc.ServiceName {
+	// 	s.logger.V(logutil.DEFAULT).Info("gRPC health check requested unknown service", "available-services", []string{extProcPb.ExternalProcessor_ServiceDesc.ServiceName}, "requested-service", in.Service)
+	// 	return &healthPb.HealthCheckResponse{Status: healthPb.HealthCheckResponse_SERVICE_UNKNOWN}, nil
+	// }
 
 	if !s.datastore.PoolHasSynced() {
-		s.logger.V(logutil.DEFAULT).Info("gRPC health check not serving", "service", extProcPb.ExternalProcessor_ServiceDesc.ServiceName)
+		s.logger.V(logutil.DEFAULT).Info("gRPC health check not serving", "service", in.Service)
 		return &healthPb.HealthCheckResponse{Status: healthPb.HealthCheckResponse_NOT_SERVING}, nil
 	}
 
-	s.logger.V(logutil.TRACE).Info("gRPC health check serving", "service", extProcPb.ExternalProcessor_ServiceDesc.ServiceName)
+	s.logger.V(logutil.TRACE).Info("gRPC health check serving", "service", in.Service)
 	return &healthPb.HealthCheckResponse{Status: healthPb.HealthCheckResponse_SERVING}, nil
 }
 
