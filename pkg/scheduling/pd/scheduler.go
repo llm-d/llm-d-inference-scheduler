@@ -13,8 +13,12 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
+	k8sfilter "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/filter"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/prefix"
+	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	envutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
@@ -63,13 +67,13 @@ func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*
 
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(
 		ds,
-		scheduler.generateSchedulerConfig(ctx, schedCfg.PrefillSchedulerScorers,
+		scheduler.generateSchedulerConfig(ctx, schedCfg.PrefillSchedulerPlugins,
 			&filter.PrefillFilter{}),
 	)
 
 	scheduler.decode = scheduling.NewSchedulerWithConfig(
 		ds,
-		scheduler.generateSchedulerConfig(ctx, schedCfg.DecodeSchedulerScorers,
+		scheduler.generateSchedulerConfig(ctx, schedCfg.DecodeSchedulerPlugins,
 			&filter.DecodeFilter{}),
 	)
 
@@ -144,54 +148,89 @@ func (s *Scheduler) OnResponse(_ context.Context, _ *types.LLMResponse, _ string
 	// no-op
 }
 
-func (s *Scheduler) scorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[plugins.Scorer]int {
+func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int) map[plugins.Plugin]int {
 	logger := log.FromContext(ctx)
 
-	scorers := map[plugins.Scorer]int{}
+	plugins := map[plugins.Plugin]int{}
 	prefixWasAdded := false
 
-	for scorerName, scorerWeight := range scorersConfig {
-		switch scorerName {
+	for pluginName, pluginWeight := range pluginsConfig {
+		switch pluginName {
 		case config.KVCacheScorerName:
 			scorer, err := scorer.NewKVCacheAwareScorer(ctx)
 			if err == nil {
-				scorers[scorer] = scorerWeight
+				plugins[scorer] = pluginWeight
 			} else {
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			scorers[scorer.NewLoadAwareScorer(ctx)] = scorerWeight
+			plugins[scorer.NewLoadAwareScorer(ctx)] = pluginWeight
 		case config.PrefixScorerName:
 			// TODO - create config? based on what? - issue #55
 			// use the same instance
-			scorers[s.prefixScorer] = scorerWeight
+			plugins[s.prefixScorer] = pluginWeight
 			prefixWasAdded = true
 		case config.SessionAwareScorerName:
-			scorers[scorer.NewSessionAffinity()] = scorerWeight
+			plugins[scorer.NewSessionAffinity()] = pluginWeight
+
+		// Plugins from upstream
+
+		case config.GIELeastKVCacheFilterName:
+			plugins[k8sfilter.NewLeastKVCacheFilter()] = pluginWeight
+		case config.GIELeastQueueFilterName:
+			plugins[k8sfilter.NewLeastQueueFilter()] = pluginWeight
+		case config.GIELoraAffinityFilterName:
+			plugins[k8sfilter.NewLoraAffinityFilter()] = pluginWeight
+		case config.GIELowQueueFilterName:
+			plugins[k8sfilter.NewLowQueueFilter()] = pluginWeight
+		case config.GIESheddableCapacityFilterName:
+			plugins[k8sfilter.NewSheddableCapacityFilter()] = pluginWeight
+		case config.GIEKVCacheUtilizationScorerName:
+			plugins[&k8sscorer.KVCacheScorer{}] = pluginWeight
+		case config.K8SPrefixScorerName:
+			// For now use the default configuration
+			prefixConfig := prefix.Config{
+				HashBlockSize:          envutil.GetEnvInt("PREFIX_CACHE_HASH_BLOCK_SIZE", prefix.DefaultHashBlockSize, logger),
+				MaxPrefixBlocksToMatch: envutil.GetEnvInt("PREFIX_CACHE_MAX_PREFIX_BLOCKS", prefix.DefaultMaxPrefixBlocks, logger),
+				LRUIndexerCapacity:     envutil.GetEnvInt("PREFIX_CACHE_LRU_CAPACITY", prefix.DefaultLRUIndexerCapacity, logger),
+			}
+			plugins[prefix.New(prefixConfig)] = pluginWeight
+		case config.GIEQueueScorerName:
+			plugins[&k8sscorer.QueueScorer{}] = pluginWeight
 		}
 	}
 
 	if !prefixWasAdded {
-		scorers[s.prefixScorer] = 0.0
+		plugins[s.prefixScorer] = 0.0
 	}
 
-	return scorers
+	return plugins
 }
 
-func (s *Scheduler) generateSchedulerConfig(ctx context.Context, scorersConfig map[string]int, filters ...plugins.Filter) *scheduling.SchedulerConfig {
-	scorers := s.scorersFromConfig(ctx, scorersConfig)
+func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig map[string]int, extraFilters ...plugins.Filter) *scheduling.SchedulerConfig {
+	thePlugins := s.pluginsFromConfig(ctx, pluginsConfig)
 	preSchedulePlugins := []plugins.PreSchedule{}
+	filters := []plugins.Filter{}
+	scorers := map[plugins.Scorer]int{}
 	postSchedulePlugins := []plugins.PostSchedule{}
 	postResponsePlugins := []plugins.PostResponse{}
 
-	for scorer := range scorers {
-		if preSchedule, ok := scorer.(plugins.PreSchedule); ok {
+	filters = append(filters, extraFilters...)
+
+	for plugin, pluginWeight := range thePlugins {
+		if preSchedule, ok := plugin.(plugins.PreSchedule); ok {
 			preSchedulePlugins = append(preSchedulePlugins, preSchedule)
 		}
-		if postSchedule, ok := scorer.(plugins.PostSchedule); ok {
+		if filter, ok := plugin.(plugins.Filter); ok {
+			filters = append(filters, filter)
+		}
+		if scorer, ok := plugin.(plugins.Scorer); ok {
+			scorers[scorer] = pluginWeight
+		}
+		if postSchedule, ok := plugin.(plugins.PostSchedule); ok {
 			postSchedulePlugins = append(postSchedulePlugins, postSchedule)
 		}
-		if postResponse, ok := scorer.(plugins.PostResponse); ok {
+		if postResponse, ok := plugin.(plugins.PostResponse); ok {
 			postResponsePlugins = append(postResponsePlugins, postResponse)
 		}
 	}
