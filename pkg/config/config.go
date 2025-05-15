@@ -19,26 +19,12 @@ const (
 	PrefixScorerName = "PREFIX_AWARE_SCORER"
 	// SessionAwareScorerName name of the session aware scorer in configuration
 	SessionAwareScorerName = "SESSION_AWARE_SCORER"
-
-	kvCacheScorerEnablementEnvVar      = "ENABLE_KVCACHE_AWARE_SCORER"
-	loadAwareScorerEnablementEnvVar    = "ENABLE_LOAD_AWARE_SCORER"
-	prefixScorerEnablementEnvVar       = "ENABLE_PREFIX_AWARE_SCORER"
-	sessionAwareScorerEnablementEnvVar = "ENABLE_SESSION_AWARE_SCORER"
-
-	kvCacheScorerWeightEnvVar      = "KVCACHE_AWARE_SCORER_WEIGHT"
-	loadAwareScorerWeightEnvVar    = "LOAD_AWARE_SCORER_WEIGHT"
-	prefixScorerWeightEnvVar       = "PREFIX_AWARE_SCORER_WEIGHT"
-	sessionAwareScorerWeightEnvVar = "SESSION_AWARE_SCORER_WEIGHT"
-
-	prefillKvCacheScorerEnablementEnvVar      = "PREFILL_ENABLE_KVCACHE_AWARE_SCORER"
-	prefillLoadAwareScorerEnablementEnvVar    = "PREFILL_ENABLE_LOAD_AWARE_SCORER"
-	prefillPrefixAwareScorerEnablementEnvVar  = "PREFILL_ENABLE_PREFIX_AWARE_SCORER"
-	prefillSessionAwareScorerEnablementEnvVar = "PREFILL_ENABLE_SESSION_AWARE_SCORER"
-
-	prefillKvCacheScorerWeightEnvVar      = "PREFILL_KVCACHE_AWARE_SCORER_WEIGHT"
-	prefillLoadAwareScorerWeightEnvVar    = "PREFILL_LOAD_AWARE_SCORER_WEIGHT"
-	prefillPrefixAwareScorerWeightEnvVar  = "PREFILL_PREFIX_AWARE_SCORER_WEIGHT"
-	prefillSessionAwareScorerWeightEnvVar = "PREFILL_SESSION_AWARE_SCORER_WEIGHT"
+	// K8SKVCacheScorer name of the k8s kv-cache scorer in configuration
+	K8SKVCacheScorerName = "K8S_KVCACHE_SCORER"
+	// K8SQueueScorer name of the k8s queue scorer in configuration
+	K8SQueueScorerName = "K8S_QUEUE_SCORER"
+	// K8SPrefixPlugin name of the k8s prefix plugin in configuration
+	K8SPrefixScorerName = "K8S_PREFIX_SCORER"
 
 	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
@@ -48,8 +34,8 @@ const (
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
 type Config struct {
 	logger                  logr.Logger
-	DecodeSchedulerScorers  map[string]int
-	PrefillSchedulerScorers map[string]int
+	DecodeSchedulerPlugins  map[string]int
+	PrefillSchedulerPlugins map[string]int
 
 	PDEnabled   bool
 	PDThreshold int
@@ -59,8 +45,8 @@ type Config struct {
 func NewConfig(logger logr.Logger) *Config {
 	return &Config{
 		logger:                  logger,
-		DecodeSchedulerScorers:  map[string]int{},
-		PrefillSchedulerScorers: map[string]int{},
+		DecodeSchedulerPlugins:  map[string]int{},
+		PrefillSchedulerPlugins: map[string]int{},
 		PDEnabled:               false,
 		PDThreshold:             math.MaxInt,
 	}
@@ -68,28 +54,38 @@ func NewConfig(logger logr.Logger) *Config {
 
 // LoadConfig loads configuration from environment variables
 func (c *Config) LoadConfig() {
-	c.loadScorerInfo(c.DecodeSchedulerScorers, KVCacheScorerName, kvCacheScorerEnablementEnvVar, kvCacheScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, LoadAwareScorerName, loadAwareScorerEnablementEnvVar, loadAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, PrefixScorerName, prefixScorerEnablementEnvVar, prefixScorerWeightEnvVar)
-	c.loadScorerInfo(c.DecodeSchedulerScorers, SessionAwareScorerName, sessionAwareScorerEnablementEnvVar, sessionAwareScorerWeightEnvVar)
+	c.loadPluginInfo(c.DecodeSchedulerPlugins, false,
+		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
+		K8SKVCacheScorerName, K8SQueueScorerName, K8SPrefixScorerName)
 
-	c.loadScorerInfo(c.PrefillSchedulerScorers, KVCacheScorerName, prefillKvCacheScorerEnablementEnvVar, prefillKvCacheScorerWeightEnvVar)
-	c.loadScorerInfo(c.PrefillSchedulerScorers, LoadAwareScorerName, prefillLoadAwareScorerEnablementEnvVar, prefillLoadAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.PrefillSchedulerScorers, PrefixScorerName, prefillPrefixAwareScorerEnablementEnvVar, prefillPrefixAwareScorerWeightEnvVar)
-	c.loadScorerInfo(c.PrefillSchedulerScorers, SessionAwareScorerName, prefillSessionAwareScorerEnablementEnvVar, prefillSessionAwareScorerWeightEnvVar)
+	c.loadPluginInfo(c.PrefillSchedulerPlugins, true,
+		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
+		K8SKVCacheScorerName, K8SQueueScorerName, K8SPrefixScorerName)
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
 }
 
-func (c *Config) loadScorerInfo(scorers map[string]int, scorerName string, enablementKey string, weightKey string) {
-	if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
-		c.logger.Info(fmt.Sprintf("Skipping %s creation as it is not enabled", scorerName))
-		return
+func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginNames ...string) {
+	for _, pluginName := range pluginNames {
+		var enablementKey string
+		var weightKey string
+		if prefill {
+			enablementKey = "PREFILL_ENABLE_" + pluginName
+			weightKey = "PREFILL_" + pluginName + "_WEIGHT"
+		} else {
+			enablementKey = "ENABLE_" + pluginName
+			weightKey = pluginName + "_WEIGHT"
+		}
+
+		if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
+			c.logger.Info(fmt.Sprintf("Skipping %s creation as it is not enabled", pluginName))
+			return
+		}
+
+		weight := env.GetEnvInt(weightKey, 1, c.logger)
+
+		plugins[pluginName] = weight
+		c.logger.Info("Initialized plugin", "plugin", pluginName, "weight", weight)
 	}
-
-	weight := env.GetEnvInt(weightKey, 1, c.logger)
-
-	scorers[scorerName] = weight
-	c.logger.Info("Initialized scorer", "scorer", scorerName, "weight", weight)
 }
