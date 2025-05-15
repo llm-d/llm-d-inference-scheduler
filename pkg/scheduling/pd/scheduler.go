@@ -14,6 +14,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/prefix"
+	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
@@ -63,13 +65,13 @@ func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*
 
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(
 		ds,
-		scheduler.generateSchedulerConfig(ctx, schedCfg.PrefillSchedulerScorers,
+		scheduler.generateSchedulerConfig(ctx, schedCfg.PrefillSchedulerPlugins,
 			&filter.PrefillFilter{}),
 	)
 
 	scheduler.decode = scheduling.NewSchedulerWithConfig(
 		ds,
-		scheduler.generateSchedulerConfig(ctx, schedCfg.DecodeSchedulerScorers,
+		scheduler.generateSchedulerConfig(ctx, schedCfg.DecodeSchedulerPlugins,
 			&filter.DecodeFilter{}),
 	)
 
@@ -144,54 +146,77 @@ func (s *Scheduler) OnResponse(_ context.Context, _ *types.LLMResponse, _ string
 	// no-op
 }
 
-func (s *Scheduler) scorersFromConfig(ctx context.Context, scorersConfig map[string]int) map[plugins.Scorer]int {
+func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int) map[plugins.Plugin]int {
 	logger := log.FromContext(ctx)
 
-	scorers := map[plugins.Scorer]int{}
+	plugins := map[plugins.Plugin]int{}
 	prefixWasAdded := false
 
-	for scorerName, scorerWeight := range scorersConfig {
-		switch scorerName {
+	for pluginName, scorerWeight := range pluginsConfig {
+		switch pluginName {
 		case config.KVCacheScorerName:
 			scorer, err := scorer.NewKVCacheAwareScorer(ctx)
 			if err == nil {
-				scorers[scorer] = scorerWeight
+				plugins[scorer] = scorerWeight
 			} else {
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			scorers[scorer.NewLoadAwareScorer(ctx)] = scorerWeight
+			plugins[scorer.NewLoadAwareScorer(ctx)] = scorerWeight
 		case config.PrefixScorerName:
 			// TODO - create config? based on what? - issue #55
 			// use the same instance
-			scorers[s.prefixScorer] = scorerWeight
+			plugins[s.prefixScorer] = scorerWeight
 			prefixWasAdded = true
 		case config.SessionAwareScorerName:
-			scorers[scorer.NewSessionAffinity()] = scorerWeight
+			plugins[scorer.NewSessionAffinity()] = scorerWeight
+
+		// Plugins from upstream
+		case config.K8SKVCacheScorerName:
+			plugins[&k8sscorer.KVCacheScorer{}] = scorerWeight
+		case config.K8SPrefixScorerName:
+			prefixConfig := prefix.Config{
+				HashBlockSize:          prefix.DefaultHashBlockSize,
+				MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
+				LRUIndexerCapacity:     prefix.DefaultLRUIndexerCapacity,
+			}
+			plugins[prefix.New(prefixConfig)] = scorerWeight
+		case config.K8SQueueScorerName:
+			plugins[&k8sscorer.QueueScorer{}] = scorerWeight
 		}
 	}
 
 	if !prefixWasAdded {
-		scorers[s.prefixScorer] = 0.0
+		plugins[s.prefixScorer] = 0.0
 	}
 
-	return scorers
+	return plugins
 }
 
-func (s *Scheduler) generateSchedulerConfig(ctx context.Context, scorersConfig map[string]int, filters ...plugins.Filter) *scheduling.SchedulerConfig {
-	scorers := s.scorersFromConfig(ctx, scorersConfig)
+func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig map[string]int, extraFilters ...plugins.Filter) *scheduling.SchedulerConfig {
+	thePlugins := s.pluginsFromConfig(ctx, pluginsConfig)
 	preSchedulePlugins := []plugins.PreSchedule{}
+	filters := []plugins.Filter{}
+	scorers := map[plugins.Scorer]int{}
 	postSchedulePlugins := []plugins.PostSchedule{}
 	postResponsePlugins := []plugins.PostResponse{}
 
-	for scorer := range scorers {
-		if preSchedule, ok := scorer.(plugins.PreSchedule); ok {
+	filters = append(filters, extraFilters...)
+
+	for plugin, scorerWeight := range thePlugins {
+		if preSchedule, ok := plugin.(plugins.PreSchedule); ok {
 			preSchedulePlugins = append(preSchedulePlugins, preSchedule)
 		}
-		if postSchedule, ok := scorer.(plugins.PostSchedule); ok {
+		if filter, ok := plugin.(plugins.Filter); ok {
+			filters = append(filters, filter)
+		}
+		if scorer, ok := plugin.(plugins.Scorer); ok {
+			scorers[scorer] = scorerWeight
+		}
+		if postSchedule, ok := plugin.(plugins.PostSchedule); ok {
 			postSchedulePlugins = append(postSchedulePlugins, postSchedule)
 		}
-		if postResponse, ok := scorer.(plugins.PostResponse); ok {
+		if postResponse, ok := plugin.(plugins.PostResponse); ok {
 			postResponsePlugins = append(postResponsePlugins, postResponse)
 		}
 	}
