@@ -63,5 +63,8 @@ func (s *SessionAffinity) Score(ctx *types.SchedulingContext, pods []types.Pod) 
 // cookie values if present.
 // Tracked in https://github.com/llm-d/llm-d-inference-scheduler/issues/28
 func (s *SessionAffinity) PostResponse(ctx *types.SchedulingContext, pod types.Pod) {
+	if ctx.Req.Headers == nil { // TODO should always be populated?
+		ctx.Req.Headers = make(map[string]string)
+	}
 	ctx.Req.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(pod.GetPod().NamespacedName.String()))
 }
