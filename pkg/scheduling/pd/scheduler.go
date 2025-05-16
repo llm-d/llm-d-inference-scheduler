@@ -142,10 +142,10 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	return decodeRes, nil // decode pod
 }
 
-// OnResponse normally processes all LLMResponses it is a no-op for the P/D
-// scheduler.
-func (s *Scheduler) OnResponse(_ context.Context, _ *types.LLMResponse, _ string) {
-	// no-op
+// OnResponse normally processes all LLMResponses - forwards all responses to the decode scheduler
+func (s *Scheduler) OnResponse(ctx context.Context, resp *types.LLMResponse, targetPodName string) {
+	// prefill scheduler will never get OnReponse, need to take care of plugin, issue #97
+	s.decode.OnResponse(ctx, resp, targetPodName)
 }
 
 func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int) map[plugins.Plugin]int {
