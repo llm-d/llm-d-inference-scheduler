@@ -32,8 +32,8 @@ jobs:
             echo "tag=$prod_version" >> "$GITHUB_OUTPUT"
             echo "registry=$prod_registry" >> "$GITHUB_OUTPUT"
           else
-            echo "Error: Unsupported branch ${GITHUB_REF_NAME}" >&2
-            exit 1
+            echo "tag=$dev_version" >> "$GITHUB_OUTPUT"
+            echo "registry=$dev_registry" >> "$GITHUB_OUTPUT"
           fi
         shell: bash
 
