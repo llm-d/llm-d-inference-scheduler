@@ -37,9 +37,12 @@ ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
 
+# Check the contents of the /workspace/lib directory to ensure the library is there
+RUN echo "Listing contents of /workspace/lib:" && ls -l /workspace/lib
+
 # Ensure the libtokenizers is found by the linker
-# RUN go build -tags cgo -a -o bin/epp -mod=vendor -ldflags="-extldflags '-L/workspace/lib -L/usr/local/lib'" cmd/epp/main.go cmd/epp/health.go
-RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
+RUN go build -tags cgo -a -o bin/epp -mod=vendor -ldflags="-extldflags '-L/workspace/lib -L/usr/local/lib'" cmd/epp/main.go cmd/epp/health.go
+# RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
 
 RUN rm -rf ~/.netrc # remove git token
 
