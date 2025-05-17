@@ -28,6 +28,11 @@ COPY cmd/ cmd/
 COPY pkg/ pkg/
 COPY internal/ internal/
 
+# HuggingFace tokenizer bindings
+RUN mkdir -p lib
+RUN curl -L https://github.com/daulet/tokenizers/releases/download/v1.20.2/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
+RUN ranlib lib/*.a
+
 # Copy the vendor directory
 COPY vendor/ vendor/
 
