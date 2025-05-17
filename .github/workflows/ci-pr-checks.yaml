@@ -44,5 +44,4 @@ jobs:
       - name: Run go build
         shell: bash
         run: |
-          
           make build
