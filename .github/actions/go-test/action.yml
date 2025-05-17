@@ -4,6 +4,9 @@ runs:
   using: "composite"
   steps:
     - run: |
+          git config --global url."https://${{ secrets.KV_CACHE_MANAGER_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+    - run: |
         echo "Installing Ginkgo..."
         go install github.com/onsi/ginkgo/ginkgo@latest
         export PATH=$PATH:$(go env GOPATH)/bin

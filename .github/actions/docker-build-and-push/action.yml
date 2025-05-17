@@ -29,7 +29,11 @@ runs:
         echo "Tag: ${{ inputs.tag }}"
         echo "Registry: ${{ inputs.registry }}"
       shell: bash
-      
+
+    - name: Configure Git to use token for private modules
+      run: |
+          git config --global url."https://${{ secrets.KV_CACHE_MANAGER_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
     - name: Build image
       run: |
         docker buildx build \
