@@ -49,3 +49,4 @@ jobs:
           image-name: llm-d-inference-scheduler
           registry: ${{ steps.version.outputs.registry }}
           github-token: ${{ secrets.GHCR_TOKEN }}
+          kv-cache-manager-token: ${{ secrets.KV_CACHE_MANAGER_TOKEN }}
