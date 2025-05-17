@@ -26,6 +26,10 @@ jobs:
         run: |
             git config --global url."https://${{ secrets.KV_CACHE_MANAGER_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
+      - name: Set Go environment for private modules
+        run: |
+          go env -w GOPRIVATE=github.com/llm-d/*
+          
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v8
         with:

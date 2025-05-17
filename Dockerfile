@@ -11,6 +11,7 @@ WORKDIR /workspace
 ## llm-d internal repos pull config
 ARG KV_CACHE_MANAGER_TOKEN
 RUN git config --global url."https://${KV_CACHE_MANAGER_TOKEN}@github.com/".insteadOf "https://github.com/"
+ENV GOPRIVATE=github.com/llm-d/*
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
