@@ -146,34 +146,16 @@ ifndef NM_TOKEN
 	$(error "NM_TOKEN is not set")
 endif
 
-# Check if 'docker' is actually podman
-DOCKER_IS_PODMAN := $(shell docker --version 2>/dev/null | grep -qi podman && echo true || echo false)
-
-ifeq ($(CONTAINER_TOOL),docker)
-ifeq ($(DOCKER_IS_PODMAN),true)
-	@echo "⚠️  Detected podman aliased as docker. Falling back to podman-compatible build."
-	podman build \
-		--build-arg TARGETOS=$(TARGETOS) \
-		--build-arg TARGETARCH=$(TARGETARCH) \
-		--build-arg GIT_NM_USER=$(GIT_NM_USER) \
-		--build-arg NM_TOKEN=$(NM_TOKEN) \
-		--layers \
-		-t ghcr.io/llm-d/dev-kind:latest .
-	podman push ghcr.io/llm-d/dev-kind:latest
-else
-	DOCKER_BUILDKIT=1 docker buildx build \
-		--platform=linux/amd64 \
-		--build-arg TARGETOS=$(TARGETOS) \
-		--build-arg TARGETARCH=$(TARGETARCH) \
-		--build-arg GIT_NM_USER=$(GIT_NM_USER) \
-		--build-arg NM_TOKEN=$(NM_TOKEN) \
-		--cache-from=type=registry,ref=ghcr.io/llm-d/dev-kind:cache \
-		--cache-to=type=registry,ref=ghcr.io/llm-d/dev-kind:cache,mode=max \
-		--push \
-		-t ghcr.io/llm-d/dev-kind:latest .
+.PHONY: image-build
+image-build: check-container-tool load-version-json ## Build Docker image
+	@printf "\033[33;1m==== Building Docker image $(IMG) ====\033[0m\n"
+ifndef GIT_NM_USER
+	$(error "GIT_NM_USER is not set")
 endif
-else
-	# Primary path: use podman directly
+ifndef NM_TOKEN
+	$(error "NM_TOKEN is not set")
+endif
+
 	$(CONTAINER_TOOL) build \
 		--build-arg TARGETOS=$(TARGETOS) \
 		--build-arg TARGETARCH=$(TARGETARCH) \
@@ -181,9 +163,8 @@ else
 		--build-arg NM_TOKEN=$(NM_TOKEN) \
 		--layers \
 		-t ghcr.io/llm-d/dev-kind:latest .
-	$(CONTAINER_TOOL) push ghcr.io/llm-d/dev-kind:latest
-endif
 
+	$(CONTAINER_TOOL) push ghcr.io/llm-d/dev-kind:latest
 
 .PHONY: image-push
 image-push: check-container-tool load-version-json ## Push Docker image $(IMG) to registry
