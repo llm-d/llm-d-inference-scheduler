@@ -146,9 +146,22 @@ ifndef NM_TOKEN
 	$(error "NM_TOKEN is not set")
 endif
 
-ifeq ($(CONTAINER_TOOL),docker)
+ifeq ($(CONTAINER_TOOL),podman)
+	# Podman primary build flow
+	$(CONTAINER_TOOL) build \
+		--build-arg TARGETOS=$(TARGETOS) \
+		--build-arg TARGETARCH=$(TARGETARCH) \
+		--build-arg GIT_NM_USER=$(GIT_NM_USER) \
+		--build-arg NM_TOKEN=$(NM_TOKEN) \
+		--layers \
+		-t ghcr.io/llm-d/dev-kind:latest .
+
+	# Manual push
+	$(CONTAINER_TOOL) push ghcr.io/llm-d/dev-kind:latest
+else
+	# Docker fallback with buildx
 	DOCKER_BUILDKIT=1 docker buildx build \
-	    --platform=linux/amd64 \
+		--platform=linux/amd64 \
 		--build-arg TARGETOS=$(TARGETOS) \
 		--build-arg TARGETARCH=$(TARGETARCH) \
 		--build-arg GIT_NM_USER=$(GIT_NM_USER) \
@@ -156,14 +169,6 @@ ifeq ($(CONTAINER_TOOL),docker)
 		--cache-from=type=registry,ref=ghcr.io/llm-d/dev-kind:cache \
 		--cache-to=type=registry,ref=ghcr.io/llm-d/dev-kind:cache,mode=max \
 		--push \
-		-t ghcr.io/llm-d/dev-kind:latest .
-else
-	$(CONTAINER_TOOL) build \
-		--build-arg TARGETOS=$(TARGETOS) \
-		--build-arg TARGETARCH=$(TARGETARCH) \
-		--build-arg GIT_NM_USER=$(GIT_NM_USER) \
-		--build-arg NM_TOKEN=$(NM_TOKEN) \
-		--layers \
 		-t ghcr.io/llm-d/dev-kind:latest .
 endif
 
