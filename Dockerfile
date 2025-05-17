@@ -37,8 +37,8 @@ ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
 
-# Build using the vendor directory
-RUN go build -tags cgo -a -o bin/epp -mod=vendor -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
+# Ensure the libtokenizers is found by the linker
+RUN go build -tags cgo -a -o bin/epp -mod=vendor -ldflags="-extldflags '-L/workspace/lib -L/usr/local/lib'" cmd/epp/main.go cmd/epp/health.go
 
 RUN rm -rf ~/.netrc # remove git token
 
