@@ -85,11 +85,8 @@ build: check-go download-tokenizer ##
 .PHONY: buildah-build
 buildah-build: check-builder load-version-json ## Build and push image (multi-arch if supported)
 	@echo "✅ Using builder: $(BUILDER)"
-ifndef GIT_NM_USER
-	$(error "GIT_NM_USER is not set")
-endif
-ifndef NM_TOKEN
-	$(error "NM_TOKEN is not set")
+ifndef KV_CACHE_MANAGER_TOKEN
+	$(error "KV_CACHE_MANAGER_TOKEN is not set")
 endif
 	@if [ "$(BUILDER)" = "buildah" ]; then \
 	  echo "🔧 Buildah detected: Performing multi-arch build..."; \
@@ -99,8 +96,7 @@ endif
 	    echo "📦 Building for architecture: $$arch"; \
 				buildah build \
         			--arch=$$arch \
-        			--build-arg GIT_NM_USER=$(GIT_NM_USER) \
-                    --build-arg NM_TOKEN=$(NM_TOKEN) \
+        			--build-arg KV_CACHE_MANAGER_TOKEN=$(KV_CACHE_MANAGER_TOKEN) \
         			--os=linux \
         			--layers -t $(IMG)-$$arch . || exit 1; \
 	    echo "🚀 Pushing image: $(IMG)-$$arch"; \
@@ -122,8 +118,7 @@ endif
 	  docker buildx use image-builder; \
 	  	  docker buildx build --push \
       	  			--platform=$(PLATFORMS) \
-      	  			--build-arg GIT_NM_USER=$(GIT_NM_USER)\
-                      --build-arg NM_TOKEN=$(NM_TOKEN) \
+                      --build-arg KV_CACHE_MANAGER_TOKEN=$(KV_CACHE_MANAGER_TOKEN) \
                       --tag $(IMG) -f Dockerfile.cross . || exit 1; \
 	  docker buildx rm image-builder || true; \
 	  rm Dockerfile.cross; \
@@ -139,17 +134,13 @@ endif
 .PHONY:	image-build
 image-build: check-container-tool load-version-json ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
 	@printf "\033[33;1m==== Building Docker image $(IMG) ====\033[0m\n"
-ifndef GIT_NM_USER
-	$(error "GIT_NM_USER is not set")
-endif
-ifndef NM_TOKEN
-	$(error "NM_TOKEN is not set")
+ifndef KV_CACHE_MANAGER_TOKEN
+	$(error "KV_CACHE_MANAGER_TOKEN is not set")
 endif
 	$(CONTAINER_TOOL) build \
  		--build-arg TARGETOS=$(TARGETOS) \
 		--build-arg TARGETARCH=$(TARGETARCH) \
-		--build-arg GIT_NM_USER=$(GIT_NM_USER)\
-	        --build-arg NM_TOKEN=$(NM_TOKEN) \
+		--build-arg KV_CACHE_MANAGER_TOKEN=$(KV_CACHE_MANAGER_TOKEN) \
  		-t $(IMG) .
 
 .PHONY: image-push

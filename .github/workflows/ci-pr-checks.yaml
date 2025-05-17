@@ -22,6 +22,10 @@ jobs:
           go-version: '1.24.0'
           cache-dependency-path: ./go.sum
 
+      - name: Configure Git to use token for private modules
+        run: |
+            git config --global url."https://${{ secrets.KV_CACHE_MANAGER_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v8
         with:
