@@ -6,6 +6,8 @@ runs:
     - run: |
           git config --global url."https://${{ secrets.KV_CACHE_MANAGER_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
+    - run: go env -w GOPRIVATE=github.com/llm-d/*
+
     - run: |
         echo "Installing Ginkgo..."
         go install github.com/onsi/ginkgo/ginkgo@latest
