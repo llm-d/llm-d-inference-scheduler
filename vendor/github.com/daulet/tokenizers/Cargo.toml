@@ -1,0 +1,21 @@
+[package]
+name = "tokenizers"
+# Bump major version every time we change the behavior of the library.
+# Bump minor.patch version every time we bump tokenizers dependency version.
+version = "1.20.2"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+libc = "0.2.162"
+tokenizers = {version = "0.20.2" }
+
+[dev-dependencies]
+criterion = { version = "0.5.1", features = ["html_reports"] }
+rand = "0.8.5"
+
+[[bench]]
+name = "decode_benchmark"
+harness = false
