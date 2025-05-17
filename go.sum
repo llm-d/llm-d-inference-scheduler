@@ -267,10 +267,6 @@ sigs.k8s.io/controller-runtime v0.20.4 h1:X3c+Odnxz+iPTRobG4tp092+CvBU9UK0t/bRf+
 sigs.k8s.io/controller-runtime v0.20.4/go.mod h1:xg2XB0K5ShQzAgsoujxuKN4LNXR2LfwwHsPj7Iaw+XY=
 sigs.k8s.io/gateway-api v1.3.0 h1:q6okN+/UKDATola4JY7zXzx40WO4VISk7i9DIfOvr9M=
 sigs.k8s.io/gateway-api v1.3.0/go.mod h1:d8NV8nJbaRbEKem+5IuxkL8gJGOZ+FJ+NvOIltV8gDk=
-sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250512170515-baf3d7d18bf7 h1:Ed6+2CfhG2RcwfjQB+TlYqTxel47Y5JTfq/IY2sfy3g=
-sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250512170515-baf3d7d18bf7/go.mod h1:qRPXOlVZzeSDeh+ExJqF/h4Tv5cus8SLhE+Qnpe882Y=
-sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250514202720-c2e3fa9e5a46 h1:VuInpiVLmF13UypQcRpdN7Hrp2pVU3hhalXqKzDl5+4=
-sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250514202720-c2e3fa9e5a46/go.mod h1:qRPXOlVZzeSDeh+ExJqF/h4Tv5cus8SLhE+Qnpe882Y=
 sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250515212313-6e8a2effa41c h1:DzAckfomFqkROfuWVO6QYv1K0+0JZJ20hHkDw5ljYIo=
 sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250515212313-6e8a2effa41c/go.mod h1:qRPXOlVZzeSDeh+ExJqF/h4Tv5cus8SLhE+Qnpe882Y=
 sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 h1:/Rv+M11QRah1itp8VhT6HoVx1Ray9eB4DBr+K+/sCJ8=
