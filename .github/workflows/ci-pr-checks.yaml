@@ -25,11 +25,11 @@ jobs:
       - name: Configure Git to use token for private modules
         run: |
             git config --global url."https://${{ secrets.KV_CACHE_MANAGER_TOKEN }}@github.com/".insteadOf "https://github.com/"
+            go env -w GOPRIVATE=github.com/llm-d/*
 
-      - name: Set Go environment for private modules
-        run: |
-          go env -w GOPRIVATE=github.com/llm-d/*
-          
+      - name: go mod tidy
+        run: go mod tidy
+
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v8
         with:
