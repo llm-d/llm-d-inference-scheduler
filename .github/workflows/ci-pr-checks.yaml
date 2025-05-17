@@ -40,3 +40,9 @@ jobs:
         shell: bash 
         run: |
           make test
+
+      - name: Run go build
+        shell: bash
+        run: |
+          
+          make build
