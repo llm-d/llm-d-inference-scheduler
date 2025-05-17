@@ -4,7 +4,12 @@ ARG TARGETOS
 ARG TARGETARCH
 
 # Install build tools
-RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
+RUN dnf install -y gcc gcc-c++ glibc-devel libstdc++-devel kernel-headers && \
+    dnf remove -y clang && \
+    dnf clean all
+ENV CC=gcc
+ENV CXX=g++
+# RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
 
 WORKDIR /workspace
 
@@ -38,7 +43,9 @@ RUN ranlib lib/*.a
 ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
-RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
+RUN go build -tags cgo -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
+
+# RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
 RUN rm -rf ~/.netrc # remove git token
 
 # Use distroless as minimal base image to package the manager binary
