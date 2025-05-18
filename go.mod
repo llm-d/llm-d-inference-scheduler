@@ -15,7 +15,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.72.0
-	k8s.io/apimachinery v0.32.4
+	k8s.io/apimachinery v0.33.1
 	k8s.io/client-go v0.32.4
 	k8s.io/component-base v0.32.4
 	sigs.k8s.io/controller-runtime v0.20.4
@@ -50,7 +50,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/cel-go v0.22.0 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
-	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.24.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
