@@ -12,7 +12,7 @@ inputs:
     description: GitHub token for login
   kv-cache-manager-token:
     required: true
-    description: Token for llm-d-kv-cache-manager private module
+    description: KV Cache Manager llm-d repo token
   registry:
     required: true
     description: Container registry (e.g., ghcr.io/llm-d)
@@ -33,11 +33,12 @@ runs:
         echo "Registry: ${{ inputs.registry }}"
       shell: bash
 
-    - name: Build image
+    - name: Build image and push
       run: |
         docker buildx build \
           --platform linux/amd64 \
-          --build-arg RUNNING_IN_GHA=true \
+          --build-arg KV_CACHE_MANAGER_TOKEN=${{ inputs.kv-cache-manager-token }} \
           -t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }} \
-          --push .
+          --push . && \
+          docker push ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }}
       shell: bash
