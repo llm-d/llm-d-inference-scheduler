@@ -39,6 +39,5 @@ runs:
           --platform linux/amd64 \
           --build-arg KV_CACHE_MANAGER_TOKEN=${{ inputs.kv-cache-manager-token }} \
           -t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }} \
-          --push . && \
-          docker push ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }}
+          --push .
       shell: bash
