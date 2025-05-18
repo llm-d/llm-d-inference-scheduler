@@ -2,9 +2,10 @@
 
 ## Goal
 
-This tutorial outlines the steps needed for creating an hooking a new filter
- for the llm-d inference scheduler and hooking it into the filter chain.
- The tutorial assumes basic working knowledge of tools used in this repository,
+This tutorial outlines the steps needed for creating and hooking a new filter
+ for the llm-d inference scheduler.
+
+The tutorial assumes basic working knowledge of tools used in this repository,
  such as Git, Go, etc. It further assumes that you have a working development
  environment which can build `llm-d-inference-scheduler`.
  
