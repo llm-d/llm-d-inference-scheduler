@@ -16,7 +16,7 @@ The tutorial demonstrates the coding of a new filter, which selects inference
 ## Introduction to filtering
 
 Plug-ins are used to modify llm-d's default scheduling behavior. Filter plugins
- are provided with a list of candidate inference serving Pods and remove the
+ are provided with a list of candidate inference serving Pods and filter out the
  Pods which do not match the filtering criteria. Several filtering plugins can
  run in succession to produce the final candidate list which is then evaluated,
  through the process of _scoring_, to select the most appropriate target Pod.
@@ -132,6 +132,21 @@ Once a filter is defined, it can be used to modify the llm-d inference
 - Add any desired configuration knobs (e.g., environment variable); and
 - Listing the new filter in the `LoadConfig()` function's `cfg.loadPluginInfo`
  list of available plugins.
+
+In the case of the llm-d inference scheduler, filters can be hooked into the
+ `Prefill` and/or `Decode` scheduling cycles. For example, the following snippet
+ add the `ByLabels` filter to the list of plugins available to the `Decode`
+ scheduler (assuming a `ByLabelFilterName` constant is defined alogn with other
+ environment variables):
+
+```go 
+func (c *Config) LoadConfig() {
+	c.loadPluginInfo(c.DecodeSchedulerPlugins, false,
+		KVCacheScorerName, ..., ByLabelFilterName, ... )
+	c.loadPluginInfo(c.PrefillSchedulerPlugins, true, ... )
+	// ...
+}
+```
 
 > Note: a real filter would require unit tests, etc. These are left out to
  keep the tutorial short and focused.
