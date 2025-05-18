@@ -50,3 +50,5 @@ jobs:
           registry: ${{ steps.version.outputs.registry }}
           github-token: ${{ secrets.GHCR_TOKEN }}
           kv-cache-manager-token: ${{ secrets.KV_CACHE_MANAGER_TOKEN }}
+          secrets: |
+            kv_cache_manager_token=${{ secrets.KV_CACHE_MANAGER_TOKEN }}

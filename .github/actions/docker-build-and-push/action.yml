@@ -33,16 +33,11 @@ runs:
         echo "Registry: ${{ inputs.registry }}"
       shell: bash
 
-    - name: Configure Git to use token for private modules
-      run: |
-          git config --global url."https://${{ inputs.kv-cache-manager-token }}@github.com/".insteadOf "https://github.com/"
-          go env -w GOPRIVATE=github.com/llm-d/*
-      shell: bash
-
     - name: Build image
       run: |
         docker buildx build \
           --platform linux/amd64 \
+          --build-arg RUNNING_IN_GHA=true \
           -t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }} \
           --push .
       shell: bash
