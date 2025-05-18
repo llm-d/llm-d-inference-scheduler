@@ -3,8 +3,8 @@ name: CI - PR Checks
 on:
   pull_request:
     branches:
-      - main
       - dev
+      - main
 
 jobs:
   lint-and-test:
@@ -15,11 +15,14 @@ jobs:
         
       - name: Sanity check repo contents
         run: ls -la
-    
+
+      - name: Extract Go version from go.mod
+        run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
+
       - name: Set up Go with cache
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.0'
+          go-version: "${{ env.GO_VERSION }}"
           cache-dependency-path: ./go.sum
 
       - name: Configure Git to use token for private modules
@@ -36,12 +39,12 @@ jobs:
           version: 'v2.1.6'
           args: "--config=./.golangci.yml"
 
-      - name: Run go test
+      - name: Run make test
         shell: bash 
         run: |
           make test
 
-      - name: Run go build
+      - name: Run make build
         shell: bash
         run: |
           make build
