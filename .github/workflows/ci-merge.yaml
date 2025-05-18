@@ -1,0 +1,52 @@
+name: CI - Merge - Docker Container Image
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:  # temporary trigger for testing in PRs
+    branches:
+      - dev
+      - main
+
+jobs:
+  docker-build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Load version information
+        id: version
+        run: |
+          VERSION_FILE=".version.json"
+          dev_version=$(jq -r '.["dev-version"]' "$VERSION_FILE")
+          dev_registry=$(jq -r '.["dev-registry"]' "$VERSION_FILE")
+          prod_version=$(jq -r '.["prod-version"]' "$VERSION_FILE")
+          prod_registry=$(jq -r '.["prod-registry"]' "$VERSION_FILE")
+          if [[ "${GITHUB_REF_NAME}" == "dev" ]]; then
+            echo "tag=$dev_version" >> "$GITHUB_OUTPUT"
+            echo "registry=$dev_registry" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            echo "tag=$prod_version" >> "$GITHUB_OUTPUT"
+            echo "registry=$prod_registry" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$dev_version" >> "$GITHUB_OUTPUT"
+            echo "registry=$dev_registry" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      - name: Print version and registry
+        run: |
+          echo "Tag: ${{ steps.version.outputs.tag }}"
+          echo "Registry: ${{ steps.version.outputs.registry }}"
+
+      - name: Build and push image
+        uses: ./.github/actions/docker-build-and-push
+        with:
+          tag: ${{ steps.version.outputs.tag }}
+          image-name: llm-d-inference-scheduler
+          registry: ${{ steps.version.outputs.registry }}
+          github-token: ${{ secrets.GHCR_TOKEN }}
+          kv-cache-manager-token: ${{ secrets.KV_CACHE_MANAGER_TOKEN }}

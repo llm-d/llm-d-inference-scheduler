@@ -10,6 +10,9 @@ inputs:
   github-token:
     required: true
     description: GitHub token for login
+  kv-cache-manager-token:
+    required: true
+    description: Token for llm-d-kv-cache-manager private module
   registry:
     required: true
     description: Container registry (e.g., ghcr.io/llm-d)
@@ -32,12 +35,10 @@ runs:
 
     - name: Configure Git to use token for private modules
       run: |
-          git config --global url."https://${{ secrets.KV_CACHE_MANAGER_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${{ inputs.kv-cache-manager-token }}@github.com/".insteadOf "https://github.com/"
+          go env -w GOPRIVATE=github.com/llm-d/*
+      shell: bash
 
-    - name: Set Go environment for private modules
-      run: |
-        go env -w GOPRIVATE=github.com/llm-d/*
-        
     - name: Build image
       run: |
         docker buildx build \
