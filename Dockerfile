@@ -9,9 +9,18 @@ RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
 WORKDIR /workspace
 
 ## llm-d internal repos pull config
+ARG RUNNING_IN_GHA
 ARG KV_CACHE_MANAGER_TOKEN
-RUN git config --global url."https://${KV_CACHE_MANAGER_TOKEN}@github.com/".insteadOf "https://github.com/"
-ENV GOPRIVATE=github.com/llm-d/*
+
+RUN --mount=type=secret,id=kv_cache_manager_token \
+    if [ "${RUNNING_IN_GHA}" = "true" ]; then \
+        KV_CACHE_MANAGER_TOKEN=$(cat /run/secrets/kv_cache_manager_token) && \
+        git config --global url."https://${KV_CACHE_MANAGER_TOKEN}@github.com/".insteadOf "https://github.com/" && \
+        go env -w GOPRIVATE=github.com/llm-d/*; \
+    else \
+        git config --global url."https://${KV_CACHE_MANAGER_TOKEN}@github.com/".insteadOf "https://github.com/" && \
+        export GOPRIVATE=github.com/llm-d/*; \
+    fi
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -36,7 +45,6 @@ ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
 RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
-RUN rm -rf ~/.netrc # remove git token
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
