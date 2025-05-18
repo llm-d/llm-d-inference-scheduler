@@ -5,10 +5,6 @@ on:
     branches:
       - dev
       - main
-  pull_request:  # temporary trigger for testing in PRs
-    branches:
-      - dev
-      - main
 
 jobs:
   docker-build-and-push:
