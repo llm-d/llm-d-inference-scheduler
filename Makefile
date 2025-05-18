@@ -138,6 +138,7 @@ ifndef KV_CACHE_MANAGER_TOKEN
 	$(error "KV_CACHE_MANAGER_TOKEN is not set")
 endif
 	$(CONTAINER_TOOL) build \
+		--platform $(TARGETOS)/$(TARGETARCH) \
  		--build-arg TARGETOS=$(TARGETOS) \
 		--build-arg TARGETARCH=$(TARGETARCH) \
 		--build-arg KV_CACHE_MANAGER_TOKEN=$(KV_CACHE_MANAGER_TOKEN) \
