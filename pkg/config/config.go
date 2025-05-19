@@ -91,7 +91,7 @@ func (c *Config) LoadConfig() {
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
-	c.PrefixBlockSize = env.GetEnvInt(prefixScorerBlockSizeEnvKey, 256, c.logger)
+	c.PrefixBlockSize = env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, c.logger)
 }
 
 func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginNames ...string) {
