@@ -6,6 +6,7 @@ import (
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const (
@@ -64,6 +65,7 @@ func (s *SessionAffinity) Score(ctx *types.SchedulingContext, pods []types.Pod) 
 // Tracked in https://github.com/llm-d/llm-d-inference-scheduler/issues/28
 func (s *SessionAffinity) PostResponse(ctx *types.SchedulingContext, pod types.Pod) {
 	if ctx.Resp == nil || pod == nil || pod.GetPod() == nil {
+		ctx.Logger.V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of ctx.Resp, pod, pod.GetPod is nil")
 		return
 	}
 
