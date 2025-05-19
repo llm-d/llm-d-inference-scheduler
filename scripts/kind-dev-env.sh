@@ -26,16 +26,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${VLLM_SIMULATOR_IMAGE:=llm-d-inference-sim}"
 
 # Set a default VLLM_SIMULATOR_TAG if not provided
-export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:=0.0.6}"
+export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-0.0.6}"
 
 # Set a default EPP_IMAGE if not provided
 : "${EPP_IMAGE:=llm-d-inference-scheduler}"
 
 # Set a default EPP_TAG if not provided
-export EPP_TAG="${EPP_TAG:=0.0.4}"
+export EPP_TAG="${EPP_TAG:-0.0.4}"
 
 # Set the default routing side car image tag
-export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:=0.0.6}"
+export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"
 
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-vllm-llama3-8b-instruct}"
@@ -44,17 +44,17 @@ export POOL_NAME="${POOL_NAME:-vllm-llama3-8b-instruct}"
 export MODEL_NAME="${MODEL_NAME:-meta-llama/Llama-3.1-8B-Instruct}"
 
 # vLLM replica count (without PD)
-export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:=1}"
+export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 
 # By default we are not setting up for PD
-export PD_ENABLED="\"${PD_ENABLED:=false}\""
+export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
 # By default the PD threshhold is ten tokens
-export PD_PROMPT_LEN_THRESHOLD="\"${PD_PROMPT_LEN_THRESHOLD:=10}\""
+export PD_PROMPT_LEN_THRESHOLD="\"${PD_PROMPT_LEN_THRESHOLD:-10}\""
 
 # Replica counts for P and D
-export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:=1}"
-export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:=2}"
+export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
+export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks
