@@ -160,14 +160,17 @@ kustomize build --enable-helm deploy/components/crds-istio |
 # ------------------------------------------------------------------------------
 
 # Deploy the environment to the "default" namespace
-kustomize build --enable-helm deploy/environments/dev/kind-istio \
-	| envsubst \${POOL_NAME} | envsubst \${EPP_TAG} \
-	| kubectl --context ${KUBE_CONTEXT} apply -f -
 if [ "${PD_ENABLED}" != "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
 else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
 fi
+kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
+	| envsubst \${POOL_NAME} | envsubst \${EPP_TAG} | envsubst \${VLLM_SIMULATOR_TAG} \
+    | envsubst \${PD_ENABLED} | envsubst \${PD_PROMPT_LEN_THRESHOLD} \
+    | envsubst \${ROUTING_SIDECAR_TAG} | envsubst \${VLLM_REPLICA_COUNT} \
+    | envsubst \${VLLM_REPLICA_COUNT_P} | envsubst \${VLLM_REPLICA_COUNT_D} \
+    | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------
 # Check & Verify
