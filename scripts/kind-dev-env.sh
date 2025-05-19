@@ -98,7 +98,16 @@ ${CONTAINER_RUNTIME} exec -it ${CONTAINER_NAME} /bin/bash -c "sysctl net.ipv4.co
 
 # Wait for all pods to be ready
 kubectl --context ${KUBE_CONTEXT} -n kube-system wait --for=condition=Ready --all pods --timeout=300s
-kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Ready --all pods --timeout=300s
+once=1
+while !(kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Ready --all pods --timeout=300s); do
+  if [[ $once -eq 1 ]]; then
+    sleep 10
+    once=0
+  else
+    echo "Base cluster pods are not all active"
+    exit 1
+  fi    
+done
 
 # ------------------------------------------------------------------------------
 # Load Container Images
