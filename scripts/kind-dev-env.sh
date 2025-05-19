@@ -163,6 +163,11 @@ kustomize build --enable-helm deploy/components/crds-istio |
 kustomize build --enable-helm deploy/environments/dev/kind-istio \
 	| envsubst \${POOL_NAME} | envsubst \${EPP_TAG} \
 	| kubectl --context ${KUBE_CONTEXT} apply -f -
+if [ "${PD_ENABLED}" != "\"true\"" ]; then
+  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
+else
+  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
+fi
 
 # ------------------------------------------------------------------------------
 # Check & Verify
