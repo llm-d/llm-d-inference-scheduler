@@ -58,11 +58,14 @@ type Datastore interface {
 // NewScheduler returns a new disaggregated Prefill/Decode filter, using the
 // provided configuration.
 func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*Scheduler, error) {
+	prefixConfig := scorer.DefaultPrefixStoreConfig()
+	prefixConfig.BlockSize = schedCfg.PrefixBlockSize
+
 	scheduler := &Scheduler{
 		threshold:    schedCfg.PDThreshold,
 		pdEnabled:    schedCfg.PDEnabled,
 		store:        ds,
-		prefixScorer: scorer.NewPrefixAwareScorer(ctx, nil),
+		prefixScorer: scorer.NewPrefixAwareScorer(ctx, prefixConfig),
 	}
 
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(

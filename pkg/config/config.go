@@ -47,6 +47,9 @@ const (
 	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
 	pdPromptLenThresholdDefault = 100
+
+	prefixScorerBlockSizeEnvKey  = "PREFIX_SCORER_BLOCK_SIZE"
+	prefixScorerBlockSizeDefault = 256
 )
 
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
@@ -55,8 +58,9 @@ type Config struct {
 	DecodeSchedulerPlugins  map[string]int
 	PrefillSchedulerPlugins map[string]int
 
-	PDEnabled   bool
-	PDThreshold int
+	PDEnabled       bool
+	PDThreshold     int
+	PrefixBlockSize int
 }
 
 // NewConfig creates a new instance if Config
@@ -67,6 +71,7 @@ func NewConfig(logger logr.Logger) *Config {
 		PrefillSchedulerPlugins: map[string]int{},
 		PDEnabled:               false,
 		PDThreshold:             math.MaxInt,
+		PrefixBlockSize:         prefixScorerBlockSizeDefault,
 	}
 }
 
@@ -86,6 +91,7 @@ func (c *Config) LoadConfig() {
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
+	c.PrefixBlockSize = env.GetEnvInt(prefixScorerBlockSizeEnvKey, 256, c.logger)
 }
 
 func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginNames ...string) {
