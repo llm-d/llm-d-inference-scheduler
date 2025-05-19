@@ -38,6 +38,10 @@ var _ plugins.Scorer = &PrefixAwareScorer{} // validate interface conformance
 // NewPrefixAwareScorer creates a new PrefixAwareScorer with the given
 // PrefixStoreConfig. If the config is nil, default is used.
 func NewPrefixAwareScorer(ctx context.Context, config *PrefixStoreConfig) *PrefixAwareScorer {
+	if config == nil {
+		config = DefaultPrefixStoreConfig()
+	}
+
 	scorer := &PrefixAwareScorer{
 		prefixStore:     NewPrefixStore(config),
 		podToPromptHits: sync.Map{},
