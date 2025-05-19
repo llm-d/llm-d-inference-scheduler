@@ -17,8 +17,9 @@ Plugins are used to modify llm-d-inference-scheduler's default behavior. Filter 
  run in succession to produce the final candidate list which is then evaluated,
  through the process of _scoring_, to select the most appropriate target Pods.
  While llm-d-inference-scheduler comes with several existing filters and
- more are availble in the upstream [Gateway API Inference Extension](https://sigs.k8s.io/gateway-api-inference-extension), in some cases it may be desireable to create
- and deploy custom filtering code to match your specific requirements.
+ more are availble in the upstream [Gateway API Inference Extension](https://sigs.k8s.io/gateway-api-inference-extension),
+ in some cases it may be desireable to create and deploy custom filtering code to
+ match your specific requirements.
 
 The filters` main operating function is
 
@@ -27,7 +28,7 @@ func Filter(*types.SchedulingContext, []types.Pod) []types.Pod
 ```
 
 The `Filter` function accepts a `SchedulingContext` (e.g., containing the
- incoming LLM request) and an array of `Pod`s as potential targets. Each `Pod`
+ incoming LLM request) and an array of `Pod` objects as potential targets. Each `Pod`
  entry includes relevant inference metrics and attributes which can be used
  to make scheduling decisions. The function returns a (possibly smaller) array
  of `Pod`s which satisfy the filtering criteria.
