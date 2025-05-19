@@ -1,13 +1,9 @@
-# Writing a new Filter for llm-d
+# Extending llm-d-inference-scheduler with a custom filter
 
 ## Goal
 
 This tutorial outlines the steps needed for creating and hooking a new filter
- for the llm-d inference scheduler.
-
-The tutorial assumes basic working knowledge of tools used in this repository,
- such as Git, Go, etc. It further assumes that you have a working development
- environment which can build `llm-d-inference-scheduler`.
+ for the llm-d-inference-scheduler.
  
 The tutorial demonstrates the coding of a new filter, which selects inference
  serving Pods based on their labels. All relevant code is contained in the
@@ -15,23 +11,23 @@ The tutorial demonstrates the coding of a new filter, which selects inference
 
 ## Introduction to filtering
 
-Plug-ins are used to modify llm-d's default scheduling behavior. Filter plugins
+Plugins are used to modify llm-d-inference-scheduler's default behavior. Filter plugins
  are provided with a list of candidate inference serving Pods and filter out the
  Pods which do not match the filtering criteria. Several filtering plugins can
  run in succession to produce the final candidate list which is then evaluated,
- through the process of _scoring_, to select the most appropriate target Pod.
- While the llm-d inference scheduler comes with several existing filters and
+ through the process of _scoring_, to select the most appropriate target Pods.
+ While llm-d-inference-scheduler comes with several existing filters and
  more are availble in the upstream [Gateway API Inference Extension](https://sigs.k8s.io/gateway-api-inference-extension), in some cases it may be desireable to create
- and deploy specialized filtering code to match your specific requirements.
+ and deploy custom filtering code to match your specific requirements.
 
-The filters main operating function is
+The filters` main operating function is
 
 ```go
 func Filter(*types.SchedulingContext, []types.Pod) []types.Pod
 ```
 
 The `Filter` function accepts a `SchedulingContext` (e.g., containing the
- incoming LLM request) and an array of `Pod`s as potential targets. Each Pod
+ incoming LLM request) and an array of `Pod`s as potential targets. Each `Pod`
  entry includes relevant inference metrics and attributes which can be used
  to make scheduling decisions. The function returns a (possibly smaller) array
  of `Pod`s which satisfy the filtering criteria.
@@ -55,7 +51,7 @@ import (
 
 Specifically, we import the Kubernetes `meta/v1` and `labels` packages to allow
  defining and using `label.Selector` objects, and the Gateway API Infernce
- Eextension's `plugin` (defininig the plugin interfaces) and `types` (defining
+ Extension's `plugin` (defininig the plugin interfaces) and `types` (defining
  scheduling related objects) packages.
 
 Next we define the `ByLabels` struct type, along with the relevant fields,
@@ -124,19 +120,19 @@ Since the filter is only matching on candidate `types.Pod` labels,
 
 ## Hooking the filter into the scheduling flow
 
-Once a filter is defined, it can be used to modify the llm-d inference
- scheduler configuration. This would typically be done by modifying the
- `pkg/config/config.go` file to
+Once a filter is defined, it can be used to modify llm-d-inference-scheduler
+ configuration. This would typically be done by modifying the
+`pkg/config/config.go` file to
  
 - Add the relevant import path (if defined outside this repository);
-- Add any desired configuration knobs (e.g., environment variable); and
+- Add any desired configuration knobs (e.g., environment variables); and
 - Listing the new filter in the `LoadConfig()` function's `cfg.loadPluginInfo`
  list of available plugins.
 
-In the case of the llm-d inference scheduler, filters can be hooked into the
+In the case of the llm-d-inference-scheduler, filters can be hooked into the
  `Prefill` and/or `Decode` scheduling cycles. For example, the following snippet
- add the `ByLabels` filter to the list of plugins available to the `Decode`
- scheduler (assuming a `ByLabelFilterName` constant is defined alogn with other
+ adds the `ByLabels` filter to the list of plugins available to the `Decode`
+ scheduler (assuming a `ByLabelFilterName` constant is defined along with other
  environment variables):
 
 ```go 
@@ -154,5 +150,6 @@ func (c *Config) LoadConfig() {
 ## Next steps
 
 If you have an idea for a new `Filter` (or other) plugin - we'd love to hear
- from you! Please open an [issue](https://github.com/llm-d/llm-d-inference-scheduler/issues/new/choose), describing your use case and requirements, and we'll reach out to
- refine and collaborate.
+ from you! Please open an [issue](https://github.com/llm-d/llm-d-inference-scheduler/issues/new/choose),
+ describing your use case and requirements, and we'll reach out to refine
+ and collaborate.
