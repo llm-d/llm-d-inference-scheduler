@@ -105,14 +105,14 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 	// assumes that prefix scorer was activated
 	decodeRes, err := s.decode.Schedule(ctx, req)
 
-	if decodeRes.TargetPod == nil {
+	if decodeRes == nil || decodeRes.TargetPod == nil {
 		logger.Info("No decode pod found, skipping scheduling")
 		return nil, errors.New("no decode pod found")
 	}
 
 	// if the request is short enough, use the default scheduler
 	hitPercentage := s.prefixScorer.GetCachedPercentage(decodeRes.TargetPod.GetPod().NamespacedName.String(), req.Prompt)
-	if hitPercentage > 0 && (1.0-hitPercentage)*float64(len(req.Prompt)) < float64(s.threshold) {
+	if (1.0-hitPercentage)*float64(len(req.Prompt)) < float64(s.threshold) {
 		logger.Info("Non-cached suffix is smaller than threshold, using decode scheduler",
 			"hitPercentage", hitPercentage)
 		return decodeRes, err
