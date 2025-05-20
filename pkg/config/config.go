@@ -25,6 +25,10 @@ const (
 	// SessionAwareScorerName name of the session aware scorer in configuration
 	SessionAwareScorerName = "SESSION_AWARE_SCORER"
 
+	prefillPrefix = "PREFILL_"
+	enablePrefix  = "ENABLE_"
+	weightSuffix  = "_WEIGHT"
+
 	// Plugins from Upstream
 
 	// GIELeastKVCacheFilterName name of the GIE least kv-cache filter in configuration
@@ -41,8 +45,8 @@ const (
 	GIEKVCacheUtilizationScorerName = "GIE_KVCACHE_UTILIZATION_SCORER"
 	// GIEQueueScorerName name of the GIE queue scorer in configuration
 	GIEQueueScorerName = "GIE_QUEUE_SCORER"
-	// K8SPrefixScorerName name of the GIE prefix plugin in configuration
-	K8SPrefixScorerName = "GIE_PREFIX_SCORER"
+	// GIEPrefixScorerName name of the GIE prefix plugin in configuration
+	GIEPrefixScorerName = "GIE_PREFIX_SCORER"
 
 	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
@@ -81,13 +85,13 @@ func (c *Config) LoadConfig() {
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
 		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, K8SPrefixScorerName)
+		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName)
 
 	c.loadPluginInfo(c.PrefillSchedulerPlugins, true,
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
 		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, K8SPrefixScorerName)
+		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName)
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
@@ -99,11 +103,11 @@ func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginName
 		var enablementKey string
 		var weightKey string
 		if prefill {
-			enablementKey = "PREFILL_ENABLE_" + pluginName
-			weightKey = "PREFILL_" + pluginName + "_WEIGHT"
+			enablementKey = prefillPrefix + enablePrefix + pluginName
+			weightKey = prefillPrefix + pluginName + weightSuffix
 		} else {
-			enablementKey = "ENABLE_" + pluginName
-			weightKey = pluginName + "_WEIGHT"
+			enablementKey = enablePrefix + pluginName
+			weightKey = pluginName + weightSuffix
 		}
 
 		if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
