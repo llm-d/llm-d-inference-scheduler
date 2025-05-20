@@ -190,7 +190,7 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 			plugins[k8sfilter.NewSheddableCapacityFilter()] = pluginWeight
 		case config.GIEKVCacheUtilizationScorerName:
 			plugins[&k8sscorer.KVCacheScorer{}] = pluginWeight
-		case config.K8SPrefixScorerName:
+		case config.GIEPrefixScorerName:
 			// For now use the default configuration
 			prefixConfig := prefix.Config{
 				HashBlockSize:          envutil.GetEnvInt("PREFIX_CACHE_HASH_BLOCK_SIZE", prefix.DefaultHashBlockSize, logger),

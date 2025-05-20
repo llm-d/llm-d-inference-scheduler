@@ -41,8 +41,8 @@ const (
 	GIEKVCacheUtilizationScorerName = "GIE_KVCACHE_UTILIZATION_SCORER"
 	// GIEQueueScorerName name of the GIE queue scorer in configuration
 	GIEQueueScorerName = "GIE_QUEUE_SCORER"
-	// K8SPrefixScorerName name of the GIE prefix plugin in configuration
-	K8SPrefixScorerName = "GIE_PREFIX_SCORER"
+	// GIEPrefixScorerName name of the GIE prefix plugin in configuration
+	GIEPrefixScorerName = "GIE_PREFIX_SCORER"
 
 	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
@@ -81,13 +81,13 @@ func (c *Config) LoadConfig() {
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
 		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, K8SPrefixScorerName)
+		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName)
 
 	c.loadPluginInfo(c.PrefillSchedulerPlugins, true,
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
 		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, K8SPrefixScorerName)
+		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName)
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
