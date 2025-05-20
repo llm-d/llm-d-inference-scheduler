@@ -42,7 +42,6 @@ jobs:
           image-name: ${{ steps.version.outputs.project_name }}
           registry: ghcr.io/llm-d
           github-token: ${{ secrets.GHCR_TOKEN }}
-          kv-cache-manager-token: ${{ secrets.KV_CACHE_MANAGER_TOKEN }}
 
       - name: Run Trivy scan
         uses: ./.github/actions/trivy-scan
