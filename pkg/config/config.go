@@ -16,6 +16,11 @@ const (
 	//  - "PREFILL_ENABLE_" + pluginName  Enables the named plugin for prefill processing
 	//  - "PREFILL_" + pluginName + "_WEIGHT"  The weight for a scorer in prefill processing
 
+	enablementKeyPrefix        = "ENABLE_"
+	weightSuffix               = "_WEIGHT"
+	prefillEnablementKeyPrefix = "PREFILL_ENABLE_"
+	prefillWeightPrefix        = "PREFILL_"
+
 	// KVCacheScorerName name of the kv-cache scorer in configuration
 	KVCacheScorerName = "KVCACHE_AWARE_SCORER"
 	// LoadAwareScorerName name of the load aware scorer in configuration
@@ -99,11 +104,11 @@ func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginName
 		var enablementKey string
 		var weightKey string
 		if prefill {
-			enablementKey = "PREFILL_ENABLE_" + pluginName
-			weightKey = "PREFILL_" + pluginName + "_WEIGHT"
+			enablementKey = prefillEnablementKeyPrefix + pluginName
+			weightKey = prefillWeightPrefix + pluginName + weightSuffix
 		} else {
-			enablementKey = "ENABLE_" + pluginName
-			weightKey = pluginName + "_WEIGHT"
+			enablementKey = enablementKeyPrefix + pluginName
+			weightKey = pluginName + weightSuffix
 		}
 
 		if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
