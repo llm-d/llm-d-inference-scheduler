@@ -125,7 +125,7 @@ build: check-go download-tokenizer ##
 	fi
 
 .PHONY:	image-build
-image-build: check-container-tool load-version-json ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
+image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
 	@printf "\033[33;1m==== Building Docker image $(IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) build \
 		--platform $(TARGETOS)/$(TARGETARCH) \
@@ -134,7 +134,7 @@ image-build: check-container-tool load-version-json ## Build Docker image ## Bui
  		-t $(IMG) .
 
 .PHONY: image-push
-image-push: check-container-tool load-version-json ## Push Docker image $(IMG) to registry
+image-push: check-container-tool ## Push Docker image $(IMG) to registry
 	@printf "\033[33;1m==== Pushing Docker image $(IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $(IMG)
 
@@ -233,57 +233,6 @@ install-rbac: check-kubectl check-kustomize check-envsubst ## Install RBAC
 uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 	@echo "Removing RBAC configuration from deploy/rbac..."
 	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete -f - || true
-
-
-##@ Version Extraction
-.PHONY: version dev-registry prod-registry extract-version-info
-
-dev-version: check-jq
-	@jq -r '.dev-version' .version.json
-
-prod-version: check-jq
-	@jq -r '.prod-version' .version.json
-
-dev-registry: check-jq
-	@jq -r '."dev-registry"' .version.json
-
-prod-registry: check-jq
-	@jq -r '."prod-registry"' .version.json
-
-extract-version-info: check-jq
-	@echo "DEV_VERSION=$$(jq -r '."dev-version"' .version.json)"
-	@echo "PROD_VERSION=$$(jq -r '."prod-version"' .version.json)"
-	@echo "DEV_IMAGE_TAG_BASE=$$(jq -r '."dev-registry"' .version.json)"
-	@echo "PROD_IMAGE_TAG_BASE=$$(jq -r '."prod-registry"' .version.json)"
-
-##@ Load Version JSON
-
-.PHONY: load-version-json
-load-version-json: check-jq
-	@if [ "$(DEV_VERSION)" = "0.0.1" ]; then \
-	  DEV_VERSION=$$(jq -r '."dev-version"' .version.json); \
-	  PROD_VERSION=$$(jq -r '."prod-version"' .version.json); \
-	  echo "✔ Loaded DEV_VERSION from .version.json: $$DEV_VERSION"; \
-	  echo "✔ Loaded PROD_VERSION from .version.json: $$PROD_VERSION"; \
-	  export DEV_VERSION; \
-	  export PROD_VERSION; \
-	fi && \
-	CURRENT_DEFAULT="ghcr.io/llm-d/$(PROJECT_NAME)"; \
-	if [ "$(IMAGE_TAG_BASE)" = "$$CURRENT_DEFAULT" ]; then \
-	  IMAGE_TAG_BASE=$$(jq -r '."dev-registry"' .version.json); \
-	  echo "✔ Loaded IMAGE_TAG_BASE from .version.json: $$IMAGE_TAG_BASE"; \
-	  export IMAGE_TAG_BASE; \
-	fi && \
-	echo "🛠 Final values: DEV_VERSION=$$DEV_VERSION, PROD_VERSION=$$PROD_VERSION, IMAGE_TAG_BASE=$$IMAGE_TAG_BASE"
-
-.PHONY: env
-env: load-version-json ## Print environment variables
-	@echo "DEV_VERSION=$(DEV_VERSION)"
-	@echo "PROD_VERSION=$(PROD_VERSION)"
-	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
-	@echo "IMG=$(IMG)"
-	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
-
 
 ##@ Tools
 
