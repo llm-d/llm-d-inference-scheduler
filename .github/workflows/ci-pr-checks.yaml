@@ -28,6 +28,12 @@ jobs:
       - name: go mod tidy
         run: go mod tidy
 
+      - name: Run markdown link checker
+        uses: ./.github/actions/markdown-link-checker
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          args: "--quiet --retry"  
+
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v8
         with:
