@@ -13,8 +13,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
+	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
@@ -38,30 +38,15 @@ func NewScheduler(threshold float32, datastore datastore.Datastore) *Scheduler {
 		store:     datastore,
 	}
 
-	scheduler.primary = scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig(
-		[]plugins.PreSchedule{},
-		[]plugins.Filter{
-			&filter.Passthrough{},
-		},
-		map[plugins.Scorer]int{
-			&scorer.Passthrough{}: 10,
-		},
-		&picker.MaxScorePicker{},
-		[]plugins.PostSchedule{},
-		[]plugins.PostResponse{},
-	))
-	scheduler.secondary = scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig(
-		[]plugins.PreSchedule{},
-		[]plugins.Filter{
-			&filter.Random{},
-		},
-		map[plugins.Scorer]int{
-			&scorer.Random{}: 10,
-		},
-		&picker.RandomPicker{},
-		[]plugins.PostSchedule{},
-		[]plugins.PostResponse{},
-	))
+	scheduler.primary = scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig().
+		WithFilters(&filter.Passthrough{}).
+		WithScorers(giescorer.NewWeightedScorer(&scorer.Passthrough{}, 10)).
+		WithPicker(picker.NewMaxScorePicker()))
+
+	scheduler.secondary = scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig().
+		WithFilters(&filter.Random{}).
+		WithScorers(giescorer.NewWeightedScorer(&scorer.Random{}, 10)).
+		WithPicker(picker.NewRandomPicker()))
 
 	return scheduler
 }

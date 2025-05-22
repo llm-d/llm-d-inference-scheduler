@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
+	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
@@ -100,16 +101,10 @@ func TestLoadBasedScorer(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			datastore := &fakeDataStore{pods: test.input}
 
-			scheduler := scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig(
-				[]plugins.PreSchedule{},
-				[]plugins.Filter{},
-				map[plugins.Scorer]int{
-					test.scorer: 1,
-				},
-				&picker.MaxScorePicker{},
-				[]plugins.PostSchedule{},
-				[]plugins.PostResponse{},
-			))
+			scheduler := scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig().
+				WithScorers(giescorer.NewWeightedScorer(test.scorer, 1)).
+				WithPicker(picker.NewMaxScorePicker()))
+
 			got, err := scheduler.Schedule(context.Background(), test.req)
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
