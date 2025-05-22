@@ -2,25 +2,27 @@ package pd_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr/testr"
-
 	"github.com/google/go-cmp/cmp"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
 )
 
 // Tests the default scheduler configuration and expected behavior.
 func TestPDSchedule(t *testing.T) {
+	RegisterFailHandler(Fail)
+
 	pod1 := &backendmetrics.FakePodMetrics{
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
@@ -50,11 +52,12 @@ func TestPDSchedule(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		req     *types.LLMRequest
-		input   []*backendmetrics.FakePodMetrics
-		wantRes *types.Result
-		err     bool
+		name        string
+		req         *types.LLMRequest
+		input       []*backendmetrics.FakePodMetrics
+		wantRes     *types.Result
+		wantHeaders map[string]string
+		err         bool
 	}{
 		{
 			name: "no pods in datastore",
@@ -67,7 +70,7 @@ func TestPDSchedule(t *testing.T) {
 			err:   true,
 		},
 		{
-			name: "one pod, short prompt",
+			name: "one decode pod, short prompt",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 				Critical:    true,
@@ -80,13 +83,32 @@ func TestPDSchedule(t *testing.T) {
 					Pod: wantPod2,
 				},
 			},
+			// no headers - only decode is used
+			wantHeaders: map[string]string{},
 		},
 		{
-			name: "1P1D",
+			name: "one decode pod, long prompt",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 				Critical:    true,
-				Prompt:      "12345678901",
+				Prompt:      "1234567890",
+			},
+			// pod2 will be picked because it is the only pod with Decode role
+			input: []*backendmetrics.FakePodMetrics{pod2},
+			wantRes: &types.Result{
+				TargetPod: &types.ScoredPod{
+					Pod: wantPod2,
+				},
+			},
+			// empty headers since there is no prefill pod
+			wantHeaders: map[string]string{},
+		},
+		{
+			name: "1P1D-short",
+			req: &types.LLMRequest{
+				TargetModel: "critical",
+				Critical:    true,
+				Prompt:      "12",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP will be in header
 			input: []*backendmetrics.FakePodMetrics{pod1, pod2},
@@ -95,24 +117,41 @@ func TestPDSchedule(t *testing.T) {
 					Pod:   wantPod2,
 					Score: 0.0,
 				},
-				//				MutatedHeaders: map[string]string{"x-prefiller-url": "http://1.2.3.4:80"},
 			},
+			// empty headers - prompt is short ebought to be processed on decode only
+			wantHeaders: map[string]string{},
+		},
+		{
+			name: "1P1D",
+			req: &types.LLMRequest{
+				TargetModel: "critical",
+				Critical:    true,
+				Prompt:      "1234567890",
+			},
+			// pod2 will be picked because it is the decode pod, pod1 IP will be in header
+			input: []*backendmetrics.FakePodMetrics{pod1, pod2},
+			wantRes: &types.Result{
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod2,
+					Score: 0.0,
+				},
+			},
+			wantHeaders: map[string]string{"x-prefiller-url": "http://1.2.3.4:80"},
 		},
 	}
 
+	ctx := context.Background()
+	logger := testr.New(t)
+	ctx = ctrl.IntoContext(ctx, logger)
+
+	schedCfg := config.NewConfig(logger)
+	schedCfg.PDEnabled = true
+	schedCfg.PDThreshold = 5
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			logger := testr.New(t)
-
-			schedCfg := config.NewConfig(logger)
-			// TODO - ensure that default config is ok here (no scorers) - issue #56
 			scheduler, _ := pd.NewScheduler(ctx, schedCfg, &fakeDataStore{pods: test.input})
 			got, err := scheduler.Schedule(ctx, test.req)
-
-			fmt.Printf("Test %s:\n", test.name)
-			fmt.Printf("Result: %#v\n", got)
-			fmt.Printf("Expected: %#v\n", test.wantRes)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
@@ -121,6 +160,17 @@ func TestPDSchedule(t *testing.T) {
 			if diff := cmp.Diff(test.wantRes, got); diff != "" {
 				t.Errorf("Unexpected output (-want +got): %v", diff)
 			}
+
+			reqHeaders := test.req.Headers
+			if reqHeaders == nil {
+				reqHeaders = map[string]string{}
+			}
+			wantHeaders := test.wantHeaders
+			if wantHeaders == nil {
+				wantHeaders = map[string]string{}
+			}
+
+			Expect(reqHeaders).To(Equal(wantHeaders))
 		})
 	}
 }
