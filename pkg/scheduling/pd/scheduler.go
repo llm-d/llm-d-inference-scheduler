@@ -14,8 +14,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	k8sfilter "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/filter"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/prefix"
 	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	envutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
@@ -216,7 +216,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 	thePlugins := s.pluginsFromConfig(ctx, pluginsConfig)
 	preSchedulePlugins := []plugins.PreSchedule{}
 	filters := []plugins.Filter{}
-	scorers := map[plugins.Scorer]int{}
+	scorers := []*k8sscorer.WeightedScorer{}
 	postSchedulePlugins := []plugins.PostSchedule{}
 	postResponsePlugins := []plugins.PostResponse{}
 
@@ -230,7 +230,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 			filters = append(filters, filter)
 		}
 		if scorer, ok := plugin.(plugins.Scorer); ok {
-			scorers[scorer] = pluginWeight
+			scorers = append(scorers, k8sscorer.NewWeightedScorer(scorer, pluginWeight))
 		}
 		if postSchedule, ok := plugin.(plugins.PostSchedule); ok {
 			postSchedulePlugins = append(postSchedulePlugins, postSchedule)
@@ -240,12 +240,11 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 		}
 	}
 
-	return scheduling.NewSchedulerConfig(
-		preSchedulePlugins,
-		filters,
-		scorers,
-		picker.NewMaxScorePicker(),
-		postSchedulePlugins,
-		postResponsePlugins,
-	)
+	return scheduling.NewSchedulerConfig().
+		WithPreSchedulePlugins(preSchedulePlugins...).
+		WithFilters(filters...).
+		WithScorers(scorers...).
+		WithPicker(picker.NewMaxScorePicker()).
+		WithPostSchedulePlugins(postSchedulePlugins...).
+		WithPostResponsePlugins(postResponsePlugins...)
 }
