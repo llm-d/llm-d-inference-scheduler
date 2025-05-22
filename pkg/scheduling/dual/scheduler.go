@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
-	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
+	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
@@ -40,12 +40,12 @@ func NewScheduler(threshold float32, datastore datastore.Datastore) *Scheduler {
 
 	scheduler.primary = scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig().
 		WithFilters(&filter.Passthrough{}).
-		WithScorers(k8sscorer.NewWeightedScorer(&scorer.Passthrough{}, 10)).
+		WithScorers(giescorer.NewWeightedScorer(&scorer.Passthrough{}, 10)).
 		WithPicker(picker.NewMaxScorePicker()))
 
 	scheduler.secondary = scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig().
 		WithFilters(&filter.Random{}).
-		WithScorers(k8sscorer.NewWeightedScorer(&scorer.Random{}, 10)).
+		WithScorers(giescorer.NewWeightedScorer(&scorer.Random{}, 10)).
 		WithPicker(picker.NewRandomPicker()))
 
 	return scheduler

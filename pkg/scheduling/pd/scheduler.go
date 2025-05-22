@@ -13,10 +13,10 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
-	k8sfilter "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/filter"
+	giefilter "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/filter"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
-	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
+	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	envutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -179,17 +179,17 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 		// Plugins from upstream
 
 		case config.GIELeastKVCacheFilterName:
-			plugins[k8sfilter.NewLeastKVCacheFilter()] = pluginWeight
+			plugins[giefilter.NewLeastKVCacheFilter()] = pluginWeight
 		case config.GIELeastQueueFilterName:
-			plugins[k8sfilter.NewLeastQueueFilter()] = pluginWeight
+			plugins[giefilter.NewLeastQueueFilter()] = pluginWeight
 		case config.GIELoraAffinityFilterName:
-			plugins[k8sfilter.NewLoraAffinityFilter()] = pluginWeight
+			plugins[giefilter.NewLoraAffinityFilter()] = pluginWeight
 		case config.GIELowQueueFilterName:
-			plugins[k8sfilter.NewLowQueueFilter()] = pluginWeight
+			plugins[giefilter.NewLowQueueFilter()] = pluginWeight
 		case config.GIESheddableCapacityFilterName:
-			plugins[k8sfilter.NewSheddableCapacityFilter()] = pluginWeight
+			plugins[giefilter.NewSheddableCapacityFilter()] = pluginWeight
 		case config.GIEKVCacheUtilizationScorerName:
-			plugins[&k8sscorer.KVCacheScorer{}] = pluginWeight
+			plugins[&giescorer.KVCacheScorer{}] = pluginWeight
 		case config.GIEPrefixScorerName:
 			// For now use the default configuration
 			prefixConfig := prefix.Config{
@@ -199,7 +199,7 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 			}
 			plugins[prefix.New(prefixConfig)] = pluginWeight
 		case config.GIEQueueScorerName:
-			plugins[&k8sscorer.QueueScorer{}] = pluginWeight
+			plugins[&giescorer.QueueScorer{}] = pluginWeight
 		}
 	}
 
@@ -216,7 +216,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 	thePlugins := s.pluginsFromConfig(ctx, pluginsConfig)
 	preSchedulePlugins := []plugins.PreSchedule{}
 	filters := []plugins.Filter{}
-	scorers := []*k8sscorer.WeightedScorer{}
+	scorers := []*giescorer.WeightedScorer{}
 	postSchedulePlugins := []plugins.PostSchedule{}
 	postResponsePlugins := []plugins.PostResponse{}
 
@@ -230,7 +230,7 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 			filters = append(filters, filter)
 		}
 		if scorer, ok := plugin.(plugins.Scorer); ok {
-			scorers = append(scorers, k8sscorer.NewWeightedScorer(scorer, pluginWeight))
+			scorers = append(scorers, giescorer.NewWeightedScorer(scorer, pluginWeight))
 		}
 		if postSchedule, ok := plugin.(plugins.PostSchedule); ok {
 			postSchedulePlugins = append(postSchedulePlugins, postSchedule)

@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
-	k8sscorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
+	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
@@ -102,7 +102,7 @@ func TestLoadBasedScorer(t *testing.T) {
 			datastore := &fakeDataStore{pods: test.input}
 
 			scheduler := scheduling.NewSchedulerWithConfig(datastore, scheduling.NewSchedulerConfig().
-				WithScorers(k8sscorer.NewWeightedScorer(test.scorer, 1)).
+				WithScorers(giescorer.NewWeightedScorer(test.scorer, 1)).
 				WithPicker(picker.NewMaxScorePicker()))
 
 			got, err := scheduler.Schedule(context.Background(), test.req)
