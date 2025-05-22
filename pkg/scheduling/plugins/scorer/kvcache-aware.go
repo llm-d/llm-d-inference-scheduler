@@ -17,8 +17,9 @@ import (
 const (
 	kvCacheAwareScorerName = "kvcache-aware-scorer"
 
-	kvCacheRedisEnvVar     = "KVCACHE_INDEXER_REDIS_ADDR"
-	huggingFaceTokenEnvVar = "HF_TOKEN"
+	kvCacheRedisEnvVar         = "KVCACHE_INDEXER_REDIS_ADDR"
+	kvCacheRedisPasswordEnvVar = "KVCACHE_INDEXER_REDIS_PWD"
+	huggingFaceTokenEnvVar     = "HF_TOKEN"
 )
 
 // KVCacheAwareScorer uses the KVCacheIndexer to score pods based on KVCache
@@ -40,6 +41,11 @@ func NewKVCacheAwareScorer(ctx context.Context) (plugins.Scorer, error) {
 		config.KVBlockIndexerConfig.RedisAddr = redisAddr
 	} else {
 		return nil, fmt.Errorf("environment variable %s is not set", kvCacheRedisEnvVar)
+	}
+
+	redisPassword := os.Getenv(kvCacheRedisPasswordEnvVar)
+	if redisPassword != "" {
+		config.KVBlockIndexerConfig.RedisPassword = redisAddr
 	}
 
 	hfToken := os.Getenv(huggingFaceTokenEnvVar)
