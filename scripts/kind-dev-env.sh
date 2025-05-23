@@ -115,10 +115,10 @@ ${CONTAINER_RUNTIME} exec -it ${CONTAINER_NAME} /bin/bash -c "sysctl net.ipv4.co
 # Wait for all pods to be ready
 kubectl --context ${KUBE_CONTEXT} -n kube-system wait --for=condition=Ready --all pods --timeout=300s
 
-if kubectl --context ${KUBE_CONTEXT} -n local-path-storage get pods > /dev/null 2>&1; [ $? -ne 0 ]; then
-  # Wait a bit for the local-path-storage pods to be created
-  sleep 10
-fi
+echo "Waiting for local-path-storage pods to be created..."
+until kubectl --context ${KUBE_CONTEXT} -n local-path-storage get pods -o name | grep -q pod/; do
+  sleep 2
+done
 kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Ready --all pods --timeout=300s
 
 # ------------------------------------------------------------------------------
