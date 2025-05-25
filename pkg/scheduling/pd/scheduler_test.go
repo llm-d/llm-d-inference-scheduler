@@ -17,6 +17,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Tests the default scheduler configuration and expected behavior.
@@ -132,14 +133,16 @@ func TestPDSchedule(t *testing.T) {
 		},
 	}
 
+	ctx := context.Background()
+	logger := testr.New(t)
+	ctx = log.IntoContext(ctx, logger)
+
+	schedCfg := config.NewConfig(logger)
+	schedCfg.PDEnabled = true
+	schedCfg.PDThreshold = 5
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			logger := testr.New(t)
-
-			schedCfg := config.NewConfig(logger)
-			schedCfg.PDEnabled = true
-			schedCfg.PDThreshold = 5
 			// TODO - ensure that default config is ok here (no scorers) - issue #56
 			scheduler, _ := pd.NewScheduler(ctx, schedCfg, &fakeDataStore{pods: test.input})
 			got, err := scheduler.Schedule(ctx, test.req)
