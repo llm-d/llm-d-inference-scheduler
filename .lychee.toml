@@ -12,4 +12,4 @@ retry_count = 2
 accept = [200, 429]
 
 # Only check *.md files
-include = ["**/*.md"]
+include = [".*\\.md$"]
