@@ -2,7 +2,6 @@ package pd_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr/testr"
@@ -17,6 +16,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Tests the default scheduler configuration and expected behavior.
@@ -50,11 +50,13 @@ func TestPDSchedule(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		req     *types.LLMRequest
-		input   []*backendmetrics.FakePodMetrics
-		wantRes *types.Result
-		err     bool
+		name            string
+		req             *types.LLMRequest
+		input           []*backendmetrics.FakePodMetrics
+		wantRes         *types.Result
+		wantHeaders     map[string]string
+		unwantedHeaders []string
+		err             bool
 	}{
 		{
 			name: "no pods in datastore",
@@ -67,19 +69,31 @@ func TestPDSchedule(t *testing.T) {
 			err:   true,
 		},
 		{
-			name: "one pod, short prompt",
+			name: "one decode pod, long prompt",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 				Critical:    true,
-				Prompt:      "123",
+				Prompt:      "12345678901",
 			},
 			// pod2 will be picked because it is the only pod with Decode role
-			input: []*backendmetrics.FakePodMetrics{pod1, pod2},
+			input: []*backendmetrics.FakePodMetrics{pod2},
 			wantRes: &types.Result{
 				TargetPod: &types.ScoredPod{
 					Pod: wantPod2,
 				},
 			},
+			unwantedHeaders: []string{"x-prefiller-url"},
+		},
+		{
+			name: "one prefill pod, long prompt",
+			req: &types.LLMRequest{
+				TargetModel: "critical",
+				Critical:    true,
+				Prompt:      "12345678901",
+			},
+			// no Decode pod
+			input: []*backendmetrics.FakePodMetrics{pod1},
+			err:   true,
 		},
 		{
 			name: "1P1D",
@@ -88,31 +102,48 @@ func TestPDSchedule(t *testing.T) {
 				Critical:    true,
 				Prompt:      "12345678901",
 			},
-			// pod2 will be picked because it is the decode pod, pod1 IP will be in header
+			// pod2 will be picked because it is the decode pod, pod1 IP will be in the header
 			input: []*backendmetrics.FakePodMetrics{pod1, pod2},
 			wantRes: &types.Result{
 				TargetPod: &types.ScoredPod{
 					Pod:   wantPod2,
 					Score: 0.0,
 				},
-				//				MutatedHeaders: map[string]string{"x-prefiller-url": "http://1.2.3.4:80"},
 			},
+			wantHeaders: map[string]string{"x-prefiller-url": "http://1.2.3.4:80"},
+		},
+		{
+			name: "1P1Dshort",
+			req: &types.LLMRequest{
+				TargetModel: "critical",
+				Critical:    true,
+				Prompt:      "123",
+			},
+			// pod2 will be picked because it is the decode pod, pod1 IP should no be in the header,
+			// because the prompt is too short
+			input: []*backendmetrics.FakePodMetrics{pod1, pod2},
+			wantRes: &types.Result{
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod2,
+					Score: 0.0,
+				},
+			},
+			unwantedHeaders: []string{"x-prefiller-url"},
 		},
 	}
 
+	ctx := context.Background()
+	logger := testr.New(t)
+	ctx = log.IntoContext(ctx, logger)
+
+	schedCfg := config.NewConfig(logger)
+	schedCfg.PDEnabled = true
+	schedCfg.PDThreshold = 5
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			logger := testr.New(t)
-
-			schedCfg := config.NewConfig(logger)
-			// TODO - ensure that default config is ok here (no scorers) - issue #56
 			scheduler, _ := pd.NewScheduler(ctx, schedCfg, &fakeDataStore{pods: test.input})
 			got, err := scheduler.Schedule(ctx, test.req)
-
-			fmt.Printf("Test %s:\n", test.name)
-			fmt.Printf("Result: %#v\n", got)
-			fmt.Printf("Expected: %#v\n", test.wantRes)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
@@ -120,6 +151,21 @@ func TestPDSchedule(t *testing.T) {
 
 			if diff := cmp.Diff(test.wantRes, got); diff != "" {
 				t.Errorf("Unexpected output (-want +got): %v", diff)
+			}
+
+			for header, value := range test.wantHeaders {
+				gotValue, ok := test.req.Headers[header]
+				if !ok {
+					t.Errorf("Missing header: %s", header)
+				} else if gotValue != value {
+					t.Errorf("Wrong header value for %s: want %s got %s)", header, value, gotValue)
+				}
+			}
+
+			for _, header := range test.unwantedHeaders {
+				if _, exists := test.req.Headers[header]; exists {
+					t.Errorf("Unwanted header %s exists", header)
+				}
 			}
 		})
 	}
