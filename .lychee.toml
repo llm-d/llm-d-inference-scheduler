@@ -1,6 +1,5 @@
 # Skip URLs matching these patterns
-exclude = [
-]
+exclude = [ ]
 
 # Timeout in seconds
 timeout = 15
@@ -10,6 +9,3 @@ retry_count = 2
 
 # Accept non-200 status codes (429: rate limits)
 accept = [200, 429]
-
-# Only check *.md files
-include = [".*\\.md$"]
