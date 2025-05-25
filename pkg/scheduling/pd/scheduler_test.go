@@ -2,7 +2,6 @@ package pd_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr/testr"
@@ -143,13 +142,8 @@ func TestPDSchedule(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// TODO - ensure that default config is ok here (no scorers) - issue #56
 			scheduler, _ := pd.NewScheduler(ctx, schedCfg, &fakeDataStore{pods: test.input})
 			got, err := scheduler.Schedule(ctx, test.req)
-
-			fmt.Printf("Test %s:\n", test.name)
-			fmt.Printf("Result: %#v\n", got)
-			fmt.Printf("Expected: %#v\n", test.wantRes)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
