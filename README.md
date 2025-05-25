@@ -20,9 +20,9 @@ callback mechanism the EPP relies on to make routing decisions to model serving
 workloads currently.
 
 [Kubernetes]:https://kubernetes.io
-[Architecture Documentation]:/docs/architecture.md
+[Architecture Documentation]:docs/architecture.md
 [Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
-[P/D Disaggregation]:/docs/dp.md
+[P/D Disaggregation]:docs/dp.md
 [Gateway API]:https://github.com/kubernetes-sigs/gateway-api
 [Envoy]:https://github.com/envoyproxy/envoy
 [ext-proc]:https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter
@@ -33,7 +33,7 @@ Contributions are welcome!
 
 For large changes please [create an issue] first describing the change so the
 maintainers can do an assessment, and work on the details with you. See
-[DEVELOPMENT.md](/DEVELOPMENT.md) for details on how to work with the codebase.
+[DEVELOPMENT.md](DEVELOPMENT.md) for details on how to work with the codebase.
 
 Note that in general features should go to the upstream [Gateway API Inference
 Extension (GIE)] project _first_ if applicable. The GIE is a major dependency of
