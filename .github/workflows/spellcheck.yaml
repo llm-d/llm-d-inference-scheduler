@@ -1,0 +1,23 @@
+# .github/workflows/spellcheck.yml
+name: Spell Check PR
+
+on:
+  pull_request:
+    paths:
+      - '**/*.go'
+      - '**/*.md'
+      - '.github/spelling/**'
+
+jobs:
+  check-spelling:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Spell Check
+        uses: check-spelling/check-spelling@v0.0.22
+        with:
+          config: .github/spelling

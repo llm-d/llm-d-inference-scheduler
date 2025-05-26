@@ -1,0 +1,1 @@
+\.go$ -> ^\s*//.*         # Only keep comments in Go files
