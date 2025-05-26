@@ -1,3 +1,6 @@
-[A-Z]+([A-Z][a-z0-9]+)+   # Exported CamelCase
-[a-z]+([A-Z][a-z0-9]+)+   # private package CamelCase
-[A-Z_]{2,}                # CONSTANT_CASE
+plugin
+plugins
+pluggability
+png
+lifecycle
+
