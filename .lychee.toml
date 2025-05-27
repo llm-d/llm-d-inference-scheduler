@@ -1,0 +1,13 @@
+# Ignore transient failures on gnu.org (it sometimes refuses connections)
+exclude = [
+  "^https://www.gnu.org/software/make/?$"
+]
+
+# Timeout in seconds
+timeout = 20
+
+# Retry failed links (helpful for flaky sites)
+retry_count = 3
+
+# Accept non-200 status codes (429: rate limits)
+accept = [200, 429]
