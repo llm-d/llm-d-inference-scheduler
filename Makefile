@@ -291,7 +291,7 @@ KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
 KIND_GATEWAY_HOST_PORT ?= 30080
 
 .PHONY: env-dev-kind
-env-dev-kind:
+env-dev-kind: image-build
 	CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 	GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 	IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
