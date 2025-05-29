@@ -299,6 +299,6 @@ env-dev-kind: image-build
 		./scripts/kind-dev-env.sh
 
 .PHONY: clean-env-dev-kind
-clean-env-dev-kind: check-kubectl check-kustomize check-envsubst
+clean-env-dev-kind:
 	@echo "INFO: cleaning up kind cluster $(KIND_CLUSTER_NAME)"
 	kind delete cluster --name $(KIND_CLUSTER_NAME)

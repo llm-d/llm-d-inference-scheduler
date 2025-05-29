@@ -92,7 +92,7 @@ make env-dev-kind
 ```
 
 This will build images with your recent changes and load the new images to the
-cluster. By default the image tag will be `dev`. It will also load llm-d-inference-sim, using a tag of `dev` by default.
+cluster. By default the image tag will be `dev`. It will also load `llm-d-inference-sim` image.
 
 **NOTE:** The built image tag can be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
 
