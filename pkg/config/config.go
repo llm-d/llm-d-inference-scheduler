@@ -50,17 +50,13 @@ const (
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
 	pdPromptLenThresholdDefault = 100
 
-	prefixMaxCacheSizeKey = "PREFIX_SCORER_MAX_CACHE_SIZE"
-	// DefaultPrefixMaxCacheSize sets the maximum number of blocks the LRU cache can store.
-	DefaultPrefixMaxCacheSize = 500000
+	prefixCacheCapacityEnvKey = "PREFIX_SCORER_CACHE_CAPACITY"
+	// DefaultPrefixCacheCapacity sets the maximum number of blocks the LRU cache can store.
+	DefaultPrefixCacheCapacity = 500000
 
-	prefixScorerBlockSizeEnvKey = "PREFIX_SCORER_BLOCK_SIZE"
-	// DefaultPrefixBlockSize defines how many runes each block contains in the prefix cache.
-	DefaultPrefixBlockSize = 256
-
-	prefixMaxBlockCacheSizeKey = "PREFIX_SCORER_MAX_BLOCK_CACHE_SIZE"
-	// DefaultPrefixMaxBlockCacheSize sets the maximum number of pods a block can store.
-	DefaultPrefixMaxBlockCacheSize = 100
+	prefixScorerCacheBlockSizeEnvKey = "PREFIX_SCORER_CACHE_BLOCK_SIZE"
+	// DefaultPrefixCacheBlockSize defines how many runes each block contains in the prefix cache.
+	DefaultPrefixCacheBlockSize = 256
 )
 
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
@@ -69,8 +65,8 @@ type Config struct {
 	PrefillSchedulerPlugins map[string]int
 	PDEnabled               bool
 	PDThreshold             int
-	PrefixCacheSize         int
-	PrefixBlockCacheSize    int
+	PrefixCacheBlockSize    int
+	PrefixCacheCapacity     int
 }
 
 // LoadConfig loads configuration from environment variables and returns a new instance of Config
@@ -87,7 +83,6 @@ func LoadConfig(logger logr.Logger) *Config {
 		PrefillSchedulerPlugins: loadPluginInfo(logger, true, pluginNames),
 		PDEnabled:               env.GetEnvString(pdEnabledEnvKey, "false", logger) == "true",
 		PDThreshold:             env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
-		PrefixBlockSize:         env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, logger),
 		PrefixCacheBlockSize:    env.GetEnvInt(prefixScorerCacheBlockSizeEnvKey, DefaultPrefixCacheBlockSize, logger),
 		PrefixCacheCapacity:     env.GetEnvInt(prefixCacheCapacityEnvKey, DefaultPrefixCacheCapacity, logger),
 	}

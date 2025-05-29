@@ -144,7 +144,7 @@ func (s *PrefixAwareScorer) GetCachedPercentage(pod, prompt string) float64 {
 	}
 
 	intVal, _ := rawVal.(int)
-	return float64(intVal*s.prefixStore.blockSize) / float64(len(prompt))
+	return float64(intVal*s.prefixStore.cacheBlockSize) / float64(len(prompt))
 }
 
 // cleanup Cleans up hits map

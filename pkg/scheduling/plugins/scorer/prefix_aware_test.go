@@ -113,7 +113,7 @@ func TestPrefixAwareScorer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset prefix store for each test
 			config := scorer.DefaultPrefixStoreConfig()
-			config.BlockSize = 5 // set small chunking for testing
+			config.CacheBlockSize = 5 // set small chunking for testing
 
 			s := scorer.NewPrefixAwareScorer(ctx, config)
 
@@ -157,13 +157,13 @@ func TestPrefixAwareScorerProfiling(t *testing.T) {
 
 	name2Pod := createPods(nPodsTotal)
 	config := scorer.DefaultPrefixStoreConfig()
-	text := generateNonRepeatingText(config.BlockSize * nPodsInStore)
+	text := generateNonRepeatingText(config.CacheBlockSize * nPodsInStore)
 	t.Run(testName, func(t *testing.T) {
 		start := time.Now() // record start time
 		config := scorer.DefaultPrefixStoreConfig()
 		s := scorer.NewPrefixAwareScorer(ctx, config)
 		for i := range nPodsInStore {
-			prompt := text[0 : (i+1)*config.BlockSize-1]
+			prompt := text[0 : (i+1)*config.CacheBlockSize-1]
 			err := s.GetPrefixStore().AddEntry(modelName, prompt, &name2Pod["pod"+strconv.Itoa(i)].NamespacedName)
 			if err != nil {
 				t.Errorf("Failed to add entry to prefix store: %v", err)

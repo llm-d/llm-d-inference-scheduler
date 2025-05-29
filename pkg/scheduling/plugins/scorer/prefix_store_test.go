@@ -17,7 +17,7 @@ func TestBasicPrefixOperations(t *testing.T) {
 	_ = log.IntoContext(ctx, logr.New(log.NullLogSink{}))
 
 	config := scorer.DefaultPrefixStoreConfig()
-	config.BlockSize = 5 // set small chunking for testing
+	config.CacheBlockSize = 5 // set small chunking for testing
 	store := scorer.NewPrefixStore(config)
 
 	podName := k8stypes.NamespacedName{
