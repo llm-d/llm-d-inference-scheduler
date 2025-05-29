@@ -295,5 +295,5 @@ env-dev-kind: image-build
 	CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 	GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 	IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-	EPP_TAG=$(DEV_VERSION) \
+	EPP_TAG=$(EPP_TAG) \
 		./scripts/kind-dev-env.sh
