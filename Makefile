@@ -4,11 +4,10 @@ SHELL := /usr/bin/env bash
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
 PROJECT_NAME ?= llm-d-inference-scheduler
-DEV_VERSION ?= 0.0.3
-PROD_VERSION ?= 0.0.2
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
-IMG = $(IMAGE_TAG_BASE):$(DEV_VERSION)
+EPP_TAG ?= dev
+IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
 NAMESPACE ?= hc4ai-operator
 
 CONTAINER_TOOL := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
@@ -82,50 +81,8 @@ build: check-go download-tokenizer ##
 
 ##@ Container Build/Push
 
-.PHONY: buildah-build
-	@if [ "$(BUILDER)" = "buildah" ]; then \
-	  echo "🔧 Buildah detected: Performing multi-arch build..."; \
-	  FINAL_TAG=$(IMG); \
-	  for arch in amd64; do \
-	    ARCH_TAG=$$FINAL_TAG-$$arch; \
-	    echo "📦 Building for architecture: $$arch"; \
-				buildah build \
-        			--arch=$$arch \
-        			--os=linux \
-        			--layers -t $(IMG)-$$arch . || exit 1; \
-	    echo "🚀 Pushing image: $(IMG)-$$arch"; \
-	    buildah push $(IMG)-$$arch docker://$(IMG)-$$arch || exit 1; \
-	  done; \
-	  echo "🧼 Removing existing manifest (if any)..."; \
-	  buildah manifest rm $$FINAL_TAG || true; \
-	  echo "🧱 Creating and pushing manifest list: $(IMG)"; \
-	  buildah manifest create $(IMG); \
-	  for arch in amd64; do \
-	    ARCH_TAG=$$FINAL_TAG-$$arch; \
-	    buildah manifest add $$FINAL_TAG $$ARCH_TAG; \
-	  done; \
-	  buildah manifest push --all $(IMG) docker://$(IMG); \
-	elif [ "$(BUILDER)" = "docker" ]; then \
-	  echo "🐳 Docker detected: Building with buildx..."; \
-	  sed -e '1 s/\(^FROM\)/FROM --platform=$${BUILDPLATFORM}/' Dockerfile > Dockerfile.cross; \
-	  - docker buildx create --use --name image-builder || true; \
-	  docker buildx use image-builder; \
-	  	  docker buildx build --push \
-      	  			--platform=$(PLATFORMS) \
-                      --tag $(IMG) -f Dockerfile.cross . || exit 1; \
-	  docker buildx rm image-builder || true; \
-	  rm Dockerfile.cross; \
-	elif [ "$(BUILDER)" = "podman" ]; then \
-	  echo "⚠️ Podman detected: Building single-arch image..."; \
-	  podman build -t $(IMG) . || exit 1; \
-	  podman push $(IMG) || exit 1; \
-	else \
-	  echo "❌ No supported container tool available."; \
-	  exit 1; \
-	fi
-
 .PHONY:	image-build
-image-build: check-container-tool load-version-json ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
+image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
 	@printf "\033[33;1m==== Building Docker image $(IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) build \
 		--platform $(TARGETOS)/$(TARGETARCH) \
@@ -134,7 +91,7 @@ image-build: check-container-tool load-version-json ## Build Docker image ## Bui
  		-t $(IMG) .
 
 .PHONY: image-push
-image-push: check-container-tool load-version-json ## Push Docker image $(IMG) to registry
+image-push: check-container-tool ## Push Docker image $(IMG) to registry
 	@printf "\033[33;1m==== Pushing Docker image $(IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $(IMG)
 
@@ -236,50 +193,10 @@ uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 
 
 ##@ Version Extraction
-.PHONY: version dev-registry prod-registry extract-version-info
-
-dev-version: check-jq
-	@jq -r '.dev-version' .version.json
-
-prod-version: check-jq
-	@jq -r '.prod-version' .version.json
-
-dev-registry: check-jq
-	@jq -r '."dev-registry"' .version.json
-
-prod-registry: check-jq
-	@jq -r '."prod-registry"' .version.json
-
-extract-version-info: check-jq
-	@echo "DEV_VERSION=$$(jq -r '."dev-version"' .version.json)"
-	@echo "PROD_VERSION=$$(jq -r '."prod-version"' .version.json)"
-	@echo "DEV_IMAGE_TAG_BASE=$$(jq -r '."dev-registry"' .version.json)"
-	@echo "PROD_IMAGE_TAG_BASE=$$(jq -r '."prod-registry"' .version.json)"
-
-##@ Load Version JSON
-
-.PHONY: load-version-json
-load-version-json: check-jq
-	@if [ "$(DEV_VERSION)" = "0.0.1" ]; then \
-	  DEV_VERSION=$$(jq -r '."dev-version"' .version.json); \
-	  PROD_VERSION=$$(jq -r '."prod-version"' .version.json); \
-	  echo "✔ Loaded DEV_VERSION from .version.json: $$DEV_VERSION"; \
-	  echo "✔ Loaded PROD_VERSION from .version.json: $$PROD_VERSION"; \
-	  export DEV_VERSION; \
-	  export PROD_VERSION; \
-	fi && \
-	CURRENT_DEFAULT="ghcr.io/llm-d/$(PROJECT_NAME)"; \
-	if [ "$(IMAGE_TAG_BASE)" = "$$CURRENT_DEFAULT" ]; then \
-	  IMAGE_TAG_BASE=$$(jq -r '."dev-registry"' .version.json); \
-	  echo "✔ Loaded IMAGE_TAG_BASE from .version.json: $$IMAGE_TAG_BASE"; \
-	  export IMAGE_TAG_BASE; \
-	fi && \
-	echo "🛠 Final values: DEV_VERSION=$$DEV_VERSION, PROD_VERSION=$$PROD_VERSION, IMAGE_TAG_BASE=$$IMAGE_TAG_BASE"
+.PHONY: version extract-version-info
 
 .PHONY: env
-env: load-version-json ## Print environment variables
-	@echo "DEV_VERSION=$(DEV_VERSION)"
-	@echo "PROD_VERSION=$(PROD_VERSION)"
+env: ## Print environment variables
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
 	@echo "IMG=$(IMG)"
 	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
@@ -292,13 +209,11 @@ check-tools: \
   check-go \
   check-ginkgo \
   check-golangci-lint \
-  check-jq \
   check-kustomize \
   check-envsubst \
   check-container-tool \
   check-kubectl \
-  check-buildah \
-  check-podman
+  check-buildah 
 	@echo "✅ All required tools are installed."
 
 .PHONY: check-go
@@ -315,11 +230,6 @@ check-ginkgo:
 check-golangci-lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
 	  echo "❌ golangci-lint is not installed. Install from https://golangci-lint.run/usage/install/"; exit 1; }
-
-.PHONY: check-jq
-check-jq:
-	@command -v jq >/dev/null 2>&1 || { \
-	  echo "❌ jq is not installed. Install it from https://stedolan.github.io/jq/download/"; exit 1; }
 
 .PHONY: check-kustomize
 check-kustomize:
@@ -352,12 +262,6 @@ check-builder:
 		echo "✅ Using builder: $(BUILDER)"; \
 	fi
 
-.PHONY: check-podman
-check-podman:
-	@command -v podman >/dev/null 2>&1 || { \
-	  echo "⚠️  Podman is not installed. You can install it with:"; \
-	  echo "🔧 sudo apt install podman  OR  brew install podman"; exit 1; }
-
 ##@ Alias checking
 .PHONY: check-alias
 check-alias: check-container-tool
@@ -387,7 +291,7 @@ KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
 KIND_GATEWAY_HOST_PORT ?= 30080
 
 .PHONY: env-dev-kind
-env-dev-kind: image-build
+env-dev-kind:
 	CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 	GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 	IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
