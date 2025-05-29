@@ -66,7 +66,7 @@ test-integration: download-tokenizer
 post-deploy-test: ## Run post deployment tests
 	echo Success!
 	@echo "Post-deployment tests passed."
-	
+
 .PHONY: lint
 lint: check-golangci-lint ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
@@ -138,7 +138,7 @@ install-k8s: check-kubectl check-kustomize check-envsubst ## Install on Kubernet
 	echo "Kubernetes installation complete."; \
 	echo "To use the app, run:"; \
 	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'"
-	
+
 .PHONY: uninstall-k8s
 uninstall-k8s: check-kubectl check-kustomize check-envsubst ## Uninstall from Kubernetes
 	export PROJECT_NAME=${PROJECT_NAME}
@@ -165,7 +165,7 @@ install-openshift: check-kubectl check-kustomize check-envsubst ## Install on Op
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
 	echo "OpenShift installation complete."; \
 	echo "To use the app, run:"; \
-	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'" 
+	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'"
 
 .PHONY: uninstall-openshift
 uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall from OpenShift
@@ -213,7 +213,7 @@ check-tools: \
   check-envsubst \
   check-container-tool \
   check-kubectl \
-  check-buildah 
+  check-buildah
 	@echo "✅ All required tools are installed."
 
 .PHONY: check-go
@@ -297,3 +297,8 @@ env-dev-kind: image-build
 	IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
 	EPP_TAG=$(EPP_TAG) \
 		./scripts/kind-dev-env.sh
+
+.PHONY: clean-env-dev-kind
+clean-env-dev-kind: check-kubectl check-kustomize check-envsubst
+	@echo "INFO: cleaning up kind cluster $(KIND_CLUSTER_NAME)"
+	kind delete cluster --name $(KIND_CLUSTER_NAME)
