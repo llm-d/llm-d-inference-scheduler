@@ -92,7 +92,9 @@ make env-dev-kind
 ```
 
 This will build images with your recent changes and load the new images to the
-cluster. Note that built image tag should be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
+cluster. By default the image tag will be `dev`.
+
+**NOTE:** The built image tag can be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
 
 ```console
 EPP_TAG=0.0.4 make env-dev-kind
