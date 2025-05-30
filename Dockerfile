@@ -32,7 +32,7 @@ ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
 RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
 
-# Use distroless as minimal base image to package the manager binary
+# Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 WORKDIR /
