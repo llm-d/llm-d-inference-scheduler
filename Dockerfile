@@ -33,7 +33,7 @@ ENV GOARCH=${TARGETARCH}
 RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go cmd/epp/health.go
 
 # Use ubi9 as a minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
+# Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
