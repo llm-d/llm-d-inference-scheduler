@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+
+	"github.com/redis/go-redis/v9"
 
 	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
 
@@ -37,7 +40,16 @@ func NewKVCacheAwareScorer(ctx context.Context) (plugins.Scorer, error) {
 
 	redisAddr := os.Getenv(kvCacheRedisEnvVar)
 	if redisAddr != "" {
-		config.KVBlockIndexerConfig.RedisAddr = redisAddr
+		// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
+		if !strings.HasPrefix(redisAddr, "redis://") && !strings.HasPrefix(redisAddr, "rediss://") && !strings.HasPrefix(redisAddr, "unix://") {
+			redisAddr = "redis://" + redisAddr
+		}
+		redisOpt, err := redis.ParseURL(redisAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse redisURL: %w", err)
+		}
+
+		config.KVBlockIndexerConfig.RedisOpt = redisOpt
 	} else {
 		return nil, fmt.Errorf("environment variable %s is not set", kvCacheRedisEnvVar)
 	}
