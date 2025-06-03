@@ -10,34 +10,34 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 )
 
 const (
-	// defaultMaxCacheSize sets the maximum number of blocks the LRU cache can store.
-	defaultMaxCacheSize = 500000
-	// defaultBlockSize defines how many runes each block contains in the prefix cache.
-	defaultBlockSize = 256
-	// defaultMaxBlockCacheSize sets the maximum number of pods a block can store.
-	defaultMaxBlockCacheSize = 100
+	// defaultMaxBlockPods sets the maximum number of pods a block can store.
+	defaultMaxBlockPods = 100
 )
 
 // PrefixStoreConfig contains initialization configuration for PrefixStore.
 type PrefixStoreConfig struct {
-	// CacheSize sets the maximum number of blocks the LRU cache can store.
-	CacheSize int
-	// BlockSize defines how many runes each block contains in the prefix cache.
-	BlockSize int
-	// BlockCacheSize sets the maximum number of pods a block can store.
-	BlockCacheSize int
+	// CacheCapacity sets the maximum number of blocks the LRU cache can store.
+	// A block maps from a chunk of a prompt to a set of pods that are estimated to have
+	// the prefix of the prompt that ends at the keyed chunk.
+	CacheCapacity int
+	// CacheBlockSize defines the length of the prompt chunk that a block is keyed by.
+	CacheBlockSize int
+	// MaxBlockPods sets the maximum number of pods a block can store.
+	MaxBlockPods int
 }
 
 // DefaultPrefixStoreConfig returns an PrefixStoreConfig instance with default
 // configuration.
 func DefaultPrefixStoreConfig() *PrefixStoreConfig {
 	return &PrefixStoreConfig{
-		CacheSize:      defaultMaxCacheSize,
-		BlockSize:      defaultBlockSize,
-		BlockCacheSize: defaultMaxBlockCacheSize,
+		CacheCapacity:  config.DefaultPrefixCacheCapacity,
+		CacheBlockSize: config.DefaultPrefixCacheBlockSize,
+		MaxBlockPods:   defaultMaxBlockPods,
 	}
 }
 
@@ -51,9 +51,9 @@ type block struct {
 type PrefixStore struct {
 	sync.RWMutex
 
-	cacheSize      int
-	blockSize      int
-	blockCacheSize int
+	cacheCapacity  int
+	cacheBlockSize int
+	maxBlockPods   int
 
 	store map[string]*lru.Cache[uint64, *block]
 }
@@ -66,16 +66,16 @@ func NewPrefixStore(config *PrefixStoreConfig) *PrefixStore {
 	}
 
 	return &PrefixStore{
-		cacheSize:      config.CacheSize,
-		blockSize:      config.BlockSize,
-		blockCacheSize: config.BlockCacheSize,
+		cacheCapacity:  config.CacheCapacity,
+		cacheBlockSize: config.CacheBlockSize,
+		maxBlockPods:   config.MaxBlockPods,
 		store:          make(map[string]*lru.Cache[uint64, *block]),
 	}
 }
 
 // AddEntry adds a new entry to the prefix store.
 func (s *PrefixStore) AddEntry(modelName string, prompt string, pod *types.NamespacedName) error {
-	if prompt == "" || pod == nil || len(prompt) < s.blockSize /* skip if prompt is too short */ {
+	if prompt == "" || pod == nil || len(prompt) < s.cacheBlockSize /* skip if prompt is too short */ {
 		return nil
 	}
 
@@ -84,7 +84,7 @@ func (s *PrefixStore) AddEntry(modelName string, prompt string, pod *types.Names
 	cache, ok := s.store[modelName]
 	if !ok {
 		var err error
-		cache, err = lru.New[uint64, *block](s.cacheSize)
+		cache, err = lru.New[uint64, *block](s.cacheCapacity)
 		if err != nil {
 			return fmt.Errorf("failed to create LRU cache for model %s: %w", modelName, err)
 		}
@@ -98,8 +98,8 @@ func (s *PrefixStore) AddEntry(modelName string, prompt string, pod *types.Names
 	digest := xxhash.New()
 
 	// Chunk the text into blocks and populate the cache
-	for start := 0; start < len(promptBytes); start += s.blockSize {
-		end := start + s.blockSize
+	for start := 0; start < len(promptBytes); start += s.cacheBlockSize {
+		end := start + s.cacheBlockSize
 		if end > len(promptBytes) {
 			break // skip partial blocks
 		}
@@ -118,7 +118,7 @@ func (s *PrefixStore) AddEntry(modelName string, prompt string, pod *types.Names
 
 		b, ok := cache.Get(blockHash)
 		if !ok {
-			pods, err := lru.New[types.NamespacedName, time.Time](s.blockCacheSize)
+			pods, err := lru.New[types.NamespacedName, time.Time](s.maxBlockPods)
 			if err != nil {
 				return fmt.Errorf("failed to create LRU cache for block: %w", err)
 			}
@@ -136,7 +136,7 @@ func (s *PrefixStore) AddEntry(modelName string, prompt string, pod *types.Names
 // FindMatchingPods finds all pods that match the given prompt and model name.
 // It returns a map of pods and the number of blocks they match.
 func (s *PrefixStore) FindMatchingPods(prompt, modelName string) map[string]int {
-	if prompt == "" || modelName == "" || len(prompt) < s.blockSize /* skip if prompt is too short */ {
+	if prompt == "" || modelName == "" || len(prompt) < s.cacheBlockSize /* skip if prompt is too short */ {
 		return nil
 	}
 
@@ -153,8 +153,8 @@ func (s *PrefixStore) FindMatchingPods(prompt, modelName string) map[string]int 
 	digest := xxhash.New()
 
 	matchedPods := make(map[string]int)
-	for start := 0; start < len(promptBytes); start += s.blockSize {
-		end := start + s.blockSize
+	for start := 0; start < len(promptBytes); start += s.cacheBlockSize {
+		end := start + s.cacheBlockSize
 		if end > len(promptBytes) {
 			break // skip partial blocks
 		}
