@@ -4,11 +4,10 @@ SHELL := /usr/bin/env bash
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
 PROJECT_NAME ?= llm-d-inference-scheduler
-DEV_VERSION ?= 0.0.3
-PROD_VERSION ?= 0.0.2
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
-IMG = $(IMAGE_TAG_BASE):$(DEV_VERSION)
+EPP_TAG ?= dev
+IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
 NAMESPACE ?= hc4ai-operator
 
 CONTAINER_TOOL := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
@@ -67,7 +66,7 @@ test-integration: download-tokenizer
 post-deploy-test: ## Run post deployment tests
 	echo Success!
 	@echo "Post-deployment tests passed."
-	
+
 .PHONY: lint
 lint: check-golangci-lint ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
@@ -81,48 +80,6 @@ build: check-go download-tokenizer ##
 	go build -ldflags="$(LDFLAGS)" -o bin/epp cmd/epp/main.go cmd/epp/health.go
 
 ##@ Container Build/Push
-
-.PHONY: buildah-build
-	@if [ "$(BUILDER)" = "buildah" ]; then \
-	  echo "🔧 Buildah detected: Performing multi-arch build..."; \
-	  FINAL_TAG=$(IMG); \
-	  for arch in amd64; do \
-	    ARCH_TAG=$$FINAL_TAG-$$arch; \
-	    echo "📦 Building for architecture: $$arch"; \
-				buildah build \
-        			--arch=$$arch \
-        			--os=linux \
-        			--layers -t $(IMG)-$$arch . || exit 1; \
-	    echo "🚀 Pushing image: $(IMG)-$$arch"; \
-	    buildah push $(IMG)-$$arch docker://$(IMG)-$$arch || exit 1; \
-	  done; \
-	  echo "🧼 Removing existing manifest (if any)..."; \
-	  buildah manifest rm $$FINAL_TAG || true; \
-	  echo "🧱 Creating and pushing manifest list: $(IMG)"; \
-	  buildah manifest create $(IMG); \
-	  for arch in amd64; do \
-	    ARCH_TAG=$$FINAL_TAG-$$arch; \
-	    buildah manifest add $$FINAL_TAG $$ARCH_TAG; \
-	  done; \
-	  buildah manifest push --all $(IMG) docker://$(IMG); \
-	elif [ "$(BUILDER)" = "docker" ]; then \
-	  echo "🐳 Docker detected: Building with buildx..."; \
-	  sed -e '1 s/\(^FROM\)/FROM --platform=$${BUILDPLATFORM}/' Dockerfile > Dockerfile.cross; \
-	  - docker buildx create --use --name image-builder || true; \
-	  docker buildx use image-builder; \
-	  	  docker buildx build --push \
-      	  			--platform=$(PLATFORMS) \
-                      --tag $(IMG) -f Dockerfile.cross . || exit 1; \
-	  docker buildx rm image-builder || true; \
-	  rm Dockerfile.cross; \
-	elif [ "$(BUILDER)" = "podman" ]; then \
-	  echo "⚠️ Podman detected: Building single-arch image..."; \
-	  podman build -t $(IMG) . || exit 1; \
-	  podman push $(IMG) || exit 1; \
-	else \
-	  echo "❌ No supported container tool available."; \
-	  exit 1; \
-	fi
 
 .PHONY:	image-build
 image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
@@ -181,7 +138,7 @@ install-k8s: check-kubectl check-kustomize check-envsubst ## Install on Kubernet
 	echo "Kubernetes installation complete."; \
 	echo "To use the app, run:"; \
 	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'"
-	
+
 .PHONY: uninstall-k8s
 uninstall-k8s: check-kubectl check-kustomize check-envsubst ## Uninstall from Kubernetes
 	export PROJECT_NAME=${PROJECT_NAME}
@@ -208,7 +165,7 @@ install-openshift: check-kubectl check-kustomize check-envsubst ## Install on Op
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
 	echo "OpenShift installation complete."; \
 	echo "To use the app, run:"; \
-	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'" 
+	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'"
 
 .PHONY: uninstall-openshift
 uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall from OpenShift
@@ -234,6 +191,13 @@ uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 	@echo "Removing RBAC configuration from deploy/rbac..."
 	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete -f - || true
 
+##@ Environment
+.PHONY: env
+env: ## Print environment variables
+	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
+	@echo "IMG=$(IMG)"
+	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
+
 ##@ Tools
 
 .PHONY: check-tools
@@ -241,13 +205,11 @@ check-tools: \
   check-go \
   check-ginkgo \
   check-golangci-lint \
-  check-jq \
   check-kustomize \
   check-envsubst \
   check-container-tool \
   check-kubectl \
-  check-buildah \
-  check-podman
+  check-buildah
 	@echo "✅ All required tools are installed."
 
 .PHONY: check-go
@@ -264,11 +226,6 @@ check-ginkgo:
 check-golangci-lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
 	  echo "❌ golangci-lint is not installed. Install from https://golangci-lint.run/usage/install/"; exit 1; }
-
-.PHONY: check-jq
-check-jq:
-	@command -v jq >/dev/null 2>&1 || { \
-	  echo "❌ jq is not installed. Install it from https://stedolan.github.io/jq/download/"; exit 1; }
 
 .PHONY: check-kustomize
 check-kustomize:
@@ -300,12 +257,6 @@ check-builder:
 	else \
 		echo "✅ Using builder: $(BUILDER)"; \
 	fi
-
-.PHONY: check-podman
-check-podman:
-	@command -v podman >/dev/null 2>&1 || { \
-	  echo "⚠️  Podman is not installed. You can install it with:"; \
-	  echo "🔧 sudo apt install podman  OR  brew install podman"; exit 1; }
 
 ##@ Alias checking
 .PHONY: check-alias
@@ -340,5 +291,10 @@ env-dev-kind: image-build
 	CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 	GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 	IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-	EPP_TAG=$(DEV_VERSION) \
+	EPP_TAG=$(EPP_TAG) \
 		./scripts/kind-dev-env.sh
+
+.PHONY: clean-env-dev-kind
+clean-env-dev-kind:
+	@echo "INFO: cleaning up kind cluster $(KIND_CLUSTER_NAME)"
+	kind delete cluster --name $(KIND_CLUSTER_NAME)

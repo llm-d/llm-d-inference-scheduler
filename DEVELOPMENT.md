@@ -92,10 +92,15 @@ make env-dev-kind
 ```
 
 This will build images with your recent changes and load the new images to the
-cluster. Note that built image tag should be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
+cluster. By default the image tag will be `dev`. It will also load `llm-d-inference-sim` image.
+
+**NOTE:** The built image tag can be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
 
 ```console
 EPP_TAG=0.0.4 make env-dev-kind
+```
+
+**NOTE:** If you want to load a different tag of llm-d-inference-sim, you can use the environment variable `VLLM_SIMULATOR_TAG` to specify it.
 
 **NOTE**: If you are working on a MacOS with Apple Silicon, it is required to add
 the environment variable `GOOS=linux`.

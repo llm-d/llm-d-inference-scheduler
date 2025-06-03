@@ -1,0 +1,44 @@
+version: 2
+updates:
+
+  # 1. Go module updates
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(go)"
+    labels:
+      - "dependencies"
+      - "release-note-none"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+
+  # 2. GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "ci"
+      - "dependencies"
+    commit-message:
+      prefix: "deps(actions)"
+
+  # 3. Docker base image updates (e.g., for Dockerfile FROM lines)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "deps(docker)"

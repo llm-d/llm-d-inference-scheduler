@@ -26,13 +26,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${VLLM_SIMULATOR_IMAGE:=llm-d-inference-sim}"
 
 # Set a default VLLM_SIMULATOR_TAG if not provided
-export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-0.0.6}"
+export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.1.0}"
 
 # Set a default EPP_IMAGE if not provided
 : "${EPP_IMAGE:=llm-d-inference-scheduler}"
 
 # Set a default EPP_TAG if not provided
-export EPP_TAG="${EPP_TAG:-0.0.4}"
+export EPP_TAG="${EPP_TAG:-dev}"
 
 # Set the default routing side car image tag
 export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"
