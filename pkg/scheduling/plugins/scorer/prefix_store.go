@@ -25,7 +25,7 @@ type PrefixStoreConfig struct {
 	// A block maps from a chunk of a prompt to a set of pods that are estimated to have
 	// the prefix of the prompt that ends at the keyed chunk.
 	CacheCapacity int
-	// CacheBlockSize defines how many runes each block contains in the prefix cache.
+	// CacheBlockSize defines the length of the prompt chunk that a block is keyed by.
 	CacheBlockSize int
 	// MaxBlockPods sets the maximum number of pods a block can store.
 	MaxBlockPods int
