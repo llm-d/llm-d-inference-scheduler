@@ -18,7 +18,7 @@ const (
 
 // RoleBasedFilter - filters out pods based on the role defined by RoleLabel
 type RoleBasedFilter struct {
-	validRoles map[string]struct{}
+	validRoles map[string]bool
 	name       string
 }
 
@@ -39,10 +39,10 @@ func NewDecodeFilter() *RoleBasedFilter {
 // name - the filter name
 // rolesArr - list of valid roles
 func NewRoleBasedFilter(name string, rolesArr ...string) *RoleBasedFilter {
-	roles := map[string]struct{}{}
+	roles := map[string]bool{}
 
 	for _, role := range rolesArr {
-		roles[role] = struct{}{}
+		roles[role] = true
 	}
 
 	return &RoleBasedFilter{name: name, validRoles: roles}
