@@ -16,7 +16,7 @@ const (
 	RoleBoth = "both"
 )
 
-// RoleBasedFilter - filters out pods based on the role defiled by RoleLabel
+// RoleBasedFilter - filters out pods based on the role defined by RoleLabel
 type RoleBasedFilter struct {
 	validRoles map[string]struct{}
 	name       string
