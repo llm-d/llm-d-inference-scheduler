@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
 
@@ -21,18 +22,20 @@ type RoleBasedFilter struct {
 	name       string
 }
 
-// NewPrefillFilter creates and returns instance of RoleBasedFilter configured for prefill
+var _ plugins.Filter = &RoleBasedFilter{}
+
+// NewPrefillFilter creates and returns an instance of the RoleBasedFilter configured for prefill
 func NewPrefillFilter() *RoleBasedFilter {
 	// TODO: doesn't RoleBoth also imply Prefill?
 	return NewRoleBasedFilter("prefill-filter", RolePrefill)
 }
 
-// NewDecodeFilter creates and returns instance of RoleBasedFilter configured for decode
+// NewDecodeFilter creates and returns an instance of the RoleBasedFilter configured for decode
 func NewDecodeFilter() *RoleBasedFilter {
 	return NewRoleBasedFilter("decode-filter", RoleDecode, RoleBoth)
 }
 
-// NewRoleBasedFilter creates and returns instance of RoleBasedFilter based on input parameters
+// NewRoleBasedFilter creates and returns an instance of the RoleBasedFilter based on the input parameters
 // name - the filter name
 // rolesArr - list of valid roles
 func NewRoleBasedFilter(name string, rolesArr ...string) *RoleBasedFilter {
