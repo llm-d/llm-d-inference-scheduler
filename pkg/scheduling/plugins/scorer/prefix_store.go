@@ -22,6 +22,8 @@ const (
 // PrefixStoreConfig contains initialization configuration for PrefixStore.
 type PrefixStoreConfig struct {
 	// CacheCapacity sets the maximum number of blocks the LRU cache can store.
+	// A block maps from a chunk of a prompt to a set of pods that are estimated to have
+	// the prefix of the prompt that ends at the keyed chunk.
 	CacheCapacity int
 	// CacheBlockSize defines how many runes each block contains in the prefix cache.
 	CacheBlockSize int
