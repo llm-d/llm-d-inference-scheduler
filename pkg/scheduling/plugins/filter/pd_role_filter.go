@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	// RoleLabel name
+	// RoleLabel name of the label that contains the pod's role
 	RoleLabel = "llm-d.ai/role"
 	// RolePrefill set for designated prefill workers
 	RolePrefill = "prefill"
@@ -16,46 +16,50 @@ const (
 	RoleBoth = "both"
 )
 
-// PrefillFilter - filters out pods that are not marked with role Prefill
-type PrefillFilter struct{}
-
-var _ plugins.Filter = &PrefillFilter{} // validate interface conformance
-
-// Name returns the name of the filter
-func (pf *PrefillFilter) Name() string {
-	return "prefill-filter"
+// RoleBasedFilter - filters out pods based on the role defined by RoleLabel
+type RoleBasedFilter struct {
+	validRoles map[string]bool
+	name       string
 }
 
-// Filter filters out all pods that are not marked as "prefill"
-func (pf *PrefillFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
+var _ plugins.Filter = &RoleBasedFilter{}
+
+// NewPrefillFilter creates and returns an instance of the RoleBasedFilter configured for prefill
+func NewPrefillFilter() *RoleBasedFilter {
+	// TODO: doesn't RoleBoth also imply Prefill?
+	return NewRoleBasedFilter("prefill-filter", RolePrefill)
+}
+
+// NewDecodeFilter creates and returns an instance of the RoleBasedFilter configured for decode
+func NewDecodeFilter() *RoleBasedFilter {
+	return NewRoleBasedFilter("decode-filter", RoleDecode, RoleBoth)
+}
+
+// NewRoleBasedFilter creates and returns an instance of the RoleBasedFilter based on the input parameters
+// name - the filter name
+// rolesArr - list of valid roles
+func NewRoleBasedFilter(name string, rolesArr ...string) *RoleBasedFilter {
+	roles := map[string]bool{}
+
+	for _, role := range rolesArr {
+		roles[role] = true
+	}
+
+	return &RoleBasedFilter{name: name, validRoles: roles}
+}
+
+// Name returns the name of the filter
+func (f *RoleBasedFilter) Name() string {
+	return f.name
+}
+
+// Filter filters out all pods that are not marked with one of roles from the validRoles collection
+func (f *RoleBasedFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
 		role := pod.GetPod().Labels[RoleLabel]
-		if role == RolePrefill { // TODO: doesn't RoleBoth also imply Prefill?
-			filteredPods = append(filteredPods, pod)
-		}
-	}
-	return filteredPods
-}
-
-// DecodeFilter - filters out pods that are not marked with role Decode or Both
-type DecodeFilter struct{}
-
-var _ plugins.Filter = &DecodeFilter{} // validate interface conformance
-
-// Name returns the name of the filter
-func (df *DecodeFilter) Name() string {
-	return "decode-filter"
-}
-
-// Filter removes all pods that are not marked as "decode" or "both"
-func (df *DecodeFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
-	filteredPods := []types.Pod{}
-
-	for _, pod := range pods {
-		role, defined := pod.GetPod().Labels[RoleLabel]
-		if !defined || role == RoleDecode || role == RoleBoth {
+		if _, exists := f.validRoles[role]; exists {
 			filteredPods = append(filteredPods, pod)
 		}
 	}

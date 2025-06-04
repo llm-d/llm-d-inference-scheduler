@@ -71,13 +71,13 @@ func NewScheduler(ctx context.Context, schedCfg *config.Config, ds Datastore) (*
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(
 		ds,
 		scheduler.generateSchedulerConfig(ctx, schedCfg.PrefillSchedulerPlugins,
-			&filter.PrefillFilter{}),
+			filter.NewPrefillFilter()),
 	)
 
 	scheduler.decode = scheduling.NewSchedulerWithConfig(
 		ds,
 		scheduler.generateSchedulerConfig(ctx, schedCfg.DecodeSchedulerPlugins,
-			&filter.DecodeFilter{}),
+			filter.NewDecodeFilter()),
 	)
 
 	return scheduler, nil
