@@ -73,15 +73,15 @@ func LoadConfig(logger logr.Logger) *Config {
 	}
 
 	return &Config{
-		DecodeSchedulerPlugins:  loadPluginInfo(logger, false, pluginNames...),
-		PrefillSchedulerPlugins: loadPluginInfo(logger, true, pluginNames...),
+		DecodeSchedulerPlugins:  loadPluginInfo(logger, false, pluginNames),
+		PrefillSchedulerPlugins: loadPluginInfo(logger, true, pluginNames),
 		PDEnabled:               env.GetEnvString(pdEnabledEnvKey, "false", logger) == "true",
 		PDThreshold:             env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
 		PrefixBlockSize:         env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, logger),
 	}
 }
 
-func loadPluginInfo(logger logr.Logger, prefill bool, pluginNames ...string) map[string]int {
+func loadPluginInfo(logger logr.Logger, prefill bool, pluginNames []string) map[string]int {
 	result := map[string]int{}
 
 	for _, pluginName := range pluginNames {
