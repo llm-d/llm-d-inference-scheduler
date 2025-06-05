@@ -136,13 +136,17 @@ func TestPDSchedule(t *testing.T) {
 	logger := testr.New(t)
 	ctx = log.IntoContext(ctx, logger)
 
-	schedCfg := config.NewConfig(logger)
-	schedCfg.PDEnabled = true
-	schedCfg.PDThreshold = 5
+	schedulderConfig := &config.Config{
+		DecodeSchedulerPlugins:  map[string]int{},
+		PrefillSchedulerPlugins: map[string]int{},
+		PDEnabled:               true,
+		PDThreshold:             5,
+		PrefixBlockSize:         256,
+	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			scheduler, _ := pd.NewScheduler(ctx, schedCfg, &fakeDataStore{pods: test.input})
+			scheduler, _ := pd.NewScheduler(ctx, schedulderConfig, &fakeDataStore{pods: test.input})
 			got, err := scheduler.Schedule(ctx, test.req)
 
 			if test.err != (err != nil) {
