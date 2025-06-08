@@ -8,6 +8,7 @@ Documentation for developing the inference scheduler.
 - [Golang] `v1.24`+
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
+- [Kustomize]
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
