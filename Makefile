@@ -191,16 +191,12 @@ uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 	@echo "Removing RBAC configuration from deploy/rbac..."
 	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete -f - || true
 
-
-##@ Version Extraction
-.PHONY: version extract-version-info
-
+##@ Environment
 .PHONY: env
 env: ## Print environment variables
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
 	@echo "IMG=$(IMG)"
 	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
-
 
 ##@ Tools
 
@@ -291,7 +287,7 @@ KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
 KIND_GATEWAY_HOST_PORT ?= 30080
 
 .PHONY: env-dev-kind
-env-dev-kind: image-build
+env-dev-kind: image-build  ## Run under kind ($(KIND_CLUSTER_NAME))
 	CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 	GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 	IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
@@ -299,6 +295,6 @@ env-dev-kind: image-build
 		./scripts/kind-dev-env.sh
 
 .PHONY: clean-env-dev-kind
-clean-env-dev-kind:
+clean-env-dev-kind:      ## Cleanup kind setup (delete cluster $(KIND_CLUSTER_NAME))
 	@echo "INFO: cleaning up kind cluster $(KIND_CLUSTER_NAME)"
 	kind delete cluster --name $(KIND_CLUSTER_NAME)
