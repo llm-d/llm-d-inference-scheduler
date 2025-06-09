@@ -52,8 +52,13 @@ const (
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
 	pdPromptLenThresholdDefault = 100
 
-	prefixScorerBlockSizeEnvKey  = "PREFIX_SCORER_BLOCK_SIZE"
-	prefixScorerBlockSizeDefault = 256
+	prefixCacheCapacityEnvKey = "PREFIX_SCORER_CACHE_CAPACITY"
+	// DefaultPrefixCacheCapacity sets the maximum number of blocks the LRU cache can store.
+	DefaultPrefixCacheCapacity = 500000
+
+	prefixScorerCacheBlockSizeEnvKey = "PREFIX_SCORER_CACHE_BLOCK_SIZE"
+	// DefaultPrefixCacheBlockSize defines how many runes each block contains in the prefix cache.
+	DefaultPrefixCacheBlockSize = 256
 )
 
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
@@ -62,9 +67,10 @@ type Config struct {
 	DecodeSchedulerPlugins  map[string]int
 	PrefillSchedulerPlugins map[string]int
 
-	PDEnabled       bool
-	PDThreshold     int
-	PrefixBlockSize int
+	PDEnabled            bool
+	PDThreshold          int
+	PrefixCacheBlockSize int
+	PrefixCacheCapacity  int
 }
 
 // NewConfig creates a new instance if Config
@@ -75,7 +81,8 @@ func NewConfig(logger logr.Logger) *Config {
 		PrefillSchedulerPlugins: map[string]int{},
 		PDEnabled:               false,
 		PDThreshold:             math.MaxInt,
-		PrefixBlockSize:         prefixScorerBlockSizeDefault,
+		PrefixCacheBlockSize:    DefaultPrefixCacheBlockSize,
+		PrefixCacheCapacity:     DefaultPrefixCacheCapacity,
 	}
 }
 
@@ -95,7 +102,8 @@ func (c *Config) LoadConfig() {
 
 	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
 	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
-	c.PrefixBlockSize = env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, c.logger)
+	c.PrefixCacheBlockSize = env.GetEnvInt(prefixScorerCacheBlockSizeEnvKey, DefaultPrefixCacheBlockSize, c.logger)
+	c.PrefixCacheCapacity = env.GetEnvInt(prefixCacheCapacityEnvKey, DefaultPrefixCacheCapacity, c.logger)
 }
 
 func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginNames ...string) {
