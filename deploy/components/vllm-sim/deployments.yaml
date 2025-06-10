@@ -20,7 +20,7 @@ spec:
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8000"
-        - "--model=food-review"
+        - "--model=${MODEL_NAME}"
         ports:
         - name: http
           containerPort: 8000

@@ -41,7 +41,7 @@ export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"
 export POOL_NAME="${POOL_NAME:-vllm-llama3-8b-instruct}"
 
 # Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-meta-llama/Llama-3.1-8B-Instruct}"
+export MODEL_NAME="${MODEL_NAME:-food-review}"
 
 # vLLM replica count (without PD)
 export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
@@ -162,7 +162,7 @@ else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
 fi
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
-	| envsubst \${POOL_NAME} | envsubst \${EPP_TAG} | envsubst \${VLLM_SIMULATOR_TAG} \
+	| envsubst \${POOL_NAME} | envsubst '${MODEL_NAME}' | envsubst \${EPP_TAG} | envsubst \${VLLM_SIMULATOR_TAG} \
     | envsubst \${PD_ENABLED} | envsubst \${PD_PROMPT_LEN_THRESHOLD} \
     | envsubst \${ROUTING_SIDECAR_TAG} | envsubst \${VLLM_REPLICA_COUNT} \
     | envsubst \${VLLM_REPLICA_COUNT_P} | envsubst \${VLLM_REPLICA_COUNT_D} \
@@ -200,7 +200,7 @@ You can watch the Endpoint Picker logs with:
 
 With that running in the background, you can make requests:
 
-  $ curl -s -w '\n' http://localhost:${GATEWAY_HOST_PORT}/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+  $ curl -s -w '\n' http://localhost:${GATEWAY_HOST_PORT}/v1/completions -H 'Content-Type: application/json' -d '{"model":"${MODEL_NAME}","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 
 See DEVELOPMENT.md for additional access methods if the above fails.
 
