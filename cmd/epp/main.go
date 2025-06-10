@@ -178,11 +178,10 @@ func run() error {
 	// Setup runner.
 	ctx := ctrl.SetupSignalHandler()
 
-	schedCfg := config.NewConfig(setupLog)
-	schedCfg.LoadConfig()
+	schedulerConfig := config.LoadConfig(setupLog)
 
 	datastore := datastore.NewDatastore(ctx, pmf)
-	scheduler, err := pd.NewScheduler(ctx, schedCfg, datastore)
+	scheduler, err := pd.NewScheduler(ctx, schedulerConfig, datastore)
 	if err != nil {
 		setupLog.Error(err, "Failed to create PD scheduler")
 		return err

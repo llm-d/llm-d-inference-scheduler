@@ -3,8 +3,6 @@
 package config
 
 import (
-	"math"
-
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
@@ -16,6 +14,10 @@ const (
 	//  - "PREFILL_ENABLE_" + pluginName  Enables the named plugin for prefill processing
 	//  - "PREFILL_" + pluginName + "_WEIGHT"  The weight for a scorer in prefill processing
 
+	prefillPrefix = "PREFILL_"
+	enablePrefix  = "ENABLE_"
+	weightSuffix  = "_WEIGHT"
+
 	// KVCacheScorerName name of the kv-cache scorer in configuration
 	KVCacheScorerName = "KVCACHE_AWARE_SCORER"
 	// LoadAwareScorerName name of the load aware scorer in configuration
@@ -24,10 +26,6 @@ const (
 	PrefixScorerName = "PREFIX_AWARE_SCORER"
 	// SessionAwareScorerName name of the session aware scorer in configuration
 	SessionAwareScorerName = "SESSION_AWARE_SCORER"
-
-	prefillPrefix = "PREFILL_"
-	enablePrefix  = "ENABLE_"
-	weightSuffix  = "_WEIGHT"
 
 	// Plugins from Upstream
 
@@ -58,47 +56,34 @@ const (
 
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
 type Config struct {
-	logger                  logr.Logger
 	DecodeSchedulerPlugins  map[string]int
 	PrefillSchedulerPlugins map[string]int
-
-	PDEnabled       bool
-	PDThreshold     int
-	PrefixBlockSize int
+	PDEnabled               bool
+	PDThreshold             int
+	PrefixBlockSize         int
 }
 
-// NewConfig creates a new instance if Config
-func NewConfig(logger logr.Logger) *Config {
+// LoadConfig loads configuration from environment variables and returns a new instance of Config
+func LoadConfig(logger logr.Logger) *Config {
+	pluginNames := []string{
+		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
+		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
+		GIELowQueueFilterName, GIESheddableCapacityFilterName,
+		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName,
+	}
+
 	return &Config{
-		logger:                  logger,
-		DecodeSchedulerPlugins:  map[string]int{},
-		PrefillSchedulerPlugins: map[string]int{},
-		PDEnabled:               false,
-		PDThreshold:             math.MaxInt,
-		PrefixBlockSize:         prefixScorerBlockSizeDefault,
+		DecodeSchedulerPlugins:  loadPluginInfo(logger, false, pluginNames),
+		PrefillSchedulerPlugins: loadPluginInfo(logger, true, pluginNames),
+		PDEnabled:               env.GetEnvString(pdEnabledEnvKey, "false", logger) == "true",
+		PDThreshold:             env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
+		PrefixBlockSize:         env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, logger),
 	}
 }
 
-// LoadConfig loads configuration from environment variables
-func (c *Config) LoadConfig() {
-	c.loadPluginInfo(c.DecodeSchedulerPlugins, false,
-		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
-		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
-		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName)
+func loadPluginInfo(logger logr.Logger, prefill bool, pluginNames []string) map[string]int {
+	result := map[string]int{}
 
-	c.loadPluginInfo(c.PrefillSchedulerPlugins, true,
-		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
-		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
-		GIELowQueueFilterName, GIESheddableCapacityFilterName,
-		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName)
-
-	c.PDEnabled = env.GetEnvString(pdEnabledEnvKey, "false", c.logger) == "true"
-	c.PDThreshold = env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, c.logger)
-	c.PrefixBlockSize = env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, c.logger)
-}
-
-func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginNames ...string) {
 	for _, pluginName := range pluginNames {
 		var enablementKey string
 		var weightKey string
@@ -110,13 +95,15 @@ func (c *Config) loadPluginInfo(plugins map[string]int, prefill bool, pluginName
 			weightKey = pluginName + weightSuffix
 		}
 
-		if env.GetEnvString(enablementKey, "false", c.logger) != "true" {
-			c.logger.Info("Skipping plugin creation as it is not enabled", "name", pluginName)
+		if env.GetEnvString(enablementKey, "false", logger) != "true" {
+			logger.Info("Skipping plugin creation as it is not enabled", "name", pluginName)
 		} else {
-			weight := env.GetEnvInt(weightKey, 1, c.logger)
+			weight := env.GetEnvInt(weightKey, 1, logger)
 
-			plugins[pluginName] = weight
-			c.logger.Info("Initialized plugin", "plugin", pluginName, "weight", weight)
+			result[pluginName] = weight
+			logger.Info("Initialized plugin", "plugin", pluginName, "weight", weight)
 		}
 	}
+
+	return result
 }
