@@ -81,7 +81,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, request *types.LLMRequest, 
 // ProcessResults handles the outcome of the profile runs after both prefill and decode profiles ran succuessfully.
 // In case of an error in one of them, ProcessResults will not be called by the scheduler and an appropriate error
 // is returned by the scheduler.
-func (h *PdProfileHandler) ProcessResults(ctx context.Context, request *types.LLMRequest, profileResults map[string]*types.ProfileRunResult) *types.SchedulingResult {
+func (h *PdProfileHandler) ProcessResults(_ context.Context, request *types.LLMRequest, profileResults map[string]*types.ProfileRunResult) *types.SchedulingResult {
 	if pool, err := h.datastore.PoolGet(); err == nil {
 		// TODO: should the scheme be conifgurable (e.g., https://)?
 		prefillURL := fmt.Sprintf("http://%s:%d", profileResults[prefill].TargetPod.GetPod().Address, pool.Spec.TargetPortNumber)

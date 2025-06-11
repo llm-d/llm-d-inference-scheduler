@@ -61,7 +61,7 @@ func (s *PrefixAwareScorer) Name() string {
 }
 
 // Score scores the target pods based on the longest prefix match.
-func (s *PrefixAwareScorer) Score(ctx context.Context, request *types.LLMRequest, cycleState *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
+func (s *PrefixAwareScorer) Score(ctx context.Context, request *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(prefixAwareScorerName).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
@@ -101,7 +101,7 @@ func (s *PrefixAwareScorer) Score(ctx context.Context, request *types.LLMRequest
 
 // PostResponse implements the PostResponse interface.
 // It adds the prefix to the PrefixStore for the given pod.
-func (s *PrefixAwareScorer) PostResponse(ctx context.Context, request *types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (s *PrefixAwareScorer) PostResponse(ctx context.Context, request *types.LLMRequest, _ *requestcontrol.Response, targetPod *backend.Pod) {
 	debugLogger := log.FromContext(ctx).WithName(prefixAwareScorerName)
 	debugLogger.Info("PostResponse called", "request", request, "pod", targetPod)
 
