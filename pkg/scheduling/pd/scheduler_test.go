@@ -14,8 +14,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -53,7 +53,7 @@ func TestPDSchedule(t *testing.T) {
 		name            string
 		req             *types.LLMRequest
 		input           []*backendmetrics.FakePodMetrics
-		wantRes         *types.Result
+		wantRes         *types.ProfileRunResult
 		wantHeaders     map[string]string
 		unwantedHeaders []string
 		err             bool
@@ -62,7 +62,6 @@ func TestPDSchedule(t *testing.T) {
 			name: "no pods in datastore",
 			req: &types.LLMRequest{
 				TargetModel: "any-model",
-				Critical:    true,
 				Prompt:      "12345678901",
 			},
 			input: []*backendmetrics.FakePodMetrics{},
@@ -72,12 +71,11 @@ func TestPDSchedule(t *testing.T) {
 			name: "one decode pod, long prompt",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Critical:    true,
 				Prompt:      "12345678901",
 			},
 			// pod2 will be picked because it is the only pod with Decode role
 			input: []*backendmetrics.FakePodMetrics{pod2},
-			wantRes: &types.Result{
+			wantRes: &types.ProfileRunResult{
 				TargetPod: &types.ScoredPod{
 					Pod: wantPod2,
 				},
@@ -88,7 +86,6 @@ func TestPDSchedule(t *testing.T) {
 			name: "one prefill pod, long prompt",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Critical:    true,
 				Prompt:      "12345678901",
 			},
 			// no Decode pod
@@ -99,12 +96,11 @@ func TestPDSchedule(t *testing.T) {
 			name: "1P1D",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Critical:    true,
 				Prompt:      "12345678901",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP will be in the header
 			input: []*backendmetrics.FakePodMetrics{pod1, pod2},
-			wantRes: &types.Result{
+			wantRes: &types.ProfileRunResult{
 				TargetPod: &types.ScoredPod{
 					Pod:   wantPod2,
 					Score: 0.0,
@@ -116,13 +112,12 @@ func TestPDSchedule(t *testing.T) {
 			name: "1P1Dshort",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Critical:    true,
 				Prompt:      "123",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP should no be in the header,
 			// because the prompt is too short
 			input: []*backendmetrics.FakePodMetrics{pod1, pod2},
-			wantRes: &types.Result{
+			wantRes: &types.ProfileRunResult{
 				TargetPod: &types.ScoredPod{
 					Pod:   wantPod2,
 					Score: 0.0,
@@ -146,7 +141,11 @@ func TestPDSchedule(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			scheduler, _ := pd.NewScheduler(ctx, schedulderConfig, &fakeDataStore{pods: test.input})
+			scheduler, err := pd.CreatePDScheduler(ctx, schedulderConfig, &fakeDataStore{pods: test.input})
+			if err != nil {
+				t.Errorf("Unexpected error, got %v", err)
+			}
+
 			got, err := scheduler.Schedule(ctx, test.req)
 
 			if test.err != (err != nil) {

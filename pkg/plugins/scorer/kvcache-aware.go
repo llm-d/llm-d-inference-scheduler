@@ -8,13 +8,12 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
-
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+
+	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
 )
 
 const (
@@ -24,18 +23,15 @@ const (
 	huggingFaceTokenEnvVar = "HF_TOKEN"
 )
 
-// KVCacheAwareScorer uses the KVCacheIndexer to score pods based on KVCache
-// awareness.
-type KVCacheAwareScorer struct {
-	kvCacheIndexer *kvcache.Indexer
-}
+// compile-time type assertion
+var _ framework.Scorer = &KVCacheAwareScorer{}
 
 // NewKVCacheAwareScorer creates a new KVCacheAwareScorer instance.
 // It initializes the KVCacheIndexer from environment variables.
 //
 // If the environment variables are not set, or if the indexer
 // fails to initialize, an error is returned.
-func NewKVCacheAwareScorer(ctx context.Context) (plugins.Scorer, error) {
+func NewKVCacheAwareScorer(ctx context.Context) (framework.Scorer, error) {
 	config := kvcache.NewDefaultConfig()
 
 	redisAddr := os.Getenv(kvCacheRedisEnvVar)
@@ -73,6 +69,11 @@ func NewKVCacheAwareScorer(ctx context.Context) (plugins.Scorer, error) {
 	}, nil
 }
 
+// KVCacheAwareScorer uses the KVCacheIndexer to score pods based on KVCache awareness.
+type KVCacheAwareScorer struct {
+	kvCacheIndexer *kvcache.Indexer
+}
+
 // Name returns the name of the scorer.
 func (s *KVCacheAwareScorer) Name() string {
 	return kvCacheAwareScorerName
@@ -80,14 +81,14 @@ func (s *KVCacheAwareScorer) Name() string {
 
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
-func (s *KVCacheAwareScorer) Score(ctx *types.SchedulingContext, pods []types.Pod) map[types.Pod]float64 {
+func (s *KVCacheAwareScorer) Score(ctx context.Context, request *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(kvCacheAwareScorerName).V(logutil.DEBUG)
-	if ctx.Req == nil {
+	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
 		return nil
 	}
 
-	scores, err := s.kvCacheIndexer.GetPodScores(ctx.Context, ctx.Req.Prompt, ctx.Req.TargetModel, nil)
+	scores, err := s.kvCacheIndexer.GetPodScores(ctx, request.Prompt, request.TargetModel, nil)
 	if err != nil {
 		loggerDebug.Error(err, "Failed to get pod scores")
 		return nil
