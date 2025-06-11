@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: endpoint-picker
+  name: ${EPP_NAME}
   labels:
-    app: endpoint-picker
+    app: ${EPP_NAME}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: endpoint-picker
+      app: ${EPP_NAME}
   template:
     metadata:
       labels:
-        app: endpoint-picker
+        app: ${EPP_NAME}
     spec:
-      serviceAccountName: endpoint-picker
+      serviceAccountName: ${EPP_NAME}
       terminationGracePeriodSeconds: 130
       containers:
       - name: epp

@@ -2,9 +2,9 @@
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: endpoint-picker-insecure-tls
+  name: ${EPP_NAME}-insecure-tls
 spec:
-  host: endpoint-picker
+  host: ${EPP_NAME}
   trafficPolicy:
       tls:
         mode: SIMPLE

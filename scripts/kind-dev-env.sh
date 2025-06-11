@@ -34,14 +34,17 @@ export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.1.0}"
 # Set a default EPP_TAG if not provided
 export EPP_TAG="${EPP_TAG:-dev}"
 
+# Set the model name to deploy
+export MODEL_NAME="${MODEL_NAME:-food-review}"
+
+# Set the endpoint-picker to deploy
+export EPP_NAME="${EPP_NAME:-${MODEL_NAME}-enpoint-picker}"
+
 # Set the default routing side car image tag
 export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"
 
 # Set the inference pool name for the deployment
-export POOL_NAME="${POOL_NAME:-vllm-llama3-8b-instruct}"
-
-# Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-food-review}"
+export POOL_NAME="${POOL_NAME:-${MODEL_NAME}-inference-pool}"
 
 # vLLM replica count (without PD)
 export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
@@ -161,12 +164,11 @@ if [ "${PD_ENABLED}" != "\"true\"" ]; then
 else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
 fi
+
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
-	| envsubst \${POOL_NAME} | envsubst '${MODEL_NAME}' | envsubst \${EPP_TAG} | envsubst \${VLLM_SIMULATOR_TAG} \
-    | envsubst \${PD_ENABLED} | envsubst \${PD_PROMPT_LEN_THRESHOLD} \
-    | envsubst \${ROUTING_SIDECAR_TAG} | envsubst \${VLLM_REPLICA_COUNT} \
-    | envsubst \${VLLM_REPLICA_COUNT_P} | envsubst \${VLLM_REPLICA_COUNT_D} \
-    | kubectl --context ${KUBE_CONTEXT} apply -f -
+	| envsubst '${POOL_NAME} ${MODEL_NAME} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
+  ${PD_ENABLED} ${ROUTING_SIDECAR_TAG} ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D}' \
+  | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------
 # Check & Verify
@@ -196,7 +198,7 @@ Status:
 
 You can watch the Endpoint Picker logs with:
 
-  $ kubectl --context ${KUBE_CONTEXT} logs -f deployments/endpoint-picker
+  $ kubectl --context ${KUBE_CONTEXT} logs -f deployments/${EPP_NAME}
 
 With that running in the background, you can make requests:
 

@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: endpoint-picker
+  name: ${EPP_NAME}
 spec:
   selector:
-    app: endpoint-picker
+    app: ${EPP_NAME}
   ports:
   - protocol: TCP
     port: 9002
