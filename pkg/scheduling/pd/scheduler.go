@@ -2,194 +2,117 @@ package pd
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
+
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
-	giefilter "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/filter"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/multi/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/picker"
-	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins/scorer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	giefilter "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/filter"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/picker"
+	gieprofile "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/profile"
+	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/scorer"
 	envutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/datastore"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
-const (
-	// PrefillPodHeader is the HTTP header name used to indicate Prefill worker
-	PrefillPodHeader = "x-prefiller-url"
-)
+// CreatePDScheduler returns a new disaggregated Prefill/Decode scheduler, using the provided configuration.
+func CreatePDScheduler(ctx context.Context, pdConfig *config.Config, ds datastore.Datastore) (*scheduling.Scheduler, error) {
+	loggerDebug := log.FromContext(ctx).WithName("pd-Scheduler").V(logutil.DEBUG)
 
-// Scheduler implements the disaggreagted P/D scheduling logic
-type Scheduler struct {
-	threshold int
-	pdEnabled bool
-	store     Datastore
-	prefill   requestcontrol.Scheduler
-	decode    requestcontrol.Scheduler
+	// decode profile plugins creation
+	decodePlugins := pluginsFromConfig(ctx, pdConfig.DecodeSchedulerPlugins)
 
-	// prefixScorer is a prefix scorer which will be used for decission if prefill step is required
-	// if pd is enabled, prefix scorers should be the same instance in all:
-	// prefill scheduler, decode scheduler and prefixScorer
-	prefixScorer *scorer.PrefixAwareScorer
-}
-
-var _ requestcontrol.Scheduler = &Scheduler{} // validate interface conformance
-
-// Datastore portion used by scheduler
-type Datastore interface {
-	// InferencePool operations
-	PoolGet() (*v1alpha2.InferencePool, error)
-	// PodMetrics operations
-	PodGetAll() []backendmetrics.PodMetrics
-}
-
-// NewScheduler returns a new disaggregated Prefill/Decode filter, using the
-// provided configuration.
-func NewScheduler(ctx context.Context, schedulerConfig *config.Config, ds Datastore) (*Scheduler, error) {
-	prefixConfig := scorer.DefaultPrefixStoreConfig()
-	prefixConfig.BlockSize = schedulerConfig.PrefixBlockSize
-
-	scheduler := &Scheduler{
-		threshold:    schedulerConfig.PDThreshold,
-		pdEnabled:    schedulerConfig.PDEnabled,
-		store:        ds,
-		prefixScorer: scorer.NewPrefixAwareScorer(ctx, prefixConfig),
-	}
-
-	scheduler.prefill = scheduling.NewSchedulerWithConfig(
-		ds,
-		scheduler.generateSchedulerConfig(ctx, schedulerConfig.PrefillSchedulerPlugins,
-			&filter.PrefillFilter{}),
-	)
-
-	scheduler.decode = scheduling.NewSchedulerWithConfig(
-		ds,
-		scheduler.generateSchedulerConfig(ctx, schedulerConfig.DecodeSchedulerPlugins,
-			&filter.DecodeFilter{}),
-	)
-
-	return scheduler, nil
-}
-
-// Schedule uses (up to) two internal schedulers to process requests.
-// If the request prompt is short (as defined by the configured threshold)
-// the scheduler use the default behavior ("Decode scheduler").
-// If the request prompt is long enough to warrant disaggregated prefill-decode,
-// both the Prefill and Decode schedulers are invoked. In the case of the
-// Prefill scheduler, the selected Pod's URL is saved in a header
-// and communicated back to the inference gateway.
-func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types.Result, error) {
-	logger := log.FromContext(ctx).WithName("PD").WithValues("request", req)
-	debugLog := logger.V(logutil.DEBUG)
-
-	scheduleStart := time.Now()
-	defer func() {
-		metrics.RecordSchedulerE2ELatency(time.Since(scheduleStart))
-	}()
-
-	if !s.pdEnabled {
-		debugLog.Info("Disagregated prefill/decode disabled - scheduling to decode worker only")
-		return s.decode.Schedule(ctx, req)
-	}
-
-	// find the best pod for decode
-	// assumes that prefix scorer was activated
-	decodeRes, err := s.decode.Schedule(ctx, req)
-
-	if decodeRes == nil || decodeRes.TargetPod == nil {
-		logger.Info("No decode pod found, skipping scheduling")
-		return nil, errors.New("no decode pod found")
-	}
-
-	// if the request is short enough, use the default scheduler
-	hitPercentage := s.prefixScorer.GetCachedPercentage(decodeRes.TargetPod.GetPod().NamespacedName.String(), req.Prompt)
-	if (1.0-hitPercentage)*float64(len(req.Prompt)) < float64(s.threshold) {
-		logger.Info("Non-cached suffix is smaller than threshold, using decode scheduler",
-			"hitPercentage", hitPercentage)
-		return decodeRes, err
-	}
-
-	logger.Info("Non-cached suffix is larger than threshold, using PD scheduler",
-		"hitPercentage", hitPercentage)
-	prefillRes, prefillErr := s.prefill.Schedule(ctx, req)
-
-	if prefillErr == nil && prefillRes.TargetPod != nil { // record the prefill worker
-		pool, err := s.store.PoolGet()
+	if !pdConfig.PDEnabled { // no PD, create scheduler with SingleProfileHandler (handling only decode profile)
+		decodeProfile, err := createDecodeSchedulerProfile(decodePlugins)
 		if err != nil {
-			debugLog.Error(err, "Get inference pool failed - scheduling to decode worker only")
-			return s.decode.Schedule(ctx, req)
+			return nil, fmt.Errorf("falied to create scheduler - %w", err)
 		}
+		loggerDebug.Info("Disagregated prefill/decode disabled - scheduler configured to work with decode profile only")
+		return scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(gieprofile.NewSingleProfileHandler(), map[string]*framework.SchedulerProfile{
+			"decode": decodeProfile})), nil
+	}
+	// if we're here, PD is enabled.
+	// always initialize prefix scorer, which is used in the decision making of whether PD should be called or not.
+	// The prefix scorer is always used in profile handler and should always be used in decode profile even when PD is
+	// disabled (in such case add with weight 0).
+	prefixConfig := scorer.DefaultPrefixStoreConfig()
+	prefixConfig.BlockSize = pdConfig.PrefixBlockSize
+	prefixScorer := scorer.NewPrefixAwareScorer(ctx, prefixConfig)
 
-		// TODO: should the scheme be conifgurable (e.g., https://)?
-		prefillURL := fmt.Sprintf("http://%s:%d", prefillRes.TargetPod.GetPod().Address, pool.Spec.TargetPortNumber)
-		if req.Headers == nil { // TODO should always be populated?
-			req.Headers = make(map[string]string)
-		}
-		req.Headers[PrefillPodHeader] = prefillURL
+	// in case pd is enabled and prefix scorer was not enabled for decode profile
+	// add prefix scorer to list of all scorers to collect information used for the decision if prefill should be called.
+	if _, exist := pdConfig.DecodeSchedulerPlugins[config.PrefixScorerName]; !exist {
+		decodePlugins = append(decodePlugins, framework.NewWeightedScorer(prefixScorer, 0))
+	}
+	decodeProfile, err := createDecodeSchedulerProfile(decodePlugins)
+	if err != nil {
+		return nil, fmt.Errorf("falied to create scheduler - %w", err)
 	}
 
-	debugLog.Info("Scheduling to separate Prefill and Decode workers")
+	// prefil profile creation
+	prefilProfile := framework.NewSchedulerProfile().
+		WithFilters(&filter.PrefillFilter{}).
+		WithPicker(picker.NewMaxScorePicker())
+	if err := prefilProfile.AddPlugins(pluginsFromConfig(ctx, pdConfig.PrefillSchedulerPlugins)...); err != nil {
+		return nil, fmt.Errorf("falied to create prefil scheduler profile - %w", err)
+	}
 
-	return decodeRes, nil // decode pod
+	pdProfileHandler := profile.NewPdProfileHandler(pdConfig.PDThreshold, prefixScorer, ds)
+	return scheduling.NewSchedulerWithConfig(ds, scheduling.NewSchedulerConfig(pdProfileHandler, map[string]*framework.SchedulerProfile{
+		"decode":  decodeProfile,
+		"prefill": prefilProfile,
+	})), nil
 }
 
-// OnResponse normally processes all LLMResponses - forwards all responses to the decode scheduler
-func (s *Scheduler) OnResponse(ctx context.Context, resp *types.LLMResponse, targetPodName string) {
-	// prefill scheduler will never get OnReponse, need to take care of plugin, issue #97
-	s.decode.OnResponse(ctx, resp, targetPodName)
+func createDecodeSchedulerProfile(decodePlugins []plugins.Plugin) (*framework.SchedulerProfile, error) {
+	decodeProfile := framework.NewSchedulerProfile().
+		WithFilters(&filter.DecodeFilter{}).
+		WithPicker(picker.NewMaxScorePicker())
+	if err := decodeProfile.AddPlugins(decodePlugins...); err != nil {
+		return nil, fmt.Errorf("falied to create decode scheduler profile - %w", err)
+	}
+
+	return decodeProfile, nil
 }
 
-func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int) map[plugins.Plugin]int {
+func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int) []plugins.Plugin {
 	logger := log.FromContext(ctx)
 
-	plugins := map[plugins.Plugin]int{}
-	prefixWasAdded := false
-
+	plugins := []plugins.Plugin{}
 	for pluginName, pluginWeight := range pluginsConfig {
 		switch pluginName {
 		case config.KVCacheScorerName:
-			scorer, err := scorer.NewKVCacheAwareScorer(ctx)
-			if err == nil {
-				plugins[scorer] = pluginWeight
+			if scorer, err := scorer.NewKVCacheAwareScorer(ctx); err == nil {
+				plugins = append(plugins, framework.NewWeightedScorer(scorer, pluginWeight))
 			} else {
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			plugins[scorer.NewLoadAwareScorer(ctx)] = pluginWeight
-		case config.PrefixScorerName:
-			// TODO - create config? based on what? - issue #55
-			// use the same instance
-			plugins[s.prefixScorer] = pluginWeight
-			prefixWasAdded = true
+			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx), pluginWeight))
 		case config.SessionAwareScorerName:
-			plugins[scorer.NewSessionAffinity()] = pluginWeight
+			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewSessionAffinity(), pluginWeight))
 
 		// Plugins from upstream
 
 		case config.GIELeastKVCacheFilterName:
-			plugins[giefilter.NewLeastKVCacheFilter()] = pluginWeight
+			plugins = append(plugins, giefilter.NewLeastKVCacheFilter())
 		case config.GIELeastQueueFilterName:
-			plugins[giefilter.NewLeastQueueFilter()] = pluginWeight
+			plugins = append(plugins, giefilter.NewLeastQueueFilter())
 		case config.GIELoraAffinityFilterName:
-			plugins[giefilter.NewLoraAffinityFilter()] = pluginWeight
+			plugins = append(plugins, giefilter.NewLoraAffinityFilter())
 		case config.GIELowQueueFilterName:
-			plugins[giefilter.NewLowQueueFilter()] = pluginWeight
-		case config.GIESheddableCapacityFilterName:
-			plugins[giefilter.NewSheddableCapacityFilter()] = pluginWeight
+			plugins = append(plugins, giefilter.NewLowQueueFilter())
 		case config.GIEKVCacheUtilizationScorerName:
-			plugins[&giescorer.KVCacheScorer{}] = pluginWeight
+			plugins = append(plugins, framework.NewWeightedScorer(&giescorer.KVCacheScorer{}, pluginWeight))
 		case config.GIEPrefixScorerName:
 			// For now use the default configuration
 			prefixConfig := prefix.Config{
@@ -197,54 +120,11 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 				MaxPrefixBlocksToMatch: envutil.GetEnvInt("PREFIX_CACHE_MAX_PREFIX_BLOCKS", prefix.DefaultMaxPrefixBlocks, logger),
 				LRUIndexerCapacity:     envutil.GetEnvInt("PREFIX_CACHE_LRU_CAPACITY", prefix.DefaultLRUIndexerCapacity, logger),
 			}
-			plugins[prefix.New(prefixConfig)] = pluginWeight
+			plugins = append(plugins, framework.NewWeightedScorer(prefix.New(prefixConfig), pluginWeight))
 		case config.GIEQueueScorerName:
-			plugins[&giescorer.QueueScorer{}] = pluginWeight
+			plugins = append(plugins, framework.NewWeightedScorer(&giescorer.QueueScorer{}, pluginWeight))
 		}
-	}
-
-	// only in case pd is enabled and prefix scorer was not enabled for decode scheduler
-	// add prefix scorer to list of all scorers to collect information used for decision if PD should be acrivated
-	if s.pdEnabled && !prefixWasAdded {
-		plugins[s.prefixScorer] = 0.0
 	}
 
 	return plugins
-}
-
-func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig map[string]int, extraFilters ...plugins.Filter) *scheduling.SchedulerConfig {
-	thePlugins := s.pluginsFromConfig(ctx, pluginsConfig)
-	preSchedulePlugins := []plugins.PreSchedule{}
-	filters := []plugins.Filter{}
-	scorers := []*giescorer.WeightedScorer{}
-	postSchedulePlugins := []plugins.PostSchedule{}
-	postResponsePlugins := []plugins.PostResponse{}
-
-	filters = append(filters, extraFilters...)
-
-	for plugin, pluginWeight := range thePlugins {
-		if preSchedule, ok := plugin.(plugins.PreSchedule); ok {
-			preSchedulePlugins = append(preSchedulePlugins, preSchedule)
-		}
-		if filter, ok := plugin.(plugins.Filter); ok {
-			filters = append(filters, filter)
-		}
-		if scorer, ok := plugin.(plugins.Scorer); ok {
-			scorers = append(scorers, giescorer.NewWeightedScorer(scorer, pluginWeight))
-		}
-		if postSchedule, ok := plugin.(plugins.PostSchedule); ok {
-			postSchedulePlugins = append(postSchedulePlugins, postSchedule)
-		}
-		if postResponse, ok := plugin.(plugins.PostResponse); ok {
-			postResponsePlugins = append(postResponsePlugins, postResponse)
-		}
-	}
-
-	return scheduling.NewSchedulerConfig().
-		WithPreSchedulePlugins(preSchedulePlugins...).
-		WithFilters(filters...).
-		WithScorers(scorers...).
-		WithPicker(picker.NewMaxScorePicker()).
-		WithPostSchedulePlugins(postSchedulePlugins...).
-		WithPostResponsePlugins(postResponsePlugins...)
 }

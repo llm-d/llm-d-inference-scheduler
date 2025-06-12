@@ -1,7 +1,9 @@
 package filter
 
 import (
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
+	"context"
+
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
 
@@ -16,10 +18,11 @@ const (
 	RoleBoth = "both"
 )
 
+// compile-time type assertion
+var _ framework.Filter = &PrefillFilter{}
+
 // PrefillFilter - filters out pods that are not marked with role Prefill
 type PrefillFilter struct{}
-
-var _ plugins.Filter = &PrefillFilter{} // validate interface conformance
 
 // Name returns the name of the filter
 func (pf *PrefillFilter) Name() string {
@@ -27,7 +30,7 @@ func (pf *PrefillFilter) Name() string {
 }
 
 // Filter filters out all pods that are not marked as "prefill"
-func (pf *PrefillFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
+func (pf *PrefillFilter) Filter(_ context.Context, _ *types.LLMRequest, _ *types.CycleState, pods []types.Pod) []types.Pod {
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
@@ -39,10 +42,11 @@ func (pf *PrefillFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []
 	return filteredPods
 }
 
+// compile-time type assertion
+var _ framework.Filter = &DecodeFilter{}
+
 // DecodeFilter - filters out pods that are not marked with role Decode or Both
 type DecodeFilter struct{}
-
-var _ plugins.Filter = &DecodeFilter{} // validate interface conformance
 
 // Name returns the name of the filter
 func (df *DecodeFilter) Name() string {
@@ -50,7 +54,7 @@ func (df *DecodeFilter) Name() string {
 }
 
 // Filter removes all pods that are not marked as "decode" or "both"
-func (df *DecodeFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
+func (df *DecodeFilter) Filter(_ context.Context, _ *types.LLMRequest, _ *types.CycleState, pods []types.Pod) []types.Pod {
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
