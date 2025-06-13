@@ -3,7 +3,8 @@ package pd
 import (
 	"context"
 	"errors"
-	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -133,7 +134,8 @@ func (s *Scheduler) Schedule(ctx context.Context, req *types.LLMRequest) (*types
 		}
 
 		// TODO: should the scheme be conifgurable (e.g., https://)?
-		prefillURL := fmt.Sprintf("http://%s:%d", prefillRes.TargetPod.GetPod().Address, pool.Spec.TargetPortNumber)
+		prefillURL := "http://" + net.JoinHostPort(prefillRes.TargetPod.GetPod().Address, strconv.Itoa(int(pool.Spec.TargetPortNumber)))
+
 		if req.Headers == nil { // TODO should always be populated?
 			req.Headers = make(map[string]string)
 		}
