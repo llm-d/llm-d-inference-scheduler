@@ -22,6 +22,7 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
+	externalhttp "github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/external/http"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/filter"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
 )
@@ -70,13 +71,13 @@ func NewScheduler(ctx context.Context, schedulerConfig *config.Config, ds Datast
 
 	scheduler.prefill = scheduling.NewSchedulerWithConfig(
 		ds,
-		scheduler.generateSchedulerConfig(ctx, schedulerConfig.PrefillSchedulerPlugins,
+		scheduler.generateSchedulerConfig(ctx, schedulerConfig.PrefillSchedulerPlugins, schedulerConfig.PrefillSchedulerExternalPlugins,
 			&filter.PrefillFilter{}),
 	)
 
 	scheduler.decode = scheduling.NewSchedulerWithConfig(
 		ds,
-		scheduler.generateSchedulerConfig(ctx, schedulerConfig.DecodeSchedulerPlugins,
+		scheduler.generateSchedulerConfig(ctx, schedulerConfig.DecodeSchedulerPlugins, schedulerConfig.DecodeSchedulerExternalPlugins,
 			&filter.DecodeFilter{}),
 	)
 
@@ -212,7 +213,57 @@ func (s *Scheduler) pluginsFromConfig(ctx context.Context, pluginsConfig map[str
 	return plugins
 }
 
-func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig map[string]int, extraFilters ...plugins.Filter) *scheduling.SchedulerConfig {
+func externalFiltersFromConfig(ctx context.Context, info []config.ExternalPluginInfo) []plugins.Filter {
+	logger := log.FromContext(ctx)
+	filters := make([]plugins.Filter, 0)
+
+	for _, extPluginInfo := range info {
+		filters = append(filters, externalhttp.NewFilter(ctx, extPluginInfo.Name, extPluginInfo.URL))
+	}
+
+	logger.Info(fmt.Sprintf("Created %d external filters", len(filters)))
+	return filters
+}
+
+func externalPreSchedulesFromConfig(ctx context.Context, info []config.ExternalPluginInfo) []plugins.PreSchedule {
+	logger := log.FromContext(ctx)
+	preSchedules := []plugins.PreSchedule{}
+
+	for _, extPluginInfo := range info {
+		preSchedules = append(preSchedules, externalhttp.NewPreSchedule(ctx, extPluginInfo.Name, extPluginInfo.URL))
+	}
+
+	logger.Info(fmt.Sprintf("Created %d external pre-schedules", len(preSchedules)))
+	return preSchedules
+}
+
+func externalPostSchedulesFromConfig(ctx context.Context, info []config.ExternalPluginInfo) []plugins.PostSchedule {
+	logger := log.FromContext(ctx)
+	postSchedules := []plugins.PostSchedule{}
+
+	for _, extPluginInfo := range info {
+		postSchedules = append(postSchedules, externalhttp.NewPostSchedule(ctx, extPluginInfo.Name, extPluginInfo.URL))
+	}
+
+	logger.Info(fmt.Sprintf("Created %d external post-schedules", len(postSchedules)))
+	return postSchedules
+}
+
+func externalScorersFromConfig(ctx context.Context, info []config.ExternalPluginInfo) []*giescorer.WeightedScorer {
+	logger := log.FromContext(ctx)
+	scorers := []*giescorer.WeightedScorer{}
+
+	for _, extPluginInfo := range info {
+		scorers = append(scorers, giescorer.NewWeightedScorer(externalhttp.NewScorer(ctx, extPluginInfo.Name, extPluginInfo.URL), extPluginInfo.Weight))
+	}
+
+	logger.Info(fmt.Sprintf("Created %d external scorers", len(scorers)))
+	return scorers
+}
+
+func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig map[string]int,
+	externalPlugins config.ExternalPlugins, extraFilters ...plugins.Filter) *scheduling.SchedulerConfig {
+
 	thePlugins := s.pluginsFromConfig(ctx, pluginsConfig)
 	preSchedulePlugins := []plugins.PreSchedule{}
 	filters := []plugins.Filter{}
@@ -239,6 +290,13 @@ func (s *Scheduler) generateSchedulerConfig(ctx context.Context, pluginsConfig m
 			postResponsePlugins = append(postResponsePlugins, postResponse)
 		}
 	}
+
+	// add external plugins
+	preSchedulePlugins = append(preSchedulePlugins, externalPreSchedulesFromConfig(ctx, externalPlugins.PreSchedulers)...)
+	filters = append(filters, externalFiltersFromConfig(ctx, externalPlugins.Filters)...)
+	scorers = append(scorers, externalScorersFromConfig(ctx, externalPlugins.Scorers)...)
+	postSchedulePlugins = append(postSchedulePlugins, externalPostSchedulesFromConfig(ctx, externalPlugins.PostSchedulers)...)
+	// postResponsePlugins = append(postResponsePlugins, postResponse)
 
 	return scheduling.NewSchedulerConfig().
 		WithPreSchedulePlugins(preSchedulePlugins...).

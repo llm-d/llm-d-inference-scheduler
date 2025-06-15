@@ -3,6 +3,8 @@
 package config
 
 import (
+	"encoding/json"
+
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
@@ -52,15 +54,49 @@ const (
 
 	prefixScorerBlockSizeEnvKey  = "PREFIX_SCORER_BLOCK_SIZE"
 	prefixScorerBlockSizeDefault = 256
+
+	externalPrefix = "EXTERNAL_"
+	httpPrefix     = "HTTP_"
+
+	preSchedulers  = "PRE_SCHEDULERS"
+	filters        = "FILTERS"
+	scorers        = "SCORERS"
+	postSchedulers = "POST_SCHEDULERS"
+
+	// EXTERNAL_HTTP_PRE_SCHEDULERS
+	// EXTERNAL_PREFILL_HTTP_PRE_SCHEDULERS
+	// EXTERNAL_HTTP_FILTERS
+	// EXTERNAL_PREFILL_HTTP_FILTERS
+	// EXTERNAL_HTTP_SCORERS
+	// EXTERNAL_PREFILL_HTTP_SCORERS
+	// EXTERNAL_HTTP_POST_SCHEDULERS
+	// EXTERNAL_PREFILL_HTTP_POST_SCHEDULERS
 )
+
+// ExternalPluginInfo configuration of an external plugin
+type ExternalPluginInfo struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Weight int    `json:"weight"`
+}
+
+// ExternalPlugins contains all types of external plugins configuration
+type ExternalPlugins struct {
+	PreSchedulers  []ExternalPluginInfo
+	Filters        []ExternalPluginInfo
+	Scorers        []ExternalPluginInfo
+	PostSchedulers []ExternalPluginInfo
+}
 
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
 type Config struct {
-	DecodeSchedulerPlugins  map[string]int
-	PrefillSchedulerPlugins map[string]int
-	PDEnabled               bool
-	PDThreshold             int
-	PrefixBlockSize         int
+	DecodeSchedulerPlugins          map[string]int
+	PrefillSchedulerPlugins         map[string]int
+	DecodeSchedulerExternalPlugins  ExternalPlugins
+	PrefillSchedulerExternalPlugins ExternalPlugins
+	PDEnabled                       bool
+	PDThreshold                     int
+	PrefixBlockSize                 int
 }
 
 // LoadConfig loads configuration from environment variables and returns a new instance of Config
@@ -72,12 +108,29 @@ func LoadConfig(logger logr.Logger) *Config {
 		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName,
 	}
 
+	// load external plugins for decode and prefill schedulers
+	prefillSchedulerExternalPlugins := ExternalPlugins{
+		PreSchedulers:  loadExternalPluginsInfo(logger, httpPrefix, "", preSchedulers),
+		Filters:        loadExternalPluginsInfo(logger, httpPrefix, "", filters),
+		Scorers:        loadExternalPluginsInfo(logger, httpPrefix, "", scorers),
+		PostSchedulers: loadExternalPluginsInfo(logger, httpPrefix, "", postSchedulers),
+	}
+
+	decodeSchedulerExternalPlugins := ExternalPlugins{
+		PreSchedulers:  loadExternalPluginsInfo(logger, httpPrefix, prefillPrefix, preSchedulers),
+		Filters:        loadExternalPluginsInfo(logger, httpPrefix, prefillPrefix, filters),
+		Scorers:        loadExternalPluginsInfo(logger, httpPrefix, prefillPrefix, scorers),
+		PostSchedulers: loadExternalPluginsInfo(logger, httpPrefix, prefillPrefix, postSchedulers),
+	}
+
 	return &Config{
-		DecodeSchedulerPlugins:  loadPluginInfo(logger, false, pluginNames),
-		PrefillSchedulerPlugins: loadPluginInfo(logger, true, pluginNames),
-		PDEnabled:               env.GetEnvString(pdEnabledEnvKey, "false", logger) == "true",
-		PDThreshold:             env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
-		PrefixBlockSize:         env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, logger),
+		DecodeSchedulerPlugins:          loadPluginInfo(logger, false, pluginNames),
+		PrefillSchedulerPlugins:         loadPluginInfo(logger, true, pluginNames),
+		DecodeSchedulerExternalPlugins:  prefillSchedulerExternalPlugins,
+		PrefillSchedulerExternalPlugins: decodeSchedulerExternalPlugins,
+		PDEnabled:                       env.GetEnvString(pdEnabledEnvKey, "false", logger) == "true",
+		PDThreshold:                     env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
+		PrefixBlockSize:                 env.GetEnvInt(prefixScorerBlockSizeEnvKey, prefixScorerBlockSizeDefault, logger),
 	}
 }
 
@@ -106,4 +159,27 @@ func loadPluginInfo(logger logr.Logger, prefill bool, pluginNames []string) map[
 	}
 
 	return result
+}
+
+// loadExternalPluginsInfo loads configuration of external plugins for the given scheduler type and the given plugins type
+//
+//nolint:unparam // future: protocol will support more values (grpc, wasm, etc.)
+func loadExternalPluginsInfo(logger logr.Logger, protocol string, schedulerType string, pluginType string) []ExternalPluginInfo {
+	var plugins []ExternalPluginInfo
+
+	envVarName := externalPrefix + protocol + schedulerType + pluginType
+	envVarRawValue := env.GetEnvString(envVarName, "", logger)
+
+	if envVarRawValue == "" {
+		logger.Info("Environment variable is not defined", "var", envVarName)
+		return plugins
+	}
+
+	if err := json.Unmarshal([]byte(envVarRawValue), &plugins); err != nil {
+		logger.Info("Error in environment variable unmarshaling", "error", err, "variable", envVarName, "value", envVarRawValue)
+		return plugins
+	}
+
+	logger.Info("External plugin loaded", "type", pluginType, "plugins", plugins)
+	return plugins
 }

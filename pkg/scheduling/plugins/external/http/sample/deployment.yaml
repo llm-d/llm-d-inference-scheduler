@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-plugins-server-service
+spec:
+  selector:
+    app: sample-plugins-server  # This should match your pod's labels
+  ports:
+  - port: 80          # Port the service exposes
+    targetPort: 1080  # Port your Python server listens on
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-plugins-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sample-plugins-server
+  template:
+    metadata:
+      labels:
+        app: sample-plugins-server  # Must match the Service selector
+    spec:
+      containers:
+      - name: sample-plugins-server
+        image: ghcr.io/llm-d/sample-external-plugins:dev
+        # imagePullPolicy: Always
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 1080  # Port your Python server listens on
+---
