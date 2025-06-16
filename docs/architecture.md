@@ -92,6 +92,11 @@ In case Disaggrigated Prefill is enabled, you should also define the following e
 - Toggle P/D mode: `PD_ENABLED=true`
 - Threshold: `PD_PROMPT_LEN_THRESHOLD=<value>`
 
+### Prefix Aware Scorer Configuration
+
+- `PREFIX_SCORER_CACHE_CAPACITY` - the cache capacity sets the maximum number of blocks the LRU cache can store. A block maps from a chunk of a prompt to a set of pods that are estimated to have the prefix of the prompt that ends at the keyed chunk.
+- `PREFIX_SCORER_CACHE_BLOCK_SIZE` - the cache block size defines the length of the prompt chunk that a block is keyed by.
+
 #### Prefill Scorers:
 ```bash
 export PREFILL_ENABLE_SESSION_AWARE_SCORER=true
