@@ -21,7 +21,7 @@ require (
 	k8s.io/component-base v0.33.1
 	sigs.k8s.io/controller-runtime v0.21.0
 	sigs.k8s.io/gateway-api v1.3.0
-	sigs.k8s.io/gateway-api-inference-extension v0.3.0
+	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250521193836-a5bf0acd13cc
 )
 
 require (
