@@ -141,7 +141,8 @@ func TestPDSchedule(t *testing.T) {
 		PrefillSchedulerPlugins: map[string]int{},
 		PDEnabled:               true,
 		PDThreshold:             5,
-		PrefixBlockSize:         256,
+		PrefixCacheBlockSize:    256,
+		PrefixCacheCapacity:     50000,
 	}
 
 	for _, test := range tests {
