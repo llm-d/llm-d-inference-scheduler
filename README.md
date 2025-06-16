@@ -7,8 +7,7 @@ the llm-d inference framework.
 
 This provides an "Endpoint Picker (EPP)" component to the llm-d inference
 framework which schedules incoming inference requests to the platform via a
-[Kubernetes] Gateway according to scheduler plugins (for more
-details, see the [Architecture Documentation]).
+[Kubernetes] Gateway according to scheduler plugins. For more details on the llm-d inference scheduler architecture, routing logic, and different plugins (filters and scorers), including plugin configuration, see the [Architecture Documentation]).
 
 The EPP extends the [Gateway API Inference Extension (GIE)] project,
 which provides the API resources and machinery for scheduling. We add some
