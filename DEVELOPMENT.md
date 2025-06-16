@@ -8,19 +8,21 @@ Documentation for developing the inference scheduler.
 - [Golang] `v1.24`+
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
+- [Kustomize]
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
 [Docker]:https://www.docker.com/
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
+[Kustomize]:https://kubectl.docs.kubernetes.io/installation/kustomize/
 
 ## Kind Development Environment
 
-> **WARNING**: This current requires you to have manually built the vllm
+> **WARNING**: This currently requires you to have manually built the vllm
 > simulator separately on your local system. In a future iteration this will
 > be handled automatically and will not be required. The tag for the simulator
-> currently needs to be `0.0.4`.
+> currently needs to be `v0.1.0`.
 
 You can deploy the current scheduler with a Gateway API implementation into a
 [Kubernetes in Docker (KIND)] cluster locally with the following:
@@ -84,7 +86,7 @@ access the inference gatyeway.
 
 ### Development Cycle
 
-To test your changes to `llm-d-inferernce-scheduler` in this environment, make your changes locally
+To test your changes to `llm-d-inference-scheduler` in this environment, make your changes locally
 and then re-run the deployment:
 
 ```console

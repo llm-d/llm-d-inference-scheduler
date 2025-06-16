@@ -1,22 +1,12 @@
 apiVersion: inference.networking.x-k8s.io/v1alpha2
 kind: InferenceModel
 metadata:
-  name: food-review
-spec:
-  modelName: food-review
-  criticality: Critical
-  poolRef:
-    name: ${POOL_NAME}
-  targetModels:
-  - name: food-review
-    weight: 100
----
-apiVersion: inference.networking.x-k8s.io/v1alpha2
-kind: InferenceModel
-metadata:
-  name: base-model
+  name: ${MODEL_NAME}
 spec:
   modelName: ${MODEL_NAME}
   criticality: Critical
   poolRef:
     name: ${POOL_NAME}
+  targetModels:
+  - name: ${MODEL_NAME}
+    weight: 100

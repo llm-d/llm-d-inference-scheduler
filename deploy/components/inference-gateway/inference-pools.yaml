@@ -7,4 +7,4 @@ spec:
   selector:
     app: ${POOL_NAME}
   extensionRef:
-    name: endpoint-picker
+    name: ${EPP_NAME}
