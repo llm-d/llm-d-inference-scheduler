@@ -12,6 +12,8 @@ updates:
     labels:
       - "dependencies"
       - "release-note-none"
+    ignore:
+      - dependency-name: "sigs.k8s.io/gateway-api-inference-extension"
     groups:
       go-dependencies:
         patterns:
