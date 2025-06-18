@@ -36,9 +36,9 @@ export EPP_TAG="${EPP_TAG:-dev}"
 
 # Set the model name to deploy
 export MODEL_NAME="${MODEL_NAME:-food-review}"
-
+export MODEL_NAME_SAFE=$(echo "${MODEL_NAME}" | tr '[:upper:]' '[:lower:]' | tr ' /_.' '-')
 # Set the endpoint-picker to deploy
-export EPP_NAME="${EPP_NAME:-${MODEL_NAME}-enpoint-picker}"
+export EPP_NAME="${EPP_NAME:-${MODEL_NAME}-endpoint-picker}"
 
 # Set the default routing side car image tag
 export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"

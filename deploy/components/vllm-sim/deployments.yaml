@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${MODEL_NAME}-vllm-sim
+  name: ${MODEL_NAME_SAFE}-vllm-sim
   labels:
     app: ${POOL_NAME}
 spec:
