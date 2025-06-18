@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	// defaultMaxBlockPods sets the maximum number of pods a block can store.
+	// defaultMaxBlockPods defined the default maximum number of pods a block can store. Currently this value cannot be changed by configuration
 	defaultMaxBlockPods = 100
 )
 
