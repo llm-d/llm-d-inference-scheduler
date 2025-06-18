@@ -1,8 +1,8 @@
 package filter
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
 
 const (
@@ -16,48 +16,26 @@ const (
 	RoleBoth = "both"
 )
 
-// PrefillFilter - filters out pods that are not marked with role Prefill
-type PrefillFilter struct{}
-
-var _ plugins.Filter = &PrefillFilter{} // validate interface conformance
-
-// Name returns the name of the filter
-func (pf *PrefillFilter) Name() string {
-	return "prefill-filter"
-}
-
-// Filter filters out all pods that are not marked as "prefill"
-func (pf *PrefillFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
-	filteredPods := []types.Pod{}
-
-	for _, pod := range pods {
-		role := pod.GetPod().Labels[RoleLabel]
-		if role == RolePrefill { // TODO: doesn't RoleBoth also imply Prefill?
-			filteredPods = append(filteredPods, pod)
-		}
+// NewPrefillFilter creates and returns an instance of the Filter configured for prefill role
+func NewPrefillFilter() (plugins.Filter, error) {
+	selector := &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      RoleLabel,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   []string{RolePrefill},
+		}},
 	}
-	return filteredPods
+	return NewByLabel("prefill-filter", selector)
 }
 
-// DecodeFilter - filters out pods that are not marked with role Decode or Both
-type DecodeFilter struct{}
-
-var _ plugins.Filter = &DecodeFilter{} // validate interface conformance
-
-// Name returns the name of the filter
-func (df *DecodeFilter) Name() string {
-	return "decode-filter"
-}
-
-// Filter removes all pods that are not marked as "decode" or "both"
-func (df *DecodeFilter) Filter(_ *types.SchedulingContext, pods []types.Pod) []types.Pod {
-	filteredPods := []types.Pod{}
-
-	for _, pod := range pods {
-		role, defined := pod.GetPod().Labels[RoleLabel]
-		if !defined || role == RoleDecode || role == RoleBoth {
-			filteredPods = append(filteredPods, pod)
-		}
+// NewDecodeFilter creates and returns an instance of the Filter configured for decode role
+func NewDecodeFilter() (plugins.Filter, error) {
+	selector := &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      RoleLabel,
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   []string{RoleDecode, RoleBoth},
+		}},
 	}
-	return filteredPods
+	return NewByLabel("decode-filter", selector)
 }
