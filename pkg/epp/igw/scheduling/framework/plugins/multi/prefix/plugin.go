@@ -19,12 +19,14 @@ package prefix
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 
 	"github.com/cespare/xxhash/v2"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -49,17 +51,19 @@ const (
 	// token is about 128KB in size, so we can cache 500K tokens. Using the default block size of 16
 	// in vLLM, we will have 250K / 16 = 31.25K blocks.
 	DefaultLRUCapacityPerServer = 31250
+
+	PrefixCachePluginName = "prefix-cache"
 )
 
 type Config struct {
 	// The input prompt is broken into sizes of HashBlockSize to calculate block hashes . Requests
 	// with length shorter than the block size will be ignored.
-	HashBlockSize int
+	HashBlockSize int `json:"hashBlockSize"`
 	// MaxPrefixBlocksToMatch is the maximum number of prefix blocks to match. Input beyond this limit will
 	// be ignored.
-	MaxPrefixBlocksToMatch int
+	MaxPrefixBlocksToMatch int `json:"maxPrefixBlocksToMatch"`
 	// Max capacity size of the LRU indexer in number of entries per server (pod).
-	LRUCapacityPerServer int
+	LRUCapacityPerServer int `json:"lruCapacityPerServer"`
 }
 
 type Plugin struct {
@@ -84,7 +88,24 @@ func (s ServerID) String() string {
 	return k8stypes.NamespacedName(s).String()
 }
 
-// compile-time type assertion
+// PrefixCachePluginFactory is the factory for the PrefixCache plugin
+func PrefixCachePluginFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := Config{
+		HashBlockSize:          DefaultHashBlockSize,
+		MaxPrefixBlocksToMatch: DefaultMaxPrefixBlocks,
+		LRUCapacityPerServer:   DefaultLRUCapacityPerServer,
+	}
+	if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+		return nil, fmt.Errorf("failed to parse the parameters of the %s plugin. Error: %s", PrefixCachePluginName, err)
+	}
+
+	return &Plugin{
+		Config:  parameters,
+		indexer: newIndexer(parameters.LRUCapacityPerServer),
+	}, nil
+}
+
+// compile-time type validation
 var _ types.StateData = &schedulingContextState{}
 
 // This is the state of this plugin to be used during a scheduling cycle.
@@ -133,7 +154,7 @@ func New(config Config) *Plugin {
 
 // Name returns the name of the plugin.
 func (m *Plugin) Name() string {
-	return "prefix-cache"
+	return PrefixCachePluginName
 }
 
 // Score returns the scoring result for the given list of pods based on context.

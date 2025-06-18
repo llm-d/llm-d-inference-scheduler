@@ -16,13 +16,18 @@ limitations under the License.
 
 package plugins
 
-// Plugin defines the interface for a plugin.
-// This interface should be embedded in all plugins across the code.
-type Plugin interface {
-	// Name returns the name of the plugin.
-	Name() string
+import (
+	"encoding/json"
+)
+
+// Factory is the definition of the factory functions that are used to instantiate plugins
+// specified in a configuration.
+type Factory func(name string, parameters json.RawMessage, handle Handle) (Plugin, error)
+
+// Register is a static function that can be called to register plugin factory functions.
+func Register(name string, factory Factory) {
+	Registry[name] = factory
 }
 
-// Handle provides plugins  set of standard data and tools to work with
-type Handle interface {
-}
+// Registry is a mapping from plugin name to Factory function
+var Registry map[string]Factory = map[string]Factory{}

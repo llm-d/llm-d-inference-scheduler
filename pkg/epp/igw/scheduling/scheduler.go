@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/filter"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/picker"
-	profilepicker "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/profile"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/profile"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
@@ -68,9 +68,9 @@ func NewScheduler(datastore Datastore) *Scheduler {
 		WithFilters(lowLatencyFilter).
 		WithPicker(&picker.RandomPicker{})
 
-	profilePicker := profilepicker.NewSingleProfileHandler()
+	profileHandler := profile.NewSingleProfileHandler()
 
-	return NewSchedulerWithConfig(datastore, NewSchedulerConfig(profilePicker, map[string]*framework.SchedulerProfile{"default": defaultProfile}))
+	return NewSchedulerWithConfig(datastore, NewSchedulerConfig(profileHandler, map[string]*framework.SchedulerProfile{"default": defaultProfile}))
 }
 
 // NewSchedulerWithConfig returns a new scheduler with the given scheduler plugins configuration.
