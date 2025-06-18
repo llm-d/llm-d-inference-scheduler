@@ -51,11 +51,11 @@ const (
 	pdPromptLenThresholdDefault = 100
 
 	prefixCacheCapacityEnvKey = "PREFIX_SCORER_CACHE_CAPACITY"
-	// DefaultPrefixCacheCapacity sets the maximum number of blocks the LRU cache can store.
+	// DefaultPrefixCacheCapacity defines the default value for maximum number of blocks the LRU cache can store.
 	DefaultPrefixCacheCapacity = 500000
 
 	prefixScorerCacheBlockSizeEnvKey = "PREFIX_SCORER_CACHE_BLOCK_SIZE"
-	// DefaultPrefixCacheBlockSize defines how many runes each block contains in the prefix cache.
+	// DefaultPrefixCacheBlockSize defines the default value of how many runes each block contains in the prefix cache.
 	DefaultPrefixCacheBlockSize = 256
 )
 
