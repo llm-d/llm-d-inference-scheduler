@@ -1,0 +1,22 @@
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata:
+  name: custom-gw-params
+spec:
+  kube:
+    envoyContainer:
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: "${PROXY_UID}"
+    service:
+      type: ${GATEWAY_SERVICE_TYPE}
+      extraLabels:
+        gateway: custom
+    podTemplate:
+      extraLabels:
+        gateway: custom
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

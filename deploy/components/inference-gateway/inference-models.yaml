@@ -1,7 +1,7 @@
 apiVersion: inference.networking.x-k8s.io/v1alpha2
 kind: InferenceModel
 metadata:
-  name: ${MODEL_NAME}
+  name: ${MODEL_NAME_SAFE}
 spec:
   modelName: ${MODEL_NAME}
   criticality: Critical
