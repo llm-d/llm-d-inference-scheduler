@@ -37,8 +37,6 @@ const (
 	GIELoraAffinityFilterName = "GIE_LORA_AFFINITY_FILTER"
 	// GIELowQueueFilterName name of the GIE low queue filter in configuration
 	GIELowQueueFilterName = "GIE_LOW_QUEUE_FILTER"
-	// GIESheddableCapacityFilterName name of the GIE sheddable capacity filter in configuration
-	GIESheddableCapacityFilterName = "GIE_SHEDDABLE_CAPACITY_FILTER"
 	// GIEKVCacheUtilizationScorerName name of the GIE kv-cache utilization scorer in configuration
 	GIEKVCacheUtilizationScorerName = "GIE_KVCACHE_UTILIZATION_SCORER"
 	// GIEQueueScorerName name of the GIE queue scorer in configuration
@@ -74,14 +72,14 @@ func LoadConfig(logger logr.Logger) *Config {
 	pluginNames := []string{
 		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
-		GIELowQueueFilterName, GIESheddableCapacityFilterName,
+		GIELowQueueFilterName,
 		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName,
 	}
 
 	return &Config{
 		DecodeSchedulerPlugins:  loadPluginInfo(logger, false, pluginNames),
 		PrefillSchedulerPlugins: loadPluginInfo(logger, true, pluginNames),
-		PDEnabled:               env.GetEnvString(pdEnabledEnvKey, "false", logger) == "true",
+		PDEnabled:               env.GetEnvBool(pdEnabledEnvKey, false, logger),
 		PDThreshold:             env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
 		PrefixCacheBlockSize:    env.GetEnvInt(prefixScorerCacheBlockSizeEnvKey, DefaultPrefixCacheBlockSize, logger),
 		PrefixCacheCapacity:     env.GetEnvInt(prefixCacheCapacityEnvKey, DefaultPrefixCacheCapacity, logger),
@@ -102,11 +100,10 @@ func loadPluginInfo(logger logr.Logger, prefill bool, pluginNames []string) map[
 			weightKey = pluginName + weightSuffix
 		}
 
-		if env.GetEnvString(enablementKey, "false", logger) != "true" {
+		if !env.GetEnvBool(enablementKey, false, logger) {
 			logger.Info("Skipping plugin creation as it is not enabled", "name", pluginName)
 		} else {
 			weight := env.GetEnvInt(weightKey, 1, logger)
-
 			result[pluginName] = weight
 			logger.Info("Initialized plugin", "plugin", pluginName, "weight", weight)
 		}

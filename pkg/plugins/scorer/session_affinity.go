@@ -1,10 +1,14 @@
 package scorer
 
 import (
+	"context"
 	"encoding/base64"
 	"time"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
@@ -15,19 +19,20 @@ const (
 	sessionTokenHeader             = "x-session-token" // name of the session header in request
 )
 
+// compile-time type assertion
+var _ framework.Scorer = &SessionAffinity{}
+var _ requestcontrol.PostResponse = &SessionAffinity{}
+
+// NewSessionAffinity returns a scorer
+func NewSessionAffinity() *SessionAffinity {
+	return &SessionAffinity{}
+}
+
 // SessionAffinity is a routing scorer that routes subsequent
 // requests in a session to the same pod as the first request in the
 // session was sent to, by giving that pod the specified weight and assigning
 // zero score to the rest of the targets
 type SessionAffinity struct {
-}
-
-var _ plugins.Scorer = &SessionAffinity{}       // validate interface conformance
-var _ plugins.PostResponse = &SessionAffinity{} // validate interface conformance
-
-// NewSessionAffinity returns a scorer
-func NewSessionAffinity() *SessionAffinity {
-	return &SessionAffinity{}
 }
 
 // Name returns the scorer's name
@@ -36,15 +41,15 @@ func (s *SessionAffinity) Name() string {
 }
 
 // Score assign a high score to the pod used in previous requests and zero to others
-func (s *SessionAffinity) Score(ctx *types.SchedulingContext, pods []types.Pod) map[types.Pod]float64 {
+func (s *SessionAffinity) Score(ctx context.Context, request *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[types.Pod]float64)
-	sessionToken := ctx.Req.Headers[sessionTokenHeader]
+	sessionToken := request.Headers[sessionTokenHeader]
 	podName := ""
 
 	if sessionToken != "" {
 		decodedBytes, err := base64.StdEncoding.DecodeString(sessionToken)
 		if err != nil {
-			ctx.Logger.Error(err, "Error decoding session header")
+			log.FromContext(ctx).Error(err, "Error decoding session header")
 		} else {
 			podName = string(decodedBytes)
 		}
@@ -63,19 +68,19 @@ func (s *SessionAffinity) Score(ctx *types.SchedulingContext, pods []types.Pod) 
 // TODO: this should be using a cookie and ensure not overriding any other
 // cookie values if present.
 // Tracked in https://github.com/llm-d/llm-d-inference-scheduler/issues/28
-func (s *SessionAffinity) PostResponse(ctx *types.SchedulingContext, pod types.Pod) {
-	if ctx.Resp == nil || pod == nil || pod.GetPod() == nil {
+func (s *SessionAffinity) PostResponse(ctx context.Context, _ *types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+	if response == nil || targetPod == nil {
 		reqID := "undefined"
-		if ctx.Resp != nil {
-			reqID = ctx.Resp.RequestId
+		if response != nil {
+			reqID = response.RequestId
 		}
-		ctx.Logger.V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of ctx.Resp, pod, pod.GetPod is nil", "req id", reqID)
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of ctx.Resp, pod, pod.GetPod is nil", "req id", reqID)
 		return
 	}
 
-	if ctx.Resp.Headers == nil { // TODO should always be populated?
-		ctx.Resp.Headers = make(map[string]string)
+	if response.Headers == nil { // TODO should always be populated?
+		response.Headers = make(map[string]string)
 	}
 
-	ctx.Resp.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(pod.GetPod().NamespacedName.String()))
+	response.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(targetPod.NamespacedName.String()))
 }

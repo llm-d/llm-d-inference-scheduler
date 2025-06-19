@@ -1,21 +1,15 @@
 package scorer_test
 
 import (
-	"context"
 	"testing"
 
-	"github.com/go-logr/logr"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
 // TestBasicPrefixOperations tests the basic functionality of adding and finding prefixes
 func TestBasicPrefixOperations(t *testing.T) {
-	ctx := context.TODO()
-	_ = log.IntoContext(ctx, logr.New(log.NullLogSink{}))
-
 	config := scorer.DefaultPrefixStoreConfig()
 	config.CacheBlockSize = 5 // set small chunking for testing
 	store := scorer.NewPrefixStore(config)
