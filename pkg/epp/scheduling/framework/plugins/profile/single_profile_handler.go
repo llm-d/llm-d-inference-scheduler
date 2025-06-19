@@ -19,6 +19,8 @@ package profile
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -58,15 +60,28 @@ func (h *SingleProfileHandler) Pick(_ context.Context, request *types.LLMRequest
 	return profiles
 }
 
-func (h *SingleProfileHandler) ProcessResults(_ context.Context, _ *types.LLMRequest, profileResults map[string]*types.ProfileRunResult) *types.SchedulingResult {
-	var firstKey string
-	for key := range profileResults {
-		firstKey = key
+// ProcessResults handles the outcome of the profile runs after all profiles ran.
+// It may aggregate results, log test profile outputs, or apply custom logic. It specifies in the SchedulingResult the
+// key of the primary profile that should be used to get the request selected destination.
+// When a profile run fails, its result in the profileResults map is nil.
+func (h *SingleProfileHandler) ProcessResults(_ context.Context, _ *types.LLMRequest,
+	profileResults map[string]*types.ProfileRunResult) (*types.SchedulingResult, error) {
+	if len(profileResults) != 1 {
+		return nil, errors.New("single profile handler is intended to be used with a single profile, failed to process multiple profiles")
+	}
+
+	var singleProfileName string
+	for profileName := range profileResults {
+		singleProfileName = profileName
 		break
+	}
+
+	if profileResults[singleProfileName] == nil { // there was an error while running the profile
+		return nil, fmt.Errorf("failed to run scheduler profile '%s'", singleProfileName)
 	}
 
 	return &types.SchedulingResult{
 		ProfileResults:     profileResults,
-		PrimaryProfileName: firstKey,
-	}
+		PrimaryProfileName: singleProfileName,
+	}, nil
 }
