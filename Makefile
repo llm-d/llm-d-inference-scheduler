@@ -298,3 +298,17 @@ env-dev-kind: image-build  ## Run under kind ($(KIND_CLUSTER_NAME))
 clean-env-dev-kind:      ## Cleanup kind setup (delete cluster $(KIND_CLUSTER_NAME))
 	@echo "INFO: cleaning up kind cluster $(KIND_CLUSTER_NAME)"
 	kind delete cluster --name $(KIND_CLUSTER_NAME)
+
+
+# Kubernetes Development Environment - Deploy
+# This target deploys the GIE stack in a specific namespace for development and testing.
+.PHONY: env-dev-kubernetes
+env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
+	IMAGE_REGISTRY=$(IMAGE_REGISTRY) ./scripts/kubernetes-dev-env.sh 2>&1
+	@echo "INFO: Development environment deployed to namespace $(NAMESPACE)"
+
+# Kubernetes Development Environment - Teardown
+.PHONY: clean-env-dev-kubernetes
+clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
+	@CLEAN=true ./scripts/kubernetes-dev-env.sh 2>&1
+	@echo "INFO: Finished cleanup of development environment for namespace $(NAMESPACE)"
