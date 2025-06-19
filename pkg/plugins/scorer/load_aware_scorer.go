@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
@@ -14,18 +14,19 @@ const (
 	queueThresholdDefault = 128
 )
 
-// LoadAwareScorer scorer that is based on load
-type LoadAwareScorer struct {
-	queueThreshold float64
-}
-
-var _ plugins.Scorer = &LoadAwareScorer{} // validate interface conformance
+// compile-time type assertion
+var _ framework.Scorer = &LoadAwareScorer{}
 
 // NewLoadAwareScorer creates a new load based scorer
-func NewLoadAwareScorer(ctx context.Context) plugins.Scorer {
+func NewLoadAwareScorer(ctx context.Context) framework.Scorer {
 	return &LoadAwareScorer{
 		queueThreshold: float64(env.GetEnvInt(queueThresholdEnvName, queueThresholdDefault, log.FromContext(ctx))),
 	}
+}
+
+// LoadAwareScorer scorer that is based on load
+type LoadAwareScorer struct {
+	queueThreshold float64
 }
 
 // Name returns the scorer's name
@@ -40,7 +41,7 @@ func (s *LoadAwareScorer) Name() string {
 // Pod with requests in the queue will get score between 0.5 and 0.
 // Score 0 will get pod with number of requests in the queue equal to the threshold used in load-based filter (QueueingThresholdLoRA)
 // In future pods with additional capacity will get score higher than 0.5
-func (s *LoadAwareScorer) Score(_ *types.SchedulingContext, pods []types.Pod) map[types.Pod]float64 {
+func (s *LoadAwareScorer) Score(_ context.Context, _ *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[types.Pod]float64)
 
 	for _, pod := range pods {

@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
@@ -17,23 +19,14 @@ const (
 	prefixAwareKeepAliveCheckFrequency = 15 * time.Minute // How often to check for overly idle sessions
 )
 
+// compile-time type assertion
+var _ framework.Scorer = &PrefixAwareScorer{}
+
 type promptHits struct {
 	lastUpdate time.Time
 	// hits map from string to int
 	hits sync.Map
 }
-
-// PrefixAwareScorer is a routing scorer that scores pods based on the longest prefix match
-// between the request's prompt and stored prefixes. The score is normalized between 0 and 1,
-// where 1 represents the longest matching prefix.
-type PrefixAwareScorer struct {
-	prefixStore *PrefixStore
-
-	// podToPromptHits map from podID(string) to promptHits
-	podToPromptHits sync.Map
-}
-
-var _ plugins.Scorer = &PrefixAwareScorer{} // validate interface conformance
 
 // NewPrefixAwareScorer creates a new PrefixAwareScorer with the given
 // PrefixStoreConfig. If the config is nil, default is used.
@@ -52,20 +45,30 @@ func NewPrefixAwareScorer(ctx context.Context, config *PrefixStoreConfig) *Prefi
 	return scorer
 }
 
+// PrefixAwareScorer is a routing scorer that scores pods based on the longest prefix match
+// between the request's prompt and stored prefixes. The score is normalized between 0 and 1,
+// where 1 represents the longest matching prefix.
+type PrefixAwareScorer struct {
+	prefixStore *PrefixStore
+
+	// podToPromptHits map from podID(string) to promptHits
+	podToPromptHits sync.Map
+}
+
 // Name returns the scorer's name
 func (s *PrefixAwareScorer) Name() string {
 	return "prefix-aware-scorer"
 }
 
 // Score scores the target pods based on the longest prefix match.
-func (s *PrefixAwareScorer) Score(ctx *types.SchedulingContext, pods []types.Pod) map[types.Pod]float64 {
+func (s *PrefixAwareScorer) Score(ctx context.Context, request *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(prefixAwareScorerName).V(logutil.DEBUG)
-	if ctx.Req == nil {
+	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
 		return nil
 	}
 
-	scores := s.prefixStore.FindMatchingPods(ctx.Req.Prompt, ctx.Req.TargetModel)
+	scores := s.prefixStore.FindMatchingPods(request.Prompt, request.TargetModel)
 	loggerDebug.Info("Got pod scores", "scores", scores)
 
 	if len(scores) == 0 {
@@ -81,7 +84,7 @@ func (s *PrefixAwareScorer) Score(ctx *types.SchedulingContext, pods []types.Pod
 		rawPromptHitsInfo, _ := s.podToPromptHits.LoadOrStore(pod, &promptHits{lastUpdate: time.Now()})
 		if promptHitsInfo, ok := rawPromptHitsInfo.(*promptHits); ok {
 			promptHitsInfo.lastUpdate = time.Now()
-			promptHitsInfo.hits.Store(ctx.Req.Prompt, score)
+			promptHitsInfo.hits.Store(request.Prompt, score)
 		}
 	}
 
@@ -96,29 +99,28 @@ func (s *PrefixAwareScorer) Score(ctx *types.SchedulingContext, pods []types.Pod
 	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
 }
 
-// PostSchedule implements the PostSchedulePlugin interface.
+// PostResponse implements the PostResponse interface.
 // It adds the prefix to the PrefixStore for the given pod.
-// TODO: switch to PostResponse.
-func (s *PrefixAwareScorer) PostSchedule(ctx *types.SchedulingContext, res *types.Result) {
-	pod := res.TargetPod
-
+func (s *PrefixAwareScorer) PostResponse(ctx context.Context, request *types.LLMRequest, _ *requestcontrol.Response, targetPod *backend.Pod) {
 	debugLogger := log.FromContext(ctx).WithName(prefixAwareScorerName)
-	debugLogger.Info("PostResponse called", "req", ctx.Req, "pod", pod)
+	debugLogger.Info("PostResponse called", "request", request, "pod", targetPod)
 
-	if ctx.Req == nil {
+	if request == nil {
 		debugLogger.Info("Request is nil, skipping PostResponse")
 		return
 	}
 
-	if pod.GetPod() == nil {
-		debugLogger.Info("Pod is nil, skipping PostResponse", "req", ctx.Req, "pod", pod)
+	if targetPod == nil {
+		debugLogger.Info("Pod is nil, skipping PostResponse", "request", request)
 		return
 	}
 
-	if err := s.prefixStore.AddEntry(ctx.Req.TargetModel, ctx.Req.Prompt, &pod.GetPod().NamespacedName); err != nil {
-		debugLogger.Error(err, "Failed to add entry to prefix store", "req", ctx.Req, "pod", pod)
+	if err := s.prefixStore.AddEntry(request.TargetModel, request.Prompt, &targetPod.NamespacedName); err != nil {
+		debugLogger.Error(err, "Failed to add entry to prefix store", "request", request, "pod", targetPod)
 		return
 	}
+	// TODO should use response body as well. currently due to a bug in istio we do not get response body back.
+	// should be handled once that bug is fixed.
 }
 
 // GetPrefixStore returns the scorer's PrefixStore.

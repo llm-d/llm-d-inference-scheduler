@@ -7,14 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
 func TestPrefixAwareScorer(t *testing.T) {
@@ -106,39 +104,34 @@ func TestPrefixAwareScorer(t *testing.T) {
 		},
 	}
 
-	ctx := context.TODO()
-	_ = log.IntoContext(ctx, logr.New(log.NullLogSink{}))
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			// Reset prefix store for each test
 			config := scorer.DefaultPrefixStoreConfig()
 			config.CacheBlockSize = 5 // set small chunking for testing
 
-			s := scorer.NewPrefixAwareScorer(ctx, config)
+			s := scorer.NewPrefixAwareScorer(context.Background(), config)
 
 			// Add prefix if specified
-			if tt.prefixToAdd != "" {
-				err := s.GetPrefixStore().AddEntry(tt.prefixModel,
-					tt.prefixToAdd, &tt.podToAdd)
+			if test.prefixToAdd != "" {
+				err := s.GetPrefixStore().AddEntry(test.prefixModel, test.prefixToAdd, &test.podToAdd)
 				if err != nil {
 					t.Fatalf("Failed to add prefix: %v", err)
 				}
 			}
 
-			// Create test context
-			sCtx := types.NewSchedulingContext(ctx, &types.LLMRequest{
-				Prompt:      tt.prompt,
-				TargetModel: tt.modelName,
-			}, nil, []types.Pod{})
+			request := &types.LLMRequest{
+				Prompt:      test.prompt,
+				TargetModel: test.modelName,
+			}
 
 			// Score pods
 			pods := []types.Pod{pod1, pod2}
-			scores := s.Score(sCtx, pods)
+			scores := s.Score(context.Background(), request, nil, pods)
 
 			for p, score := range scores {
-				if score != tt.expectedScores[p] {
-					t.Errorf("Pod %v: expected score %v, got %v", p, tt.expectedScores[p], score)
+				if score != test.expectedScores[p] {
+					t.Errorf("Pod %v: expected score %v, got %v", p, test.expectedScores[p], score)
 				}
 			}
 		})
@@ -151,17 +144,13 @@ func TestPrefixAwareScorerProfiling(t *testing.T) {
 	const nPodsTotal = 200
 	const nPodsInStore = 100 // number of chunks stored for pod is proportional to the pod number
 
-	ctx := context.Background()
-	logger := log.FromContext(ctx)
-	ctx = log.IntoContext(ctx, logger)
-
 	name2Pod := createPods(nPodsTotal)
 	config := scorer.DefaultPrefixStoreConfig()
 	text := generateNonRepeatingText(config.CacheBlockSize * nPodsInStore)
 	t.Run(testName, func(t *testing.T) {
 		start := time.Now() // record start time
 		config := scorer.DefaultPrefixStoreConfig()
-		s := scorer.NewPrefixAwareScorer(ctx, config)
+		s := scorer.NewPrefixAwareScorer(context.Background(), config)
 		for i := range nPodsInStore {
 			prompt := text[0 : (i+1)*config.CacheBlockSize-1]
 			err := s.GetPrefixStore().AddEntry(modelName, prompt, &name2Pod["pod"+strconv.Itoa(i)].NamespacedName)
@@ -169,18 +158,17 @@ func TestPrefixAwareScorerProfiling(t *testing.T) {
 				t.Errorf("Failed to add entry to prefix store: %v", err)
 			}
 		}
-		sCtx := types.NewSchedulingContext(ctx, &types.LLMRequest{
+		request := &types.LLMRequest{
 			Prompt:      text,
 			TargetModel: modelName,
-		}, nil, []types.Pod{})
-
+		}
 		// Score pods
 		pods := make([]types.Pod, 0, len(name2Pod))
 		for _, v := range name2Pod {
 			pods = append(pods, v)
 		}
 
-		scores := s.Score(sCtx, pods)
+		scores := s.Score(context.Background(), request, nil, pods)
 
 		highestScore := scores[name2Pod["pod"+strconv.Itoa(nPodsInStore-1)]]
 		if highestScore < 0.99 {

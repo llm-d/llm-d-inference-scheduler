@@ -77,7 +77,7 @@ lint: check-golangci-lint ## Run lint
 .PHONY: build
 build: check-go download-tokenizer ##
 	@printf "\033[33;1m==== Building ====\033[0m\n"
-	go build -ldflags="$(LDFLAGS)" -o bin/epp cmd/epp/main.go cmd/epp/health.go
+	go build -ldflags="$(LDFLAGS)" -o bin/epp cmd/epp/main.go
 
 ##@ Container Build/Push
 
