@@ -70,17 +70,11 @@ func NewScheduler(ctx context.Context, schedulerConfig *config.Config, ds Datast
 		prefixScorer: scorer.NewPrefixAwareScorer(ctx, prefixConfig),
 	}
 
-	scheduler.prefill = scheduling.NewSchedulerWithConfig(
-		ds,
-		scheduler.generateSchedulerConfig(ctx, schedulerConfig.PrefillSchedulerPlugins,
-			&filter.PrefillFilter{}),
-	)
+	scheduler.prefill = scheduling.NewSchedulerWithConfig(ds,
+		scheduler.generateSchedulerConfig(ctx, schedulerConfig.PrefillSchedulerPlugins, filter.NewPrefillFilter()))
 
-	scheduler.decode = scheduling.NewSchedulerWithConfig(
-		ds,
-		scheduler.generateSchedulerConfig(ctx, schedulerConfig.DecodeSchedulerPlugins,
-			&filter.DecodeFilter{}),
-	)
+	scheduler.decode = scheduling.NewSchedulerWithConfig(ds,
+		scheduler.generateSchedulerConfig(ctx, schedulerConfig.DecodeSchedulerPlugins, filter.NewDecodeFilter()))
 
 	return scheduler, nil
 }
