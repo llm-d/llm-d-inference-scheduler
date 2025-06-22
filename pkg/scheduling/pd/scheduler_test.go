@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr/testr"
-
 	"github.com/google/go-cmp/cmp"
+
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
@@ -17,7 +18,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Tests the default scheduler configuration and expected behavior.

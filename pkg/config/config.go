@@ -4,6 +4,7 @@ package config
 
 import (
 	"github.com/go-logr/logr"
+
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
 

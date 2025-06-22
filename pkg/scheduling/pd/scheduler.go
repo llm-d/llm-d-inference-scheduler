@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	gieschedulingconfig "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/config"

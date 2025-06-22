@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/types"
-
 	"github.com/cespare/xxhash/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 )

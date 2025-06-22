@@ -28,13 +28,13 @@ import (
 	"os"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
-	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 )
 
 func main() {
