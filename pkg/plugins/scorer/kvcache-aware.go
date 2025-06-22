@@ -6,14 +6,13 @@ import (
 	"os"
 	"strings"
 
+	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
 	"github.com/redis/go-redis/v9"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
-
-	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
 )
 
 const (
