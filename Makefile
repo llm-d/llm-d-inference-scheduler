@@ -301,11 +301,10 @@ clean-env-dev-kind:      ## Cleanup kind setup (delete cluster $(KIND_CLUSTER_NA
 
 
 # Kubernetes Development Environment - Deploy
-# This target deploys the GIE stack in a specific namespace for development and testing.
+# This target deploys the inference scheduler stack in a specific namespace for development and testing.
 .PHONY: env-dev-kubernetes
 env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 	IMAGE_REGISTRY=$(IMAGE_REGISTRY) ./scripts/kubernetes-dev-env.sh 2>&1
-	@echo "INFO: Development environment deployed to namespace $(NAMESPACE)"
 
 # Kubernetes Development Environment - Teardown
 .PHONY: clean-env-dev-kubernetes

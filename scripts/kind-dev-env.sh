@@ -36,6 +36,7 @@ export EPP_TAG="${EPP_TAG:-dev}"
 
 # Set the model name to deploy
 export MODEL_NAME="${MODEL_NAME:-food-review}"
+# Safe model name for Kubernetes resources (lowercase, hyphenated)
 export MODEL_NAME_SAFE=$(echo "${MODEL_NAME}" | tr '[:upper:]' '[:lower:]' | tr ' /_.' '-')
 # Set the endpoint-picker to deploy
 export EPP_NAME="${EPP_NAME:-${MODEL_NAME}-endpoint-picker}"
@@ -166,7 +167,7 @@ else
 fi
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
-	| envsubst '${POOL_NAME} ${MODEL_NAME} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
+	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
   ${PD_ENABLED} ${ROUTING_SIDECAR_TAG} ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 

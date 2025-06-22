@@ -8,11 +8,6 @@ resources:
 - ../../../components/inference-gateway/
 - gateway-parameters.yaml
 
-images:
-- name: quay.io/llm-d/gateway-api-inference-extension
-  newName: ${EPP_IMAGE}
-  newTag: ${EPP_TAG}
-
 patches:
 - path: patch-deployments.yaml
 - path: patch-gateways.yaml

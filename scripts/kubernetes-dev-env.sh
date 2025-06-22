@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# This shell script deploys a Kubernetes or OpenShift cluster with an
+# This shell script deploys a Kubernetes  cluster with an
 # KGateway-based Gateway API implementation fully configured. It deploys the
-# vllm simulator, which it exposes with a Gateway -> HTTPRoute -> InferencePool.
+# vllm, which it exposes with a Gateway -> HTTPRoute -> InferencePool.
 # The Gateway is configured with the a filter for the ext_proc endpoint picker.
 
 set -eux
@@ -17,6 +17,10 @@ export CLEAN="${CLEAN:-false}"
 # Validate required inputs
 if [[ -z "${NAMESPACE:-}" ]]; then
   echo "ERROR: NAMESPACE environment variable is not set."
+  exit 1
+fi
+if [[ -z "${HF_TOKEN:-}" ]]; then
+  echo "ERROR: HF_TOKEN environment variable is not set."
   exit 1
 fi
 
@@ -68,12 +72,12 @@ export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 
 # EPP container image name
-export EPP_IMAGE="${EPP_IMAGE:-llm-d-inference-scheduler}"
+export EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler}"
 
 # EPP image tag
 export EPP_TAG="${EPP_TAG:-v0.1.0}"
 
-# Whether Prompt/Document (P/D) mode is enabled for this deployment
+# Whether P/D mode is enabled for this deployment
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
 # Token length threshold to trigger P/D logic
@@ -90,10 +94,6 @@ export REDIS_HOST="${REDIS_HOST:-${REDIS_SVC_NAME}.${NAMESPACE}.svc.cluster.loca
 
 # Redis port
 export REDIS_PORT="${REDIS_PORT:-8100}"
-
-# Hugging Face access token
-export HF_TOKEN2="${HF_TOKEN}"  # Save original (unencoded) for optional use
-export HF_TOKEN=$(echo -n "${HF_TOKEN}" | base64 | tr -d '\n')
 
 # Key in the secret under which the HF token is stored
 export HF_SECRET_KEY="${HF_SECRET_KEY:-token}"
@@ -123,7 +123,7 @@ export VLLM_DEPLOYMENT_NAME="${VLLM_HELM_RELEASE_NAME}-${MODEL_NAME_SAFE}"
 
 kubectl create namespace ${NAMESPACE} 2>/dev/null || true
 
-# Hack to deal with KGateways broken OpenShift support
+# Hack to better deal with kgateway on OpenShift
 export PROXY_UID=$(kubectl get namespace ${NAMESPACE} -o json | jq -e -r '.metadata.annotations["openshift.io/sa.scc.uid-range"]' | perl -F'/' -lane 'print $F[0]+1');
 
 # Detect if the cluster is OpenShift by checking for the 'route.openshift.io' API group
@@ -137,14 +137,13 @@ set -o pipefail
 if [[ "$CLEAN" == "true" ]]; then
   echo "INFO: CLEANING environment in namespace ${NAMESPACE}"
   # Delete inference schedulare and gateway resources.
-  kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst > temp_delet.yaml
   kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" delete --ignore-not-found=true -f -
   # Delete vllm resources.
-  helm uninstall vllm --namespace c3
+  helm uninstall vllm --namespace ${NAMESPACE}
   exit 0
 fi
 
-echo "INFO: Deploying vLLM Environment in namespace ${NAMESPACE}"
+echo "INFO: Deploying vLLM Environment in namespace ${NAMESPACE} ${EPP_IMAGE=}"
 if [[ "${IS_OPENSHIFT}" == "true" ]]; then
   if command -v oc &>/dev/null; then
     # Grant the 'default' service account permission to run containers as any user (disables UID restrictions)
@@ -156,9 +155,9 @@ fi
 # Run Helm upgrade/install vllm
 echo "INFO: Deploying vLLM Environment in namespace ${NAMESPACE}, ${POOL_NAME}"
 helm upgrade --install "$VLLM_HELM_RELEASE_NAME" "$VLLM_CHART_DIR" \
-  --namespace c3 \
+  --namespace="$NAMESPACE" \
   --set secret.create=true \
-  --set secret.hfTokenValue="$HF_TOKEN2" \
+  --set secret.hfTokenValue="$HF_TOKEN" \
   --set vllm.poolLabelValue="$POOL_NAME" \
   --set vllm.model.name="$MODEL_NAME" \
   --set vllm.model.label="$MODEL_NAME_SAFE" \
@@ -172,7 +171,6 @@ helm upgrade --install "$VLLM_HELM_RELEASE_NAME" "$VLLM_CHART_DIR" \
 
 echo "INFO: Deploying Gateway Environment in namespace ${NAMESPACE}, ${POOL_NAME}"
 kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" apply -f -
-
 echo "INFO: Waiting for resources in namespace ${NAMESPACE} to become ready"
 # Wait for gateway resources
 kubectl -n "${NAMESPACE}" wait deployment/${EPP_NAME} --for=condition=Available --timeout=60s
@@ -180,5 +178,28 @@ kubectl -n "${NAMESPACE}" wait gateway/inference-gateway --for=condition=Program
 kubectl -n "${NAMESPACE}" wait deployment/inference-gateway --for=condition=Available --timeout=60s
 
 # Wait for vllm resources
-kubectl -n "${NAMESPACE}" wait deployment/${VLLM_HELM_RELEASE_NAME}-${REDIS_DEPLOYMENT_NAME} --for=condition=Available --timeout=60s
+kubectl -n "${NAMESPACE}" wait deployment/${VLLM_HELM_RELEASE_NAME}-redis-${REDIS_DEPLOYMENT_NAME} --for=condition=Available --timeout=60s
 kubectl -n "${NAMESPACE}" wait deployment/${VLLM_HELM_RELEASE_NAME}-${VLLM_DEPLOYMENT_NAME} --for=condition=Available --timeout=240s
+
+cat <<EOF
+-----------------------------------------
+Deployment to namespace ${NAMESPACE} completed!
+
+Status:
+
+* The vllm is running and exposed via InferencePool
+* The Gateway is exposing the InferencePool via HTTPRoute
+* The Endpoint Picker is loaded into the Gateway via ext_proc
+
+You can watch the Endpoint Picker logs with:
+
+  $ kubectl logs -f deployments/${EPP_NAME}
+
+With that running in the background, you can make requests using port-forward and curl:
+
+  $ kubectl port-forward service/inference-gateway 8080:80 -n "${NAMESPACE}" &
+  $ curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: application/json' -d '{"model":"${MODEL_NAME}","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+
+See DEVELOPMENT.md for additional access methods if the above fails.
+-----------------------------------------
+EOF

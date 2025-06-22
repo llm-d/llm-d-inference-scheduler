@@ -19,7 +19,8 @@ Documentation for developing the inference scheduler.
 
 ## Kind Development Environment
 
-> **WARNING**: This currently requires you to have manually built the vllm
+> [!Warning]
+> This currently requires you to have manually built the vllm
 > simulator separately on your local system. In a future iteration this will
 > be handled automatically and will not be required. The tag for the simulator
 > currently needs to be `v0.1.0`.
@@ -116,46 +117,50 @@ kubectl rollout restart deployment food-review-endpoint-picker
 
 ## Kubernetes Development Environment
 
-A Kubernetes (or OpenShift) cluster can be used for development and testing.
-There is a cluster-level infrastructure deployment that needs to be managed,
-and then development environments can be created on a per-namespace basis to
-enable sharing the cluster with multiple developers (or feel free to just use
-the `default` namespace if the cluster is private/personal).
+A Kubernetes cluster can be used for development and testing.
+The setup can be split in two:
+
+- cluster-level infrastructure deployment (e.g., CRDs), and
+- deployment of development environments on a per-namespace basis
+
+This enables cluster sharing by multiple developers. In case of private/personal
+clusters, the `default` namespace can be used directly.
 
 ### Setup - Infrastructure
 
-> **WARNING**: In shared cluster situations you should probably not be
-> running this unless you're the cluster admin and you're _certain_ it's you
-> that should be running this, as this can be disruptive to other developers
+> [!CAUTION]
+> In shared cluster situations you should probably not be
+> running this unless you're the cluster admin and you're _certain_
+> that you should be running this, as this can be disruptive to other developers
 > in the cluster.
 
 The following will deploy all the infrastructure-level requirements (e.g. CRDs,
-Operators, etc) to support the namespace-level development environments:
+Operators, etc.) to support the namespace-level development environments:
 
 Install GIE CRDs:
 
 ```bash
-VERSION=v0.3.0
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/$VERSION/manifests.yaml
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml
 ```
 
-Install Kgateway:
+Install kgateway:
 ```bash
 KGTW_VERSION=v2.0.2
 helm upgrade -i --create-namespace --namespace kgateway-system --version $KGTW_VERSION kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds
 helm upgrade -i --namespace kgateway-system --version $KGTW_VERSION kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --set inferenceExtension.enabled=true
 ```
 
-For more details you can find in Gateway API inference [getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/)
+For more details, see the Gateway API inference Extension [getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/)
 
 ### Setup - Developer Environment
 
-> **WARNING**: This setup is currently very manual in regards to container
+> [!NOTE]
+> This setup is currently very manual in regards to container
 > images for the VLLM simulator and the EPP. It is expected that you build and
 > push images for both to your own private registry. In future iterations, we
 > will be providing automation around this to make it simpler.
 
-To deploy a development environment to the cluster you'll need to explicitly
+To deploy a development environment to the cluster, you'll need to explicitly
 provide a namespace. This can be `default` if this is your personal cluster,
 but on a shared cluster you should pick something unique. For example:
 
@@ -175,7 +180,8 @@ Set the default namespace for kubectl commands
 kubectl config set-context --current --namespace="${NAMESPACE}"
 ```
 
-> NOTE: If you are using OpenShift (oc CLI), use the following instead: `oc project "${NAMESPACE}"`
+> [!NOTE]
+> If you are using OpenShift (oc CLI), you can use the following instead: `oc project "${NAMESPACE}"`
 
 - Set Hugging Face token variable:
 
@@ -186,12 +192,11 @@ export HF_TOKEN="<HF_TOKEN>"
 Download the `llm-d-kv-cache-manager` repository (the instllation script and Helm chart to install the vLLM environment):
 
 ```bash
-cd .. & git clone git@github.com:llm-d/llm-d-kv-cache-manager.git
+cd .. && git clone git@github.com:llm-d/llm-d-kv-cache-manager.git
 ```
+
 If you prefer to clone it into the `/tmp` directory, make sure to update the `VLLM_CHART_DIR` environment variable:
 `export VLLM_CHART_DIR=<tmp_dir>/llm-d-kv-cache-manager/vllm-setup-helm`
-
-
 
 Once all this is set up, you can deploy the environment:
 
@@ -200,12 +205,13 @@ make env-dev-kubernetes
 ```
 
 This will deploy the entire stack to whatever namespace you chose.
-**Note:** The model and images of each componet can  be replaced. See [Environment Configuration](#environment-configuration) for model settings.
+> [!NOTE]
+> The model and images of each componet can  be replaced. See [Environment Configuration](#environment-configuration) for model settings.
 
-You can test by exposing the inference `Gateway` via port-forward:
+You can test by exposing the `inference gateway` via port-forward:
 
 ```bash
-kubectl port-forward service/inference-gateway 8080:80
+kubectl port-forward service/inference-gateway 8080:80 -n "${NAMESPACE}"
 ```
 
 And making requests with `curl`:
@@ -215,6 +221,9 @@ curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: applicati
   -d '{"model":"meta-llama/Llama-3.1-8B-Instruct","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
+> [!NOTE]
+> If the response is empty or contains an error, jq may output a cryptic error. You can run the command without jq to debug raw responses.
+
 #### Environment Configurateion
 
 **1. Setting the EPP image and tag:**
@@ -222,8 +231,8 @@ curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: applicati
 You can optionally set a custom EPP image (otherwise, the default will be used):
 
 ```bash
-export EPP_IMAGE="<YOUR_REGISTRY>/<YOUR_IMAGE>"
 export EPP_TAG="<YOUR_TAG>"
+export EPP_IMAGE="<YOUR_REGISTRY>/<YOUR_IMAGE>"
 ```
 
 **2. Setting the vLLM replicas:**
@@ -234,7 +243,7 @@ You can optionally set the vllm replicas:
 export VLLM_REPLICA_COUNT=2
 ```
 
-**3. Setting the model name and label:**
+**3. Setting the model name:**
 
 You can replace the model name that will be used in the system.
 
@@ -244,41 +253,36 @@ export MODEL_NAME="${MODEL_NAME:-mistralai/Mistral-7B-Instruct-v0.2}"
 
 **4. Additional environment settings:**
 
-More Setting of environment variables can be found in the `scripts/kubernetes-dev-env.sh`.
-
-
+More environment variable settings can be found in the `scripts/kubernetes-dev-env.sh`.
 
 #### Development Cycle
 
-> **WARNING**: This is a very manual process at the moment. We expect to make
+> [!Warning]
+> This is a very manual process at the moment. We expect to make
 > this more automated in future iterations.
 
 Make your changes locally and commit them. Then select an image tag based on
-the `git` SHA:
+the `git` SHA and set your private registry:
 
 ```bash
 export EPP_TAG=$(git rev-parse HEAD)
+export IMAGE_REGISTRY="quay.io/<my-id>"
 ```
 
-Build the image:
+Build the image and tag the image for your private registry:
 
 ```bash
-DEV_VERSION=$EPP_TAG make image-build
+make image-build
 ```
 
-Tag the image for your private registry and push it:
+and push it:
 
 ```bash
-$CONTAINER_RUNTIME tag quay.io/llm-d/llm-d-gateway-api-inference-extension/epp:$TAG \
-    <MY_REGISTRY>/<MY_IMAGE>:$EPP_TAG
-$CONTAINER_RUNTIME push <MY_REGISTRY>/<MY_IMAGE>:$EPP_TAG
+make image-push
 ```
 
-> **NOTE**: `$CONTAINER_RUNTIME` can be configured or replaced with whatever your
-> environment's standard container runtime is (e.g. `podman`, `docker`).
-
-Then you can re-deploy the environment with the new changes (don't forget all
-the required env vars):
+You can now re-deploy the environment with your changes (don't forget all
+the required environment variables):
 
 ```bash
 make env-dev-kubernetes
@@ -299,3 +303,19 @@ If you also want to remove the namespace entirely, run:
 ```sh
 kubectl delete namespace ${NAMESPACE}
 ```
+
+To uninstall the infra-stracture development:
+Uninstal GIE CRDs:
+
+```sh
+kubectl delete -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml --ignore-not-found
+```
+
+Uninstall kgateway:
+
+```sh
+helm uninstall kgateway -n kgateway-system
+helm uninstall kgateway-crds -n kgateway-system
+```
+
+For more details, see the Gateway API inference Extension [getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/)
