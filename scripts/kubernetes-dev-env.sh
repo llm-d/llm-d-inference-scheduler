@@ -111,8 +111,20 @@ export PVC_SIZE="${PVC_SIZE:-40Gi}"
 # CPU request per vLLM replica
 export VLLM_CPU_RESOURCES="${VLLM_CPU_RESOURCES:-10}"
 
+# Memory request per vLLM replica
+export VLLM_MEMORY_RESOURCES="${VLLM_MEMORY_RESOURCES:-40Gi}"
+
+# GPU memory utilization (optional, default is null)
+export VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-null}"
+
 # Number of vLLM replicas
 export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-3}"
+
+# Tensor parallel size (optional, default is null)
+export VLLM_TENSOR_PARALLEL_SIZE="${VLLM_TENSOR_PARALLEL_SIZE:-null}"
+
+# Number of GPU per vLLM
+export VLLM_GPU_COUNT_PER_INSTANCE="${VLLM_GPU_COUNT_PER_INSTANCE:-1}"
 
 # vLLM deployment name (derived from release + model)
 export VLLM_DEPLOYMENT_NAME="${VLLM_HELM_RELEASE_NAME}-${MODEL_NAME_SAFE}"
@@ -139,7 +151,7 @@ if [[ "$CLEAN" == "true" ]]; then
   # Delete inference schedulare and gateway resources.
   kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" delete --ignore-not-found=true -f -
   # Delete vllm resources.
-  helm uninstall vllm --namespace ${NAMESPACE}
+  helm uninstall vllm --namespace ${NAMESPACE} --ignore-not-found
   exit 0
 fi
 
@@ -163,6 +175,11 @@ helm upgrade --install "$VLLM_HELM_RELEASE_NAME" "$VLLM_CHART_DIR" \
   --set vllm.model.label="$MODEL_NAME_SAFE" \
   --set vllm.replicaCount="$VLLM_REPLICA_COUNT" \
   --set vllm.resources.requests.cpu="$VLLM_CPU_RESOURCES" \
+  --set vllm.resources.requests.memory="$VLLM_MEMORY_RESOURCES" \
+  --set vllm.resources.requests."nvidia\.com/gpu"="$VLLM_GPU_COUNT_PER_INSTANCE" \
+  --set vllm.resources.limits."nvidia\.com/gpu"="$VLLM_GPU_COUNT_PER_INSTANCE" \
+  --set vllm.gpuMemoryUtilization="${VLLM_GPU_MEMORY_UTILIZATION}" \
+  --set vllm.tensorParallelSize="${VLLM_TENSOR_PARALLEL_SIZE}" \
   --set persistence.enabled=true \
   --set persistence.size="$PVC_SIZE"\
   --set redis.nameSuffix="$REDIS_DEPLOYMENT_NAME" \

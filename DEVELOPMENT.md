@@ -248,7 +248,18 @@ export VLLM_REPLICA_COUNT=2
 You can replace the model name that will be used in the system.
 
 ```bash
-export MODEL_NAME="${MODEL_NAME:-mistralai/Mistral-7B-Instruct-v0.2}"
+export MODEL_NAME=mistralai/Mistral-7B-Instruct-v0.2
+```
+
+If you need to deploy a larger model, update the vLLM-related parameters according to the model's requirements. For example:
+
+```bash
+export MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
+export PVC_SIZE=200Gi
+export VLLM_MEMORY_RESOURCES=100Gi
+export VLLM_GPU_MEMORY_UTILIZATION=0.95
+export VLLM_TENSOR_PARALLEL_SIZE=2
+export VLLM_GPU_COUNT_PER_INSTANCE=2
 ```
 
 **4. Additional environment settings:**
