@@ -25,7 +25,7 @@ func NewPrefillHeaderHandler() *PrefillHeaderHandler {
 // PrefillHeaderHandler PreRequest plugin
 type PrefillHeaderHandler struct{}
 
-// Type returns the PreRequest plugin type
+// Type returns the type of the PreRequest plugin.
 func (p *PrefillHeaderHandler) Type() string {
 	return "prefill-header"
 }
