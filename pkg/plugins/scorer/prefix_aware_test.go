@@ -127,7 +127,7 @@ func TestPrefixAwareScorer(t *testing.T) {
 
 			// Score pods
 			pods := []types.Pod{pod1, pod2}
-			scores := s.Score(context.Background(), request, nil, pods)
+			scores := s.Score(context.Background(), nil, request, pods)
 
 			for p, score := range scores {
 				if score != test.expectedScores[p] {
@@ -168,7 +168,7 @@ func TestPrefixAwareScorerProfiling(t *testing.T) {
 			pods = append(pods, v)
 		}
 
-		scores := s.Score(context.Background(), request, nil, pods)
+		scores := s.Score(context.Background(), nil, request, pods)
 
 		highestScore := scores[name2Pod["pod"+strconv.Itoa(nPodsInStore-1)]]
 		if highestScore < 0.99 {

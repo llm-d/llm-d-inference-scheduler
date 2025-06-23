@@ -36,13 +36,13 @@ type ByLabels struct {
 	selector labels.Selector
 }
 
-// Name returns the name of the filter
-func (blf *ByLabels) Name() string {
+// Type returns the type of the filter
+func (blf *ByLabels) Type() string {
 	return blf.name
 }
 
 // Filter filters out all pods that do not satisfy the label selector
-func (blf *ByLabels) Filter(_ context.Context, _ *types.LLMRequest, _ *types.CycleState, pods []types.Pod) []types.Pod {
+func (blf *ByLabels) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) []types.Pod {
 	filtered := []types.Pod{}
 
 	for _, pod := range pods {

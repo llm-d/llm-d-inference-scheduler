@@ -35,14 +35,14 @@ type PdProfileHandler struct {
 	prefixScorer *scorer.PrefixAwareScorer
 }
 
-// Name returns the name of the Profile Handler.
-func (h *PdProfileHandler) Name() string {
+// Type returns the type of the Profile Handler.
+func (h *PdProfileHandler) Type() string {
 	return name
 }
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *PdProfileHandler) Pick(ctx context.Context, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
+func (h *PdProfileHandler) Pick(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
 	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
 	if _, executed := profileResults[decode]; !executed {
 		// if decode profile was not executed yet, first let the scheduler run the decode profile
@@ -77,7 +77,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, request *types.LLMRequest, 
 // ProcessResults handles the outcome of the profile runs after the selected profiles ran.
 // In case of an error in any of the profiles, the matching entry in the profileResults will contain nil, to indicate there was
 // an error while running the profile.
-func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.LLMRequest,
+func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState, _ *types.LLMRequest,
 	profileResults map[string]*types.ProfileRunResult) (*types.SchedulingResult, error) {
 	if profileResults[decode] == nil { // if decode profile failed to run, we should fail
 		return nil, errors.New("failed to find available decode workers")

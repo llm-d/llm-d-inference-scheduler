@@ -35,13 +35,13 @@ func NewSessionAffinity() *SessionAffinity {
 type SessionAffinity struct {
 }
 
-// Name returns the scorer's name
-func (s *SessionAffinity) Name() string {
+// Type returns the type of the scorer.
+func (s *SessionAffinity) Type() string {
 	return "session-affinity-scorer"
 }
 
 // Score assign a high score to the pod used in previous requests and zero to others
-func (s *SessionAffinity) Score(ctx context.Context, request *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
+func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[types.Pod]float64)
 	sessionToken := request.Headers[sessionTokenHeader]
 	podName := ""

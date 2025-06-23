@@ -55,13 +55,13 @@ type PrefixAwareScorer struct {
 	podToPromptHits sync.Map
 }
 
-// Name returns the scorer's name
-func (s *PrefixAwareScorer) Name() string {
+// Type returns the type of the scorer.
+func (s *PrefixAwareScorer) Type() string {
 	return "prefix-aware-scorer"
 }
 
 // Score scores the target pods based on the longest prefix match.
-func (s *PrefixAwareScorer) Score(ctx context.Context, request *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
+func (s *PrefixAwareScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(prefixAwareScorerName).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")

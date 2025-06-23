@@ -29,8 +29,8 @@ type LoadAwareScorer struct {
 	queueThreshold float64
 }
 
-// Name returns the scorer's name
-func (s *LoadAwareScorer) Name() string {
+// Type returns the type of the scorer.
+func (s *LoadAwareScorer) Type() string {
 	return "load-aware-scorer"
 }
 
@@ -41,7 +41,7 @@ func (s *LoadAwareScorer) Name() string {
 // Pod with requests in the queue will get score between 0.5 and 0.
 // Score 0 will get pod with number of requests in the queue equal to the threshold used in load-based filter (QueueingThresholdLoRA)
 // In future pods with additional capacity will get score higher than 0.5
-func (s *LoadAwareScorer) Score(_ context.Context, _ *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
+func (s *LoadAwareScorer) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[types.Pod]float64)
 
 	for _, pod := range pods {

@@ -24,13 +24,13 @@ var _ framework.Filter = &PrefillFilter{}
 // PrefillFilter - filters out pods that are not marked with role Prefill
 type PrefillFilter struct{}
 
-// Name returns the name of the filter
-func (pf *PrefillFilter) Name() string {
+// Type returns the type of the filter
+func (pf *PrefillFilter) Type() string {
 	return "prefill-filter"
 }
 
 // Filter filters out all pods that are not marked as "prefill"
-func (pf *PrefillFilter) Filter(_ context.Context, _ *types.LLMRequest, _ *types.CycleState, pods []types.Pod) []types.Pod {
+func (pf *PrefillFilter) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) []types.Pod {
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
@@ -48,13 +48,13 @@ var _ framework.Filter = &DecodeFilter{}
 // DecodeFilter - filters out pods that are not marked with role Decode or Both
 type DecodeFilter struct{}
 
-// Name returns the name of the filter
-func (df *DecodeFilter) Name() string {
+// Type returns the type of the filter
+func (df *DecodeFilter) Type() string {
 	return "decode-filter"
 }
 
 // Filter removes all pods that are not marked as "decode" or "both"
-func (df *DecodeFilter) Filter(_ context.Context, _ *types.LLMRequest, _ *types.CycleState, pods []types.Pod) []types.Pod {
+func (df *DecodeFilter) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) []types.Pod {
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {

@@ -73,14 +73,14 @@ type KVCacheAwareScorer struct {
 	kvCacheIndexer *kvcache.Indexer
 }
 
-// Name returns the name of the scorer.
-func (s *KVCacheAwareScorer) Name() string {
+// Type returns the type of the scorer.
+func (s *KVCacheAwareScorer) Type() string {
 	return kvCacheAwareScorerName
 }
 
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
-func (s *KVCacheAwareScorer) Score(ctx context.Context, request *types.LLMRequest, _ *types.CycleState, pods []types.Pod) map[types.Pod]float64 {
+func (s *KVCacheAwareScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(kvCacheAwareScorerName).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
