@@ -175,7 +175,7 @@ func (s *PrefixStore) FindMatchingPods(prompt, modelName string) map[string]int 
 		}
 
 		for _, pod := range b.Pods.Keys() {
-			matchedPods[pod.String()]++
+			matchedPods[pod.String()] += s.cacheBlockSize
 		}
 	}
 

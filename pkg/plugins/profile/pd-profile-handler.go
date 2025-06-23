@@ -4,6 +4,7 @@ package profile
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -63,8 +64,9 @@ func (h *PdProfileHandler) Pick(ctx context.Context, request *types.LLMRequest, 
 	// inspect decode execution result to decide if prefil should run or not.
 	// if the request is short enough, use decode results only and don't run the prefill profile.
 	hitPercentage := h.prefixScorer.GetCachedPercentage(profileResults[decode].TargetPod.GetPod().NamespacedName.String(), request.Prompt)
+
 	if (1.0-hitPercentage)*float64(len(request.Prompt)) < float64(h.pdThreshold) {
-		log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentage)
+		log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", fmt.Sprintf("%.2f%%", hitPercentage*100.0))
 		return map[string]*framework.SchedulerProfile{} // do not run prefill
 	}
 

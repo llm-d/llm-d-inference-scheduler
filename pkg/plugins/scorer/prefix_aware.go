@@ -2,6 +2,7 @@ package scorer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -115,6 +116,10 @@ func (s *PrefixAwareScorer) PostResponse(ctx context.Context, request *types.LLM
 		return
 	}
 
+	hitPercentage := s.GetCachedPercentage(targetPod.NamespacedName.String(), request.Prompt)
+	log.FromContext(ctx).Info("Responded pod prefix cache hit percentage",
+		"percentage", fmt.Sprintf("%.2f%%", hitPercentage*100.0))
+
 	if err := s.prefixStore.AddEntry(request.TargetModel, request.Prompt, &targetPod.NamespacedName); err != nil {
 		debugLogger.Error(err, "Failed to add entry to prefix store", "request", request, "pod", targetPod)
 		return
@@ -146,7 +151,7 @@ func (s *PrefixAwareScorer) GetCachedPercentage(pod, prompt string) float64 {
 	}
 
 	intVal, _ := rawVal.(int)
-	return float64(intVal*s.prefixStore.cacheBlockSize) / float64(len(prompt))
+	return float64(intVal) / float64(len(prompt))
 }
 
 // cleanup Cleans up hits map
