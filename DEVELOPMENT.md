@@ -19,16 +19,10 @@ Documentation for developing the inference scheduler.
 
 ## Kind Development Environment
 
-> [!Warning]
-> This currently requires you to have manually built the vllm
-> simulator separately on your local system. In a future iteration this will
-> be handled automatically and will not be required. The tag for the simulator
-> currently needs to be `v0.1.0`.
+The following deployment creates a [Kubernetes in Docker (KIND)] cluster with an inference scheduler using a Gateway API implementation, connected to the vLLM simulator.
+To run the deployment, use the following command:
 
-You can deploy the current scheduler with a Gateway API implementation into a
-[Kubernetes in Docker (KIND)] cluster locally with the following:
-
-```console
+```bash
 make env-dev-kind
 ```
 
@@ -36,17 +30,20 @@ This will create a `kind` cluster (or re-use an existing one) using the system's
 local container runtime and deploy the development stack into the `default`
 namespace.
 
+> [!NOTE]
+> You can download the image locally using `docker pull ghcr.io/llm-d/llm-d-inference-sim:latest`, and the script will load it from your local Docker registry.
+
 There are several ways to access the gateway:
 
 **Port forward**:
 
-```console
+```bash
 $ kubectl --context llm-d-inference-scheduler-dev port-forward service/inference-gateway 8080:80
 ```
 
 **NodePort**
 
-```console
+```bash
 # Determine the k8s node address
 $ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep address
 # The service is accessible over port 80 of the worker IP address.
@@ -54,7 +51,7 @@ $ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep addres
 
 **LoadBalancer**
 
-```console
+```bash
 # Install and run cloud-provider-kind:
 $ go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
 $ kubectl --context llm-d-inference-scheduler-dev get service inference-gateway
@@ -63,7 +60,7 @@ $ kubectl --context llm-d-inference-scheduler-dev get service inference-gateway
 
 You can now make requests macthing the IP:port of one of the access mode above:
 
-```console
+```bash
 $ curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
@@ -71,14 +68,15 @@ By default the created inference gateway, can be accessed on port 30080. This ca
 be overriden to any free port in the range of 30000 to 32767, by running the above
 command as follows:
 
-```console
+```bash
 KIND_GATEWAY_HOST_PORT=<selected-port> make env-dev-kind
 ```
 
 **Where:** &lt;selected-port&gt; is the port on your local machine you want to use to
 access the inference gatyeway.
 
-> **NOTE**: If you require significant customization of this environment beyond
+> [!NOTE]
+> If you require significant customization of this environment beyond
 > what the standard deployment provides, you can use the `deploy/components`
 > with `kustomize` to build your own highly customized environment. You can use
 > the `deploy/environments/kind` deployment as a reference for your own.
@@ -90,28 +88,30 @@ access the inference gatyeway.
 To test your changes to `llm-d-inference-scheduler` in this environment, make your changes locally
 and then re-run the deployment:
 
-```console
+```bash
 make env-dev-kind
 ```
 
 This will build images with your recent changes and load the new images to the
 cluster. By default the image tag will be `dev`. It will also load `llm-d-inference-sim` image.
 
-**NOTE:** The built image tag can be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
+> [!NOTE]
+>The built image tag can be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
 
-```console
+```bash
 EPP_TAG=0.0.4 make env-dev-kind
 ```
 
-**NOTE:** If you want to load a different tag of llm-d-inference-sim, you can use the environment variable `VLLM_SIMULATOR_TAG` to specify it.
+> [!NOTE]
+> If you want to load a different tag of llm-d-inference-sim, you can use the environment variable `VLLM_SIMULATOR_TAG` to specify it.
 
-**NOTE**: If you are working on a MacOS with Apple Silicon, it is required to add
-the environment variable `GOOS=linux`.
+> [!NOTE]
+> If you are working on a MacOS with Apple Silicon, it is required to add the environment variable `GOOS=linux`.
 
 Then do a rollout of the EPP `Deployment` so that your recent changes are
 reflected:
 
-```console
+```bash
 kubectl rollout restart deployment food-review-endpoint-picker
 ```
 
@@ -292,7 +292,7 @@ and push it:
 make image-push
 ```
 
-You can now re-deploy the environment with your changes (don't forget all
+You can now re-deploy the environment with your changes (don't forget all of
 the required environment variables):
 
 ```bash
@@ -305,26 +305,26 @@ And test the changes.
 
 To clean up the development environment and remove all deployed resources in your namespace, run:
 
-```sh
+```bash
 make clean-env-dev-kubernetes
 ```
 
 If you also want to remove the namespace entirely, run:
 
-```sh
+```bash
 kubectl delete namespace ${NAMESPACE}
 ```
 
 To uninstall the infra-stracture development:
 Uninstal GIE CRDs:
 
-```sh
+```bash
 kubectl delete -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml --ignore-not-found
 ```
 
 Uninstall kgateway:
 
-```sh
+```bash
 helm uninstall kgateway -n kgateway-system
 helm uninstall kgateway-crds -n kgateway-system
 ```

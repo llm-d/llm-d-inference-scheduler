@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${VLLM_SIMULATOR_IMAGE:=llm-d-inference-sim}"
 
 # Set a default VLLM_SIMULATOR_TAG if not provided
-export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.1.0}"
+export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-latest}"
 
 # Set a default EPP_IMAGE if not provided
 : "${EPP_IMAGE:=llm-d-inference-scheduler}"
@@ -133,7 +133,10 @@ kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Rea
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 	podman save ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
-	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}
+	if docker image inspect "${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}" > /dev/null 2>&1; then
+		echo "INFO: Loading image into KIND cluster..."
+		kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}
+	fi
 fi
 
 # Load the ext_proc endpoint-picker image into the cluster
