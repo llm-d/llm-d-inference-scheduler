@@ -180,8 +180,10 @@ func TestPDSchedule(t *testing.T) {
 				t.Errorf("Unexpected error, got %v", err)
 			}
 
-			scheduler := scheduling.NewSchedulerWithConfig(&fakeDataStore{pods: test.input}, schedulderConfig)
-			got, err := scheduler.Schedule(ctx, test.req)
+			datastore := &fakeDataStore{pods: test.input}
+			scheduler := scheduling.NewSchedulerWithConfig(schedulderConfig)
+			candidatePods := types.ToSchedulerPodMetrics(datastore.PodGetAll())
+			got, err := scheduler.Schedule(ctx, test.req, candidatePods)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
