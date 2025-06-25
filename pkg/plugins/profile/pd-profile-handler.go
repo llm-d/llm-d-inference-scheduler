@@ -13,7 +13,9 @@ import (
 )
 
 const (
-	name    = "pd-profile-handler"
+	// PdProfileHandlerType is the type of the PdProfileHandler
+	PdProfileHandlerType = "pd-profile-handler"
+
 	decode  = "decode"
 	prefill = "prefill"
 )
@@ -24,6 +26,7 @@ var _ framework.ProfileHandler = &PdProfileHandler{}
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewPdProfileHandler(pdThreshold int, prefixScorer *scorer.PrefixAwareScorer) *PdProfileHandler {
 	return &PdProfileHandler{
+		name:         PdProfileHandlerType,
 		pdThreshold:  pdThreshold,
 		prefixScorer: prefixScorer,
 	}
@@ -31,13 +34,25 @@ func NewPdProfileHandler(pdThreshold int, prefixScorer *scorer.PrefixAwareScorer
 
 // PdProfileHandler handles scheduler profiles for PD.
 type PdProfileHandler struct {
+	name         string
 	pdThreshold  int
 	prefixScorer *scorer.PrefixAwareScorer
 }
 
 // Type returns the type of the Profile Handler.
 func (h *PdProfileHandler) Type() string {
-	return name
+	return PdProfileHandlerType
+}
+
+// Name returns the name of the instance of the filter.
+func (h *PdProfileHandler) Name() string {
+	return h.name
+}
+
+// WithName sets the name of the filter.
+func (h *PdProfileHandler) WithName(name string) *PdProfileHandler {
+	h.name = name
+	return h
 }
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the

@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	kvCacheAwareScorerName = "kvcache-aware-scorer"
+	// KvCacheAwareScorerType is the type of the KvCacheAwareScorer
+	KvCacheAwareScorerType = "kvcache-aware-scorer"
 
 	kvCacheRedisEnvVar     = "KVCACHE_INDEXER_REDIS_ADDR"
 	huggingFaceTokenEnvVar = "HF_TOKEN"
@@ -64,24 +65,37 @@ func NewKVCacheAwareScorer(ctx context.Context) (framework.Scorer, error) {
 	go kvCacheIndexer.Run(ctx)
 
 	return &KVCacheAwareScorer{
+		name:           KvCacheAwareScorerType,
 		kvCacheIndexer: kvCacheIndexer,
 	}, nil
 }
 
 // KVCacheAwareScorer uses the KVCacheIndexer to score pods based on KVCache awareness.
 type KVCacheAwareScorer struct {
+	name           string
 	kvCacheIndexer *kvcache.Indexer
 }
 
 // Type returns the type of the scorer.
 func (s *KVCacheAwareScorer) Type() string {
-	return kvCacheAwareScorerName
+	return KvCacheAwareScorerType
+}
+
+// Name returns the name of the instance of the filter.
+func (s *KVCacheAwareScorer) Name() string {
+	return s.name
+}
+
+// WithName sets the name of the filter.
+func (s *KVCacheAwareScorer) WithName(name string) *KVCacheAwareScorer {
+	s.name = name
+	return s
 }
 
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
 func (s *KVCacheAwareScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
-	loggerDebug := log.FromContext(ctx).WithName(kvCacheAwareScorerName).V(logutil.DEBUG)
+	loggerDebug := log.FromContext(ctx).WithName(s.name).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
 		return nil

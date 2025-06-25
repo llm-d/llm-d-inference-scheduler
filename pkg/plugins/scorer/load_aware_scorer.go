@@ -10,6 +10,9 @@ import (
 )
 
 const (
+	// LoadAwareScorerType is the type of the LoadAwareScorer
+	LoadAwareScorerType = "load-aware-scorer"
+
 	queueThresholdEnvName = "LOAD_AWARE_SCORER_QUEUE_THRESHOLD"
 	queueThresholdDefault = 128
 )
@@ -20,18 +23,31 @@ var _ framework.Scorer = &LoadAwareScorer{}
 // NewLoadAwareScorer creates a new load based scorer
 func NewLoadAwareScorer(ctx context.Context) framework.Scorer {
 	return &LoadAwareScorer{
+		name:           LoadAwareScorerType,
 		queueThreshold: float64(env.GetEnvInt(queueThresholdEnvName, queueThresholdDefault, log.FromContext(ctx))),
 	}
 }
 
 // LoadAwareScorer scorer that is based on load
 type LoadAwareScorer struct {
+	name           string
 	queueThreshold float64
 }
 
 // Type returns the type of the scorer.
 func (s *LoadAwareScorer) Type() string {
-	return "load-aware-scorer"
+	return LoadAwareScorerType
+}
+
+// Name returns the name of the instance of the filter.
+func (s *LoadAwareScorer) Name() string {
+	return s.name
+}
+
+// WithName sets the name of the filter.
+func (s *LoadAwareScorer) WithName(name string) *LoadAwareScorer {
+	s.name = name
+	return s
 }
 
 // Score scores the given pod in range of 0-1

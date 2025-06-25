@@ -11,6 +11,9 @@ import (
 )
 
 const (
+	// PrefillHeaderHandlerType is the type of the PrefillHeaderHandler
+	PrefillHeaderHandlerType = "prefill-header"
+
 	prefillPodHeader = "x-prefiller-url" // prefillPodHeader is the HTTP header name used to indicate Prefill worker
 )
 
@@ -19,15 +22,30 @@ var _ requestcontrol.PreRequest = &PrefillHeaderHandler{}
 
 // NewPrefillHeaderHandler initializes a new PrefillHeaderHandler and returns its pointer.
 func NewPrefillHeaderHandler() *PrefillHeaderHandler {
-	return &PrefillHeaderHandler{}
+	return &PrefillHeaderHandler{
+		name: PrefillHeaderHandlerType,
+	}
 }
 
 // PrefillHeaderHandler PreRequest plugin
-type PrefillHeaderHandler struct{}
+type PrefillHeaderHandler struct {
+	name string
+}
 
 // Type returns the type of the PreRequest plugin.
 func (p *PrefillHeaderHandler) Type() string {
-	return "prefill-header"
+	return PrefillHeaderHandlerType
+}
+
+// Name returns the name of the instance of the filter.
+func (p *PrefillHeaderHandler) Name() string {
+	return p.name
+}
+
+// WithName sets the name of the filter.
+func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
+	p.name = name
+	return p
 }
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker

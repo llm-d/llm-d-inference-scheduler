@@ -14,6 +14,9 @@ import (
 )
 
 const (
+	// SessionAffinityScorerType is the type of the SessionAffinityScorer
+	SessionAffinityScorerType = "session-affinity-scorer"
+
 	sessionKeepAliveTime           = 60 * time.Minute  // How long should an idle session be kept alive
 	sessionKeepAliveCheckFrequency = 15 * time.Minute  // How often to check for overly idle sessions
 	sessionTokenHeader             = "x-session-token" // name of the session header in request
@@ -25,7 +28,9 @@ var _ requestcontrol.PostResponse = &SessionAffinity{}
 
 // NewSessionAffinity returns a scorer
 func NewSessionAffinity() *SessionAffinity {
-	return &SessionAffinity{}
+	return &SessionAffinity{
+		name: SessionAffinityScorerType,
+	}
 }
 
 // SessionAffinity is a routing scorer that routes subsequent
@@ -33,11 +38,23 @@ func NewSessionAffinity() *SessionAffinity {
 // session was sent to, by giving that pod the specified weight and assigning
 // zero score to the rest of the targets
 type SessionAffinity struct {
+	name string
 }
 
 // Type returns the type of the scorer.
 func (s *SessionAffinity) Type() string {
-	return "session-affinity-scorer"
+	return SessionAffinityScorerType
+}
+
+// Name returns the name of the instance of the filter.
+func (s *SessionAffinity) Name() string {
+	return s.name
+}
+
+// WithName sets the name of the filter.
+func (s *SessionAffinity) WithName(name string) *SessionAffinity {
+	s.name = name
+	return s
 }
 
 // Score assign a high score to the pod used in previous requests and zero to others

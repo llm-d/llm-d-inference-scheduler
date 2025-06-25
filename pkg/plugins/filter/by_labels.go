@@ -10,6 +10,11 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
 
+const (
+	// ByLabelsFilterType is the type of the ByLabelsFilter
+	ByLabelsFilterType = "by-labels"
+)
+
 // compile-time type assertion
 var _ framework.Filter = &ByLabels{}
 
@@ -38,7 +43,18 @@ type ByLabels struct {
 
 // Type returns the type of the filter
 func (blf *ByLabels) Type() string {
+	return ByLabelsFilterType
+}
+
+// Name returns the name of the instance of the filter.
+func (blf *ByLabels) Name() string {
 	return blf.name
+}
+
+// WithName sets the name of the filter.
+func (blf *ByLabels) WithName(name string) *ByLabels {
+	blf.name = name
+	return blf
 }
 
 // Filter filters out all pods that do not satisfy the label selector
