@@ -53,7 +53,7 @@ const (
 	DefaultPrefixCacheCapacity = 500000
 
 	prefixScorerCacheBlockSizeEnvKey = "PREFIX_SCORER_CACHE_BLOCK_SIZE"
-	// DefaultPrefixCacheBlockSize defines the default value of how many runes each block contains in the prefix cache.
+	// DefaultPrefixCacheBlockSize defines the default value of how many bytes each block contains in the prefix cache.
 	DefaultPrefixCacheBlockSize = 256
 )
 
