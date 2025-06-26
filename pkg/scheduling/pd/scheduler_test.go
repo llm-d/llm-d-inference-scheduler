@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
@@ -75,11 +76,42 @@ func TestPDSchedule(t *testing.T) {
 		Metrics: &backendmetrics.MetricsState{},
 	}
 
+	prefillDecodeResult := &types.SchedulingResult{
+		ProfileResults: map[string]*types.ProfileRunResult{
+			"decode": {
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod2,
+					Score: 0.0,
+				},
+			},
+			"prefill": {
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod1,
+					Score: 0.0,
+				},
+			},
+		},
+		PrimaryProfileName: "decode",
+	}
+
+	decodeResult := &types.SchedulingResult{
+		ProfileResults: map[string]*types.ProfileRunResult{
+			"decode": {
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod2,
+					Score: 0.0,
+				},
+			},
+		},
+		PrimaryProfileName: "decode",
+	}
+
 	tests := []struct {
 		name            string
 		req             *types.LLMRequest
 		input           []backendmetrics.PodMetrics
 		wantRes         *types.SchedulingResult
+		wantRes2        *types.SchedulingResult
 		wantHeaders     map[string]string
 		unwantedHeaders []string
 		unwantedPodIDs  []string
@@ -124,51 +156,27 @@ func TestPDSchedule(t *testing.T) {
 			err:   true,
 		},
 		{
-			name: "1P1D",
+			name: "1P1D - long prompt",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Prompt:      "12345678901",
+				Prompt:      "12345678906",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP will be in the header
-			input: []backendmetrics.PodMetrics{pod1, pod2},
-			wantRes: &types.SchedulingResult{
-				ProfileResults: map[string]*types.ProfileRunResult{
-					"decode": {
-						TargetPod: &types.ScoredPod{
-							Pod:   wantPod2,
-							Score: 0.0,
-						},
-					},
-					"prefill": {
-						TargetPod: &types.ScoredPod{
-							Pod:   wantPod1,
-							Score: 0.0,
-						},
-					},
-				},
-				PrimaryProfileName: "decode",
-			},
+			input:    []backendmetrics.PodMetrics{pod1, pod2},
+			wantRes:  prefillDecodeResult,
+			wantRes2: decodeResult,
 		},
 		{
 			name: "1P1Dshort",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Prompt:      "123",
+				Prompt:      "12345",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP should no be in the header,
 			// because the prompt is too short
-			input: []backendmetrics.PodMetrics{pod1, pod2},
-			wantRes: &types.SchedulingResult{
-				ProfileResults: map[string]*types.ProfileRunResult{
-					"decode": {
-						TargetPod: &types.ScoredPod{
-							Pod:   wantPod2,
-							Score: 0.0,
-						},
-					},
-				},
-				PrimaryProfileName: "decode",
-			},
+			input:    []backendmetrics.PodMetrics{pod1, pod2},
+			wantRes:  decodeResult,
+			wantRes2: decodeResult,
 		},
 		{
 			name: "TestRoles",
@@ -190,19 +198,21 @@ func TestPDSchedule(t *testing.T) {
 		DecodeSchedulerPlugins:  map[string]int{},
 		PrefillSchedulerPlugins: map[string]int{},
 		PDEnabled:               true,
-		PDThreshold:             5,
-		PrefixCacheBlockSize:    256,
-		PrefixCacheCapacity:     50000,
+		PDThreshold:             10,
+		GIEPrefixConfig: &prefix.Config{
+			HashBlockSize:          5,
+			MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
+			LRUCapacityPerServer:   prefix.DefaultLRUCapacityPerServer,
+		},
+		PrefixConfig: scorer.DefaultPrefixStoreConfig(),
 	}
+
+	schedulderConfig.GIEPrefixConfig.HashBlockSize = 5
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			prefixConfig := scorer.DefaultPrefixStoreConfig()
-			prefixConfig.CacheBlockSize = schedulderConfig.PrefixCacheBlockSize
-			prefixConfig.CacheCapacity = schedulderConfig.PrefixCacheCapacity
-			prefixScorer := scorer.NewPrefixAwareScorer(ctx, prefixConfig)
 
-			schedulderConfig, err := pd.CreatePDSchedulerConfig(ctx, schedulderConfig, prefixScorer)
+			schedulderConfig, err := pd.CreatePDSchedulerConfig(ctx, schedulderConfig)
 			if err != nil {
 				t.Errorf("Unexpected error, got %v", err)
 			}
@@ -248,6 +258,18 @@ func TestPDSchedule(t *testing.T) {
 					}
 				}
 			}
+
+			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
+				got, err = scheduler.Schedule(ctx, test.req, candidatePods)
+				if test.err != (err != nil) {
+					t.Errorf("Unexpected error, got %v, want %v", err, test.err)
+				}
+
+				if diff := cmp.Diff(test.wantRes2, got); diff != "" {
+					t.Errorf("Unexpected output (-want +got): %v", diff)
+				}
+			}
+
 		})
 	}
 }

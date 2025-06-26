@@ -4,6 +4,8 @@ package config
 
 import (
 	"github.com/go-logr/logr"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
 
@@ -47,14 +49,6 @@ const (
 	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
 	pdPromptLenThresholdDefault = 100
-
-	prefixCacheCapacityEnvKey = "PREFIX_SCORER_CACHE_CAPACITY"
-	// DefaultPrefixCacheCapacity defines the default value for maximum number of blocks the LRU cache can store.
-	DefaultPrefixCacheCapacity = 500000
-
-	prefixScorerCacheBlockSizeEnvKey = "PREFIX_SCORER_CACHE_BLOCK_SIZE"
-	// DefaultPrefixCacheBlockSize defines the default value of how many runes each block contains in the prefix cache.
-	DefaultPrefixCacheBlockSize = 256
 )
 
 // Config contains scheduler configuration, currently configuration is loaded from environment variables
@@ -63,8 +57,8 @@ type Config struct {
 	PrefillSchedulerPlugins map[string]int
 	PDEnabled               bool
 	PDThreshold             int
-	PrefixCacheBlockSize    int
-	PrefixCacheCapacity     int
+	GIEPrefixConfig         *prefix.Config
+	PrefixConfig            *scorer.PrefixStoreConfig // TBD should be removed.
 }
 
 // LoadConfig loads configuration from environment variables and returns a new instance of Config
@@ -76,13 +70,24 @@ func LoadConfig(logger logr.Logger) *Config {
 		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName,
 	}
 
+	// Set GIE prefix Config
+	giePrefixConfig := &prefix.Config{
+		HashBlockSize:          env.GetEnvInt("PREFIX_CACHE_HASH_BLOCK_SIZE", prefix.DefaultHashBlockSize, logger),
+		MaxPrefixBlocksToMatch: env.GetEnvInt("PREFIX_CACHE_MAX_PREFIX_BLOCKS", prefix.DefaultMaxPrefixBlocks, logger),
+		LRUCapacityPerServer:   env.GetEnvInt("PREFIX_CACHE_LRU_CAPACITY_PER_SERVER", prefix.DefaultLRUCapacityPerServer, logger),
+	}
+	// prefix Config- TBD to be mremove
+	prefixConfig := scorer.DefaultPrefixStoreConfig()
+	prefixConfig.CacheBlockSize = env.GetEnvInt("PREFIX_SCORER_CACHE_BLOCK_SIZE", scorer.DefaultPrefixCacheBlockSize, logger)
+	prefixConfig.CacheCapacity = env.GetEnvInt("PREFIX_SCORER_CACHE_CAPACITY", scorer.DefaultPrefixCacheCapacity, logger)
+
 	return &Config{
 		DecodeSchedulerPlugins:  loadPluginInfo(logger, false, pluginNames),
 		PrefillSchedulerPlugins: loadPluginInfo(logger, true, pluginNames),
 		PDEnabled:               env.GetEnvBool(pdEnabledEnvKey, false, logger),
 		PDThreshold:             env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
-		PrefixCacheBlockSize:    env.GetEnvInt(prefixScorerCacheBlockSizeEnvKey, DefaultPrefixCacheBlockSize, logger),
-		PrefixCacheCapacity:     env.GetEnvInt(prefixCacheCapacityEnvKey, DefaultPrefixCacheCapacity, logger),
+		GIEPrefixConfig:         giePrefixConfig,
+		PrefixConfig:            prefixConfig,
 	}
 }
 

@@ -33,7 +33,6 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
 )
 
@@ -43,23 +42,12 @@ func main() {
 
 	pdConfig := config.LoadConfig(setupLog)
 
-	// always initialize prefix scorer, which is used in the decision making of whether PD should be called or not.
-	prefixConfig := scorer.DefaultPrefixStoreConfig()
-	prefixConfig.CacheBlockSize = pdConfig.PrefixCacheBlockSize
-	prefixConfig.CacheCapacity = pdConfig.PrefixCacheCapacity
-	prefixScorer := scorer.NewPrefixAwareScorer(ctx, prefixConfig)
-
 	requestControlConfig := requestcontrol.NewConfig()
 	if pdConfig.PDEnabled { // if PD is enabled, use the prefill header pre-request plugin to populate prefill endpoint in a header.
 		requestControlConfig.WithPreRequestPlugins(prerequest.NewPrefillHeaderHandler())
 	}
-	// if PD is enabled we always use prefix scorer (even if not configured on Prefill/Decode scheduling profiles)
-	// if PD is disabled, only decode profile runs. if prefix is configured in decode use its post response extension point.
-	if _, exist := pdConfig.DecodeSchedulerPlugins[config.PrefixScorerName]; exist || pdConfig.PDEnabled {
-		requestControlConfig.WithPostResponsePlugins(prefixScorer)
-	}
 
-	schedulerConfig, err := pd.CreatePDSchedulerConfig(ctx, pdConfig, prefixScorer)
+	schedulerConfig, err := pd.CreatePDSchedulerConfig(ctx, pdConfig)
 	if err != nil {
 		setupLog.Error(err, "failed to create scheduler config")
 		os.Exit(1)
