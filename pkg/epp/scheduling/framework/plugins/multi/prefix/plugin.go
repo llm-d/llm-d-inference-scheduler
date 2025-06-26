@@ -90,17 +90,17 @@ func (s ServerID) String() string {
 }
 
 // compile-time type validation
-var _ types.StateData = &schedulingContextState{}
+var _ types.StateData = &SchedulingContextState{}
 
-// This is the state of this plugin to be used during a scheduling cycle.
-type schedulingContextState struct {
+// SchedulingContextState is the state of this plugin to be used during a scheduling cycle.
+type SchedulingContextState struct {
 	// PrefixHashes is a list of prefix hashes of the request prompt broken into blocks.
 	PrefixHashes []BlockHash
 	// A map of server to its longest prefix cache match length.
 	PrefixCacheServers map[ServerID]int
 }
 
-func (s *schedulingContextState) Clone() types.StateData {
+func (s *SchedulingContextState) Clone() types.StateData {
 	prefixHashes := make([]BlockHash, len(s.PrefixHashes))
 	copy(prefixHashes, s.PrefixHashes)
 	prefixCacheServers := make(map[ServerID]int, len(s.PrefixCacheServers))
@@ -108,7 +108,7 @@ func (s *schedulingContextState) Clone() types.StateData {
 		prefixCacheServers[key] = value
 	}
 
-	return &schedulingContextState{
+	return &SchedulingContextState{
 		PrefixHashes:       prefixHashes,
 		PrefixCacheServers: prefixCacheServers,
 	}
@@ -171,7 +171,7 @@ func (m *Plugin) Score(ctx context.Context, cycleState *types.CycleState, reques
 	loggerTrace := log.FromContext(ctx).V(logutil.TRACE)
 	// pre score step, hashing prompt and find longest prefix match.
 	hashes := hashPrompt(ctx, request, m.HashBlockSize, m.MaxPrefixBlocksToMatch)
-	state := &schedulingContextState{
+	state := &SchedulingContextState{
 		PrefixHashes:       hashes,
 		PrefixCacheServers: m.matchLongestPrefix(ctx, hashes),
 	}
@@ -199,7 +199,7 @@ func (m *Plugin) Score(ctx context.Context, cycleState *types.CycleState, reques
 // PostCycle records in the plugin cache the result of the scheduling selection.
 func (m *Plugin) PostCycle(ctx context.Context, cycleState *types.CycleState, res *types.ProfileRunResult) {
 	targetPod := res.TargetPod.GetPod()
-	state, err := m.getPrefixState(cycleState)
+	state, err := types.ReadCycleStateKey[*SchedulingContextState](cycleState, PrefixCachePluginType)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to read prefix plugin cycle state")
 		return
@@ -233,22 +233,6 @@ func (m *Plugin) matchLongestPrefix(ctx context.Context, hashes []BlockHash) map
 		}
 	}
 	return res
-}
-
-// getPrefixState returns the cycle state as a schedulingContextState.
-func (m *Plugin) getPrefixState(cycleState *types.CycleState) (*schedulingContextState, error) {
-	prefixStateKey := types.StateKey(m.Type())
-	state, err := cycleState.Read(prefixStateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed reading %q from CycleState: %w", prefixStateKey, err)
-	}
-
-	prefixSchedulingState, ok := state.(*schedulingContextState)
-	if !ok {
-		return nil, fmt.Errorf("invalid Prefix state, got type %T", state)
-	}
-
-	return prefixSchedulingState, nil
 }
 
 // hashPrompt divides the prompt into blocks and calculate the prefix cache for each block.
