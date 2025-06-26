@@ -10,7 +10,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/llm-d/llm-d-kv-cache-manager v0.1.1
-	github.com/redis/go-redis/v9 v9.10.0
+	github.com/redis/go-redis/v9 v9.11.0
 	github.com/stretchr/testify v1.10.0
 	k8s.io/apimachinery v0.33.2
 	k8s.io/client-go v0.33.2
