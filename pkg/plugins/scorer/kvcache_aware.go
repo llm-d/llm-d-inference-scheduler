@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
+	"github.com/llm-d/llm-d-kv-cache-manager/pkg/tracing"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
@@ -102,13 +104,24 @@ func (s *KVCacheAwareScorer) WithName(name string) *KVCacheAwareScorer {
 // The returned scores are normalized to a range of 0-1.
 func (s *KVCacheAwareScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(s.typedName.String()).V(logutil.DEBUG)
+	ctx, span := tracing.StartSpan(ctx, "epp.kvcache_scorer.score", tracing.OperationGetPodScores)
+	defer span.End()
+
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
+		span.SetAttributes(attribute.String(tracing.AttrOperationOutcome, tracing.OutcomeSuccess))
 		return nil
 	}
 
+	span.SetAttributes(
+		attribute.String(tracing.AttrGenAIRequestModel, request.TargetModel),
+		attribute.Int("epp.prompt_length", len(request.Prompt)),
+		attribute.Int("epp.candidate_pods", len(pods)),
+	)
+
 	scores, err := s.kvCacheIndexer.GetPodScores(ctx, request.Prompt, request.TargetModel, nil)
 	if err != nil {
+		tracing.SetSpanError(span, err)
 		loggerDebug.Error(err, "Failed to get pod scores")
 		return nil
 	}
@@ -123,5 +136,13 @@ func (s *KVCacheAwareScorer) Score(ctx context.Context, _ *types.CycleState, req
 		return metricsPod.Address, true
 	}
 
-	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
+	result := indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
+
+	span.SetAttributes(
+		attribute.Int("epp.scored_pods", len(result)),
+		attribute.Int("epp.cache_hits", len(scores)),
+		attribute.String(tracing.AttrOperationOutcome, tracing.OutcomeSuccess),
+	)
+
+	return result
 }
