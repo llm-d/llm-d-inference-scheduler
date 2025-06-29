@@ -3,6 +3,8 @@ package pd
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
@@ -21,6 +23,12 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+)
+
+const (
+	kvCacheRedisEnvVar     = "KVCACHE_INDEXER_REDIS_ADDR"
+	huggingFaceTokenEnvVar = "HF_TOKEN"
+	queueThresholdEnvName  = "LOAD_AWARE_SCORER_QUEUE_THRESHOLD"
 )
 
 // CreatePDSchedulerConfig returns a new disaggregated Prefill/Decode SchedulerConfig, using the provided configuration.
@@ -84,13 +92,15 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, prefix
 	for pluginName, pluginWeight := range pluginsConfig {
 		switch pluginName {
 		case config.KVCacheScorerName:
-			if scorer, err := scorer.NewKVCacheAwareScorer(ctx); err == nil {
-				plugins = append(plugins, framework.NewWeightedScorer(scorer, pluginWeight))
-			} else {
+			plugin, err := createKVCacheScorer(ctx, pluginWeight)
+			if err != nil {
 				logger.Error(err, "KVCache scorer creation failed")
 			}
+			plugins = append(plugins, plugin)
+
 		case config.LoadAwareScorerName:
-			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx), pluginWeight))
+			queueThreshold := float64(envutil.GetEnvInt(queueThresholdEnvName, scorer.QueueThresholdDefault, log.FromContext(ctx)))
+			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(queueThreshold), pluginWeight))
 		case config.PrefixScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(prefixScorer, pluginWeight))
 		case config.SessionAwareScorerName:
@@ -128,4 +138,27 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, prefix
 	}
 
 	return plugins
+}
+
+func createKVCacheScorer(ctx context.Context, pluginWeight int) (plugins.Plugin, error) {
+	redisAddr := os.Getenv(kvCacheRedisEnvVar)
+	if redisAddr != "" {
+		// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
+		if !strings.HasPrefix(redisAddr, "redis://") && !strings.HasPrefix(redisAddr, "rediss://") && !strings.HasPrefix(redisAddr, "unix://") {
+			redisAddr = "redis://" + redisAddr
+		}
+	} else {
+		return nil, fmt.Errorf("environment variable %s is not set", kvCacheRedisEnvVar)
+	}
+
+	hfToken := os.Getenv(huggingFaceTokenEnvVar)
+	if hfToken == "" {
+		return nil, fmt.Errorf("environment variable %s is not set", huggingFaceTokenEnvVar)
+	}
+	var kvScorer framework.Scorer
+	var err error
+	if kvScorer, err = scorer.NewKVCacheAwareScorer(ctx, redisAddr, hfToken); err == nil {
+		return framework.NewWeightedScorer(kvScorer, pluginWeight), nil
+	}
+	return nil, err
 }
