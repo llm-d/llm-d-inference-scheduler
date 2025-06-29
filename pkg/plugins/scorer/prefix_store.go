@@ -9,13 +9,15 @@ import (
 	"github.com/cespare/xxhash/v2"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 )
 
 const (
 	// defaultMaxBlockPods defined the default maximum number of pods a block can store. Currently this value cannot be changed by configuration
 	defaultMaxBlockPods = 100
+	// DefaultPrefixCacheCapacity defines the default value for maximum number of blocks the LRU cache can store.
+	DefaultPrefixCacheCapacity = 500000
+	// DefaultPrefixCacheBlockSize defines the default value of how many runes each block contains in the prefix cache.
+	DefaultPrefixCacheBlockSize = 256
 )
 
 // PrefixStoreConfig contains initialization configuration for PrefixStore.
@@ -34,8 +36,8 @@ type PrefixStoreConfig struct {
 // configuration.
 func DefaultPrefixStoreConfig() *PrefixStoreConfig {
 	return &PrefixStoreConfig{
-		CacheCapacity:  config.DefaultPrefixCacheCapacity,
-		CacheBlockSize: config.DefaultPrefixCacheBlockSize,
+		CacheCapacity:  DefaultPrefixCacheCapacity,
+		CacheBlockSize: DefaultPrefixCacheBlockSize,
 		MaxBlockPods:   defaultMaxBlockPods,
 	}
 }
