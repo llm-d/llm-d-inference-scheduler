@@ -38,13 +38,11 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 		return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", PdProfileHandlerType, err)
 	}
 
-	rawPlugin := handle.Plugins().Plugin(parameters.PrefixScorerRef)
-	if rawPlugin == nil {
-		return nil, fmt.Errorf("there was no plugin with the name '%s' defined", parameters.PrefixScorerRef)
-	}
-	prefixScorer, ok := rawPlugin.(*scorer.PrefixAwareScorer)
-	if !ok {
-		return nil, fmt.Errorf("the plugin with the name '%s' was not an instance of the PrefixAwareScorer", parameters.PrefixScorerRef)
+	var prefixScorer *scorer.PrefixAwareScorer
+	var err error
+	prefixScorer, err = plugins.PluginByType[*scorer.PrefixAwareScorer](handle.Plugins(), parameters.PrefixScorerRef)
+	if err != nil {
+		return nil, err
 	}
 
 	return NewPdProfileHandler(parameters.Threshold, prefixScorer).WithName(name), nil
