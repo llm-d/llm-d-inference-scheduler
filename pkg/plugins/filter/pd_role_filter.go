@@ -2,7 +2,9 @@ package filter
 
 import (
 	"context"
+	"encoding/json"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
@@ -26,6 +28,11 @@ const (
 
 // compile-time type assertion
 var _ framework.Filter = &PrefillFilter{}
+
+// PrefillFilterFactory defines the factory function for the PrefillFilter
+func PrefillFilterFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewPrefillFilter().WithName(name), nil
+}
 
 // NewPrefillFilter creates a new instance of the DecodeFilter
 func NewPrefillFilter() *PrefillFilter {
@@ -70,6 +77,11 @@ func (pf *PrefillFilter) Filter(_ context.Context, _ *types.CycleState, _ *types
 
 // compile-time type assertion
 var _ framework.Filter = &DecodeFilter{}
+
+// DecodeFilterFactory defines the factory function for the DecodeFilter
+func DecodeFilterFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewDecodeFilter().WithName(name), nil
+}
 
 // NewDecodeFilter creates a new instance of the DecodeFilter
 func NewDecodeFilter() *DecodeFilter {

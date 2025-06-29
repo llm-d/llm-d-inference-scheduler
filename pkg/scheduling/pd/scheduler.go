@@ -23,6 +23,10 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
+const (
+	queueThresholdEnvName = "LOAD_AWARE_SCORER_QUEUE_THRESHOLD"
+)
+
 // CreatePDSchedulerConfig returns a new disaggregated Prefill/Decode SchedulerConfig, using the provided configuration.
 func CreatePDSchedulerConfig(ctx context.Context, pdConfig *config.Config, prefixScorer *scorer.PrefixAwareScorer) (*scheduling.SchedulerConfig, error) {
 	if !pdConfig.PDEnabled { // if PD is disabled, create scheduler with SingleProfileHandler (handling only decode profile)
@@ -90,7 +94,8 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, prefix
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx), pluginWeight))
+			queueThreshold := envutil.GetEnvInt(queueThresholdEnvName, scorer.QueueThresholdDefault, log.FromContext(ctx))
+			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(queueThreshold), pluginWeight))
 		case config.PrefixScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(prefixScorer, pluginWeight))
 		case config.SessionAwareScorerName:

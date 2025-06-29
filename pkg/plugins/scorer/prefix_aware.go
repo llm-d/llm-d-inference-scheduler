@@ -2,11 +2,14 @@ package scorer
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -23,6 +26,16 @@ const (
 
 // compile-time type assertion
 var _ framework.Scorer = &PrefixAwareScorer{}
+
+// PrefixAwareScorerFactory defines the factory function for PrefixAwareScorer.
+func PrefixAwareScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+	parameters := DefaultPrefixStoreConfig()
+	if err := json.Unmarshal(rawParameters, parameters); err != nil {
+		return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", PrefixAwareScorerType, err)
+	}
+
+	return NewPrefixAwareScorer(handle.Context(), parameters).WithName(name), nil
+}
 
 type promptHits struct {
 	lastUpdate time.Time
