@@ -23,11 +23,11 @@ type PrefixStoreConfig struct {
 	// CacheCapacity sets the maximum number of blocks the LRU cache can store.
 	// A block maps from a chunk of a prompt to a set of pods that are estimated to have
 	// the prefix of the prompt that ends at the keyed chunk.
-	CacheCapacity int
+	CacheCapacity int `json:"cacheCapacity"`
 	// CacheBlockSize defines the length of the prompt chunk that a block is keyed by.
-	CacheBlockSize int
+	CacheBlockSize int `json:"cacheBlockSize"`
 	// MaxBlockPods sets the maximum number of pods a block can store.
-	MaxBlockPods int
+	MaxBlockPods int `json:"maxBlockPods"`
 }
 
 // DefaultPrefixStoreConfig returns an PrefixStoreConfig instance with default

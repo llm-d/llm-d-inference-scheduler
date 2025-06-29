@@ -2,10 +2,13 @@ package filter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
@@ -17,6 +20,15 @@ const (
 
 // compile-time type assertion
 var _ framework.Filter = &ByLabels{}
+
+// ByLabelFactory defines the factory function for the ByLabel filter
+func ByLabelFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := metav1.LabelSelector{}
+	if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+		return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelsFilterType, err)
+	}
+	return NewByLabel(name, &parameters)
+}
 
 // NewByLabel returns a new filter instance, configured with the provided
 // name and label selector.

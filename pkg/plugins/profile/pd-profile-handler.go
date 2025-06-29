@@ -3,9 +3,12 @@ package profile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
@@ -20,8 +23,32 @@ const (
 	prefill = "prefill"
 )
 
+type pdProfileHandlerParameters struct {
+	Threshold       int    `json:"threshold"`
+	PrefixScorerRef string `json:"prefixScorerRef"`
+}
+
 // compile-time type assertion
 var _ framework.ProfileHandler = &PdProfileHandler{}
+
+// PdProfileHandlerFactory defines the factory function for the PdProfileHandler
+func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+	parameters := pdProfileHandlerParameters{}
+	if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+		return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", PdProfileHandlerType, err)
+	}
+
+	rawPlugin := handle.Plugins().Plugin(parameters.PrefixScorerRef)
+	if rawPlugin == nil {
+		return nil, fmt.Errorf("there was no plugin with the name '%s' defined", parameters.PrefixScorerRef)
+	}
+	prefixScorer, ok := rawPlugin.(*scorer.PrefixAwareScorer)
+	if !ok {
+		return nil, fmt.Errorf("the plugin with the name '%s' was not an instance of the PrefixAwareScorer", parameters.PrefixScorerRef)
+	}
+
+	return NewPdProfileHandler(parameters.Threshold, prefixScorer).WithName(name), nil
+}
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewPdProfileHandler(pdThreshold int, prefixScorer *scorer.PrefixAwareScorer) *PdProfileHandler {

@@ -2,14 +2,16 @@ package scorer
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
 	"github.com/redis/go-redis/v9"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
@@ -18,44 +20,58 @@ import (
 const (
 	// KvCacheAwareScorerType is the type of the KvCacheAwareScorer
 	KvCacheAwareScorerType = "kvcache-aware-scorer"
-
-	kvCacheRedisEnvVar     = "KVCACHE_INDEXER_REDIS_ADDR"
-	huggingFaceTokenEnvVar = "HF_TOKEN"
 )
+
+type kvCacheAwareScorerParameters struct {
+	RedisAddres string `json:"redisAddress"`
+	HfToken     string `json:"hfToken"`
+}
 
 // compile-time type assertion
 var _ framework.Scorer = &KVCacheAwareScorer{}
+
+// KvCacheAwareScorerFactory defines the factory function for the KVCacheAwareScorer
+func KvCacheAwareScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+	parameters := kvCacheAwareScorerParameters{}
+	if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+		return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", KvCacheAwareScorerType, err)
+	}
+
+	if parameters.RedisAddres != "" {
+		// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
+		if !strings.HasPrefix(parameters.RedisAddres, "redis://") && !strings.HasPrefix(parameters.RedisAddres, "rediss://") && !strings.HasPrefix(parameters.RedisAddres, "unix://") {
+			parameters.RedisAddres = "redis://" + parameters.RedisAddres
+		}
+	} else {
+		return nil, errors.New("RedisAddress parameter was not set")
+	}
+
+	if parameters.HfToken == "" {
+		return nil, errors.New("HfToken parameter was not set")
+	}
+
+	plugin, err := NewKVCacheAwareScorer(handle.Context(), parameters.RedisAddres, parameters.HfToken)
+	if err != nil {
+		return nil, err
+	}
+	return plugin.WithName(name), nil
+}
 
 // NewKVCacheAwareScorer creates a new KVCacheAwareScorer instance.
 // It initializes the KVCacheIndexer from environment variables.
 //
 // If the environment variables are not set, or if the indexer
 // fails to initialize, an error is returned.
-func NewKVCacheAwareScorer(ctx context.Context) (framework.Scorer, error) {
+func NewKVCacheAwareScorer(ctx context.Context, redisAddr string, hfToken string) (*KVCacheAwareScorer, error) {
 	config := kvcache.NewDefaultConfig()
 
-	redisAddr := os.Getenv(kvCacheRedisEnvVar)
-	if redisAddr != "" {
-		// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
-		if !strings.HasPrefix(redisAddr, "redis://") && !strings.HasPrefix(redisAddr, "rediss://") && !strings.HasPrefix(redisAddr, "unix://") {
-			redisAddr = "redis://" + redisAddr
-		}
-		redisOpt, err := redis.ParseURL(redisAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse redisURL: %w", err)
-		}
-
-		config.KVBlockIndexerConfig.RedisOpt = redisOpt
-	} else {
-		return nil, fmt.Errorf("environment variable %s is not set", kvCacheRedisEnvVar)
+	redisOpt, err := redis.ParseURL(redisAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse redisURL: %w", err)
 	}
+	config.KVBlockIndexerConfig.RedisOpt = redisOpt
 
-	hfToken := os.Getenv(huggingFaceTokenEnvVar)
-	if hfToken != "" {
-		config.TokenizersPoolConfig.HuggingFaceToken = hfToken
-	} else {
-		return nil, fmt.Errorf("environment variable %s is not set", huggingFaceTokenEnvVar)
-	}
+	config.TokenizersPoolConfig.HuggingFaceToken = hfToken
 
 	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(config)
 	if err != nil {
