@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -144,7 +145,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 
 	tests := []struct {
 		name                   string
-		reqBodyMap             map[string]interface{}
+		reqBodyMap             map[string]any
 		mockSaturationDetector *mockSaturationDetector
 		schedulerMockSetup     func(m *mockScheduler)
 		wantErrCode            string                   // Expected errutil code string
@@ -153,7 +154,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 	}{
 		{
 			name: "successful completions request (critical, saturation ignored)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  model,
 				"prompt": "critical prompt",
 			},
@@ -174,10 +175,10 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful chat completions request (critical, saturation ignored)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model": model,
-				"messages": []interface{}{
-					map[string]interface{}{
+				"messages": []any{
+					map[string]any{
 						"role":    "user",
 						"content": "critical prompt",
 					},
@@ -199,14 +200,14 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful chat completions request with multiple messages (critical, saturation ignored)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model": model,
-				"messages": []interface{}{
-					map[string]interface{}{
+				"messages": []any{
+					map[string]any{
 						"role":    "developer",
 						"content": "You are a helpful assistant.",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"role":    "user",
 						"content": "Hello!",
 					},
@@ -228,7 +229,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful completions request (sheddable, not saturated)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  modelSheddable,
 				"prompt": "sheddable prompt",
 			},
@@ -249,7 +250,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "successful request with target model resolution",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  modelWithResolvedTarget,
 				"prompt": "prompt for target resolution",
 			},
@@ -283,7 +284,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				TargetEndpoint: "192.168.1.100:8000",
 			},
 			wantMutatedBodyModel: "food-review-1",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  "food-review-1",
 				"prompt": "test prompt",
 			},
@@ -292,7 +293,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		{
 
 			name: "request dropped (sheddable, saturated)",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  modelSheddable,
 				"prompt": "sheddable prompt",
 			},
@@ -301,27 +302,27 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name:                   "model not found, expect err",
-			reqBodyMap:             map[string]interface{}{"prompt": "p"},
+			reqBodyMap:             map[string]any{"prompt": "p"},
 			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
 			wantErrCode:            errutil.BadRequest,
 		},
 
 		{
 			name:        "prompt or messages not found, expect err",
-			reqBodyMap:  map[string]interface{}{"model": model},
+			reqBodyMap:  map[string]any{"model": model},
 			wantErrCode: errutil.BadRequest,
 		},
 		{
 			name: "empty messages, expect err",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":    model,
-				"messages": []interface{}{},
+				"messages": []any{},
 			},
 			wantErrCode: errutil.BadRequest,
 		},
 		{
 			name: "scheduler returns error",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  model,
 				"prompt": "prompt that causes scheduler error",
 			},
@@ -332,7 +333,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 		{
 			name: "scheduler returns nil result and nil error",
-			reqBodyMap: map[string]interface{}{
+			reqBodyMap: map[string]any{
 				"model":  model,
 				"prompt": "prompt for nil,nil scheduler return",
 			},
@@ -355,7 +356,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			reqCtx := &handlers.RequestContext{
 				Request: &handlers.Request{
 					// Create a copy of the map for each test run to avoid mutation issues.
-					Body: make(map[string]interface{}),
+					Body: make(map[string]any),
 					Headers: map[string]string{
 						requtil.RequestIdHeaderKey: "test-req-id-" + test.name, // Ensure a default request ID
 					},
@@ -391,6 +392,138 @@ func TestDirector_HandleRequest(t *testing.T) {
 				assert.NotNil(t, returnedReqCtx.Request.Body, "Expected mutated body, but reqCtx.Request.Body is nil")
 				assert.Equal(t, test.wantMutatedBodyModel, returnedReqCtx.Request.Body["model"],
 					"Mutated reqCtx.Request.Body model mismatch")
+			}
+		})
+	}
+}
+
+// TestGetCandidatePodsForScheduling is testing getCandidatePodsForScheduling and more specifically the functionality of SubsetFilter.
+func TestGetCandidatePodsForScheduling(t *testing.T) {
+	var makeFilterMetadata = func(data []any) map[string]any {
+		return map[string]any{
+			"envoy.lb.subset_hint": map[string]any{
+				"x-gateway-destination-endpoint-subset": data,
+			},
+		}
+	}
+
+	testInput := []*corev1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pod1",
+			},
+			Status: corev1.PodStatus{
+				PodIP: "10.0.0.1",
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pod2",
+			},
+			Status: corev1.PodStatus{
+				PodIP: "10.0.0.2",
+			},
+		},
+	}
+
+	outputPod1 := &backend.Pod{
+		NamespacedName: types.NamespacedName{Name: "pod1"},
+		Address:        "10.0.0.1",
+		Labels:         map[string]string{},
+	}
+
+	outputPod2 := &backend.Pod{
+		NamespacedName: types.NamespacedName{Name: "pod2"},
+		Address:        "10.0.0.2",
+		Labels:         map[string]string{},
+	}
+
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		output   []schedulingtypes.Pod
+	}{
+		{
+			name:     "SubsetFilter, filter not present — return all pods",
+			metadata: map[string]any{},
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod2,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, namespace present filter not present — return all pods",
+			metadata: map[string]any{"envoy.lb.subset_hint": map[string]any{}},
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod2,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, filter present with empty list — return error",
+			metadata: makeFilterMetadata([]any{}),
+			output:   []schedulingtypes.Pod{},
+		},
+		{
+			name:     "SubsetFilter, subset with one matching pod",
+			metadata: makeFilterMetadata([]any{"10.0.0.1"}),
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, subset with multiple matching pods",
+			metadata: makeFilterMetadata([]any{"10.0.0.1", "10.0.0.2", "10.0.0.3"}),
+			output: []schedulingtypes.Pod{
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod1,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+				&schedulingtypes.PodMetrics{
+					Pod:          outputPod2,
+					MetricsState: backendmetrics.NewMetricsState(),
+				},
+			},
+		},
+		{
+			name:     "SubsetFilter, subset with no matching pods",
+			metadata: makeFilterMetadata([]any{"10.0.0.3"}),
+			output:   []schedulingtypes.Pod{},
+		},
+	}
+
+	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
+	ds := datastore.NewDatastore(t.Context(), pmf)
+	for _, testPod := range testInput {
+		ds.PodUpdateOrAddIfNotExist(testPod)
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			director := NewDirectorWithConfig(ds, &mockScheduler{}, &mockSaturationDetector{}, NewConfig())
+
+			got := director.getCandidatePodsForScheduling(context.Background(), test.metadata)
+
+			diff := cmp.Diff(test.output, got, cmpopts.SortSlices(func(a, b schedulingtypes.Pod) bool {
+				return a.GetPod().NamespacedName.String() < b.GetPod().NamespacedName.String()
+			}))
+			if diff != "" {
+				t.Errorf("Unexpected output (-want +got): %v", diff)
 			}
 		})
 	}
