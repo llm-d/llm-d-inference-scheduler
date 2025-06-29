@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
@@ -40,6 +41,12 @@ import (
 func main() {
 	setupLog := ctrl.Log.WithName("setup")
 	ctx := ctrl.SetupSignalHandler()
+
+	// Register GIE plugins
+	runner.RegisterAllPlugins()
+
+	// Register llm-d-inference-scheduler plugins
+	plugins.RegisterAllPlugins()
 
 	pdConfig := config.LoadConfig(setupLog)
 
