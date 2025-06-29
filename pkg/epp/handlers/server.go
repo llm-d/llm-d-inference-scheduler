@@ -112,7 +112,7 @@ type RequestContext struct {
 
 type Request struct {
 	Headers  map[string]string
-	Body     map[string]interface{}
+	Body     map[string]any
 	Metadata map[string]any
 }
 type Response struct {
@@ -143,7 +143,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		RequestState: RequestReceived,
 		Request: &Request{
 			Headers:  make(map[string]string),
-			Body:     make(map[string]interface{}),
+			Body:     make(map[string]any),
 			Metadata: make(map[string]any),
 		},
 		Response: &Response{
@@ -152,7 +152,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	}
 
 	var body []byte
-	var responseBody map[string]interface{}
+	var responseBody map[string]any
 
 	// Create error handling var as each request should only report once for
 	// error metrics. This doesn't cover the error "Cannot receive stream request" because
@@ -308,7 +308,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		// Handle the err and fire an immediate response.
 		if err != nil {
 			logger.V(logutil.DEFAULT).Error(err, "Failed to process request", "request", req)
-			resp, err := BuildErrResponse(err)
+			resp, err := buildErrResponse(err)
 			if err != nil {
 				return err
 			}
@@ -389,7 +389,7 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 	return nil
 }
 
-func BuildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
+func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 	var resp *extProcPb.ProcessingResponse
 
 	switch errutil.CanonicalCode(err) {
@@ -412,6 +412,17 @@ func BuildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 				ImmediateResponse: &extProcPb.ImmediateResponse{
 					Status: &envoyTypePb.HttpStatus{
 						Code: envoyTypePb.StatusCode_InternalServerError,
+					},
+				},
+			},
+		}
+	// This code can be returned by the director when there are no candidate pods for the request scheduling.
+	case errutil.ServiceUnavailable:
+		resp = &extProcPb.ProcessingResponse{
+			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
+				ImmediateResponse: &extProcPb.ImmediateResponse{
+					Status: &envoyTypePb.HttpStatus{
+						Code: envoyTypePb.StatusCode_ServiceUnavailable,
 					},
 				},
 			},
