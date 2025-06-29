@@ -94,7 +94,7 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, prefix
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			queueThreshold := float64(envutil.GetEnvInt(queueThresholdEnvName, scorer.QueueThresholdDefault, log.FromContext(ctx)))
+			queueThreshold := envutil.GetEnvInt(queueThresholdEnvName, scorer.QueueThresholdDefault, log.FromContext(ctx))
 			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(queueThreshold), pluginWeight))
 		case config.PrefixScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(prefixScorer, pluginWeight))

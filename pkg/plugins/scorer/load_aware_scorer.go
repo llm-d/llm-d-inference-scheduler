@@ -19,7 +19,7 @@ const (
 )
 
 type loadAwareScorerParameters struct {
-	Threshold float64 `json:"threshold"`
+	Threshold int `json:"threshold"`
 }
 
 // compile-time type assertion
@@ -36,10 +36,10 @@ func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, _ plugin
 }
 
 // NewLoadAwareScorer creates a new load based scorer
-func NewLoadAwareScorer(queueThreshold float64) *LoadAwareScorer {
+func NewLoadAwareScorer(queueThreshold int) *LoadAwareScorer {
 	return &LoadAwareScorer{
 		name:           LoadAwareScorerType,
-		queueThreshold: queueThreshold,
+		queueThreshold: float64(queueThreshold),
 	}
 }
 
