@@ -16,7 +16,7 @@ require (
 	k8s.io/client-go v0.33.2
 	sigs.k8s.io/controller-runtime v0.21.0
 	sigs.k8s.io/gateway-api v1.3.0
-	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250628171228-9c9abd51a6d0
+	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20250629153429-5c851eb1ff8f
 )
 
 require (
