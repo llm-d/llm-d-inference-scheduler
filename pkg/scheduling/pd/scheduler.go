@@ -28,16 +28,17 @@ func CreatePDSchedulerConfig(ctx context.Context, pdConfig *config.Config) (*sch
 		return createDecodeOnlySchedulerConfig(ctx, pdConfig.DecodeSchedulerPlugins, pdConfig)
 	}
 	// otherwise, PD is enabled.
+	prefixScorer := prefix.New(*pdConfig.GIEPrefixConfig) // create prefix scorer instance to be used in both decode and prefill profiles
 
 	// create decode scheduling profile.
-	decodeProfile, err := createSchedulerProfile(ctx, filter.NewDecodeFilter(), picker.NewMaxScorePicker(), pdConfig.DecodeSchedulerPlugins, pdConfig)
+	decodeProfile, err := createSchedulerProfile(ctx, filter.NewDecodeFilter(), picker.NewMaxScorePicker(), pdConfig.DecodeSchedulerPlugins, pdConfig, prefixScorer)
 
 	if err != nil {
 		return nil, fmt.Errorf("falied to create decode scheduling profile - %w", err)
 	}
 
 	// create prefil scheduling profile.
-	prefilProfile, err := createSchedulerProfile(ctx, filter.NewPrefillFilter(), picker.NewMaxScorePicker(), pdConfig.PrefillSchedulerPlugins, pdConfig)
+	prefilProfile, err := createSchedulerProfile(ctx, filter.NewPrefillFilter(), picker.NewMaxScorePicker(), pdConfig.PrefillSchedulerPlugins, pdConfig, prefixScorer)
 
 	if err != nil {
 		return nil, fmt.Errorf("falied to create prefill scheduling profile - %w", err)
@@ -54,7 +55,7 @@ func createDecodeOnlySchedulerConfig(ctx context.Context, configuredPlugins map[
 	loggerDebug := log.FromContext(ctx).WithName("pd-Scheduler").V(logutil.DEBUG)
 
 	// create decode profile
-	decodeProfile, err := createSchedulerProfile(ctx, filter.NewDecodeFilter(), picker.NewMaxScorePicker(), configuredPlugins, pdConfig)
+	decodeProfile, err := createSchedulerProfile(ctx, filter.NewDecodeFilter(), picker.NewMaxScorePicker(), configuredPlugins, pdConfig, prefix.New(*pdConfig.GIEPrefixConfig))
 
 	if err != nil {
 		return nil, fmt.Errorf("falied to create decode scheduling profile - %w", err)
@@ -65,8 +66,8 @@ func createDecodeOnlySchedulerConfig(ctx context.Context, configuredPlugins map[
 }
 
 func createSchedulerProfile(ctx context.Context, roleFilter framework.Filter, picker framework.Picker, configuredPlugins map[string]int,
-	pdConfig *config.Config) (*framework.SchedulerProfile, error) {
-	plugins := pluginsFromConfig(ctx, configuredPlugins, pdConfig) // share the same prefix scorer instance
+	pdConfig *config.Config, prefixScorer *prefix.Plugin) (*framework.SchedulerProfile, error) {
+	plugins := pluginsFromConfig(ctx, configuredPlugins, pdConfig, prefixScorer) // share the same prefix scorer instance
 
 	profile := framework.NewSchedulerProfile().
 		WithFilters(roleFilter).
@@ -78,11 +79,10 @@ func createSchedulerProfile(ctx context.Context, roleFilter framework.Filter, pi
 	return profile, nil
 }
 
-func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, pdConfig *config.Config) []plugins.Plugin {
+func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, pdConfig *config.Config, prefixScorer *prefix.Plugin) []plugins.Plugin {
 	logger := log.FromContext(ctx)
 
 	plugins := []plugins.Plugin{}
-	GIEPrefixScorer := prefix.New(*pdConfig.GIEPrefixConfig)
 	for pluginName, pluginWeight := range pluginsConfig {
 		switch pluginName {
 		case config.KVCacheScorerName:
@@ -109,7 +109,7 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, pdConf
 		case config.GIEKVCacheUtilizationScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(giescorer.NewKVCacheScorer(), pluginWeight))
 		case config.GIEPrefixScorerName:
-			plugins = append(plugins, framework.NewWeightedScorer(GIEPrefixScorer, pluginWeight))
+			plugins = append(plugins, framework.NewWeightedScorer(prefixScorer, pluginWeight))
 		case config.GIEQueueScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(giescorer.NewQueueScorer(), pluginWeight))
 		}
@@ -118,7 +118,7 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, pdConf
 	// in case pd is enabled and prefix scorer was not enabled for the profile
 	// add prefix scorer to list of all scorers to collect information used for the decision if prefill should be called.
 	if _, exist := pluginsConfig[config.GIEPrefixScorerName]; !exist && pdConfig.PDEnabled {
-		plugins = append(plugins, framework.NewWeightedScorer(GIEPrefixScorer, 0))
+		plugins = append(plugins, framework.NewWeightedScorer(prefixScorer, 0))
 	}
 
 	return plugins
