@@ -4,7 +4,6 @@ package config
 
 import (
 	"github.com/go-logr/logr"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
@@ -24,10 +23,10 @@ const (
 	KVCacheScorerName = "KVCACHE_AWARE_SCORER"
 	// LoadAwareScorerName name of the load aware scorer in configuration
 	LoadAwareScorerName = "LOAD_AWARE_SCORER"
-	// PrefixScorerName name of the prefix scorer in configuration
-	PrefixScorerName = "PREFIX_AWARE_SCORER"
 	// SessionAwareScorerName name of the session aware scorer in configuration
 	SessionAwareScorerName = "SESSION_AWARE_SCORER"
+	// GIEPrefixScorerName name of the GIE prefix scorer in configuration
+	GIEPrefixScorerName = "PREFIX_AWARE_SCORER"
 
 	// Plugins from Upstream
 
@@ -43,8 +42,6 @@ const (
 	GIEKVCacheUtilizationScorerName = "GIE_KVCACHE_UTILIZATION_SCORER"
 	// GIEQueueScorerName name of the GIE queue scorer in configuration
 	GIEQueueScorerName = "GIE_QUEUE_SCORER"
-	// GIEPrefixScorerName name of the GIE prefix plugin in configuration
-	GIEPrefixScorerName = "GIE_PREFIX_SCORER"
 
 	pdEnabledEnvKey             = "PD_ENABLED"
 	pdPromptLenThresholdEnvKey  = "PD_PROMPT_LEN_THRESHOLD"
@@ -58,13 +55,12 @@ type Config struct {
 	PDEnabled               bool
 	PDThreshold             int
 	GIEPrefixConfig         *prefix.Config
-	PrefixConfig            *scorer.PrefixStoreConfig // TBD should be removed.
 }
 
 // LoadConfig loads configuration from environment variables and returns a new instance of Config
 func LoadConfig(logger logr.Logger) *Config {
 	pluginNames := []string{
-		KVCacheScorerName, LoadAwareScorerName, PrefixScorerName, SessionAwareScorerName,
+		KVCacheScorerName, LoadAwareScorerName, SessionAwareScorerName,
 		GIELeastKVCacheFilterName, GIELeastQueueFilterName, GIELoraAffinityFilterName,
 		GIELowQueueFilterName,
 		GIEKVCacheUtilizationScorerName, GIEQueueScorerName, GIEPrefixScorerName,
@@ -76,10 +72,6 @@ func LoadConfig(logger logr.Logger) *Config {
 		MaxPrefixBlocksToMatch: env.GetEnvInt("PREFIX_CACHE_MAX_PREFIX_BLOCKS", prefix.DefaultMaxPrefixBlocks, logger),
 		LRUCapacityPerServer:   env.GetEnvInt("PREFIX_CACHE_LRU_CAPACITY_PER_SERVER", prefix.DefaultLRUCapacityPerServer, logger),
 	}
-	// prefix Config- TBD to be mremove
-	prefixConfig := scorer.DefaultPrefixStoreConfig()
-	prefixConfig.CacheBlockSize = env.GetEnvInt("PREFIX_SCORER_CACHE_BLOCK_SIZE", scorer.DefaultPrefixCacheBlockSize, logger)
-	prefixConfig.CacheCapacity = env.GetEnvInt("PREFIX_SCORER_CACHE_CAPACITY", scorer.DefaultPrefixCacheCapacity, logger)
 
 	return &Config{
 		DecodeSchedulerPlugins:  loadPluginInfo(logger, false, pluginNames),
@@ -87,7 +79,6 @@ func LoadConfig(logger logr.Logger) *Config {
 		PDEnabled:               env.GetEnvBool(pdEnabledEnvKey, false, logger),
 		PDThreshold:             env.GetEnvInt(pdPromptLenThresholdEnvKey, pdPromptLenThresholdDefault, logger),
 		GIEPrefixConfig:         giePrefixConfig,
-		PrefixConfig:            prefixConfig,
 	}
 }
 

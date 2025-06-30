@@ -93,9 +93,6 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, pdConf
 			}
 		case config.LoadAwareScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx), pluginWeight))
-		case config.PrefixScorerName:
-
-			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewPrefixAwareScorer(ctx, pdConfig.PrefixConfig), pluginWeight))
 		case config.SessionAwareScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewSessionAffinity(), pluginWeight))
 
@@ -120,7 +117,7 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, pdConf
 
 	// in case pd is enabled and prefix scorer was not enabled for the profile
 	// add prefix scorer to list of all scorers to collect information used for the decision if prefill should be called.
-	if _, exist := pluginsConfig[config.PrefixScorerName]; !exist && pdConfig.PDEnabled {
+	if _, exist := pluginsConfig[config.GIEPrefixScorerName]; !exist && pdConfig.PDEnabled {
 		plugins = append(plugins, framework.NewWeightedScorer(GIEPrefixScorer, 0))
 	}
 

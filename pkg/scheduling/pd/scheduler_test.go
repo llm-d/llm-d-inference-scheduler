@@ -17,7 +17,6 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
 )
 
@@ -204,10 +203,7 @@ func TestPDSchedule(t *testing.T) {
 			MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
 			LRUCapacityPerServer:   prefix.DefaultLRUCapacityPerServer,
 		},
-		PrefixConfig: scorer.DefaultPrefixStoreConfig(),
 	}
-
-	schedulderConfig.GIEPrefixConfig.HashBlockSize = 5
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
