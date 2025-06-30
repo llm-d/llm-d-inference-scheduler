@@ -18,9 +18,9 @@ const (
 // compile-time type assertion
 var _ framework.Filter = &ByLabels{}
 
-// NewByLabel returns a new filter instance, configured with the provided
+// NewByLabels returns a new filter instance, configured with the provided
 // name and label selector.
-func NewByLabel(name string, selector *metav1.LabelSelector) (framework.Filter, error) {
+func NewByLabels(name string, selector *metav1.LabelSelector) (framework.Filter, error) {
 	if name == "" {
 		return nil, errors.New("ByLabels: missing filter name")
 	}

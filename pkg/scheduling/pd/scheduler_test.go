@@ -60,13 +60,30 @@ func TestPDSchedule(t *testing.T) {
 			WaitingModels: map[string]int{},
 		},
 	}
+	noRolePod1 := &backendmetrics.FakePodMetrics{
+		Pod: &backend.Pod{
+			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod1"},
+			Address:        "1.1.1.1",
+		},
+		Metrics: &backendmetrics.MetricsState{},
+	}
+	noRolePod2 := &backendmetrics.FakePodMetrics{
+		Pod: &backend.Pod{
+			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod2"},
+			Address:        "2.2.2.2",
+		},
+		Metrics: &backendmetrics.MetricsState{},
+	}
 
 	tests := []struct {
-		name    string
-		req     *types.LLMRequest
-		input   []backendmetrics.PodMetrics
-		wantRes *types.SchedulingResult
-		err     bool
+		name            string
+		req             *types.LLMRequest
+		input           []backendmetrics.PodMetrics
+		wantRes         *types.SchedulingResult
+		wantHeaders     map[string]string
+		unwantedHeaders []string
+		unwantedPodIDs  []string
+		err             bool
 	}{
 		{
 			name: "no pods in datastore",
@@ -153,6 +170,16 @@ func TestPDSchedule(t *testing.T) {
 				PrimaryProfileName: "decode",
 			},
 		},
+		{
+			name: "TestRoles",
+			req: &types.LLMRequest{
+				TargetModel: "critical",
+				Prompt:      "12345678901",
+			},
+			input:          []backendmetrics.PodMetrics{pod1, noRolePod1, noRolePod2},
+			wantRes:        nil, // doesn't mater which pod was selected
+			unwantedPodIDs: []string{pod1.GetPod().NamespacedName.String()},
+		},
 	}
 
 	ctx := context.Background()
@@ -189,8 +216,37 @@ func TestPDSchedule(t *testing.T) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
 			}
 
-			if diff := cmp.Diff(test.wantRes, got); diff != "" {
-				t.Errorf("Unexpected output (-want +got): %v", diff)
+			if test.wantRes != nil {
+				if diff := cmp.Diff(test.wantRes, got); diff != "" {
+					t.Errorf("Unexpected output (-want +got): %v", diff)
+				}
+
+				for header, value := range test.wantHeaders {
+					gotValue, ok := test.req.Headers[header]
+					if !ok {
+						t.Errorf("Missing header: %s", header)
+					} else if gotValue != value {
+						t.Errorf("Wrong header value for %s: want %s got %s)", header, value, gotValue)
+					}
+				}
+
+				for _, header := range test.unwantedHeaders {
+					if _, exists := test.req.Headers[header]; exists {
+						t.Errorf("Unwanted header %s exists", header)
+					}
+				}
+			}
+
+			if len(test.unwantedPodIDs) > 0 {
+				// ensure that target pod is not one of the unwanted
+				profileRes, found := got.ProfileResults[got.PrimaryProfileName]
+				if found {
+					for _, podID := range test.unwantedPodIDs {
+						if podID == profileRes.TargetPod.GetPod().NamespacedName.String() {
+							t.Errorf("Unwanted pod was selected: %s", podID)
+						}
+					}
+				}
 			}
 		})
 	}
