@@ -27,7 +27,7 @@ func TestLoadBasedScorer(t *testing.T) {
 	}{
 		{
 			name:   "load based scorer",
-			scorer: scorer.NewLoadAwareScorer(context.Background()),
+			scorer: scorer.NewLoadAwareScorer(0),
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 			},

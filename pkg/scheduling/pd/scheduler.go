@@ -14,12 +14,17 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/picker"
 	gieprofile "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/profile"
 	giescorer "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/scorer"
+	envutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+)
+
+const (
+	queueThresholdEnvName = "LOAD_AWARE_SCORER_QUEUE_THRESHOLD"
 )
 
 // CreatePDSchedulerConfig returns a new disaggregated Prefill/Decode SchedulerConfig, using the provided configuration.
@@ -92,7 +97,8 @@ func pluginsFromConfig(ctx context.Context, pluginsConfig map[string]int, pdConf
 				logger.Error(err, "KVCache scorer creation failed")
 			}
 		case config.LoadAwareScorerName:
-			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx), pluginWeight))
+			queueThreshold := envutil.GetEnvInt(queueThresholdEnvName, scorer.QueueThresholdDefault, log.FromContext(ctx))
+			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewLoadAwareScorer(queueThreshold), pluginWeight))
 		case config.SessionAwareScorerName:
 			plugins = append(plugins, framework.NewWeightedScorer(scorer.NewSessionAffinity(), pluginWeight))
 
