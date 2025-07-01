@@ -2,36 +2,69 @@ package scorer
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
 
 const (
-	queueThresholdEnvName = "LOAD_AWARE_SCORER_QUEUE_THRESHOLD"
-	queueThresholdDefault = 128
+	// LoadAwareScorerType is the type of the LoadAwareScorer
+	LoadAwareScorerType = "load-aware-scorer"
+
+	// QueueThresholdDefault defines the default queue threshold value
+	QueueThresholdDefault = 128
 )
+
+type loadAwareScorerParameters struct {
+	Threshold int `json:"threshold"`
+}
 
 // compile-time type assertion
 var _ framework.Scorer = &LoadAwareScorer{}
 
+// LoadAwareScorerFactory defines the factory function for the LoadAwareScorer
+func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := loadAwareScorerParameters{Threshold: QueueThresholdDefault}
+	if rawParameters != nil {
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", LoadAwareScorerType, err)
+		}
+	}
+
+	return NewLoadAwareScorer(parameters.Threshold).WithName(name), nil
+}
+
 // NewLoadAwareScorer creates a new load based scorer
-func NewLoadAwareScorer(ctx context.Context) framework.Scorer {
+func NewLoadAwareScorer(queueThreshold int) *LoadAwareScorer {
 	return &LoadAwareScorer{
-		queueThreshold: float64(env.GetEnvInt(queueThresholdEnvName, queueThresholdDefault, log.FromContext(ctx))),
+		name:           LoadAwareScorerType,
+		queueThreshold: float64(queueThreshold),
 	}
 }
 
 // LoadAwareScorer scorer that is based on load
 type LoadAwareScorer struct {
+	name           string
 	queueThreshold float64
 }
 
 // Type returns the type of the scorer.
 func (s *LoadAwareScorer) Type() string {
-	return "load-aware-scorer"
+	return LoadAwareScorerType
+}
+
+// Name returns the name of the instance of the filter.
+func (s *LoadAwareScorer) Name() string {
+	return s.name
+}
+
+// WithName sets the name of the filter.
+func (s *LoadAwareScorer) WithName(name string) *LoadAwareScorer {
+	s.name = name
+	return s
 }
 
 // Score scores the given pod in range of 0-1

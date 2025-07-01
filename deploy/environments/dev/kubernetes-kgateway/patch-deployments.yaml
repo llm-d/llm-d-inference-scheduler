@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${EPP_NAME}
+spec:
+  template:
+    spec:
+      containers:
+      - name: epp
+        image: ${EPP_IMAGE}:${EPP_TAG}
+        args:
+        - -poolName
+        - ${POOL_NAME}
+        - -poolNamespace
+        - ${NAMESPACE}
+        - -v
+        - "4"
+        - --zap-encoder
+        - "json"
+        - -grpcPort
+        - "9002"
+        - -grpcHealthPort
+        - "9003"
+        env:
+          - name: KVCACHE_INDEXER_REDIS_ADDR
+            value: ${REDIS_HOST}:${REDIS_PORT}
+          - name: HF_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hf-token
+                key: ${HF_SECRET_KEY}
+          - name: ENABLE_KVCACHE_AWARE_SCORER
+            value: "true"
+          - name: KVCACHE_AWARE_SCORER_WEIGHT
+            value: "2.0"
+          - name: ENABLE_LOAD_AWARE_SCORER
+            value: "true"
+          - name: LOAD_AWARE_SCORER_WEIGHT
+            value: "1.0"

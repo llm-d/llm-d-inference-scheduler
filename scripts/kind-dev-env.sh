@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${VLLM_SIMULATOR_IMAGE:=llm-d-inference-sim}"
 
 # Set a default VLLM_SIMULATOR_TAG if not provided
-export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.1.0}"
+export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-latest}"
 
 # Set a default EPP_IMAGE if not provided
 : "${EPP_IMAGE:=llm-d-inference-scheduler}"
@@ -36,9 +36,10 @@ export EPP_TAG="${EPP_TAG:-dev}"
 
 # Set the model name to deploy
 export MODEL_NAME="${MODEL_NAME:-food-review}"
-
+# Safe model name for Kubernetes resources (lowercase, hyphenated)
+export MODEL_NAME_SAFE=$(echo "${MODEL_NAME}" | tr '[:upper:]' '[:lower:]' | tr ' /_.' '-')
 # Set the endpoint-picker to deploy
-export EPP_NAME="${EPP_NAME:-${MODEL_NAME}-enpoint-picker}"
+export EPP_NAME="${EPP_NAME:-${MODEL_NAME}-endpoint-picker}"
 
 # Set the default routing side car image tag
 export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"
@@ -132,7 +133,10 @@ kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Rea
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 	podman save ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
-	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}
+	if docker image inspect "${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}" > /dev/null 2>&1; then
+		echo "INFO: Loading image into KIND cluster..."
+		kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}
+	fi
 fi
 
 # Load the ext_proc endpoint-picker image into the cluster
@@ -166,7 +170,7 @@ else
 fi
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
-	| envsubst '${POOL_NAME} ${MODEL_NAME} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
+	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
   ${PD_ENABLED} ${ROUTING_SIDECAR_TAG} ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 

@@ -3,10 +3,11 @@ package scorer
 import (
 	"context"
 	"encoding/base64"
-	"time"
+	"encoding/json"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -14,18 +15,26 @@ import (
 )
 
 const (
-	sessionKeepAliveTime           = 60 * time.Minute  // How long should an idle session be kept alive
-	sessionKeepAliveCheckFrequency = 15 * time.Minute  // How often to check for overly idle sessions
-	sessionTokenHeader             = "x-session-token" // name of the session header in request
+	// SessionAffinityScorerType is the type of the SessionAffinityScorer
+	SessionAffinityScorerType = "session-affinity-scorer"
+
+	sessionTokenHeader = "x-session-token" // name of the session header in request
 )
 
 // compile-time type assertion
 var _ framework.Scorer = &SessionAffinity{}
 var _ requestcontrol.PostResponse = &SessionAffinity{}
 
+// SessionAffinityScorerFactory defines the factory function for SessionAffinityScorer.
+func SessionAffinityScorerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewSessionAffinity().WithName(name), nil
+}
+
 // NewSessionAffinity returns a scorer
 func NewSessionAffinity() *SessionAffinity {
-	return &SessionAffinity{}
+	return &SessionAffinity{
+		name: SessionAffinityScorerType,
+	}
 }
 
 // SessionAffinity is a routing scorer that routes subsequent
@@ -33,11 +42,23 @@ func NewSessionAffinity() *SessionAffinity {
 // session was sent to, by giving that pod the specified weight and assigning
 // zero score to the rest of the targets
 type SessionAffinity struct {
+	name string
 }
 
 // Type returns the type of the scorer.
 func (s *SessionAffinity) Type() string {
-	return "session-affinity-scorer"
+	return SessionAffinityScorerType
+}
+
+// Name returns the name of the instance of the filter.
+func (s *SessionAffinity) Name() string {
+	return s.name
+}
+
+// WithName sets the name of the filter.
+func (s *SessionAffinity) WithName(name string) *SessionAffinity {
+	s.name = name
+	return s
 }
 
 // Score assign a high score to the pod used in previous requests and zero to others
