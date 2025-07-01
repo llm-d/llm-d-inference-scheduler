@@ -109,17 +109,18 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	// which means PD is enabled (otherwise, prefil profile is not configured at all and this profile handler is not used).
 	// inspect decode execution result to decide if prefil should run or not.
 	// if the request is short enough, use decode results only and don't run the prefill profile.
+	hitPercentagePrefix := 0.0 // default to 0, meaning no prefix cache hit
 	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, prefix.PrefixCachePluginType)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "unable to read prefix state")
-		return map[string]*framework.SchedulerProfile{}
+	} else {
+		decodePod := profileResults[decode].TargetPod.GetPod().NamespacedName
+		hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
+		hitPercentagePrefix = float64(hitPrefix*h.cfg.GIEPrefixConfig.HashBlockSize) / float64(len(request.Prompt))
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
+			"promptLength", len(request.Prompt))
 	}
 
-	decodePod := profileResults[decode].TargetPod.GetPod().NamespacedName
-	hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
-	hitPercentagePrefix := float64(hitPrefix*h.cfg.GIEPrefixConfig.HashBlockSize) / float64(len(request.Prompt))
-	log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
-		"promptLength", len(request.Prompt))
 	if (1.0-hitPercentagePrefix)*float64(len(request.Prompt)) < float64(h.cfg.PDThreshold) {
 		log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
 		return map[string]*framework.SchedulerProfile{} // do not run prefill
