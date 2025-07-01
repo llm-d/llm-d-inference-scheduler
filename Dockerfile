@@ -8,13 +8,23 @@ RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
 
 WORKDIR /workspace
 
+# FOR LOCAL BUILDING
+# This is to build from ../ with llm-d-kv-cache-manager checked out at ../
 # Copy the Go Modules manifests
-COPY go.mod go.mod
-COPY go.sum go.sum
+COPY llm-d-inference-scheduler/go.mod go.mod
+COPY llm-d-inference-scheduler/go.sum go.sum
 
+# FOR LOCAL BUILDING
+# This is to build from ../ with llm-d-kv-cache-manager checked out at ../
 # Copy the go source
-COPY cmd/ cmd/
-COPY pkg/ pkg/
+COPY llm-d-inference-scheduler/cmd/ cmd/
+COPY llm-d-inference-scheduler/pkg/ pkg/
+
+# FOR LOCAL BUILDING
+# This is to build from ../ with llm-d-kv-cache-manager checked out at ../
+# Copy the local kv-cache-manager for the replace directive
+COPY llm-d-kv-cache-manager/ llm-d-kv-cache-manager/
+RUN go mod edit -replace github.com/llm-d/llm-d-kv-cache-manager=./llm-d-kv-cache-manager
 
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib
