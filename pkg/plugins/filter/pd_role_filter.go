@@ -1,7 +1,9 @@
 package filter
 
 import (
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"encoding/json"
+
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 )
 
 const (
@@ -13,14 +15,29 @@ const (
 	RoleDecode = "decode"
 	// RoleBoth set for workers that can act as both prefill and decode
 	RoleBoth = "both"
+
+	// DecodeFilterType is the type of the DecodeFilter
+	DecodeFilterType = "decode-filter"
+	// PrefillFilterType is the type of the PrefillFilter
+	PrefillFilterType = "prefill-filter"
 )
 
+// PrefillFilterFactory defines the factory function for the PrefillFilter
+func PrefillFilterFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewPrefillFilter().WithName(name), nil
+}
+
 // NewPrefillFilter creates and returns an instance of the Filter configured for prefill role
-func NewPrefillFilter() framework.Filter {
-	return NewByLabel("prefill-filter", RoleLabel, false, RolePrefill)
+func NewPrefillFilter() *ByLabel {
+	return NewByLabel(PrefillFilterType, RoleLabel, false, RolePrefill)
+}
+
+// DecodeFilterFactory defines the factory function for the DecodeFilter
+func DecodeFilterFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewDecodeFilter().WithName(name), nil
 }
 
 // NewDecodeFilter creates and returns an instance of the Filter configured for decode role
-func NewDecodeFilter() framework.Filter {
-	return NewByLabel("decode-filter", RoleLabel, true, RoleDecode, RoleBoth)
+func NewDecodeFilter() *ByLabel {
+	return NewByLabel(DecodeFilterType, RoleLabel, true, RoleDecode, RoleBoth)
 }

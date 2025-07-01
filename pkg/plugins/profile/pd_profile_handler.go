@@ -3,14 +3,18 @@ package profile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 )
 
 const (
@@ -21,8 +25,36 @@ const (
 	prefill = "prefill"
 )
 
+type pdProfileHandlerParameters struct {
+	prefix.Config
+	Threshold int `json:"threshold"`
+}
+
 // compile-time type assertion
 var _ framework.ProfileHandler = &PdProfileHandler{}
+
+// PdProfileHandlerFactory defines the factory function for the PdProfileHandler
+func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := pdProfileHandlerParameters{
+		Config: prefix.Config{
+			HashBlockSize:          prefix.DefaultHashBlockSize,
+			MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
+			LRUCapacityPerServer:   prefix.DefaultLRUCapacityPerServer,
+		},
+		Threshold: 100,
+	}
+	if rawParameters != nil {
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", PdProfileHandlerType, err)
+		}
+	}
+
+	cfg := &config.Config{
+		PDThreshold:     parameters.Threshold,
+		GIEPrefixConfig: &parameters.Config,
+	}
+	return NewPdProfileHandler(cfg).WithName(name), nil
+}
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewPdProfileHandler(cfg *config.Config) *PdProfileHandler {
