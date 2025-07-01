@@ -3,9 +3,11 @@ package prerequest
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"strconv"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
@@ -19,6 +21,11 @@ const (
 
 // compile-time type assertion
 var _ requestcontrol.PreRequest = &PrefillHeaderHandler{}
+
+// PrefillHeaderHandlerFactory  defines the factory function for the PrefillHeaderHandler
+func PrefillHeaderHandlerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewPrefillHeaderHandler().WithName(name), nil
+}
 
 // NewPrefillHeaderHandler initializes a new PrefillHeaderHandler and returns its pointer.
 func NewPrefillHeaderHandler() *PrefillHeaderHandler {

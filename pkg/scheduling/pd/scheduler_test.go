@@ -12,11 +12,11 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
 )
 
@@ -60,13 +60,61 @@ func TestPDSchedule(t *testing.T) {
 			WaitingModels: map[string]int{},
 		},
 	}
+	noRolePod1 := &backendmetrics.FakePodMetrics{
+		Pod: &backend.Pod{
+			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod1"},
+			Address:        "1.1.1.1",
+		},
+		Metrics: &backendmetrics.MetricsState{},
+	}
+	noRolePod2 := &backendmetrics.FakePodMetrics{
+		Pod: &backend.Pod{
+			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod2"},
+			Address:        "2.2.2.2",
+		},
+		Metrics: &backendmetrics.MetricsState{},
+	}
+
+	prefillDecodeResult := &types.SchedulingResult{
+		ProfileResults: map[string]*types.ProfileRunResult{
+			"decode": {
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod2,
+					Score: 0.0,
+				},
+			},
+			"prefill": {
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod1,
+					Score: 0.0,
+				},
+			},
+		},
+		PrimaryProfileName: "decode",
+	}
+
+	decodeResult := &types.SchedulingResult{
+		ProfileResults: map[string]*types.ProfileRunResult{
+			"decode": {
+				TargetPod: &types.ScoredPod{
+					Pod:   wantPod2,
+					Score: 0.0,
+				},
+			},
+		},
+		PrimaryProfileName: "decode",
+	}
 
 	tests := []struct {
-		name    string
-		req     *types.LLMRequest
-		input   []backendmetrics.PodMetrics
-		wantRes *types.SchedulingResult
-		err     bool
+		name            string
+		req             *types.LLMRequest
+		input           []backendmetrics.PodMetrics
+		wantRes         *types.SchedulingResult
+		wantRes2        *types.SchedulingResult
+		wantHeaders     map[string]string
+		unwantedHeaders []string
+		unwantedPodIDs  []string
+		err             bool
 	}{
 		{
 			name: "no pods in datastore",
@@ -107,51 +155,37 @@ func TestPDSchedule(t *testing.T) {
 			err:   true,
 		},
 		{
-			name: "1P1D",
+			name: "1P1D - long prompt",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Prompt:      "12345678901",
+				Prompt:      "12345678906",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP will be in the header
-			input: []backendmetrics.PodMetrics{pod1, pod2},
-			wantRes: &types.SchedulingResult{
-				ProfileResults: map[string]*types.ProfileRunResult{
-					"decode": {
-						TargetPod: &types.ScoredPod{
-							Pod:   wantPod2,
-							Score: 0.0,
-						},
-					},
-					"prefill": {
-						TargetPod: &types.ScoredPod{
-							Pod:   wantPod1,
-							Score: 0.0,
-						},
-					},
-				},
-				PrimaryProfileName: "decode",
-			},
+			input:    []backendmetrics.PodMetrics{pod1, pod2},
+			wantRes:  prefillDecodeResult,
+			wantRes2: decodeResult,
 		},
 		{
 			name: "1P1Dshort",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
-				Prompt:      "123",
+				Prompt:      "12345",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP should no be in the header,
 			// because the prompt is too short
-			input: []backendmetrics.PodMetrics{pod1, pod2},
-			wantRes: &types.SchedulingResult{
-				ProfileResults: map[string]*types.ProfileRunResult{
-					"decode": {
-						TargetPod: &types.ScoredPod{
-							Pod:   wantPod2,
-							Score: 0.0,
-						},
-					},
-				},
-				PrimaryProfileName: "decode",
+			input:    []backendmetrics.PodMetrics{pod1, pod2},
+			wantRes:  decodeResult,
+			wantRes2: decodeResult,
+		},
+		{
+			name: "TestRoles",
+			req: &types.LLMRequest{
+				TargetModel: "critical",
+				Prompt:      "12345678901",
 			},
+			input:          []backendmetrics.PodMetrics{pod1, noRolePod1, noRolePod2},
+			wantRes:        nil, // doesn't mater which pod was selected
+			unwantedPodIDs: []string{pod1.GetPod().NamespacedName.String()},
 		},
 	}
 
@@ -163,19 +197,18 @@ func TestPDSchedule(t *testing.T) {
 		DecodeSchedulerPlugins:  map[string]int{},
 		PrefillSchedulerPlugins: map[string]int{},
 		PDEnabled:               true,
-		PDThreshold:             5,
-		PrefixCacheBlockSize:    256,
-		PrefixCacheCapacity:     50000,
+		PDThreshold:             10,
+		GIEPrefixConfig: &prefix.Config{
+			HashBlockSize:          5,
+			MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
+			LRUCapacityPerServer:   prefix.DefaultLRUCapacityPerServer,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			prefixConfig := scorer.DefaultPrefixStoreConfig()
-			prefixConfig.CacheBlockSize = schedulderConfig.PrefixCacheBlockSize
-			prefixConfig.CacheCapacity = schedulderConfig.PrefixCacheCapacity
-			prefixScorer := scorer.NewPrefixAwareScorer(ctx, prefixConfig)
 
-			schedulderConfig, err := pd.CreatePDSchedulerConfig(ctx, schedulderConfig, prefixScorer)
+			schedulderConfig, err := pd.CreatePDSchedulerConfig(ctx, schedulderConfig)
 			if err != nil {
 				t.Errorf("Unexpected error, got %v", err)
 			}
@@ -189,9 +222,50 @@ func TestPDSchedule(t *testing.T) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
 			}
 
-			if diff := cmp.Diff(test.wantRes, got); diff != "" {
-				t.Errorf("Unexpected output (-want +got): %v", diff)
+			if test.wantRes != nil {
+				if diff := cmp.Diff(test.wantRes, got); diff != "" {
+					t.Errorf("Unexpected output (-want +got): %v", diff)
+				}
+
+				for header, value := range test.wantHeaders {
+					gotValue, ok := test.req.Headers[header]
+					if !ok {
+						t.Errorf("Missing header: %s", header)
+					} else if gotValue != value {
+						t.Errorf("Wrong header value for %s: want %s got %s)", header, value, gotValue)
+					}
+				}
+
+				for _, header := range test.unwantedHeaders {
+					if _, exists := test.req.Headers[header]; exists {
+						t.Errorf("Unwanted header %s exists", header)
+					}
+				}
 			}
+
+			if len(test.unwantedPodIDs) > 0 {
+				// ensure that target pod is not one of the unwanted
+				profileRes, found := got.ProfileResults[got.PrimaryProfileName]
+				if found {
+					for _, podID := range test.unwantedPodIDs {
+						if podID == profileRes.TargetPod.GetPod().NamespacedName.String() {
+							t.Errorf("Unwanted pod was selected: %s", podID)
+						}
+					}
+				}
+			}
+
+			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
+				got, err = scheduler.Schedule(ctx, test.req, candidatePods)
+				if test.err != (err != nil) {
+					t.Errorf("Unexpected error, got %v, want %v", err, test.err)
+				}
+
+				if diff := cmp.Diff(test.wantRes2, got); diff != "" {
+					t.Errorf("Unexpected output (-want +got): %v", diff)
+				}
+			}
+
 		})
 	}
 }

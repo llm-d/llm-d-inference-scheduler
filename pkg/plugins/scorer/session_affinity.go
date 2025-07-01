@@ -3,10 +3,11 @@ package scorer
 import (
 	"context"
 	"encoding/base64"
-	"time"
+	"encoding/json"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -17,14 +18,17 @@ const (
 	// SessionAffinityScorerType is the type of the SessionAffinityScorer
 	SessionAffinityScorerType = "session-affinity-scorer"
 
-	sessionKeepAliveTime           = 60 * time.Minute  // How long should an idle session be kept alive
-	sessionKeepAliveCheckFrequency = 15 * time.Minute  // How often to check for overly idle sessions
-	sessionTokenHeader             = "x-session-token" // name of the session header in request
+	sessionTokenHeader = "x-session-token" // name of the session header in request
 )
 
 // compile-time type assertion
 var _ framework.Scorer = &SessionAffinity{}
 var _ requestcontrol.PostResponse = &SessionAffinity{}
+
+// SessionAffinityScorerFactory defines the factory function for SessionAffinityScorer.
+func SessionAffinityScorerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	return NewSessionAffinity().WithName(name), nil
+}
 
 // NewSessionAffinity returns a scorer
 func NewSessionAffinity() *SessionAffinity {

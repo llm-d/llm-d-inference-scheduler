@@ -3,13 +3,18 @@ package profile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 )
 
 const (
@@ -20,23 +25,49 @@ const (
 	prefill = "prefill"
 )
 
+type pdProfileHandlerParameters struct {
+	prefix.Config
+	Threshold int `json:"threshold"`
+}
+
 // compile-time type assertion
 var _ framework.ProfileHandler = &PdProfileHandler{}
 
+// PdProfileHandlerFactory defines the factory function for the PdProfileHandler
+func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := pdProfileHandlerParameters{
+		Config: prefix.Config{
+			HashBlockSize:          prefix.DefaultHashBlockSize,
+			MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
+			LRUCapacityPerServer:   prefix.DefaultLRUCapacityPerServer,
+		},
+		Threshold: 100,
+	}
+	if rawParameters != nil {
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", PdProfileHandlerType, err)
+		}
+	}
+
+	cfg := &config.Config{
+		PDThreshold:     parameters.Threshold,
+		GIEPrefixConfig: &parameters.Config,
+	}
+	return NewPdProfileHandler(cfg).WithName(name), nil
+}
+
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func NewPdProfileHandler(pdThreshold int, prefixScorer *scorer.PrefixAwareScorer) *PdProfileHandler {
+func NewPdProfileHandler(cfg *config.Config) *PdProfileHandler {
 	return &PdProfileHandler{
-		name:         PdProfileHandlerType,
-		pdThreshold:  pdThreshold,
-		prefixScorer: prefixScorer,
+		name: PdProfileHandlerType,
+		cfg:  cfg,
 	}
 }
 
 // PdProfileHandler handles scheduler profiles for PD.
 type PdProfileHandler struct {
-	name         string
-	pdThreshold  int
-	prefixScorer *scorer.PrefixAwareScorer
+	name string
+	cfg  *config.Config
 }
 
 // Type returns the type of the Profile Handler.
@@ -57,7 +88,8 @@ func (h *PdProfileHandler) WithName(name string) *PdProfileHandler {
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *PdProfileHandler) Pick(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
+func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
+
 	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
 	if _, executed := profileResults[decode]; !executed {
 		// if decode profile was not executed yet, first let the scheduler run the decode profile
@@ -77,9 +109,20 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *types.CycleState, reques
 	// which means PD is enabled (otherwise, prefil profile is not configured at all and this profile handler is not used).
 	// inspect decode execution result to decide if prefil should run or not.
 	// if the request is short enough, use decode results only and don't run the prefill profile.
-	hitPercentage := h.prefixScorer.GetCachedPercentage(profileResults[decode].TargetPod.GetPod().NamespacedName.String(), request.Prompt)
-	if (1.0-hitPercentage)*float64(len(request.Prompt)) < float64(h.pdThreshold) {
-		log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentage)
+	hitPercentagePrefix := 0.0 // default to 0, meaning no prefix cache hit
+	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, prefix.PrefixCachePluginType)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "unable to read prefix state")
+	} else {
+		decodePod := profileResults[decode].TargetPod.GetPod().NamespacedName
+		hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
+		hitPercentagePrefix = float64(hitPrefix*h.cfg.GIEPrefixConfig.HashBlockSize) / float64(len(request.Prompt))
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
+			"promptLength", len(request.Prompt))
+	}
+
+	if (1.0-hitPercentagePrefix)*float64(len(request.Prompt)) < float64(h.cfg.PDThreshold) {
+		log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
 		return map[string]*framework.SchedulerProfile{} // do not run prefill
 	}
 
