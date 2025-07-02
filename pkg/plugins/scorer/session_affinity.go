@@ -95,7 +95,7 @@ func (s *SessionAffinity) PostResponse(ctx context.Context, _ *types.LLMRequest,
 		if response != nil {
 			reqID = response.RequestId
 		}
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of ctx.Resp, pod, pod.GetPod is nil", "req id", reqID)
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetPod is nil", "req id", reqID)
 		return
 	}
 
