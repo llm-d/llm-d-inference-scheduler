@@ -29,12 +29,8 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
-	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
 )
 
 func main() {
@@ -47,23 +43,7 @@ func main() {
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
 
-	pdConfig := config.LoadConfig(setupLog)
-
-	requestControlConfig := requestcontrol.NewConfig()
-	if pdConfig.PDEnabled { // if PD is enabled, use the prefill header pre-request plugin to populate prefill endpoint in a header.
-		requestControlConfig.WithPreRequestPlugins(prerequest.NewPrefillHeaderHandler())
-	}
-
-	schedulerConfig, err := pd.CreatePDSchedulerConfig(ctx, pdConfig)
-	if err != nil {
-		setupLog.Error(err, "failed to create scheduler config")
-		os.Exit(1)
-	}
-
-	if err := runner.NewRunner().
-		WithRequestControlConfig(requestControlConfig).
-		WithSchedulerConfig(schedulerConfig).
-		Run(ctx); err != nil {
+	if err := runner.NewRunner().Run(ctx); err != nil {
 		setupLog.Error(err, "failed to run llm-d-scheduler")
 		os.Exit(1)
 	}
