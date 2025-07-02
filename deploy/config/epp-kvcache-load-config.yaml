@@ -1,0 +1,22 @@
+# Sample EPP configuration for running with KvCache and load aware scorers
+#
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: single-profile
+- name: decodeFilter
+  type: decode-filter
+- name: kvcacheScorer
+  type: kvcache-aware-scorer
+- name: loadAware
+  type: load-aware-scorer
+- type: max-score
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decodeFilter
+  - pluginRef: kvcacheScorer
+    weight: 2.0
+  - pluginRef: loadAware
+    weight: 1.0
+  - pluginRef: max-score
