@@ -21,6 +21,8 @@ spec:
         - "9002"
         - -grpcHealthPort
         - "9003"
+        - --configFile
+        - "/etc/epp/epp-config.yaml"
         env:
           - name: KVCACHE_INDEXER_REDIS_ADDR
             value: ${REDIS_HOST}:${REDIS_PORT}
@@ -29,11 +31,3 @@ spec:
               secretKeyRef:
                 name: hf-token
                 key: ${HF_SECRET_KEY}
-          - name: ENABLE_KVCACHE_AWARE_SCORER
-            value: "true"
-          - name: KVCACHE_AWARE_SCORER_WEIGHT
-            value: "2.0"
-          - name: ENABLE_LOAD_AWARE_SCORER
-            value: "true"
-          - name: LOAD_AWARE_SCORER_WEIGHT
-            value: "1.0"

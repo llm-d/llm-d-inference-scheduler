@@ -53,3 +53,10 @@ spec:
             service: envoy.service.ext_proc.v3.ExternalProcessor
           initialDelaySeconds: 5
           periodSeconds: 10
+        volumeMounts:
+        - name: epp-config
+          mountPath: /etc/epp
+      volumes:
+      - name: epp-config
+        configMap:
+          name: epp-config

@@ -83,6 +83,8 @@ export PD_ENABLED="\"${PD_ENABLED:-false}\""
 # Token length threshold to trigger P/D logic
 export PD_PROMPT_LEN_THRESHOLD="\"${PD_PROMPT_LEN_THRESHOLD:-10}\""
 
+export EPP_CONFIG="${EPP_CONFIG:-deploy/config/epp-kvcache-load-config.yaml}"
+
 # Redis deployment name
 export REDIS_DEPLOYMENT_NAME="${REDIS_DEPLOYMENT_NAME:-lookup-server}"
 
@@ -148,6 +150,8 @@ set -o pipefail
 
 if [[ "$CLEAN" == "true" ]]; then
   echo "INFO: CLEANING environment in namespace ${NAMESPACE}"
+  # Delete the ConfigMAp created for the EPP configuration
+  kubectl -n "${NAMESPACE}" delete --ignore-not-found=true ConfigMap epp-config
   # Delete inference schedulare and gateway resources.
   kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" delete --ignore-not-found=true -f -
   # Delete vllm resources.
@@ -187,6 +191,7 @@ helm upgrade --install "$VLLM_HELM_RELEASE_NAME" "$VLLM_CHART_DIR" \
   --set redis.service.port="$REDIS_PORT"
 
 echo "INFO: Deploying Gateway Environment in namespace ${NAMESPACE}, ${POOL_NAME}"
+kubectl -n "${NAMESPACE}" create configmap epp-config --from-file=epp-config.yaml=${EPP_CONFIG}
 kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" apply -f -
 echo "INFO: Waiting for resources in namespace ${NAMESPACE} to become ready"
 # Wait for gateway resources

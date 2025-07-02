@@ -53,13 +53,16 @@ export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 # By default we are not setting up for PD
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
-# By default the PD threshhold is ten tokens
-export PD_PROMPT_LEN_THRESHOLD="\"${PD_PROMPT_LEN_THRESHOLD:-10}\""
-
 # Replica counts for P and D
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
 export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 
+if [ "${PD_ENABLED}" != "\"true\"" ]; then
+  DEFAULT_EPP_CONFIG="deploy/config/epp-config.yaml"
+else
+  DEFAULT_EPP_CONFIG="deploy/config/pd-epp-config.yaml"
+fi
+export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks
 # ------------------------------------------------------------------------------
@@ -167,7 +170,9 @@ if [ "${PD_ENABLED}" != "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
 else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
-fi
+fi 
+
+kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${EPP_CONFIG}
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \

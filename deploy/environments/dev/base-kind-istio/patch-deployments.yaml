@@ -20,3 +20,5 @@ spec:
         - "9002"
         - -grpcHealthPort
         - "9003"
+        - --configFile
+        - "/etc/epp/epp-config.yaml"
