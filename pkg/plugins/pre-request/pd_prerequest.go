@@ -4,6 +4,7 @@ package prerequest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"strconv"
 
@@ -17,26 +18,42 @@ const (
 	PrefillHeaderHandlerType = "prefill-header"
 
 	prefillPodHeader = "x-prefiller-url" // prefillPodHeader is the HTTP header name used to indicate Prefill worker
+
+	defaultPrefillProfile = "prefill"
 )
+
+type prefillHeaderHandlerParameters struct {
+	PrefillProfile string `json:"prefillProfile"`
+}
 
 // compile-time type assertion
 var _ requestcontrol.PreRequest = &PrefillHeaderHandler{}
 
 // PrefillHeaderHandlerFactory  defines the factory function for the PrefillHeaderHandler
-func PrefillHeaderHandlerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
-	return NewPrefillHeaderHandler().WithName(name), nil
+func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := prefillHeaderHandlerParameters{
+		PrefillProfile: defaultPrefillProfile,
+	}
+	if rawParameters != nil {
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' pre-request handler - %w", PrefillHeaderHandlerType, err)
+		}
+	}
+	return NewPrefillHeaderHandler(parameters.PrefillProfile).WithName(name), nil
 }
 
 // NewPrefillHeaderHandler initializes a new PrefillHeaderHandler and returns its pointer.
-func NewPrefillHeaderHandler() *PrefillHeaderHandler {
+func NewPrefillHeaderHandler(prefillProfile string) *PrefillHeaderHandler {
 	return &PrefillHeaderHandler{
-		name: PrefillHeaderHandlerType,
+		name:           PrefillHeaderHandlerType,
+		prefillProfile: prefillProfile,
 	}
 }
 
 // PrefillHeaderHandler PreRequest plugin
 type PrefillHeaderHandler struct {
-	name string
+	name           string
+	prefillProfile string
 }
 
 // Type returns the type of the PreRequest plugin.
@@ -57,7 +74,7 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
 func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, targetPort int) {
-	prefillProfileRunResult, exists := schedulingResult.ProfileResults["prefill"]
+	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
 	if !exists {
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
