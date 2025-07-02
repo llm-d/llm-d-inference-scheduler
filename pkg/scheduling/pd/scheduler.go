@@ -39,20 +39,20 @@ func CreatePDSchedulerConfig(ctx context.Context, pdConfig *config.Config) (*sch
 	decodeProfile, err := createSchedulerProfile(ctx, filter.NewDecodeFilter(), picker.NewMaxScorePicker(), pdConfig.DecodeSchedulerPlugins, pdConfig, prefixScorer)
 
 	if err != nil {
-		return nil, fmt.Errorf("falied to create decode scheduling profile - %w", err)
+		return nil, fmt.Errorf("failed to create decode scheduling profile - %w", err)
 	}
 
-	// create prefil scheduling profile.
-	prefilProfile, err := createSchedulerProfile(ctx, filter.NewPrefillFilter(), picker.NewMaxScorePicker(), pdConfig.PrefillSchedulerPlugins, pdConfig, prefixScorer)
+	// create prefill scheduling profile.
+	prefillProfile, err := createSchedulerProfile(ctx, filter.NewPrefillFilter(), picker.NewMaxScorePicker(), pdConfig.PrefillSchedulerPlugins, pdConfig, prefixScorer)
 
 	if err != nil {
-		return nil, fmt.Errorf("falied to create prefill scheduling profile - %w", err)
+		return nil, fmt.Errorf("failed to create prefill scheduling profile - %w", err)
 	}
 
 	pdProfileHandler := profile.NewPdProfileHandler(pdConfig)
 	return scheduling.NewSchedulerConfig(pdProfileHandler, map[string]*framework.SchedulerProfile{
 		"decode":  decodeProfile,
-		"prefill": prefilProfile,
+		"prefill": prefillProfile,
 	}), nil
 }
 
@@ -63,7 +63,7 @@ func createDecodeOnlySchedulerConfig(ctx context.Context, configuredPlugins map[
 	decodeProfile, err := createSchedulerProfile(ctx, filter.NewDecodeFilter(), picker.NewMaxScorePicker(), configuredPlugins, pdConfig, prefix.New(*pdConfig.GIEPrefixConfig))
 
 	if err != nil {
-		return nil, fmt.Errorf("falied to create decode scheduling profile - %w", err)
+		return nil, fmt.Errorf("failed to create decode scheduling profile - %w", err)
 	}
 	loggerDebug.Info("Disagregated prefill/decode disabled - scheduler configured to work with decode profile only")
 	return scheduling.NewSchedulerConfig(gieprofile.NewSingleProfileHandler(), map[string]*framework.SchedulerProfile{
@@ -78,7 +78,7 @@ func createSchedulerProfile(ctx context.Context, roleFilter framework.Filter, pi
 		WithFilters(roleFilter).
 		WithPicker(picker)
 	if err := profile.AddPlugins(plugins...); err != nil {
-		return nil, fmt.Errorf("falied to create scheduler profile - %w", err)
+		return nil, fmt.Errorf("failed to create scheduler profile - %w", err)
 	}
 
 	return profile, nil
