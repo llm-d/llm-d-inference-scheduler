@@ -21,10 +21,13 @@ COPY llm-d-inference-scheduler/cmd/ cmd/
 COPY llm-d-inference-scheduler/pkg/ pkg/
 
 # FOR LOCAL BUILDING
-# This is to build from ../ with llm-d-kv-cache-manager checked out at ../
-# Copy the local kv-cache-manager for the replace directive
+# This is to build from ../ with llm-d-kv-cache-manager and gateway-api-inference-extension checked out at ../
+# Copy the local dependencies for the replace directives
 COPY llm-d-kv-cache-manager/ llm-d-kv-cache-manager/
+COPY gateway-api-inference-extension/ gateway-api-inference-extension/
 RUN go mod edit -replace github.com/llm-d/llm-d-kv-cache-manager=./llm-d-kv-cache-manager
+RUN go mod edit -replace sigs.k8s.io/gateway-api-inference-extension=./gateway-api-inference-extension
+RUN go mod tidy
 
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib

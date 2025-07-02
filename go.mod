@@ -116,5 +116,6 @@ require (
 	sigs.k8s.io/yaml v1.5.0 // indirect
 )
 
-// Use local tracing branch of kv-cache-manager for development
+// Use local tracing branches for development
 replace github.com/llm-d/llm-d-kv-cache-manager => ../llm-d-kv-cache-manager
+replace sigs.k8s.io/gateway-api-inference-extension => ../gateway-api-inference-extension
