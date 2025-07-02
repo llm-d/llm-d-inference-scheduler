@@ -9,15 +9,16 @@ import (
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config/loader"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/config"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/scheduling/pd"
 )
 
 // Tests the default scheduler configuration and expected behavior.
@@ -189,26 +190,28 @@ func TestPDSchedule(t *testing.T) {
 		},
 	}
 
+	runner.RegisterAllPlugins()
+	plugins.RegisterAllPlugins()
+
 	ctx := context.Background()
 	logger := testr.New(t)
 	ctx = log.IntoContext(ctx, logger)
 
-	schedulderConfig := &config.Config{
-		DecodeSchedulerPlugins:  map[string]int{},
-		PrefillSchedulerPlugins: map[string]int{},
-		PDEnabled:               true,
-		PDThreshold:             10,
-		GIEPrefixConfig: &prefix.Config{
-			HashBlockSize:          5,
-			MaxPrefixBlocksToMatch: prefix.DefaultMaxPrefixBlocks,
-			LRUCapacityPerServer:   prefix.DefaultLRUCapacityPerServer,
-		},
-	}
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			handle := utils.NewTestHandle(ctx)
 
-			schedulderConfig, err := pd.CreatePDSchedulerConfig(ctx, schedulderConfig)
+			eppConfig, err := loader.LoadConfig([]byte(pdSchedulerConfigYaml), "")
+			if err != nil {
+				t.Errorf("Unexpected error, got %v", err)
+			}
+
+			err = loader.LoadPluginReferences(eppConfig.Plugins, handle)
+			if err != nil {
+				t.Errorf("Unexpected error, got %v", err)
+			}
+
+			schedulderConfig, err := loader.LoadSchedulerConfig(eppConfig.SchedulingProfiles, handle)
 			if err != nil {
 				t.Errorf("Unexpected error, got %v", err)
 			}
@@ -280,3 +283,40 @@ type fakeDataStore struct {
 func (fds *fakeDataStore) PodGetAll() []backendmetrics.PodMetrics {
 	return fds.pods
 }
+
+const pdSchedulerConfigYaml = `
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefill-header
+- name: prefixScorer 
+  type: prefix-cache
+  parameters:
+    hashBlockSize: 5
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 31250
+- name: prefillFilter
+  type: prefill-filter
+- name: decodeFilter
+  type: decode-filter
+- type: max-score
+- type: pd-profile-handler
+  parameters:
+    hashBlockSize: 5
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 31250
+    threshold: 10
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefillFilter
+  - pluginRef: max-score
+  - pluginRef: prefixScorer
+    weight: 50
+- name: decode
+  plugins:
+  - pluginRef: decodeFilter
+  - pluginRef: max-score
+  - pluginRef: prefixScorer
+    weight: 0
+`
