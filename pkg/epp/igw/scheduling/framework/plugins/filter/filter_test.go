@@ -25,8 +25,10 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/uuid"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/config"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/scorer"
@@ -37,14 +39,18 @@ import (
 // compile-time type assertion
 var _ framework.Filter = &filterAll{}
 
-type filterAll struct{}
-
-func (f *filterAll) Type() string {
-	return "filter-all"
+type filterAll struct {
+	tn plugins.TypedName
 }
 
-func (f *filterAll) Name() string {
-	return "test-all"
+func (f *filterAll) TypedName() plugins.TypedName {
+	return f.tn
+}
+
+func newFilterAll() *filterAll {
+	return &filterAll{
+		tn: plugins.TypedName{Type: "filter-all", Name: "test-all"},
+	}
 }
 
 func (f *filterAll) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) []types.Pod {
@@ -61,7 +67,7 @@ func TestFilter(t *testing.T) {
 	}{
 		{
 			name:   "simple filter filters all pods",
-			filter: &filterAll{},
+			filter: newFilterAll(),
 			output: []types.Pod{},
 		},
 		{
@@ -359,7 +365,7 @@ func TestDecisionTreeFilterFactory(t *testing.T) {
 	}
 
 	cmpOptions := cmpopts.IgnoreUnexported(LeastKVCacheFilter{}, LeastQueueFilter{},
-		LoraAffinityFilter{}, LowQueueFilter{}, scorer.KVCacheScorer{})
+		LoraAffinityFilter{}, LowQueueFilter{}, scorer.KVCacheScorer{}, plugins.TypedName{})
 
 	for _, test := range tests {
 		rawParameters := struct {

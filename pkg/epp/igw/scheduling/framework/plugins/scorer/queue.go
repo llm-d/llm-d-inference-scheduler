@@ -42,29 +42,24 @@ func QueueScorerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugi
 // NewQueueScorer initializes a new QueueScorer and returns its pointer.
 func NewQueueScorer() *QueueScorer {
 	return &QueueScorer{
-		name: QueueScorerType,
+		tn: plugins.TypedName{Type: QueueScorerType, Name: QueueScorerType},
 	}
 }
 
 // QueueScorer scores list of candidate pods based on the pod's waiting queue size.
 // the less waiting queue size the pod has, the higher score it will get (since it's more available to serve new request).
 type QueueScorer struct {
-	name string
+	tn plugins.TypedName
 }
 
-// Type returns the type of the scorer.
-func (s *QueueScorer) Type() string {
-	return QueueScorerType
-}
-
-// Name returns the name of the scorer.
-func (s *QueueScorer) Name() string {
-	return s.name
+// TypedName returns the type and name tuple of this plugin instance.
+func (s *QueueScorer) TypedName() plugins.TypedName {
+	return s.tn
 }
 
 // WithName sets the name of the scorer.
 func (s *QueueScorer) WithName(name string) *QueueScorer {
-	s.name = name
+	s.tn.Name = name
 	return s
 }
 

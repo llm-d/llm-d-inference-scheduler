@@ -36,9 +36,11 @@ const (
 // compile-time type assertion
 var _ framework.Filter = &DecisionTreeFilter{}
 
-// DecisionTreeFilter applies current fitler, and then recursively applies next filters
+// DecisionTreeFilter applies current filter, and then recursively applies next filters
 // depending success or failure of the current filter.
 // It can be used to construct a flow chart algorithm.
+// Since a DecisionTreeFilter takes on the type and name of the current filter,
+// it is not embedding a fixed plugins.TypeName.
 type DecisionTreeFilter struct {
 	Current framework.Filter
 	// NextOnSuccess filter will be applied after successfully applying the current filter.
@@ -131,20 +133,14 @@ func loadDecisionTreeEntry(entry *decisionTreeFilterEntry, handle plugins.Handle
 	return nil, errors.New("either pluginRef or decisionTree must be specified")
 }
 
-// Type returns the type of the filter.
-func (f *DecisionTreeFilter) Type() string {
+func (f *DecisionTreeFilter) TypedName() plugins.TypedName {
 	if f == nil {
-		return "nil"
+		// TODO: this keeps the previous behavior ("nil"/"") - not sure
+		// why done this way.
+		// Change to empty TypedName or some more meaningful values?
+		return plugins.TypedName{Type: "nil", Name: ""}
 	}
-	return f.Current.Type()
-}
-
-// Name returns the name of the filter.
-func (f *DecisionTreeFilter) Name() string {
-	if f == nil {
-		return ""
-	}
-	return f.Current.Name()
+	return f.Current.TypedName()
 }
 
 // Filter filters out pods that doesn't meet the filter criteria.
@@ -161,7 +157,7 @@ func (f *DecisionTreeFilter) Filter(ctx context.Context, cycleState *types.Cycle
 		if f.NextOnSuccess != nil {
 			next = f.NextOnSuccess
 		}
-		loggerTrace.Info("Filter succeeded", "filter", f.Type(), "next", next.Type(), "filteredPodCount", len(filteredPod))
+		loggerTrace.Info("Filter succeeded", "filter", f.TypedName(), "next", next.TypedName(), "filteredPodCount", len(filteredPod))
 		// On success, pass the filtered result to the next filter.
 		return next.Filter(ctx, cycleState, request, filteredPod)
 	} else {
@@ -172,7 +168,7 @@ func (f *DecisionTreeFilter) Filter(ctx context.Context, cycleState *types.Cycle
 		if f.NextOnFailure != nil {
 			next = f.NextOnFailure
 		}
-		loggerTrace.Info("Filter failed", "filter", f.Type(), "next", next.Type())
+		loggerTrace.Info("Filter failed", "filter", f.TypedName(), "next", next.TypedName())
 		// On failure, pass the initial set of pods to the next filter.
 		return next.Filter(ctx, cycleState, request, pods)
 	}
