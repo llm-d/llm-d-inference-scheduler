@@ -169,25 +169,25 @@ line argument `--configText` should be used.
 This section describes how to setup the various plugins available with the llm-d-inference-scheduler
 
 **PrefillHeader**<br>
-Sets a header for use in P/D disaggregation<br>
+Sets a header for use in disaggregated prefill/decode<br>
 *Type*: prefill-header<br>
 *Parameters*:<br>
 \- `prefillProfile` specifies the name of the profile used for the prefill scheduling. Only needed if the 
    prefill profile is not named `prefill`.<br>
 
 **PdProfileHandler**<br>
-Selects the profiles to use when running with P/D disagregated prefill/decode<br>
+Selects the profiles to use when running with disagregated prefill/decode<br>
 *Type:* pd-profile-handler<br>
 *Parameters:*<br>
 \- `threshold` specifies the threshold at which there are enough new input tokens to
     send the request to prefill and then decode, vs just to decode.<br>
 \- `hashBlockSize` specifies the length of the prompt chunk that a block is keyed by.
-   This must the same value used for the PrefixScorer.<br>
+   This must the same value used for the PrefixCachePlugin.<br>
 \- `decodeProfile` specifies the name of the profile used for the decode scheduling.
    Only needed if the decode profile is not named `decode`.<br>
 \- `prefillProfile` specifies the name of the profile used for the prefill scheduling.
    Only needed if the prefill profile is not named `prefill`.<br>
-**Note:** When using this plugin you must also have a Prefix scorer configured in the
+**Note:** When using this plugin you must also have a PrefixCachePlugin configured in the
    prefill and decode scheduling profiles.
 
 **ByLabelSelector**<br>
@@ -210,8 +210,8 @@ with a value of `prefill`.<br>
 *Parameters:* None<br>
 
 **KvCacheAwareScorer**<br>
-Scores based on real KV-cache state on vLLM;<br>more accurate but requires extra computation
-and cycles to track the current cache state<br>
+Scores based on real KV-cache state on vLLM. It is more accurate than either the SessionAffinity
+or PrefixCachePlugin, but requires extra computation and cycles to track the current cache state<br>
 *Type:* kvcache-aware-scorer<br>
 *Parameters:* Due to the sensitivity of the parameters of this plugin, the following
 environment variables are used to configure the scorer:<br>
@@ -221,17 +221,23 @@ environment variables are used to configure the scorer:<br>
 **LoadAwareScorer**<br>
 Scores pods based on their load, based on the number of requests concurrently being processed.
 A threshold is provided which is used to determine what is considered an overloaded pod.<br>
+Scores are given to the pods in the range of 0-1. Currently the metrics contain the number of
+requests waiting in the queue, there is no information about number of requests that can be
+processed in the given pod immediately.<br>
+Pods with an empty waiting requests queue are scored with 0.5.<br>
+Pods with requests in the queue will get score between 0.5 and 0.<br>
 *Type:* load-aware-scorer<br>
 *Parameters:*<br>
 \- `threshold` specifies the threshold at which a pod is considered overloaded.<br>
 
 **SessionAffinity**<br>
-Prefers to send requests to pods that were previously used for the same session.<br>
+Scores the candidate pods by giving a higher score to the pods that were previously
+used for the same session.<br>
 *Type:* session-affinity-scorer<br>
 *Parameters:* None<br>
 
-### Sample Disaggregated P/D Configuration
-The following is an example of what a configuration for disaggregated P/D might look like:
+### Sample Disaggregated Prefill/Decode Configuration
+The following is an example of what a configuration for disaggregated Prefill/Decode might look like:
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
@@ -265,17 +271,11 @@ schedulingProfiles:
 ```
 
 Several things should be noted:
-1. The `PrefillHeader`, `PdProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCache`
+1. The `PrefillHeader`, `PdProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
 plugins must be in the list of plugins instantiated.
 2. There must be two scheduler profiles defined.
 3. The scheduler profile for prefill, must include the `PrefillFilter`
 4. The scheduler profile for decode, must include the `DecodeFilter`
-
-### Prefix Aware Scorer Configuration
-
-- `PREFIX_CACHE_LRU_CAPACITY_PER_SERVER` - the cache capacity sets the maximum number of blocks the LRU cache can store per pod. A block maps from a chunk of a prompt to a set of pods that are estimated to have the prefix of the prompt that ends at the keyed chunk.
-- `PREFIX_CACHE_HASH_BLOCK_SIZE` - the cache block size defines the length of the prompt chunk that a block is keyed by.
-- `PREFIX_CACHE_MAX_PREFIX_BLOCKS`- The maximum number of blocks to find prefix match. The default is 128 (or 256*64=16384 characters, or roughly 4096 tokens). This is useful to tradeoff prefix match accuracy for performance.
 
 ---
 
