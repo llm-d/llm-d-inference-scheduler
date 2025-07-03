@@ -88,7 +88,8 @@ it is configured. The configuration is in the form of YAML text, which can eithe
 specified in-line as a parameter. The configuration defines the set of plugins to be instantiated along with their parameters. Each plugin is also given a name, enabling the same plugin type to be instantiated
 multiple times, if needed. Also defined is a set of SchedulingProfiles, which determine the set of
 plugins to be used when scheduling a request. The set of plugins instantiated must also include a
-Profile Handler, which determines which SchedulingProfiles will be used for a particular request.
+Profile Handler, which determines which SchedulingProfiles will be used for a particular request and
+how their results will be processed.
 
 The configuration text has the following form:
 ```yaml
