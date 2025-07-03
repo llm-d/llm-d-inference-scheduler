@@ -555,15 +555,18 @@ schedulingProfiles:
 var _ framework.Filter = &test1{}
 
 type test1 struct {
+	tn        plugins.TypedName
 	Threshold int `json:"threshold"`
 }
 
-func (f *test1) Type() string {
-	return test1Type
+func newTest1() *test1 {
+	return &test1{
+		tn: plugins.TypedName{Type: test1Type, Name: "test-1"},
+	}
 }
 
-func (f *test1) Name() string {
-	return "test-1"
+func (f *test1) TypedName() plugins.TypedName {
+	return f.tn
 }
 
 // Filter filters out pods that doesn't meet the filter criteria.
@@ -575,14 +578,18 @@ func (f *test1) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMReque
 var _ framework.Scorer = &test2{}
 var _ framework.PostCycle = &test2{}
 
-type test2 struct{}
-
-func (f *test2) Type() string {
-	return test2Type
+type test2 struct {
+	tn plugins.TypedName
 }
 
-func (f *test2) Name() string {
-	return "test-2"
+func newTest2() *test2 {
+	return &test2{
+		tn: plugins.TypedName{Type: test2Type, Name: "test-2"},
+	}
+}
+
+func (m *test2) TypedName() plugins.TypedName {
+	return m.tn
 }
 
 func (m *test2) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, _ []types.Pod) map[types.Pod]float64 {
@@ -594,14 +601,18 @@ func (m *test2) PostCycle(_ context.Context, _ *types.CycleState, _ *types.Profi
 // compile-time type validation
 var _ framework.Picker = &testPicker{}
 
-type testPicker struct{}
-
-func (p *testPicker) Type() string {
-	return testPickerType
+type testPicker struct {
+	tn plugins.TypedName
 }
 
-func (p *testPicker) Name() string {
-	return "test-picker"
+func newTestPicker() *testPicker {
+	return &testPicker{
+		tn: plugins.TypedName{Type: testPickerType, Name: "test-picker"},
+	}
+}
+
+func (p *testPicker) TypedName() plugins.TypedName {
+	return p.tn
 }
 
 func (p *testPicker) Pick(_ context.Context, _ *types.CycleState, _ []*types.ScoredPod) *types.ProfileRunResult {
@@ -611,14 +622,18 @@ func (p *testPicker) Pick(_ context.Context, _ *types.CycleState, _ []*types.Sco
 // compile-time type validation
 var _ framework.ProfileHandler = &testProfileHandler{}
 
-type testProfileHandler struct{}
-
-func (p *testProfileHandler) Type() string {
-	return testProfileHandlerType
+type testProfileHandler struct {
+	tn plugins.TypedName
 }
 
-func (p *testProfileHandler) Name() string {
-	return "test-profile-handler"
+func newTestProfileHandler() *testProfileHandler {
+	return &testProfileHandler{
+		tn: plugins.TypedName{Type: testProfileHandlerType, Name: "test-profile-handler"},
+	}
+}
+
+func (p *testProfileHandler) TypedName() plugins.TypedName {
+	return p.tn
 }
 
 func (p *testProfileHandler) Pick(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, _ map[string]*framework.SchedulerProfile, _ map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
@@ -631,28 +646,28 @@ func (p *testProfileHandler) ProcessResults(_ context.Context, _ *types.CycleSta
 
 func registerTestPlugins() {
 	plugins.Register(test1Type,
-		func(name string, parameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-			result := test1{}
-			err := json.Unmarshal(parameters, &result)
-			return &result, err
+		func(_ string, parameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+			result := newTest1()
+			err := json.Unmarshal(parameters, result)
+			return result, err
 		},
 	)
 
 	plugins.Register(test2Type,
-		func(name string, parameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-			return &test2{}, nil
+		func(_ string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+			return newTest2(), nil
 		},
 	)
 
 	plugins.Register(testPickerType,
-		func(name string, parameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-			return &testPicker{}, nil
+		func(_ string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+			return newTestPicker(), nil
 		},
 	)
 
 	plugins.Register(testProfileHandlerType,
-		func(name string, parameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-			return &testProfileHandler{}, nil
+		func(_ string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+			return newTestProfileHandler(), nil
 		},
 	)
 }

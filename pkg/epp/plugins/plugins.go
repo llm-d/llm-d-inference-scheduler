@@ -24,10 +24,8 @@ import (
 // Plugin defines the interface for a plugin.
 // This interface should be embedded in all plugins across the code.
 type Plugin interface {
-	// Type returns the type of the plugin.
-	Type() string
-	// Name returns the name of this plugin instance.
-	Name() string
+	// TypedName returns the type and name tuple of this plugin instance.
+	TypedName() TypedName
 }
 
 // Handle provides plugins a set of standard data and tools to work with

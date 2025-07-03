@@ -23,6 +23,7 @@ import (
 	"math/rand"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -44,28 +45,23 @@ func RandomPickerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plug
 // NewRandomPicker initializes a new RandomPicker and returns its pointer.
 func NewRandomPicker() *RandomPicker {
 	return &RandomPicker{
-		name: RandomPickerType,
+		tn: plugins.TypedName{Type: RandomPickerType, Name: RandomPickerType},
 	}
 }
 
 // RandomPicker picks a random pod from the list of candidates.
 type RandomPicker struct {
-	name string
+	tn plugins.TypedName
 }
 
-// Type returns the type of the picker.
-func (p *RandomPicker) Type() string {
-	return RandomPickerType
+// TypedName returns the type and name tuple of this plugin instance.
+func (p *RandomPicker) TypedName() plugins.TypedName {
+	return p.tn
 }
 
-// Name returns the name of the picker.
-func (p *RandomPicker) Name() string {
-	return p.name
-}
-
-// WithName sets the picker's name
+// WithName sets the name of the picker.
 func (p *RandomPicker) WithName(name string) *RandomPicker {
-	p.name = name
+	p.tn.Name = name
 	return p
 }
 

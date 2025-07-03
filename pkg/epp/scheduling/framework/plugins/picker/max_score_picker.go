@@ -43,30 +43,25 @@ func MaxScorePickerFactory(name string, _ json.RawMessage, _ plugins.Handle) (pl
 // NewMaxScorePicker initializes a new MaxScorePicker and returns its pointer.
 func NewMaxScorePicker() *MaxScorePicker {
 	return &MaxScorePicker{
-		name:   MaxScorePickerType,
+		tn:     plugins.TypedName{Type: MaxScorePickerType, Name: MaxScorePickerType},
 		random: NewRandomPicker(),
 	}
 }
 
 // MaxScorePicker picks the pod with the maximum score from the list of candidates.
 type MaxScorePicker struct {
-	name   string
+	tn     plugins.TypedName
 	random *RandomPicker
 }
 
-// Type returns the type of the picker.
-func (p *MaxScorePicker) Type() string {
-	return MaxScorePickerType
-}
-
-// Name returns the name of the picker.
-func (p *MaxScorePicker) Name() string {
-	return p.name
+// TypedName returns the type and name tuple of this plugin instance.
+func (p *MaxScorePicker) TypedName() plugins.TypedName {
+	return p.tn
 }
 
 // WithName sets the picker's name
 func (p *MaxScorePicker) WithName(name string) *MaxScorePicker {
-	p.name = name
+	p.tn.Name = name
 	return p
 }
 
