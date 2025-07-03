@@ -192,9 +192,11 @@ Selects the profiles to use when running with disagregated prefill/decode<br>
 
 **ByLabelSelector**<br>
 Filters out pods using a standard Kubernetes label selector.<br>
-**Note:** Only the matching feature of Kubernetes label selectors is supported.<br>
+**Note:** Only the matching laabels feature of Kubernetes label selectors is supported.<br>
 *Type:* by-label-selector<br>
 *Parameters:* A standard Kubernetes label selector.<br>
+\- `matchLabels` is a map of {key,value} pairs. If more than one pair are in the map, all
+of the keys are checked and the results are ANDed together.
 
 **DecodeFilter**<br>
 Filters out pods that are not marked either as decode or both prefill and decode. The filter
