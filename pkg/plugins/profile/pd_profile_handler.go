@@ -19,8 +19,8 @@ const (
 	// PdProfileHandlerType is the type of the PdProfileHandler
 	PdProfileHandlerType = "pd-profile-handler"
 
-	defaultDecodeProfile   = "decode"
-	defaultPßrefillProfile = "prefill"
+	defaultDecodeProfile  = "decode"
+	defaultPrefillProfile = "prefill"
 )
 
 type pdProfileHandlerParameters struct {
@@ -38,7 +38,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 	parameters := pdProfileHandlerParameters{
 		Threshold:      100,
 		DecodeProfile:  defaultDecodeProfile,
-		PrefillProfile: defaultPßrefillProfile,
+		PrefillProfile: defaultPrefillProfile,
 		HashBlockSize:  prefix.DefaultHashBlockSize,
 	}
 	if rawParameters != nil {

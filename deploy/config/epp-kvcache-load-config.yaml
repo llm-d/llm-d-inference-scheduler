@@ -4,19 +4,16 @@ apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: single-profile
-- name: decodeFilter
-  type: decode-filter
-- name: kvcacheScorer
-  type: kvcache-aware-scorer
-- name: loadAware
-  type: load-aware-scorer
+- type: decode-filter
+- type: kvcache-aware-scorer
+- type: load-aware-scorer
 - type: max-score
 schedulingProfiles:
 - name: default
   plugins:
-  - pluginRef: decodeFilter
-  - pluginRef: kvcacheScorer
+  - pluginRef: decode-filter
+  - pluginRef: kvcache-aware-scorer
     weight: 2.0
-  - pluginRef: loadAware
+  - pluginRef: load-aware-scorer
     weight: 1.0
   - pluginRef: max-score

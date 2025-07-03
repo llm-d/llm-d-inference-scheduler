@@ -3,16 +3,13 @@ apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: prefill-header
-- name: prefixScorer
-  type: prefix-cache
+- type: prefix-cache
   parameters:
     hashBlockSize: 5
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
-- name: prefillFilter
-  type: prefill-filter
-- name: decodeFilter
-  type: decode-filter
+- type: prefill-filter
+- type: decode-filter
 - type: max-score
 - type: pd-profile-handler
   parameters:
@@ -21,13 +18,13 @@ plugins:
 schedulingProfiles:
 - name: prefill
   plugins:
-  - pluginRef: prefillFilter
+  - pluginRef: prefill-filter
   - pluginRef: max-score
-  - pluginRef: prefixScorer
+  - pluginRef: prefix-cache
     weight: 50
 - name: decode
   plugins:
-  - pluginRef: decodeFilter
+  - pluginRef: decode-filter
   - pluginRef: max-score
-  - pluginRef: prefixScorer
+  - pluginRef: prefix-cache
     weight: 50
