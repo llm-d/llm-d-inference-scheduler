@@ -6,8 +6,10 @@
 
 The design enables:
 
-- Support for **multiple base models** and **LoRA adapters** within a shared cluster [Not supported in Phase1]
-- Efficient routing based on **KV cache locality**, **prefix**, **session affinity**, **load**, and **model metadata**
+- Support for **multiple base models** and **LoRA adapters** within a shared cluster [Not supported in
+Phase1]
+- Efficient routing based on **KV cache locality**, **prefix**, **session affinity**, **load**, and
+**model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
 - Pluggable **filters**, **scorers**, and **scrapers** for extensible routing
 
@@ -81,12 +83,12 @@ These components are maintained in the `llm-d-inference-scheduler` repository an
 
 ## Configuration
 
-The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how it is configured.
-The configuration is in the form of YAML text, which can either be in a file or specified in-line as a parameter.
-The configuration defines the set of plugins to be instantiated along with their parameters. Each plugin is also
-given a name, enabling the same plugin type to be instantiated multiple times, if needed. Also defined is a set of
-SchedulingProfiles, which determine the set of plugins to be used when scheduling a request. The set of plugins instantiated
-must also include a Profile Handler, which determines which SchedulingProfiles will be used for a particular request.
+The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how 
+it is configured. The configuration is in the form of YAML text, which can either be in a file or
+specified in-line as a parameter. The configuration defines the set of plugins to be instantiated along with their parameters. Each plugin is also given a name, enabling the same plugin type to be instantiated
+multiple times, if needed. Also defined is a set of SchedulingProfiles, which determine the set of
+plugins to be used when scheduling a request. The set of plugins instantiated must also include a
+Profile Handler, which determines which SchedulingProfiles will be used for a particular request.
 
 The configuration text has the following form:
 ```yaml
@@ -100,7 +102,7 @@ schedulingProfiles:
 - ....
 ```
 
-The first two lines of the configuration constant and must appear as is.
+The first two lines of the configuration are constant and must appear as is.
 
 The plugins section defines the set of plugins that will be instantiated and their parameters. Each entry in this section
 has the following form:
@@ -112,15 +114,16 @@ has the following form:
     parm2: val2
 ```
 The fields in a plugin entry are:
-- *name* which is optional, provides a name by which the plugin instance can be referenced. If this field is
-omitted, the plugin's type wil be used as its name.<br>
+- *name* which is optional, provides a name by which the plugin instance can be referenced. If this
+field is omitted, the plugin's type will be used as its name.<br>
 - *type* specifies the type of the plugin to be instantiated.<br>
 - *parameters* which is optional, defines the set of parameters used to configure the plugin in question.
 The actual set of parameters varies from plugin to plugin.
 
-The schedulingProfiles section defines the set of scheduling profiles that can be used in scheduling requests
-to pods. The number of scheduuling profiles one defines, depends on the use case. For simple serving of requests,
-one is enough. For disaggregated prefill, two profiles are required. Each entry in this section has the following form:
+The schedulingProfiles section defines the set of scheduling profiles that can be used in scheduling
+requests to pods. The number of scheduling profiles one defines, depends on the use case. For simple
+serving of requests, one is enough. For disaggregated prefill, two profiles are required. Each entry
+in this section has the following form:
 ```yaml
 - name: aName
   plugins:
@@ -130,9 +133,10 @@ one is enough. For disaggregated prefill, two profiles are required. Each entry 
 ```
 The fields in a schedulingProfile entry are:
 - *name* specifies the scheduling profile's name.
-- *plugins* specifies the set of plugins to be used when this scheduling profile is chosen for a request. Each entry in the schedculingProfile's plugins section has the following fields:
+- *plugins* specifies the set of plugins to be used when this scheduling profile is chosen for a request.
+Each entry in the schedulingProfile's plugins section has the following fields:
   - *pluginRef* is a reference to the name of the plugin instance to be used
-  - *weight* is the weight to be used if this referenced plugin is a scorer.
+  - *weight* is the weight to be used if the referenced plugin is a scorer.
 
 A complete configuration might look like this:
 ```yaml
@@ -156,9 +160,8 @@ schedulingProfiles:
     weight: 50
 ```
 
-If the configuration is in a file, the EPP command line argument `--configFile` should be used to specify the
-full path of the file in question. If the configuration is passed as in-line text the EPP command line argument
-`--configText` should be used.
+If the configuration is in a file, the EPP command line argument `--configFile` should be used to specify the full path of the file in question. If the configuration is passed as in-line text the EPP command
+line argument `--configText` should be used.
 
 ### Plugin Configuration
 
