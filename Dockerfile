@@ -31,9 +31,9 @@ ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
 RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go
 
-# Use ubi9 as a minimal base image to package the manager binary
-# Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+# Use ubi9 as a micro base image to package the manager binary
+# Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-micro/615bdf943f6014fa45ae1b58 for more details
+FROM registry.access.redhat.com/ubi9/ubi-micro:latest
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 USER 65532:65532
