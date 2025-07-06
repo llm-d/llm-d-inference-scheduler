@@ -21,18 +21,6 @@ type byLabelFilterParameters struct {
 	AllowsNoLabel bool     `json:"allowsNoLabel"`
 }
 
-// ByLabel - filters out pods based on the values defined by the given label
-type ByLabel struct {
-	// name defines the filter name
-	name string
-	// labelName defines the name of the label to be checked
-	labelName string
-	// validValues defines list of valid label values
-	validValues map[string]struct{}
-	// allowsNoLabel - if true pods without given label will be considered as valid (not filtered out)
-	allowsNoLabel bool
-}
-
 var _ framework.Filter = &ByLabel{} // validate interface conformance
 
 // ByLabelFilterFactory defines the factory function for the ByLabelFilter
@@ -58,22 +46,34 @@ func NewByLabel(name string, labelName string, allowsNoLabel bool, validValues .
 		validValuesMap[v] = struct{}{}
 	}
 
-	return &ByLabel{name: name, labelName: labelName, allowsNoLabel: allowsNoLabel, validValues: validValuesMap}
+	return &ByLabel{
+		typedName:     plugins.TypedName{Type: ByLabelFilterType, Name: name},
+		labelName:     labelName,
+		allowsNoLabel: allowsNoLabel,
+		validValues:   validValuesMap,
+	}
 }
 
-// Type returns the type of the filter
-func (f *ByLabel) Type() string {
-	return ByLabelFilterType
+// ByLabel - filters out pods based on the values defined by the given label
+type ByLabel struct {
+	// name defines the filter typed name
+	typedName plugins.TypedName
+	// labelName defines the name of the label to be checked
+	labelName string
+	// validValues defines list of valid label values
+	validValues map[string]struct{}
+	// allowsNoLabel - if true pods without given label will be considered as valid (not filtered out)
+	allowsNoLabel bool
 }
 
-// Name returns the name of the filter
-func (f *ByLabel) Name() string {
-	return f.name
+// TypedName returns the typed name of the plugin
+func (f *ByLabel) TypedName() plugins.TypedName {
+	return f.typedName
 }
 
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (f *ByLabel) WithName(name string) *ByLabel {
-	f.name = name
+	f.typedName.Name = name
 	return f
 }
 

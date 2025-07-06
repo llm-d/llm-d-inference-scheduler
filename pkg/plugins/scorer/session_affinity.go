@@ -33,7 +33,7 @@ func SessionAffinityScorerFactory(name string, _ json.RawMessage, _ plugins.Hand
 // NewSessionAffinity returns a scorer
 func NewSessionAffinity() *SessionAffinity {
 	return &SessionAffinity{
-		name: SessionAffinityScorerType,
+		typedName: plugins.TypedName{Type: SessionAffinityScorerType},
 	}
 }
 
@@ -42,22 +42,17 @@ func NewSessionAffinity() *SessionAffinity {
 // session was sent to, by giving that pod the specified weight and assigning
 // zero score to the rest of the targets
 type SessionAffinity struct {
-	name string
+	typedName plugins.TypedName
 }
 
-// Type returns the type of the scorer.
-func (s *SessionAffinity) Type() string {
-	return SessionAffinityScorerType
+// TypedName returns the typed name of the plugin.
+func (s *SessionAffinity) TypedName() plugins.TypedName {
+	return s.typedName
 }
 
-// Name returns the name of the instance of the filter.
-func (s *SessionAffinity) Name() string {
-	return s.name
-}
-
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (s *SessionAffinity) WithName(name string) *SessionAffinity {
-	s.name = name
+	s.typedName.Name = name
 	return s
 }
 

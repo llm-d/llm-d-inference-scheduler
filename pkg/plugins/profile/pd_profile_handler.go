@@ -53,7 +53,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewPdProfileHandler(prefillProfile string, decodeProfile string, pdThreshold int, hashBlockSize int) *PdProfileHandler {
 	return &PdProfileHandler{
-		name:           PdProfileHandlerType,
+		typedName:      plugins.TypedName{Type: PdProfileHandlerType},
 		decodeProfile:  decodeProfile,
 		prefillProfile: prefillProfile,
 		pdThreshold:    pdThreshold,
@@ -63,33 +63,27 @@ func NewPdProfileHandler(prefillProfile string, decodeProfile string, pdThreshol
 
 // PdProfileHandler handles scheduler profiles for PD.
 type PdProfileHandler struct {
-	name           string
+	typedName      plugins.TypedName
 	decodeProfile  string
 	prefillProfile string
 	pdThreshold    int
 	hashBlockSize  int
 }
 
-// Type returns the type of the Profile Handler.
-func (h *PdProfileHandler) Type() string {
-	return PdProfileHandlerType
+// TypedName returns the typed name of the plugin.
+func (h *PdProfileHandler) TypedName() plugins.TypedName {
+	return h.typedName
 }
 
-// Name returns the name of the instance of the filter.
-func (h *PdProfileHandler) Name() string {
-	return h.name
-}
-
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (h *PdProfileHandler) WithName(name string) *PdProfileHandler {
-	h.name = name
+	h.typedName.Name = name
 	return h
 }
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
 func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
-
 	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
 	if _, executed := profileResults[h.decodeProfile]; !executed {
 		// if decode profile was not executed yet, first let the scheduler run the decode profile

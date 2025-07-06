@@ -23,70 +23,48 @@ import (
 
 // Tests the default scheduler configuration and expected behavior.
 func TestPDSchedule(t *testing.T) {
-	pod1 := &backendmetrics.FakePodMetrics{
+	pod1 := &types.PodMetrics{
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
 			Address:        "1.2.3.4",
 			Labels:         map[string]string{filter.RoleLabel: filter.RolePrefill},
 		},
-		Metrics: &backendmetrics.MetricsState{},
+		MetricsState: backendmetrics.NewMetricsState(),
 	}
-	pod2 := &backendmetrics.FakePodMetrics{
+	pod2 := &types.PodMetrics{
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod2"},
 			Address:        "5.6.7.8",
 			Labels:         map[string]string{filter.RoleLabel: filter.RoleDecode},
 		},
-		Metrics: &backendmetrics.MetricsState{},
+		MetricsState: backendmetrics.NewMetricsState(),
 	}
-	wantPod1 := &types.PodMetrics{
-		Pod: &backend.Pod{
-			NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
-			Address:        "1.2.3.4",
-			Labels:         map[string]string{filter.RoleLabel: filter.RolePrefill},
-		},
-		MetricsState: &backendmetrics.MetricsState{
-			ActiveModels:  map[string]int{},
-			WaitingModels: map[string]int{},
-		},
-	}
-	wantPod2 := &types.PodMetrics{
-		Pod: &backend.Pod{
-			NamespacedName: k8stypes.NamespacedName{Name: "pod2"},
-			Address:        "5.6.7.8",
-			Labels:         map[string]string{filter.RoleLabel: filter.RoleDecode},
-		},
-		MetricsState: &backendmetrics.MetricsState{
-			ActiveModels:  map[string]int{},
-			WaitingModels: map[string]int{},
-		},
-	}
-	noRolePod1 := &backendmetrics.FakePodMetrics{
+	noRolePod1 := &types.PodMetrics{
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod1"},
 			Address:        "1.1.1.1",
 		},
-		Metrics: &backendmetrics.MetricsState{},
+		MetricsState: backendmetrics.NewMetricsState(),
 	}
-	noRolePod2 := &backendmetrics.FakePodMetrics{
+	noRolePod2 := &types.PodMetrics{
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod2"},
 			Address:        "2.2.2.2",
 		},
-		Metrics: &backendmetrics.MetricsState{},
+		MetricsState: backendmetrics.NewMetricsState(),
 	}
 
 	prefillDecodeResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
 			"decode": {
 				TargetPod: &types.ScoredPod{
-					Pod:   wantPod2,
+					Pod:   pod2,
 					Score: 0.0,
 				},
 			},
 			"prefill": {
 				TargetPod: &types.ScoredPod{
-					Pod:   wantPod1,
+					Pod:   pod1,
 					Score: 0.0,
 				},
 			},
@@ -98,7 +76,7 @@ func TestPDSchedule(t *testing.T) {
 		ProfileResults: map[string]*types.ProfileRunResult{
 			"decode": {
 				TargetPod: &types.ScoredPod{
-					Pod:   wantPod2,
+					Pod:   pod2,
 					Score: 0.0,
 				},
 			},
@@ -109,7 +87,7 @@ func TestPDSchedule(t *testing.T) {
 	tests := []struct {
 		name            string
 		req             *types.LLMRequest
-		input           []backendmetrics.PodMetrics
+		input           []types.Pod
 		wantRes         *types.SchedulingResult
 		wantRes2        *types.SchedulingResult
 		wantHeaders     map[string]string
@@ -123,7 +101,7 @@ func TestPDSchedule(t *testing.T) {
 				TargetModel: "any-model",
 				Prompt:      "12345678901",
 			},
-			input: []backendmetrics.PodMetrics{},
+			input: []types.Pod{},
 			err:   true,
 		},
 		{
@@ -133,12 +111,12 @@ func TestPDSchedule(t *testing.T) {
 				Prompt:      "12345678901",
 			},
 			// pod2 will be picked because it is the only pod with Decode role
-			input: []backendmetrics.PodMetrics{pod2},
+			input: []types.Pod{pod2},
 			wantRes: &types.SchedulingResult{
 				ProfileResults: map[string]*types.ProfileRunResult{
 					"decode": {
 						TargetPod: &types.ScoredPod{
-							Pod: wantPod2,
+							Pod: pod2,
 						},
 					},
 				},
@@ -152,7 +130,7 @@ func TestPDSchedule(t *testing.T) {
 				Prompt:      "12345678901",
 			},
 			// no Decode pod
-			input: []backendmetrics.PodMetrics{pod1},
+			input: []types.Pod{pod1},
 			err:   true,
 		},
 		{
@@ -162,7 +140,7 @@ func TestPDSchedule(t *testing.T) {
 				Prompt:      "12345678906",
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP will be in the header
-			input:    []backendmetrics.PodMetrics{pod1, pod2},
+			input:    []types.Pod{pod1, pod2},
 			wantRes:  prefillDecodeResult,
 			wantRes2: decodeResult,
 		},
@@ -174,7 +152,7 @@ func TestPDSchedule(t *testing.T) {
 			},
 			// pod2 will be picked because it is the decode pod, pod1 IP should no be in the header,
 			// because the prompt is too short
-			input:    []backendmetrics.PodMetrics{pod1, pod2},
+			input:    []types.Pod{pod1, pod2},
 			wantRes:  decodeResult,
 			wantRes2: decodeResult,
 		},
@@ -184,7 +162,7 @@ func TestPDSchedule(t *testing.T) {
 				TargetModel: "critical",
 				Prompt:      "12345678901",
 			},
-			input:          []backendmetrics.PodMetrics{pod1, noRolePod1, noRolePod2},
+			input:          []types.Pod{pod1, noRolePod1, noRolePod2},
 			wantRes:        nil, // doesn't mater which pod was selected
 			unwantedPodIDs: []string{pod1.GetPod().NamespacedName.String()},
 		},
@@ -216,10 +194,8 @@ func TestPDSchedule(t *testing.T) {
 				t.Errorf("Unexpected error, got %v", err)
 			}
 
-			datastore := &fakeDataStore{pods: test.input}
 			scheduler := scheduling.NewSchedulerWithConfig(schedulderConfig)
-			candidatePods := types.ToSchedulerPodMetrics(datastore.PodGetAll())
-			got, err := scheduler.Schedule(ctx, test.req, candidatePods)
+			got, err := scheduler.Schedule(ctx, test.req, test.input)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
@@ -259,7 +235,7 @@ func TestPDSchedule(t *testing.T) {
 			}
 
 			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
-				got, err = scheduler.Schedule(ctx, test.req, candidatePods)
+				got, err = scheduler.Schedule(ctx, test.req, test.input)
 				if test.err != (err != nil) {
 					t.Errorf("Unexpected error, got %v, want %v", err, test.err)
 				}
@@ -271,17 +247,6 @@ func TestPDSchedule(t *testing.T) {
 
 		})
 	}
-}
-
-// TODO: this is probably better in upstream (e.g., epp/scheduling or epp/scheduling/plugins)
-// currently duplicated from pkg/scheduling/plugins/
-type fakeDataStore struct {
-	pods []backendmetrics.PodMetrics
-}
-
-// PodGetAll returns all pods in the store
-func (fds *fakeDataStore) PodGetAll() []backendmetrics.PodMetrics {
-	return fds.pods
 }
 
 const pdSchedulerConfigYaml = `
