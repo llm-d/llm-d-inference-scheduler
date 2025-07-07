@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -39,18 +41,12 @@ func ByLabelFilterFactory(name string, rawParameters json.RawMessage, _ plugins.
 // labelName - the name of the label to use
 // allowsNoLabel - if true pods without given label will be considered as valid (not filtered out)
 // validValuesApp - list of valid values
-func NewByLabel(name string, labelName string, allowsNoLabel bool, validValues ...string) *ByLabel {
-	validValuesMap := map[string]struct{}{}
-
-	for _, v := range validValues {
-		validValuesMap[v] = struct{}{}
-	}
-
+func NewByLabel(name string, labelKey string, allowsNoLabel bool, validValues ...string) *ByLabel {
 	return &ByLabel{
-		typedName:     plugins.TypedName{Type: ByLabelFilterType, Name: name},
-		labelName:     labelName,
-		allowsNoLabel: allowsNoLabel,
-		validValues:   validValuesMap,
+		typedName:      plugins.TypedName{Type: ByLabelFilterType, Name: name},
+		labelKey:       labelKey,
+		allowsNoLabel:  allowsNoLabel,
+		validValuesSet: sets.New(validValues...),
 	}
 }
 
@@ -58,10 +54,10 @@ func NewByLabel(name string, labelName string, allowsNoLabel bool, validValues .
 type ByLabel struct {
 	// name defines the filter typed name
 	typedName plugins.TypedName
-	// labelName defines the name of the label to be checked
-	labelName string
-	// validValues defines list of valid label values
-	validValues map[string]struct{}
+	// labelKey defines the key of the label to be checked
+	labelKey string
+	// validValues defines a set of valid label values
+	validValuesSet sets.Set[string]
 	// allowsNoLabel - if true pods without given label will be considered as valid (not filtered out)
 	allowsNoLabel bool
 }
@@ -83,10 +79,8 @@ func (f *ByLabel) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMReq
 	filteredPods := []types.Pod{}
 
 	for _, pod := range pods {
-		val, labelDefined := pod.GetPod().Labels[f.labelName]
-		_, valueExists := f.validValues[val]
-
-		if (!labelDefined && f.allowsNoLabel) || valueExists {
+		labelValue, labelExists := pod.GetPod().Labels[f.labelKey] // labelValue is empty string if labelKey doesn't exist
+		if f.validValuesSet.Has(labelValue) || (!labelExists && f.allowsNoLabel) {
 			filteredPods = append(filteredPods, pod)
 		}
 	}
