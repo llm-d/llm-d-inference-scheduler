@@ -6,22 +6,27 @@ import (
 
 	"github.com/go-logr/logr/testr"
 	"github.com/google/go-cmp/cmp"
-
+	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config/loader"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/picker"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
 )
 
-// Tests the default scheduler configuration and expected behavior.
+const (
+	prefill = "prefill"
+	decode  = "decode"
+)
+
+// Tests the scheduler expected behavior.
 func TestPDSchedule(t *testing.T) {
 	pod1 := &types.PodMetrics{
 		Pod: &backend.Pod{
@@ -46,57 +51,47 @@ func TestPDSchedule(t *testing.T) {
 		},
 		MetricsState: backendmetrics.NewMetricsState(),
 	}
-	noRolePod2 := &types.PodMetrics{
-		Pod: &backend.Pod{
-			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod2"},
-			Address:        "2.2.2.2",
-		},
-		MetricsState: backendmetrics.NewMetricsState(),
-	}
 
 	prefillDecodeResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
-			"decode": {
+			decode: {
 				TargetPod: &types.ScoredPod{
 					Pod:   pod2,
 					Score: 0.0,
 				},
 			},
-			"prefill": {
+			prefill: {
 				TargetPod: &types.ScoredPod{
 					Pod:   pod1,
 					Score: 0.0,
 				},
 			},
 		},
-		PrimaryProfileName: "decode",
+		PrimaryProfileName: decode,
 	}
 
 	decodeResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
-			"decode": {
+			decode: {
 				TargetPod: &types.ScoredPod{
 					Pod:   pod2,
 					Score: 0.0,
 				},
 			},
 		},
-		PrimaryProfileName: "decode",
+		PrimaryProfileName: decode,
 	}
 
 	tests := []struct {
-		name            string
-		req             *types.LLMRequest
-		input           []types.Pod
-		wantRes         *types.SchedulingResult
-		wantRes2        *types.SchedulingResult
-		wantHeaders     map[string]string
-		unwantedHeaders []string
-		unwantedPodIDs  []string
-		err             bool
+		name     string
+		req      *types.LLMRequest
+		input    []types.Pod
+		wantRes  *types.SchedulingResult
+		wantRes2 *types.SchedulingResult // a subsequent call to check prefix cache and how it affects PD
+		err      bool
 	}{
 		{
-			name: "no pods in datastore",
+			name: "no candidate pods",
 			req: &types.LLMRequest{
 				TargetModel: "any-model",
 				Prompt:      "12345678901",
@@ -111,17 +106,8 @@ func TestPDSchedule(t *testing.T) {
 				Prompt:      "12345678901",
 			},
 			// pod2 will be picked because it is the only pod with Decode role
-			input: []types.Pod{pod2},
-			wantRes: &types.SchedulingResult{
-				ProfileResults: map[string]*types.ProfileRunResult{
-					"decode": {
-						TargetPod: &types.ScoredPod{
-							Pod: pod2,
-						},
-					},
-				},
-				PrimaryProfileName: "decode",
-			},
+			input:   []types.Pod{pod2},
+			wantRes: decodeResult,
 		},
 		{
 			name: "one prefill pod, long prompt",
@@ -139,7 +125,7 @@ func TestPDSchedule(t *testing.T) {
 				TargetModel: "critical",
 				Prompt:      "12345678906",
 			},
-			// pod2 will be picked because it is the decode pod, pod1 IP will be in the header
+			// pod2 will be picked in the decode profile result, pod1 will be in the prefill profile result
 			input:    []types.Pod{pod1, pod2},
 			wantRes:  prefillDecodeResult,
 			wantRes2: decodeResult,
@@ -150,26 +136,38 @@ func TestPDSchedule(t *testing.T) {
 				TargetModel: "critical",
 				Prompt:      "12345",
 			},
-			// pod2 will be picked because it is the decode pod, pod1 IP should no be in the header,
+			// pod2 will be picked because it is the decode pod, pod1 shouldn't be picked,
 			// because the prompt is too short
 			input:    []types.Pod{pod1, pod2},
 			wantRes:  decodeResult,
 			wantRes2: decodeResult,
 		},
 		{
-			name: "TestRoles",
+			name: "TestRolesWithNoDecode",
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 				Prompt:      "12345678901",
 			},
-			input:          []types.Pod{pod1, noRolePod1, noRolePod2},
-			wantRes:        nil, // doesn't matter which pod was selected
-			unwantedPodIDs: []string{pod1.GetPod().NamespacedName.String()},
+			input: []types.Pod{pod1, noRolePod1},
+			wantRes: &types.SchedulingResult{
+				ProfileResults: map[string]*types.ProfileRunResult{
+					decode: {
+						TargetPod: &types.ScoredPod{
+							Pod:   noRolePod1,
+							Score: 0.0,
+						},
+					},
+					prefill: {
+						TargetPod: &types.ScoredPod{
+							Pod:   pod1,
+							Score: 0.0,
+						},
+					},
+				},
+				PrimaryProfileName: decode,
+			},
 		},
 	}
-
-	runner.RegisterAllPlugins()
-	plugins.RegisterAllPlugins()
 
 	ctx := context.Background()
 	logger := testr.New(t)
@@ -177,111 +175,48 @@ func TestPDSchedule(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handle := utils.NewTestHandle(ctx)
+			//  initialize scheduler with config
+			prefixScorer := prefix.New(prefix.Config{HashBlockSize: 5, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
 
-			eppConfig, err := loader.LoadConfig([]byte(pdSchedulerConfigYaml), "")
-			if err != nil {
-				t.Errorf("Unexpected error, got %v", err)
-			}
+			prefillSchedulerProfile := framework.NewSchedulerProfile().
+				WithFilters(filter.NewPrefillFilter()).
+				WithPicker(picker.NewMaxScorePicker())
+			err := prefillSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 50))
+			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
-			err = loader.LoadPluginReferences(eppConfig.Plugins, handle)
-			if err != nil {
-				t.Errorf("Unexpected error, got %v", err)
-			}
+			decodeSchedulerProfile := framework.NewSchedulerProfile().
+				WithFilters(filter.NewDecodeFilter()).
+				WithPicker(picker.NewMaxScorePicker())
+			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
+			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
-			schedulderConfig, err := loader.LoadSchedulerConfig(eppConfig.SchedulingProfiles, handle)
-			if err != nil {
-				t.Errorf("Unexpected error, got %v", err)
-			}
+			profileHandle := profile.NewPdProfileHandler(prefill, decode, 10, 5)
 
-			scheduler := scheduling.NewSchedulerWithConfig(schedulderConfig)
+			schedulerConfig := scheduling.NewSchedulerConfig(profileHandle, map[string]*framework.SchedulerProfile{
+				prefill: prefillSchedulerProfile,
+				decode:  decodeSchedulerProfile,
+			})
+			scheduler := scheduling.NewSchedulerWithConfig(schedulerConfig)
 			got, err := scheduler.Schedule(ctx, test.req, test.input)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
 			}
 
-			if test.wantRes != nil {
-				if diff := cmp.Diff(test.wantRes, got); diff != "" {
-					t.Errorf("Unexpected output (-want +got): %v", diff)
-				}
-
-				for header, value := range test.wantHeaders {
-					gotValue, ok := test.req.Headers[header]
-					if !ok {
-						t.Errorf("Missing header: %s", header)
-					} else if gotValue != value {
-						t.Errorf("Wrong header value for %s: want %s got %s)", header, value, gotValue)
-					}
-				}
-
-				for _, header := range test.unwantedHeaders {
-					if _, exists := test.req.Headers[header]; exists {
-						t.Errorf("Unwanted header %s exists", header)
-					}
-				}
-			}
-
-			if len(test.unwantedPodIDs) > 0 {
-				// ensure that target pod is not one of the unwanted
-				profileRes, found := got.ProfileResults[got.PrimaryProfileName]
-				if found {
-					for _, podID := range test.unwantedPodIDs {
-						if podID == profileRes.TargetPod.GetPod().NamespacedName.String() {
-							t.Errorf("Unwanted pod was selected: %s", podID)
-						}
-					}
-				}
+			if diff := cmp.Diff(test.wantRes, got); diff != "" {
+				t.Errorf("Unexpected output (-want +got): %v", diff)
 			}
 
 			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
 				got, err = scheduler.Schedule(ctx, test.req, test.input)
 				if test.err != (err != nil) {
-					t.Errorf("Unexpected error, got %v, want %v", err, test.err)
+					t.Errorf("Unexpected error in schedule call, got %v, want %v", err, test.err)
 				}
 
 				if diff := cmp.Diff(test.wantRes2, got); diff != "" {
-					t.Errorf("Unexpected output (-want +got): %v", diff)
+					t.Errorf("Unexpected output in subsequent schedule call (-want +got): %v", diff)
 				}
 			}
-
 		})
 	}
 }
-
-const pdSchedulerConfigYaml = `
-apiVersion: inference.networking.x-k8s.io/v1alpha1
-kind: EndpointPickerConfig
-plugins:
-- type: prefill-header
-- name: prefixScorer 
-  type: prefix-cache
-  parameters:
-    hashBlockSize: 5
-    maxPrefixBlocksToMatch: 256
-    lruCapacityPerServer: 31250
-- name: prefillFilter
-  type: prefill-filter
-- name: decodeFilter
-  type: decode-filter
-- type: max-score
-- type: pd-profile-handler
-  parameters:
-    hashBlockSize: 5
-    maxPrefixBlocksToMatch: 256
-    lruCapacityPerServer: 31250
-    threshold: 10
-schedulingProfiles:
-- name: prefill
-  plugins:
-  - pluginRef: prefillFilter
-  - pluginRef: max-score
-  - pluginRef: prefixScorer
-    weight: 50
-- name: decode
-  plugins:
-  - pluginRef: decodeFilter
-  - pluginRef: max-score
-  - pluginRef: prefixScorer
-    weight: 0
-`
