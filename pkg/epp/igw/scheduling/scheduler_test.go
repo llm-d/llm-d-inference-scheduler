@@ -40,8 +40,8 @@ func TestSchedule(t *testing.T) {
 		{
 			name: "no candidate pods",
 			req: &types.LLMRequest{
-				TargetModel: "any-model",
 				RequestId:   uuid.NewString(),
+				TargetModel: "any-model",
 			},
 			input:   []types.Pod{},
 			wantRes: nil,
@@ -50,8 +50,8 @@ func TestSchedule(t *testing.T) {
 		{
 			name: "finds optimal pod",
 			req: &types.LLMRequest{
-				TargetModel: "critical",
 				RequestId:   uuid.NewString(),
+				TargetModel: "critical",
 			},
 			// pod2 will be picked because it has relatively low queue size, with the requested
 			// model being active, and has low KV cache.
@@ -95,16 +95,18 @@ func TestSchedule(t *testing.T) {
 			wantRes: &types.SchedulingResult{
 				ProfileResults: map[string]*types.ProfileRunResult{
 					"default": {
-						TargetPod: &types.ScoredPod{
-							Pod: &types.PodMetrics{
-								Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}},
-								MetricsState: &backendmetrics.MetricsState{
-									WaitingQueueSize:    3,
-									KVCacheUsagePercent: 0.1,
-									MaxActiveModels:     2,
-									ActiveModels: map[string]int{
-										"foo":      1,
-										"critical": 1,
+						TargetPods: []types.Pod{
+							&types.ScoredPod{
+								Pod: &types.PodMetrics{
+									Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}},
+									MetricsState: &backendmetrics.MetricsState{
+										WaitingQueueSize:    3,
+										KVCacheUsagePercent: 0.1,
+										MaxActiveModels:     2,
+										ActiveModels: map[string]int{
+											"foo":      1,
+											"critical": 1,
+										},
 									},
 								},
 							},
