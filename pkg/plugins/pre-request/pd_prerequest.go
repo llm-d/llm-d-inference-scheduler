@@ -8,9 +8,11 @@ import (
 	"net"
 	"strconv"
 
+	"go.opentelemetry.io/otel/attribute"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/tracing"
 )
 
 const (
@@ -68,13 +70,24 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 }
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
-func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, targetPort int) {
+func (p *PrefillHeaderHandler) PreRequest(ctx context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, targetPort int) {
+	ctx, span := tracing.StartGatewaySpan(ctx, "epp.pd_prerequest")
+	defer span.End()
+
 	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
 	if !exists {
+		span.SetAttributes(attribute.Bool("llm_d.pd.disaggregation_enabled", false))
+		tracing.SetSpanSuccess(span)
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
 	// TODO: should the scheme be conifgurable (e.g., https://)?
 	prefillURL := "http://" + net.JoinHostPort(prefillProfileRunResult.TargetPod.GetPod().Address, strconv.Itoa(targetPort))
 	request.Headers[prefillPodHeader] = prefillURL
+
+	span.SetAttributes(
+		attribute.Bool("llm_d.pd.disaggregation_enabled", true),
+		attribute.String("llm_d.pd.prefill_pod_address", prefillProfileRunResult.TargetPod.GetPod().Address),
+	)
+	tracing.SetSpanSuccess(span)
 }
