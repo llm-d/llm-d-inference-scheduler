@@ -204,7 +204,7 @@ env: ## Print environment variables
 .PHONY: check-codespell
 check-codespell: $(CODESPELL) ## Check for spelling errors (exits with error if found)
 	@echo "🔍 Checking for spelling errors..."
-	@if $(CODESPELL) --check-filenames --skip=deploy > codespell-results.txt 2>&1; then \
+	@if $(CODESPELL) --check-filenames --skip=deploy --ignore-words=.codespell-ignore > codespell-results.txt 2>&1; then \
 		echo "✅ No spelling errors found! Cleaning up..."; \
 		rm -f codespell-results.txt; \
 		echo "🎉 Spelling check completed successfully!"; \
