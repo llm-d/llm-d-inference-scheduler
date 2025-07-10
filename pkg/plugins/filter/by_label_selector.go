@@ -44,31 +44,20 @@ func NewByLabelSelector(name string, selector *metav1.LabelSelector) (*ByLabelSe
 	}
 
 	return &ByLabelSelector{
-		name:     name,
-		selector: labelSelector,
+		typedName: plugins.TypedName{Type: ByLabelSelectorFilterType, Name: name},
+		selector:  labelSelector,
 	}, nil
 }
 
 // ByLabelSelector filters out pods that do not match its label selector criteria
 type ByLabelSelector struct {
-	name     string
-	selector labels.Selector
+	typedName plugins.TypedName
+	selector  labels.Selector
 }
 
-// Type returns the type of the filter
-func (blf *ByLabelSelector) Type() string {
-	return ByLabelSelectorFilterType
-}
-
-// Name returns the name of the instance of the filter.
-func (blf *ByLabelSelector) Name() string {
-	return blf.name
-}
-
-// WithName sets the name of the filter.
-func (blf *ByLabelSelector) WithName(name string) *ByLabelSelector {
-	blf.name = name
-	return blf
+// TypedName returns the typed name of the plugin
+func (blf *ByLabelSelector) TypedName() plugins.TypedName {
+	return blf.typedName
 }
 
 // Filter filters out all pods that do not satisfy the label selector

@@ -16,8 +16,8 @@ import (
 const (
 	// PrefillHeaderHandlerType is the type of the PrefillHeaderHandler
 	PrefillHeaderHandlerType = "prefill-header"
-
-	prefillPodHeader = "x-prefiller-url" // prefillPodHeader is the HTTP header name used to indicate Prefill worker
+	// prefillPodHeader is the HTTP header name used to indicate Prefill worker
+	prefillPodHeader = "x-prefiller-url"
 
 	defaultPrefillProfile = "prefill"
 )
@@ -36,7 +36,7 @@ func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ p
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' pre-request handler - %w", PrefillHeaderHandlerType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' pre-request plugin - %w", PrefillHeaderHandlerType, err)
 		}
 	}
 	return NewPrefillHeaderHandler(parameters.PrefillProfile).WithName(name), nil
@@ -45,30 +45,25 @@ func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ p
 // NewPrefillHeaderHandler initializes a new PrefillHeaderHandler and returns its pointer.
 func NewPrefillHeaderHandler(prefillProfile string) *PrefillHeaderHandler {
 	return &PrefillHeaderHandler{
-		name:           PrefillHeaderHandlerType,
+		typedName:      plugins.TypedName{Type: PrefillHeaderHandlerType},
 		prefillProfile: prefillProfile,
 	}
 }
 
 // PrefillHeaderHandler PreRequest plugin
 type PrefillHeaderHandler struct {
-	name           string
+	typedName      plugins.TypedName
 	prefillProfile string
 }
 
-// Type returns the type of the PreRequest plugin.
-func (p *PrefillHeaderHandler) Type() string {
-	return PrefillHeaderHandlerType
+// TypedName returns the typed name of the plugin.
+func (p *PrefillHeaderHandler) TypedName() plugins.TypedName {
+	return p.typedName
 }
 
-// Name returns the name of the instance of the filter.
-func (p *PrefillHeaderHandler) Name() string {
-	return p.name
-}
-
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
-	p.name = name
+	p.typedName.Name = name
 	return p
 }
 

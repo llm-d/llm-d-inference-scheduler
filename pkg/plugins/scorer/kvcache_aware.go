@@ -46,13 +46,13 @@ func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
 	config := kvcache.NewDefaultConfig()
 
 	redisAddr := os.Getenv(kvCacheRedisEnvVar)
-	if redisAddr != "" {
-		// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
-		if !strings.HasPrefix(redisAddr, "redis://") && !strings.HasPrefix(redisAddr, "rediss://") && !strings.HasPrefix(redisAddr, "unix://") {
-			redisAddr = "redis://" + redisAddr
-		}
-	} else {
-		return nil, fmt.Errorf("environment variable %s is not set", kvCacheRedisEnvVar)
+	if redisAddr == "" {
+		return nil, fmt.Errorf("environment variable '%s' is not set", kvCacheRedisEnvVar)
+	}
+
+	// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
+	if !strings.HasPrefix(redisAddr, "redis://") && !strings.HasPrefix(redisAddr, "rediss://") && !strings.HasPrefix(redisAddr, "unix://") {
+		redisAddr = "redis://" + redisAddr
 	}
 
 	redisOpt, err := redis.ParseURL(redisAddr)
@@ -63,7 +63,7 @@ func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
 
 	hfToken := os.Getenv(huggingFaceTokenEnvVar)
 	if hfToken == "" {
-		return nil, fmt.Errorf("environment variable %s is not set", huggingFaceTokenEnvVar)
+		return nil, fmt.Errorf("environment variable '%s' is not set", huggingFaceTokenEnvVar)
 	}
 
 	config.TokenizersPoolConfig.HuggingFaceToken = hfToken
@@ -76,37 +76,32 @@ func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
 	go kvCacheIndexer.Run(ctx)
 
 	return &KVCacheAwareScorer{
-		name:           KvCacheAwareScorerType,
+		typedName:      plugins.TypedName{Type: KvCacheAwareScorerType},
 		kvCacheIndexer: kvCacheIndexer,
 	}, nil
 }
 
 // KVCacheAwareScorer uses the KVCacheIndexer to score pods based on KVCache awareness.
 type KVCacheAwareScorer struct {
-	name           string
+	typedName      plugins.TypedName
 	kvCacheIndexer *kvcache.Indexer
 }
 
-// Type returns the type of the scorer.
-func (s *KVCacheAwareScorer) Type() string {
-	return KvCacheAwareScorerType
+// TypedName returns the typed name of the plugin.
+func (s *KVCacheAwareScorer) TypedName() plugins.TypedName {
+	return s.typedName
 }
 
-// Name returns the name of the instance of the filter.
-func (s *KVCacheAwareScorer) Name() string {
-	return s.name
-}
-
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (s *KVCacheAwareScorer) WithName(name string) *KVCacheAwareScorer {
-	s.name = name
+	s.typedName.Name = name
 	return s
 }
 
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
 func (s *KVCacheAwareScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
-	loggerDebug := log.FromContext(ctx).WithName(s.name).V(logutil.DEBUG)
+	loggerDebug := log.FromContext(ctx).WithName(s.typedName.String()).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
 		return nil

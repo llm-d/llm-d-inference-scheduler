@@ -40,30 +40,25 @@ func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, _ plugin
 // NewLoadAwareScorer creates a new load based scorer
 func NewLoadAwareScorer(queueThreshold int) *LoadAwareScorer {
 	return &LoadAwareScorer{
-		name:           LoadAwareScorerType,
+		typedName:      plugins.TypedName{Type: LoadAwareScorerType},
 		queueThreshold: float64(queueThreshold),
 	}
 }
 
 // LoadAwareScorer scorer that is based on load
 type LoadAwareScorer struct {
-	name           string
+	typedName      plugins.TypedName
 	queueThreshold float64
 }
 
-// Type returns the type of the scorer.
-func (s *LoadAwareScorer) Type() string {
-	return LoadAwareScorerType
+// TypedName returns the typed name of the plugin.
+func (s *LoadAwareScorer) TypedName() plugins.TypedName {
+	return s.typedName
 }
 
-// Name returns the name of the instance of the filter.
-func (s *LoadAwareScorer) Name() string {
-	return s.name
-}
-
-// WithName sets the name of the filter.
+// WithName sets the name of the plugin.
 func (s *LoadAwareScorer) WithName(name string) *LoadAwareScorer {
-	s.name = name
+	s.typedName.Name = name
 	return s
 }
 
