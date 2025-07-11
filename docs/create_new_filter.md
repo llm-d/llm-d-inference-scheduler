@@ -17,8 +17,8 @@ Plugins are used to modify llm-d-inference-scheduler's default behavior. Filter 
  run in succession to produce the final candidate list which is then evaluated,
  through the process of _scoring_, to select the most appropriate target Pods.
  While llm-d-inference-scheduler comes with several existing filters and
- more are availble in the upstream [Gateway API Inference Extension](https://sigs.k8s.io/gateway-api-inference-extension),
- in some cases it may be desireable to create and deploy custom filtering code to
+ more are available in the upstream [Gateway API Inference Extension](https://sigs.k8s.io/gateway-api-inference-extension),
+ in some cases it may be desirable to create and deploy custom filtering code to
  match your specific requirements.
 
 The filters` main operating function is
@@ -33,9 +33,9 @@ The `Filter` function accepts a `SchedulingContext` (e.g., containing the
  to make scheduling decisions. The function returns a (possibly smaller) array
  of `Pod`s which satisfy the filtering criteria.
 
-## Code walkthough
+## Code walkthrough
 
-The top of the file has the expected Go package and import statments:
+The top of the file has the expected Go package and import statements:
 
 ```go
 package filter
@@ -56,7 +56,7 @@ Specifically, we import the Kubernetes `meta/v1` and `labels` packages to allow
  scheduling related objects) packages.
 
 Next we define the `ByLabels` struct type, along with the relevant fields,
- and a consturctor function.
+ and a constructor function.
 
 ```go
 // ByLabels filters out pods that do not match its label selector criteria

@@ -74,7 +74,7 @@ This evolved version removes the requirement for sidecars on the **prefill node*
 ## Worker Selection Logic
 
 - **Decode Worker**:
-  - Prefer longest prefix match / KV cache utilization (depends on avaialble scorers)
+  - Prefer longest prefix match / KV cache utilization (depends on available scorers)
 
 - **Prefill Worker**:
   - High prefix-cache hit rate

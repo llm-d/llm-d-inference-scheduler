@@ -163,7 +163,7 @@ func TestPDSchedule(t *testing.T) {
 				Prompt:      "12345678901",
 			},
 			input:          []types.Pod{pod1, noRolePod1, noRolePod2},
-			wantRes:        nil, // doesn't mater which pod was selected
+			wantRes:        nil, // doesn't matter which pod was selected
 			unwantedPodIDs: []string{pod1.GetPod().NamespacedName.String()},
 		},
 	}
