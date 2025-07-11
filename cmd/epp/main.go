@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
+	"github.com/llm-d/llm-d-kv-cache-manager/pkg/tracing"
 )
 
 func main() {
@@ -39,6 +40,24 @@ func main() {
 
 	// Register GIE plugins
 	runner.RegisterAllPlugins()
+
+	// Initialize distributed tracing
+	tracingConfig := tracing.NewConfigFromEnv()
+	if tracingShutdown, err := tracing.Initialize(ctx, tracingConfig); err != nil {
+		setupLog.Error(err, "failed to setup distributed tracing")
+		os.Exit(1)
+	} else {
+		defer func() {
+			if err := tracingShutdown(ctx); err != nil {
+				setupLog.Error(err, "failed to shutdown tracing")
+			}
+		}()
+		if tracingConfig.Enabled {
+			setupLog.Info("tracing enabled", "endpoint", tracingConfig.ExporterEndpoint, "sampling", tracingConfig.SamplingRate)
+		} else {
+			setupLog.Info("tracing disabled, context propagation enabled")
+		}
+	}
 
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
