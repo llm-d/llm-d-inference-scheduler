@@ -1,3 +1,6 @@
+# The Go and Python based tools are defined in Makefile.tools.mk.
+include Makefile.tools.mk
+
 SHELL := /usr/bin/env bash
 
 # Defaults
@@ -197,6 +200,20 @@ env: ## Print environment variables
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
 	@echo "IMG=$(IMG)"
 	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
+
+.PHONY: check-codespell
+check-codespell: $(CODESPELL) ## Check for spelling errors (exits with error if found)
+	@echo "🔍 Checking for spelling errors..."
+	@if $(CODESPELL) --check-filenames --skip=deploy --ignore-words=.codespell-ignore > codespell-results.txt 2>&1; then \
+		echo "✅ No spelling errors found! Cleaning up..."; \
+		rm -f codespell-results.txt; \
+		echo "🎉 Spelling check completed successfully!"; \
+	else \
+		echo "❌ Spelling errors found! Results saved to codespell-results.txt"; \
+		echo "🔧 Please fix the spelling errors and run 'make check-codespell' again"; \
+		cat codespell-results.txt; \
+		exit 1; \
+	fi
 
 ##@ Tools
 
