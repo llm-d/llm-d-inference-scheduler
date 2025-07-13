@@ -19,6 +19,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
 const (
@@ -34,7 +35,7 @@ func TestPDSchedule(t *testing.T) {
 			Address:        "1.2.3.4",
 			Labels:         map[string]string{filter.RoleLabel: filter.RolePrefill},
 		},
-		MetricsState: backendmetrics.NewMetricsState(),
+		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 0},
 	}
 	pod2 := &types.PodMetrics{
 		Pod: &backend.Pod{
@@ -42,14 +43,14 @@ func TestPDSchedule(t *testing.T) {
 			Address:        "5.6.7.8",
 			Labels:         map[string]string{filter.RoleLabel: filter.RoleDecode},
 		},
-		MetricsState: backendmetrics.NewMetricsState(),
+		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 0},
 	}
 	noRolePod1 := &types.PodMetrics{
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod1"},
 			Address:        "1.1.1.1",
 		},
-		MetricsState: backendmetrics.NewMetricsState(),
+		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 2},
 	}
 
 	prefillDecodeResult := &types.SchedulingResult{
@@ -57,7 +58,7 @@ func TestPDSchedule(t *testing.T) {
 			decode: {
 				TargetPod: &types.ScoredPod{
 					Pod:   pod2,
-					Score: 0.0,
+					Score: 0.5,
 				},
 			},
 			prefill: {
@@ -75,7 +76,7 @@ func TestPDSchedule(t *testing.T) {
 			decode: {
 				TargetPod: &types.ScoredPod{
 					Pod:   pod2,
-					Score: 0.0,
+					Score: 0.5,
 				},
 			},
 		},
@@ -154,7 +155,7 @@ func TestPDSchedule(t *testing.T) {
 					decode: {
 						TargetPod: &types.ScoredPod{
 							Pod:   noRolePod1,
-							Score: 0.0,
+							Score: 0.4921875,
 						},
 					},
 					prefill: {
@@ -166,6 +167,18 @@ func TestPDSchedule(t *testing.T) {
 				},
 				PrimaryProfileName: decode,
 			},
+		},
+		{
+			name: "1P2D - long prompt",
+			req: &types.LLMRequest{
+				TargetModel: "critical",
+				Prompt:      "12345678906",
+			},
+			// pod2 will be picked in the decode profile result cause it has higher score than noRolePod1
+			// pod1 will be in the prefill profile result
+			input:    []types.Pod{pod1, pod2, noRolePod1},
+			wantRes:  prefillDecodeResult,
+			wantRes2: decodeResult,
 		},
 	}
 
@@ -186,6 +199,7 @@ func TestPDSchedule(t *testing.T) {
 
 			decodeSchedulerProfile := framework.NewSchedulerProfile().
 				WithFilters(filter.NewDecodeFilter()).
+				WithScorers(framework.NewWeightedScorer(scorer.NewLoadAwareScorer(scorer.QueueThresholdDefault), 1)).
 				WithPicker(picker.NewMaxScorePicker())
 			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
