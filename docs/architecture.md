@@ -302,7 +302,7 @@ The **vLLM sidecar** handles orchestration between Prefill and Decode stages. It
 - Local memory management
 - Experimental protocol compatibility
 
-> **Note**: The detailed P/D design is available in this document: [Disaggregated Prefill/Decode in llm-d](./dp.md)
+> **Note**: The detailed P/D design is available in this document: [Disaggregated Prefill/Decode in llm-d](./pd_disagg.md)
 ---
 
 ## InferencePool & InferenceModel Design

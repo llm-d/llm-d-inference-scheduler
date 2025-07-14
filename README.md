@@ -21,7 +21,7 @@ workloads currently.
 [Kubernetes]:https://kubernetes.io
 [Architecture Documentation]:docs/architecture.md
 [Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
-[P/D Disaggregation]:docs/dp.md
+[P/D Disaggregation]:docs/pd_disagg.md
 [Gateway API]:https://github.com/kubernetes-sigs/gateway-api
 [Envoy]:https://github.com/envoyproxy/envoy
 [ext-proc]:https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter
