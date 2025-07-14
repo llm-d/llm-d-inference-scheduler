@@ -16,8 +16,8 @@ import (
 const (
 	// PrefillHeaderHandlerType is the type of the PrefillHeaderHandler
 	PrefillHeaderHandlerType = "prefill-header"
-	// prefillPodHeader is the HTTP header name used to indicate Prefill worker
-	prefillPodHeader = "x-prefiller-url"
+	// prefillPodHeader is the header name used to indicate Prefill worker <ip:port>
+	prefillPodHeader = "x-prefiller-host-port"
 
 	defaultPrefillProfile = "prefill"
 )
