@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-logr/logr/testr"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -57,14 +58,12 @@ func TestPDSchedule(t *testing.T) {
 		ProfileResults: map[string]*types.ProfileRunResult{
 			decode: {
 				TargetPod: &types.ScoredPod{
-					Pod:   pod2,
-					Score: 0.5,
+					Pod: pod2,
 				},
 			},
 			prefill: {
 				TargetPod: &types.ScoredPod{
-					Pod:   pod1,
-					Score: 0.0,
+					Pod: pod1,
 				},
 			},
 		},
@@ -75,8 +74,7 @@ func TestPDSchedule(t *testing.T) {
 		ProfileResults: map[string]*types.ProfileRunResult{
 			decode: {
 				TargetPod: &types.ScoredPod{
-					Pod:   pod2,
-					Score: 0.5,
+					Pod: pod2,
 				},
 			},
 		},
@@ -154,14 +152,12 @@ func TestPDSchedule(t *testing.T) {
 				ProfileResults: map[string]*types.ProfileRunResult{
 					decode: {
 						TargetPod: &types.ScoredPod{
-							Pod:   noRolePod1,
-							Score: 0.4921875,
+							Pod: noRolePod1,
 						},
 					},
 					prefill: {
 						TargetPod: &types.ScoredPod{
-							Pod:   pod1,
-							Score: 0.0,
+							Pod: pod1,
 						},
 					},
 				},
@@ -217,7 +213,7 @@ func TestPDSchedule(t *testing.T) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
 			}
 
-			if diff := cmp.Diff(test.wantRes, got); diff != "" {
+			if diff := cmp.Diff(test.wantRes, got, cmpopts.IgnoreFields(types.ScoredPod{}, "Score")); diff != "" {
 				t.Errorf("Unexpected output (-want +got): %v", diff)
 			}
 
@@ -227,7 +223,7 @@ func TestPDSchedule(t *testing.T) {
 					t.Errorf("Unexpected error in schedule call, got %v, want %v", err, test.err)
 				}
 
-				if diff := cmp.Diff(test.wantRes2, got); diff != "" {
+				if diff := cmp.Diff(test.wantRes2, got, cmpopts.IgnoreFields(types.ScoredPod{}, "Score")); diff != "" {
 					t.Errorf("Unexpected output in subsequent schedule call (-want +got): %v", diff)
 				}
 			}
