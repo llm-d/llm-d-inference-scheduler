@@ -56,25 +56,31 @@ func TestPDSchedule(t *testing.T) {
 
 	prefillDecodeResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
-			decode: {
-				TargetPod: &types.ScoredPod{
+			decode: {TargetPods: []types.Pod{
+				&types.ScoredPod{
 					Pod: pod2,
 				},
 			},
+			},
 			prefill: {
-				TargetPod: &types.ScoredPod{
-					Pod: pod1,
+				TargetPods: []types.Pod{
+					&types.ScoredPod{
+						Pod: pod1,
+					},
 				},
 			},
 		},
+
 		PrimaryProfileName: decode,
 	}
 
 	decodeResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
 			decode: {
-				TargetPod: &types.ScoredPod{
-					Pod: pod2,
+				TargetPods: []types.Pod{
+					&types.ScoredPod{
+						Pod: pod2,
+					},
 				},
 			},
 		},
@@ -151,13 +157,17 @@ func TestPDSchedule(t *testing.T) {
 			wantRes: &types.SchedulingResult{
 				ProfileResults: map[string]*types.ProfileRunResult{
 					decode: {
-						TargetPod: &types.ScoredPod{
-							Pod: noRolePod1,
+						TargetPods: []types.Pod{
+							&types.ScoredPod{
+								Pod: noRolePod1,
+							},
 						},
 					},
 					prefill: {
-						TargetPod: &types.ScoredPod{
-							Pod: pod1,
+						TargetPods: []types.Pod{
+							&types.ScoredPod{
+								Pod: pod1,
+							},
 						},
 					},
 				},
@@ -189,14 +199,14 @@ func TestPDSchedule(t *testing.T) {
 
 			prefillSchedulerProfile := framework.NewSchedulerProfile().
 				WithFilters(filter.NewPrefillFilter()).
-				WithPicker(picker.NewMaxScorePicker())
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err := prefillSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := framework.NewSchedulerProfile().
 				WithFilters(filter.NewDecodeFilter()).
 				WithScorers(framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx, scorer.QueueThresholdDefault), 1)).
-				WithPicker(picker.NewMaxScorePicker())
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 

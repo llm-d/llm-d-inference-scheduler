@@ -83,7 +83,7 @@ These components are maintained in the `llm-d-inference-scheduler` repository an
 
 ## Configuration
 
-The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how 
+The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how
 it is configured. The configuration is in the form of YAML text, which can either be in a file or
 specified in-line as a parameter. The configuration defines the set of plugins to be instantiated along with their parameters. Each plugin is also given a name, enabling the same plugin type to be instantiated
 multiple times, if needed. Also defined is a set of SchedulingProfiles, which determine the set of
@@ -144,20 +144,20 @@ A complete configuration might look like this:
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefix-cache
+- type: prefix-cache-scorer
   parameters:
     hashBlockSize: 5
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
 - type: decode-filter
-- type: max-score
-- type: single-profile
+- type: max-score-picker
+- type: single-profile-handler
 schedulingProfiles:
 - name: default
   plugins:
   - pluginRef: decode-filter
-  - pluginRef: max-score
-  - pluginRef: prefix-cache
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
     weight: 50
 ```
 
@@ -170,9 +170,9 @@ This section describes how to setup the various plugins available with the llm-d
 
 **PrefillHeader**<br>
 Sets a header for use in disaggregated prefill/decode<br>
-*Type*: prefill-header<br>
+*Type*: prefill-header-handler<br>
 *Parameters*:<br>
-\- `prefillProfile` specifies the name of the profile used for the prefill scheduling. Only needed if the 
+\- `prefillProfile` specifies the name of the profile used for the prefill scheduling. Only needed if the
    prefill profile is not named `prefill`.<br>
 
 **PdProfileHandler**<br>
@@ -244,15 +244,15 @@ The following is an example of what a configuration for disaggregated Prefill/De
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefill-header
-- type: prefix-cache
+- type: prefill-header-handler
+- type: prefix-cache-scorer
   parameters:
     hashBlockSize: 5
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
 - type: prefill-filter
 - type: decode-filter
-- type: max-score
+- type: max-score-picker
 - type: pd-profile-handler
   parameters:
     threshold: 10
@@ -261,14 +261,14 @@ schedulingProfiles:
 - name: prefill
   plugins:
   - pluginRef: prefill-filter
-  - pluginRef: max-score
-  - pluginRef: prefix-cache
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
     weight: 50
 - name: decode
   plugins:
   - pluginRef: decode-filter
-  - pluginRef: max-score
-  - pluginRef: prefix-cache
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
     weight: 50
 ```
 

@@ -15,7 +15,7 @@ import (
 
 const (
 	// PrefillHeaderHandlerType is the type of the PrefillHeaderHandler
-	PrefillHeaderHandlerType = "prefill-header"
+	PrefillHeaderHandlerType = "prefill-header-handler"
 	// prefillPodHeader is the header name used to indicate Prefill worker <ip:port>
 	prefillPodHeader = "x-prefiller-host-port"
 
@@ -74,6 +74,6 @@ func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMR
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	prefillHostPort := net.JoinHostPort(prefillProfileRunResult.TargetPod.GetPod().Address, strconv.Itoa(targetPort))
+	prefillHostPort := net.JoinHostPort(prefillProfileRunResult.TargetPods[0].GetPod().Address, strconv.Itoa(targetPort))
 	request.Headers[prefillPodHeader] = prefillHostPort // in the form of <ip:port>
 }

@@ -108,7 +108,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	if err != nil {
 		log.FromContext(ctx).Error(err, "unable to read prefix state")
 	} else {
-		decodePod := profileResults[h.decodeProfile].TargetPod.GetPod().NamespacedName
+		decodePod := profileResults[h.decodeProfile].TargetPods[0].GetPod().NamespacedName
 		hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
 		hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(request.Prompt))
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
