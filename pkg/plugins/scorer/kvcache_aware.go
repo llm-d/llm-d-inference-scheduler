@@ -3,6 +3,7 @@ package scorer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -13,28 +14,72 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
-const (
-	// KvCacheAwareScorerType is the type of the KvCacheAwareScorer
-	KvCacheAwareScorerType = "kvcache-aware-scorer"
+// PrefixCachePluginMode defines the mode of the prefix cache plugin. It can be either `estimate` or `cache_tracking`.
+type PrefixCachePluginMode string
 
-	kvCacheRedisEnvVar     = "KVCACHE_INDEXER_REDIS_ADDR"
+const (
+	// PrefixCachePluginModeEstimate is the mode where the plugin use estimated prefix.
+	PrefixCachePluginModeEstimate PrefixCachePluginMode = "estimate"
+	// PrefixCachePluginModeCacheTracking is the mode where the plugin uses cache tracking using KVevents.
+	PrefixCachePluginModeCacheTracking PrefixCachePluginMode = "cache_tracking"
+	// huggingFaceTokenEnvVar is the environment variable that holds the Hugging Face token.
 	huggingFaceTokenEnvVar = "HF_TOKEN"
 )
+
+// PrefixCachePluginConfig holds the configuration for the PrefixCachePlugin.
+type PrefixCachePluginConfig struct {
+	// Mode defines the mode of the prefix cache plugin.
+	Mode PrefixCachePluginMode `json:"mode"` // "prefix" or "cache_tracking"
+	// Config holds the configuration for the prefix cache plugin.
+	prefix.Config
+	// kvCacheRedisAddr is the address of the Redis instance used for cache tracking.
+	KVCacheRedisAddr string `json:"kvCacheRedisAddr"`
+}
 
 // compile-time type assertion
 var _ framework.Scorer = &KVCacheAwareScorer{}
 
-// KvCacheAwareScorerFactory defines the factory function for the KVCacheAwareScorer
-func KvCacheAwareScorerFactory(name string, _ json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-	plugin, err := NewKVCacheAwareScorer(handle.Context())
-	if err != nil {
-		return nil, err
+// PrefixCachePluginFactory creates a new instance of the PrefixCachePlugin based on the provided configuration.
+func PrefixCachePluginFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+	var cfg PrefixCachePluginConfig
+
+	logger := log.FromContext(handle.Context()).WithName("PrefixCachePluginFactory").V(logutil.DEFAULT)
+	// Fallback to empty JSON if parameters are missing
+	if rawParameters == nil {
+		rawParameters = []byte(`{}`)
 	}
-	return plugin.WithName(name), nil
+	// Unmarshal directly into the flat config struct
+	if err := json.Unmarshal(rawParameters, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse %s plugin config: %w", prefix.PrefixCachePluginType, err)
+	}
+
+	mode := cfg.Mode
+	if mode == "" {
+		mode = PrefixCachePluginModeEstimate
+	}
+
+	switch mode {
+	case PrefixCachePluginModeEstimate:
+		logger.Info("Creating PrefixCachePlugin in estimate mode", "parameters", rawParameters)
+		return prefix.PrefixCachePluginFactory(name, rawParameters, handle)
+
+	case PrefixCachePluginModeCacheTracking:
+		logger.Info("Creating PrefixCachePluginConfig in cache tracking mode", "parameters", rawParameters)
+
+		plugin, err := NewKVCacheAwareScorer(handle.Context(), &cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create %s plugin: %w", prefix.PrefixCachePluginType, err)
+		}
+		return plugin.WithName(name), nil
+
+	default:
+		return nil, fmt.Errorf("unknown mode for %s plugin: %s", prefix.PrefixCachePluginType, mode)
+	}
 }
 
 // NewKVCacheAwareScorer creates a new KVCacheAwareScorer instance.
@@ -42,12 +87,12 @@ func KvCacheAwareScorerFactory(name string, _ json.RawMessage, handle plugins.Ha
 //
 // If the environment variables are not set, or if the indexer
 // fails to initialize, an error is returned.
-func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
+func NewKVCacheAwareScorer(ctx context.Context, cfg *PrefixCachePluginConfig) (*KVCacheAwareScorer, error) {
 	config := kvcache.NewDefaultConfig()
 
-	redisAddr := os.Getenv(kvCacheRedisEnvVar)
+	redisAddr := cfg.KVCacheRedisAddr
 	if redisAddr == "" {
-		return nil, fmt.Errorf("environment variable '%s' is not set", kvCacheRedisEnvVar)
+		return nil, errors.New("environment variable kvCacheRedisAddr is not set")
 	}
 
 	// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
@@ -76,7 +121,7 @@ func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
 	go kvCacheIndexer.Run(ctx)
 
 	return &KVCacheAwareScorer{
-		typedName:      plugins.TypedName{Type: KvCacheAwareScorerType},
+		typedName:      plugins.TypedName{Type: prefix.PrefixCachePluginType},
 		kvCacheIndexer: kvCacheIndexer,
 	}, nil
 }

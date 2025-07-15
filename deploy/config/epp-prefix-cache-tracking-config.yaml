@@ -5,14 +5,17 @@ kind: EndpointPickerConfig
 plugins:
 - type: single-profile-handler
 - type: decode-filter
-- type: kvcache-aware-scorer
+- type: prefix-cache-scorer
+  parameters:
+    mode: cache_tracking
+    kvCacheRedisAddr: ${REDIS_HOST}:${REDIS_PORT}
 - type: load-aware-scorer
 - type: max-score-picker
 schedulingProfiles:
 - name: default
   plugins:
   - pluginRef: decode-filter
-  - pluginRef: kvcache-aware-scorer
+  - pluginRef: prefix-cache-scorer
     weight: 2.0
   - pluginRef: load-aware-scorer
     weight: 1.0

@@ -83,7 +83,7 @@ export PD_ENABLED="\"${PD_ENABLED:-false}\""
 # Token length threshold to trigger P/D logic
 export PD_PROMPT_LEN_THRESHOLD="\"${PD_PROMPT_LEN_THRESHOLD:-10}\""
 
-export EPP_CONFIG="${EPP_CONFIG:-deploy/config/epp-kvcache-load-config.yaml}"
+export EPP_CONFIG="${EPP_CONFIG:-deploy/config/epp-prefix-cache-tracking-config.yaml}"
 
 # Redis deployment name
 export REDIS_DEPLOYMENT_NAME="${REDIS_DEPLOYMENT_NAME:-lookup-server}"
@@ -92,7 +92,7 @@ export REDIS_DEPLOYMENT_NAME="${REDIS_DEPLOYMENT_NAME:-lookup-server}"
 export REDIS_SVC_NAME="${REDIS_SVC_NAME:-${REDIS_DEPLOYMENT_NAME}-service}"
 
 # Redis FQDN for internal Kubernetes communication
-export REDIS_HOST="${REDIS_HOST:-${REDIS_SVC_NAME}.${NAMESPACE}.svc.cluster.local}"
+export REDIS_HOST="${REDIS_HOST:-vllm-${REDIS_SVC_NAME}.${NAMESPACE}.svc.cluster.local}"
 
 # Redis port
 export REDIS_PORT="${REDIS_PORT:-8100}"
@@ -191,7 +191,7 @@ helm upgrade --install "$VLLM_HELM_RELEASE_NAME" "$VLLM_CHART_DIR" \
   --set redis.service.port="$REDIS_PORT"
 
 echo "INFO: Deploying Gateway Environment in namespace ${NAMESPACE}, ${POOL_NAME}"
-kubectl -n "${NAMESPACE}" create configmap epp-config --from-file=epp-config.yaml=${EPP_CONFIG}
+kubectl -n "${NAMESPACE}" create configmap epp-config --from-file=epp-config.yaml=<(envsubst < "${EPP_CONFIG}") --dry-run=client -o yaml | kubectl apply -f -
 kustomize build deploy/environments/dev/kubernetes-kgateway | envsubst | kubectl -n "${NAMESPACE}" apply -f -
 echo "INFO: Waiting for resources in namespace ${NAMESPACE} to become ready"
 # Wait for gateway resources
