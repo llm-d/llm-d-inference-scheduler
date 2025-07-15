@@ -195,7 +195,7 @@ func TestPDSchedule(t *testing.T) {
 
 			decodeSchedulerProfile := framework.NewSchedulerProfile().
 				WithFilters(filter.NewDecodeFilter()).
-				WithScorers(framework.NewWeightedScorer(scorer.NewLoadAwareScorer(scorer.QueueThresholdDefault), 1)).
+				WithScorers(framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx, scorer.QueueThresholdDefault), 1)).
 				WithPicker(picker.NewMaxScorePicker())
 			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
