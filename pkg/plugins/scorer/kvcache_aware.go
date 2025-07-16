@@ -69,7 +69,7 @@ func PrefixCachePluginFactory(name string, rawParameters json.RawMessage, handle
 	case PrefixCachePluginModeCacheTracking:
 		logger.Info("Creating PrefixCachePluginConfig in cache tracking mode", "parameters", rawParameters)
 
-		plugin, err := NewKVCacheAwareScorer(handle.Context(), &cfg)
+		plugin, err := NewKVCacheAwareScorer(handle.Context())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create %s plugin: %w", prefix.PrefixCachePluginType, err)
 		}
@@ -85,7 +85,7 @@ func PrefixCachePluginFactory(name string, rawParameters json.RawMessage, handle
 //
 // If the environment variables are not set, or if the indexer
 // fails to initialize, an error is returned.
-func NewKVCacheAwareScorer(ctx context.Context, cfg *PrefixCachePluginConfig) (*KVCacheAwareScorer, error) {
+func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
 	config := kvcache.NewDefaultConfig()
 
 	hfToken := os.Getenv(huggingFaceTokenEnvVar)
@@ -117,9 +117,8 @@ func NewKVCacheAwareScorer(ctx context.Context, cfg *PrefixCachePluginConfig) (*
 
 // KVCacheAwareScorer uses the KVCacheIndexer to score pods based on KVCache awareness.
 type KVCacheAwareScorer struct {
-	typedName         plugins.TypedName
-	kvCacheIndexer    *kvcache.Indexer
-	kvCacheEventsPool *kvevents.Pool
+	typedName      plugins.TypedName
+	kvCacheIndexer *kvcache.Indexer
 }
 
 // TypedName returns the typed name of the plugin.
