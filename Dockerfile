@@ -54,7 +54,7 @@ EXPOSE 9002
 EXPOSE 9003
 EXPOSE 9090
 
-# expose port for KV cache events
+# expose port for KV-Events ZMQ SUB socket
 EXPOSE 5557
 
 ENTRYPOINT ["/app/epp"]

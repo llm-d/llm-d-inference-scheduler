@@ -93,6 +93,7 @@ func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
 		return nil, fmt.Errorf("environment variable '%s' is not set", huggingFaceTokenEnvVar)
 	}
 
+	// TODO expose configuration
 	config.TokenizersPoolConfig.HuggingFaceToken = hfToken
 	config.TokenProcessorConfig.BlockSize = 64
 	config.TokenProcessorConfig.HashSeed = "0"
