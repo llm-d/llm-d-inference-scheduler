@@ -3,13 +3,11 @@ package scorer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"strings"
 
-	kvcache "github.com/llm-d/llm-d-kv-cache-manager/pkg/kv-cache"
-	"github.com/redis/go-redis/v9"
+	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache"
+	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache/kvevents"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
@@ -90,33 +88,24 @@ func PrefixCachePluginFactory(name string, rawParameters json.RawMessage, handle
 func NewKVCacheAwareScorer(ctx context.Context, cfg *PrefixCachePluginConfig) (*KVCacheAwareScorer, error) {
 	config := kvcache.NewDefaultConfig()
 
-	redisAddr := cfg.KVCacheRedisAddr
-	if redisAddr == "" {
-		return nil, errors.New("environment variable kvCacheRedisAddr is not set")
-	}
-
-	// to keep compatibility with deployments only specifying hostname:port: need to add protocol to front to enable parsing
-	if !strings.HasPrefix(redisAddr, "redis://") && !strings.HasPrefix(redisAddr, "rediss://") && !strings.HasPrefix(redisAddr, "unix://") {
-		redisAddr = "redis://" + redisAddr
-	}
-
-	redisOpt, err := redis.ParseURL(redisAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse redisURL: %w", err)
-	}
-	config.KVBlockIndexerConfig.RedisOpt = redisOpt
-
 	hfToken := os.Getenv(huggingFaceTokenEnvVar)
 	if hfToken == "" {
 		return nil, fmt.Errorf("environment variable '%s' is not set", huggingFaceTokenEnvVar)
 	}
 
 	config.TokenizersPoolConfig.HuggingFaceToken = hfToken
+	config.TokenProcessorConfig.BlockSize = 64
+	config.TokenProcessorConfig.HashSeed = "0"
 
 	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create KVCacheIndexer: %w", err)
 	}
+
+	poolConf := kvevents.DefaultConfig()
+	poolConf.ZMQEndpoint = "tcp://*:5557"
+	pool := kvevents.NewPool(poolConf, kvCacheIndexer.KVBlockIndex())
+	pool.Start(ctx)
 
 	go kvCacheIndexer.Run(ctx)
 
@@ -128,8 +117,9 @@ func NewKVCacheAwareScorer(ctx context.Context, cfg *PrefixCachePluginConfig) (*
 
 // KVCacheAwareScorer uses the KVCacheIndexer to score pods based on KVCache awareness.
 type KVCacheAwareScorer struct {
-	typedName      plugins.TypedName
-	kvCacheIndexer *kvcache.Indexer
+	typedName         plugins.TypedName
+	kvCacheIndexer    *kvcache.Indexer
+	kvCacheEventsPool *kvevents.Pool
 }
 
 // TypedName returns the typed name of the plugin.
