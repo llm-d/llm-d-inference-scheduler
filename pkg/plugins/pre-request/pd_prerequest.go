@@ -69,6 +69,10 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
 func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, targetPort int) {
+	if _, found := request.Headers[prefillPodHeader]; found {
+		request.Headers[prefillPodHeader] = "" // clear header, if already set
+	}
+
 	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
 	if !exists {
 		return // prefill profile failed to run or we chose not to run it, no-op in this case

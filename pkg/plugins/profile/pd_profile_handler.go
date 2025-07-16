@@ -100,8 +100,8 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	}
 
 	// if we're here that means decode profile ran successfully, and we have additional profile configured that didn't run yet,
-	// which means PD is enabled (otherwise, prefil profile is not configured at all and this profile handler is not used).
-	// inspect decode execution result to decide if prefil should run or not.
+	// which means PD is enabled (otherwise, prefill profile is not configured at all and this profile handler is not used).
+	// inspect decode execution result to decide if prefill should run or not.
 	// if the request is short enough, use decode results only and don't run the prefill profile.
 	hitPercentagePrefix := 0.0 // default to 0, meaning no prefix cache hit
 	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, prefix.PrefixCachePluginType)
