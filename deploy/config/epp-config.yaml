@@ -4,10 +4,6 @@ apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer
-  parameters:
-    hashBlockSize: 5
-    maxPrefixBlocksToMatch: 256
-    lruCapacityPerServer: 31250
 - type: decode-filter
 - type: max-score-picker
 - type: single-profile-handler
@@ -17,4 +13,4 @@ schedulingProfiles:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
   - pluginRef: prefix-cache-scorer
-    weight: 50
+    weight: 2

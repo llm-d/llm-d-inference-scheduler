@@ -58,9 +58,9 @@ export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
 export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 
 if [ "${PD_ENABLED}" != "\"true\"" ]; then
-  DEFAULT_EPP_CONFIG="deploy/config/epp-config.yaml"
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
 else
-  DEFAULT_EPP_CONFIG="deploy/config/pd-epp-config.yaml"
+  DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
 fi
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
 # ------------------------------------------------------------------------------
@@ -170,7 +170,7 @@ if [ "${PD_ENABLED}" != "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
 else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
-fi 
+fi
 
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${EPP_CONFIG}
 
