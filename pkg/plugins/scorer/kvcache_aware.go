@@ -104,7 +104,6 @@ func NewKVCacheAwareScorer(ctx context.Context) (*KVCacheAwareScorer, error) {
 	}
 
 	poolConf := kvevents.DefaultConfig()
-	poolConf.ZMQEndpoint = "tcp://*:5557"
 	pool := kvevents.NewPool(poolConf, kvCacheIndexer.KVBlockIndex())
 	pool.Start(ctx)
 
