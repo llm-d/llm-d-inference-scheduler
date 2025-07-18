@@ -24,8 +24,6 @@ spec:
         - --configFile
         - "/etc/epp/epp-config.yaml"
         env:
-          - name: KVCACHE_INDEXER_REDIS_ADDR
-            value: ${REDIS_HOST}:${REDIS_PORT}
           - name: HF_TOKEN
             valueFrom:
               secretKeyRef:

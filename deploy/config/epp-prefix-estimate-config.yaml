@@ -1,0 +1,19 @@
+# Sample EPP configuration for running with prefix cache in estimate mode and load-aware scorers
+#
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: single-profile-handler
+- type: decode-filter
+- type: prefix-cache-scorer
+- type: load-aware-scorer
+- type: max-score-picker
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: prefix-cache-scorer
+    weight: 2.0
+  - pluginRef: load-aware-scorer
+    weight: 1.0
+  - pluginRef: max-score-picker

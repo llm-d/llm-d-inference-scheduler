@@ -27,7 +27,8 @@ func TestLoadBasedScorer(t *testing.T) {
 	}{
 		{
 			name:   "load based scorer",
-			scorer: scorer.NewLoadAwareScorer(0),
+			scorer: scorer.NewLoadAwareScorer(context.Background(), 10),
+
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 			},
@@ -72,7 +73,7 @@ func TestLoadBasedScorer(t *testing.T) {
 				},
 			},
 			wantRes: &types.ProfileRunResult{
-				TargetPod: &types.ScoredPod{
+				TargetPods: []types.Pod{&types.ScoredPod{
 					Pod: &types.PodMetrics{
 						Pod: &backend.Pod{
 							NamespacedName: k8stypes.NamespacedName{Name: "pod2"},
@@ -89,6 +90,7 @@ func TestLoadBasedScorer(t *testing.T) {
 					},
 					Score: 0.5,
 				},
+				},
 			},
 		},
 	}
@@ -97,7 +99,7 @@ func TestLoadBasedScorer(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			schedulerProfile := framework.NewSchedulerProfile().
 				WithScorers(framework.NewWeightedScorer(test.scorer, 1)).
-				WithPicker(picker.NewMaxScorePicker())
+				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 
 			got, err := schedulerProfile.Run(context.Background(), test.req, nil, test.input)
 

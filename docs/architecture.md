@@ -83,7 +83,7 @@ These components are maintained in the `llm-d-inference-scheduler` repository an
 
 ## Configuration
 
-The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how 
+The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how
 it is configured. The configuration is in the form of YAML text, which can either be in a file or
 specified in-line as a parameter. The configuration defines the set of plugins to be instantiated along with their parameters. Each plugin is also given a name, enabling the same plugin type to be instantiated
 multiple times, if needed. Also defined is a set of SchedulingProfiles, which determine the set of
@@ -144,20 +144,20 @@ A complete configuration might look like this:
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefix-cache
+- type: prefix-cache-scorer
   parameters:
     hashBlockSize: 5
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
 - type: decode-filter
-- type: max-score
-- type: single-profile
+- type: max-score-picker
+- type: single-profile-handler
 schedulingProfiles:
 - name: default
   plugins:
   - pluginRef: decode-filter
-  - pluginRef: max-score
-  - pluginRef: prefix-cache
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
     weight: 50
 ```
 
@@ -170,9 +170,9 @@ This section describes how to setup the various plugins available with the llm-d
 
 **PrefillHeader**<br>
 Sets a header for use in disaggregated prefill/decode<br>
-*Type*: prefill-header<br>
+*Type*: prefill-header-handler<br>
 *Parameters*:<br>
-\- `prefillProfile` specifies the name of the profile used for the prefill scheduling. Only needed if the 
+\- `prefillProfile` specifies the name of the profile used for the prefill scheduling. Only needed if the
    prefill profile is not named `prefill`.<br>
 
 **PdProfileHandler**<br>
@@ -211,14 +211,30 @@ with a value of `prefill`.<br>
 *Type:* prefill-filter<br>
 *Parameters:* None<br>
 
-**KvCacheAwareScorer**<br>
-Scores based on real KV-cache state on vLLM. It is more accurate than either the SessionAffinity
-or PrefixCachePlugin, but requires extra computation and cycles to track the current cache state<br>
-*Type:* kvcache-aware-scorer<br>
-*Parameters:* Due to the sensitivity of the parameters of this plugin, the following
-environment variables are used to configure the scorer:<br>
-`KVCACHE_INDEXER_REDIS_ADDR` - the address of the Redis server used<br>
-`HF_TOKEN` - the Hugginface token to be used.<br>
+**PrefixCacheScorer**<br>
+The `prefix-cache-scorer` scores a request based on the KV cache localities.
+It supports two modes: `estimate` and `cache_tracking`.<br>
+
+**`estimate` mode** (default):<br>
+This mode uses the default GIE prefix scorer and scores pods based on how much of the prompt is estimated to be present in the pod’s KV cache.<br>
+*Type*: `prefix-cache-scorer`<br>
+*Parameters:*<br>
+
+\- `hashBlockSize`: Specifies the size of the blocks used to split the input **prompt** when calculating block hashes. Defaults to `64` if not specified.<br>
+\- `maxPrefixBlocksToMatch`: Specifies the maximum number of prefix blocks to match. Defaults to `256` if not specified.<br>
+\- `lruCapacityPerServer`: Specifies the capacity of the LRU indexer, in number of entries per server (pod). Defaults to `31,250` if not specified.<br>
+
+**Note:** \-  `mode: estimate` is not required, as it is the default.
+
+**`cache_tracking` mode**:<br>
+This mode scores requests based on the actual KV cache state in vLLM. It is more accurate than both `SessionAffinity` and `PrefixCachePlugin` in `estimate` mode,
+but incurs additional computation overhead to track the current cache state.<br>
+*Type*: `prefix-cache-scorer`<br>
+*Parameters:*<br>
+\- `mode: cache_tracking`<br>
+\- `kvCacheRedisAddr`: The address of the Redis instance used for cache tracking.
+Due to the sensitivity of this plugin’s parameters, the following environment variable is required when using `cache_tracking` mode:
+`HF_TOKEN`: The Hugging Face token to be used.
 
 **LoadAwareScorer**<br>
 Scores pods based on their load, based on the number of requests concurrently being processed.
@@ -244,15 +260,15 @@ The following is an example of what a configuration for disaggregated Prefill/De
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefill-header
-- type: prefix-cache
+- type: prefill-header-handler
+- type: prefix-cache-scorer
   parameters:
     hashBlockSize: 5
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
 - type: prefill-filter
 - type: decode-filter
-- type: max-score
+- type: max-score-picker
 - type: pd-profile-handler
   parameters:
     threshold: 10
@@ -261,14 +277,14 @@ schedulingProfiles:
 - name: prefill
   plugins:
   - pluginRef: prefill-filter
-  - pluginRef: max-score
-  - pluginRef: prefix-cache
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
     weight: 50
 - name: decode
   plugins:
   - pluginRef: decode-filter
-  - pluginRef: max-score
-  - pluginRef: prefix-cache
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
     weight: 50
 ```
 

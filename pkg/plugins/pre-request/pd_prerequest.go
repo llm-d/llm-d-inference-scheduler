@@ -15,9 +15,9 @@ import (
 
 const (
 	// PrefillHeaderHandlerType is the type of the PrefillHeaderHandler
-	PrefillHeaderHandlerType = "prefill-header"
-	// prefillPodHeader is the HTTP header name used to indicate Prefill worker
-	prefillPodHeader = "x-prefiller-url"
+	PrefillHeaderHandlerType = "prefill-header-handler"
+	// prefillPodHeader is the header name used to indicate Prefill worker <ip:port>
+	prefillPodHeader = "x-prefiller-host-port"
 
 	defaultPrefillProfile = "prefill"
 )
@@ -69,12 +69,15 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
 func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, targetPort int) {
+	if _, found := request.Headers[prefillPodHeader]; found {
+		request.Headers[prefillPodHeader] = "" // clear header, if already set
+	}
+
 	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
 	if !exists {
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	// TODO: should the scheme be configurable (e.g., https://)?
-	prefillURL := "http://" + net.JoinHostPort(prefillProfileRunResult.TargetPod.GetPod().Address, strconv.Itoa(targetPort))
-	request.Headers[prefillPodHeader] = prefillURL
+	prefillHostPort := net.JoinHostPort(prefillProfileRunResult.TargetPods[0].GetPod().Address, strconv.Itoa(targetPort))
+	request.Headers[prefillPodHeader] = prefillHostPort // in the form of <ip:port>
 }

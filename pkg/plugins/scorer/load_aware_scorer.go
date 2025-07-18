@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const (
@@ -26,7 +28,7 @@ type loadAwareScorerParameters struct {
 var _ framework.Scorer = &LoadAwareScorer{}
 
 // LoadAwareScorerFactory defines the factory function for the LoadAwareScorer
-func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
 	parameters := loadAwareScorerParameters{Threshold: QueueThresholdDefault}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -34,11 +36,16 @@ func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, _ plugin
 		}
 	}
 
-	return NewLoadAwareScorer(parameters.Threshold).WithName(name), nil
+	return NewLoadAwareScorer(handle.Context(), parameters.Threshold).WithName(name), nil
 }
 
 // NewLoadAwareScorer creates a new load based scorer
-func NewLoadAwareScorer(queueThreshold int) *LoadAwareScorer {
+func NewLoadAwareScorer(ctx context.Context, queueThreshold int) *LoadAwareScorer {
+	if queueThreshold <= 0 {
+		queueThreshold = QueueThresholdDefault
+		log.FromContext(ctx).V(logutil.DEFAULT).Info(fmt.Sprintf("queueThreshold %d should be positive, using default queue threshold %d", queueThreshold, QueueThresholdDefault))
+	}
+
 	return &LoadAwareScorer{
 		typedName:      plugins.TypedName{Type: LoadAwareScorerType},
 		queueThreshold: float64(queueThreshold),
