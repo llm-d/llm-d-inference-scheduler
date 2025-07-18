@@ -8,6 +8,7 @@ spec:
       containers:
       - name: epp
         image: ${EPP_IMAGE}:${EPP_TAG}
+        imagePullPolicy: Always
         args:
         - -poolName
         - ${POOL_NAME}
