@@ -209,20 +209,20 @@ check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error
 		echo "✅ No spelling errors found!"; \
 		echo "🎉 Spelling check completed successfully!"; \
 	else \
-		echo "❌ Spelling errors found!"; \
-		echo "🔧 Please fix the spelling errors and run 'make check-typos' again"; \
+		echo "❌ Spelling errors found! \
+		echo "🔧 You can try 'make fix-typos' to automatically fix the spelling errors and run 'make check-typos' again"; \
 		echo "$$TYPOS_OUTPUT"; \
 		exit 1; \
 	fi
 
-fix-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error if found)
-	@echo "🔍 Checking for spelling errors with typos..."
+fix-typos: $(TYPOS) ## Automatically fix spelling errors using typos
+	@echo "🔍 Automatically fixing spelling errors with typos..."
 	@TYPOS_OUTPUT=$$($(TYPOS) --write-changes --format brief 2>&1); \
 	if [ $$? -eq 0 ]; then \
 		echo "✅ No spelling errors found!"; \
 		echo "🎉 Spelling check completed successfully!"; \
 	else \
-		echo "❌ Spelling errors found!"; \
+		echo "❌ Spelling errors found! You need to fix the spelling errors manually"; \
 		echo "🔧 Please fix the spelling errors and run 'make check-typos' again"; \
 		echo "$$TYPOS_OUTPUT"; \
 		exit 1; \

@@ -4,7 +4,7 @@ KServe = "KServe"
 vLLM = "vLLM"
 IST = "IST"
 parm = "parm"
-Ded ="Ded"
+Ded = "Ded"
 
 [files]
 extend-exclude = ["*.png", "*.jpg", "deploy/"]
