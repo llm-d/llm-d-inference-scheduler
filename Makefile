@@ -71,7 +71,7 @@ post-deploy-test: ## Run post deployment tests
 	@echo "Post-deployment tests passed."
 
 .PHONY: lint
-lint: check-golangci-lint ## Run lint
+lint: check-golangci-lint check-typos ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
 	golangci-lint run
 
@@ -201,17 +201,30 @@ env: ## Print environment variables
 	@echo "IMG=$(IMG)"
 	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
 
-.PHONY: check-codespell
-check-codespell: $(CODESPELL) ## Check for spelling errors (exits with error if found)
-	@echo "🔍 Checking for spelling errors..."
-	@if $(CODESPELL) --check-filenames --skip=deploy --ignore-words=.codespell-ignore > codespell-results.txt 2>&1; then \
-		echo "✅ No spelling errors found! Cleaning up..."; \
-		rm -f codespell-results.txt; \
+.PHONY: check-typos fix-typos
+check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error if found)
+	@echo "🔍 Checking for spelling errors with typos..."
+	@TYPOS_OUTPUT=$$($(TYPOS) --format brief 2>&1); \
+	if [ $$? -eq 0 ]; then \
+		echo "✅ No spelling errors found!"; \
 		echo "🎉 Spelling check completed successfully!"; \
 	else \
-		echo "❌ Spelling errors found! Results saved to codespell-results.txt"; \
-		echo "🔧 Please fix the spelling errors and run 'make check-codespell' again"; \
-		cat codespell-results.txt; \
+		echo "❌ Spelling errors found!"; \
+		echo "🔧 Please fix the spelling errors and run 'make check-typos' again"; \
+		echo "$$TYPOS_OUTPUT"; \
+		exit 1; \
+	fi
+
+fix-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error if found)
+	@echo "🔍 Checking for spelling errors with typos..."
+	@TYPOS_OUTPUT=$$($(TYPOS) --write-changes --format brief 2>&1); \
+	if [ $$? -eq 0 ]; then \
+		echo "✅ No spelling errors found!"; \
+		echo "🎉 Spelling check completed successfully!"; \
+	else \
+		echo "❌ Spelling errors found!"; \
+		echo "🔧 Please fix the spelling errors and run 'make check-typos' again"; \
+		echo "$$TYPOS_OUTPUT"; \
 		exit 1; \
 	fi
 
