@@ -4,7 +4,10 @@ ARG TARGETOS
 ARG TARGETARCH
 
 # Install build tools
-RUN dnf install -y gcc-c++ libstdc++ libstdc++-devel clang && dnf clean all
+# The builder is based on UBI8, so we need epel-release-8.
+RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
+    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig && \
+    dnf clean all
 
 WORKDIR /workspace
 
@@ -36,11 +39,22 @@ RUN go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib'" cmd/epp/main.go
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
+
+# Install zeromq runtime library needed by the manager.
+# The final image is UBI9, so we need epel-release-9.
+USER root
+RUN microdnf install -y dnf && \
+    dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
+    dnf install -y zeromq
+
 USER 65532:65532
 
 # expose gRPC, health and metrics ports
 EXPOSE 9002
 EXPOSE 9003
 EXPOSE 9090
+
+# expose port for KV-Events ZMQ SUB socket
+EXPOSE 5557
 
 ENTRYPOINT ["/app/epp"]

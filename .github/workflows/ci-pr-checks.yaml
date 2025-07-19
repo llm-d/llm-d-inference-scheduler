@@ -28,6 +28,9 @@ jobs:
       - name: go mod tidy
         run: go mod tidy
 
+      - name: Clear Go mod cache
+        run: go clean -modcache
+
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v8
         with:
