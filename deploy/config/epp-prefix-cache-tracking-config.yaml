@@ -13,8 +13,7 @@ plugins:
           blockSize: 64                 # must match vLLM block size
           hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
         kvBlockIndexConfig:
-          enableMetrics: true                   # enable kv-block index metrics (prometheus)
-          metricsLoggingInterval: 60000000000   # log kv-block metrics as well (1m in nanoseconds)
+          enableMetrics: true           # enable kv-block index metrics (prometheus)
   - type: kv-cache-scorer # kv-cache-utilization
   - type: queue-scorer
   - type: max-score-picker

@@ -277,53 +277,44 @@ Note that in most cases you will only need to set:
 
 Example configuration with the above parameters set:
 ```yaml
-{
-  "indexerConfig": {
-    "tokenProcessorConfig": {
-      "blockSize": 64,
-      "hashSeed": "12345"
-    },
-    "tokenizersPoolConfig": {
-     "huggingFaceToken": "your_hf_token_here"
-    },
-    "kvBlockIndexConfig": {
-      "enableMetrics": true
-    },
-  }
-}
+plugins:
+  - type: prefix-cache-scorer
+    parameters:
+      indexerConfig:
+        tokenProcessorConfig:
+          blockSize: 64
+          hashSeed: "12345"
+      tokenizersPoolConfig:
+        huggingFaceToken: your_hf_token_here
+      kvBlockIndexConfig:
+        enableMetrics: true
 ```
 
 Example configuration with all parameters set:
 ```yaml
-{
-  "kvEventsConfig": {
-    "zmqEndpoint": "tcp://*:5557",
-    "topicFilter": "kv@",
-    "concurrency": 8
-  },
-  "kvCacheIndexerConfig": {
-    "prefixStoreConfig": {
-      "cacheSize": 500000,
-      "blockSize": 256
-    },
-    "tokenProcessorConfig": {
-      "blockSize": 16,
-      "hashSeed": "12345"
-    },
-    "kvBlockIndexConfig": {
-      "inMemoryConfig": {
-        "size": 100000000,
-        "podCacheSize": 10
-      },
-      "enableMetrics": true
-    },
-    "tokenizersPoolConfig": {
-      "workersCount": 8,
-      "huggingFaceToken": "your_hf_token_here",
-      "tokenizersCacheDir": "/tmp/tokenizers"
-    },
-  }
-}
+plugins:
+  - type: prefix-cache-scorer
+    parameters:
+        kvEventsConfig:
+          zmqEndpoint: tcp://*:5557
+          topicFilter: kv@
+          concurrency: 8
+        kvCacheIndexerConfig:
+          prefixStoreConfig:
+            cacheSize: 500000
+            blockSize: 256
+          tokenProcessorConfig:
+            blockSize: 16
+            hashSeed: "12345"
+          kvBlockIndexConfig:
+            inMemoryConfig:
+              size: 100000000
+              podCacheSize: 10
+            enableMetrics: true
+          tokenizersPoolConfig:
+            workersCount: 8
+            huggingFaceToken: your_hf_token_here
+            tokenizersCacheDir: /tmp/tokenizers
 ```
 
 ---
