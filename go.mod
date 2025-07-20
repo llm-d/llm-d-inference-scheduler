@@ -8,7 +8,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/go-cmp v0.7.0
-	github.com/llm-d/llm-d-kv-cache-manager v0.1.2-0.20250715101727-2d83929183c9
+	github.com/llm-d/llm-d-kv-cache-manager v0.2.0
 	github.com/stretchr/testify v1.10.0
 	k8s.io/apimachinery v0.33.2
 	k8s.io/client-go v0.33.2
