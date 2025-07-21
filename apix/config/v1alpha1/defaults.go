@@ -14,14 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package testing
+package v1alpha1
 
-import (
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-)
-
-func DiffModelLists(want, got []*v1alpha2.InferenceModel) string {
-	return cmp.Diff(want, got, cmpopts.SortSlices(func(a, b *v1alpha2.InferenceModel) bool { return a.Name < b.Name }))
+// SetDefaults_EndpointPickerConfig sets default values in a
+// EndpointPickerConfig struct.
+//
+// This naming convension is required by the defalter-gen code.
+func SetDefaults_EndpointPickerConfig(cfg *EndpointPickerConfig) {
+	for idx, pluginConfig := range cfg.Plugins {
+		if pluginConfig.Name == "" {
+			cfg.Plugins[idx].Name = pluginConfig.Type
+		}
+	}
 }

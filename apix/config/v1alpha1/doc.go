@@ -14,14 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package testing
-
-import (
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-)
-
-func DiffModelLists(want, got []*v1alpha2.InferenceModel) string {
-	return cmp.Diff(want, got, cmpopts.SortSlices(func(a, b *v1alpha2.InferenceModel) bool { return a.Name < b.Name }))
-}
+// Package v1alpha1 contains API Schema definitions for the
+// inference.networking.x-k8s.io API group.
+//
+// +kubebuilder:object:generate=true
+// +groupName=inference.networking.x-k8s.io
+package v1alpha1
