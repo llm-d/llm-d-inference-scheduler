@@ -185,10 +185,11 @@ helm upgrade --install "$VLLM_HELM_RELEASE_NAME" "$VLLM_CHART_DIR" \
   --set vllm.gpuMemoryUtilization="${VLLM_GPU_MEMORY_UTILIZATION}" \
   --set vllm.tensorParallelSize="${VLLM_TENSOR_PARALLEL_SIZE}" \
   --set persistence.enabled=true \
-  --set persistence.size="$PVC_SIZE"\
-  --set redis.nameSuffix="$REDIS_DEPLOYMENT_NAME" \
-  --set redis.service.nameSuffix="$REDIS_SVC_NAME" \
-  --set redis.service.port="$REDIS_PORT"
+  --set persistence.size="$PVC_SIZE" \
+  --set lmcache.redis.enabled=true \
+  --set lmcache.redis.nameSuffix="$REDIS_DEPLOYMENT_NAME" \
+  --set lmcache.redis.service.nameSuffix="$REDIS_SVC_NAME" \
+  --set lmcache.redis.service.port="$REDIS_PORT"
 
 echo "INFO: Deploying Gateway Environment in namespace ${NAMESPACE}, ${POOL_NAME}"
 kubectl -n "${NAMESPACE}" create configmap epp-config --from-file=epp-config.yaml=<(envsubst < "${EPP_CONFIG}") --dry-run=client -o yaml | kubectl apply -f -
