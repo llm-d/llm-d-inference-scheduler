@@ -1,5 +1,7 @@
 # llm-d Inference Router Architecture
 
+---
+
 ## Overview
 
 **llm-d** is an extensible architecture designed to route inference requests efficiently across model-serving pods. A central component of this architecture is the **Inference Gateway**, which builds on the Kubernetes-native **Gateway API Inference Extension (GIE)** to enable scalable, flexible, and pluggable routing of requests.
@@ -36,6 +38,8 @@ The inference scheduler is built on top of:
 - **Envoy** as a programmable data plane
 - **EPP (External Processing Plugin)** using **GIE**
 
+---
+
 ### Pluggability
 
 ![Pluggability Architecture](./images/plugability.png)
@@ -57,6 +61,8 @@ These components are maintained in the `llm-d-inference-scheduler` repository an
 - **Pluggability**: No core changes are needed to add new scorers or filters
 - **Isolation**: Each component operates independently
 
+---
+
 ### Routing Flow
 
 1. **Filtering**
@@ -71,6 +77,8 @@ These components are maintained in the `llm-d-inference-scheduler` repository an
 3. **Pod Selection**
    - The highest-scored pod is selected
    - If multiple pods share the same score, one is selected at random
+
+---
 
 ### Lifecycle Hooks
 
@@ -115,10 +123,10 @@ has the following form:
     parm2: val2
 ```
 The fields in a plugin entry are:
-- *name* which is optional, provides a name by which the plugin instance can be referenced. If this
-field is omitted, the plugin's type will be used as its name.<br>
-- *type* specifies the type of the plugin to be instantiated.<br>
-- *parameters* which is optional, defines the set of parameters used to configure the plugin in question.
+- **name** (optional): provides a name by which the plugin instance can be referenced. If this
+field is omitted, the plugin's type will be used as its name.
+- **type**: specifies the type of the plugin to be instantiated.
+- **parameters** (optional): defines the set of parameters used to configure the plugin in question.
 The actual set of parameters varies from plugin to plugin.
 
 The schedulingProfiles section defines the set of scheduling profiles that can be used in scheduling
@@ -133,11 +141,10 @@ in this section has the following form:
     weight: 50
 ```
 The fields in a schedulingProfile entry are:
-- *name* specifies the scheduling profile's name.
-- *plugins* specifies the set of plugins to be used when this scheduling profile is chosen for a request.
-Each entry in the schedulingProfile's plugins section has the following fields:
-  - *pluginRef* is a reference to the name of the plugin instance to be used
-  - *weight* is the weight to be used if the referenced plugin is a scorer.
+- **name**: specifies the scheduling profile's name.
+- **plugins**: specifies the set of plugins to be used when this scheduling profile is chosen for a request.
+  - **pluginRef**: reference to the name of the plugin instance to be used
+  - **weight**: weight to be used if the referenced plugin is a scorer.
 
 A complete configuration might look like this:
 ```yaml
@@ -164,97 +171,185 @@ schedulingProfiles:
 If the configuration is in a file, the EPP command line argument `--configFile` should be used to specify the full path of the file in question. If the configuration is passed as in-line text the EPP command
 line argument `--configText` should be used.
 
+---
+
 ### Plugin Configuration
 
 This section describes how to setup the various plugins available with the llm-d-inference-scheduler
 
-**PrefillHeader**<br>
-Sets a header for use in disaggregated prefill/decode<br>
-*Type*: prefill-header-handler<br>
-*Parameters*:<br>
-\- `prefillProfile` specifies the name of the profile used for the prefill scheduling. Only needed if the
-   prefill profile is not named `prefill`.<br>
+#### PrefillHeader
 
-**PdProfileHandler**<br>
-Selects the profiles to use when running with disagregated prefill/decode<br>
-*Type:* pd-profile-handler<br>
-*Parameters:*<br>
-\- `threshold` specifies the threshold at which there are enough new input tokens to
-    send the request to prefill and then decode, vs just to decode.<br>
-\- `hashBlockSize` specifies the length of the prompt chunk that a block is keyed by.
-   This must the same value used for the PrefixCachePlugin.<br>
-\- `decodeProfile` specifies the name of the profile used for the decode scheduling.
-   Only needed if the decode profile is not named `decode`.<br>
-\- `prefillProfile` specifies the name of the profile used for the prefill scheduling.
-   Only needed if the prefill profile is not named `prefill`.<br>
-**Note:** When using this plugin you must also have a PrefixCachePlugin configured in the
-   prefill and decode scheduling profiles.
+Sets a header for use in disaggregated prefill/decode
 
-**ByLabelSelector**<br>
-Filters out pods using a standard Kubernetes label selector.<br>
-**Note:** Only the matching laabels feature of Kubernetes label selectors is supported.<br>
-*Type:* by-label-selector<br>
-*Parameters:* A standard Kubernetes label selector.<br>
-\- `matchLabels` is a map of {key,value} pairs. If more than one pair are in the map, all
-of the keys are checked and the results are ANDed together.
+- **Type**: `prefill-header-handler`
+- **Parameters**:
+  - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
 
-**DecodeFilter**<br>
-Filters out pods that are not marked either as decode or both prefill and decode. The filter
-looks for the label `llm-d.ai/role`, with a value of either `decode` or `both`. In addition pods
-that are missing the label will not be filtered out.<br>
-*Type:* decode-filter<br>
-*Parameters:* None<br>
+---
 
-**PrefillFilter**<br>
-Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`,
-with a value of `prefill`.<br>
-*Type:* prefill-filter<br>
-*Parameters:* None<br>
+#### PdProfileHandler
 
-**PrefixCacheScorer**<br>
-The `prefix-cache-scorer` scores a request based on the KV cache localities.
-It supports two modes: `estimate` and `cache_tracking`.<br>
+Selects the profiles to use when running with disagregated prefill/decode
 
-**`estimate` mode** (default):<br>
-This mode uses the default GIE prefix scorer and scores pods based on how much of the prompt is estimated to be present in the pod’s KV cache.<br>
-*Type*: `prefix-cache-scorer`<br>
-*Parameters:*<br>
+- **Type**: `pd-profile-handler`
+- **Parameters**:
+  - `threshold`: specifies the threshold at which there are enough new input tokens to send the request to prefill and then decode, vs just to decode.
+  - `hashBlockSize`: specifies the length of the prompt chunk that a block is keyed by. This must the same value used for the PrefixCachePlugin.
+  - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
+  - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
 
-\- `hashBlockSize`: Specifies the size of the blocks used to split the input **prompt** when calculating block hashes. Defaults to `64` if not specified.<br>
-\- `maxPrefixBlocksToMatch`: Specifies the maximum number of prefix blocks to match. Defaults to `256` if not specified.<br>
-\- `lruCapacityPerServer`: Specifies the capacity of the LRU indexer, in number of entries per server (pod). Defaults to `31,250` if not specified.<br>
+**Note:** When using this plugin you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
 
-**Note:** \-  `mode: estimate` is not required, as it is the default.
+---
 
-**`cache_tracking` mode**:<br>
-This mode scores requests based on the actual KV cache state in vLLM. It is more accurate than both `SessionAffinity` and `PrefixCachePlugin` in `estimate` mode,
-but incurs additional computation overhead to track the current cache state.<br>
-*Type*: `prefix-cache-scorer`<br>
-*Parameters:*<br>
-\- `mode: cache_tracking`<br>
-\- `kvCacheRedisAddr`: The address of the Redis instance used for cache tracking.
-Due to the sensitivity of this plugin’s parameters, the following environment variable is required when using `cache_tracking` mode:
-`HF_TOKEN`: The Hugging Face token to be used.
+#### ByLabelSelector
 
-**LoadAwareScorer**<br>
+Filters out pods using a standard Kubernetes label selector.
+
+**Note:** Only the matching labels feature of Kubernetes label selectors is supported.
+
+- **Type**: `by-label-selector`
+- **Parameters**: A standard Kubernetes label selector.
+  - `matchLabels`: map of `{key,value}` pairs. If more than one pair are in the map, all of the keys are checked and the results are ANDed together.
+
+---
+
+#### DecodeFilter
+
+Filters out pods that are not marked either as decode or both prefill and decode. The filter looks for the label `llm-d.ai/role`, with a value of either `decode` or `both`. In addition pods that are missing the label will not be filtered out.
+
+- **Type**: `decode-filter`
+- **Parameters**: None
+
+---
+
+#### PrefillFilter
+
+Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`.
+
+- **Type**: `prefill-filter`
+- **Parameters**: None
+
+---
+
+#### PrefixCacheScorer
+
+The `prefix-cache-scorer` scores a request based on KV-cache localities.
+It supports two modes: `estimate` and `cache_tracking`.
+
+##### `estimate` mode (default):
+
+This mode uses the default GIE prefix scorer and scores pods based on the estimated cache locality of the prompt.
+The estimation is based on scheduling history.
+
+- **Type**: `prefix-cache-scorer`
+- **Parameters**:
+  - `hashBlockSize`: Specifies the size of the blocks used to split the input **prompt** when calculating block hashes. Defaults to `64` if not specified.
+  - `maxPrefixBlocksToMatch`: Specifies the maximum number of prefix blocks to match. Defaults to `256` if not specified.
+  - `lruCapacityPerServer`: Specifies the capacity of the LRU indexer, in number of entries per server (pod). Defaults to `31,250` if not specified.
+
+**Note:** `mode: estimate` is not required, as it is the default.
+
+##### `cache_tracking` mode:
+
+This mode scores requests based on the actual KV-cache states across the vLLM instances. 
+It is more accurate than both `SessionAffinity` and `PrefixCachePlugin` in `estimate` mode,
+but incurs additional computation overhead and KV-Events streaming to track the KV-cache states.
+
+When enabled, the scorer will use the `llm-d-kv-cache-manager` to track the KV-cache states across the vLLM instances.
+It will use the `kvcache.Indexer` to score the pods based on the number of matching blocks in the KV-cache.
+It will also use the `kvevents.Pool` to subscribe to the KV-Events emitted by the vLLM instances and update the KV-cache states in near-real-time.
+
+Configuration:
+
+- **Type**: `prefix-cache-scorer`
+- **Parameters**:
+  - `mode: cache_tracking`
+  - `indexerConfig`: Configuration for the `kvcache.Indexer`.
+  - `kvEventsConfig`: Configuration for the `kvevents.Pool`.
+
+See list of parameters at [llm-d-kv-cache-manager/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache-manager/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
+
+Note that in most cases you will only need to set:
+- Hugging Face token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
+- IMPORTANT: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
+- KVBlockIndex metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
+
+Example configuration with the above parameters set:
+```yaml
+plugins:
+  - type: prefix-cache-scorer
+    parameters:
+      indexerConfig:
+        tokenProcessorConfig:
+          blockSize: 64
+          hashSeed: "12345"
+      tokenizersPoolConfig:
+        huggingFaceToken: your_hf_token_here
+      kvBlockIndexConfig:
+        enableMetrics: true
+```
+
+Example configuration with all parameters set:
+```yaml
+plugins:
+  - type: prefix-cache-scorer
+    parameters:
+        kvEventsConfig:
+          zmqEndpoint: tcp://*:5557
+          topicFilter: kv@
+          concurrency: 8
+        kvCacheIndexerConfig:
+          prefixStoreConfig:
+            cacheSize: 500000
+            blockSize: 256
+          tokenProcessorConfig:
+            blockSize: 16
+            hashSeed: "12345"
+          kvBlockIndexConfig:
+            inMemoryConfig:
+              size: 100000000
+              podCacheSize: 10
+            enableMetrics: true
+          tokenizersPoolConfig:
+            workersCount: 8
+            huggingFaceToken: your_hf_token_here
+            tokenizersCacheDir: /tmp/tokenizers
+```
+
+---
+
+#### LoadAwareScorer
+
 Scores pods based on their load, based on the number of requests concurrently being processed.
-A threshold is provided which is used to determine what is considered an overloaded pod.<br>
+A threshold is provided which is used to determine what is considered an overloaded pod.
+
 Scores are given to the pods in the range of 0-1. Currently the metrics contain the number of
 requests waiting in the queue, there is no information about number of requests that can be
-processed in the given pod immediately.<br>
-Pods with an empty waiting requests queue are scored with 0.5.<br>
-Pods with requests in the queue will get score between 0.5 and 0.<br>
-*Type:* load-aware-scorer<br>
-*Parameters:*<br>
-\- `threshold` specifies the threshold at which a pod is considered overloaded.<br>
+processed in the given pod immediately.
 
-**SessionAffinity**<br>
+Pods with an empty waiting requests queue are scored with 0.5.
+
+Pods with requests in the queue will get score between 0.5 and 0.
+
+- **Type**: `load-aware-scorer`
+- **Parameters**:
+  - `threshold`: specifies the threshold at which a pod is considered overloaded.
+
+---
+
+#### SessionAffinity
+
 Scores the candidate pods by giving a higher score to the pods that were previously
-used for the same session.<br>
-*Type:* session-affinity-scorer<br>
-*Parameters:* None<br>
+used for the same session.
+
+- **Type**: `session-affinity-scorer`
+- **Parameters**: None
+
+---
 
 ### Sample Disaggregated Prefill/Decode Configuration
+
 The following is an example of what a configuration for disaggregated Prefill/Decode might look like:
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1
