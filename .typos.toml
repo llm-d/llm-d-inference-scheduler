@@ -1,0 +1,26 @@
+[default.extend-words]
+k8s = "k8s"
+KServe = "KServe"
+vLLM = "vLLM"
+IST = "IST"
+parm = "parm"
+Ded = "Ded"
+
+[files]
+extend-exclude = ["*.png", "*.jpg", "deploy/"]
+
+
+[default.extend-replacements]
+teh = "the"
+funtion = "function"
+macthing = "matching"
+overriden = "overridden"
+instllation = "installation"
+componet = "component"
+avaialble = "available"
+availble = "available"
+desireable = "desirable"
+walkthough = "walkthrough"
+statments = "statements"
+consturctor = "constructor"
+Schedulling = "Scheduling"
