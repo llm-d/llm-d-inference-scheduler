@@ -55,12 +55,12 @@ format: ## Format Go source files
 test: test-unit
 
 .PHONY: test-unit
-test-unit: download-tokenizer
+test-unit: download-tokenizer install-zmq
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v ./...
 
 .PHONY: test-integration
-test-integration: download-tokenizer
+test-integration: download-tokenizer install-zmq
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
@@ -77,7 +77,7 @@ lint: check-golangci-lint ## Run lint
 ##@ Build
 
 .PHONY: build
-build: check-go download-tokenizer ##
+build: check-go install-zmq download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	go build -ldflags="$(LDFLAGS)" -o bin/epp cmd/epp/main.go
 
@@ -313,3 +313,36 @@ env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 	@CLEAN=true ./scripts/kubernetes-dev-env.sh 2>&1
 	@echo "INFO: Finished cleanup of development environment for namespace $(NAMESPACE)"
+
+##@ ZMQ Setup
+
+.PHONY: install-zmq
+install-zmq: ## Install ZMQ dependencies based on OS/ARCH
+	@echo "Checking if ZMQ is already installed..."
+	@if pkg-config --exists libzmq; then \
+	  echo "✅ ZMQ is already installed."; \
+	else \
+	  echo "Installing ZMQ dependencies..."; \
+	  if [ "$(TARGETOS)" = "linux" ]; then \
+	    if [ -x "$(command -v apt)" ]; then \
+	      sudo apt update && sudo apt install -y libzmq3-dev; \
+	    elif [ -x "$(command -v dnf)" ]; then \
+	      sudo dnf install -y zeromq-devel; \
+	    else \
+	      echo "Unsupported Linux package manager. Install libzmq manually."; \
+	      exit 1; \
+	    fi; \
+	  elif [ "$(TARGETOS)" = "darwin" ]; then \
+	    if [ -x "$(command -v brew)" ]; then \
+	      brew install zeromq; \
+	    else \
+	      echo "Homebrew is not installed. Install it from https://brew.sh/"; \
+	      exit 1; \
+	    fi; \
+	  else \
+	    echo "Unsupported OS: $(TARGETOS). Install libzmq manually."; \
+	    exit 1; \
+	  fi; \
+	  echo "✅ ZMQ dependencies installed."; \
+	fi
+
