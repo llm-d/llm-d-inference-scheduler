@@ -272,6 +272,7 @@ See list of parameters at [llm-d-kv-cache-manager/docs/configuration.md](https:/
 
 Note that in most cases you will only need to set:
 - Hugging Face token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
+  - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
 - IMPORTANT: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
 - KVBlockIndex metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
 
@@ -285,7 +286,7 @@ plugins:
           blockSize: 64
           hashSeed: "12345"
       tokenizersPoolConfig:
-        huggingFaceToken: your_hf_token_here
+        huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
       kvBlockIndexConfig:
         enableMetrics: true
 ```
@@ -313,7 +314,7 @@ plugins:
             enableMetrics: true
           tokenizersPoolConfig:
             workersCount: 8
-            huggingFaceToken: your_hf_token_here
+            huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
             tokenizersCacheDir: /tmp/tokenizers
 ```
 
