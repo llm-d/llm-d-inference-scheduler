@@ -8,7 +8,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.34.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/go-cmp v0.7.0
-	github.com/llm-d/llm-d-kv-cache-manager v0.2.0
+	github.com/llm-d/llm-d-kv-cache-manager v0.2.1
 	github.com/stretchr/testify v1.10.0
 	k8s.io/apimachinery v0.33.2
 	k8s.io/client-go v0.33.2
@@ -26,7 +26,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20250326154945-ae57f3c0d45f // indirect
-	github.com/daulet/tokenizers v1.20.2 // indirect
+	github.com/daulet/tokenizers v1.22.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/emicklei/go-restful/v3 v3.12.0 // indirect
