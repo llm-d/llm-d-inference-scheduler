@@ -26,9 +26,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	configapi "sigs.k8s.io/gateway-api-inference-extension/apix/config/v1alpha1"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/picker"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/profile"
 )
 
 var scheme = runtime.NewScheme()
@@ -64,15 +67,28 @@ func LoadSchedulerConfig(configProfiles []configapi.SchedulingProfile, handle pl
 	profiles := map[string]*framework.SchedulerProfile{}
 	for _, namedProfile := range configProfiles {
 		profile := framework.NewSchedulerProfile()
+		pickerAdded := false
 		for _, plugin := range namedProfile.Plugins {
 			referencedPlugin := handle.Plugin(plugin.PluginRef)
 			if scorer, ok := referencedPlugin.(framework.Scorer); ok {
-				if plugin.Weight == nil {
-					return nil, fmt.Errorf("scorer '%s' is missing a weight", plugin.PluginRef)
+				// Set default weight if one wasn't set in the configuration
+				weight := config.DefaultScorerWeight
+				if plugin.Weight != nil {
+					weight = *plugin.Weight
 				}
-				referencedPlugin = framework.NewWeightedScorer(scorer, *plugin.Weight)
+				referencedPlugin = framework.NewWeightedScorer(scorer, weight)
+			}
+			if _, ok := referencedPlugin.(framework.Picker); ok {
+				pickerAdded = true
 			}
 			if err := profile.AddPlugins(referencedPlugin); err != nil {
+				return nil, fmt.Errorf("failed to load scheduler config - %w", err)
+			}
+		}
+		if !pickerAdded {
+			// There isn't a picker in this profile, add one
+			thePicker := picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints)
+			if err := profile.AddPlugins(thePicker); err != nil {
 				return nil, fmt.Errorf("failed to load scheduler config - %w", err)
 			}
 		}
@@ -89,7 +105,10 @@ func LoadSchedulerConfig(configProfiles []configapi.SchedulingProfile, handle pl
 		}
 	}
 	if profileHandler == nil {
-		return nil, errors.New("no profile handler was specified")
+		if len(profiles) != 1 {
+			return nil, errors.New("no profile handler was specified")
+		}
+		profileHandler = profile.NewSingleProfileHandler()
 	}
 
 	return scheduling.NewSchedulerConfig(profileHandler, profiles), nil
@@ -125,10 +144,6 @@ func instantiatePlugins(configuredPlugins []configapi.PluginSpec, handle plugins
 }
 
 func validateSchedulingProfiles(config *configapi.EndpointPickerConfig) error {
-	if len(config.SchedulingProfiles) == 0 {
-		return errors.New("there must be at least one scheduling profile in the configuration")
-	}
-
 	profileNames := sets.New[string]()
 	for _, profile := range config.SchedulingProfiles {
 		if profile.Name == "" {
