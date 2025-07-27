@@ -55,12 +55,12 @@ format: ## Format Go source files
 test: test-unit
 
 .PHONY: test-unit
-test-unit: download-tokenizer install-zmq
+test-unit: download-tokenizer download-zmq
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v ./...
 
 .PHONY: test-integration
-test-integration: download-tokenizer install-zmq
+test-integration: download-tokenizer download-zmq
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
@@ -77,7 +77,7 @@ lint: check-golangci-lint ## Run lint
 ##@ Build
 
 .PHONY: build
-build: check-go install-zmq download-tokenizer ## Build the project
+build: check-go download-zmq download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	go build -ldflags="$(LDFLAGS)" -o bin/epp cmd/epp/main.go
 
@@ -316,8 +316,8 @@ clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 
 ##@ ZMQ Setup
 
-.PHONY: install-zmq
-install-zmq: ## Install ZMQ dependencies based on OS/ARCH
+.PHONY: download-zmq
+download-zmq: ## Install ZMQ dependencies based on OS/ARCH
 	@echo "Checking if ZMQ is already installed..."
 	@if pkg-config --exists libzmq; then \
 	  echo "✅ ZMQ is already installed."; \
