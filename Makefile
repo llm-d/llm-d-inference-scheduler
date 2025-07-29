@@ -1,3 +1,6 @@
+# The Go and Python based tools are defined in Makefile.tools.mk.
+include Makefile.tools.mk
+
 SHELL := /usr/bin/env bash
 
 # Defaults
@@ -70,7 +73,7 @@ post-deploy-test: ## Run post deployment tests
 	@echo "Post-deployment tests passed."
 
 .PHONY: lint
-lint: check-golangci-lint ## Run lint
+lint: check-golangci-lint check-typos ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
 	golangci-lint run
 
@@ -200,6 +203,20 @@ env: ## Print environment variables
 	@echo "IMG=$(IMG)"
 	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
 
+.PHONY: check-typos
+check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error if found)
+	@echo "🔍 Checking for spelling errors with typos..."
+	@TYPOS_OUTPUT=$$($(TYPOS) --format brief 2>&1); \
+	if [ $$? -eq 0 ]; then \
+		echo "✅ No spelling errors found!"; \
+		echo "🎉 Spelling check completed successfully!"; \
+	else \
+		echo "❌ Spelling errors found!"; \
+		echo "🔧 You can try 'make fix-typos' to automatically fix the spelling errors and run 'make check-typos' again"; \
+		echo "$$TYPOS_OUTPUT"; \
+		exit 1; \
+	fi
+	
 ##@ Tools
 
 .PHONY: check-tools

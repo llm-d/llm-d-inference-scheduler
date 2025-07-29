@@ -115,7 +115,7 @@ func (blf *ByLabels) Filter(_ *types.SchedulingContext, pods []types.Pod) []type
 ```
 
 Since the filter is only matching on candidate `types.Pod` labels,
- we leave the `types.SchedullingContext` parameter unnamed. Filters
+ we leave the `types.SchedulingContext` parameter unnamed. Filters
  that need access to LLM request information (e.g., filtering based
  on prompt length) may use it.
 

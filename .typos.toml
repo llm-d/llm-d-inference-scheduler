@@ -1,0 +1,9 @@
+[default.extend-words]
+k8s = "k8s"
+KServe = "KServe"
+vLLM = "vLLM"
+IST = "IST"
+
+[files]
+extend-exclude = ["*.png", "*.jpg", "deploy/"]
+
