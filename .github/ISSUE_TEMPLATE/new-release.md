@@ -113,13 +113,13 @@ This document defines the process for releasing llm-d-inference-scheduler.
 
 9. Pushing the tag triggers CI action to build and publish the container image to the [ghcr registry].
 10. Test the steps in the tagged quickstart guide after the PR merges. TODO add e2e tests! <!-- link to an e2e tests once we have such one -->
-11. Create a [new release][]:
+11. Create a [new release]:
     1. Choose the tag that you created for the release.
     2. Use the tag as the release title, i.e. `v0.1.0` refer to previous release for the content of the release body.
     3. Click "Generate release notes" and preview the release body.
     4. Go to Gateway Inference Extension latest release and make sure to include the highlights in llm-d-inference-scheduler as well.
     5. If this is a release candidate, select the "This is a pre-release" checkbox.
-12. If you find any bugs in this process, create an [issue][].
+12. If you find any bugs in this process, create an [issue].
 
 ## Announce the Release
 
