@@ -71,7 +71,7 @@ This document defines the process for releasing llm-d-inference-scheduler.
     git commit -s -m "Updates artifacts for v${MAJOR}.${MINOR}.${PATCH}-rc.${RC} release"
     ```
 
-   For a major or minor release:
+   For a major, minor or patch release:
 
     ```shell
     git commit -s -m "Updates artifacts for v${MAJOR}.${MINOR}.${PATCH} release"
