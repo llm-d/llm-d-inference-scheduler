@@ -63,7 +63,7 @@ This document defines the process for releasing llm-d-inference-scheduler.
 
 4. Update release-specific content, generate release artifacts, and stage the changes.
 
-5. Sign, commit, and push the changes to the Gateway API Inference Extension repo.
+5. Sign, commit, and push the changes to the `llm-d-inference-scheduler` repo.
 
    For a release candidate:
 
