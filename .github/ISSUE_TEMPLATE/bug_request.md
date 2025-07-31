@@ -21,7 +21,7 @@ assignees: ''
 
 **Environment**:
 - Kubernetes version (use `kubectl version`):
-- llm-d-scheduler version (use `git describe --tags --dirty --always`):
+- llm-d-scheduler version (use `git describe --tags --dirty --always` if you built from source, or specify the tag if you used a tagged version):
 - Cloud provider or hardware configuration:
 - Install tools:
 - Others:
