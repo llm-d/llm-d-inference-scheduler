@@ -38,7 +38,7 @@ This document defines the process for releasing llm-d-inference-scheduler.
 
 ## Release Process
 
-1. If needed, clone the llm-d-inference-scheduler [repo][repo].
+1. If needed, clone the llm-d-inference-scheduler [repo].
 
    ```shell
    git clone -o ${REMOTE} git@github.com:llm-d/llm-d-inference-scheduler.git
@@ -111,7 +111,7 @@ This document defines the process for releasing llm-d-inference-scheduler.
     git push ${REMOTE} v${MAJOR}.${MINOR}.${PATCH}
     ```
 
-9. Pushing the tag triggers CI action to build and publish the container image to the [ghcr registry][].
+9. Pushing the tag triggers CI action to build and publish the container image to the [ghcr registry].
 10. Test the steps in the tagged quickstart guide after the PR merges. TODO add e2e tests! <!-- link to an e2e tests once we have such one -->
 11. Create a [new release][]:
     1. Choose the tag that you created for the release.
