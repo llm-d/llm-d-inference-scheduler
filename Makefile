@@ -122,8 +122,8 @@ install-docker: check-container-tool ## Install app using $(CONTAINER_TOOL)
 .PHONY: uninstall-docker
 uninstall-docker: check-container-tool ## Uninstall app from $(CONTAINER_TOOL)
 	@echo "Stopping and removing container in $(CONTAINER_TOOL)..."
-	-$(CONTAINER_TOOL) stop $(PROJECT_NAME)-container && $(CONTAINER_TOOL) rm $(PROJECT_NAME)-container
-@echo "$(CONTAINER_TOOL) uninstallation complete. Remove alias if set: unalias $(PROJECT_NAME)"
+	$(CONTAINER_TOOL) stop $(PROJECT_NAME)-container && $(CONTAINER_TOOL) rm $(PROJECT_NAME)-container
+	@echo "$(CONTAINER_TOOL) uninstallation complete. Remove alias if set: unalias $(PROJECT_NAME)"
 
 ### Kubernetes Targets (kubectl)
 
@@ -341,16 +341,16 @@ download-zmq: ## Install ZMQ dependencies based on OS/ARCH
 	else \
 	  echo "Installing ZMQ dependencies..."; \
 	  if [ "$(TARGETOS)" = "linux" ]; then \
-	    if [ -x "$(command -v apt)" ]; then \
+	    if [ -x "$$(command -v apt)" ]; then \
 	      apt update && apt install -y libzmq3-dev; \
-	    elif [ -x "$(command -v dnf)" ]; then \
+	    elif [ -x "$$(command -v dnf)" ]; then \
 	      dnf install -y zeromq-devel; \
 	    else \
 	      echo "Unsupported Linux package manager. Install libzmq manually."; \
 	      exit 1; \
 	    fi; \
 	  elif [ "$(TARGETOS)" = "darwin" ]; then \
-	    if [ -x "$(command -v brew)" ]; then \
+	    if [ -x "$$(command -v brew)" ]; then \
 	      brew install zeromq; \
 	    else \
 	      echo "Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
