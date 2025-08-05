@@ -18,13 +18,17 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
+	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
@@ -35,17 +39,31 @@ import (
 type InferencePoolReconciler struct {
 	client.Reader
 	Datastore datastore.Datastore
+	PoolGKNN  common.GKNN
 }
 
 func (c *InferencePoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("inferencePool", req.NamespacedName).V(logutil.DEFAULT)
+	logger := log.FromContext(ctx).WithValues("group", c.PoolGKNN.Group, "inferencePool", req.NamespacedName).V(logutil.DEFAULT)
 	ctx = ctrl.LoggerInto(ctx, logger)
 
-	logger.Info("Reconciling InferencePool")
+	logger.Info("Reconciling InferencePool", "group", c.PoolGKNN.Group, "inferencePool", req.NamespacedName)
 
-	infPool := &v1.InferencePool{}
+	// 1. Initialize a generic client.Object based on the group.
+	var obj client.Object
+	switch c.PoolGKNN.Group {
+	case v1.GroupName:
+		obj = &v1.InferencePool{}
+	case v1alpha2.GroupName:
+		obj = &v1alpha2.InferencePool{}
+	default:
+		// Handle unsupported groups gracefully.
+		err := fmt.Errorf("unsupported API group: %s", c.PoolGKNN.Group)
+		logger.Error(err, "Cannot reconcile InferencePool")
+		return ctrl.Result{}, err
+	}
 
-	if err := c.Get(ctx, req.NamespacedName, infPool); err != nil {
+	// 2. Perform a single, generic fetch for the object.
+	if err := c.Get(ctx, req.NamespacedName, obj); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("InferencePool not found. Clearing the datastore")
 			c.Datastore.Clear()
@@ -53,13 +71,40 @@ func (c *InferencePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		logger.Error(err, "Unable to get InferencePool")
 		return ctrl.Result{}, err
-	} else if !infPool.DeletionTimestamp.IsZero() {
+	}
+
+	// 3. Perform common checks using the client.Object interface.
+	if !obj.GetDeletionTimestamp().IsZero() {
 		logger.Info("InferencePool is marked for deletion. Clearing the datastore")
 		c.Datastore.Clear()
 		return ctrl.Result{}, nil
 	}
-	// update pool in datastore
-	if err := c.Datastore.PoolSet(ctx, c.Reader, infPool); err != nil {
+
+	// 4. Convert the fetched object to the canonical v1.InferencePool.
+	var v1infPool *v1.InferencePool
+
+	switch pool := obj.(type) {
+	case *v1.InferencePool:
+		// If it's already a v1 object, just use it.
+		v1infPool = pool
+	case *v1alpha2.InferencePool:
+		// If it's a v1alpha2 object, convert it to v1.
+		var uns *unstructured.Unstructured
+		uns, err := common.ToUnstructured(pool)
+		if err != nil {
+			logger.Error(err, "Failed to convert inferencePool to unstructured")
+			return ctrl.Result{}, err
+		}
+		v1infPool, err = common.ToInferencePool(uns)
+		if err != nil {
+			logger.Error(err, "Failed to convert unstructured to inferencePool")
+			return ctrl.Result{}, err
+		}
+	default:
+		return ctrl.Result{}, fmt.Errorf("unsupported API group: %s", c.PoolGKNN.Group)
+	}
+
+	if err := c.Datastore.PoolSet(ctx, c.Reader, v1infPool); err != nil {
 		logger.Error(err, "Failed to update datastore")
 		return ctrl.Result{}, err
 	}
@@ -68,7 +113,16 @@ func (c *InferencePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 func (c *InferencePoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1.InferencePool{}).
-		Complete(c)
+	switch c.PoolGKNN.Group {
+	case v1alpha2.GroupName:
+		return ctrl.NewControllerManagedBy(mgr).
+			For(&v1alpha2.InferencePool{}).
+			Complete(c)
+	case v1.GroupName:
+		return ctrl.NewControllerManagedBy(mgr).
+			For(&v1.InferencePool{}).
+			Complete(c)
+	default:
+		return fmt.Errorf("unknown group %s", c.PoolGKNN.Group)
+	}
 }
