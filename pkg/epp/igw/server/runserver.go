@@ -28,12 +28,14 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"sigs.k8s.io/gateway-api-inference-extension/internal/runnable"
 	tlsutil "sigs.k8s.io/gateway-api-inference-extension/internal/tls"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/controller"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
@@ -48,6 +50,7 @@ type ExtProcServerRunner struct {
 	DestinationEndpointHintKey               string
 	FairnessIDHeaderKey                      string
 	PoolNamespacedName                       types.NamespacedName
+	PoolGKNN                                 common.GKNN
 	Datastore                                datastore.Datastore
 	SecureServing                            bool
 	HealthChecking                           bool
@@ -83,18 +86,27 @@ const (
 	DefaultCertPath                                 = ""                                // default for --cert-path
 	DefaultConfigFile                               = ""                                // default for --config-file
 	DefaultConfigText                               = ""                                // default for --config-text
+	DefaultPoolGroup                                = "inference.networking.k8s.io"     // default for --pool-group
 	DefaultMetricsStalenessThreshold                = 2 * time.Second
 )
 
 // NewDefaultExtProcServerRunner creates a runner with default values.
 // Note: Dependencies like Datastore, Scheduler, SD need to be set separately.
 func NewDefaultExtProcServerRunner() *ExtProcServerRunner {
+	poolGKNN := common.GKNN{
+		NamespacedName: types.NamespacedName{Name: DefaultPoolName, Namespace: DefaultPoolNamespace},
+		GroupKind: schema.GroupKind{
+			Group: DefaultPoolGroup,
+			Kind:  "InferencePool",
+		},
+	}
 	return &ExtProcServerRunner{
 		GrpcPort:                                 DefaultGrpcPort,
 		DestinationEndpointHintKey:               DefaultDestinationEndpointHintKey,
 		DestinationEndpointHintMetadataNamespace: DefaultDestinationEndpointHintMetadataNamespace,
 		FairnessIDHeaderKey:                      DefaultFairnessIDHeaderKey,
 		PoolNamespacedName:                       types.NamespacedName{Name: DefaultPoolName, Namespace: DefaultPoolNamespace},
+		PoolGKNN:                                 poolGKNN,
 		SecureServing:                            DefaultSecureServing,
 		HealthChecking:                           DefaultHealthChecking,
 		RefreshPrometheusMetricsInterval:         DefaultRefreshPrometheusMetricsInterval,
@@ -109,14 +121,15 @@ func (r *ExtProcServerRunner) SetupWithManager(ctx context.Context, mgr ctrl.Man
 	if err := (&controller.InferencePoolReconciler{
 		Datastore: r.Datastore,
 		Reader:    mgr.GetClient(),
+		PoolGKNN:  r.PoolGKNN,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("failed setting up InferencePoolReconciler: %w", err)
 	}
 
 	if err := (&controller.InferenceObjectiveReconciler{
-		Datastore:          r.Datastore,
-		Reader:             mgr.GetClient(),
-		PoolNamespacedName: r.PoolNamespacedName,
+		Datastore: r.Datastore,
+		Reader:    mgr.GetClient(),
+		PoolGKNN:  r.PoolGKNN,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		return fmt.Errorf("failed setting up InferenceObjectiveReconciler: %w", err)
 	}
