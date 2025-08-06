@@ -74,8 +74,8 @@ func (s *LoadAwareScorer) WithName(name string) *LoadAwareScorer {
 // that can be processed in the given pod immediately.
 // Pod with empty waiting requests queue is scored with 0.5
 // Pod with requests in the queue will get score between 0.5 and 0.
-// Score 0 will get pod with number of requests in the queue equal to the threshold used in load-based filter (QueueingThresholdLoRA)
-// In future pods with additional capacity will get score higher than 0.5
+// Score 0 will get pod with number of requests in the queue equal to the threshold used in load-based filter
+// In the future, pods with additional capacity will get score higher than 0.5
 func (s *LoadAwareScorer) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[types.Pod]float64)
 

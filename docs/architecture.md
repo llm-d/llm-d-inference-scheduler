@@ -8,7 +8,7 @@
 
 The design enables:
 
-- Support for **multiple base models** and **LoRA adapters** within a shared cluster [Not supported in
+- Support for **multiple base models** within a shared cluster [Not supported in
 Phase1]
 - Efficient routing based on **KV cache locality**, **prefix**, **session affinity**, **load**, and
 **model metadata**
