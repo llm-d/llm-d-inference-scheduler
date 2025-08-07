@@ -33,6 +33,8 @@ jobs:
           else
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
+          PRE_RELEASE=${{ github.event_name != 'release' || github.event.release.prerelease }}
+          echo "prerelease=${PRE_RELEASE}" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Build and push image
@@ -42,6 +44,7 @@ jobs:
           image-name: ${{ steps.version.outputs.project_name }}
           registry: ghcr.io/llm-d
           github-token: ${{ secrets.GHCR_TOKEN }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
 
       - name: Run Trivy scan
         uses: ./.github/actions/trivy-scan

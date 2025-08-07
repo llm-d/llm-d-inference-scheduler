@@ -13,6 +13,9 @@ inputs:
   registry:
     required: true
     description: Container registry (e.g., ghcr.io/llm-d)
+  prerelease:
+    required: true
+    description: indicates whether or not this is a pre-release (not a release) build
 runs:
   using: "composite"
   steps:
@@ -32,9 +35,13 @@ runs:
 
     - name: Build image and push
       run: |
+        if [[ ${{ inputs.prerelease }} == "true" ]]; then
+          LATEST_TAG=""
+        else
+          LATEST_TAG="-t ${{ inputs.registry }}/${{ inputs.image-name }}:latest"
+        fi
         docker buildx build \
           --platform linux/amd64,linux/arm64 \
           -t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }} \
-          -t ${{ inputs.registry }}/${{ inputs.image-name }}:latest \
-          --push .
+          ${LATEST_TAG} --push .
       shell: bash
