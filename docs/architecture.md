@@ -4,7 +4,9 @@
 
 ## Overview
 
-**llm-d** is an extensible architecture designed to route inference requests efficiently across model-serving pods. A central component of this architecture is the **Inference Gateway**, which builds on the Kubernetes-native **Gateway API Inference Extension (GIE)** to enable scalable, flexible, and pluggable routing of requests.
+**llm-d** is an extensible architecture designed to route inference requests efficiently across model-serving pods.
+ A central component of this architecture is the **Inference Gateway**, which builds on the Kubernetes-native
+ **Gateway API Inference Extension** to enable scalable, flexible, and pluggable routing of requests.
 
 The design enables:
 
@@ -51,6 +53,8 @@ Routing decisions are governed by dynamic components:
 - **Scrapers**: Collect pod metadata and metrics for scorers
 
 These components are maintained in the `llm-d-inference-scheduler` repository and can evolve independently.
+A [sample filter plugin guide](./create_new_filter.md) is provided to illustrate how one could extend the
+ Inference Gateway functionality to address unique requirements.
 
 ---
 
@@ -92,14 +96,16 @@ These components are maintained in the `llm-d-inference-scheduler` repository an
 ## Configuration
 
 The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how
-it is configured. The configuration is in the form of YAML text, which can either be in a file or
-specified in-line as a parameter. The configuration defines the set of plugins to be instantiated along with their parameters. Each plugin is also given a name, enabling the same plugin type to be instantiated
-multiple times, if needed. Also defined is a set of SchedulingProfiles, which determine the set of
-plugins to be used when scheduling a request. The set of plugins instantiated must also include a
-Profile Handler, which determines which SchedulingProfiles will be used for a particular request and
-how their results will be processed.
+ it is configured. The configuration is in the form of YAML text, which can either be in a file or
+ specified in-line as a parameter. The configuration defines the set of plugins to be instantiated
+ along with their parameters. Each plugin is also given a name, enabling the same plugin type to be
+ instantiated multiple times, if needed. Also defined is a set of SchedulingProfiles, which determine
+ the set of plugins to be used when scheduling a request. The set of plugins instantiated must also
+ include a Profile Handler, which determines which SchedulingProfiles will be used for a particular
+ request and how their results will be processed.
 
 The configuration text has the following form:
+
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
@@ -113,8 +119,9 @@ schedulingProfiles:
 
 The first two lines of the configuration are constant and must appear as is.
 
-The plugins section defines the set of plugins that will be instantiated and their parameters. Each entry in this section
-has the following form:
+The plugins section defines the set of plugins that will be instantiated and their parameters.
+ Each entry in this section has the following form:
+
 ```yaml
 - name: aName
   type: a-type
@@ -122,6 +129,7 @@ has the following form:
     param1: val1
     param2: val2
 ```
+
 The fields in a plugin entry are:
 - **name** (optional): provides a name by which the plugin instance can be referenced. If this
 field is omitted, the plugin's type will be used as its name.
@@ -133,6 +141,7 @@ The schedulingProfiles section defines the set of scheduling profiles that can b
 requests to pods. The number of scheduling profiles one defines, depends on the use case. For simple
 serving of requests, one is enough. For disaggregated prefill, two profiles are required. Each entry
 in this section has the following form:
+
 ```yaml
 - name: aName
   plugins:
@@ -147,6 +156,7 @@ The fields in a schedulingProfile entry are:
   - **weight**: weight to be used if the referenced plugin is a scorer.
 
 A complete configuration might look like this:
+
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
@@ -168,8 +178,9 @@ schedulingProfiles:
     weight: 50
 ```
 
-If the configuration is in a file, the EPP command line argument `--configFile` should be used to specify the full path of the file in question. If the configuration is passed as in-line text the EPP command
-line argument `--configText` should be used.
+If the configuration is in a file, the EPP command line argument `--configFile` should be used
+ to specify the full path of the file in question. If the configuration is passed as in-line
+ text the EPP command line argument `--configText` should be used.
 
 ---
 
@@ -189,7 +200,7 @@ Sets a header for use in disaggregated prefill/decode
 
 #### PdProfileHandler
 
-Selects the profiles to use when running with disagregated prefill/decode
+Selects the profiles to use when running with disaggregated prefill/decode
 
 - **Type**: `pd-profile-handler`
 - **Parameters**:
@@ -216,7 +227,9 @@ Filters out pods using a standard Kubernetes label selector.
 
 #### DecodeFilter
 
-Filters out pods that are not marked either as decode or both prefill and decode. The filter looks for the label `llm-d.ai/role`, with a value of either `decode` or `both`. In addition pods that are missing the label will not be filtered out.
+Filters out pods that are not marked either as decode or both prefill and decode. The filter looks for
+ the label `llm-d.ai/role`, with a value of either `decode` or `both`. In addition pods that are missing
+ the label will not be filtered out.
 
 - **Type**: `decode-filter`
 - **Parameters**: None
@@ -253,12 +266,13 @@ The estimation is based on scheduling history.
 ##### `cache_tracking` mode:
 
 This mode scores requests based on the actual KV-cache states across the vLLM instances. 
-It is more accurate than both `SessionAffinity` and `PrefixCachePlugin` in `estimate` mode,
-but incurs additional computation overhead and KV-Events streaming to track the KV-cache states.
+ It is more accurate than both `SessionAffinity` and `PrefixCachePlugin` in `estimate` mode,
+ but incurs additional computation overhead and KV-Events streaming to track the KV-cache states.
 
-When enabled, the scorer will use the `llm-d-kv-cache-manager` to track the KV-cache states across the vLLM instances.
-It will use the `kvcache.Indexer` to score the pods based on the number of matching blocks in the KV-cache.
-It will also use the `kvevents.Pool` to subscribe to the KV-Events emitted by the vLLM instances and update the KV-cache states in near-real-time.
+When enabled, the scorer will use the `llm-d-kv-cache-manager` to track the KV-cache states
+ across the vLLM instances. It will use the `kvcache.Indexer` to score the pods based on the
+ number of matching blocks in the KV-cache. It will also use the `kvevents.Pool` to subscribe
+ to the KV-Events emitted by the vLLM instances and update the KV-cache states in near-real-time.
 
 Configuration:
 
@@ -271,12 +285,13 @@ Configuration:
 See list of parameters at [llm-d-kv-cache-manager/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache-manager/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
 
 Note that in most cases you will only need to set:
-- Hugging Face token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
+- HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
   - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
-- IMPORTANT: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
-- KVBlockIndex metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
+- **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
+- `KVBlockIndex` metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
 
 Example configuration with the above parameters set:
+
 ```yaml
 plugins:
   - type: prefix-cache-scorer
@@ -292,6 +307,7 @@ plugins:
 ```
 
 Example configuration with all parameters set:
+
 ```yaml
 plugins:
   - type: prefix-cache-scorer
@@ -352,6 +368,7 @@ used for the same session.
 ### Sample Disaggregated Prefill/Decode Configuration
 
 The following is an example of what a configuration for disaggregated Prefill/Decode might look like:
+
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
@@ -386,7 +403,7 @@ schedulingProfiles:
 
 Several things should be noted:
 1. The `PrefillHeader`, `PdProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
-plugins must be in the list of plugins instantiated.
+ plugins must be in the list of plugins instantiated.
 2. There must be two scheduler profiles defined.
 3. The scheduler profile for prefill, must include the `PrefillFilter`
 4. The scheduler profile for decode, must include the `DecodeFilter`
@@ -415,6 +432,7 @@ The **vLLM sidecar** handles orchestration between Prefill and Decode stages. It
 - Experimental protocol compatibility
 
 > **Note**: The detailed P/D design is available in this document: [Disaggregated Prefill/Decode in llm-d](./dp.md)
+
 ---
 
 ## InferencePool & InferenceModel Design
@@ -424,6 +442,10 @@ The **vLLM sidecar** handles orchestration between Prefill and Decode stages. It
 - Single `InferencePool` and single `EPP` due to Envoy limitations
 - Model-based filtering can be handled within EPP
 - Currently only one base model is supported
+
+> [!NOTE]
+> The `InferenceModel` CRD is in the process of being significantly changed in IGW.
+> Once finalized, these changes would be reflected in llm-d as well.
 
 ---
 
