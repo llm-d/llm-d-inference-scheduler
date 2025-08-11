@@ -98,15 +98,16 @@ func TestCollectorCollectsOnTicks(t *testing.T) {
 	c := NewCollector()
 	ticker := mocks.NewTicker()
 	ctx := context.Background()
+
 	require.NoError(t, c.Start(ctx, ticker, endpoint, []DataSource{source}))
-
 	ticker.Tick()
 	ticker.Tick()
-	time.Sleep(20 * time.Millisecond) // let collector process the ticks
 
-	got := atomic.LoadInt64(&source.callCount)
-	want := int64(2)
-	assert.Equal(t, want, got, "call count mismatch")
+	// use Eventually for async processing
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt64(&source.callCount) == 2
+	}, 1*time.Second, 2*time.Millisecond, "expected 2 collections")
+
 	require.NoError(t, c.Stop())
 }
 

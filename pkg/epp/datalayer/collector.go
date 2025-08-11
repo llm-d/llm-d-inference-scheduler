@@ -83,10 +83,13 @@ func NewCollector() *Collector {
 
 // Start initiates data source collection for the endpoint.
 func (c *Collector) Start(ctx context.Context, ticker Ticker, ep Endpoint, sources []DataSource) error {
+	var ready chan struct{}
 	started := false
+
 	c.startOnce.Do(func() {
 		c.ctx, c.cancel = context.WithCancel(ctx)
 		started = true
+		ready = make(chan struct{})
 
 		go func(endpoint Endpoint, sources []DataSource) {
 			logger := log.FromContext(ctx).WithValues("endpoint", ep.GetPod().GetIPAddress())
@@ -96,6 +99,8 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep Endpoint, sourc
 				logger.V(logging.DEFAULT).Info("terminating collection")
 				ticker.Stop()
 			}()
+
+			close(ready) // signal ready to accept ticks
 
 			for {
 				select {
@@ -115,7 +120,21 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep Endpoint, sourc
 	if !started {
 		return errors.New("collector start called multiple times")
 	}
-	return nil
+
+	// Wait for goroutine to signal readiness.
+	// The use of ready channel is mostly to make the function testable, by ensuring
+	// synchronous order of events. Ignoring test requirements, one could let the
+	// go routine start at some arbitrary point in the future, possibly after this
+	// function has returned.
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		if c.cancel != nil {
+			c.cancel() // ensure clean up
+		}
+		return ctx.Err()
+	}
 }
 
 // Stop terminates the collector.
