@@ -1,0 +1,38 @@
+name: 'Mark stale issues'
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+
+jobs:
+  stale-issues:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: 'Mark stale issues'
+        uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 90
+          days-before-pr-stale: -1
+          days-before-close: -1
+          stale-issue-label: 'lifecycle/stale'
+          exempt-issue-labels: 'lifecycle/rotten'
+
+      - name: 'Mark rotten issues'
+        uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 30
+          days-before-pr-stale: -1
+          days-before-close: -1
+          stale-issue-label: 'lifecycle/rotten'
+          only-labels: 'lifecycle/stale'
+          labels-to-remove-when-stale: 'lifecycle/stale'
+
+      - name: 'Close rotten issues'
+        uses: actions/stale@v9
+        with:
+          days-before-stale: -1
+          days-before-issue-close: 30
+          days-before-pr-close: -1
+          stale-issue-label: 'lifecycle/rotten'
