@@ -1,0 +1,5 @@
+approvers:
+- llm-d-inference-scheduler-maintainers
+
+reviewers:
+- llm-d-inference-scheduler-reviewers
