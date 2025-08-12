@@ -164,19 +164,17 @@ func (d *Director) admitRequest(ctx context.Context, requestPriority int, fairne
 	logger.V(logutil.TRACE).Info("Entering Flow Control", "priority", requestPriority, "fairnessID", fairnessID)
 
 	// This will be removed in favor of a more robust implementation (Flow Control) in the very near future.
-	// For now we will keep similar behavior to the previous implementation.
 	// TODO: Make this a configurable value.
 	// Tracking issue https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/1347
-	if requestPriority >= 2 {
-		logger.V(logutil.DEBUG).Info("Critical request bypassing saturation check.")
+	if requestPriority >= 0 {
+		logger.V(logutil.TRACE).Info("Non-sheddable request bypassing saturation check.")
 		return nil
 	}
 
-	logger.V(logutil.DEBUG).Info("Performing saturation check for non-critical request.")
 	if d.saturationDetector.IsSaturated(ctx) { // Assuming non-nil Saturation Detector
 		return errutil.Error{
 			Code: errutil.InferencePoolResourceExhausted,
-			Msg:  "system saturated, non-critical request dropped",
+			Msg:  "system saturated, sheddable request dropped",
 		}
 	}
 
