@@ -29,8 +29,8 @@ updates:
     schedule:
       interval: "weekly"
     labels:
-      - "ci"
       - "dependencies"
+      - "release-note-none"
     commit-message:
       prefix: "deps(actions)"
 
@@ -41,6 +41,5 @@ updates:
       interval: "weekly"
     labels:
       - "dependencies"
-      - "docker"
     commit-message:
       prefix: "deps(docker)"
