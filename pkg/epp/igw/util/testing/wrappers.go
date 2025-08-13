@@ -194,7 +194,9 @@ func (m *InferencePoolWrapper) Selector(selector map[string]string) *InferencePo
 	for k, v := range selector {
 		s[v1.LabelKey(k)] = v1.LabelValue(v)
 	}
-	m.Spec.Selector = s
+	m.Spec.Selector = v1.LabelSelector{
+		MatchLabels: s,
+	}
 	return m
 }
 
@@ -225,7 +227,11 @@ func MakeXInferencePool(name string) *XInferencePoolWrapper {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: name,
 			},
-			Spec: v1alpha2.InferencePoolSpec{},
+			Spec: v1alpha2.InferencePoolSpec{
+				EndpointPickerConfig: v1alpha2.EndpointPickerConfig{
+					ExtensionRef: &v1alpha2.Extension{},
+				},
+			},
 		},
 	}
 }
