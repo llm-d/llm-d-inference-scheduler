@@ -17,6 +17,9 @@ CONTAINER_TOOL := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } 
 BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_TOOL))
 PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
 
+GIT_COMMIT_SHA ?= "$(shell git rev-parse HEAD 2>/dev/null)"
+BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
+
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
@@ -93,6 +96,8 @@ image-build: check-container-tool ## Build Docker image ## Build Docker image us
 		--platform $(TARGETOS)/$(TARGETARCH) \
  		--build-arg TARGETOS=$(TARGETOS) \
 		--build-arg TARGETARCH=$(TARGETARCH) \
+		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
+		--build-arg BUILD_REF=${BUILD_REF} \
  		-t $(IMG) .
 
 .PHONY: image-push
