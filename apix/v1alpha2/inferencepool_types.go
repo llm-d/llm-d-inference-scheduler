@@ -78,8 +78,6 @@ type InferencePoolSpec struct {
 // This type is intended to be a union of mutually exclusive configuration options that we may add in the future.
 type EndpointPickerConfig struct {
 	// Extension configures an endpoint picker as an extension service.
-	//
-	// +kubebuilder:validation:Required
 	ExtensionRef *Extension `json:"extensionRef,omitempty"`
 }
 
