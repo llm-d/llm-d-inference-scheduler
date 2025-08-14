@@ -47,6 +47,10 @@ func TestInferencePoolConvertTo(t *testing.T) {
 		{
 			name: "full conversion from v1alpha2 to v1 including status",
 			src: &InferencePool{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InferencePool",
+					APIVersion: "inference.networking.x-k8s.io/v1alpha2",
+				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pool",
 					Namespace: "test-ns",
@@ -56,14 +60,12 @@ func TestInferencePoolConvertTo(t *testing.T) {
 						"app": "my-model-server",
 					},
 					TargetPortNumber: 8080,
-					EndpointPickerConfig: EndpointPickerConfig{
-						ExtensionRef: &Extension{
-							Group:       &group,
-							Kind:        &kind,
-							Name:        "my-epp-service",
-							PortNumber:  &portNumber,
-							FailureMode: &failureMode,
-						},
+					ExtensionRef: &Extension{
+						Group:       &group,
+						Kind:        &kind,
+						Name:        "my-epp-service",
+						PortNumber:  &portNumber,
+						FailureMode: &failureMode,
 					},
 				},
 				Status: InferencePoolStatus{
@@ -83,6 +85,10 @@ func TestInferencePoolConvertTo(t *testing.T) {
 				},
 			},
 			want: &v1.InferencePool{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InferencePool",
+					APIVersion: "inference.networking.x-k8s.io/v1alpha2",
+				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pool",
 					Namespace: "test-ns",
@@ -121,16 +127,79 @@ func TestInferencePoolConvertTo(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "nil source should return nil and no error",
-			src:     nil,
-			want:    nil,
+			name: "conversion from v1alpha2 to v1 with nil extensionRef",
+			src: &InferencePool{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InferencePool",
+					APIVersion: "inference.networking.x-k8s.io/v1alpha2",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pool",
+					Namespace: "test-ns",
+				},
+				Spec: InferencePoolSpec{
+					Selector: map[LabelKey]LabelValue{
+						"app": "my-model-server",
+					},
+					TargetPortNumber: 8080,
+				},
+				Status: InferencePoolStatus{
+					Parents: []PoolStatus{
+						{
+							GatewayRef: ParentGatewayReference{Name: "my-gateway"},
+							Conditions: []metav1.Condition{
+								{
+									Type:               string(InferencePoolConditionAccepted),
+									Status:             metav1.ConditionTrue,
+									Reason:             string(InferencePoolReasonAccepted),
+									LastTransitionTime: timestamp,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: &v1.InferencePool{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InferencePool",
+					APIVersion: "inference.networking.x-k8s.io/v1alpha2",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pool",
+					Namespace: "test-ns",
+				},
+				Spec: v1.InferencePoolSpec{
+					Selector: v1.LabelSelector{
+						MatchLabels: map[v1.LabelKey]v1.LabelValue{
+							"app": "my-model-server",
+						},
+					},
+					TargetPortNumber: 8080,
+				},
+				Status: v1.InferencePoolStatus{
+					Parents: []v1.PoolStatus{
+						{
+							GatewayRef: v1.ParentGatewayReference{Name: "my-gateway"},
+							Conditions: []metav1.Condition{
+								{
+									Type:               string(v1.InferencePoolConditionAccepted),
+									Status:             metav1.ConditionTrue,
+									Reason:             string(v1.InferencePoolReasonAccepted),
+									LastTransitionTime: timestamp,
+								},
+							},
+						},
+					},
+				},
+			},
 			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.src.ConvertTo()
+			got := &v1.InferencePool{}
+			err := tt.src.ConvertTo(got)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ConvertTo() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -151,6 +220,10 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 		{
 			name: "full conversion from v1 to v1alpha2 including status",
 			src: &v1.InferencePool{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InferencePool",
+					APIVersion: "inference.networking.k8s.io/v1",
+				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pool",
 					Namespace: "test-ns",
@@ -189,7 +262,7 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 			want: &InferencePool{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "InferencePool",
-					APIVersion: "inference.networking.x-k8s.io/v1alpha2",
+					APIVersion: "inference.networking.k8s.io/v1",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pool",
@@ -200,14 +273,12 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 						"app": "my-model-server",
 					},
 					TargetPortNumber: 8080,
-					EndpointPickerConfig: EndpointPickerConfig{
-						ExtensionRef: &Extension{
-							Group:       &group,
-							Kind:        &kind,
-							Name:        "my-epp-service",
-							PortNumber:  &portNumber,
-							FailureMode: &failureMode,
-						},
+					ExtensionRef: &Extension{
+						Group:       &group,
+						Kind:        &kind,
+						Name:        "my-epp-service",
+						PortNumber:  &portNumber,
+						FailureMode: &failureMode,
 					},
 				},
 				Status: InferencePoolStatus{
@@ -229,16 +300,85 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "nil source should return nil and no error",
-			src:     nil,
-			want:    nil,
+			name: "conversion from v1 to v1alpha2 with nil extensionRef",
+			src: &v1.InferencePool{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InferencePool",
+					APIVersion: "inference.networking.k8s.io/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pool",
+					Namespace: "test-ns",
+				},
+				Spec: v1.InferencePoolSpec{
+					Selector: v1.LabelSelector{
+						MatchLabels: map[v1.LabelKey]v1.LabelValue{
+							"app": "my-model-server",
+						},
+					},
+					TargetPortNumber: 8080,
+				},
+				Status: v1.InferencePoolStatus{
+					Parents: []v1.PoolStatus{
+						{
+							GatewayRef: v1.ParentGatewayReference{Name: "my-gateway"},
+							Conditions: []metav1.Condition{
+								{
+									Type:               string(v1.InferencePoolConditionAccepted),
+									Status:             metav1.ConditionTrue,
+									Reason:             string(v1.InferencePoolReasonAccepted),
+									LastTransitionTime: timestamp,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: &InferencePool{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InferencePool",
+					APIVersion: "inference.networking.k8s.io/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pool",
+					Namespace: "test-ns",
+				},
+				Spec: InferencePoolSpec{
+					Selector: map[LabelKey]LabelValue{
+						"app": "my-model-server",
+					},
+					TargetPortNumber: 8080,
+				},
+				Status: InferencePoolStatus{
+					Parents: []PoolStatus{
+						{
+							GatewayRef: ParentGatewayReference{Name: "my-gateway"},
+							Conditions: []metav1.Condition{
+								{
+									Type:               string(InferencePoolConditionAccepted),
+									Status:             metav1.ConditionTrue,
+									Reason:             string(InferencePoolReasonAccepted),
+									LastTransitionTime: timestamp,
+								},
+							},
+						},
+					},
+				},
+			},
 			wantErr: false,
+		},
+		{
+			name:    "nil source",
+			src:     nil,
+			want:    &InferencePool{},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ConvertFrom(tt.src)
+			got := &InferencePool{}
+			err := got.ConvertFrom(tt.src)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ConvertFrom() error = %v, wantErr %v", err, tt.wantErr)
 			}
