@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
@@ -39,7 +40,7 @@ type podMetrics struct {
 	pod      atomic.Pointer[backend.Pod]
 	metrics  atomic.Pointer[MetricsState]
 	pmc      PodMetricsClient
-	ds       Datastore
+	ds       datalayer.PoolInfo
 	interval time.Duration
 
 	startOnce sync.Once // ensures the refresh loop goroutine is started only once
@@ -129,17 +130,27 @@ func (pm *podMetrics) refreshMetrics() error {
 	// this case, the updated metrics object will have partial updates. A partial update is
 	// considered better than no updates.
 	if updated != nil {
-		updated.UpdateTime = time.Now()
-		pm.logger.V(logutil.TRACE).Info("Refreshed metrics", "updated", updated)
-		pm.metrics.Store(updated)
+		pm.UpdateMetrics(updated)
 	}
 
 	return nil
 }
 
-func (pm *podMetrics) StopRefreshLoop() {
+func (pm *podMetrics) stopRefreshLoop() {
 	pm.logger.V(logutil.DEFAULT).Info("Stopping refresher", "pod", pm.GetPod())
 	pm.stopOnce.Do(func() {
 		close(pm.done)
 	})
+}
+
+// Allowing forward compatibility between PodMetrics and datalayer.Endpoint, by
+// implementing missing functions (e.g., extended attributes support) as no-op.
+func (*podMetrics) Put(string, datalayer.Cloneable)        {}
+func (*podMetrics) Get(string) (datalayer.Cloneable, bool) { return nil, false }
+func (*podMetrics) Keys() []string                         { return nil }
+
+func (pm *podMetrics) UpdateMetrics(updated *MetricsState) {
+	updated.UpdateTime = time.Now()
+	pm.logger.V(logutil.TRACE).Info("Refreshed metrics", "updated", updated)
+	pm.metrics.Store(updated)
 }
