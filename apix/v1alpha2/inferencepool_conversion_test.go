@@ -60,7 +60,7 @@ func TestInferencePoolConvertTo(t *testing.T) {
 						"app": "my-model-server",
 					},
 					TargetPortNumber: 8080,
-					ExtensionRef: &Extension{
+					ExtensionRef: Extension{
 						Group:       &group,
 						Kind:        &kind,
 						Name:        "my-epp-service",
@@ -99,7 +99,7 @@ func TestInferencePoolConvertTo(t *testing.T) {
 							"app": "my-model-server",
 						},
 					},
-					TargetPortNumber: 8080,
+					TargetPorts: []v1.Port{{Number: v1.PortNumber(int32(8080))}},
 					ExtensionRef: v1.Extension{
 						Group:       &v1Group,
 						Kind:        v1Kind,
@@ -127,7 +127,7 @@ func TestInferencePoolConvertTo(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "conversion from v1alpha2 to v1 with nil extensionRef",
+			name: "conversion from v1alpha2 to v1 with empty extensionRef",
 			src: &InferencePool{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "InferencePool",
@@ -174,7 +174,7 @@ func TestInferencePoolConvertTo(t *testing.T) {
 							"app": "my-model-server",
 						},
 					},
-					TargetPortNumber: 8080,
+					TargetPorts: []v1.Port{{Number: v1.PortNumber(int32(8080))}},
 				},
 				Status: v1.InferencePoolStatus{
 					Parents: []v1.PoolStatus{
@@ -234,7 +234,7 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 							"app": "my-model-server",
 						},
 					},
-					TargetPortNumber: 8080,
+					TargetPorts: []v1.Port{{Number: v1.PortNumber(int32(8080))}},
 					ExtensionRef: v1.Extension{
 						Group:       &v1Group,
 						Kind:        v1Kind,
@@ -273,7 +273,7 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 						"app": "my-model-server",
 					},
 					TargetPortNumber: 8080,
-					ExtensionRef: &Extension{
+					ExtensionRef: Extension{
 						Group:       &group,
 						Kind:        &kind,
 						Name:        "my-epp-service",
@@ -300,7 +300,7 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "conversion from v1 to v1alpha2 with nil extensionRef",
+			name: "conversion from v1 to v1alpha2 with empty extensionRef",
 			src: &v1.InferencePool{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "InferencePool",
@@ -316,7 +316,7 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 							"app": "my-model-server",
 						},
 					},
-					TargetPortNumber: 8080,
+					TargetPorts: []v1.Port{{Number: v1.PortNumber(int32(8080))}},
 				},
 				Status: v1.InferencePoolStatus{
 					Parents: []v1.PoolStatus{
@@ -348,7 +348,6 @@ func TestInferencePoolConvertFrom(t *testing.T) {
 						"app": "my-model-server",
 					},
 					TargetPortNumber: 8080,
-					ExtensionRef:     &Extension{},
 				},
 				Status: InferencePoolStatus{
 					Parents: []PoolStatus{
