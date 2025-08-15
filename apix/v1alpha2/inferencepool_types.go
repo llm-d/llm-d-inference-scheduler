@@ -21,10 +21,9 @@ import (
 )
 
 // InferencePool is the Schema for the InferencePools API.
-//
 // +kubebuilder:object:root=true
-// TODO: change the annotation once it gets officially approved
 // +kubebuilder:metadata:annotations="api-approved.kubernetes.io=unapproved, experimental-only"
+// +kubebuilder:resource:shortName=xinfpool
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +genclient
