@@ -1,5 +1,15 @@
 approvers:
-- llm-d-inference-scheduler-maintainers
+- elevran
+- kfirtoledo
+- kfswain
+- nilig
+- nirrozenbaum
+- shmuelk
 
 reviewers:
-- llm-d-inference-scheduler-reviewers
+- elevran
+- kfirtoledo
+- kfswain
+- nilig
+- nirrozenbaum
+- shmuelk
