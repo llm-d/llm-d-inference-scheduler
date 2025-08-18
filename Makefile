@@ -91,7 +91,7 @@ test: test-unit test-e2e ## Run unit tests and e2e tests
 .PHONY: test-unit
 test-unit: download-tokenizer install-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	go test -ldflags="$(LDFLAGS)" -v $$(echo $$(go list ./... | grep -v /test/))
+	go test -ldflags="$(LDFLAGS)" -cover -coverprofile=coverage.out -v $$(echo $$(go list ./... | grep -v /test/))
 
 .PHONY: test-integration
 test-integration: download-tokenizer install-dependencies ## Run integration tests
