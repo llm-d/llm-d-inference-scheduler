@@ -21,4 +21,5 @@ func RegisterAllPlugins() {
 	plugins.Register(prefix.PrefixCachePluginType, scorer.PrefixCachePluginFactory)
 	plugins.Register(scorer.LoadAwareScorerType, scorer.LoadAwareScorerFactory)
 	plugins.Register(scorer.SessionAffinityScorerType, scorer.SessionAffinityScorerFactory)
+	plugins.Register(scorer.ActiveRequestScorerType, scorer.ActiveRequestScorerFactory)
 }
