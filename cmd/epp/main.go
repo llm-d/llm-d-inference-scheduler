@@ -34,7 +34,6 @@ import (
 )
 
 func main() {
-	setupLog := ctrl.Log.WithName("setup")
 	ctx := ctrl.SetupSignalHandler()
 
 	// Register GIE plugins
@@ -44,7 +43,6 @@ func main() {
 	plugins.RegisterAllPlugins()
 
 	if err := runner.NewRunner().Run(ctx); err != nil {
-		setupLog.Error(err, "failed to run llm-d-scheduler")
 		os.Exit(1)
 	}
 }
