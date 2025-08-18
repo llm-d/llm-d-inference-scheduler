@@ -25,6 +25,8 @@ const (
 	defaultRequestTimeout = 300
 )
 
+// ActiveRequestScorerParameters defines the parameters for the
+// ActiveRequestScorer.
 type ActiveRequestScorerParameters struct {
 	// RequestTimeout defines the timeout for requests in seconds.
 	// Once the request is "in-flight" for this duration, it is considered to
@@ -84,7 +86,7 @@ func NewActiveRequestScorer(ctx context.Context, requestTimeout int) *ActiveRequ
 	// callback to decrement count when requests expire
 	// most requests will be removed in PostResponse, but this ensures
 	// that we don't leak pod counts if PostResponse is not called
-	requestCache.OnEviction(func(ctx context.Context, reason ttlcache.EvictionReason,
+	requestCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
 		item *ttlcache.Item[string, *requestEntry]) {
 		if reason == ttlcache.EvictionReasonExpired {
 			scorer.decrementPodCount(item.Value().PodName)

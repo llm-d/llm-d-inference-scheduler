@@ -41,7 +41,7 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 	}{
 		{
 			name: "no pods in cache",
-			setupCache: func(s *ActiveRequestScorer) {
+			setupCache: func(_ *ActiveRequestScorer) {
 				// Cache is empty
 			},
 			input: []types.Pod{podA, podB, podC},
