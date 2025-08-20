@@ -361,10 +361,6 @@ Scores pods based on the number of active requests being served per pod. Each re
 individually with its own TTL to ensure accurate timeout handling. Pods with fewer active 
 requests receive higher scores.
 
-The scorer maintains two data structures for efficiency:
-- A cache of individual requests with TTL for automatic cleanup
-- A count map for fast O(1) lookup during scoring
-
 Scores are normalized to a range of 0-1, where pods with fewer active requests get higher scores.
 
 - **Type**: `active-request-scorer`

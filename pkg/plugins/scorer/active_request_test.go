@@ -55,30 +55,30 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 			name: "all pods in cache with different request counts",
 			setupCache: func(s *ActiveRequestScorer) {
 				s.mutex.Lock()
-				s.podCounts["default/pod-a"] = 2
+				s.podCounts["default/pod-a"] = 3
 				s.podCounts["default/pod-b"] = 0
 				s.podCounts["default/pod-c"] = 6
 				s.mutex.Unlock()
 			},
 			input: []types.Pod{podA, podB, podC},
 			wantScores: map[types.Pod]float64{
-				podA: 0.75,
+				podA: 0.5,
 				podB: 1.0,
-				podC: 0.25,
+				podC: 0.0,
 			},
 		},
 		{
 			name: "some pods in cache",
 			setupCache: func(s *ActiveRequestScorer) {
 				s.mutex.Lock()
-				s.podCounts["default/pod-a"] = 3
+				s.podCounts["default/pod-a"] = 4
 				s.podCounts["default/pod-c"] = 1
 				// pod-b not in cache
 				s.mutex.Unlock()
 			},
 			input: []types.Pod{podA, podB, podC},
 			wantScores: map[types.Pod]float64{
-				podA: 0.25,
+				podA: 0.0,
 				podB: 1.0,
 				podC: 0.75,
 			},

@@ -48,27 +48,23 @@ func (r *requestEntry) String() string {
 // compile-time type assertion
 var _ framework.Scorer = &ActiveRequestScorer{}
 
-// ActiveRequestScorerFactory defines the factory function for the LoadAwareScorer
-func ActiveRequestScorerFactory(name string, rawParameters json.RawMessage,
-	handle plugins.Handle) (plugins.Plugin, error) {
+// ActiveRequestScorerFactory defines the factory function for the ActiveRequestScorer.
+func ActiveRequestScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
 	parameters := ActiveRequestScorerParameters{RequestTimeout: defaultRequestTimeout}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w",
-				ActiveRequestScorerType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", ActiveRequestScorerType, err)
 		}
 	}
 
 	return NewActiveRequestScorer(handle.Context(), parameters.RequestTimeout).WithName(name), nil
 }
 
-// NewActiveRequestScorer creates a new local-serving-queue scorer.
+// NewActiveRequestScorer creates a new ActiveRequestScorer scorer.
 func NewActiveRequestScorer(ctx context.Context, requestTimeout int) *ActiveRequestScorer {
 	if requestTimeout <= 0 {
 		requestTimeout = defaultRequestTimeout
-		log.FromContext(ctx).
-			V(logutil.DEFAULT).
-			Info("Request timeout should be positive, using default request timeout")
+		log.FromContext(ctx).V(logutil.DEFAULT).Info("Request timeout should be positive, using default request timeout")
 	}
 
 	// cache for individual requests with their own TTL
@@ -127,11 +123,13 @@ func (s *ActiveRequestScorer) WithName(name string) *ActiveRequestScorer {
 func (s *ActiveRequestScorer) Score(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest,
 	pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[string]int)
-	sum := 0
+	maxCount := 0
 	s.mutex.RLock()
 	for podName, count := range s.podCounts {
 		scoredPods[podName] = count
-		sum += count
+		if count >= maxCount {
+			maxCount = count
+		}
 	}
 	s.mutex.RUnlock()
 
@@ -142,7 +140,7 @@ func (s *ActiveRequestScorer) Score(ctx context.Context, _ *types.CycleState, _ 
 			if count == 0 {
 				scoredPodsMap[pod] = 1.0 // no requests means highest score
 			} else {
-				scoredPodsMap[pod] = float64(sum-count) / float64(sum)
+				scoredPodsMap[pod] = float64(maxCount-count) / float64(maxCount)
 			}
 		} else {
 			scoredPodsMap[pod] = 1.0
@@ -203,14 +201,17 @@ func (s *ActiveRequestScorer) PostResponse(ctx context.Context, request *types.L
 // incrementPodCount increments the request count for a pod.
 func (s *ActiveRequestScorer) incrementPodCount(podName string) {
 	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	s.podCounts[podName]++
-	s.mutex.Unlock()
 }
 
 // decrementPodCount decrements the request count for a pod and removes
 // the entry if count reaches zero.
 func (s *ActiveRequestScorer) decrementPodCount(podName string) {
 	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if count, exists := s.podCounts[podName]; exists {
 		if count <= 1 {
 			delete(s.podCounts, podName)
@@ -218,7 +219,6 @@ func (s *ActiveRequestScorer) decrementPodCount(podName string) {
 			s.podCounts[podName] = count - 1
 		}
 	}
-	s.mutex.Unlock()
 }
 
 func cleanCachePeriodically(ctx context.Context, cache *ttlcache.Cache[string, *requestEntry], requestTimeout int) {
