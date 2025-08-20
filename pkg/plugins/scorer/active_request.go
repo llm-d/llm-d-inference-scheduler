@@ -57,13 +57,15 @@ func ActiveRequestScorerFactory(name string, rawParameters json.RawMessage, hand
 		}
 	}
 
-	return NewActiveRequestScorer(handle.Context(), parameters.RequestTimeout).WithName(name), nil
+	return NewActiveRequestScorer(handle.Context(), &parameters).WithName(name), nil
 }
 
 // NewActiveRequestScorer creates a new ActiveRequestScorer scorer.
-func NewActiveRequestScorer(ctx context.Context, requestTimeout int) *ActiveRequestScorer {
-	if requestTimeout <= 0 {
-		requestTimeout = defaultRequestTimeout
+func NewActiveRequestScorer(ctx context.Context, params *ActiveRequestScorerParameters) *ActiveRequestScorer {
+	requestTimeout := defaultRequestTimeout
+
+	if params != nil && params.RequestTimeout > 0 {
+		requestTimeout = params.RequestTimeout
 		log.FromContext(ctx).V(logutil.DEFAULT).Info("Request timeout should be positive, using default request timeout")
 	}
 
