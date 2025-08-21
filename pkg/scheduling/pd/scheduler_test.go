@@ -198,13 +198,13 @@ func TestPDSchedule(t *testing.T) {
 			prefixScorer := prefix.New(prefix.Config{HashBlockSize: 5, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
 
 			prefillSchedulerProfile := framework.NewSchedulerProfile().
-				WithFilters(filter.NewPrefillFilter()).
+				WithFilters(filter.NewPrefill()).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err := prefillSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := framework.NewSchedulerProfile().
-				WithFilters(filter.NewDecodeFilter()).
+				WithFilters(filter.NewDecode()).
 				WithScorers(framework.NewWeightedScorer(scorer.NewLoadAwareScorer(ctx, scorer.QueueThresholdDefault), 1)).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
