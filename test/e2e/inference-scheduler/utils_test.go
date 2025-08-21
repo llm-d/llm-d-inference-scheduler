@@ -12,7 +12,6 @@ import (
 	"github.com/onsi/gomega/gexec"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -73,7 +72,7 @@ func createObjsFromYaml(docs []string) []string {
 			// Wait for the CRD to be established.
 			testutils.CRDEstablished(ctx, k8sClient, clientObj.(*apiextv1.CustomResourceDefinition),
 				readyTimeout, interval)
-		case "deployment":
+		case "Deployment":
 			// Wait for the deployment to be available.
 			testutils.DeploymentAvailable(ctx, k8sClient, clientObj.(*appsv1.Deployment),
 				modelReadyTimeout, interval)
@@ -117,7 +116,7 @@ func getClientObject(kind string) client.Object {
 	case "serviceaccount":
 		return &corev1.ServiceAccount{}
 	default:
-		ginkgo.Fail(fmt.Sprintf("unsupported K8S kind %s", kind), 1)
+		ginkgo.Fail("unsupported K8S kind "+kind, 1)
 		return nil
 	}
 }
@@ -136,11 +135,12 @@ func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string
 
 	for _, pod := range pods {
 		podLabels := apilabels.Set(pod.Labels)
-		if prefillValidator.Matches(podLabels) {
+		switch {
+		case prefillValidator.Matches(podLabels):
 			prefillPods = append(prefillPods, pod.Name)
-		} else if decodeValidator.Matches(podLabels) {
+		case decodeValidator.Matches(podLabels):
 			decodePods = append(decodePods, pod.Name)
-		} else {
+		default:
 			// If not labelled at all, it's a decode pod
 			notFound := true
 			for decodeKey := range decodeLabels {
@@ -158,13 +158,13 @@ func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string
 	return prefillPods, decodePods
 }
 
-func getPods(labels map[string]string) []v1.Pod {
-	podList := v1.PodList{}
+func getPods(labels map[string]string) []corev1.Pod {
+	podList := corev1.PodList{}
 	selector := apilabels.SelectorFromSet(labels)
 	err := k8sClient.List(ctx, &podList, &client.ListOptions{LabelSelector: selector})
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	pods := []v1.Pod{}
+	pods := []corev1.Pod{}
 	for _, pod := range podList.Items {
 		if pod.DeletionTimestamp == nil {
 			pods = append(pods, pod)
@@ -198,9 +198,9 @@ func runKustomize(kustomizeDir string) []string {
 
 // applyYAMLFile reads a file containing YAML (possibly multiple docs)
 // and applies each object to the cluster.
-func applyYAMLFile(filePath string) []string {
+func applyYAMLFile(filePath string) {
 	// Create the resources from the manifest file
-	return createObjsFromYaml(readYaml(filePath))
+	createObjsFromYaml(readYaml(filePath))
 }
 
 func readYaml(filePath string) []string {

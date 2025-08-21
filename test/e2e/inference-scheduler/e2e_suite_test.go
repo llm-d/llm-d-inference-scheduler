@@ -2,10 +2,7 @@ package inferencescheduler
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -109,16 +106,20 @@ func setupK8sCluster() {
 	stdin, err := command.StdinPipe()
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	go func() {
-		defer stdin.Close()
+		defer func() {
+			err := stdin.Close()
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		}()
 		clusterConfig := strings.ReplaceAll(kindClusterConfig, "${PORT}", port)
-		io.WriteString(stdin, clusterConfig)
+		_, err := io.WriteString(stdin, clusterConfig)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	}()
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
 	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image",
-		fmt.Sprintf("ghcr.io/llm-d/llm-d-inference-sim:%s", vllmSimTag))
+		"ghcr.io/llm-d/llm-d-inference-sim:"+vllmSimTag)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
@@ -166,20 +167,6 @@ func createEnvoy() {
 	manifests := readYaml(envoyManifest)
 	ginkgo.By("Creating envoy proxy resources from manifest: " + envoyManifest)
 	createObjsFromYaml(manifests)
-}
-
-func getFreePort() (string, error) {
-	listener, err := net.Listen("tcp4", ":0")
-	if err != nil {
-		return "", err
-	}
-
-	address := listener.Addr().String()
-	portIdx := strings.Index(address, ":")
-	if portIdx == -1 {
-		return "", errors.New("failed to find free port")
-	}
-	return address[portIdx+1:], nil
 }
 
 func getTimeout(key string, fallback time.Duration) time.Duration {
