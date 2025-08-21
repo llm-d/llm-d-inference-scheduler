@@ -82,7 +82,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrChat).Should(gomega.BeElementOf(decodePods))
 
-			// Do an extra completion call with a different promt
+			// Do an extra completion call with a different prompt
 			nsHdr, podHdr := runCompletion(extraPrompt, modelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
@@ -93,7 +93,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrCompletion))
 
-			// Do an extra chat completion call with a different promt
+			// Do an extra chat completion call with a different prompt
 			nsHdr, podHdr = runChatCompletion(extraPrompt, modelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
@@ -277,7 +277,7 @@ schedulingProfiles:
     weight: 2
 `
 
-// EPP configuration for tunning with P/D
+// EPP configuration for running with P/D
 const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
@@ -304,6 +304,7 @@ schedulingProfiles:
     weight: 2
 `
 
+// EPP config for running with precise prefix scoring (i.e. KV events)
 const kvConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
