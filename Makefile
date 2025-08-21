@@ -73,7 +73,7 @@ test: test-unit test-e2e
 .PHONY: test-unit
 test-unit: download-tokenizer download-zmq
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	go test -ldflags="$(LDFLAGS)" -v ./...
+	go test -ldflags="$(LDFLAGS)" -v $$(echo $$(go list ./... | grep -v /test/))
 
 .PHONY: test-e2e
 test-e2e: image-build 
