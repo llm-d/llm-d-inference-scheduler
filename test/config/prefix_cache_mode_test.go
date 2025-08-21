@@ -129,9 +129,9 @@ schedulingProfiles:
 				}
 
 			} else {
-				_, err := giePlugins.PluginByType[*scorer.PrefixCacheTrackingScorer](handle, test.pluginName)
+				_, err := giePlugins.PluginByType[*scorer.PrefixCacheTracking](handle, test.pluginName)
 				if err != nil {
-					t.Fatalf("expected PrefixCacheTrackingScorer, but got error: %v", err)
+					t.Fatalf("expected PrefixCacheTracking, but got error: %v", err)
 				}
 
 			}

@@ -12,14 +12,14 @@ import (
 
 // RegisterAllPlugins registers the factory functions of all plugins in this repository.
 func RegisterAllPlugins() {
-	plugins.Register(filter.ByLabelFilterType, filter.ByLabelFilterFactory)
-	plugins.Register(filter.ByLabelSelectorFilterType, filter.ByLabelSelectorFactory)
-	plugins.Register(filter.DecodeFilterType, filter.DecodeFilterFactory)
-	plugins.Register(filter.PrefillFilterType, filter.PrefillFilterFactory)
+	plugins.Register(filter.ByLabelType, filter.ByLabelFactory)
+	plugins.Register(filter.ByLabelSelectorType, filter.ByLabelSelectorFactory)
+	plugins.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
+	plugins.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
 	plugins.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
 	plugins.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
 	plugins.Register(prefix.PrefixCachePluginType, scorer.PrefixCachePluginFactory)
-	plugins.Register(scorer.LoadAwareScorerType, scorer.LoadAwareScorerFactory)
-	plugins.Register(scorer.SessionAffinityScorerType, scorer.SessionAffinityScorerFactory)
-	plugins.Register(scorer.ActiveRequestScorerType, scorer.ActiveRequestScorerFactory)
+	plugins.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
+	plugins.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
+	plugins.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
 }

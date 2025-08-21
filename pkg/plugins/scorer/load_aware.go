@@ -13,58 +13,58 @@ import (
 )
 
 const (
-	// LoadAwareScorerType is the type of the LoadAwareScorer
-	LoadAwareScorerType = "load-aware-scorer"
+	// LoadAwareType is the type of the LoadAware scorer
+	LoadAwareType = "load-aware-scorer"
 
 	// QueueThresholdDefault defines the default queue threshold value
 	QueueThresholdDefault = 128
 )
 
-type loadAwareScorerParameters struct {
+type loadAwareParameters struct {
 	Threshold int `json:"threshold"`
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &LoadAwareScorer{}
+var _ framework.Scorer = &LoadAware{}
 
-// LoadAwareScorerFactory defines the factory function for the LoadAwareScorer
-func LoadAwareScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-	parameters := loadAwareScorerParameters{Threshold: QueueThresholdDefault}
+// LoadAwareFactory defines the factory function for the LoadAware
+func LoadAwareFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+	parameters := loadAwareParameters{Threshold: QueueThresholdDefault}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", LoadAwareScorerType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", LoadAwareType, err)
 		}
 	}
 
-	return NewLoadAwareScorer(handle.Context(), parameters.Threshold).WithName(name), nil
+	return NewLoadAware(handle.Context(), parameters.Threshold).WithName(name), nil
 }
 
-// NewLoadAwareScorer creates a new load based scorer
-func NewLoadAwareScorer(ctx context.Context, queueThreshold int) *LoadAwareScorer {
+// NewLoadAware creates a new load based scorer
+func NewLoadAware(ctx context.Context, queueThreshold int) *LoadAware {
 	if queueThreshold <= 0 {
 		queueThreshold = QueueThresholdDefault
 		log.FromContext(ctx).V(logutil.DEFAULT).Info(fmt.Sprintf("queueThreshold %d should be positive, using default queue threshold %d", queueThreshold, QueueThresholdDefault))
 	}
 
-	return &LoadAwareScorer{
-		typedName:      plugins.TypedName{Type: LoadAwareScorerType},
+	return &LoadAware{
+		typedName:      plugins.TypedName{Type: LoadAwareType},
 		queueThreshold: float64(queueThreshold),
 	}
 }
 
-// LoadAwareScorer scorer that is based on load
-type LoadAwareScorer struct {
+// LoadAware scorer that is based on load
+type LoadAware struct {
 	typedName      plugins.TypedName
 	queueThreshold float64
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *LoadAwareScorer) TypedName() plugins.TypedName {
+func (s *LoadAware) TypedName() plugins.TypedName {
 	return s.typedName
 }
 
 // WithName sets the name of the plugin.
-func (s *LoadAwareScorer) WithName(name string) *LoadAwareScorer {
+func (s *LoadAware) WithName(name string) *LoadAware {
 	s.typedName.Name = name
 	return s
 }
@@ -76,7 +76,7 @@ func (s *LoadAwareScorer) WithName(name string) *LoadAwareScorer {
 // Pod with requests in the queue will get score between 0.5 and 0.
 // Score 0 will get pod with number of requests in the queue equal to the threshold used in load-based filter
 // In the future, pods with additional capacity will get score higher than 0.5
-func (s *LoadAwareScorer) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+func (s *LoadAware) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[types.Pod]float64)
 
 	for _, pod := range pods {

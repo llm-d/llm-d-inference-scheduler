@@ -17,7 +17,7 @@ import (
 )
 
 // PrefixCacheTrackingConfig holds the configuration for the
-// PrefixCacheTrackingScorer.
+// PrefixCacheTracking.
 type PrefixCacheTrackingConfig struct {
 	// IndexerConfig holds the configuration for the `kvcache.Indexer` which is
 	// used to score pods based on the KV-cache index state.
@@ -29,7 +29,7 @@ type PrefixCacheTrackingConfig struct {
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &PrefixCacheTrackingScorer{}
+var _ framework.Scorer = &PrefixCacheTracking{}
 
 // PrefixCacheTrackingPluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
@@ -68,7 +68,7 @@ func PrefixCacheTrackingPluginFactory(name string, rawParameters json.RawMessage
 //
 // If the configuration is invalid or if the indexer fails to initialize,
 // an error is returned.
-func New(ctx context.Context, config PrefixCacheTrackingConfig) (*PrefixCacheTrackingScorer, error) {
+func New(ctx context.Context, config PrefixCacheTrackingConfig) (*PrefixCacheTracking, error) {
 	// initialize the indexer
 	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig)
 	if err != nil {
@@ -81,36 +81,36 @@ func New(ctx context.Context, config PrefixCacheTrackingConfig) (*PrefixCacheTra
 	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex())
 	pool.Start(ctx)
 
-	return &PrefixCacheTrackingScorer{
+	return &PrefixCacheTracking{
 		typedName:      plugins.TypedName{Type: prefix.PrefixCachePluginType},
 		kvCacheIndexer: kvCacheIndexer,
 	}, nil
 }
 
-// PrefixCacheTrackingScorer implements the framework.Scorer interface.
+// PrefixCacheTracking implements the framework.Scorer interface.
 // The scorer implements the `cache_tracking` mode of the prefix cache plugin.
 // It uses the `kvcache.Indexer` to score pods based on the KV-cache index
 // state, and the `kvevents.Pool` to subscribe to KV-cache events
 // to update the internal KV-cache index state.
-type PrefixCacheTrackingScorer struct {
+type PrefixCacheTracking struct {
 	typedName      plugins.TypedName
 	kvCacheIndexer *kvcache.Indexer
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *PrefixCacheTrackingScorer) TypedName() plugins.TypedName {
+func (s *PrefixCacheTracking) TypedName() plugins.TypedName {
 	return s.typedName
 }
 
 // WithName sets the name of the plugin.
-func (s *PrefixCacheTrackingScorer) WithName(name string) *PrefixCacheTrackingScorer {
+func (s *PrefixCacheTracking) WithName(name string) *PrefixCacheTracking {
 	s.typedName.Name = name
 	return s
 }
 
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
-func (s *PrefixCacheTrackingScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+func (s *PrefixCacheTracking) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(s.typedName.String()).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")

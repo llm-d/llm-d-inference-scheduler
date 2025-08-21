@@ -31,3 +31,5 @@ go.work.sum
 # IDE files
 .idea
 .vscode
+
+vendor

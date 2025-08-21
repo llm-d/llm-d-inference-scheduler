@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	// ByLabelFilterType is the type of the ByLabel filter
-	ByLabelFilterType = "by-label"
+	// ByLabelType is the type of the ByLabel filter
+	ByLabelType = "by-label"
 )
 
-type byLabelFilterParameters struct {
+type byLabelParameters struct {
 	Label         string   `json:"label"`
 	ValidValues   []string `json:"validValues"`
 	AllowsNoLabel bool     `json:"allowsNoLabel"`
@@ -23,12 +23,12 @@ type byLabelFilterParameters struct {
 
 var _ framework.Filter = &ByLabel{} // validate interface conformance
 
-// ByLabelFilterFactory defines the factory function for the ByLabelFilter
-func ByLabelFilterFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
-	parameters := byLabelFilterParameters{}
+// ByLabelFactory defines the factory function for the ByLabel filter.
+func ByLabelFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	parameters := byLabelParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelFilterType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelType, err)
 		}
 	}
 	return NewByLabel(name, parameters.Label, parameters.AllowsNoLabel, parameters.ValidValues...), nil
@@ -47,7 +47,7 @@ func NewByLabel(name string, labelName string, allowsNoLabel bool, validValues .
 	}
 
 	return &ByLabel{
-		typedName:     plugins.TypedName{Type: ByLabelFilterType, Name: name},
+		typedName:     plugins.TypedName{Type: ByLabelType, Name: name},
 		labelName:     labelName,
 		allowsNoLabel: allowsNoLabel,
 		validValues:   validValuesMap,

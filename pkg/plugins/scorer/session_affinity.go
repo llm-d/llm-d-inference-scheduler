@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	// SessionAffinityScorerType is the type of the SessionAffinityScorer
-	SessionAffinityScorerType = "session-affinity-scorer"
+	// SessionAffinityType is the type of the SessionAffinity scorer.
+	SessionAffinityType = "session-affinity-scorer"
 
 	sessionTokenHeader = "x-session-token" // name of the session header in request
 )
@@ -25,15 +25,15 @@ const (
 var _ framework.Scorer = &SessionAffinity{}
 var _ requestcontrol.PostResponse = &SessionAffinity{}
 
-// SessionAffinityScorerFactory defines the factory function for SessionAffinityScorer.
-func SessionAffinityScorerFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+// SessionAffinityFactory defines the factory function for SessionAffinity scorer.
+func SessionAffinityFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 	return NewSessionAffinity().WithName(name), nil
 }
 
 // NewSessionAffinity returns a scorer
 func NewSessionAffinity() *SessionAffinity {
 	return &SessionAffinity{
-		typedName: plugins.TypedName{Type: SessionAffinityScorerType},
+		typedName: plugins.TypedName{Type: SessionAffinityType},
 	}
 }
 

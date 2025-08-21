@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	// ByLabelSelectorFilterType is the type of the ByLabelsFilter
-	ByLabelSelectorFilterType = "by-label-selector"
+	// ByLabelSelectorType is the type of the ByLabelSelector filter
+	ByLabelSelectorType = "by-label-selector"
 )
 
 // compile-time type assertion
@@ -26,7 +26,7 @@ func ByLabelSelectorFactory(name string, rawParameters json.RawMessage, _ plugin
 	parameters := metav1.LabelSelector{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelSelectorFilterType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelSelectorType, err)
 		}
 	}
 	return NewByLabelSelector(name, &parameters)
@@ -44,7 +44,7 @@ func NewByLabelSelector(name string, selector *metav1.LabelSelector) (*ByLabelSe
 	}
 
 	return &ByLabelSelector{
-		typedName: plugins.TypedName{Type: ByLabelSelectorFilterType, Name: name},
+		typedName: plugins.TypedName{Type: ByLabelSelectorType, Name: name},
 		selector:  labelSelector,
 	}, nil
 }

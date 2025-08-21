@@ -18,17 +18,17 @@ import (
 )
 
 const (
-	// ActiveRequestScorerType is the type of the ActiveRequestScorer
-	ActiveRequestScorerType = "active-request-scorer"
+	// ActiveRequestType is the type of the ActiveRequest scorer.
+	ActiveRequestType = "active-request-scorer"
 
 	// defaultRequestTimeout defines the default timeout for open requests to be
 	// considered stale and removed from the cache.
 	defaultRequestTimeout = 2 * time.Minute
 )
 
-// ActiveRequestScorerParameters defines the parameters for the
-// ActiveRequestScorer.
-type ActiveRequestScorerParameters struct {
+// ActiveRequestParameters defines the parameters for the
+// ActiveRequest.
+type ActiveRequestParameters struct {
 	// RequestTimeout defines the timeout for requests in seconds.
 	// Once the request is "in-flight" for this duration, it is considered to
 	// be timed out and dropped.
@@ -48,22 +48,22 @@ func (r *requestEntry) String() string {
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &ActiveRequestScorer{}
+var _ framework.Scorer = &ActiveRequest{}
 
-// ActiveRequestScorerFactory defines the factory function for the ActiveRequestScorer.
-func ActiveRequestScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-	parameters := ActiveRequestScorerParameters{}
+// ActiveRequestFactory defines the factory function for the ActiveRequest scorer.
+func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+	parameters := ActiveRequestParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", ActiveRequestScorerType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", ActiveRequestType, err)
 		}
 	}
 
-	return NewActiveRequestScorer(handle.Context(), &parameters).WithName(name), nil
+	return NewActiveRequest(handle.Context(), &parameters).WithName(name), nil
 }
 
-// NewActiveRequestScorer creates a new ActiveRequestScorer scorer.
-func NewActiveRequestScorer(ctx context.Context, params *ActiveRequestScorerParameters) *ActiveRequestScorer {
+// NewActiveRequest creates a new ActiveRequest scorer.
+func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *ActiveRequest {
 	requestTimeout := defaultRequestTimeout
 	logger := log.FromContext(ctx)
 
@@ -83,8 +83,8 @@ func NewActiveRequestScorer(ctx context.Context, params *ActiveRequestScorerPara
 		ttlcache.WithDisableTouchOnHit[string, *requestEntry](),
 	)
 
-	scorer := &ActiveRequestScorer{
-		typedName:    plugins.TypedName{Type: ActiveRequestScorerType},
+	scorer := &ActiveRequest{
+		typedName:    plugins.TypedName{Type: ActiveRequestType},
 		requestCache: requestCache,
 		podCounts:    make(map[string]int),
 		mutex:        &sync.RWMutex{},
@@ -104,9 +104,9 @@ func NewActiveRequestScorer(ctx context.Context, params *ActiveRequestScorerPara
 	return scorer
 }
 
-// ActiveRequestScorer keeps track of individual requests being served
+// ActiveRequest keeps track of individual requests being served
 // per pod.
-type ActiveRequestScorer struct {
+type ActiveRequest struct {
 	typedName plugins.TypedName
 
 	// requestCache stores individual request entries with unique composite keys (podName.requestID)
@@ -118,19 +118,19 @@ type ActiveRequestScorer struct {
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *ActiveRequestScorer) TypedName() plugins.TypedName {
+func (s *ActiveRequest) TypedName() plugins.TypedName {
 	return s.typedName
 }
 
 // WithName sets the name of the plugin.
-func (s *ActiveRequestScorer) WithName(name string) *ActiveRequestScorer {
+func (s *ActiveRequest) WithName(name string) *ActiveRequest {
 	s.typedName.Name = name
 	return s
 }
 
 // Score scores the given pods based on the number of active requests
 // being served by each pod. The score is normalized to a range of 0-1.
-func (s *ActiveRequestScorer) Score(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest,
+func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest,
 	pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[string]int)
 	maxCount := 0
@@ -164,7 +164,7 @@ func (s *ActiveRequestScorer) Score(ctx context.Context, _ *types.CycleState, _ 
 // PreRequest is called before a request is sent to the target pod.
 // It creates a new request entry in the cache with its own TTL and
 // increments the pod count for fast lookup.
-func (s *ActiveRequestScorer) PreRequest(ctx context.Context, request *types.LLMRequest,
+func (s *ActiveRequest) PreRequest(ctx context.Context, request *types.LLMRequest,
 	schedulingResult *types.SchedulingResult, _ int) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
@@ -190,9 +190,9 @@ func (s *ActiveRequestScorer) PreRequest(ctx context.Context, request *types.LLM
 // PostResponse is called after a response is sent to the client.
 // It removes the specific request entry from the cache and decrements
 // the pod count.
-func (s *ActiveRequestScorer) PostResponse(ctx context.Context, request *types.LLMRequest,
+func (s *ActiveRequest) PostResponse(ctx context.Context, request *types.LLMRequest,
 	_ *requestcontrol.Response, targetPod *backend.Pod) {
-	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequestScorer.PostResponse")
+	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.PostResponse")
 	if targetPod == nil {
 		debugLogger.Info("Skipping PostResponse because targetPod is nil")
 		return
@@ -209,7 +209,7 @@ func (s *ActiveRequestScorer) PostResponse(ctx context.Context, request *types.L
 }
 
 // incrementPodCount increments the request count for a pod.
-func (s *ActiveRequestScorer) incrementPodCount(podName string) {
+func (s *ActiveRequest) incrementPodCount(podName string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -218,7 +218,7 @@ func (s *ActiveRequestScorer) incrementPodCount(podName string) {
 
 // decrementPodCount decrements the request count for a pod and removes
 // the entry if count reaches zero.
-func (s *ActiveRequestScorer) decrementPodCount(podName string) {
+func (s *ActiveRequest) decrementPodCount(podName string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
