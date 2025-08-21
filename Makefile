@@ -88,7 +88,7 @@ post-deploy-test: ## Run post deployment tests
 .PHONY: lint
 lint: check-golangci-lint check-typos ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	golangci-lint run
+	golangci-lint run --fix
 
 ##@ Build
 
