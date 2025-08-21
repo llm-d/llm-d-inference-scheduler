@@ -10,7 +10,6 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/shared"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
@@ -46,14 +45,14 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			epp := createEndPointPicker(simpleConfig)
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
-			gomega.Expect(prefillPods).Should(gomega.HaveLen(0))
+			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
 			nsHdr, podHdr := runCompletion(simplePrompt, modelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
-			nsHdr, podHdr = runChatCompletion(simplePrompt, modelName)
+			nsHdr, podHdr = runChatCompletion(simplePrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
@@ -78,7 +77,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrCompletion).Should(gomega.BeElementOf(decodePods))
 
-			nsHdr, podHdrChat := runChatCompletion(simplePrompt, modelName)
+			nsHdr, podHdrChat := runChatCompletion(simplePrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrChat).Should(gomega.BeElementOf(decodePods))
 
@@ -94,12 +93,12 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrCompletion))
 
 			// Do an extra chat completion call with a different prompt
-			nsHdr, podHdr = runChatCompletion(extraPrompt, modelName)
+			nsHdr, podHdr = runChatCompletion(extraPrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Run chat completion with the original prompt
-			nsHdr, podHdr = runChatCompletion(simplePrompt, modelName)
+			nsHdr, podHdr = runChatCompletion(simplePrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
@@ -117,7 +116,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
-			gomega.Expect(prefillPods).Should(gomega.HaveLen(0))
+			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
 			for range 5 {
@@ -191,7 +190,10 @@ func createEndPointPicker(eppConfig string) []string {
 	conn, err := grpc.NewClient("localhost:30081",
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer conn.Close()
+	defer func() {
+		err := conn.Close()
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	}()
 
 	client := healthPb.NewHealthClient(conn)
 	healthCheckReq := &healthPb.HealthCheckRequest{}
@@ -237,7 +239,7 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 	return namespaceHeader, podHeader
 }
 
-func runChatCompletion(prompt string, theModel shared.ChatModel) (string, string) {
+func runChatCompletion(prompt string) (string, string) {
 	var httpResp *http.Response
 	openaiclient := openai.NewClient(
 		option.WithBaseURL(fmt.Sprintf("http://localhost:%s/v1", port)))
@@ -246,7 +248,7 @@ func runChatCompletion(prompt string, theModel shared.ChatModel) (string, string
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage(prompt),
 		},
-		Model: theModel,
+		Model: modelName,
 	}
 	resp, err := openaiclient.Chat.Completions.New(ctx, params, option.WithResponseInto(&httpResp))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
