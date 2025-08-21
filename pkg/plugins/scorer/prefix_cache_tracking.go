@@ -16,6 +16,11 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
+// PodScorer defines the interface for scoring pods based on KV-cache state.
+type PodScorer interface {
+	GetPodScores(ctx context.Context, prompt, model string, pods []string) (map[string]int, error)
+}
+
 // PrefixCacheTrackingConfig holds the configuration for the
 // PrefixCacheTrackingScorer.
 type PrefixCacheTrackingConfig struct {
@@ -84,7 +89,17 @@ func New(ctx context.Context, config PrefixCacheTrackingConfig) (*PrefixCacheTra
 	return &PrefixCacheTrackingScorer{
 		typedName:      plugins.TypedName{Type: prefix.PrefixCachePluginType},
 		kvCacheIndexer: kvCacheIndexer,
+		podScorer:      kvCacheIndexer,
 	}, nil
+}
+
+// NewWithPodScorer creates a new PrefixCacheTrackingScorer with a custom PodScorer.
+// This is mainly used for testing to inject mock dependencies.
+func NewWithPodScorer(podScorer PodScorer) *PrefixCacheTrackingScorer {
+	return &PrefixCacheTrackingScorer{
+		typedName: plugins.TypedName{Type: prefix.PrefixCachePluginType},
+		podScorer: podScorer,
+	}
 }
 
 // PrefixCacheTrackingScorer implements the framework.Scorer interface.
@@ -95,6 +110,7 @@ func New(ctx context.Context, config PrefixCacheTrackingConfig) (*PrefixCacheTra
 type PrefixCacheTrackingScorer struct {
 	typedName      plugins.TypedName
 	kvCacheIndexer *kvcache.Indexer
+	podScorer      PodScorer
 }
 
 // TypedName returns the typed name of the plugin.
@@ -114,13 +130,13 @@ func (s *PrefixCacheTrackingScorer) Score(ctx context.Context, _ *types.CycleSta
 	loggerDebug := log.FromContext(ctx).WithName(s.typedName.String()).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")
-		return nil
+		return make(map[types.Pod]float64)
 	}
 
-	scores, err := s.kvCacheIndexer.GetPodScores(ctx, request.Prompt, request.TargetModel, nil)
+	scores, err := s.podScorer.GetPodScores(ctx, request.Prompt, request.TargetModel, nil)
 	if err != nil {
 		loggerDebug.Error(err, "Failed to get pod scores")
-		return nil
+		return make(map[types.Pod]float64)
 	}
 	loggerDebug.Info("Got pod scores", "scores", scores)
 
