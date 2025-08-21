@@ -42,7 +42,7 @@ const (
 	modelName = "food-review"
 	// kvModelName is the model name used in KV tests.
 	kvModelName = "Qwen/Qwen2.5-1.5B-Instruct"
-	// safeKvModelName is the safe fom of the model name used in KV tests
+	// safeKvModelName is the safe form of the model name used in KV tests
 	safeKvModelName = "qwen-qwen2-5-1-5b-instruct"
 	// envoyManifest is the manifest for the envoy proxy test resources.
 	envoyManifest = "../yaml/envoy.yaml"

@@ -117,12 +117,12 @@ func getClientObject(kind string) client.Object {
 	case "serviceaccount":
 		return &corev1.ServiceAccount{}
 	default:
-		ginkgo.Fail(fmt.Sprintf("unsupport K8S kind %s", kind), 1)
+		ginkgo.Fail(fmt.Sprintf("unsupported K8S kind %s", kind), 1)
 		return nil
 	}
 }
 
-// getModelServerPods Returns the list of Prefill and Decode vLLM pods seperately
+// getModelServerPods Returns the list of Prefill and Decode vLLM pods separately
 func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string) ([]string, []string) {
 	pods := getPods(podLabels)
 
