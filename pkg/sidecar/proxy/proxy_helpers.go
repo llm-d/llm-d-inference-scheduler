@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"syscall"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // startHTTP starts the HTTP reverse proxy.
@@ -27,8 +29,15 @@ func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
 	}
 	s.addr = ln.Addr()
 
+	// Wrap handler with OpenTelemetry middleware to extract trace context from incoming requests
+	handler := otelhttp.NewHandler(s.handler, "llm-d-pd-proxy",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return "llm_d.pd_proxy." + r.Method + " " + r.URL.Path
+		}),
+	)
+
 	server := &http.Server{
-		Handler: s.handler,
+		Handler: handler,
 		// No ReadTimeout/WriteTimeout for LLM inference - can take hours for large contexts
 		IdleTimeout:       300 * time.Second, // 5 minutes for keep-alive connections
 		ReadHeaderTimeout: 30 * time.Second,  // Reasonable for headers only
