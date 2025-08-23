@@ -27,20 +27,52 @@ package main
 import (
 	"os"
 
+	"go.opentelemetry.io/otel/attribute"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 func main() {
+	ctx := ctrl.SetupSignalHandler()
+
+	// Initialize tracing before creating any spans
+	shutdownTracing, err := telemetry.InitTracing(ctx)
+	if err != nil {
+		// Log error but don't fail - tracing is optional
+		ctrl.Log.Error(err, "Failed to initialize tracing")
+	}
+	if shutdownTracing != nil {
+		defer func() {
+			if err := shutdownTracing(ctx); err != nil {
+				ctrl.Log.Error(err, "Failed to shutdown tracing")
+			}
+		}()
+	}
+
+	// Add startup span to verify tracing is working
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(ctx, "llm_d.epp.startup")
+	span.SetAttributes(
+		attribute.String("component", "llm-d-inference-scheduler"),
+		attribute.String("operation", "startup"),
+	)
+	defer span.End()
+
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
 
+	// Note: GIE built-in plugins are automatically registered by the runner
+	// when it processes configuration in runner.parsePluginsConfiguration()
+
 	if err := runner.NewRunner().
 		WithCustomCollectors(metrics.GetCollectors()...).
-		Run(ctrl.SetupSignalHandler()); err != nil {
+		Run(ctx); err != nil {
+		span.SetAttributes(attribute.String("operation.outcome", "error"))
 		os.Exit(1)
 	}
+	span.SetAttributes(attribute.String("operation.outcome", "success"))
 }

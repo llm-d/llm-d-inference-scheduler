@@ -6,15 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache/kvevents"
 	preprocessing "github.com/llm-d/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 const (
@@ -123,23 +129,74 @@ func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScor
 	return s
 }
 
+// extractPromptFromRequest extracts the prompt text from an LLMRequest based on request type.
+func extractPromptFromRequest(request *types.LLMRequest) string {
+	if request == nil || request.Body == nil {
+		return ""
+	}
+
+	// Handle completions request
+	if request.Body.Completions != nil {
+		return request.Body.Completions.Prompt
+	}
+
+	// Handle chat completions request
+	if request.Body.ChatCompletions != nil {
+		var messages []string
+		for _, msg := range request.Body.ChatCompletions.Messages {
+			messages = append(messages, msg.Content.PlainText())
+		}
+		return strings.Join(messages, " ")
+	}
+
+	return ""
+}
+
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
 func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+	// Start tracing span for scoring operation
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(ctx, "llm_d.epp.scorer.prefix_cache",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	debugLogger := logger.V(logutil.DEBUG)
 
+	// Set initial attributes
+	span.SetAttributes(
+		attribute.Int("llm_d.scorer.candidate_pods", len(pods)),
+	)
+
+	if request != nil && request.TargetModel != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+	}
+	if request != nil && request.RequestId != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+	}
+
 	if request == nil {
 		debugLogger.Info("Request is nil, skipping scoring")
+		span.SetAttributes(attribute.String("llm_d.scorer.result", "skipped_nil_request"))
+		span.SetStatus(codes.Ok, "")
 		return nil
 	}
 
 	scores, err := s.getScores(ctx, request)
 	if err != nil {
 		logger.Error(err, "Failed to get pod scores")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil
 	}
 	debugLogger.Info("Got pod scores", "scores", scores)
+
+	// Track scoring statistics
+	span.SetAttributes(
+		attribute.Int("llm_d.scorer.scores_computed", len(scores)),
+	)
 
 	podToKey := func(pod types.Pod) (string, bool) {
 		metricsPod := pod.GetPod()
@@ -150,7 +207,30 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 		return metricsPod.Address, true
 	}
 
-	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
+	normalizedScores := indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
+
+	// Calculate score distribution for observability
+	if len(normalizedScores) > 0 {
+		maxScore := 0.0
+		totalScore := 0.0
+		for _, score := range normalizedScores {
+			if score > maxScore {
+				maxScore = score
+			}
+			totalScore += score
+		}
+		avgScore := totalScore / float64(len(normalizedScores))
+
+		span.SetAttributes(
+			attribute.Float64("llm_d.scorer.score.max", maxScore),
+			attribute.Float64("llm_d.scorer.score.avg", avgScore),
+			attribute.Int("llm_d.scorer.pods_scored", len(normalizedScores)),
+		)
+	}
+
+	span.SetAttributes(attribute.String("llm_d.scorer.result", "success"))
+	span.SetStatus(codes.Ok, "")
+	return normalizedScores
 }
 
 // getScores retrieves the pod scores from the KV-cache indexer
