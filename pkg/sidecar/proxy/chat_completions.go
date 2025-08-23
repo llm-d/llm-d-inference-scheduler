@@ -17,11 +17,22 @@ limitations under the License.
 package proxy
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const requestStartTimeKey contextKey = "request_start_time"
 
 var (
 	// ChatCompletionsPath is the OpenAI chat completions path
@@ -32,6 +43,21 @@ var (
 )
 
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
+	requestStart := time.Now()
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(r.Context(), "llm_d.pd_proxy.request",
+		trace.WithSpanKind(trace.SpanKindServer),
+	)
+	defer span.End()
+
+	// Update request context with span and start time
+	ctx = context.WithValue(ctx, requestStartTimeKey, requestStart)
+	r = r.WithContext(ctx)
+
+	span.SetAttributes(
+		attribute.String("llm_d.pd_proxy.connector", s.config.Connector),
+	)
+
 	var prefillHostPorts []string
 	prefillHostPorts = r.Header.Values(common.PrefillPodHeader)
 
@@ -56,12 +82,22 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 
 	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
+		span.SetAttributes(
+			attribute.Bool("llm_d.pd_proxy.disaggregation_enabled", false),
+			attribute.String("llm_d.pd_proxy.reason", "no_prefill_header"),
+		)
 
 		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
 			s.decoderProxy.ServeHTTP(w, r)
 		}
 		return
 	}
+
+	span.SetAttributes(
+		attribute.Bool("llm_d.pd_proxy.disaggregation_enabled", true),
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillHostPort),
+		attribute.Int("llm_d.pd_proxy.prefill_candidates", numHosts),
+	)
 
 	// SSRF Protection: Check if the prefill target is allowed
 	if !s.allowlistValidator.IsAllowed(prefillHostPort) {
@@ -70,6 +106,11 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 			"clientIP", r.RemoteAddr,
 			"userAgent", r.Header.Get("User-Agent"),
 			"requestPath", r.URL.Path)
+		span.SetAttributes(
+			attribute.String("llm_d.pd_proxy.error", "ssrf_protection_denied"),
+			attribute.String("llm_d.pd_proxy.denied_target", prefillHostPort),
+		)
+		span.SetStatus(codes.Error, "SSRF protection: prefill target not in allowlist")
 		http.Error(w, "Forbidden: prefill target not allowed by SSRF protection", http.StatusForbidden)
 		return
 	}

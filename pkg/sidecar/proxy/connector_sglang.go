@@ -28,6 +28,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -77,6 +82,20 @@ func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefi
 }
 
 func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string) {
+	tracer := telemetry.Tracer()
+	ctx := r.Context()
+
+	// Prefill Stage - async
+	ctx, prefillSpan := tracer.Start(ctx, "llm_d.pd_proxy.prefill",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	prefillSpan.SetAttributes(
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillHost),
+		attribute.String("llm_d.pd_proxy.connector", "sglang"),
+		attribute.Bool("llm_d.pd_proxy.prefill.async", true),
+	)
+	prefillStart := time.Now()
+
 	// Create separate requests for prefill and decode
 	// Use context.WithoutCancel for prefillReq to prevent it from being aborted
 	// if the main HTTP handler (which serves decodeReq) finishes first.
@@ -85,6 +104,8 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillHost)
 	if err != nil {
+		prefillSpan.SetStatus(codes.Error, "failed to create prefill handler")
+		prefillSpan.End()
 		if err := errorBadGateway(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -93,6 +114,7 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 
 	// Send prefill request asynchronously
 	go func() {
+		defer prefillSpan.End()
 		defer func() {
 			if rec := recover(); rec != nil && rec != http.ErrAbortHandler {
 				s.logger.Error(fmt.Errorf("panic: %v", rec), "panic in prefill request")
@@ -100,11 +122,71 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 		}()
 		pw := &bufferedResponseWriter{}
 		prefillHandler.ServeHTTP(pw, prefillReq)
+		prefillDuration := time.Since(prefillStart)
+		prefillSpan.SetAttributes(
+			attribute.Int("llm_d.pd_proxy.prefill.status_code", pw.statusCode),
+			attribute.Float64("llm_d.pd_proxy.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+		)
+		if pw.statusCode < 200 || pw.statusCode >= 300 {
+			prefillSpan.SetStatus(codes.Error, "prefill request failed")
+		}
 		s.logger.V(5).Info("prefill request completed", "status", pw.statusCode)
 	}()
 
+	// Decode Stage - sync
+	ctx, decodeSpan := tracer.Start(ctx, "llm_d.pd_proxy.decode",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer decodeSpan.End()
+
+	decodeSpan.SetAttributes(
+		attribute.String("llm_d.pd_proxy.connector", "sglang"),
+		attribute.Bool("llm_d.pd_proxy.decode.concurrent_with_prefill", true),
+	)
+	decodeStart := time.Now()
+
 	// Send decode request synchronously
+	decodeReq = decodeReq.WithContext(ctx)
 	s.decoderProxy.ServeHTTP(w, decodeReq)
+
+	decodeDuration := time.Since(decodeStart)
+	decodeSpan.SetAttributes(
+		attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())),
+		attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host),
+	)
+
+	// Calculate end-to-end P/D metrics and add to decode span
+	// Note: SGLang runs prefill and decode concurrently, so timing is different from sequential P/D
+	// Note: After tracer.Start() above, ctx contains the decode span, so SpanFromContext returns it
+	if currentSpan := trace.SpanFromContext(ctx); currentSpan.SpanContext().IsValid() {
+		// Get request start time from context
+		var totalDuration time.Duration
+		var trueTTFT time.Duration
+		if requestStartValue := ctx.Value(requestStartTimeKey); requestStartValue != nil {
+			if requestStart, ok := requestStartValue.(time.Time); ok {
+				totalDuration = time.Since(requestStart)
+
+				// For SGLang, prefill and decode run concurrently, but True TTFT still needs to capture
+				// the full coordinator overhead from gateway start to when decode can begin generating.
+				// This includes: gateway routing + scheduling overhead + time to start decode request
+				// Note: In concurrent mode, this is different from sequential P/D where we wait for prefill
+				trueTTFT = decodeStart.Sub(requestStart)
+			}
+		}
+
+		currentSpan.SetAttributes(
+			// End-to-end P/D timing metrics for concurrent P/D
+			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.true_ttft_ms", float64(trueTTFT.Milliseconds())),
+
+			// Component breakdown (note: prefill runs concurrently)
+			attribute.Float64("llm_d.pd_proxy.decode_duration_ms", float64(decodeDuration.Milliseconds())),
+
+			// Note: prefill_duration_ms is tracked in the async prefill span
+			// SGLang-specific: prefill and decode overlap in time
+			attribute.Bool("llm_d.pd_proxy.concurrent_pd", true),
+		)
+	}
 }
 
 func cloneWithJSONBody(ctx context.Context, r *http.Request, body []byte) *http.Request {
