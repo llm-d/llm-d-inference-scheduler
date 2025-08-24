@@ -21,8 +21,9 @@ const (
 	// ActiveRequestScorerType is the type of the ActiveRequestScorer
 	ActiveRequestScorerType = "active-request-scorer"
 
-	// defaultRequestTimeout defines the default timeout for requests in seconds
-	defaultRequestTimeout = 300
+	// defaultRequestTimeout defines the default timeout for open requests to be
+	// considered stale and removed from the cache.
+	defaultRequestTimeout = 2 * time.Minute
 )
 
 // ActiveRequestScorerParameters defines the parameters for the
@@ -31,7 +32,8 @@ type ActiveRequestScorerParameters struct {
 	// RequestTimeout defines the timeout for requests in seconds.
 	// Once the request is "in-flight" for this duration, it is considered to
 	// be timed out and dropped.
-	RequestTimeout int `json:"requestTimeout"`
+	// This field accepts duration strings like "30s", "1m", "2h".
+	RequestTimeout string `json:"requestTimeout"`
 }
 
 // requestEntry represents a single request in the cache
@@ -50,7 +52,7 @@ var _ framework.Scorer = &ActiveRequestScorer{}
 
 // ActiveRequestScorerFactory defines the factory function for the ActiveRequestScorer.
 func ActiveRequestScorerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
-	parameters := ActiveRequestScorerParameters{RequestTimeout: defaultRequestTimeout}
+	parameters := ActiveRequestScorerParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", ActiveRequestScorerType, err)
@@ -63,15 +65,21 @@ func ActiveRequestScorerFactory(name string, rawParameters json.RawMessage, hand
 // NewActiveRequestScorer creates a new ActiveRequestScorer scorer.
 func NewActiveRequestScorer(ctx context.Context, params *ActiveRequestScorerParameters) *ActiveRequestScorer {
 	requestTimeout := defaultRequestTimeout
+	logger := log.FromContext(ctx)
 
-	if params != nil && params.RequestTimeout > 0 {
-		requestTimeout = params.RequestTimeout
-		log.FromContext(ctx).V(logutil.DEFAULT).Info("Request timeout should be positive, using default request timeout")
+	if params != nil && params.RequestTimeout != "" {
+		paramsRequestTimeout, err := time.ParseDuration(params.RequestTimeout)
+		if err != nil || paramsRequestTimeout <= 0 {
+			logger.Error(err, "Invalid request timeout duration, using default request timeout")
+		} else {
+			requestTimeout = paramsRequestTimeout
+			logger.Info("Using request timeout", "requestTimeout", requestTimeout)
+		}
 	}
 
 	// cache for individual requests with their own TTL
 	requestCache := ttlcache.New[string, *requestEntry](
-		ttlcache.WithTTL[string, *requestEntry](time.Duration(requestTimeout)*time.Second),
+		ttlcache.WithTTL[string, *requestEntry](requestTimeout),
 		ttlcache.WithDisableTouchOnHit[string, *requestEntry](),
 	)
 
@@ -223,8 +231,8 @@ func (s *ActiveRequestScorer) decrementPodCount(podName string) {
 	}
 }
 
-func cleanCachePeriodically(ctx context.Context, cache *ttlcache.Cache[string, *requestEntry], requestTimeout int) {
-	ticker := time.NewTicker(time.Duration(requestTimeout) * time.Second)
+func cleanCachePeriodically(ctx context.Context, cache *ttlcache.Cache[string, *requestEntry], requestTimeout time.Duration) {
+	ticker := time.NewTicker(requestTimeout)
 	defer ticker.Stop()
 
 	for {

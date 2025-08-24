@@ -87,15 +87,10 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			params := &ActiveRequestScorerParameters{RequestTimeout: 300}
-			scorer := NewActiveRequestScorer(context.Background(), params)
+			scorer := NewActiveRequestScorer(context.Background(), nil)
 			test.setupCache(scorer)
 
 			got := scorer.Score(context.Background(), nil, nil, test.input)
-
-			// Debug output
-			t.Logf("Got scores: %+v", got)
-			t.Logf("Want scores: %+v", test.wantScores)
 
 			if diff := cmp.Diff(test.wantScores, got); diff != "" {
 				t.Errorf("Unexpected output (-want +got): %v", diff)
@@ -107,8 +102,7 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	ctx := context.Background()
 
-	params := &ActiveRequestScorerParameters{RequestTimeout: 300}
-	scorer := NewActiveRequestScorer(ctx, params)
+	scorer := NewActiveRequestScorer(ctx, nil)
 
 	podA := &types.PodMetrics{
 		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
@@ -177,8 +171,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 func TestActiveRequestScorer_PostResponse(t *testing.T) {
 	ctx := context.Background()
 
-	params := &ActiveRequestScorerParameters{RequestTimeout: 300}
-	scorer := NewActiveRequestScorer(ctx, params)
+	scorer := NewActiveRequestScorer(ctx, nil)
 
 	request := &types.LLMRequest{
 		RequestId: "test-request-1",
@@ -235,7 +228,7 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 	ctx := context.Background()
 
 	// Use very short timeout for test
-	params := &ActiveRequestScorerParameters{RequestTimeout: 1}
+	params := &ActiveRequestScorerParameters{RequestTimeout: "1s"}
 	scorer := NewActiveRequestScorer(ctx, params) // 1 second timeout
 
 	request := &types.LLMRequest{
@@ -281,7 +274,7 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 }
 
 func TestNewActiveRequestScorer_InvalidTimeout(t *testing.T) {
-	params := &ActiveRequestScorerParameters{RequestTimeout: -1}
+	params := &ActiveRequestScorerParameters{RequestTimeout: "invalid"}
 	scorer := NewActiveRequestScorer(context.Background(), params)
 
 	// Should use default timeout when invalid value is provided
@@ -291,8 +284,7 @@ func TestNewActiveRequestScorer_InvalidTimeout(t *testing.T) {
 }
 
 func TestActiveRequestScorer_TypedName(t *testing.T) {
-	params := &ActiveRequestScorerParameters{RequestTimeout: 300}
-	scorer := NewActiveRequestScorer(context.Background(), params)
+	scorer := NewActiveRequestScorer(context.Background(), nil)
 
 	typedName := scorer.TypedName()
 	if typedName.Type != ActiveRequestScorerType {
@@ -301,8 +293,7 @@ func TestActiveRequestScorer_TypedName(t *testing.T) {
 }
 
 func TestActiveRequestScorer_WithName(t *testing.T) {
-	params := &ActiveRequestScorerParameters{RequestTimeout: 300}
-	scorer := NewActiveRequestScorer(context.Background(), params)
+	scorer := NewActiveRequestScorer(context.Background(), nil)
 	testName := "test-scorer"
 
 	scorer = scorer.WithName(testName)
