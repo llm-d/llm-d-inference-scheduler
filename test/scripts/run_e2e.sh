@@ -31,4 +31,4 @@ docker pull ghcr.io/llm-d/llm-d-routing-sidecar:${ROUTING_SIDECAR_TAG}
 echo "Running end to end tests"
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-go test -v ${DIR}/../e2e/inference-scheduler/ -ginkgo.v
+go test -v ${DIR}/../e2e/ -ginkgo.v
