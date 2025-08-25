@@ -73,7 +73,7 @@ test: test-unit
 .PHONY: test-unit
 test-unit: download-tokenizer download-zmq
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	go test -ldflags="$(LDFLAGS)" -v ./...
+	go test -ldflags="$(LDFLAGS)" -v -covermode=atomic -coverprofile=go-test-coverage.out ./...
 
 .PHONY: test-integration
 test-integration: download-tokenizer download-zmq
