@@ -1,4 +1,4 @@
-package inferencescheduler
+package e2e
 
 import (
 	"context"
@@ -18,8 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	k8slog "sigs.k8s.io/controller-runtime/pkg/log"
-
 	infextv1a2 "sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 )
 
 const (
@@ -32,9 +32,9 @@ const (
 	// defaultInterval is the default interval to check if a resource exists or ready conditions.
 	defaultInterval = time.Millisecond * 250
 	// xInferPoolManifest is the manifest for the inference pool CRD with 'inference.networking.x-k8s.io' group.
-	gieCrdsKustomize = "../../../deploy/components/crds-gie"
+	gieCrdsKustomize = "../../deploy/components/crds-gie"
 	// inferExtManifest is the manifest for the inference extension test resources.
-	inferExtManifest = "../yaml/inference-pools.yaml"
+	inferExtManifest = "./yaml/inference-pools.yaml"
 	// modelName is the test model name.
 	modelName = "food-review"
 	// kvModelName is the model name used in KV tests.
@@ -42,15 +42,15 @@ const (
 	// safeKvModelName is the safe form of the model name used in KV tests
 	safeKvModelName = "qwen-qwen2-5-1-5b-instruct"
 	// envoyManifest is the manifest for the envoy proxy test resources.
-	envoyManifest = "../yaml/envoy.yaml"
+	envoyManifest = "./yaml/envoy.yaml"
 	// eppManifest is the manifest for the deployment of the EPP
-	eppManifest = "../yaml/deployments.yaml"
+	eppManifest = "./yaml/deployments.yaml"
 	// rbacManifest is the manifest for the EPP's RBAC resources.
-	rbacManifest = "../yaml/rbac.yaml"
+	rbacManifest = "./yaml/rbac.yaml"
 	// serviceAccountManifest is the manifest for the EPP's service account resources.
-	serviceAccountManifest = "../yaml/service-accounts.yaml"
+	serviceAccountManifest = "./yaml/service-accounts.yaml"
 	// servicesManifest is the manifest for the EPP's service resources.
-	servicesManifest = "../yaml/services.yaml"
+	servicesManifest = "./yaml/services.yaml"
 	// nsName is the namespace in which the K8S objects will be created
 	nsName = "default"
 )
@@ -61,8 +61,8 @@ var (
 	port      string
 	scheme    = runtime.NewScheme()
 
-	vllmSimTag        = getEnvWithDefault("VLLM_SIMULATOR_TAG", "dev")
-	routingSideCarTag = getEnvWithDefault("ROUTING_SIDECAR_TAG", "v0.2.0")
+	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
+	routingSideCarTag = env.GetEnvString("ROUTING_SIDECAR_TAG", "v0.2.0", ginkgo.GinkgoLogr)
 
 	existsTimeout     = getTimeout("EXISTS_TIMEOUT", defaultExistsTimeout)
 	readyTimeout      = getTimeout("READY_TIMEOUT", defaultReadyTimeout)
@@ -176,14 +176,6 @@ func getTimeout(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
-}
-
-func getEnvWithDefault(envName string, defaultValue string) string {
-	result := os.Getenv(envName)
-	if result != "" {
-		return result
-	}
-	return defaultValue
 }
 
 const kindClusterConfig = `

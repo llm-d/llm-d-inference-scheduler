@@ -1,4 +1,4 @@
-package inferencescheduler
+package e2e
 
 import (
 	"fmt"
@@ -20,10 +20,10 @@ import (
 const (
 	// simDeployment references the YAML file for the deployment
 	// running the vLLM simulator without PD
-	simDeployment = "../yaml/vllm-sim.yaml"
+	simDeployment = "./yaml/vllm-sim.yaml"
 	// simPdDeployment references the YAML file for the deployment
 	// running the vLLM simulator with PD
-	simPdDeployment = "../yaml/vllm-sim-pd.yaml"
+	simPdDeployment = "./yaml/vllm-sim-pd.yaml"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
