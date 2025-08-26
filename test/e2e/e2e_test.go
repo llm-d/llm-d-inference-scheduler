@@ -191,6 +191,7 @@ func createEndPointPicker(eppConfig string) []string {
 	objects = append(objects, createObjsFromYaml(eppYamls)...)
 	podsInDeploymentsReady(objects)
 
+	ginkgo.By("Waiting for EPP to report that it is serving")
 	conn, err := grpc.NewClient("localhost:30081",
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())

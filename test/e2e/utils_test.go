@@ -182,6 +182,7 @@ func podsInDeploymentsReady(objects []string) {
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
 		if strings.ToLower(split[0]) == "deployment" {
+			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
 			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
 		}
 	}
