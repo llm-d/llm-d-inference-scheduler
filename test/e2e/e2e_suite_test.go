@@ -130,7 +130,7 @@ func setupK8sCluster() {
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
 	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image",
-		"ghcr.io/llm-d/llm-d-routing-sidecar:v0.2.0")
+		"ghcr.io/llm-d/llm-d-routing-sidecar:"+routingSideCarTag)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
