@@ -182,7 +182,11 @@ func createEndPointPicker(eppConfig string) []string {
 	objects := []string{"ConfigMap/epp-config"}
 
 	eppYamls := readYaml(eppManifest)
-	eppYamls = substituteMany(eppYamls, map[string]string{"${POOL_NAME}": modelName + "-inference-pool"})
+	eppYamls = substituteMany(eppYamls,
+		map[string]string{
+			"${EPP_TAG}":   eppTag,
+			"${POOL_NAME}": modelName + "-inference-pool",
+		})
 
 	objects = append(objects, createObjsFromYaml(eppYamls)...)
 	podsInDeploymentsReady(objects)

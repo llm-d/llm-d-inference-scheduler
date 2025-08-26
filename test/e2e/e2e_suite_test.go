@@ -60,6 +60,7 @@ var (
 	port      string
 	scheme    = runtime.NewScheme()
 
+	eppTag            = env.GetEnvString("EPP_TAG", "dev", ginkgo.GinkgoLogr)
 	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
 	routingSideCarTag = env.GetEnvString("ROUTING_SIDECAR_TAG", "v0.2.0", ginkgo.GinkgoLogr)
 
@@ -124,7 +125,7 @@ func setupK8sCluster() {
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
 	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image",
-		"ghcr.io/llm-d/llm-d-inference-scheduler:dev")
+		"ghcr.io/llm-d/llm-d-inference-scheduler:"+eppTag)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
