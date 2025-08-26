@@ -198,23 +198,14 @@ func createEndPointPicker(eppConfig string) []string {
 		err := conn.Close()
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	}()
-
 	client := healthPb.NewHealthClient(conn)
 	healthCheckReq := &healthPb.HealthCheckRequest{}
-	checkCount := 20
-	serving := false
 
-	// Wait for EPP to be really ready
-	for checkCount > 0 {
-		time.Sleep(2 * time.Second)
-
+	gomega.Eventually(func() bool {
 		resp, err := client.Check(ctx, healthCheckReq)
-		if err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING {
-			serving = true
-			break
-		}
-	}
-	gomega.Expect(serving).Should(gomega.BeTrue())
+		return err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING
+	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
+	ginkgo.By("EPP reports that it is serving")
 
 	return objects
 }
