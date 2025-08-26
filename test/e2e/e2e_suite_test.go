@@ -3,7 +3,6 @@ package e2e
 import (
 	"context"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -64,9 +63,9 @@ var (
 	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
 	routingSideCarTag = env.GetEnvString("ROUTING_SIDECAR_TAG", "v0.2.0", ginkgo.GinkgoLogr)
 
-	existsTimeout     = getTimeout("EXISTS_TIMEOUT", defaultExistsTimeout)
-	readyTimeout      = getTimeout("READY_TIMEOUT", defaultReadyTimeout)
-	modelReadyTimeout = getTimeout("MODEL_READY_TIMEOUT", defaultModelReadyTimeout)
+	existsTimeout     = env.GetEnvDuration("EXISTS_TIMEOUT", defaultExistsTimeout, ginkgo.GinkgoLogr)
+	readyTimeout      = env.GetEnvDuration("READY_TIMEOUT", defaultReadyTimeout, ginkgo.GinkgoLogr)
+	modelReadyTimeout = env.GetEnvDuration("MODEL_READY_TIMEOUT", defaultModelReadyTimeout, ginkgo.GinkgoLogr)
 	interval          = defaultInterval
 )
 
@@ -167,15 +166,6 @@ func createEnvoy() {
 	manifests := readYaml(envoyManifest)
 	ginkgo.By("Creating envoy proxy resources from manifest: " + envoyManifest)
 	createObjsFromYaml(manifests)
-}
-
-func getTimeout(key string, fallback time.Duration) time.Duration {
-	if value, ok := os.LookupEnv(key); ok {
-		if parsed, err := time.ParseDuration(value); err == nil {
-			return parsed
-		}
-	}
-	return fallback
 }
 
 const kindClusterConfig = `
