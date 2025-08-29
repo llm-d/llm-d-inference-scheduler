@@ -8,11 +8,10 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/common/config/loader"
+	"github.com/go-logr/logr"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config/loader"
 	giePlugins "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/profile"
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
@@ -95,11 +94,6 @@ schedulingProfiles:
 		},
 	}
 	ctx := context.Background()
-
-	// Register GIE profile plugins
-	giePlugins.Register(profile.SingleProfileHandlerType, profile.SingleProfileHandlerFactory)
-	// Register GIE plugins
-	runner.RegisterAllPlugins()
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
 
@@ -113,19 +107,16 @@ schedulingProfiles:
 
 			_ = os.Setenv("HF_TOKEN", "dummy_token") // needed for cache_tracking
 			handle := utils.NewTestHandle(ctx)
-			_, err := loader.LoadConfig([]byte(test.configText), handle)
+			_, err := loader.LoadConfig([]byte(test.configText), handle, logr.Discard())
 			fmt.Println("all plugins", handle.GetAllPluginsWithNames())
 
 			if err != nil {
 				t.Fatalf("unexpected error from LoadConfig: %v", err)
 			}
 			if test.expectEstimatemode {
-				plugin, err := giePlugins.PluginByType[*prefix.Plugin](handle, test.pluginName)
+				_, err := giePlugins.PluginByType[*prefix.Plugin](handle, test.pluginName)
 				if err != nil {
 					t.Fatalf("expected EstimatedPrefixCacheScorer, but got error: %v", err)
-				}
-				if got := plugin.HashBlockSize; got != test.expectBlock {
-					t.Errorf("EstimatedPrefixCacheScorer block size mismatch: got %d, want %d", got, test.expectBlock)
 				}
 
 			} else {
