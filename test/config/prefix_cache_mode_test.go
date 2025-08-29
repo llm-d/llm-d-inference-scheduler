@@ -9,12 +9,13 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-logr/logr"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config/loader"
 	giePlugins "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
 func TestPrefixCacheModes(t *testing.T) {
