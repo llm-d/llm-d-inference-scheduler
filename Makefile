@@ -71,17 +71,17 @@ format: ## Format Go source files
 test: test-unit test-e2e
 
 .PHONY: test-unit
-test-unit: download-tokenizer download-zmq
+test-unit: download-tokenizer install-dependencies
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v $$(echo $$(go list ./... | grep -v /test/))
 
 .PHONY: test-e2e
-test-e2e: image-build 
+test-e2e: image-build
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	./test/scripts/run_e2e.sh
 
 .PHONY: test-integration
-test-integration: download-tokenizer download-zmq
+test-integration: download-tokenizer install-dependencies
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
@@ -98,7 +98,7 @@ lint: check-golangci-lint check-typos ## Run lint
 ##@ Build
 
 .PHONY: build
-build: check-go download-zmq download-tokenizer ## Build the project
+build: check-go install-dependencies download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	go build -ldflags="$(LDFLAGS)" -o bin/epp cmd/epp/main.go
 
@@ -236,7 +236,7 @@ check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error
 		echo "$$TYPOS_OUTPUT"; \
 		exit 1; \
 	fi
-	
+
 ##@ Tools
 
 .PHONY: check-tools
@@ -357,35 +357,44 @@ clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 	@CLEAN=true ./scripts/kubernetes-dev-env.sh 2>&1
 	@echo "INFO: Finished cleanup of development environment for namespace $(NAMESPACE)"
 
-##@ ZMQ Setup
+##@ Dependencies
 
-.PHONY: download-zmq
-download-zmq: ## Install ZMQ dependencies based on OS/ARCH
-	@echo "Checking if ZMQ is already installed..."
-	@if pkg-config --exists libzmq; then \
-	  echo "✅ ZMQ is already installed."; \
-	else \
-	  echo "Installing ZMQ dependencies..."; \
-	  if [ "$(TARGETOS)" = "linux" ]; then \
-	    if [ -x "$$(command -v apt)" ]; then \
-	      apt update && apt install -y libzmq3-dev; \
-	    elif [ -x "$$(command -v dnf)" ]; then \
-	      dnf install -y zeromq-devel; \
+.PHONY: install-dependencies
+install-dependencies: ## Install development dependencies based on OS/ARCH
+	@echo "Checking and installing development dependencies..."
+	@if [ "$(TARGETOS)" = "linux" ]; then \
+	  if [ -x "$$(command -v apt)" ]; then \
+	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1; then \
+	      echo "Installing dependencies with apt..."; \
+	      apt-get update && apt-get install -y libzmq3-dev g++; \
 	    else \
-	      echo "Unsupported Linux package manager. Install libzmq manually."; \
-	      exit 1; \
+	      echo "✅ ZMQ and g++ are already installed."; \
 	    fi; \
-	  elif [ "$(TARGETOS)" = "darwin" ]; then \
-	    if [ -x "$$(command -v brew)" ]; then \
-	      brew install zeromq; \
+	  elif [ -x "$$(command -v dnf)" ]; then \
+	    if ! dnf -q list installed zeromq-devel >/dev/null 2>&1 || ! dnf -q list installed gcc-c++ >/dev/null 2>&1; then \
+	      echo "Installing dependencies with dnf..."; \
+	      dnf install -y zeromq-devel gcc-c++; \
 	    else \
-	      echo "Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
-	      exit 1; \
+	      echo "✅ ZMQ and gcc-c++ are already installed."; \
 	    fi; \
 	  else \
-	    echo "Unsupported OS: $(TARGETOS). Install libzmq manually - check https://zeromq.org/download/ for guidance."; \
+	    echo "Unsupported Linux package manager. Install libzmq and g++/gcc-c++ manually."; \
 	    exit 1; \
 	  fi; \
-	  echo "✅ ZMQ dependencies installed."; \
+	elif [ "$(TARGETOS)" = "darwin" ]; then \
+	  if [ -x "$$(command -v brew)" ]; then \
+	    if ! brew list zeromq >/dev/null 2>&1; then \
+	      echo "Installing dependencies with brew..."; \
+	      brew install zeromq; \
+	    else \
+	      echo "✅ ZeroMQ is already installed."; \
+	    fi; \
+	  else \
+	    echo "Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
+	    exit 1; \
+	  fi; \
+	else \
+	  echo "Unsupported OS: $(TARGETOS). Install development dependencies manually."; \
+	  exit 1; \
 	fi
 
