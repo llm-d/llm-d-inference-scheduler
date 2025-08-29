@@ -5,5 +5,11 @@ vLLM = "vLLM"
 IST = "IST"
 
 [files]
-extend-exclude = ["*.png", "*.jpg", "deploy/"]
+extend-exclude = [
+    "*.png", 
+    "*.jpg", 
+    "deploy/",
+    "go.mod",
+    "go.sum",
+]
 
