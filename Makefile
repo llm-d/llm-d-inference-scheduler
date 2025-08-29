@@ -46,7 +46,7 @@ TOKENIZER_LIB = lib/libtokenizers.a
 TOKENIZER_VERSION := $(shell grep '^ARG RELEASE_VERSION=' Dockerfile | cut -d'=' -f2)
 
 .PHONY: download-tokenizer
-download-tokenizer: $(TOKENIZER_LIB)
+download-tokenizer: $(TOKENIZER_LIB) ## Download HuggingFace tokenizer
 $(TOKENIZER_LIB):
 	## Download the HuggingFace tokenizer bindings.
 	@echo "Downloading HuggingFace tokenizer bindings for version $(TOKENIZER_VERSION)..."
@@ -57,7 +57,7 @@ $(TOKENIZER_LIB):
 ##@ Development
 
 .PHONY: clean
-clean:
+clean: ## Clean HuggingFace tokenizer from file system
 	go clean -testcache -cache
 	rm -f $(TOKENIZER_LIB)
 	rmdir lib
@@ -68,22 +68,22 @@ format: ## Format Go source files
 	@gofmt -l -w $(SRC)
 
 .PHONY: test
-test: test-unit test-e2e
+test: test-unit test-e2e ## Run unit tests and e2e tests
 
 .PHONY: test-unit
-test-unit: download-tokenizer download-zmq
+test-unit: download-tokenizer download-zmq ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v $$(echo $$(go list ./... | grep -v /test/))
 
-.PHONY: test-e2e
-test-e2e: image-build 
-	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
-	./test/scripts/run_e2e.sh
-
 .PHONY: test-integration
-test-integration: download-tokenizer download-zmq
+test-integration: download-tokenizer download-zmq ## Run integration tests
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
+
+.PHONY: test-e2e
+test-e2e: image-build ## Run end-to-end tests against a new kind cluster
+	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
+	./test/scripts/run_e2e.sh
 
 .PHONY: post-deploy-test
 post-deploy-test: ## Run post deployment tests
