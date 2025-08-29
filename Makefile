@@ -13,14 +13,27 @@ EPP_TAG ?= dev
 IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
 NAMESPACE ?= hc4ai-operator
 
+# Map go arch to typos arch
+ifeq ($(TARGETARCH),amd64)
+TYPOS_TARGET_ARCH = x86_64
+else ifeq ($(TARGETARCH),arm64)
+TYPOS_TARGET_ARCH = aarch64
+else
+TYPOS_TARGET_ARCH = $(TARGETARCH)
+endif
+
 ifeq ($(TARGETOS),darwin)
 ifeq ($(TARGETARCH),amd64)
 TOKENIZER_ARCH = x86_64
 else
 TOKENIZER_ARCH = $(TARGETARCH)
 endif
+TAR_OPTS = --strip-components 1
+TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-apple-darwin
 else
 TOKENIZER_ARCH = $(TARGETARCH)
+TAR_OPTS = --wildcards '*/typos'
+TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
 endif
 
 CONTAINER_TOOL := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
@@ -94,6 +107,7 @@ post-deploy-test: ## Run post deployment tests
 lint: check-golangci-lint check-typos ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
 	golangci-lint run
+	$(TYPOS)
 
 ##@ Build
 
@@ -388,4 +402,3 @@ download-zmq: ## Install ZMQ dependencies based on OS/ARCH
 	  fi; \
 	  echo "✅ ZMQ dependencies installed."; \
 	fi
-

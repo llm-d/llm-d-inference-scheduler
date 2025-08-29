@@ -11,14 +11,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
-// PrefixCacheTrackingConfig holds the configuration for the
-// PrefixCacheTracking.
-type PrefixCacheTrackingConfig struct {
+const (
+	// PrecisePrefixCachePluginType is the type-name of the PrecisePrefixCacheScorer plugin.
+	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
+)
+
+// PrecisePrefixCachePluginConfig holds the configuration for the
+// PrecisePrefixCacheScorer plugin.
+type PrecisePrefixCachePluginConfig struct {
 	// IndexerConfig holds the configuration for the `kvcache.Indexer` which is
 	// used to score pods based on the KV-cache index state.
 	IndexerConfig *kvcache.Config `json:"indexerConfig"`
@@ -29,13 +33,13 @@ type PrefixCacheTrackingConfig struct {
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &PrefixCacheTracking{}
+var _ framework.Scorer = &PrecisePrefixCacheScorer{}
 
-// PrefixCacheTrackingPluginFactory defines the factory function for creating
+// PrecisePrefixCachePluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
-func PrefixCacheTrackingPluginFactory(name string, rawParameters json.RawMessage,
+func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 	handle plugins.Handle) (plugins.Plugin, error) {
-	parameters := PrefixCacheTrackingConfig{
+	parameters := PrecisePrefixCachePluginConfig{
 		IndexerConfig:  kvcache.NewDefaultConfig(),
 		KVEventsConfig: kvevents.DefaultConfig(),
 	}
@@ -47,13 +51,13 @@ func PrefixCacheTrackingPluginFactory(name string, rawParameters json.RawMessage
 
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse %s plugin config: %w", prefix.PrefixCachePluginType, err)
+			return nil, fmt.Errorf("failed to parse %s plugin config: %w", PrecisePrefixCachePluginType, err)
 		}
 	}
 
 	scorer, err := New(handle.Context(), parameters)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create %s plugin: %w", prefix.PrefixCachePluginType, err)
+		return nil, fmt.Errorf("failed to create %s plugin: %w", PrecisePrefixCachePluginType, err)
 	}
 
 	return scorer.WithName(name), nil
@@ -68,7 +72,7 @@ func PrefixCacheTrackingPluginFactory(name string, rawParameters json.RawMessage
 //
 // If the configuration is invalid or if the indexer fails to initialize,
 // an error is returned.
-func New(ctx context.Context, config PrefixCacheTrackingConfig) (*PrefixCacheTracking, error) {
+func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePrefixCacheScorer, error) {
 	// initialize the indexer
 	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig)
 	if err != nil {
@@ -81,36 +85,36 @@ func New(ctx context.Context, config PrefixCacheTrackingConfig) (*PrefixCacheTra
 	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex())
 	pool.Start(ctx)
 
-	return &PrefixCacheTracking{
-		typedName:      plugins.TypedName{Type: prefix.PrefixCachePluginType},
+	return &PrecisePrefixCacheScorer{
+		typedName:      plugins.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer: kvCacheIndexer,
 	}, nil
 }
 
-// PrefixCacheTracking implements the framework.Scorer interface.
-// The scorer implements the `cache_tracking` mode of the prefix cache plugin.
+// PrecisePrefixCacheScorer implements the framework.Scorer interface.
+// The scorer implements precise prefix-cache KV-block locality scoring.
 // It uses the `kvcache.Indexer` to score pods based on the KV-cache index
 // state, and the `kvevents.Pool` to subscribe to KV-cache events
-// to update the internal KV-cache index state.
-type PrefixCacheTracking struct {
+// to keep the internal KV-cache index state up-to-date.
+type PrecisePrefixCacheScorer struct {
 	typedName      plugins.TypedName
 	kvCacheIndexer *kvcache.Indexer
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *PrefixCacheTracking) TypedName() plugins.TypedName {
+func (s *PrecisePrefixCacheScorer) TypedName() plugins.TypedName {
 	return s.typedName
 }
 
 // WithName sets the name of the plugin.
-func (s *PrefixCacheTracking) WithName(name string) *PrefixCacheTracking {
+func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScorer {
 	s.typedName.Name = name
 	return s
 }
 
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
-func (s *PrefixCacheTracking) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	loggerDebug := log.FromContext(ctx).WithName(s.typedName.String()).V(logutil.DEBUG)
 	if request == nil {
 		loggerDebug.Info("Request is nil, skipping scoring")

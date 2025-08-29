@@ -12,7 +12,7 @@ The design enables:
 
 - Support for **multiple base models** within a shared cluster [Not supported in
 Phase1]
-- Efficient routing based on **KV cache locality**, **prefix**, **session affinity**, **load**, and
+- Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
 - Pluggable **filters**, **scorers**, and **scrapers** for extensible routing
@@ -245,29 +245,14 @@ Filters out pods that are not marked as prefill. The filter looks for the label 
 
 ---
 
-#### PrefixCacheScorer
+#### PrecisePrefixCacheScorer
 
-The `prefix-cache-scorer` scores a request based on KV-cache localities.
-It supports two modes: `estimate` and `cache_tracking`.
-
-##### `estimate` mode (default):
-
-This mode uses the default GIE prefix scorer and scores pods based on the estimated cache locality of the prompt.
-The estimation is based on scheduling history.
-
-- **Type**: `prefix-cache-scorer`
-- **Parameters**:
-  - `hashBlockSize`: Specifies the size of the blocks used to split the input **prompt** when calculating block hashes. Defaults to `64` if not specified.
-  - `maxPrefixBlocksToMatch`: Specifies the maximum number of prefix blocks to match. Defaults to `256` if not specified.
-  - `lruCapacityPerServer`: Specifies the capacity of the LRU indexer, in number of entries per server (pod). Defaults to `31,250` if not specified.
-
-**Note:** `mode: estimate` is not required, as it is the default.
-
-##### `cache_tracking` mode:
-
-This mode scores requests based on the actual KV-cache states across the vLLM instances. 
- It is more accurate than both `SessionAffinity` and `PrefixCachePlugin` in `estimate` mode,
- but incurs additional computation overhead and KV-Events streaming to track the KV-cache states.
+The `precise-prefix-cache-scorer` scores a request based on KV-cache localities.
+Similarly to the IGW `prefix-cache-scorer`, it provides a score based on the number of
+ matching KV-cache blocks between the request's prompt and the KV-cache contents of each pod.
+ However, unlike the IGW `prefix-cache-scorer`, which relies on estimations based on scheduling history,
+ the `precise-prefix-cache-scorer` tracks the real-time KV-cache states across the vLLM instances to
+ provide more accurate scoring.
 
 When enabled, the scorer will use the `llm-d-kv-cache-manager` to track the KV-cache states
  across the vLLM instances. It will use the `kvcache.Indexer` to score the pods based on the
@@ -276,9 +261,8 @@ When enabled, the scorer will use the `llm-d-kv-cache-manager` to track the KV-c
 
 Configuration:
 
-- **Type**: `prefix-cache-scorer`
+- **Type**: `precise-prefix-cache-scorer`
 - **Parameters**:
-  - `mode: cache_tracking`
   - `indexerConfig`: Configuration for the `kvcache.Indexer`.
   - `kvEventsConfig`: Configuration for the `kvevents.Pool`.
 
@@ -294,7 +278,7 @@ Example configuration with the above parameters set:
 
 ```yaml
 plugins:
-  - type: prefix-cache-scorer
+  - type: precise-prefix-cache-scorer
     parameters:
       indexerConfig:
         tokenProcessorConfig:
@@ -310,7 +294,7 @@ Example configuration with all parameters set:
 
 ```yaml
 plugins:
-  - type: prefix-cache-scorer
+  - type: precise-prefix-cache-scorer
     parameters:
         kvEventsConfig:
           zmqEndpoint: tcp://*:5557
