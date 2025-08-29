@@ -5,9 +5,8 @@ kind: EndpointPickerConfig
 plugins:
   - type: single-profile-handler
   - type: decode-filter
-  - type: prefix-cache-scorer
+  - type: precise-prefix-cache-scorer
     parameters:
-      mode: cache_tracking
       indexerConfig:
         tokenProcessorConfig:
           blockSize: 64                 # must match vLLM block size
@@ -21,8 +20,8 @@ schedulingProfiles:
   - name: default
     plugins:
       - pluginRef: decode-filter
-      - pluginRef: prefix-cache-scorer
-        weight: 3.0
+      - pluginRef: precise-prefix-cache-scorer
+        weight: 2.0
       - pluginRef: kv-cache-scorer
         weight: 1.0
       - pluginRef: queue-scorer
