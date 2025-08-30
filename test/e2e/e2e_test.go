@@ -27,7 +27,6 @@ const (
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
-	shortPrompt  = "Hi"
 )
 
 var (
@@ -263,6 +262,10 @@ const simpleConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer
+  parameters:
+    hashBlockSize: 10
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
 - type: decode-filter
 - type: max-score-picker
 - type: single-profile-handler
@@ -281,6 +284,10 @@ kind: EndpointPickerConfig
 plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
+  parameters:
+    hashBlockSize: 10
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
@@ -306,9 +313,8 @@ schedulingProfiles:
 const kvConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefix-cache-scorer
+- type: precise-prefix-cache-scorer
   parameters:
-    mode: cache_tracking
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
@@ -330,6 +336,6 @@ schedulingProfiles:
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
-  - pluginRef: prefix-cache-scorer
+  - pluginRef: precise-prefix-cache-scorer
     weight: 10
 `
