@@ -81,15 +81,15 @@ format: ## Format Go source files
 	@gofmt -l -w $(SRC)
 
 .PHONY: test
-test: test-unit test-e2e
+test: test-unit test-e2e ## Run unit tests and e2e tests
 
 .PHONY: test-unit
-test-unit: download-tokenizer install-dependencies
+test-unit: download-tokenizer install-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v $$(echo $$(go list ./... | grep -v /test/))
 
 .PHONY: test-integration
-test-integration: download-tokenizer install-dependencies
+test-integration: download-tokenizer install-dependencies ## Run integration tests
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
