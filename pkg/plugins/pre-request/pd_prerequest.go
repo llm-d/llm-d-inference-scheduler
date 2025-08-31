@@ -31,7 +31,6 @@ type prefillHeaderHandlerParameters struct {
 var _ requestcontrol.PreRequest = &PrefillHeaderHandler{}
 
 // PrefillHeaderHandlerFactory  defines the factory function for the PrefillHeaderHandler
-// PrefillHeaderHandlerFactory  defines the factory function for the PrefillHeaderHandler
 func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 	parameters := prefillHeaderHandlerParameters{
 		PrefillProfile: defaultPrefillProfile,
@@ -46,7 +45,7 @@ func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ p
 }
 
 // NewPrefillHeaderHandler initializes a new PrefillHeaderHandler and returns its pointer.
-func NewPrefillHeaderHandler(prefillProfile string) *PrefillHeaderHandler {
+func NewPrefillHeaderHandler(prefillProfile string, prefillTargetPort int) *PrefillHeaderHandler {
 	return &PrefillHeaderHandler{
 		typedName:      plugins.TypedName{Type: PrefillHeaderHandlerType},
 		prefillProfile: prefillProfile,
