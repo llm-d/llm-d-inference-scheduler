@@ -24,7 +24,7 @@ const (
 
 type prefillHeaderHandlerParameters struct {
 	PrefillProfile string `json:"prefillProfile"`
-	PrefillTargetPort int `json:"prefillTargetPort,omitempty"`  // ← Optional field
+	PrefillTargetPort int `json:"prefillTargetPort,omitempty"`  // Optional field
 }
 
 // compile-time type assertion
@@ -57,7 +57,7 @@ func NewPrefillHeaderHandler(prefillProfile string, prefillTargetPort int) *Pref
 type PrefillHeaderHandler struct {
 	typedName      plugins.TypedName
 	prefillProfile string
-	prefillTargetPort int // ← 0 means "not configured"
+	prefillTargetPort int // 0 means "not configured"
 }
 
 // TypedName returns the typed name of the plugin.
@@ -82,11 +82,10 @@ func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMR
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	portToUse := targetPort                    // ← Default: use existing behavior
-	if p.prefillTargetPort > 0 {              // ← Only override if configured
+	portToUse := targetPort                    // Default: use existing behavior
+	if p.prefillTargetPort > 0 {              // Only override if configured
 		portToUse = p.prefillTargetPort
-	}	
-
+	}
 	prefillHostPort := net.JoinHostPort(prefillProfileRunResult.TargetPods[0].GetPod().Address, strconv.Itoa(portToUse))
 	request.Headers[prefillPodHeader] = prefillHostPort // in the form of <ip:port>
 }
