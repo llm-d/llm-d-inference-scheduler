@@ -18,7 +18,7 @@ jobs:
           days-before-close: -1
           stale-issue-label: 'lifecycle/stale'
           exempt-issue-labels: 'lifecycle/rotten'
-          stale-issue-message: 'This issue is marked as stale after 90d of inactivity. After additional 30d of inactivity, it will be closed. To prevent this issue from being closed, add a comment or remove the `lifecycle/stale` label.'
+          stale-issue-message: 'This issue is marked as stale after 90d of inactivity. After an additional 30d of inactivity, it will be closed. To prevent this issue from being closed, add a comment or remove the `lifecycle/stale` label.'
 
       - name: 'Mark rotten issues'
         uses: actions/stale@v9
