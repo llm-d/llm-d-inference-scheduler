@@ -49,7 +49,9 @@ COPY --from=builder /workspace/bin/epp /app/epp
 USER root
 RUN microdnf install -y dnf && \
     dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
-    dnf install -y zeromq
+    dnf install -y zeromq && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf /var/lib/dnf
 
 USER 65532:65532
 
