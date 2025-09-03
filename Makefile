@@ -401,7 +401,7 @@ install-dependencies: ## Install development dependencies based on OS/ARCH
 	      echo "Installing dependencies with brew..."; \
 	      brew install zeromq pkg-config; \
 	    else \
-	      echo "✅ ZeroMQ is already installed."; \
+	      echo "✅ ZeroMQ and pkgconf are already installed."; \
 	    fi; \
 	  else \
 	    echo "Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
