@@ -397,9 +397,9 @@ install-dependencies: ## Install development dependencies based on OS/ARCH
 	  fi; \
 	elif [ "$(TARGETOS)" = "darwin" ]; then \
 	  if [ -x "$$(command -v brew)" ]; then \
-	    if ! brew list zeromq >/dev/null 2>&1; then \
+	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
 	      echo "Installing dependencies with brew..."; \
-	      brew install zeromq; \
+	      brew install zeromq pkg-config; \
 	    else \
 	      echo "✅ ZeroMQ is already installed."; \
 	    fi; \
