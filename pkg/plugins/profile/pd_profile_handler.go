@@ -19,15 +19,17 @@ const (
 	// PdProfileHandlerType is the type of the PdProfileHandler
 	PdProfileHandlerType = "pd-profile-handler"
 
-	defaultDecodeProfile  = "decode"
-	defaultPrefillProfile = "prefill"
+	defaultDecodeProfile    = "decode"
+	defaultPrefillProfile   = "prefill"
+	defaultPrefixPluginName = prefix.PrefixCachePluginType
 )
 
 type pdProfileHandlerParameters struct {
-	Threshold      int    `json:"threshold"`
-	DecodeProfile  string `json:"decodeProfile"`
-	PrefillProfile string `json:"prefillProfile"`
-	HashBlockSize  int    `json:"hashBlockSize"`
+	Threshold        int    `json:"threshold"`
+	DecodeProfile    string `json:"decodeProfile"`
+	PrefillProfile   string `json:"prefillProfile"`
+	PrefixPluginName string `json:"prefixPluginName"`
+	HashBlockSize    int    `json:"hashBlockSize"`
 }
 
 // compile-time type assertion
@@ -36,10 +38,11 @@ var _ framework.ProfileHandler = &PdProfileHandler{}
 // PdProfileHandlerFactory defines the factory function for the PdProfileHandler
 func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 	parameters := pdProfileHandlerParameters{
-		Threshold:      0,
-		DecodeProfile:  defaultDecodeProfile,
-		PrefillProfile: defaultPrefillProfile,
-		HashBlockSize:  prefix.DefaultHashBlockSize,
+		Threshold:        0,
+		DecodeProfile:    defaultDecodeProfile,
+		PrefillProfile:   defaultPrefillProfile,
+		PrefixPluginName: defaultPrefixPluginName,
+		HashBlockSize:    prefix.DefaultHashBlockSize,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -47,27 +50,30 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		}
 	}
 
-	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.Threshold, parameters.HashBlockSize).WithName(name), nil
+	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginName,
+		parameters.Threshold, parameters.HashBlockSize).WithName(name), nil
 }
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func NewPdProfileHandler(prefillProfile string, decodeProfile string, pdThreshold int, hashBlockSize int) *PdProfileHandler {
+func NewPdProfileHandler(prefillProfile string, decodeProfile string, prefixPluginName string, pdThreshold int, hashBlockSize int) *PdProfileHandler {
 	return &PdProfileHandler{
-		typedName:      plugins.TypedName{Type: PdProfileHandlerType},
-		decodeProfile:  decodeProfile,
-		prefillProfile: prefillProfile,
-		pdThreshold:    pdThreshold,
-		hashBlockSize:  hashBlockSize,
+		typedName:             plugins.TypedName{Type: PdProfileHandlerType},
+		prefixPluginTypedName: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefixPluginName},
+		decodeProfile:         decodeProfile,
+		prefillProfile:        prefillProfile,
+		pdThreshold:           pdThreshold,
+		hashBlockSize:         hashBlockSize,
 	}
 }
 
 // PdProfileHandler handles scheduler profiles for PD.
 type PdProfileHandler struct {
-	typedName      plugins.TypedName
-	decodeProfile  string
-	prefillProfile string
-	pdThreshold    int
-	hashBlockSize  int
+	typedName             plugins.TypedName
+	prefixPluginTypedName plugins.TypedName
+	decodeProfile         string
+	prefillProfile        string
+	pdThreshold           int
+	hashBlockSize         int
 }
 
 // TypedName returns the typed name of the plugin.
@@ -105,7 +111,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 		// inspect decode execution result to decide if prefill should run or not.
 		// if the request is short enough, use decode results only and don't run the prefill profile.
 		hitPercentagePrefix := 0.0 // default to 0, meaning no prefix cache hit
-		prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, prefix.PrefixCachePluginType)
+		prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(h.prefixPluginTypedName.String()))
 		if err != nil {
 			log.FromContext(ctx).Error(err, "unable to read prefix state")
 		} else {
