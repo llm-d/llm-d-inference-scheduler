@@ -7,7 +7,7 @@ rules:
   - "inference.networking.x-k8s.io"
   resources:
   - "inferencepools"
-  - "inferencemodels"
+  - "inferenceobjectives"
   verbs:
   - "get"
   - "watch"
