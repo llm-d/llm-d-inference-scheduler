@@ -14,7 +14,6 @@ resources:
 - service-accounts.yaml
 - rbac.yaml
 - inference-pools.yaml
-- inference-models.yaml
 - services.yaml
 - deployments.yaml
 - gateways.yaml
