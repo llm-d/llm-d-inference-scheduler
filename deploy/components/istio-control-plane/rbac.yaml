@@ -7,8 +7,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istio-reader
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istio-reader-clusterrole-llm-d-gateway-llm-d-istio-system
 rules:
@@ -111,6 +111,7 @@ rules:
   - subjectaccessreviews
   verbs:
   - create
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -121,8 +122,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-clusterrole-llm-d-gateway-llm-d-istio-system
 rules:
@@ -275,12 +276,21 @@ rules:
   - create
 - apiGroups:
   - gateway.networking.k8s.io
+  - gateway.networking.x-k8s.io
   resources:
   - '*'
   verbs:
   - get
   - watch
   - list
+- apiGroups:
+  - gateway.networking.x-k8s.io
+  resources:
+  - xbackendtrafficpolicies/status
+  - xlistenersets/status
+  verbs:
+  - update
+  - patch
 - apiGroups:
   - gateway.networking.k8s.io
   resources:
@@ -346,6 +356,7 @@ rules:
   - get
   - watch
   - list
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -356,8 +367,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-gateway-controller-llm-d-gateway-llm-d-istio-system
 rules:
@@ -365,6 +376,30 @@ rules:
   - apps
   resources:
   - deployments
+  verbs:
+  - get
+  - watch
+  - list
+  - update
+  - patch
+  - create
+  - delete
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - get
+  - watch
+  - list
+  - update
+  - patch
+  - create
+  - delete
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
   verbs:
   - get
   - watch
@@ -397,6 +432,7 @@ rules:
   - patch
   - create
   - delete
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -407,8 +443,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istio-reader
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istio-reader-clusterrole-llm-d-gateway-llm-d-istio-system
 roleRef:
@@ -419,6 +455,7 @@ subjects:
 - kind: ServiceAccount
   name: istio-reader-service-account
   namespace: llm-d-istio-system
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -429,8 +466,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-clusterrole-llm-d-gateway-llm-d-istio-system
 roleRef:
@@ -441,6 +478,7 @@ subjects:
 - kind: ServiceAccount
   name: istiod-llm-d-gateway
   namespace: llm-d-istio-system
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -451,8 +489,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-gateway-controller-llm-d-gateway-llm-d-istio-system
 roleRef:
@@ -463,6 +501,7 @@ subjects:
 - kind: ServiceAccount
   name: istiod-llm-d-gateway
   namespace: llm-d-istio-system
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -473,8 +512,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-llm-d-gateway
   namespace: llm-d-istio-system
@@ -511,6 +550,7 @@ rules:
   - update
   - patch
   - create
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -521,8 +561,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
-    helm.sh/chart: istiod-1.26-alpha.9befed2f1439d883120f8de70fd70d84ca0ebc3d
+    app.kubernetes.io/version: 1.27.1
+    helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-llm-d-gateway
   namespace: llm-d-istio-system
@@ -534,3 +574,4 @@ subjects:
 - kind: ServiceAccount
   name: istiod-llm-d-gateway
   namespace: llm-d-istio-system
+
