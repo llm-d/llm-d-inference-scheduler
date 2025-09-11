@@ -36,9 +36,6 @@ import (
 func main() {
 	ctx := ctrl.SetupSignalHandler()
 
-	// Register GIE plugins
-	runner.RegisterAllPlugins()
-
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
 
