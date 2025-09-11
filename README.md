@@ -1,4 +1,4 @@
-# LLM-D Inference Scheduler with preprocessing support.
+# LLM-D Inference Scheduler with preprocessing support
 
 ## Overview
 
