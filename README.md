@@ -1,4 +1,4 @@
-# LLM-D Inference Scheduler Custom Fork
+# LLM-D Inference Scheduler with preprocessing support.
 
 ## Overview
 
