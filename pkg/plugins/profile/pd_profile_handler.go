@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 
+	chat_completions "github.com/llm-d/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -93,6 +95,13 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	}
 	// otherwise, decode was already executed.
 
+	// Preprocess the request to get the flattened prompt
+	prompt, err := h.preprocessRequest(ctx, request)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to preprocess request")
+		return map[string]*framework.SchedulerProfile{}
+	}
+
 	// when a profile run fails its result value is nil. we need to check decode result before continuing to prefill
 	// check if all configured profiles have been executed, or if decode failed, no need to run more profiles.
 	if len(profiles) == len(profileResults) || profileResults[h.decodeProfile] == nil {
@@ -111,12 +120,12 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 		} else {
 			decodePod := profileResults[h.decodeProfile].TargetPods[0].GetPod().NamespacedName
 			hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
-			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(request.Prompt))
+			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(prompt))
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
-				"promptLength", len(request.Prompt))
+				"promptLength", len(prompt))
 		}
 
-		if (1.0-hitPercentagePrefix)*float64(len(request.Prompt)) < float64(h.pdThreshold) {
+		if (1.0-hitPercentagePrefix)*float64(len(prompt)) < float64(h.pdThreshold) {
 			log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
 			return map[string]*framework.SchedulerProfile{} // do not run prefill
 		}
@@ -153,4 +162,74 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState
 			h.decodeProfile: profileResults[h.decodeProfile], // return decode only
 		},
 	}, nil
+}
+
+// preprocessRequest handles preprocessing of the request to extract the flattened prompt
+// For chat completions, it converts messages to a templated prompt
+// For regular completions, it uses the prompt directly
+func (h *PdProfileHandler) preprocessRequest(ctx context.Context, request *types.LLMRequest) (string, error) {
+	loggerDebug := log.FromContext(ctx).WithName(h.typedName.String()).V(logutil.DEBUG)
+
+	// If it's a chat completion request, apply preprocessing
+	if request.Data != nil && request.Data.ChatCompletions != nil {
+		loggerDebug.Info("Processing chat completion request", "messages_count", len(request.Data.ChatCompletions.Messages))
+
+		// Create preprocessing request
+		preprocessReq := &chat_completions.RenderJinjaTemplateRequest{
+			Conversations:             make([]chat_completions.ChatMessage, 0),
+			Tools:                     request.Data.ChatCompletions.Tools,
+			Documents:                 request.Data.ChatCompletions.Documents,
+			ChatTemplate:              request.Data.ChatCompletions.ChatTemplate,
+			ReturnAssistantTokensMask: request.Data.ChatCompletions.ReturnAssistantTokensMask,
+			ContinueFinalMessage:      request.Data.ChatCompletions.ContinueFinalMessage,
+			AddGenerationPrompt:       request.Data.ChatCompletions.AddGenerationPrompt,
+			ChatTemplateKWArgs:        request.Data.ChatCompletions.ChatTemplateKWArgs,
+		}
+
+		// Convert messages to the format expected by preprocessing
+		for _, msg := range request.Data.ChatCompletions.Messages {
+			preprocessReq.Conversations = append(preprocessReq.Conversations, chat_completions.ChatMessage{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
+
+		// Create preprocessing processor
+		processor := chat_completions.NewChatTemplatingProcessor()
+
+		// Render the template to get flattened prompt
+		resp, err := processor.RenderChatTemplate(ctx, preprocessReq)
+		if err != nil {
+			return "", fmt.Errorf("failed to render chat template: %w", err)
+		}
+
+		if len(resp.RenderedChats) == 0 {
+			return "", fmt.Errorf("no rendered chat returned from preprocessing")
+		}
+
+		loggerDebug.Info("Successfully preprocessed chat completion request", "prompt_length", len(resp.RenderedChats[0]))
+		return resp.RenderedChats[0], nil
+	}
+
+	// For regular completions, use the prompt directly
+	if request.Data != nil && request.Data.Completions != nil {
+		loggerDebug.Info("Using completion prompt directly", "prompt_length", len(request.Data.Completions.Prompt))
+		return request.Data.Completions.Prompt, nil
+	}
+
+	// Fallback: try to extract prompt from request body if available
+	if request.Data != nil {
+		// Try to marshal and extract prompt from raw data
+		if dataBytes, err := json.Marshal(request.Data); err == nil {
+			var rawData map[string]interface{}
+			if err := json.Unmarshal(dataBytes, &rawData); err == nil {
+				if prompt, ok := rawData["prompt"].(string); ok && prompt != "" {
+					loggerDebug.Info("Extracted prompt from raw data", "prompt_length", len(prompt))
+					return prompt, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no valid prompt found in request")
 }
