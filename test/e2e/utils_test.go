@@ -19,6 +19,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
+const (
+	deploymentKind = "deployment"
+)
+
 func scaleDeployment(objects []string, increment int) {
 	k8sCfg := config.GetConfigOrDie()
 	client, err := kubernetes.NewForConfig(k8sCfg)
@@ -32,7 +36,7 @@ func scaleDeployment(objects []string, increment int) {
 
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
-		if strings.ToLower(split[0]) == "deployment" {
+		if strings.ToLower(split[0]) == deploymentKind {
 			ginkgo.By(fmt.Sprintf("Scaling the deployment %s %s by %d", split[1], direction, absIncrement))
 			scale, err := client.AppsV1().Deployments(nsName).GetScale(testConfig.Context, split[1], v1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -107,7 +111,7 @@ func podsInDeploymentsReady(objects []string) {
 	}
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
-		if strings.ToLower(split[0]) == "deployment" {
+		if strings.ToLower(split[0]) == deploymentKind {
 			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
 			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
 		}
