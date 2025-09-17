@@ -134,7 +134,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("work should be distributed across all model servers", func() {
 			modelServers := createModelServers(false, false, 1, 0, 0)
 
-			createEndPointPicker(scaleConfig)
+			epp := createEndPointPicker(scaleConfig)
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
@@ -181,8 +181,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 				gomega.Expect(podHdr).Should(gomega.Equal(scaledDownDecodePods[0]))
 			}
 
-			//deleteObjects(epp)
-			//deleteObjects(modelServers)
+			deleteObjects(epp)
+			deleteObjects(modelServers)
 		})
 	})
 })
