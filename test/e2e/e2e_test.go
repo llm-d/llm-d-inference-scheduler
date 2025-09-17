@@ -131,7 +131,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.When("Scaling up and down the model servers", func() {
-		ginkgo.It("work should be distributed accross all model servers", func() {
+		ginkgo.It("work should be distributed across all model servers", func() {
 			modelServers := createModelServers(false, false, 1, 0, 0)
 
 			createEndPointPicker(scaleConfig)
