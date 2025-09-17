@@ -11,10 +11,40 @@ import (
 	"github.com/onsi/gomega/gexec"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apilabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
+
+func scaleDeployment(objects []string, increment int) {
+	k8sCfg := config.GetConfigOrDie()
+	client, err := kubernetes.NewForConfig(k8sCfg)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	direction := "up"
+	absIncrement := increment
+	if increment < 0 {
+		direction = "down"
+		absIncrement = -increment
+	}
+
+	for _, kindAndName := range objects {
+		split := strings.Split(kindAndName, "/")
+		if strings.ToLower(split[0]) == "deployment" {
+			ginkgo.By(fmt.Sprintf("Scaling the deployment %s %s by %d", split[1], direction, absIncrement))
+			scale, err := client.AppsV1().Deployments(nsName).GetScale(testConfig.Context, split[1], v1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			scale.Spec.Replicas += int32(increment)
+			_, err = client.AppsV1().Deployments(nsName).UpdateScale(testConfig.Context, split[1], scale, v1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			time.Sleep(time.Second)
+		}
+	}
+	podsInDeploymentsReady(objects)
+}
 
 // getModelServerPods Returns the list of Prefill and Decode vLLM pods separately
 func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string) ([]string, []string) {
