@@ -27,6 +27,10 @@ import (
 	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
+const (
+	deploymentKind = "deployment"
+)
+
 func scaleDeployment(objects []string, increment int) {
 	k8sCfg := config.GetConfigOrDie()
 	client, err := kubernetes.NewForConfig(k8sCfg)
@@ -40,7 +44,7 @@ func scaleDeployment(objects []string, increment int) {
 
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
-		if strings.ToLower(split[0]) == "deployment" {
+		if strings.ToLower(split[0]) == deploymentKind {
 			ginkgo.By(fmt.Sprintf("Scaling the deployment %s %s by %d", split[1], direction, absIncrement))
 			scale, err := client.AppsV1().Deployments(nsName).GetScale(ctx, split[1], v1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -132,7 +136,7 @@ func getClientObject(kind string) client.Object {
 		return &corev1.ConfigMap{}
 	case "customresourcedefinition":
 		return &apiextv1.CustomResourceDefinition{}
-	case "deployment":
+	case deploymentKind:
 		return &appsv1.Deployment{}
 	case "inferencepool":
 		return &v1alpha2.InferencePool{}
@@ -211,7 +215,7 @@ func podsInDeploymentsReady(objects []string) {
 	}
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
-		if strings.ToLower(split[0]) == "deployment" {
+		if strings.ToLower(split[0]) == deploymentKind {
 			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
 			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
 		}
