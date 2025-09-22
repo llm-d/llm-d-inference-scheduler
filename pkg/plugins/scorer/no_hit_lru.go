@@ -20,7 +20,7 @@ const (
 	// NoHitLRUType is the type of the NoHitLRU scorer
 	NoHitLRUType = "no-hit-lru-scorer"
 
-	// defaultLRUSize is the maximum number of pods we'll consider in the cache 
+	// defaultLRUSize is the maximum number of pods we'll consider in the cache
 	defaultLRUSize = 1024
 )
 
@@ -58,7 +58,29 @@ func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugins.
 		}
 	}
 
+	if parameters.PrefixPluginName == "" {
+		parameters.PrefixPluginName = prefix.PrefixCachePluginType
+	}
+
+	if err := ensurePrefixPluginExists(handle, parameters.PrefixPluginName); err != nil {
+		return nil, err
+	}
+
 	return NewNoHitLRU(handle.Context(), &parameters).WithName(name), nil
+}
+
+func ensurePrefixPluginExists(handle plugins.Handle, pluginName string) error {
+	dependentPlugin := handle.Plugin(pluginName)
+	if dependentPlugin == nil {
+		return fmt.Errorf("the '%s' scorer requires the prefix cache scorer '%s' to be defined before it", NoHitLRUType, pluginName)
+	}
+
+	typed := dependentPlugin.TypedName()
+	if typed.Type != prefix.PrefixCachePluginType {
+		return fmt.Errorf("the '%s' scorer requires plugin '%s' to be of type '%s', but it is configured as '%s'", NoHitLRUType, pluginName, prefix.PrefixCachePluginType, typed.Type)
+	}
+
+	return nil
 }
 
 // NewNoHitLRU creates a new NoHitLRU scorer
@@ -75,10 +97,8 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 		}
 	}
 
-	// Create LRU cache that stores pod names (string) with dummy values
 	lruCache, err := lru.New[string, struct{}](lruSize)
 	if err != nil {
-		// This should never happen with valid size
 		panic(fmt.Sprintf("failed to create LRU cache: %v", err))
 	}
 
@@ -181,9 +201,9 @@ func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, requ
 		// Avoids dividing by zero during normalization.
 		scoredPods[pods[0]] = 1.0
 	} else {
-		// Score never-used pods highest (they should be preferred)
 		for i, pod := range neverUsedPods {
-			// Give never-used pods scores from 1.0 down
+			// The first unused pod gets a maxed out score, subsequent pods
+			// fall off exponentially.
 			score := 1.0 - float64(i)/float64(totalPods-1)
 			scoredPods[pod] = score
 		}
@@ -194,8 +214,8 @@ func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, requ
 			podName := pod.GetPod().NamespacedName.String()
 			lruPos := lruPosition[podName]
 			// LRU keys are oldest to newest so rank 0 = oldest
-			// The never used pod count is added to the rank so that all used pods
-			// always score lower than all any unused pod in the calculation.
+			// The never used pod count is added to the rank so that
+			// a never-used pod will always have the highest score.
 			rank := neverUsedCount + lruPos
 			score := 1.0 - float64(rank)/float64(totalPods-1)
 			if score < 0 {
@@ -222,8 +242,8 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 	// Read the cold request state we stored in Score
 	coldState, err := plugins.ReadPluginStateKey[*coldRequestState](s.pluginState, request.RequestId, plugins.StateKey(s.typedName.String()))
 	// After fetching the cold state, drop it from the plugin state immediately (otherwise it will hang around until it becomes stale).
-	s.pluginState.Delete(request.RequestId) 
-	
+	s.pluginState.Delete(request.RequestId)
+
 	if err != nil {
 		logger.Info("No cold request state found, treating as non-cold request", "error", err)
 		return
@@ -244,10 +264,10 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 	targetPod := primaryProfile.TargetPods[0]
 	podName := targetPod.GetPod().NamespacedName.String()
 
-	// Update LRU cache (this moves the pod to the front of the LRU)
+	// Move the pod to the front of the LRU.
 	s.mutex.Lock()
-	var present struct{} // value doesn't matter, just key ordering.
-	s.lruCache.Add(podName, present) 
+	var present struct{} // dummy value
+	s.lruCache.Add(podName, present)
 	s.mutex.Unlock()
 
 	logger.Info("Updated LRU cache for cold request", "pod", podName, "requestId", request.RequestId)

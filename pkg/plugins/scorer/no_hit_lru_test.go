@@ -2,7 +2,9 @@ package scorer_test
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -19,6 +21,113 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
+
+type fakeHandle struct {
+	ctx     context.Context
+	plugins map[string]plugins.Plugin
+}
+
+func newFakeHandle(ctx context.Context) *fakeHandle {
+	return &fakeHandle{ctx: ctx, plugins: map[string]plugins.Plugin{}}
+}
+
+func (h *fakeHandle) Context() context.Context {
+	return h.ctx
+}
+
+func (h *fakeHandle) Plugin(name string) plugins.Plugin {
+	return h.plugins[name]
+}
+
+func (h *fakeHandle) AddPlugin(name string, plugin plugins.Plugin) {
+	h.plugins[name] = plugin
+}
+
+func (h *fakeHandle) GetAllPlugins() []plugins.Plugin {
+	result := make([]plugins.Plugin, 0, len(h.plugins))
+	for _, plugin := range h.plugins {
+		result = append(result, plugin)
+	}
+	return result
+}
+
+func (h *fakeHandle) GetAllPluginsWithNames() map[string]plugins.Plugin {
+	return h.plugins
+}
+
+type stubPlugin struct {
+	name plugins.TypedName
+}
+
+func (p *stubPlugin) TypedName() plugins.TypedName {
+	return p.name
+}
+
+func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
+	tests := []struct {
+		name         string
+		handle       *fakeHandle
+		params       map[string]any
+		expectError  bool
+		errorMessage string
+	}{
+		{
+			name:         "missing prefix cache plugin",
+			handle:       newFakeHandle(context.Background()),
+			expectError:  true,
+			errorMessage: "requires the prefix cache scorer",
+		},
+		{
+			name: "prefix plugin wrong type",
+			handle: func() *fakeHandle {
+				h := newFakeHandle(context.Background())
+				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugins.TypedName{Type: "not-prefix", Name: prefix.PrefixCachePluginType}})
+				return h
+			}(),
+			expectError:  true,
+			errorMessage: "configured as",
+		},
+		{
+			name: "dependency satisfied",
+			handle: func() *fakeHandle {
+				h := newFakeHandle(context.Background())
+				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefix.PrefixCachePluginType}})
+				return h
+			}(),
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		// Marshal params if provided
+		var raw json.RawMessage
+		if tt.params != nil {
+			bytes, err := json.Marshal(tt.params)
+			if err != nil {
+				t.Fatalf("failed to marshal parameters: %v", err)
+			}
+			raw = bytes
+		}
+
+		plugin, err := scorer.NoHitLRUFactory("test", raw, tt.handle)
+		if tt.expectError {
+			if err == nil {
+				t.Fatalf("expected error for case %q, got none", tt.name)
+			}
+			if tt.errorMessage != "" && !strings.Contains(err.Error(), tt.errorMessage) {
+				t.Fatalf("error message mismatch for case %q: %v", tt.name, err)
+			}
+			continue
+		}
+
+		if err != nil {
+			t.Fatalf("unexpected error for case %q: %v", tt.name, err)
+		}
+		if plugin == nil {
+			t.Fatalf("expected plugin instance for case %q", tt.name)
+		}
+	}
+}
 
 func TestNoHitLRUScorer(t *testing.T) {
 	podA := &types.PodMetrics{
