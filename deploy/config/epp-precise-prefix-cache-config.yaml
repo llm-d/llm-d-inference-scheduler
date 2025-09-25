@@ -13,7 +13,7 @@ plugins:
           hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
         kvBlockIndexConfig:
           enableMetrics: true           # enable kv-block index metrics (prometheus)
-  - type: kv-cache-scorer # kv-cache-utilization
+  - type: kv-cache-utilization-scorer
   - type: queue-scorer
   - type: max-score-picker
 schedulingProfiles:
@@ -22,7 +22,7 @@ schedulingProfiles:
       - pluginRef: decode-filter
       - pluginRef: precise-prefix-cache-scorer
         weight: 2.0
-      - pluginRef: kv-cache-scorer
+      - pluginRef: kv-cache-utilization-scorer
         weight: 1.0
       - pluginRef: queue-scorer
         weight: 1.0
