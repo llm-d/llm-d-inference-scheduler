@@ -99,7 +99,8 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 
 	lruCache, err := lru.New[string, struct{}](lruSize)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create LRU cache: %v", err))
+		log.FromContext(ctx).Error(err, "failed to create LRU cache")
+		return nil
 	}
 
 	return &NoHitLRU{
