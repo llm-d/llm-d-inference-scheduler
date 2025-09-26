@@ -62,26 +62,12 @@ func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugins.
 		parameters.PrefixPluginName = prefix.PrefixCachePluginType
 	}
 
-	if err := ensurePrefixPluginExists(handle, parameters.PrefixPluginName); err != nil {
-		return nil, err
-	}
+	// Note: We don't enforce that the prefix plugin exists here
+	// The scorer will gracefully handle missing prefix cache state as an optimization
 
 	return NewNoHitLRU(handle.Context(), &parameters).WithName(name), nil
 }
 
-func ensurePrefixPluginExists(handle plugins.Handle, pluginName string) error {
-	dependentPlugin := handle.Plugin(pluginName)
-	if dependentPlugin == nil {
-		return fmt.Errorf("the '%s' scorer requires the prefix cache scorer '%s' to be defined before it", NoHitLRUType, pluginName)
-	}
-
-	typed := dependentPlugin.TypedName()
-	if typed.Type != prefix.PrefixCachePluginType {
-		return fmt.Errorf("the '%s' scorer requires plugin '%s' to be of type '%s', but it is configured as '%s'", NoHitLRUType, pluginName, prefix.PrefixCachePluginType, typed.Type)
-	}
-
-	return nil
-}
 
 // NewNoHitLRU creates a new NoHitLRU scorer
 func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
@@ -144,14 +130,17 @@ func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, requ
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	// Read prefix cache state to determine if this is a cold request
+	// This is treated as an optimization - if the state isn't available, we assume cold request
 	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(s.prefixPluginName))
-	if err != nil {
-		logger.Info("No prefix cache state found, treating as cold request", "error", err)
-		prefixState = &prefix.SchedulingContextState{PrefixCacheServers: make(map[prefix.ServerID]int)}
-	}
 
-	// Check if this is a cold request (no prefix cache hits)
-	isCold := len(prefixState.PrefixCacheServers) == 0
+	var isCold bool
+	if err != nil {
+		logger.Info("No prefix cache state found, treating as cold request for LRU optimization", "error", err)
+		isCold = true
+	} else {
+		// Check if this is a cold request (no prefix cache hits)
+		isCold = len(prefixState.PrefixCacheServers) == 0
+	}
 
 	// Store the cold request state in plugin state for PreRequest to use
 	coldState := &coldRequestState{isCold: isCold}
