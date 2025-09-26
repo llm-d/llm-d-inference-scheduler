@@ -84,7 +84,7 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 
 	lruCache, err := lru.New[string, struct{}](lruSize)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to create LRU cache")
+		log.FromContext(ctx).Error(err, fmt.Sprintf("failed to initialize NoHitLRU scorer: could not create LRU cache with size %d: %v", lruSize, err))
 		return nil
 	}
 
