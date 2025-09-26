@@ -3,13 +3,10 @@ package scorer_test
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
-	"unsafe"
 
 	"github.com/google/go-cmp/cmp"
-	lru "github.com/hashicorp/golang-lru/v2"
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
@@ -307,11 +304,27 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		}
 	}
 
-	assertLRU := func(expected []string) {
+	// Test LRU behavior indirectly through scoring rather than internal state
+	assertHighestScoredPod := func(expectedPod types.Pod, testName string) {
 		t.Helper()
-		actual := getLRUKeys(t, scorer)
-		if !reflect.DeepEqual(expected, actual) {
-			t.Fatalf("expected LRU keys %v, got %v", expected, actual)
+		coldReq := &types.LLMRequest{RequestId: testName + "-scoring-check"}
+		scores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReq, pods)
+
+		highestScore := -1.0
+		var highestPod types.Pod
+		for pod, score := range scores {
+			if score > highestScore {
+				highestScore = score
+				highestPod = pod
+			}
+		}
+
+		if highestPod.GetPod().NamespacedName.String() != expectedPod.GetPod().NamespacedName.String() {
+			t.Fatalf("expected %s to have highest score for LRU behavior, but %s had highest score (%f). All scores: %+v",
+				expectedPod.GetPod().NamespacedName.String(),
+				highestPod.GetPod().NamespacedName.String(),
+				highestScore,
+				scores)
 		}
 	}
 
@@ -319,7 +332,8 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		coldReqA := &types.LLMRequest{RequestId: "cold-1"}
 		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqA, pods)
 		scorer.PreRequest(ctx, coldReqA, requestToPod(podA), 0)
-		assertLRU([]string{"default/pod-a"})
+		// After podA handles a cold request, other pods should score higher for new cold requests
+		assertHighestScoredPod(podB, "after-podA-used")
 	})
 
 	t.Run("unused pods rank above existing ones", func(t *testing.T) {
@@ -353,49 +367,23 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		if postWarmScores[podB] <= postWarmScores[podA] {
 			t.Fatalf("expected warm request to leave ordering unchanged, scores=%+v", postWarmScores)
 		}
-		assertLRU([]string{"default/pod-a"})
 	})
 
 	t.Run("second cold request rotates to podB", func(t *testing.T) {
-		coldReqCheck := &types.LLMRequest{RequestId: "cold-check"}
-		scorer.PreRequest(ctx, coldReqCheck, requestToPod(podB), 0)
-
+		// Simulate podB handling a cold request
 		coldReqB := &types.LLMRequest{RequestId: "cold-2"}
-		scoresAfterB := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqB, pods)
-		if scoresAfterB[podC] <= scoresAfterB[podA] {
-			t.Fatalf("expected pod-c to outrank pod-a after pod-a handled previous cold request, scores=%+v", scoresAfterB)
-		}
-		if scoresAfterB[podC] <= scoresAfterB[podB] {
-			t.Fatalf("expected pod-c to outrank pod-b after pod-b handled previous cold request, scores=%+v", scoresAfterB)
-		}
-		scorer.PreRequest(ctx, coldReqB, requestToPod(podC), 0)
-		assertLRU([]string{"default/pod-a", "default/pod-b", "default/pod-c"})
+		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqB, pods)
+		scorer.PreRequest(ctx, coldReqB, requestToPod(podB), 0)
+		// Now podC should score highest since both podA and podB have been used
+		assertHighestScoredPod(podC, "after-podB-used")
 	})
 
 	t.Run("third cold request rotates back to podA", func(t *testing.T) {
+		// Simulate podC handling a cold request
 		coldReqC := &types.LLMRequest{RequestId: "cold-3"}
-		scoresAfterC := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqC, pods)
-		if scoresAfterC[podA] <= scoresAfterC[podB] {
-			t.Fatalf("expected pod-a to outrank pod-b after pod-a handled previous cold request, scores=%+v", scoresAfterC)
-		}
-		if scoresAfterC[podA] <= scoresAfterC[podC] {
-			t.Fatalf("expected pod-a to outrank pod-c after pod-a handled previous cold request, scores=%+v", scoresAfterC)
-		}
-		scorer.PreRequest(ctx, coldReqC, requestToPod(podA), 0)
-		assertLRU([]string{"default/pod-b", "default/pod-c", "default/pod-a"})
+		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqC, pods)
+		scorer.PreRequest(ctx, coldReqC, requestToPod(podC), 0)
+		// Now podA should score highest again (LRU rotation)
+		assertHighestScoredPod(podA, "after-podC-used")
 	})
-}
-
-func getLRUKeys(t *testing.T, s *scorer.NoHitLRU) []string {
-	t.Helper()
-	v := reflect.ValueOf(s).Elem().FieldByName("lruCache")
-	if !v.IsValid() {
-		t.Fatal("lruCache field not found")
-	}
-	v = reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem()
-	cache, ok := v.Interface().(*lru.Cache[string, struct{}])
-	if !ok {
-		t.Fatalf("unexpected lru cache type %T", v.Interface())
-	}
-	return cache.Keys()
 }

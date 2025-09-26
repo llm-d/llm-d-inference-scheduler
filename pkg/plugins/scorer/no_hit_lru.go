@@ -68,7 +68,6 @@ func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugins.
 	return NewNoHitLRU(handle.Context(), &parameters).WithName(name), nil
 }
 
-
 // NewNoHitLRU creates a new NoHitLRU scorer
 func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 	prefixPluginName := prefix.PrefixCachePluginType
