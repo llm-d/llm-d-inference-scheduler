@@ -328,7 +328,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		}
 	}
 
-	t.Run("initial cold request seeds cache", func(t *testing.T) {
+	t.Run("initial cold request seeds cache", func(_ *testing.T) {
 		coldReqA := &types.LLMRequest{RequestId: "cold-1"}
 		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqA, pods)
 		scorer.PreRequest(ctx, coldReqA, requestToPod(podA), 0)
@@ -369,7 +369,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		}
 	})
 
-	t.Run("second cold request rotates to podB", func(t *testing.T) {
+	t.Run("second cold request rotates to podB", func(_ *testing.T) {
 		// Simulate podB handling a cold request
 		coldReqB := &types.LLMRequest{RequestId: "cold-2"}
 		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqB, pods)
@@ -378,7 +378,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		assertHighestScoredPod(podC, "after-podB-used")
 	})
 
-	t.Run("third cold request rotates back to podA", func(t *testing.T) {
+	t.Run("third cold request rotates back to podA", func(_ *testing.T) {
 		// Simulate podC handling a cold request
 		coldReqC := &types.LLMRequest{RequestId: "cold-3"}
 		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqC, pods)
