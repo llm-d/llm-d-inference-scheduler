@@ -72,23 +72,12 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 		errorMessage string
 	}{
 		{
-			name:         "missing prefix cache plugin",
-			handle:       newFakeHandle(context.Background()),
-			expectError:  true,
-			errorMessage: "requires the prefix cache scorer",
+			name:        "missing prefix cache plugin - should work as optimization",
+			handle:      newFakeHandle(context.Background()),
+			expectError: false,
 		},
 		{
-			name: "prefix plugin wrong type",
-			handle: func() *fakeHandle {
-				h := newFakeHandle(context.Background())
-				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugins.TypedName{Type: "not-prefix", Name: prefix.PrefixCachePluginType}})
-				return h
-			}(),
-			expectError:  true,
-			errorMessage: "configured as",
-		},
-		{
-			name: "dependency satisfied",
+			name: "prefix plugin present - should work",
 			handle: func() *fakeHandle {
 				h := newFakeHandle(context.Background())
 				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefix.PrefixCachePluginType}})
