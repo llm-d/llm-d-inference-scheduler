@@ -293,9 +293,16 @@ check-envsubst:
 
 .PHONY: check-container-tool
 check-container-tool:
-	@command -v $(CONTAINER_TOOL) >/dev/null 2>&1 || { \
-	  echo "❌ $(CONTAINER_TOOL) is not installed."; \
-	  echo "🔧 Try: sudo apt install $(CONTAINER_TOOL) OR brew install $(CONTAINER_TOOL)"; exit 1; }
+	@if [ -z "$(CONTAINER_TOOL)" ]; then \
+		echo "❌ Error: No container tool detected. Please install docker or podman."; \
+		exit 1; \
+	elif ! command -v $(CONTAINER_TOOL) >/dev/null 2>&1; then \
+		echo "❌ Error: '$(CONTAINER_TOOL)' is not installed or not in your PATH."; \
+		echo "🔧 Try: sudo apt install $(CONTAINER_TOOL) OR brew install $(CONTAINER_TOOL)"; \
+		exit 1; \
+	else \
+		echo "✅ Container tool '$(CONTAINER_TOOL)' found."; \
+	fi
 
 .PHONY: check-kubectl
 check-kubectl:
