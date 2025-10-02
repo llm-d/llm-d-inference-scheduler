@@ -119,6 +119,121 @@ func (s *NoHitLRU) WithName(name string) *NoHitLRU {
 	return s
 }
 
+// isColdRequest determines if a request is cold by reading the prefix cache state.
+// Returns true if no prefix cache hits were found, or if prefix cache state is unavailable.
+func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *types.CycleState) bool {
+	logger := log.FromContext(ctx).V(logutil.DEBUG)
+
+	// Read prefix cache state to determine if this is a cold request
+	// This is treated as an optimization - if the state isn't available, we assume cold request
+	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(s.prefixPluginName))
+
+	if err != nil {
+		logger.Info("No prefix cache state found, treating as cold request for LRU optimization", "error", err)
+		return true
+	}
+
+	// Check if this is a cold request (no prefix cache hits)
+	return len(prefixState.PrefixCacheServers) == 0
+}
+
+// scoreNeutral returns neutral scores (0.5) for all pods.
+// Used when a request has cache hits and LRU optimization should not apply.
+func (s *NoHitLRU) scoreNeutral(pods []types.Pod) map[types.Pod]float64 {
+	scoredPods := make(map[types.Pod]float64, len(pods))
+	for _, pod := range pods {
+		scoredPods[pod] = 0.5
+	}
+	return scoredPods
+}
+
+// getLRUPositions returns a map of pod names to their LRU position.
+// Position 0 represents the oldest (least recently used) entry.
+func (s *NoHitLRU) getLRUPositions() map[string]int {
+	// Get all keys from LRU cache in order (oldest first)
+	// https://pkg.go.dev/github.com/hashicorp/golang-lru/v2#Cache.Keys
+	lruKeys := s.lruCache.Keys()
+
+	lruPosition := make(map[string]int, len(lruKeys))
+	for i, key := range lruKeys {
+		lruPosition[key] = i
+	}
+	return lruPosition
+}
+
+// partitionPodsByUsage separates pods into those that have received cold requests
+// (usedPods) and those that have never received cold requests (neverUsedPods).
+func (s *NoHitLRU) partitionPodsByUsage(pods []types.Pod, lruPosition map[string]int) (usedPods, neverUsedPods []types.Pod) {
+	for _, pod := range pods {
+		podName := pod.GetPod().NamespacedName.String()
+		if _, exists := lruPosition[podName]; exists {
+			usedPods = append(usedPods, pod)
+		} else {
+			neverUsedPods = append(neverUsedPods, pod)
+		}
+	}
+	return usedPods, neverUsedPods
+}
+
+// scoreNeverUsedPods assigns scores to pods that have never received a cold request.
+// The first never-used pod gets the highest score (1.0), with subsequent pods
+// receiving progressively lower scores.
+func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[types.Pod]float64, neverUsedPods []types.Pod, totalPods int) {
+	if totalPods <= 1 {
+		return
+	}
+	for i, pod := range neverUsedPods {
+		score := 1.0 - float64(i)/float64(totalPods-1)
+		scoredPods[pod] = score
+	}
+}
+
+// scoreUsedPods assigns scores to pods based on their LRU position.
+// Pods that were least recently used for cold requests receive higher scores.
+func (s *NoHitLRU) scoreUsedPods(scoredPods map[types.Pod]float64, usedPods []types.Pod, lruPosition map[string]int, neverUsedCount, totalPods int) {
+	if totalPods <= 1 {
+		return
+	}
+	for _, pod := range usedPods {
+		podName := pod.GetPod().NamespacedName.String()
+		lruPos := lruPosition[podName]
+		// LRU keys are oldest to newest so rank 0 = oldest
+		// The never used pod count is added to the rank so that
+		// a never-used pod will always have the highest score.
+		rank := neverUsedCount + lruPos
+		score := 1.0 - float64(rank)/float64(totalPods-1)
+		if score < 0 {
+			score = 0
+		}
+		scoredPods[pod] = score
+	}
+}
+
+// scoreColdRequestByLRU scores pods based on their LRU position for cold requests.
+// Pods that have never received a cold request get the highest scores.
+// Among previously used pods, least recently used ones get higher scores.
+func (s *NoHitLRU) scoreColdRequestByLRU(pods []types.Pod) map[types.Pod]float64 {
+	scoredPods := make(map[types.Pod]float64, len(pods))
+	totalPods := len(pods)
+
+	// Special case: only one pod
+	if totalPods == 1 {
+		scoredPods[pods[0]] = 1.0
+		return scoredPods
+	}
+
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	lruPosition := s.getLRUPositions()
+	usedPods, neverUsedPods := s.partitionPodsByUsage(pods, lruPosition)
+
+	s.scoreNeverUsedPods(scoredPods, neverUsedPods, totalPods)
+	s.scoreUsedPods(scoredPods, usedPods, lruPosition, len(neverUsedPods), totalPods)
+
+	return scoredPods
+}
+
 // Score scores the given pods based on LRU for cold requests.
 // For cache hits, returns neutral scores (0.5) for all pods.
 // For cache misses, ranks pods by their LRU order.
@@ -128,94 +243,19 @@ func (s *NoHitLRU) WithName(name string) *NoHitLRU {
 func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	// Read prefix cache state to determine if this is a cold request
-	// This is treated as an optimization - if the state isn't available, we assume cold request
-	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(s.prefixPluginName))
-
-	var isCold bool
-	if err != nil {
-		logger.Info("No prefix cache state found, treating as cold request for LRU optimization", "error", err)
-		isCold = true
-	} else {
-		// Check if this is a cold request (no prefix cache hits)
-		isCold = len(prefixState.PrefixCacheServers) == 0
-	}
+	isCold := s.isColdRequest(ctx, cycleState)
 
 	// Store the cold request state in plugin state for PreRequest to use
 	coldState := &coldRequestState{isCold: isCold}
 	s.pluginState.Write(request.RequestId, plugins.StateKey(s.typedName.String()), coldState)
 
-	scoredPods := make(map[types.Pod]float64)
-
 	if !isCold {
-		// For cache hits, return neutral scores
-		for _, pod := range pods {
-			scoredPods[pod] = 0.5
-		}
 		logger.Info("Cache hit detected, returning neutral scores")
-		return scoredPods
+		return s.scoreNeutral(pods)
 	}
 
-	// For cold requests, rank by LRU
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-
-	// Get all keys from LRU cache in order (oldest first)
-	// https://pkg.go.dev/github.com/hashicorp/golang-lru/v2#Cache.Keys
-	lruKeys := s.lruCache.Keys()
-
-	// Create a map for quick lookup of LRU positions (0 == oldest)
-	lruPosition := make(map[string]int)
-	for i, key := range lruKeys {
-		lruPosition[key] = i
-	}
-
-	// Separate pods into used and never-used
-	var usedPods []types.Pod
-	var neverUsedPods []types.Pod
-
-	for _, pod := range pods {
-		podName := pod.GetPod().NamespacedName.String()
-		if _, exists := lruPosition[podName]; exists {
-			usedPods = append(usedPods, pod)
-		} else {
-			neverUsedPods = append(neverUsedPods, pod)
-		}
-	}
-
-	// Score pods: never-used get highest scores, then LRU order
-	totalPods := len(pods)
-	if totalPods == 1 {
-		// Only one pod, give it max score then skip.
-		// Avoids dividing by zero during normalization.
-		scoredPods[pods[0]] = 1.0
-	} else {
-		for i, pod := range neverUsedPods {
-			// The first unused pod gets a maxed out score, subsequent pods
-			// fall off exponentially.
-			score := 1.0 - float64(i)/float64(totalPods-1)
-			scoredPods[pod] = score
-		}
-
-		// Score used pods based on LRU position (least recent = higher score)
-		neverUsedCount := len(neverUsedPods)
-		for _, pod := range usedPods {
-			podName := pod.GetPod().NamespacedName.String()
-			lruPos := lruPosition[podName]
-			// LRU keys are oldest to newest so rank 0 = oldest
-			// The never used pod count is added to the rank so that
-			// a never-used pod will always have the highest score.
-			rank := neverUsedCount + lruPos
-			score := 1.0 - float64(rank)/float64(totalPods-1)
-			if score < 0 {
-				score = 0
-			}
-			scoredPods[pod] = score
-		}
-	}
-
-	logger.Info("Cold request detected, scored pods by LRU", "scores", scoredPods)
-	return scoredPods
+	logger.Info("Cold request detected, scoring pods by LRU")
+	return s.scoreColdRequestByLRU(pods)
 }
 
 // PreRequest is called before a request is sent to the target pod.
