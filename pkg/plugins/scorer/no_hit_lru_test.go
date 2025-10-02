@@ -387,3 +387,57 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		assertHighestScoredPod(podA, "after-podC-used")
 	})
 }
+
+func TestNoHitLRUEdgeCases(t *testing.T) {
+	ctx := context.Background()
+	scorer := scorer.NewNoHitLRU(ctx, nil)
+
+	podA := &types.PodMetrics{
+		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+		MetricsState: &backendmetrics.MetricsState{},
+	}
+
+	t.Run("empty pods list", func(t *testing.T) {
+		emptyPods := []types.Pod{}
+		cycleState := &types.CycleState{}
+		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
+		})
+
+		scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, emptyPods)
+
+		if len(scores) != 0 {
+			t.Errorf("Expected empty scores for empty pods list, got %d scores", len(scores))
+		}
+	})
+
+	t.Run("nil pods list", func(t *testing.T) {
+		cycleState := &types.CycleState{}
+		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
+		})
+
+		scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, nil)
+
+		if scores == nil {
+			t.Errorf("Expected non-nil scores map for nil pods list")
+		}
+		if len(scores) != 0 {
+			t.Errorf("Expected empty scores for nil pods list, got %d scores", len(scores))
+		}
+	})
+
+	t.Run("single pod returns 1.0", func(t *testing.T) {
+		pods := []types.Pod{podA}
+		cycleState := &types.CycleState{}
+		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
+		})
+
+		scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, pods)
+
+		if scores[podA] != 1.0 {
+			t.Errorf("Expected single pod to get score 1.0, got %f", scores[podA])
+		}
+	})
+}
