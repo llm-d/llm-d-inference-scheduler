@@ -15,14 +15,48 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apilabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
+
+const (
+	deploymentKind = "deployment"
+)
+
+func scaleDeployment(objects []string, increment int) {
+	k8sCfg := config.GetConfigOrDie()
+	client, err := kubernetes.NewForConfig(k8sCfg)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	direction := "up"
+	absIncrement := increment
+	if increment < 0 {
+		direction = "down"
+		absIncrement = -increment
+	}
+
+	for _, kindAndName := range objects {
+		split := strings.Split(kindAndName, "/")
+		if strings.ToLower(split[0]) == deploymentKind {
+			ginkgo.By(fmt.Sprintf("Scaling the deployment %s %s by %d", split[1], direction, absIncrement))
+			scale, err := client.AppsV1().Deployments(nsName).GetScale(ctx, split[1], v1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			scale.Spec.Replicas += int32(increment)
+			_, err = client.AppsV1().Deployments(nsName).UpdateScale(ctx, split[1], scale, v1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			time.Sleep(time.Second)
+		}
+	}
+	podsInDeploymentsReady(objects)
+}
 
 func createObjsFromYaml(docs []string) []string {
 	objNames := []string{}
@@ -102,7 +136,7 @@ func getClientObject(kind string) client.Object {
 		return &corev1.ConfigMap{}
 	case "customresourcedefinition":
 		return &apiextv1.CustomResourceDefinition{}
-	case "deployment":
+	case deploymentKind:
 		return &appsv1.Deployment{}
 	case "inferencepool":
 		return &v1alpha2.InferencePool{}
@@ -181,7 +215,7 @@ func podsInDeploymentsReady(objects []string) {
 	}
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
-		if strings.ToLower(split[0]) == "deployment" {
+		if strings.ToLower(split[0]) == deploymentKind {
 			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
 			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
 		}
