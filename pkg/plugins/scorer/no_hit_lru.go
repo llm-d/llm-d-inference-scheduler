@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -91,7 +90,6 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 	return &NoHitLRU{
 		typedName:        plugins.TypedName{Type: NoHitLRUType},
 		lruCache:         lruCache,
-		mutex:            &sync.RWMutex{},
 		prefixPluginName: prefixPluginName,
 		pluginState:      plugins.NewPluginState(ctx),
 	}
@@ -103,7 +101,6 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 type NoHitLRU struct {
 	typedName        plugins.TypedName
 	lruCache         *lru.Cache[string, struct{}] // pod name -> dummy value (we only care about order)
-	mutex            *sync.RWMutex
 	prefixPluginName string
 	pluginState      *plugins.PluginState
 }
@@ -222,9 +219,6 @@ func (s *NoHitLRU) scoreColdRequestByLRU(pods []types.Pod) map[types.Pod]float64
 		return scoredPods
 	}
 
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-
 	lruPosition := s.getLRUPositions()
 	usedPods, neverUsedPods := s.partitionPodsByUsage(pods, lruPosition)
 
@@ -294,10 +288,8 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 	podName := targetPod.GetPod().NamespacedName.String()
 
 	// Move the pod to the front of the LRU.
-	s.mutex.Lock()
 	var present struct{} // dummy value
 	s.lruCache.Add(podName, present)
-	s.mutex.Unlock()
 
 	logger.Info("Updated LRU cache for cold request", "pod", podName, "requestId", request.RequestId)
 }
