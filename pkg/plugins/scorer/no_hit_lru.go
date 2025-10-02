@@ -176,6 +176,7 @@ func (s *NoHitLRU) partitionPodsByUsage(pods []types.Pod, lruPosition map[string
 // The first never-used pod gets the highest score (1.0), with subsequent pods
 // receiving progressively lower scores.
 func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[types.Pod]float64, neverUsedPods []types.Pod, totalPods int) {
+	// Avoid possibility of dividing by zero.
 	if totalPods <= 1 {
 		return
 	}
@@ -188,6 +189,7 @@ func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[types.Pod]float64, neverUse
 // scoreUsedPods assigns scores to pods based on their LRU position.
 // Pods that were least recently used for cold requests receive higher scores.
 func (s *NoHitLRU) scoreUsedPods(scoredPods map[types.Pod]float64, usedPods []types.Pod, lruPosition map[string]int, neverUsedCount, totalPods int) {
+	// Avoid possibility of dividing by zero.
 	if totalPods <= 1 {
 		return
 	}
@@ -213,7 +215,7 @@ func (s *NoHitLRU) scoreColdRequestByLRU(pods []types.Pod) map[types.Pod]float64
 	scoredPods := make(map[types.Pod]float64, len(pods))
 	totalPods := len(pods)
 
-	// Special case: only one pod
+	// Avoid possibility of dividing by zero.
 	if totalPods == 1 {
 		scoredPods[pods[0]] = 1.0
 		return scoredPods
