@@ -60,9 +60,9 @@ var (
 	port      string
 	scheme    = runtime.NewScheme()
 
-	eppTag            = env.GetEnvString("EPP_TAG", "dev", ginkgo.GinkgoLogr)
-	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
-	routingSideCarTag = env.GetEnvString("ROUTING_SIDECAR_TAG", "v0.2.0", ginkgo.GinkgoLogr)
+	eppImage            = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
+	vllmSimImage        = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:dev", ginkgo.GinkgoLogr)
+	routingSideCarImage = env.GetEnvString("ROUTING_SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:v0.2.0", ginkgo.GinkgoLogr)
 
 	existsTimeout     = env.GetEnvDuration("EXISTS_TIMEOUT", defaultExistsTimeout, ginkgo.GinkgoLogr)
 	readyTimeout      = env.GetEnvDuration("READY_TIMEOUT", defaultReadyTimeout, ginkgo.GinkgoLogr)
@@ -118,20 +118,17 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image",
-		"ghcr.io/llm-d/llm-d-inference-sim:"+vllmSimTag)
+	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image", vllmSimImage)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image",
-		"ghcr.io/llm-d/llm-d-inference-scheduler:"+eppTag)
+	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image", eppImage)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image",
-		"ghcr.io/llm-d/llm-d-routing-sidecar:"+routingSideCarTag)
+	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image", routingSideCarImage)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))

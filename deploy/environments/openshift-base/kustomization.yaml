@@ -22,12 +22,6 @@ configMapGenerator:
     disableNameSuffixHash: true
 
 # Include patches to update the Service, StatefulSet, Route, and RBAC resources.
-
-# Define the image to be updated.
-# images:
-# - name: ghcr.io/llm-d/placeholder
-#   newName: ghcr.io/llm-d/${IMAGE_TAG_BASE}
-#   newTag: ${VERSION}
 patches:
 - path: common/patch-service.yaml
 - path: common/patch-statefulset.yaml
