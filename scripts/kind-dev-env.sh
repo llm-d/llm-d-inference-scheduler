@@ -23,10 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${IMAGE_REGISTRY:=ghcr.io/llm-d}"
 
 # Set a default VLLM_SIMULATOR_IMAGE if not provided
-: "${VLLM_SIMULATOR_IMAGE:=llm-d-inference-sim}"
-
-# Set a default VLLM_SIMULATOR_IMAGE if not provided
-export VLLM_SIMULATOR_IMAGE="${VLLM_SIMULATOR_IMAGE:-ghcr.io/llm-d/llm-d-inference-sim:v0.4.0}"
+export VLLM_SIMULATOR_IMAGE="${VLLM_SIMULATOR_IMAGE:-ghcr.io/llm-d/llm-d-inference-sim:latest}"
 
 # Set a default EPP_IMAGE if not provided
 export EPP_IMAGE="${EPP_IMAGE:-ghcr.io/llm-d/llm-d-inference-scheduler:dev}"
