@@ -6,13 +6,23 @@ SHELL := /usr/bin/env bash
 # Defaults
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
+NAMESPACE ?= hc4ai-operator
+# Image default
 PROJECT_NAME ?= llm-d-inference-scheduler
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 EPP_IMG_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 EPP_IMAGE = $(EPP_IMG_TAG_BASE):$(EPP_TAG)
 export EPP_IMAGE
-NAMESPACE ?= hc4ai-operator
+# Image dependency defaults
+VLLM_SIM_IMG_TAG_BASE ?= $(IMAGE_REGISTRY)/llm-d-inference-sim
+VLLM_SIMULATOR_TAG ?= latest
+VLLM_SIMULATOR_IMAGE = $(VLLM_SIM_IMG_TAG_BASE):${VLLM_SIMULATOR_TAG}
+export VLLM_SIMULATOR_IMAGE
+ROUTING_SIDECAR_IMG_TAG_BASE ?= $(IMAGE_REGISTRY)/llm-d-routing-sidecar
+ROUTING_SIDECAR_TAG ?= v0.2.0
+ROUTING_SIDECAR_IMAGE = ${ROUTING_SIDECAR_IMG_TAG_BASE}:${ROUTING_SIDECAR_TAG}
+export ROUTING_SIDECAR_IMAGE
 
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
