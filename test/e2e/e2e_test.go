@@ -146,15 +146,15 @@ func createModelServers(withPD, withKV bool, vllmReplicas, prefillReplicas, deco
 	manifests := readYaml(yaml)
 	manifests = substituteMany(manifests,
 		map[string]string{
-			"${MODEL_NAME}":           theModelName,
-			"${MODEL_NAME_SAFE}":      theSafeModelName,
-			"${POOL_NAME}":            poolName,
-			"${KV_CACHE_ENABLED}":     strconv.FormatBool(withKV),
-			"${ROUTING_SIDECAR_TAG}":  routingSideCarTag,
-			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(vllmReplicas),
-			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
-			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
-			"${VLLM_SIMULATOR_TAG}":   vllmSimTag,
+			"${MODEL_NAME}":            theModelName,
+			"${MODEL_NAME_SAFE}":       theSafeModelName,
+			"${POOL_NAME}":             poolName,
+			"${KV_CACHE_ENABLED}":      strconv.FormatBool(withKV),
+			"${ROUTING_SIDECAR_IMAGE}": routingSideCarImage,
+			"${VLLM_REPLICA_COUNT}":    strconv.Itoa(vllmReplicas),
+			"${VLLM_REPLICA_COUNT_D}":  strconv.Itoa(decodeReplicas),
+			"${VLLM_REPLICA_COUNT_P}":  strconv.Itoa(prefillReplicas),
+			"${VLLM_SIMULATOR_IMAGE}":  vllmSimImage,
 		})
 
 	objects := createObjsFromYaml(manifests)
@@ -183,7 +183,7 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls := readYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_TAG}":   eppTag,
+			"${EPP_IMAGE}": eppImage,
 			"${POOL_NAME}": modelName + "-inference-pool",
 		})
 

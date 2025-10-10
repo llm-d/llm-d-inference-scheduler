@@ -31,9 +31,6 @@ if [[ ! -f "$VLLM_CHART_DIR/Chart.yaml" ]]; then
   exit 1
 fi
 
-# Default image registry for pulling deployment images
-export IMAGE_REGISTRY="${IMAGE_REGISTRY:-ghcr.io/llm-d}"
-
 # -----------------------------------------------------------------------------
 # Model Configuration
 # -----------------------------------------------------------------------------
@@ -72,10 +69,7 @@ export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 
 # EPP container image name
-export EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler}"
-
-# EPP image tag
-export EPP_TAG="${EPP_TAG:-v0.1.0}"
+export EPP_IMAGE="${EPP_IMAGE:-ghcr.io/llm-d/llm-d-inference-scheduler:dev}"
 
 # Whether P/D mode is enabled for this deployment
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
