@@ -49,6 +49,8 @@ func (r *requestEntry) String() string {
 
 // compile-time type assertion
 var _ framework.Scorer = &ActiveRequest{}
+var _ requestcontrol.PreRequest = &ActiveRequest{}
+var _ requestcontrol.PostResponse = &ActiveRequest{}
 
 // ActiveRequestFactory defines the factory function for the ActiveRequest scorer.
 func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
