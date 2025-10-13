@@ -50,12 +50,17 @@ import (
 
 // --- Mocks ---
 
-type mockSaturationDetector struct {
-	isSaturated bool
+type mockAdmissionController struct {
+	admitErr error
 }
 
-func (m *mockSaturationDetector) IsSaturated(_ context.Context, _ []backendmetrics.PodMetrics) bool {
-	return m.isSaturated
+func (m *mockAdmissionController) Admit(
+	_ context.Context,
+	_ *handlers.RequestContext,
+	_ []backendmetrics.PodMetrics,
+	_ int,
+) error {
+	return m.admitErr
 }
 
 type mockScheduler struct {
@@ -71,8 +76,12 @@ type mockDatastore struct {
 	pods []backendmetrics.PodMetrics
 }
 
-func (ds *mockDatastore) PoolGet() (*v1.InferencePool, error)                { return nil, nil }
-func (ds *mockDatastore) ObjectiveGet(_ string) *v1alpha2.InferenceObjective { return nil }
+func (ds *mockDatastore) PoolGet() (*v1.InferencePool, error) {
+	return nil, nil
+}
+func (ds *mockDatastore) ObjectiveGet(_ string) *v1alpha2.InferenceObjective {
+	return nil
+}
 func (ds *mockDatastore) PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics {
 	res := []backendmetrics.PodMetrics{}
 	for _, pod := range ds.pods {
@@ -187,23 +196,23 @@ func TestDirector_HandleRequest(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                   string
-		reqBodyMap             map[string]any
-		mockSaturationDetector *mockSaturationDetector
-		inferenceObjectiveName string
-		schedulerMockSetup     func(m *mockScheduler)
-		wantErrCode            string                   // Expected errutil code string
-		wantReqCtx             *handlers.RequestContext // Fields to check in the returned RequestContext
-		wantMutatedBodyModel   string                   // Expected model in reqCtx.Request.Body after PostDispatch
-		targetModelName        string                   // Expected model name after target model resolution
+		name                    string
+		reqBodyMap              map[string]any
+		mockAdmissionController *mockAdmissionController
+		inferenceObjectiveName  string
+		schedulerMockSetup      func(m *mockScheduler)
+		wantErrCode             string                   // Expected errutil code string
+		wantReqCtx              *handlers.RequestContext // Fields to check in the returned RequestContext
+		wantMutatedBodyModel    string                   // Expected model in reqCtx.Request.Body after PostDispatch
+		targetModelName         string                   // Expected model name after target model resolution
 	}{
 		{
-			name: "successful completions request (critical, saturation ignored)",
+			name: "successful completions request",
 			reqBodyMap: map[string]any{
 				"model":  model,
 				"prompt": "critical prompt",
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: true},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -221,7 +230,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			targetModelName:        model,
 		},
 		{
-			name: "successful chat completions request (default critical, saturation ignored)",
+			name: "successful chat completions request",
 			reqBodyMap: map[string]any{
 				"model": model,
 				"messages": []any{
@@ -231,7 +240,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 					},
 				},
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: true},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -247,7 +256,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			targetModelName:      model,
 		},
 		{
-			name: "successful chat completions request with multiple messages (critical, saturation ignored)",
+			name: "successful chat completions request with multiple messages",
 			reqBodyMap: map[string]any{
 				"model": model,
 				"messages": []any{
@@ -261,6 +270,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 					},
 				},
 			},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -278,35 +288,12 @@ func TestDirector_HandleRequest(t *testing.T) {
 			targetModelName:        model,
 		},
 		{
-			name: "successful completions request (sheddable, not saturated)",
-			reqBodyMap: map[string]any{
-				"model":  modelSheddable,
-				"prompt": "sheddable prompt",
-			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
-			schedulerMockSetup: func(m *mockScheduler) {
-				m.scheduleResults = defaultSuccessfulScheduleResults
-			},
-			wantReqCtx: &handlers.RequestContext{
-				ObjectiveKey:    objectiveNameSheddable,
-				TargetModelName: modelSheddable,
-				TargetPod: &backend.Pod{
-					NamespacedName: types.NamespacedName{Namespace: "default", Name: "pod1"},
-					Address:        "192.168.1.100",
-				},
-				TargetEndpoint: "192.168.1.100:8000,192.168.2.100:8000,192.168.4.100:8000",
-			},
-			wantMutatedBodyModel:   modelSheddable,
-			inferenceObjectiveName: objectiveNameSheddable,
-			targetModelName:        modelSheddable,
-		},
-		{
 			name: "successful request with target model resolution",
 			reqBodyMap: map[string]any{
 				"model":  modelWithResolvedTarget,
 				"prompt": "prompt for target resolution",
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = defaultSuccessfulScheduleResults
 			},
@@ -342,28 +329,27 @@ func TestDirector_HandleRequest(t *testing.T) {
 				"model":  "food-review-1",
 				"prompt": "test prompt",
 			},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
-			inferenceObjectiveName: "food-review-1",
-			targetModelName:        "food-review-1",
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
+			inferenceObjectiveName:  "food-review-1",
+			targetModelName:         "food-review-1",
 		},
 		{
 
-			name: "request dropped (sheddable, saturated)",
+			name: "request rejected by admission controller",
 			reqBodyMap: map[string]any{
 				"model":  modelSheddable,
 				"prompt": "sheddable prompt",
 			},
-			inferenceObjectiveName: objectiveNameSheddable,
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: true},
-			wantErrCode:            errutil.InferencePoolResourceExhausted,
+			inferenceObjectiveName:  objectiveNameSheddable,
+			mockAdmissionController: &mockAdmissionController{admitErr: errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: "simulated admission rejection"}},
+			wantErrCode:             errutil.InferencePoolResourceExhausted,
 		},
 		{
-			name:                   "model not found, expect err",
-			reqBodyMap:             map[string]any{"prompt": "p"},
-			mockSaturationDetector: &mockSaturationDetector{isSaturated: false},
-			wantErrCode:            errutil.BadRequest,
+			name:                    "model not found, expect err",
+			reqBodyMap:              map[string]any{"prompt": "p"},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
+			wantErrCode:             errutil.BadRequest,
 		},
-
 		{
 			name:        "prompt or messages not found, expect err",
 			reqBodyMap:  map[string]any{"model": model},
@@ -383,6 +369,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				"model":  model,
 				"prompt": "prompt that causes scheduler error",
 			},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleErr = errors.New("simulated scheduler failure")
 			},
@@ -395,6 +382,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				"model":  model,
 				"prompt": "prompt for nil,nil scheduler return",
 			},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleResults = nil
 				m.scheduleErr = nil
@@ -410,7 +398,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			if test.schedulerMockSetup != nil {
 				test.schedulerMockSetup(mockSched)
 			}
-			director := NewDirectorWithConfig(ds, mockSched, test.mockSaturationDetector, NewConfig())
+			director := NewDirectorWithConfig(ds, mockSched, test.mockAdmissionController, NewConfig())
 
 			reqCtx := &handlers.RequestContext{
 				Request: &handlers.Request{
@@ -529,7 +517,7 @@ func TestGetCandidatePodsForScheduling(t *testing.T) {
 	ds := &mockDatastore{pods: testInput}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			director := NewDirectorWithConfig(ds, &mockScheduler{}, &mockSaturationDetector{}, NewConfig())
+			director := NewDirectorWithConfig(ds, &mockScheduler{}, &mockAdmissionController{}, NewConfig())
 
 			got := director.getCandidatePodsForScheduling(context.Background(), test.metadata)
 
@@ -598,7 +586,7 @@ func TestDirector_HandleResponse(t *testing.T) {
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
 	ds := datastore.NewDatastore(t.Context(), nil)
 	mockSched := &mockScheduler{}
-	director := NewDirectorWithConfig(ds, mockSched, nil, NewConfig().WithPostResponsePlugins(pr1))
+	director := NewDirectorWithConfig(ds, mockSched, &mockAdmissionController{}, NewConfig().WithPostResponsePlugins(pr1))
 
 	reqCtx := &handlers.RequestContext{
 		Request: &handlers.Request{
