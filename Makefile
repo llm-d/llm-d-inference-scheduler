@@ -146,7 +146,7 @@ image-push: check-container-tool ## Push Docker image $(EPP_IMAGE) to registry
 	@printf "\033[33;1m==== Pushing Docker image $(EPP_IMAGE) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $(EPP_IMAGE)
 
-.PHONY image-pull
+.PHONY: image-pull
 image-pull: check-container-tool ## Pull all related images using $(CONTAINER_TOOL)
 	@printf "\033[33;1m==== Pulling Docker images ====\033[0m\n"
 	./scripts/pull_images.sh
