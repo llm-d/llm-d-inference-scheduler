@@ -1,33 +1,71 @@
-version: "2"
+# Enhanced golangci-lint configuration for llm-d-inference-scheduler
+# Expanded from 22 to 30+ linters for improved code quality, security, and maintainability
+# Focus on practical improvements suitable for Kubernetes controller development
 
 run:
-  timeout: 5m
-  allow-parallel-runners: true
-
-formatters:
-  enable:
-  - goimports
-  - gofmt
+  timeout: 10m
+  modules-download-mode: readonly
 
 linters:
   enable:
-  - copyloopvar
-  - dupword
-  - durationcheck
-  - fatcontext
-  - ginkgolinter
-  - gocritic
-  - govet
-  - loggercheck
-  - misspell
-  - perfsprint
-  - revive
-  - unconvert
-  - makezero
-  - errcheck
-  - goconst
-  - ineffassign
-  - nakedret
-  - prealloc
-  - unparam
-  - unused
+    # === ORIGINAL LINTERS (maintained) ===
+    - copyloopvar       # Loop variable capture issues (Go 1.22+)
+    - dupword           # Duplicate words in comments  
+    - durationcheck     # Duration multiplication issues (important for k8s timers)
+    - fatcontext        # Nested contexts in loops
+    - ginkgolinter      # Ginkgo test framework linting (CRITICAL - heavily used)
+    - gocritic          # Comprehensive static code analyzer
+    - govet             # Go's built-in static analyzer
+    - loggercheck       # Logger usage patterns (CRITICAL for controller-runtime)
+    - misspell          # Spelling mistakes in comments
+    - perfsprint        # fmt.Sprintf performance issues
+    - revive            # Go best practices and style guide
+    - unconvert         # Unnecessary type conversions
+    - makezero          # Slice declarations with non-zero length
+    - errcheck          # Unchecked errors (CRITICAL for robust Go code)
+    - goconst           # Repeated strings that should be constants
+    - ineffassign       # Ineffectual assignments
+    - nakedret          # Naked returns in functions longer than specified length
+    - prealloc          # Slice pre-allocation opportunities
+    - unparam           # Unused function parameters
+    - unused            # Unused code (helps reduce bloat)
+
+    # === NEW HIGH-VALUE ADDITIONS ===
+    # Formatting and style consistency
+    - gofmt             # Ensures code is gofmt-ed
+    - goimports         # Import organization and unused import removal
+    
+    # Security enhancements
+    - gosec             # Security vulnerability scanner
+    - bodyclose         # Ensures HTTP response bodies are closed
+    
+    # Context and resource management (critical for k8s controllers)  
+    - contextcheck      # Proper context usage patterns
+    - noctx             # HTTP requests without context
+    
+    # Character encoding safety
+    - asciicheck        # Non-ASCII identifiers
+    - bidichk           # Dangerous unicode character sequences
+    
+    # Enhanced error handling
+    - errorlint         # Error wrapping scheme validation
+    - nilerr            # Nil error handling pattern issues
+    
+    # Code quality improvements
+    - testpackage       # Test package naming conventions
+    
+    # Import organization for large projects
+    - gci               # Advanced import grouping
+
+  disable:
+    # Linters that are too restrictive or noisy for this project type
+    - varnamelen        # Variable name length (Go idioms favor short names)
+    - exhaustruct       # Exhaustive struct initialization (too restrictive)
+    - nlreturn          # Newlines before returns (too opinionated)
+    - wsl               # Whitespace linter (too opinionated)  
+    - lll               # Line length (handled by gofmt)
+    - gomnd             # Magic number detection (too noisy)
+    - cyclop            # Cyclomatic complexity (can be overly strict)
+    - funlen            # Function length (can be overly strict)
+    - nestif            # Nested if statements (can be overly strict)
+    - gocognit          # Cognitive complexity (can be overly strict)
