@@ -61,6 +61,7 @@ var (
 	port      string
 	scheme    = runtime.NewScheme()
 
+	container_runtime   = env.GetEnvString("CONTAINER_TOOL", "docker", ginkgo.GinkgoLogr)
 	eppImage            = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
 	vllmSimImage        = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:dev", ginkgo.GinkgoLogr)
 	routingSideCarImage = env.GetEnvString("ROUTING_SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:v0.2.0", ginkgo.GinkgoLogr)
@@ -103,8 +104,7 @@ var _ = ginkgo.AfterSuite(func() {
 
 // loadImageIntoKind loads the specified image
 // into the Kind cluster using the most appropriate method based on the container runtime.
-func loadImageIntoKind(imageName string) {
-	container_runtime := env.GetEnvString("CONTAINER_TOOL", "docker", ginkgo.GinkgoLogr)
+func loadImageIntoKind(container_runtime string, imageName string) {
 	ginkgo.By("Loading image into Kind cluster: " + imageName)
 
 	switch container_runtime {
@@ -164,9 +164,9 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	loadImageIntoKind(vllmSimImage)
-	loadImageIntoKind(eppImage)
-	loadImageIntoKind(routingSideCarImage)
+	loadImageIntoKind(container_runtime, vllmSimImage)
+	loadImageIntoKind(container_runtime, eppImage)
+	loadImageIntoKind(container_runtime, routingSideCarImage)
 }
 
 func setupK8sClient() {
