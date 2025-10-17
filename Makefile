@@ -6,12 +6,23 @@ SHELL := /usr/bin/env bash
 # Defaults
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
+NAMESPACE ?= hc4ai-operator
+# Image default
 PROJECT_NAME ?= llm-d-inference-scheduler
 IMAGE_REGISTRY ?= ghcr.io/llm-d
-IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
+EPP_IMG_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
-IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
-NAMESPACE ?= hc4ai-operator
+EPP_IMAGE = $(EPP_IMG_TAG_BASE):$(EPP_TAG)
+export EPP_IMAGE
+# Image dependency defaults
+VLLM_SIM_IMG_TAG_BASE ?= $(IMAGE_REGISTRY)/llm-d-inference-sim
+VLLM_SIMULATOR_TAG ?= latest
+VLLM_SIMULATOR_IMAGE = $(VLLM_SIM_IMG_TAG_BASE):${VLLM_SIMULATOR_TAG}
+export VLLM_SIMULATOR_IMAGE
+ROUTING_SIDECAR_IMG_TAG_BASE ?= $(IMAGE_REGISTRY)/llm-d-routing-sidecar
+ROUTING_SIDECAR_TAG ?= v0.2.0
+ROUTING_SIDECAR_IMAGE = ${ROUTING_SIDECAR_IMG_TAG_BASE}:${ROUTING_SIDECAR_TAG}
+export ROUTING_SIDECAR_IMAGE
 
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
@@ -37,6 +48,7 @@ TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
 endif
 
 CONTAINER_TOOL := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
+export CONTAINER_TOOL
 BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_TOOL))
 PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
 
@@ -94,7 +106,7 @@ test-integration: download-tokenizer install-dependencies ## Run integration tes
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
-test-e2e: image-build ## Run end-to-end tests against a new kind cluster
+test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	./test/scripts/run_e2e.sh
 
@@ -119,20 +131,26 @@ build: check-go install-dependencies download-tokenizer ## Build the project
 ##@ Container Build/Push
 
 .PHONY:	image-build
-image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
-	@printf "\033[33;1m==== Building Docker image $(IMG) ====\033[0m\n"
+image-build: check-container-tool ## Build Docker image using $(CONTAINER_TOOL)
+	@printf "\033[33;1m==== Building Docker image $(EPP_IMAGE) ====\033[0m\n"
 	$(CONTAINER_TOOL) build \
 		--platform linux/$(TARGETARCH) \
  		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
- 		-t $(IMG) .
+ 		-t $(EPP_IMAGE) .
 
 .PHONY: image-push
-image-push: check-container-tool ## Push Docker image $(IMG) to registry
-	@printf "\033[33;1m==== Pushing Docker image $(IMG) ====\033[0m\n"
-	$(CONTAINER_TOOL) push $(IMG)
+image-push: check-container-tool ## Push Docker image $(EPP_IMAGE) to registry
+	@printf "\033[33;1m==== Pushing Docker image $(EPP_IMAGE) ====\033[0m\n"
+	$(CONTAINER_TOOL) push $(EPP_IMAGE)
+
+.PHONY: image-pull
+image-pull: check-container-tool ## Pull all related images using $(CONTAINER_TOOL)
+	@printf "\033[33;1m==== Pulling Docker images ====\033[0m\n"
+	./scripts/pull_images.sh
+
 
 ##@ Install/Uninstall Targets
 
@@ -148,7 +166,7 @@ uninstall: uninstall-docker ## Default uninstall using Docker
 .PHONY: install-docker
 install-docker: check-container-tool ## Install app using $(CONTAINER_TOOL)
 	@echo "Starting container with $(CONTAINER_TOOL)..."
-	$(CONTAINER_TOOL) run -d --name $(PROJECT_NAME)-container $(IMG)
+	$(CONTAINER_TOOL) run -d --name $(PROJECT_NAME)-container $(EPP_IMAGE)
 	@echo "$(CONTAINER_TOOL) installation complete."
 	@echo "To use $(PROJECT_NAME), run:"
 	@echo "alias $(PROJECT_NAME)='$(CONTAINER_TOOL) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"
@@ -193,12 +211,12 @@ uninstall-k8s: check-kubectl check-kustomize check-envsubst ## Uninstall from Ku
 
 .PHONY: install-openshift
 install-openshift: check-kubectl check-kustomize check-envsubst ## Install on OpenShift
-	@echo $$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION
+	@echo $$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE
 	@echo "Creating namespace $(NAMESPACE)..."
 	kubectl create namespace $(NAMESPACE) 2>/dev/null || true
 	@echo "Deploying common resources from deploy/ ..."
 	# Build and substitute the base manifests from deploy, then apply them
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl apply -n $(NAMESPACE) -f -
+	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl apply -n $(NAMESPACE) -f -
 	@echo "Waiting for pod to become ready..."
 	sleep 5
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
@@ -209,9 +227,9 @@ install-openshift: check-kubectl check-kustomize check-envsubst ## Install on Op
 .PHONY: uninstall-openshift
 uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall from OpenShift
 	@echo "Removing resources from OpenShift..."
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete --force -f - || true
+	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl delete --force -f - || true
 	# @if kubectl api-resources --api-group=route.openshift.io | grep -q Route; then \
-	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
+	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
 	# fi
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
 	echo "Deleting pod: $$POD"; \
@@ -223,19 +241,20 @@ uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall f
 .PHONY: install-rbac
 install-rbac: check-kubectl check-kustomize check-envsubst ## Install RBAC
 	@echo "Applying RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl apply -f -
+	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl apply -f -
 
 .PHONY: uninstall-rbac
 uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 	@echo "Removing RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete -f - || true
+	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl delete -f - || true
 
 ##@ Environment
 .PHONY: env
 env: ## Print environment variables
-	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
-	@echo "IMG=$(IMG)"
+	@echo "EPP_IMAGE=$(EPP_IMAGE)"
 	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
+	@echo "NAMESPACE=${NAMESPACE}"
+	@echo "GIT_COMMIT_SHA=${GIT_COMMIT_SHA}"
 
 .PHONY: check-typos
 check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error if found)
@@ -293,9 +312,16 @@ check-envsubst:
 
 .PHONY: check-container-tool
 check-container-tool:
-	@command -v $(CONTAINER_TOOL) >/dev/null 2>&1 || { \
-	  echo "❌ $(CONTAINER_TOOL) is not installed."; \
-	  echo "🔧 Try: sudo apt install $(CONTAINER_TOOL) OR brew install $(CONTAINER_TOOL)"; exit 1; }
+	@if [ -z "$(CONTAINER_TOOL)" ]; then \
+		echo "❌ Error: No container tool detected. Please install docker or podman."; \
+		exit 1; \
+	elif ! command -v $(CONTAINER_TOOL) >/dev/null 2>&1; then \
+		echo "❌ Error: '$(CONTAINER_TOOL)' is not installed or not in your PATH."; \
+		echo "🔧 Try: sudo apt install $(CONTAINER_TOOL) OR brew install $(CONTAINER_TOOL)"; \
+		exit 1; \
+	else \
+		echo "✅ Container tool '$(CONTAINER_TOOL)' found."; \
+	fi
 
 .PHONY: check-kubectl
 check-kubectl:
@@ -348,8 +374,7 @@ env-dev-kind: ## Run under kind ($(KIND_CLUSTER_NAME))
 		$(MAKE) image-build && \
 		CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 		GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
-		IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-		EPP_TAG=$(EPP_TAG) \
+		EPP_IMAGE=$(EPP_IMAGE) \
 		./scripts/kind-dev-env.sh; \
 	fi
 
