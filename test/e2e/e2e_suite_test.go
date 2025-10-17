@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -100,6 +101,51 @@ var _ = ginkgo.AfterSuite(func() {
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 })
 
+// loadImageIntoKind loads the specified image
+// into the Kind cluster using the most appropriate method based on the container runtime.
+func loadImageIntoKind(imageName string) {
+	container_runtime := env.GetEnvString("CONTAINER_TOOL", "docker", ginkgo.GinkgoLogr)
+	ginkgo.By("Loading image into Kind cluster: " + imageName)
+
+	switch container_runtime {
+	case "podman":
+		// Detect if podman is available
+		podmanPath, podmanErr := exec.LookPath("podman")
+		gomega.Expect(podmanErr).ShouldNot(gomega.HaveOccurred(), "Could not find podman in PATH")
+		ginkgo.GinkgoLogr.Info("Podman detected, using image-archive method.", "path", podmanPath)
+
+		// Create a temporary file to hold the image archive.
+		tmpFile, err := os.CreateTemp("", "image-archive-*.tar")
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		// Ensure the temporary file is cleaned up when the function exits.
+		defer os.Remove(tmpFile.Name())
+
+		// Save the image to the temp file
+		cmdPodmanSave := exec.Command("podman", "save", "-o", tmpFile.Name(), imageName)
+		saveSession, err := gexec.Start(cmdPodmanSave, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		gomega.Eventually(saveSession).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+
+		// Load the temp file image into kind
+		cmdKindLoad := exec.Command("kind", "load", "image-archive", "--name", "e2e-tests", tmpFile.Name())
+		loadSession, err := gexec.Start(cmdKindLoad, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		gomega.Eventually(loadSession).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	case "docker":
+		// Detect if podman is available
+		dockerPath, dockerErr := exec.LookPath("docker")
+		gomega.Expect(dockerErr).ShouldNot(gomega.HaveOccurred(), "Could not find docker in PATH")
+
+		ginkgo.GinkgoLogr.Info("Docker detected, using docker-image method.", "path", dockerPath)
+		command := exec.Command("kind", "load", "docker-image", "--name", "e2e-tests", imageName)
+		session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	default:
+		ginkgo.Fail("ERROR: Could not find 'podman' or 'docker' in the system's PATH. Please install one to continue.")
+	}
+}
+
 // Create the Kubernetes cluster for the E2E tests and load the local images
 func setupK8sCluster() {
 	command := exec.Command("kind", "create", "cluster", "--name", "e2e-tests", "--config", "-")
@@ -118,20 +164,9 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image", vllmSimImage)
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
-
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image", eppImage)
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
-
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "docker-image", routingSideCarImage)
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	loadImageIntoKind(vllmSimImage)
+	loadImageIntoKind(eppImage)
+	loadImageIntoKind(routingSideCarImage)
 }
 
 func setupK8sClient() {
