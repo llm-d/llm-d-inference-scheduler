@@ -19,6 +19,8 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
+var _ plugins.Handle = &fakeHandle{}
+
 type fakeHandle struct {
 	ctx     context.Context
 	plugins map[string]plugins.Plugin
@@ -50,6 +52,10 @@ func (h *fakeHandle) GetAllPlugins() []plugins.Plugin {
 
 func (h *fakeHandle) GetAllPluginsWithNames() map[string]plugins.Plugin {
 	return h.plugins
+}
+
+func (h *fakeHandle) PodList(_ func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics {
+	return make([]backendmetrics.PodMetrics, 0)
 }
 
 type stubPlugin struct {

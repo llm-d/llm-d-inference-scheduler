@@ -102,7 +102,11 @@ func TestPDSchedule(t *testing.T) {
 			req: &types.LLMRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "any-model",
-				Prompt:      "12345678901",
+				Body: &types.LLMRequestBody{
+					Completions: &types.CompletionsRequest{
+						Prompt: "12345678901",
+					},
+				},
 			},
 			input: []types.Pod{},
 			err:   true,
@@ -112,7 +116,11 @@ func TestPDSchedule(t *testing.T) {
 			req: &types.LLMRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Prompt:      "12345678901",
+				Body: &types.LLMRequestBody{
+					Completions: &types.CompletionsRequest{
+						Prompt: "12345678901",
+					},
+				},
 			},
 			// pod2 will be picked because it is the only pod with Decode role
 			input:   []types.Pod{pod2},
@@ -123,7 +131,11 @@ func TestPDSchedule(t *testing.T) {
 			req: &types.LLMRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Prompt:      "12345678901",
+				Body: &types.LLMRequestBody{
+					Completions: &types.CompletionsRequest{
+						Prompt: "12345678901",
+					},
+				},
 			},
 			// no Decode pod
 			input: []types.Pod{pod1},
@@ -134,7 +146,11 @@ func TestPDSchedule(t *testing.T) {
 			req: &types.LLMRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Prompt:      "12345678906",
+				Body: &types.LLMRequestBody{
+					Completions: &types.CompletionsRequest{
+						Prompt: "12345678906",
+					},
+				},
 			},
 			// pod2 will be picked in the decode profile result, pod1 will be in the prefill profile result
 			input:    []types.Pod{pod1, pod2},
@@ -146,7 +162,11 @@ func TestPDSchedule(t *testing.T) {
 			req: &types.LLMRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Prompt:      "12345",
+				Body: &types.LLMRequestBody{
+					Completions: &types.CompletionsRequest{
+						Prompt: "12345",
+					},
+				},
 			},
 			// pod2 will be picked because it is the decode pod, pod1 shouldn't be picked,
 			// because the prompt is too short
@@ -159,7 +179,11 @@ func TestPDSchedule(t *testing.T) {
 			req: &types.LLMRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Prompt:      "12345678901",
+				Body: &types.LLMRequestBody{
+					Completions: &types.CompletionsRequest{
+						Prompt: "12345678901",
+					},
+				},
 			},
 			input: []types.Pod{pod1, noRolePod1},
 			wantRes: &types.SchedulingResult{
@@ -187,7 +211,11 @@ func TestPDSchedule(t *testing.T) {
 			req: &types.LLMRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Prompt:      "12345678906",
+				Body: &types.LLMRequestBody{
+					Completions: &types.CompletionsRequest{
+						Prompt: "12345678906",
+					},
+				},
 			},
 			// pod2 will be picked in the decode profile result cause it has higher score than noRolePod1
 			// pod1 will be in the prefill profile result
@@ -204,7 +232,7 @@ func TestPDSchedule(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			//  initialize scheduler with config
-			prefixScorer := prefix.New(ctx, prefix.Config{HashBlockSize: 5, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
+			prefixScorer := prefix.New(ctx, prefix.Config{DefaultBlockSize: 5, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
 
 			prefillSchedulerProfile := framework.NewSchedulerProfile().
 				WithFilters(filter.NewPrefillRole()).

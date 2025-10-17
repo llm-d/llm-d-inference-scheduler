@@ -50,7 +50,7 @@ func (r *requestEntry) String() string {
 // compile-time type assertion
 var _ framework.Scorer = &ActiveRequest{}
 var _ requestcontrol.PreRequest = &ActiveRequest{}
-var _ requestcontrol.PostResponse = &ActiveRequest{}
+var _ requestcontrol.ResponseComplete = &ActiveRequest{}
 
 // ActiveRequestFactory defines the factory function for the ActiveRequest scorer.
 func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
@@ -92,8 +92,8 @@ func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *Act
 		mutex:        &sync.RWMutex{},
 	}
 	// callback to decrement count when requests expire
-	// most requests will be removed in PostResponse, but this ensures
-	// that we don't leak pod counts if PostResponse is not called
+	// most requests will be removed in ResponseComplete, but this ensures
+	// that we don't leak pod counts if ResponseComplete is not called
 	requestCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
 		item *ttlcache.Item[string, *requestEntry]) {
 		if reason == ttlcache.EvictionReasonExpired {
@@ -189,14 +189,14 @@ func (s *ActiveRequest) PreRequest(ctx context.Context, request *types.LLMReques
 	}
 }
 
-// PostResponse is called after a response is sent to the client.
+// ResponseComplete is called after a response is sent to the client.
 // It removes the specific request entry from the cache and decrements
 // the pod count.
-func (s *ActiveRequest) PostResponse(ctx context.Context, request *types.LLMRequest,
+func (s *ActiveRequest) ResponseComplete(ctx context.Context, request *types.LLMRequest,
 	_ *requestcontrol.Response, targetPod *backend.Pod) {
-	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.PostResponse")
+	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.ResponseComplete")
 	if targetPod == nil {
-		debugLogger.Info("Skipping PostResponse because targetPod is nil")
+		debugLogger.Info("Skipping ResponseComplete because targetPod is nil")
 		return
 	}
 
