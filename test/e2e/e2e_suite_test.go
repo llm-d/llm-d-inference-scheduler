@@ -132,17 +132,13 @@ func loadImageIntoKind(container_runtime string, imageName string) {
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		gomega.Eventually(loadSession).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	case "docker":
-		// Detect if podman is available
-		dockerPath, dockerErr := exec.LookPath("docker")
-		gomega.Expect(dockerErr).ShouldNot(gomega.HaveOccurred(), "Could not find docker in PATH")
-
-		ginkgo.GinkgoLogr.Info("Docker detected, using docker-image method.", "path", dockerPath)
+		ginkgo.GinkgoLogr.Info("Docker detected, using docker-image method.")
 		command := exec.Command("kind", "load", "docker-image", "--name", "e2e-tests", imageName)
 		session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	default:
-		ginkgo.Fail("ERROR: Could not find 'podman' or 'docker' in the system's PATH. Please install one to continue.")
+		ginkgo.Fail("ERROR: The CONTAINER_TOOL value must be 'docker' or 'podman'")
 	}
 }
 
