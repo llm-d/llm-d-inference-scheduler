@@ -104,7 +104,7 @@ var _ = ginkgo.AfterSuite(func() {
 
 // loadImageIntoKind loads the specified image
 // into the Kind cluster using the most appropriate method based on the container runtime.
-func loadImageIntoKind(container_runtime string, imageName string) {
+func loadImageIntoKind(imageName string) {
 	ginkgo.By("Loading image into Kind cluster: " + imageName)
 
 	switch container_runtime {
@@ -160,9 +160,9 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	loadImageIntoKind(container_runtime, vllmSimImage)
-	loadImageIntoKind(container_runtime, eppImage)
-	loadImageIntoKind(container_runtime, routingSideCarImage)
+	loadImageIntoKind(vllmSimImage)
+	loadImageIntoKind(eppImage)
+	loadImageIntoKind(routingSideCarImage)
 }
 
 func setupK8sClient() {
