@@ -37,11 +37,22 @@ jobs:
           echo "prerelease=${PRE_RELEASE}" >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Build and push image
+      - name: Build and push EPP image
         uses: ./.github/actions/docker-build-and-push
         with:
+          docker-file: Dockerfile
           tag: ${{ steps.tag.outputs.tag }}
           image-name: ${{ steps.version.outputs.project_name }}
+          registry: ghcr.io/llm-d
+          github-token: ${{ secrets.GHCR_TOKEN }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+
+      - name: Build and push sidecar image
+        uses: ./.github/actions/docker-build-and-push
+        with:
+          docker-file: Dockerfile.sidecar
+          tag: ${{ steps.tag.outputs.tag }}
+          image-name: llm-d-routing-sidecar
           registry: ghcr.io/llm-d
           github-token: ${{ secrets.GHCR_TOKEN }}
           prerelease: ${{ steps.tag.outputs.prerelease }}

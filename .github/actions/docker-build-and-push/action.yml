@@ -1,6 +1,9 @@
 name: Docker Build - ghcr
 description: Build image using buildx
 inputs:
+  docker-file:
+    required: true
+    description: Dockerfile name
   image-name:
     required: true
     description: Image name
@@ -43,5 +46,5 @@ runs:
         docker buildx build \
           --platform linux/amd64,linux/arm64 \
           -t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }} \
-          ${LATEST_TAG} --push .
+          ${LATEST_TAG} -f ${{ inputs.docker-file }} --push .
       shell: bash
