@@ -1,0 +1,10 @@
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: qwen2-0-5b
+spec:
+  modelName: "Qwen/Qwen2-0.5B"
+  poolRef:
+    group: inference.networking.x-k8s.io
+    kind: InferencePool
+    name: qwen2-0-5b

@@ -1,0 +1,11 @@
+resources:
+  - namespace.yaml
+  - qwen-decoder-pod.yaml
+  - qwen-prefiller-pod.yaml
+  - decoder-cm.yaml
+  - prefiller-cm.yaml
+  - qwen-decoder-svc.yaml
+  - qwen-prefiller-svc.yaml
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
