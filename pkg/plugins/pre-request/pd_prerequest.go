@@ -23,8 +23,8 @@ const (
 )
 
 type prefillHeaderHandlerParameters struct {
-	PrefillProfile string `json:"prefillProfile"`
-	PrefillTargetPort int `json:"prefillTargetPort,omitempty"`  // Optional field
+	PrefillProfile    string `json:"prefillProfile"`
+	PrefillTargetPort int    `json:"prefillTargetPort,omitempty"` // Optional field
 }
 
 // compile-time type assertion
@@ -33,7 +33,7 @@ var _ requestcontrol.PreRequest = &PrefillHeaderHandler{}
 // PrefillHeaderHandlerFactory  defines the factory function for the PrefillHeaderHandler
 func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 	parameters := prefillHeaderHandlerParameters{
-		PrefillProfile: defaultPrefillProfile,
+		PrefillProfile:    defaultPrefillProfile,
 		PrefillTargetPort: 0,
 	}
 	if rawParameters != nil {
@@ -47,16 +47,16 @@ func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ p
 // NewPrefillHeaderHandler initializes a new PrefillHeaderHandler and returns its pointer.
 func NewPrefillHeaderHandler(prefillProfile string, prefillTargetPort int) *PrefillHeaderHandler {
 	return &PrefillHeaderHandler{
-		typedName:      plugins.TypedName{Type: PrefillHeaderHandlerType},
-		prefillProfile: prefillProfile,
+		typedName:         plugins.TypedName{Type: PrefillHeaderHandlerType},
+		prefillProfile:    prefillProfile,
 		prefillTargetPort: prefillTargetPort,
 	}
 }
 
 // PrefillHeaderHandler PreRequest plugin
 type PrefillHeaderHandler struct {
-	typedName      plugins.TypedName
-	prefillProfile string
+	typedName         plugins.TypedName
+	prefillProfile    string
 	prefillTargetPort int // 0 means "not configured"
 }
 
@@ -82,8 +82,8 @@ func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMR
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	portToUse := targetPort                    // Default: use existing behavior
-	if p.prefillTargetPort > 0 {              // Only override if configured
+	portToUse := targetPort      // Default: use existing behavior
+	if p.prefillTargetPort > 0 { // Only override if configured
 		portToUse = p.prefillTargetPort
 	}
 	prefillHostPort := net.JoinHostPort(prefillProfileRunResult.TargetPods[0].GetPod().Address, strconv.Itoa(portToUse))
