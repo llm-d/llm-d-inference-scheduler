@@ -94,7 +94,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 	}
 }
 
-func TestSessionAffinity_PostResponse(t *testing.T) {
+func TestSessionAffinity_ResponseComplete(t *testing.T) {
 
 	targetPod := &backend.Pod{
 		NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
@@ -135,7 +135,7 @@ func TestSessionAffinity_PostResponse(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			s.PostResponse(ctx, nil, test.initialResponse, test.targetPod)
+			s.ResponseComplete(ctx, nil, test.initialResponse, test.targetPod)
 
 			if diff := cmp.Diff(test.wantHeaders, test.initialResponse.Headers); diff != "" {
 				t.Errorf("Unexpected output (-want +got): %v", diff)

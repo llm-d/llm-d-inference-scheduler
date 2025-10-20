@@ -42,7 +42,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		DecodeProfile:    defaultDecodeProfile,
 		PrefillProfile:   defaultPrefillProfile,
 		PrefixPluginName: defaultPrefixPluginName,
-		HashBlockSize:    prefix.DefaultHashBlockSize,
+		HashBlockSize:    prefix.DefaultBlockSize,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -106,6 +106,12 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	}
 
 	if h.pdThreshold > 0 {
+		userInput, err := getUserInputBytes(request)
+		if err != nil {
+			log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input bytes")
+			return nil
+		}
+
 		// if we're here that means decode profile ran successfully, and we have additional profile configured that didn't run yet,
 		// which means PD is enabled (otherwise, prefill profile is not configured at all and this profile handler is not used).
 		// inspect decode execution result to decide if prefill should run or not.
@@ -117,12 +123,12 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 		} else {
 			decodePod := profileResults[h.decodeProfile].TargetPods[0].GetPod().NamespacedName
 			hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
-			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(request.Prompt))
+			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(userInput))
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
-				"promptLength", len(request.Prompt))
+				"promptLength", len(userInput))
 		}
 
-		if (1.0-hitPercentagePrefix)*float64(len(request.Prompt)) < float64(h.pdThreshold) {
+		if (1.0-hitPercentagePrefix)*float64(len(userInput)) < float64(h.pdThreshold) {
 			log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
 			return map[string]*framework.SchedulerProfile{} // do not run prefill
 		}
@@ -159,4 +165,13 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState
 			h.decodeProfile: profileResults[h.decodeProfile], // return decode only
 		},
 	}, nil
+}
+
+func getUserInputBytes(request *types.LLMRequest) ([]byte, error) {
+	if request.Body.Completions != nil { // assumed to be valid if not nil
+		return []byte(request.Body.Completions.Prompt), nil
+	}
+
+	// must be chat-completions request at this point, return bytes of entire messages
+	return json.Marshal(request.Body.ChatCompletions.Messages)
 }

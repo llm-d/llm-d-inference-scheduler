@@ -121,7 +121,13 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 		return nil
 	}
 
-	scores, err := s.kvCacheIndexer.GetPodScores(ctx, request.Prompt, request.TargetModel, nil)
+	prompt, err := getUserInput(request)
+	if err != nil {
+		loggerDebug.Error(err, "Failed to get user input")
+		return nil
+	}
+
+	scores, err := s.kvCacheIndexer.GetPodScores(ctx, prompt, request.TargetModel, nil)
 	if err != nil {
 		loggerDebug.Error(err, "Failed to get pod scores")
 		return nil
@@ -138,4 +144,17 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 	}
 
 	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
+}
+
+func getUserInput(request *types.LLMRequest) (string, error) {
+	if request.Body.Completions != nil { // assumed to be valid if not nil
+		return request.Body.Completions.Prompt, nil
+	}
+
+	// must be chat-completions request at this point, return string of entire messages
+	data, err := json.Marshal(request.Body.ChatCompletions.Messages)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal chat-completions messages: %w", err)
+	}
+	return string(data), nil
 }
