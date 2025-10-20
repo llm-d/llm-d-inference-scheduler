@@ -120,23 +120,24 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	kindLoad("ghcr.io/llm-d/llm-d-inference-sim:" + vllmSimTag)
-	kindLoad("ghcr.io/llm-d/llm-d-inference-scheduler:" + eppTag)
-	kindLoad("ghcr.io/llm-d/llm-d-routing-sidecar:" + routingSideCarTag)
+	kindLoadImage("ghcr.io/llm-d/llm-d-inference-sim:" + vllmSimTag)
+	kindLoadImage("ghcr.io/llm-d/llm-d-inference-scheduler:" + eppTag)
+	kindLoadImage("ghcr.io/llm-d/llm-d-routing-sidecar:" + routingSideCarTag)
 }
 
-func kindLoad(image string) {
+func kindLoadImage(image string) {
 	tempDir := ginkgo.GinkgoT().TempDir()
+	target := tempDir + "/docker.tar"
 
 	ginkgo.By(fmt.Sprintf("Loading %s into the cluster e2e-tests", image))
 
 	command := exec.Command("docker", "save", "--platform", "linux/"+runtime.GOARCH,
-		"--output", tempDir+"/docker.tar", image)
+		"--output", target, image)
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "image-archive", tempDir+"/docker.tar")
+	command = exec.Command("kind", "--name", "e2e-tests", "load", "image-archive", target)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
