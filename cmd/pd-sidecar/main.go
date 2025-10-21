@@ -16,15 +16,15 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"flag"
 	"net/url"
 	"os"
 
 	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/signals"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
 )
 
 func main() {
@@ -50,15 +50,14 @@ func main() {
 	// make sure to flush logs before exiting
 	defer klog.Flush()
 
-	ctx := signals.SetupSignalHandler(context.Background())
+	ctx := ctrl.SetupSignalHandler()
 	logger := klog.FromContext(ctx)
 
-	if *connector != proxy.ConnectorNIXLV1 && *connector != proxy.ConnectorNIXLV2 && *connector != proxy.ConnectorLMCache {
-		logger.Info("Error: --connector must either be 'nixl', 'nixlv2' or 'lmcache'")
+	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
+
+	if *connector != proxy.ConnectorNIXLV2 && *connector != proxy.ConnectorLMCache {
+		logger.Info("Error: --connector must either be 'nixlv2' or 'lmcache'")
 		return
-	}
-	if *connector == proxy.ConnectorNIXLV1 {
-		logger.Info("Warning: nixl connector is deprecated and will be removed in a future release in favor of --connector=nixlv2")
 	}
 	logger.Info("p/d connector validated", "connector", connector)
 

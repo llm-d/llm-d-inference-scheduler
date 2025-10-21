@@ -49,9 +49,6 @@ const (
 	requestFieldStream           = "stream"
 	requestFieldStreamOptions    = "stream_options"
 
-	// ConnectorNIXLV1 enables the (now deprecated) P/D NIXL v1 protocol
-	ConnectorNIXLV1 = "nixl"
-
 	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
 	ConnectorNIXLV2 = "nixlv2"
 
@@ -128,8 +125,6 @@ func NewProxy(port string, decodeURL *url.URL, config Config) (*Server, error) {
 	switch config.Connector {
 	case ConnectorLMCache:
 		server.runConnectorProtocol = server.runLMCacheProtocol
-	case ConnectorNIXLV1:
-		server.runConnectorProtocol = server.runNIXLProtocolV1
 	case ConnectorNIXLV2:
 		fallthrough
 	default:

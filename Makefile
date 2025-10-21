@@ -7,13 +7,14 @@ SHELL := /usr/bin/env bash
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
 PROJECT_NAME ?= llm-d-inference-scheduler
-SIDECAR_NAME ?= llm-d-routing-sidecar
+SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
+SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
-SIDECAR_IMAGE_TAG_BASE ?= ghcr.io/llm-d/$(SIDECAR_NAME)
+SIDECAR_IMAGE_TAG_BASE ?= ghcr.io/llm-d/$(SIDECAR_IMAGE_NAME)
 SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 NAMESPACE ?= hc4ai-operator
 
@@ -155,8 +156,10 @@ image-push: check-container-tool ## Push Docker image $(IMG) to registry
 sidecar-image-build: check-container-tool ## Build Sidecar Docker image ## Build Sidecar Docker image using $(CONTAINER_TOOL)
 	@printf "\033[33;1m==== Building Sidecar Docker image $(SIDECAR_IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) build \
-	    --build-arg TARGETOS=linux \
+		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
+		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
+		--build-arg BUILD_REF=${BUILD_REF} \
 		-t $(SIDECAR_IMG) -f Dockerfile.sidecar .
 
 .PHONY: sidecar-image-push
