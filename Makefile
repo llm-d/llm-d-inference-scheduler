@@ -22,6 +22,9 @@ NAMESPACE ?= hc4ai-operator
 VLLM_SIMULATOR_TAG ?= v0.5.0
 export VLLM_SIMULATOR_TAG
 
+ACTIVATOR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)-activator
+ACTIVATOR_IMG = $(ACTIVATOR_IMAGE_TAG_BASE):$(EPP_TAG)
+
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
 TYPOS_TARGET_ARCH = x86_64
@@ -142,6 +145,14 @@ build-%: check-go install-dependencies download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
+##@ Build Activator
+
+.PHONY: activator-build
+activator-build: check-go install-dependencies download-tokenizer ## Build the project
+	@printf "\033[33;1m==== Building ====\033[0m\n"
+	go build -ldflags="$(LDFLAGS)" -o bin/activator cmd/activator/main.go
+
+
 ##@ Container Build/Push
 
 .PHONY:	image-build
@@ -170,6 +181,22 @@ image-push-%: check-container-tool ## Push container image to registry
 image-pull: check-container-tool ## Pull all related images using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Pulling Container images ====\033[0m\n"
 	./scripts/pull_images.sh
+
+.PHONY: activator-image-build
+activator-image-build: ## Build the activator image using Docker Buildx.
+	$(CONTAINER_TOOL) build \
+		--platform linux/$(TARGETARCH) \
+		--build-arg TARGETOS=linux \
+		--build-arg TARGETARCH=${TARGETARCH} \
+		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
+		--build-arg BUILD_REF=${BUILD_REF} \
+		 -t $(ACTIVATOR_IMG) \
+		 -f Dockerfile.activator .
+
+.PHONY: activator-image-push
+activator-image-push: check-container-tool load-version-json ## Push Activator Docker image $(ACTIVATOR_IMG) to registry
+	@printf "\033[33;1m==== Pushing Activator Docker image $(ACTIVATOR_IMG) ====\033[0m\n"
+	$(CONTAINER_TOOL) push $(ACTIVATOR_IMG)
 
 ##@ Install/Uninstall Targets
 
@@ -287,7 +314,7 @@ check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error
 		echo "$$TYPOS_OUTPUT"; \
 		exit 1; \
 	fi
-	
+
 ##@ Tools
 
 .PHONY: check-tools

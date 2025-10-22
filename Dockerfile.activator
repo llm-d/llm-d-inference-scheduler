@@ -1,0 +1,28 @@
+## Multistage build
+FROM quay.io/projectquay/golang:1.25 AS builder
+ARG COMMIT_SHA=unknown
+ARG BUILD_REF
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ENV CGO_ENABLED=0
+ENV GOOS=$TARGETOS
+ENV GOARCH=$TARGETARCH
+
+# Dependencies
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Sources
+COPY cmd/activator ./cmd/activator
+COPY pkg/activator ./pkg/activator
+WORKDIR /src/cmd/activator
+RUN go build -ldflags="-X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" -o /activator
+
+## Multistage deploy
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+WORKDIR /
+COPY --from=builder /activator /activator
+
+ENTRYPOINT ["/activator"]

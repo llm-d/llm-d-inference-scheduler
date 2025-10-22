@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "activatorName" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "activatorName" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "activatorName" . }}
+    spec:
+      containers:
+      - name: activator
+        image: {{ .Values.activator.image.registry }}/{{ .Values.activator.image.name }}:{{ .Values.activator.image.tag }}
+        imagePullPolicy: {{ .Values.activator.image.pullPolicy | default "Always" }}
+        args:
+        - "--pool-name"
+        - "{{ .Values.inferencePool.name }}"
+        - "--pool-namespace"
+        - "{{ .Release.Namespace }}"
+        - "--pool-group"
+        - "{{ .Values.inferencePool.group }}"
+        - "--grpc-port"
+        - "{{ .Values.activator.port }}"
+        - "--grpc-health-port"
+        - "{{ .Values.activator.healthCheckPort }}"
+        - "--zap-encoder"
+        - "json"
+        - "--v"
+        - "2"
+        ports:
+        - containerPort: {{ .Values.activator.port }}
+        # health check
+        - containerPort: {{ .Values.activator.healthCheckPort }}
+      serviceAccountName: activator
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "activatorName" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: {{ include "activatorName" . }}
+  ports:
+  - protocol: TCP
+    port: {{ .Values.activator.port }}
+    targetPort: {{ .Values.activator.port }}
+    appProtocol: HTTP2
+  type: ClusterIP

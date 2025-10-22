@@ -1,0 +1,44 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: {{ include "activatorName" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  configPatches:
+  - applyTo: HTTP_ROUTE
+    match:
+      routeConfiguration:
+        vhost:
+          name: "*:{{ .Values.inferenceGateway.port }}"
+          route:
+            name: {{ .Release.Namespace }}.{{ .Values.route.name }}.0 # TODO: what .0?
+    patch:
+      operation: MERGE
+      value:
+        typed_per_filter_config:
+          envoy.filters.http.activator.ext_proc:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute
+            overrides:
+              processing_mode:
+                request_header_mode: "SEND"
+                response_header_mode: "SKIP"
+                request_body_mode: "NONE"
+                response_body_mode: "NONE"
+                request_trailer_mode: "SKIP"
+                response_trailer_mode: "SKIP"
+              grpc_service:
+                envoy_grpc:
+                  cluster_name: outbound|{{ .Values.activator.port }}||{{ include "activatorName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: {{ include "activatorName" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  host: {{ include "activatorName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  trafficPolicy:
+      tls:
+        mode: SIMPLE
+        insecureSkipVerify: true
