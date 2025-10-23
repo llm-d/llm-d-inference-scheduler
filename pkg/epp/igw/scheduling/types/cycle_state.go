@@ -33,6 +33,7 @@ func NewCycleState() *CycleState {
 // CycleState does not provide any data protection, as all plugins are assumed to be
 // trusted.
 // Note: CycleState uses a sync.Map to back the storage, because it is thread safe. It's aimed to optimize for the "write once and read many times" scenarios.
+// TODO: Perhaps, deprecate CycleState once datalayer producer-consumer changes are made.
 type CycleState struct {
 	// key: StateKey, value: StateData
 	storage sync.Map
