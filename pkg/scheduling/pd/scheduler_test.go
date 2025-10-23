@@ -266,7 +266,7 @@ func TestPDSchedule(t *testing.T) {
 
 			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
 				// make sure prefix plugin stores the prefix hit in cache, so we can test it in the following schedule call
-				prefixScorer.PreRequest(ctx, test.req, got, 0)
+				prefixScorer.PreRequest(ctx, test.req, got)
 				time.Sleep(time.Second)
 
 				got, err = scheduler.Schedule(ctx, test.req, test.input)

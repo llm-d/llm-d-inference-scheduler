@@ -124,7 +124,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	}
 
 	// First request
-	scorer.PreRequest(ctx, request, schedulingResult, 0)
+	scorer.PreRequest(ctx, request, schedulingResult)
 
 	// Check cache and pod counts
 	compositeKey := "default/pod-a.test-request-1"
@@ -151,7 +151,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 		},
 	}
 
-	scorer.PreRequest(ctx, request2, schedulingResult2, 0)
+	scorer.PreRequest(ctx, request2, schedulingResult2)
 
 	// Check incremented count
 	scorer.mutex.RLock()
@@ -192,7 +192,7 @@ func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
 		},
 	}
 
-	scorer.PreRequest(ctx, request, schedulingResult, 0)
+	scorer.PreRequest(ctx, request, schedulingResult)
 
 	// Verify initial state
 	compositeKey := "default/pod-a.test-request-1"
@@ -248,7 +248,7 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 	}
 
 	// Add request
-	scorer.PreRequest(ctx, request, schedulingResult, 0)
+	scorer.PreRequest(ctx, request, schedulingResult)
 
 	// Verify request is added
 	scorer.mutex.RLock()
