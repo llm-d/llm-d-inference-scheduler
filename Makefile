@@ -7,10 +7,15 @@ SHELL := /usr/bin/env bash
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
 PROJECT_NAME ?= llm-d-inference-scheduler
+SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
+SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
+SIDECAR_TAG ?= dev
+SIDECAR_IMAGE_TAG_BASE ?= ghcr.io/llm-d/$(SIDECAR_IMAGE_NAME)
+SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 NAMESPACE ?= hc4ai-operator
 
 # Map go arch to typos arch
@@ -103,6 +108,14 @@ post-deploy-test: ## Run post deployment tests
 	echo Success!
 	@echo "Post-deployment tests passed."
 
+.PHONY: sidecar-test
+sidecar-test: sidecar-test-unit ## Run Sidecar tests
+
+.PHONY: sidecar-test-unit
+sidecar-test-unit: ## Run Sidecar unit tests
+	@printf "\033[33;1m==== Running tests ====\033[0m\n"
+	go test -v $$(echo $$(go list ./pkg/sidecar/...)) -ginkgo.v
+
 .PHONY: lint
 lint: check-golangci-lint check-typos ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
@@ -115,6 +128,11 @@ lint: check-golangci-lint check-typos ## Run lint
 build: check-go install-dependencies download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	go build -ldflags="$(LDFLAGS)" -o bin/epp cmd/epp/main.go
+
+.PHONY: sidecar-build
+sidecar-build: check-go ## Build the Sidecar
+	@printf "\033[33;1m==== Building the Sidecar ====\033[0m\n"
+	go build -o bin/$(SIDECAR_NAME) cmd/$(SIDECAR_NAME)/main.go
 
 ##@ Container Build/Push
 
@@ -133,6 +151,21 @@ image-build: check-container-tool ## Build Docker image ## Build Docker image us
 image-push: check-container-tool ## Push Docker image $(IMG) to registry
 	@printf "\033[33;1m==== Pushing Docker image $(IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $(IMG)
+
+.PHONY: sidecar-image-build
+sidecar-image-build: check-container-tool ## Build Sidecar Docker image ## Build Sidecar Docker image using $(CONTAINER_TOOL)
+	@printf "\033[33;1m==== Building Sidecar Docker image $(SIDECAR_IMG) ====\033[0m\n"
+	$(CONTAINER_TOOL) build \
+		--build-arg TARGETOS=linux \
+		--build-arg TARGETARCH=$(TARGETARCH) \
+		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
+		--build-arg BUILD_REF=${BUILD_REF} \
+		-t $(SIDECAR_IMG) -f Dockerfile.sidecar .
+
+.PHONY: sidecar-image-push
+sidecar-image-push: check-container-tool load-version-json ## Push Sidecar Docker image $(SIDECAR_IMG) to registry
+	@printf "\033[33;1m==== Pushing Sidecar Docker image $(SIDECAR_IMG) ====\033[0m\n"
+	$(CONTAINER_TOOL) push $(SIDECAR_IMG)
 
 ##@ Install/Uninstall Targets
 

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen2-0-5b-epp
+  labels:
+    app: qwen2-0-5b-epp
+spec:
+  selector:
+    matchLabels:
+      app: qwen2-0-5b-epp
+  template:
+    metadata:
+      labels:
+        app: qwen2-0-5b-epp
+    spec:
+      containers:
+        - args:
+            - --poolName
+            - qwen2-0-5b
+            - --poolNamespace
+            - serverless-workstream
+            - -v
+            - "4"
+            - --zap-encoder
+            - json
+            - --grpcPort
+            - "9002"
+            - --grpcHealthPort
+            - "9003"
+          env:
+            - name: PD_ENABLED
+              value: "true"
+            - name: PD_PROMPT_LEN_THRESHOLD
+              value: "10"
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:0.0.3
+          imagePullPolicy: Always
+          name: epp
+          ports:
+            - containerPort: 9002
+              protocol: TCP
+            - containerPort: 9003
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          livenessProbe:
+            grpc:
+              port: 9003
+              service: envoy.service.ext_proc.v3.ExternalProcessor
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc:
+              port: 9003
+              service: envoy.service.ext_proc.v3.ExternalProcessor
+            initialDelaySeconds: 5
+            periodSeconds: 10

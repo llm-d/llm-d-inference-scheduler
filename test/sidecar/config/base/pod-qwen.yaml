@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen2-0--5b
+spec:
+  initContainers:
+    - name: routing-proxy
+      image: routing-proxy
+      args:
+        - "--port=8000"
+        - "--vllm-port=8001"
+      restartPolicy: Always
+      # readinessProbe:
+      #   exec:
+      #     command:
+      #       - "true"
+      #   initialDelaySeconds: 2
+      #   periodSeconds: 360
+      # livenessProbe:
+      #   exec:
+      #     command:
+      #       - "true"
+      #   initialDelaySeconds: 1
+      #   periodSeconds: 360
+  containers:
+    - name: vllm
+      image: vllm/vllm-openai:v0.8.2
+      args:
+        - "--port=8001"
+        - "--model=Qwen/Qwen2-0.5B"
+      # TODO: patch
+      #args:
+      #  - serve
+      #  - Qwen/Qwen2-0.5B
+      # env:
+      #   - name: NVIDIA_VISIBLE_DEVICES
+      #     value: "0" # Limit PyTorch to GPU 0
+      #   - name: CUDA_VISIBLE_DEVICES
+      #     value: "0"
+      #   - name: HUGGING_FACE_HUB_TOKEN
+      #     valueFrom:
+      #       secretKeyRef:
+      #         key: HF_TOKEN
+      #         name: vllmdroutingsidecar
+      # resources:
+      #   limits:
+      #     nvidia.com/gpu: 1
+      #   requests:
+      #     cpu: "16"
+      #     memory: 16Gi
+      #     nvidia.com/gpu: 1
+  restartPolicy: Never

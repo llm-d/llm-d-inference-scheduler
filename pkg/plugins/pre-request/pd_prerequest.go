@@ -11,13 +11,13 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
 
 const (
 	// PrefillHeaderHandlerType is the type of the PrefillHeaderHandler
 	PrefillHeaderHandlerType = "prefill-header-handler"
-	// prefillPodHeader is the header name used to indicate Prefill worker <ip:port>
-	prefillPodHeader = "x-prefiller-host-port"
 
 	defaultPrefillProfile = "prefill"
 )
@@ -69,8 +69,8 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
 func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, targetPort int) {
-	if _, found := request.Headers[prefillPodHeader]; found {
-		request.Headers[prefillPodHeader] = "" // clear header, if already set
+	if _, found := request.Headers[common.PrefillPodHeader]; found {
+		request.Headers[common.PrefillPodHeader] = "" // clear header, if already set
 	}
 
 	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
@@ -79,5 +79,5 @@ func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMR
 	}
 
 	prefillHostPort := net.JoinHostPort(prefillProfileRunResult.TargetPods[0].GetPod().Address, strconv.Itoa(targetPort))
-	request.Headers[prefillPodHeader] = prefillHostPort // in the form of <ip:port>
+	request.Headers[common.PrefillPodHeader] = prefillHostPort // in the form of <ip:port>
 }

@@ -1,0 +1,15 @@
+namespace: e2e-pd
+
+resources:
+  - ../../../nixl
+
+images:
+  - name: routing-proxy
+    newName: ghcr.io/llm-d/llm-d-routing-sidecar
+    newTag: 0.0.5
+  - name: vllm-openai
+    newName: ghcr.io/llm-d/llm-d-dev
+    newTag: vllm-nixl-0.0.6
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization

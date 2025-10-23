@@ -1,0 +1,19 @@
+namespace: hc4ai-operator
+
+resources:
+  - ../../base
+
+images:
+  - name: vllmdroutingsidecar
+    newTag: v0.0.1
+  - name: vllm/vllm-openai:v0.8.2
+    newName: vllm-sim # use lightweight simulator
+    newTag: v0.0.1
+
+secretGenerator:
+  - name: vllmdroutingsidecar
+    envs:
+      - .secrets.env
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization

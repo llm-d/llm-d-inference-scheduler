@@ -45,9 +45,9 @@ jobs:
       - name: Run make test
         shell: bash 
         run: |
-          make test
+          make test sidecar-test
 
       - name: Run make build
         shell: bash
         run: |
-          make build
+          make build sidecar-build
