@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"strconv"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
@@ -68,7 +67,7 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 }
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
-func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, targetPort int) {
+func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult) {
 	if _, found := request.Headers[common.PrefillPodHeader]; found {
 		request.Headers[common.PrefillPodHeader] = "" // clear header, if already set
 	}
@@ -78,6 +77,7 @@ func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMR
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	prefillHostPort := net.JoinHostPort(prefillProfileRunResult.TargetPods[0].GetPod().Address, strconv.Itoa(targetPort))
+	targetPod := prefillProfileRunResult.TargetPods[0].GetPod()
+	prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
 	request.Headers[common.PrefillPodHeader] = prefillHostPort // in the form of <ip:port>
 }

@@ -256,7 +256,7 @@ func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, requ
 
 // PreRequest is called before a request is sent to the target pod.
 // For cold requests, it updates the LRU cache to track which pods have been used recently.
-func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult, _ int) {
+func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult) {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	if schedulingResult == nil || len(schedulingResult.ProfileResults) == 0 {

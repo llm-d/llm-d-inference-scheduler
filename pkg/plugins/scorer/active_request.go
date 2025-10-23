@@ -167,7 +167,7 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types
 // It creates a new request entry in the cache with its own TTL and
 // increments the pod count for fast lookup.
 func (s *ActiveRequest) PreRequest(ctx context.Context, request *types.LLMRequest,
-	schedulingResult *types.SchedulingResult, _ int) {
+	schedulingResult *types.SchedulingResult) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	for _, profileResult := range schedulingResult.ProfileResults { // schedulingResult guaranteed not to be nil
