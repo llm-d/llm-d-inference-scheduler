@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -52,6 +53,13 @@ type KVCacheUtilizationScorer struct {
 // TypedName returns the type and name tuple of this plugin instance.
 func (s *KVCacheUtilizationScorer) TypedName() plugins.TypedName {
 	return s.typedName
+}
+
+// Consumes returns the list of data that is consumed by the plugin.
+func (s *KVCacheUtilizationScorer) Consumes() map[string]any {
+	return map[string]any{
+		metrics.KVCacheUsagePercentKey: float64(0),
+	}
 }
 
 // WithName sets the name of the scorer.

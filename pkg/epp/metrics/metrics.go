@@ -34,6 +34,13 @@ const (
 	InferenceObjectiveComponent = "inference_objective"
 	InferencePoolComponent      = "inference_pool"
 	InferenceExtension          = "inference_extension"
+
+	KVCacheUsagePercentKey = "KVCacheUsagePercent"
+	WaitingQueueSizeKey    = "WaitingQueueSize"
+	MaxActiveModelsKey     = "MaxActiveModels"
+	ActiveModelsKey        = "ActiveModels"
+	WaitingModelsKey       = "WaitingModels"
+	UpdateTimeKey          = "UpdateTime"
 )
 
 var (

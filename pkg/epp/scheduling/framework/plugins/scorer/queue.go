@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"math"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -54,6 +55,13 @@ type QueueScorer struct {
 // TypedName returns the type and name tuple of this plugin instance.
 func (s *QueueScorer) TypedName() plugins.TypedName {
 	return s.typedName
+}
+
+// Consumes returns the list of data that is consumed by the plugin.
+func (s *QueueScorer) Consumes() map[string]any {
+	return map[string]any{
+		metrics.WaitingQueueSizeKey: int(0),
+	}
 }
 
 // WithName sets the name of the scorer.
