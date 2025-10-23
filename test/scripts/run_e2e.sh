@@ -4,10 +4,10 @@
 export EPP_TAG="${EPP_TAG:-dev}"
 
 # Set a default VLLM_SIMULATOR_TAG if not provided
-export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.4.0}"
+export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.5.0}"
 
 # Set the default routing side car image tag
-export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-v0.2.0}"
+export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-dev}"
 
 SIMTAG=$(docker images | grep ghcr.io/llm-d/llm-d-inference-sim | awk '{print $2}' | grep ${VLLM_SIMULATOR_TAG})
 if [[ "${SIMTAG}" != "${VLLM_SIMULATOR_TAG}" ]]; then

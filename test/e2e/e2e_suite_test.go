@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os/exec"
@@ -14,22 +13,19 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	k8slog "sigs.k8s.io/controller-runtime/pkg/log"
+
+	infextv1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	infextv1a2 "sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
+	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
 const (
-	// defaultExistsTimeout is the default timeout for a resource to exist in the api server.
-	defaultExistsTimeout = 30 * time.Second
 	// defaultReadyTimeout is the default timeout for a resource to report a ready state.
 	defaultReadyTimeout = 3 * time.Minute
-	// defaultModelReadyTimeout is the default timeout for the model server deployment to report a ready state.
-	defaultModelReadyTimeout = 10 * time.Minute
 	// defaultInterval is the default interval to check if a resource exists or ready conditions.
 	defaultInterval = time.Millisecond * 250
 	// xInferPoolManifest is the manifest for the inference pool CRD with 'inference.networking.x-k8s.io' group.
@@ -57,19 +53,16 @@ const (
 )
 
 var (
-	ctx       = context.Background()
-	k8sClient client.Client
-	port      string
-	scheme    = k8sruntime.NewScheme()
+	port string
+
+	testConfig *testutils.TestConfig
 
 	eppTag            = env.GetEnvString("EPP_TAG", "dev", ginkgo.GinkgoLogr)
 	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
-	routingSideCarTag = env.GetEnvString("ROUTING_SIDECAR_TAG", "v0.2.0", ginkgo.GinkgoLogr)
+	routingSideCarTag = env.GetEnvString("ROUTING_SIDECAR_TAG", "dev", ginkgo.GinkgoLogr)
 
-	existsTimeout     = env.GetEnvDuration("EXISTS_TIMEOUT", defaultExistsTimeout, ginkgo.GinkgoLogr)
-	readyTimeout      = env.GetEnvDuration("READY_TIMEOUT", defaultReadyTimeout, ginkgo.GinkgoLogr)
-	modelReadyTimeout = env.GetEnvDuration("MODEL_READY_TIMEOUT", defaultModelReadyTimeout, ginkgo.GinkgoLogr)
-	interval          = defaultInterval
+	readyTimeout = env.GetEnvDuration("READY_TIMEOUT", defaultReadyTimeout, ginkgo.GinkgoLogr)
+	interval     = defaultInterval
 )
 
 func TestEndToEnd(t *testing.T) {
@@ -83,16 +76,17 @@ var _ = ginkgo.BeforeSuite(func() {
 	port = "30080"
 
 	setupK8sCluster()
+	testConfig = testutils.NewTestConfig(nsName)
 	setupK8sClient()
 	createCRDs()
 	createEnvoy()
-	applyYAMLFile(rbacManifest)
-	applyYAMLFile(serviceAccountManifest)
-	applyYAMLFile(servicesManifest)
+	testutils.ApplyYAMLFile(testConfig, rbacManifest)
+	testutils.ApplyYAMLFile(testConfig, serviceAccountManifest)
+	testutils.ApplyYAMLFile(testConfig, servicesManifest)
 
-	infPoolYaml := readYaml(inferExtManifest)
+	infPoolYaml := testutils.ReadYaml(inferExtManifest)
 	infPoolYaml = substituteMany(infPoolYaml, map[string]string{"${POOL_NAME}": modelName + "-inference-pool"})
-	createObjsFromYaml(infPoolYaml)
+	testutils.CreateObjsFromYaml(testConfig, infPoolYaml)
 })
 
 var _ = ginkgo.AfterSuite(func() {
@@ -147,18 +141,19 @@ func setupK8sClient() {
 	k8sCfg := config.GetConfigOrDie()
 	gomega.ExpectWithOffset(1, k8sCfg).NotTo(gomega.BeNil())
 
-	err := clientgoscheme.AddToScheme(scheme)
+	err := clientgoscheme.AddToScheme(testConfig.Scheme)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	err = apiextv1.AddToScheme(scheme)
+	err = infextv1.Install(testConfig.Scheme)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	err = infextv1a2.Install(scheme)
+	err = apiextv1.AddToScheme(testConfig.Scheme)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	k8sClient, err = client.New(k8sCfg, client.Options{Scheme: scheme})
+	err = infextv1a2.Install(testConfig.Scheme)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(k8sClient).NotTo(gomega.BeNil())
+
+	testConfig.CreateCli()
 
 	k8slog.SetLogger(ginkgo.GinkgoLogr)
 }
@@ -166,13 +161,13 @@ func setupK8sClient() {
 // createCRDs creates the Inference Extension CRDs used for testing.
 func createCRDs() {
 	crds := runKustomize(gieCrdsKustomize)
-	createObjsFromYaml(crds)
+	testutils.CreateObjsFromYaml(testConfig, crds)
 }
 
 func createEnvoy() {
-	manifests := readYaml(envoyManifest)
+	manifests := testutils.ReadYaml(envoyManifest)
 	ginkgo.By("Creating envoy proxy resources from manifest: " + envoyManifest)
-	createObjsFromYaml(manifests)
+	testutils.CreateObjsFromYaml(testConfig, manifests)
 }
 
 const kindClusterConfig = `
