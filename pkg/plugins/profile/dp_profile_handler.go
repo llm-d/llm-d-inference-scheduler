@@ -48,7 +48,7 @@ func NewDataParallelProfileHandler(targetPort int) *DataParallelProfileHandler {
 	}
 }
 
-// PdProfileHandler handles scheduler profiles for PD.
+// DataParallelProfileHandler handles scheduler profiles for Data Parallel.
 type DataParallelProfileHandler struct {
 	typedName  plugins.TypedName
 	targetPort string
@@ -67,7 +67,7 @@ func (h *DataParallelProfileHandler) WithName(name string) *DataParallelProfileH
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *DataParallelProfileHandler) Pick(_ context.Context, cycleState *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
+func (h *DataParallelProfileHandler) Pick(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
 	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
 	if len(profiles) == len(profileResults) { // all profiles have been executed already in previous call
 		return map[string]*framework.SchedulerProfile{}
