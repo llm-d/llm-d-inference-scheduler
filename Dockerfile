@@ -70,17 +70,9 @@ RUN microdnf install -y dnf && \
     dnf install -y zeromq python3.12 python3.12-libs python3.12-pip && \
     dnf clean all
 
-# Copy Python dependencies from builder stage
+# Copy Python dependencies from builder stage (includes torch, transformers, etc)
+# These are installed during build, no need to reinstall in runtime
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/lib/python3.12/site-packages /usr/lib/python3.12/site-packages
-COPY --from=builder /usr/lib64/python3.12/site-packages /usr/lib64/python3.12/site-packages
-
-# Install Python dependencies for chat completions preprocessing in runtime
-RUN mkdir -p /tmp/req && \
-    curl -L https://raw.githubusercontent.com/llm-d/llm-d-kv-cache-manager/v0.3.2/pkg/preprocessing/chat_completions/requirements.txt -o /tmp/req/requirements.txt && \
-    python3.12 -m pip install --upgrade pip setuptools wheel && \
-    python3.12 -m pip install -r /tmp/req/requirements.txt && \
-    rm -rf /tmp/req
 
 # Set Hugging Face cache directory to writable location for non-root user
 ENV HF_HOME="/tmp/.cache"
