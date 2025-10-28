@@ -175,7 +175,7 @@ func (s *PrecisePrefixCacheScorer) preprocessRequest(ctx context.Context, reques
 		for _, msg := range request.Data.ChatCompletions.Messages {
 			preprocessReq.Conversations = append(preprocessReq.Conversations, chat_completions.ChatMessage{
 				Role:    msg.Role,
-				Content: msg.Content,
+				Content: msg.Content.Raw,
 			})
 		}
 

@@ -95,13 +95,6 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	}
 	// otherwise, decode was already executed.
 
-	// Preprocess the request to get the flattened prompt
-	prompt, err := h.preprocessRequest(ctx, request)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "Failed to preprocess request")
-		return map[string]*framework.SchedulerProfile{}
-	}
-
 	// when a profile run fails its result value is nil. we need to check decode result before continuing to prefill
 	// check if all configured profiles have been executed, or if decode failed, no need to run more profiles.
 	if len(profiles) == len(profileResults) || profileResults[h.decodeProfile] == nil {
@@ -190,7 +183,7 @@ func (h *PdProfileHandler) preprocessRequest(ctx context.Context, request *types
 		for _, msg := range request.Data.ChatCompletions.Messages {
 			preprocessReq.Conversations = append(preprocessReq.Conversations, chat_completions.ChatMessage{
 				Role:    msg.Role,
-				Content: msg.Content,
+				Content: msg.Content.Raw,
 			})
 		}
 
