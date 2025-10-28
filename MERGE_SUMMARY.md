@@ -88,9 +88,9 @@ No longer needed local clones of:
 ### ✅ Verification Complete:
 
 1. **Build Docker Image** - ✅ SUCCESS
-   - Image: `ghcr.io/llm-d/llm-d-inference-scheduler:dev`
-   - Size: 1.69 GB (includes Python runtime and chat completions dependencies)
-   - Status: Built successfully with all dependencies integrated
+   - Image: `ghcr.io/guygir2/merged-inference-scheduler:v1`
+   - Size: 637 MB (includes Python runtime and chat completions dependencies)
+   - Status: Built and pushed successfully to GitHub Container Registry
 
 2. **Unit Tests** - ✅ PARTIAL SUCCESS
    - Filter tests: ✅ PASSED
@@ -150,12 +150,46 @@ Plus 31 upstream commits including:
 
 **Final Commits:**
 ```
+f6e9b1c Update MERGE_SUMMARY: clarify original fork structure
+f210fc8 Remove duplicate Python package installation in Dockerfile
+0919ebb Update MERGE_SUMMARY with verification results - ready for production
 40f57e4 Fix Content struct field access - use msg.Content.Raw
 fac798c Update README: Reflect merge with upstream and simplified build process
 66d3456 Simplified: Use upstream llm-d-kv-cache-manager v0.3.2 with chat completions support
 ad8253d Merge upstream/main: Integrate chat completions preprocessing with upstream changes
 ```
 
+Plus 30 upstream commits integrated.
+
 **This image is ready to be deployed as the primary llm-d-inference-scheduler image.**
 
-Image tag: `ghcr.io/llm-d/llm-d-inference-scheduler:dev`
+Image tag: `ghcr.io/guygir2/merged-inference-scheduler:v1`
+
+**Pull command:**
+```bash
+podman pull ghcr.io/guygir2/merged-inference-scheduler:v1
+```
+
+---
+
+## Next Steps
+
+### 1. ✅ **Deploy Image** (Ready)
+Deploy the merged image to your Kubernetes cluster using the new image:
+```yaml
+image: ghcr.io/guygir2/merged-inference-scheduler:v1
+```
+
+### 2. ⏳ **Test Chat Completions** (Pending)
+- Test chat completions preprocessing in live deployment
+- Verify KV-cache aware routing with chat messages
+- These tests require runtime Python environment (included in image)
+
+### 3. ⏳ **Push to Fork and Create PR** (Pending)
+Once deployment tests pass:
+```bash
+git push origin main  # Push all local commits to your fork
+# Then create PR from guygir/llm-d-inference-scheduler to llm-d/llm-d-inference-scheduler
+```
+
+**Current Status:** 36 commits ahead of origin/main, ready to push
