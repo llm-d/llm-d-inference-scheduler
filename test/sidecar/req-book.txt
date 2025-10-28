@@ -1,0 +1,57 @@
+ curl  http://localhost:8000/v1/completions \
+      -H "Content-Type: application/json" \
+       -d '{
+        "model": "Qwen/Qwen2-0.5B",
+        "prompt": "Author-contribution statements and acknowledgements in research papers should state clearly and specifically whether, and to what extent, the authors used AI technologies such as ChatGPT in the preparation of their manuscript and analysis. They should also indicate which LLMs were used. This will alert editors and reviewers to scrutinize manuscripts more carefully for potential biases, inaccuracies and improper source crediting. Likewise, scientific journals should be transparent about their use of LLMs, for example when selecting submitted manuscripts. Mention the large language model based product mentioned in the paragraph above:"
+      }'
+
+ curl  http://localhost:8000/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -d '{
+        "model": "Qwen/Qwen2-0.5B",
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content":"Author-contribution statements and acknowledgements in research papers should state clearly and specifically whether, and to what extent, the authors used AI technologies such as ChatGPT in the preparation of their manuscript and analysis. They should also indicate which LLMs were used. This will alert editors and reviewers to scrutinize manuscripts more carefully for potential biases, inaccuracies and improper source crediting. Likewise, scientific journals should be transparent about their use of LLMs, for example when selecting submitted manuscripts. Mention the large language model based product mentioned in the paragraph above:"}
+        ]
+      }'
+
+ curl  http://localhost:8000/v1/completions \
+      -H "Content-Type: application/json" \
+       -d '{
+        "model": "facebook/opt-125m",
+        "prompt": "Author-contribution statements and acknowledgements in research papers should state clearly and specifically whether, and to what extent, the authors used AI technologies such as ChatGPT in the preparation of their manuscript and analysis. They should also indicate which LLMs were used. This will alert editors and reviewers to scrutinize manuscripts more carefully for potential biases, inaccuracies and improper source crediting. Likewise, scientific journals should be transparent about their use of LLMs, for example when selecting submitted manuscripts. Mention the large language model based product mentioned in the paragraph above:"
+      }'
+
+curl http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "prompt": "I am working on learning to run benchmarks in my openshift cluster. I was wondering if you could provide me a list of best practices when collecting metrics on the k8s platform, and furthermore, any OCP specific optimizations that are applicable here. Finally please help me construct a plan to support testing metrics collection for testing and dev environments such as minikube or kind.",
+    "max_tokens": 500,
+    "temperature": 0
+  }' | jq
+
+
+curl http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -H "x-prefiller-url: http://localhost:8002" \
+  -d '{
+    "model": "Qwen/Qwen2-0.5B",
+    "prompt": "I am working on learning to run benchmarks in my openshift cluster. I was wondering if you could provide me a list of best practices when collecting metrics on the k8s platform, and furthermore, any OCP specific optimizations that are applicable here. Finally please help me construct a plan to support testing metrics collection for testing and dev environments such as minikube or kind.",
+    "max_tokens": 200,
+    "temperature": 0
+  }' | jq
+
+curl http://localhost:8000/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model":"Qwen/Qwen2-0.5B",
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "I am working on learning to run benchmarks in my openshift cluster. I was wondering if you could provide me a list of best practices when collecting metrics on the k8s platform, and furthermore, any OCP specific optimizations that are applicable here. Finally please help me construct a plan to support testing metrics collection for testing and dev environments such as minikube or kind."}
+        ],
+        "max_tokens": 100
+    }'
+
+
+lm_eval --model local-completions --tasks gsm8k --model_args model="Qwen/Qwen2-0.5B",base_url=http://127.0.0.1:8000/v1/completions,num_concurrent=5,max_retries=3,tokenized_requests=False

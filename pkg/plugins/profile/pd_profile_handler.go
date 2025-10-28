@@ -21,15 +21,17 @@ const (
 	// PdProfileHandlerType is the type of the PdProfileHandler
 	PdProfileHandlerType = "pd-profile-handler"
 
-	defaultDecodeProfile  = "decode"
-	defaultPrefillProfile = "prefill"
+	defaultDecodeProfile    = "decode"
+	defaultPrefillProfile   = "prefill"
+	defaultPrefixPluginName = prefix.PrefixCachePluginType
 )
 
 type pdProfileHandlerParameters struct {
-	Threshold      int    `json:"threshold"`
-	DecodeProfile  string `json:"decodeProfile"`
-	PrefillProfile string `json:"prefillProfile"`
-	HashBlockSize  int    `json:"hashBlockSize"`
+	Threshold        int    `json:"threshold"`
+	DecodeProfile    string `json:"decodeProfile"`
+	PrefillProfile   string `json:"prefillProfile"`
+	PrefixPluginName string `json:"prefixPluginName"`
+	HashBlockSize    int    `json:"hashBlockSize"`
 }
 
 // compile-time type assertion
@@ -38,10 +40,11 @@ var _ framework.ProfileHandler = &PdProfileHandler{}
 // PdProfileHandlerFactory defines the factory function for the PdProfileHandler
 func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 	parameters := pdProfileHandlerParameters{
-		Threshold:      0,
-		DecodeProfile:  defaultDecodeProfile,
-		PrefillProfile: defaultPrefillProfile,
-		HashBlockSize:  prefix.DefaultHashBlockSize,
+		Threshold:        0,
+		DecodeProfile:    defaultDecodeProfile,
+		PrefillProfile:   defaultPrefillProfile,
+		PrefixPluginName: defaultPrefixPluginName,
+		HashBlockSize:    prefix.DefaultBlockSize,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -49,27 +52,30 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		}
 	}
 
-	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.Threshold, parameters.HashBlockSize).WithName(name), nil
+	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginName,
+		parameters.Threshold, parameters.HashBlockSize).WithName(name), nil
 }
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func NewPdProfileHandler(prefillProfile string, decodeProfile string, pdThreshold int, hashBlockSize int) *PdProfileHandler {
+func NewPdProfileHandler(prefillProfile string, decodeProfile string, prefixPluginName string, pdThreshold int, hashBlockSize int) *PdProfileHandler {
 	return &PdProfileHandler{
-		typedName:      plugins.TypedName{Type: PdProfileHandlerType},
-		decodeProfile:  decodeProfile,
-		prefillProfile: prefillProfile,
-		pdThreshold:    pdThreshold,
-		hashBlockSize:  hashBlockSize,
+		typedName:             plugins.TypedName{Type: PdProfileHandlerType},
+		prefixPluginTypedName: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefixPluginName},
+		decodeProfile:         decodeProfile,
+		prefillProfile:        prefillProfile,
+		pdThreshold:           pdThreshold,
+		hashBlockSize:         hashBlockSize,
 	}
 }
 
 // PdProfileHandler handles scheduler profiles for PD.
 type PdProfileHandler struct {
-	typedName      plugins.TypedName
-	decodeProfile  string
-	prefillProfile string
-	pdThreshold    int
-	hashBlockSize  int
+	typedName             plugins.TypedName
+	prefixPluginTypedName plugins.TypedName
+	decodeProfile         string
+	prefillProfile        string
+	pdThreshold           int
+	hashBlockSize         int
 }
 
 // TypedName returns the typed name of the plugin.
@@ -109,23 +115,29 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	}
 
 	if h.pdThreshold > 0 {
+		userInput, err := getUserInputBytes(request)
+		if err != nil {
+			log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input bytes")
+			return nil
+		}
+
 		// if we're here that means decode profile ran successfully, and we have additional profile configured that didn't run yet,
 		// which means PD is enabled (otherwise, prefill profile is not configured at all and this profile handler is not used).
 		// inspect decode execution result to decide if prefill should run or not.
 		// if the request is short enough, use decode results only and don't run the prefill profile.
 		hitPercentagePrefix := 0.0 // default to 0, meaning no prefix cache hit
-		prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, prefix.PrefixCachePluginType)
+		prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(h.prefixPluginTypedName.String()))
 		if err != nil {
 			log.FromContext(ctx).Error(err, "unable to read prefix state")
 		} else {
 			decodePod := profileResults[h.decodeProfile].TargetPods[0].GetPod().NamespacedName
 			hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
-			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(prompt))
+			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(userInput))
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
-				"promptLength", len(prompt))
+				"promptLength", len(userInput))
 		}
 
-		if (1.0-hitPercentagePrefix)*float64(len(prompt)) < float64(h.pdThreshold) {
+		if (1.0-hitPercentagePrefix)*float64(len(userInput)) < float64(h.pdThreshold) {
 			log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
 			return map[string]*framework.SchedulerProfile{} // do not run prefill
 		}
@@ -171,23 +183,23 @@ func (h *PdProfileHandler) preprocessRequest(ctx context.Context, request *types
 	loggerDebug := log.FromContext(ctx).WithName(h.typedName.String()).V(logutil.DEBUG)
 
 	// If it's a chat completion request, apply preprocessing
-	if request.Data != nil && request.Data.ChatCompletions != nil {
-		loggerDebug.Info("Processing chat completion request", "messages_count", len(request.Data.ChatCompletions.Messages))
+	if request.Body != nil && request.Body.ChatCompletions != nil {
+		loggerDebug.Info("Processing chat completion request", "messages_count", len(request.Body.ChatCompletions.Messages))
 
 		// Create preprocessing request
 		preprocessReq := &chat_completions.RenderJinjaTemplateRequest{
 			Conversations:             make([]chat_completions.ChatMessage, 0),
-			Tools:                     request.Data.ChatCompletions.Tools,
-			Documents:                 request.Data.ChatCompletions.Documents,
-			ChatTemplate:              request.Data.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Data.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Data.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Data.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Data.ChatCompletions.ChatTemplateKWArgs,
+			Tools:                     request.Body.ChatCompletions.Tools,
+			Documents:                 request.Body.ChatCompletions.Documents,
+			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
+			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
+			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
+			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
+			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
 		}
 
 		// Convert messages to the format expected by preprocessing
-		for _, msg := range request.Data.ChatCompletions.Messages {
+		for _, msg := range request.Body.ChatCompletions.Messages {
 			preprocessReq.Conversations = append(preprocessReq.Conversations, chat_completions.ChatMessage{
 				Role:    msg.Role,
 				Content: msg.Content,
@@ -212,15 +224,15 @@ func (h *PdProfileHandler) preprocessRequest(ctx context.Context, request *types
 	}
 
 	// For regular completions, use the prompt directly
-	if request.Data != nil && request.Data.Completions != nil {
-		loggerDebug.Info("Using completion prompt directly", "prompt_length", len(request.Data.Completions.Prompt))
-		return request.Data.Completions.Prompt, nil
+	if request.Body != nil && request.Body.Completions != nil {
+		loggerDebug.Info("Using completion prompt directly", "prompt_length", len(request.Body.Completions.Prompt))
+		return request.Body.Completions.Prompt, nil
 	}
 
 	// Fallback: try to extract prompt from request body if available
-	if request.Data != nil {
+	if request.Body != nil {
 		// Try to marshal and extract prompt from raw data
-		if dataBytes, err := json.Marshal(request.Data); err == nil {
+		if dataBytes, err := json.Marshal(request.Body); err == nil {
 			var rawData map[string]interface{}
 			if err := json.Unmarshal(dataBytes, &rawData); err == nil {
 				if prompt, ok := rawData["prompt"].(string); ok && prompt != "" {
@@ -232,4 +244,13 @@ func (h *PdProfileHandler) preprocessRequest(ctx context.Context, request *types
 	}
 
 	return "", fmt.Errorf("no valid prompt found in request")
+}
+
+func getUserInputBytes(request *types.LLMRequest) ([]byte, error) {
+	if request.Body.Completions != nil { // assumed to be valid if not nil
+		return []byte(request.Body.Completions.Prompt), nil
+	}
+
+	// must be chat-completions request at this point, return bytes of entire messages
+	return json.Marshal(request.Body.ChatCompletions.Messages)
 }

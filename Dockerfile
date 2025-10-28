@@ -49,7 +49,7 @@ ARG COMMIT_SHA=unknown
 ARG BUILD_REF
 RUN export CGO_CFLAGS="$(python3.12-config --cflags) -I/workspace/lib" && \
     export CGO_LDFLAGS="$(python3.12-config --ldflags --embed) -L/workspace/lib -ltokenizers -ldl -lm" && \
-    go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics.BuildRef=${BUILD_REF}" cmd/epp/main.go
+    go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" cmd/epp/main.go
 
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
@@ -67,7 +67,8 @@ USER root
 RUN microdnf install -y dnf && \
     dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm' && \
     dnf install -y zeromq python3.12 python3.12-libs python3.12-pip && \
-    dnf clean all
+    dnf clean all && \
+    rm -rf /var/cache/dnf /var/lib/dnf
 
 # Copy Python dependencies from builder stage
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

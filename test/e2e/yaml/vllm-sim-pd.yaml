@@ -65,7 +65,7 @@ spec:
         args:
         - "--port=8000"
         - "--vllm-port=8200"
-        - "--connector=nixl"
+        - "--connector=nixlv2"
         - "--secure-proxy=false"
         - "--decoder-use-tls=false"
         ports:

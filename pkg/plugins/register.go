@@ -20,4 +20,5 @@ func RegisterAllPlugins() {
 	plugins.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
 	plugins.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugins.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
+	plugins.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
 }

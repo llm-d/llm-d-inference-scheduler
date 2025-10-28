@@ -15,6 +15,7 @@ import (
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
 const (
@@ -55,8 +56,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
-			deleteObjects(epp)
-			deleteObjects(modelServers)
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
 		})
 	})
 
@@ -102,8 +103,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
 
-			deleteObjects(epp)
-			deleteObjects(modelServers)
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
 		})
 	})
 
@@ -124,8 +125,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 			}
 
-			deleteObjects(epp)
-			deleteObjects(modelServers)
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
 		})
 	})
 })
@@ -143,7 +144,7 @@ func createModelServers(withPD, withKV bool, vllmReplicas, prefillReplicas, deco
 		yaml = simPdDeployment
 	}
 
-	manifests := readYaml(yaml)
+	manifests := testutils.ReadYaml(yaml)
 	manifests = substituteMany(manifests,
 		map[string]string{
 			"${MODEL_NAME}":           theModelName,
@@ -157,7 +158,7 @@ func createModelServers(withPD, withKV bool, vllmReplicas, prefillReplicas, deco
 			"${VLLM_SIMULATOR_TAG}":   vllmSimTag,
 		})
 
-	objects := createObjsFromYaml(manifests)
+	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
 
 	return objects
@@ -175,19 +176,19 @@ func createEndPointPicker(eppConfig string) []string {
 		},
 		Data: map[string]string{"epp-config.yaml": eppConfig},
 	}
-	err := k8sClient.Create(ctx, configMap)
+	err := testConfig.K8sClient.Create(testConfig.Context, configMap)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
 	objects := []string{"ConfigMap/epp-config"}
 
-	eppYamls := readYaml(eppManifest)
+	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
 			"${EPP_TAG}":   eppTag,
 			"${POOL_NAME}": modelName + "-inference-pool",
 		})
 
-	objects = append(objects, createObjsFromYaml(eppYamls)...)
+	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)
 	podsInDeploymentsReady(objects)
 
 	ginkgo.By("Waiting for EPP to report that it is serving")
@@ -202,10 +203,11 @@ func createEndPointPicker(eppConfig string) []string {
 	healthCheckReq := &healthPb.HealthCheckRequest{}
 
 	gomega.Eventually(func() bool {
-		resp, err := client.Check(ctx, healthCheckReq)
+		resp, err := client.Check(testConfig.Context, healthCheckReq)
 		return err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING
 	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
 	ginkgo.By("EPP reports that it is serving")
+	time.Sleep(2 * time.Second)
 
 	return objects
 }
@@ -222,7 +224,7 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 		Model: theModel,
 	}
 
-	resp, err := openaiclient.Completions.New(ctx, completionParams, option.WithResponseInto(&httpResp))
+	resp, err := openaiclient.Completions.New(testConfig.Context, completionParams, option.WithResponseInto(&httpResp))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Expect(resp.Choices).Should(gomega.HaveLen(1))
 	gomega.Expect(resp.Choices[0].FinishReason).Should(gomega.Equal(openai.CompletionChoiceFinishReasonStop))
@@ -245,7 +247,7 @@ func runChatCompletion(prompt string) (string, string) {
 		},
 		Model: modelName,
 	}
-	resp, err := openaiclient.Chat.Completions.New(ctx, params, option.WithResponseInto(&httpResp))
+	resp, err := openaiclient.Chat.Completions.New(testConfig.Context, params, option.WithResponseInto(&httpResp))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Expect(resp.Choices).Should(gomega.HaveLen(1))
 	gomega.Expect(resp.Choices[0].FinishReason).Should(gomega.Equal("stop"))

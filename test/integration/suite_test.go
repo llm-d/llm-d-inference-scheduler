@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
-	gwinfv1alpha2 "sigs.k8s.io/gateway-api-inference-extension/api/v1alpha2"
+	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -54,7 +54,7 @@ func initializeKubernetesClient() error {
 		return err
 	}
 
-	if err := gwinfv1alpha2.Install(scheme.Scheme); err != nil {
+	if err := v1alpha2.Install(scheme.Scheme); err != nil {
 		return err
 	}
 

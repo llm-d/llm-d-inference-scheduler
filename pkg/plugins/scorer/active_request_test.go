@@ -124,7 +124,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	}
 
 	// First request
-	scorer.PreRequest(ctx, request, schedulingResult, 0)
+	scorer.PreRequest(ctx, request, schedulingResult)
 
 	// Check cache and pod counts
 	compositeKey := "default/pod-a.test-request-1"
@@ -151,7 +151,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 		},
 	}
 
-	scorer.PreRequest(ctx, request2, schedulingResult2, 0)
+	scorer.PreRequest(ctx, request2, schedulingResult2)
 
 	// Check incremented count
 	scorer.mutex.RLock()
@@ -168,7 +168,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	}
 }
 
-func TestActiveRequestScorer_PostResponse(t *testing.T) {
+func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
 	ctx := context.Background()
 
 	scorer := NewActiveRequest(ctx, nil)
@@ -192,12 +192,12 @@ func TestActiveRequestScorer_PostResponse(t *testing.T) {
 		},
 	}
 
-	scorer.PreRequest(ctx, request, schedulingResult, 0)
+	scorer.PreRequest(ctx, request, schedulingResult)
 
 	// Verify initial state
 	compositeKey := "default/pod-a.test-request-1"
 	if !scorer.requestCache.Has(compositeKey) {
-		t.Fatal("Request should be in cache before PostResponse")
+		t.Fatal("Request should be in cache before ResponseComplete")
 	}
 
 	scorer.mutex.RLock()
@@ -208,11 +208,11 @@ func TestActiveRequestScorer_PostResponse(t *testing.T) {
 	}
 
 	// Call PostResponse
-	scorer.PostResponse(ctx, request, &requestcontrol.Response{}, podA.GetPod())
+	scorer.ResponseComplete(ctx, request, &requestcontrol.Response{}, podA.GetPod())
 
 	// Check request is removed from cache
 	if scorer.requestCache.Has(compositeKey) {
-		t.Errorf("Request should be removed from cache after PostResponse")
+		t.Errorf("Request should be removed from cache after ResponseComplete")
 	}
 
 	// Check pod count is decremented and removed (since it was 1)
@@ -248,7 +248,7 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 	}
 
 	// Add request
-	scorer.PreRequest(ctx, request, schedulingResult, 0)
+	scorer.PreRequest(ctx, request, schedulingResult)
 
 	// Verify request is added
 	scorer.mutex.RLock()

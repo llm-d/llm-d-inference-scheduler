@@ -23,7 +23,7 @@ const (
 
 // compile-time type assertion
 var _ framework.Scorer = &SessionAffinity{}
-var _ requestcontrol.PostResponse = &SessionAffinity{}
+var _ requestcontrol.ResponseComplete = &SessionAffinity{}
 
 // SessionAffinityFactory defines the factory function for SessionAffinity scorer.
 func SessionAffinityFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
@@ -80,11 +80,11 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, reques
 	return scoredPods
 }
 
-// PostResponse sets the session header on the response sent to the client
+// ResponseComplete sets the session header on the response sent to the client
 // TODO: this should be using a cookie and ensure not overriding any other
 // cookie values if present.
 // Tracked in https://github.com/llm-d/llm-d-inference-scheduler/issues/28
-func (s *SessionAffinity) PostResponse(ctx context.Context, _ *types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (s *SessionAffinity) ResponseComplete(ctx context.Context, _ *types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
 	if response == nil || targetPod == nil {
 		reqID := "undefined"
 		if response != nil {

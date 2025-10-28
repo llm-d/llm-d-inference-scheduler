@@ -11,16 +11,17 @@ jobs:
       issues: write
     steps:
       - name: 'Mark stale issues'
-        uses: actions/stale@v9
+        uses: actions/stale@v10
         with:
           days-before-issue-stale: 90
           days-before-pr-stale: -1
           days-before-close: -1
           stale-issue-label: 'lifecycle/stale'
           exempt-issue-labels: 'lifecycle/rotten'
+          stale-issue-message: 'This issue is marked as stale after 90d of inactivity. After an additional 30d of inactivity, it will be closed. To prevent this issue from being closed, add a comment or remove the `lifecycle/stale` label.'
 
       - name: 'Mark rotten issues'
-        uses: actions/stale@v9
+        uses: actions/stale@v10
         with:
           days-before-issue-stale: 30
           days-before-pr-stale: -1
@@ -30,9 +31,10 @@ jobs:
           labels-to-remove-when-stale: 'lifecycle/stale'
 
       - name: 'Close rotten issues'
-        uses: actions/stale@v9
+        uses: actions/stale@v10
         with:
           days-before-stale: -1
           days-before-issue-close: 30
           days-before-pr-close: -1
           stale-issue-label: 'lifecycle/rotten'
+          stale-issue-message: 'This issue is being closed after 120d of inactivity.'

@@ -6,8 +6,7 @@ rules:
 - apiGroups:
   - "inference.networking.x-k8s.io"
   resources:
-  - "inferencepools"
-  - "inferencemodels"
+  - "inferenceobjectives"
   verbs:
   - "get"
   - "watch"
@@ -21,9 +20,9 @@ rules:
   - "watch"
   - "list"
 - apiGroups:
-  - "discovery.k8s.io"
+  - "inference.networking.k8s.io"
   resources:
-  - "endpointslices"
+  - "inferencepools"
   verbs:
   - "get"
   - "watch"

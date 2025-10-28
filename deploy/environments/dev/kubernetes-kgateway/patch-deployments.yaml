@@ -10,19 +10,21 @@ spec:
         image: ${EPP_IMAGE}:${EPP_TAG}
         imagePullPolicy: Always
         args:
-        - -poolName
+        - --pool-name
         - ${POOL_NAME}
-        - -poolNamespace
+        - --pool-namespace
         - ${NAMESPACE}
-        - -v
+        - "--pool-group"
+        - "inference.networking.x-k8s.io"
+        - --v
         - "4"
         - --zap-encoder
         - "json"
-        - -grpcPort
+        - --grpc-port
         - "9002"
-        - -grpcHealthPort
+        - --grpc-health-port
         - "9003"
-        - --configFile
+        - --config-file
         - "/etc/epp/epp-config.yaml"
         env:
           - name: HF_TOKEN

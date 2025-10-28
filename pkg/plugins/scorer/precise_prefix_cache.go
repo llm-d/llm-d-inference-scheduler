@@ -156,23 +156,23 @@ func (s *PrecisePrefixCacheScorer) preprocessRequest(ctx context.Context, reques
 	loggerDebug := log.FromContext(ctx).WithName(s.typedName.String()).V(logutil.DEBUG)
 
 	// If it's a chat completion request, apply preprocessing
-	if request.Data != nil && request.Data.ChatCompletions != nil {
-		loggerDebug.Info("Processing chat completion request", "messages_count", len(request.Data.ChatCompletions.Messages))
+	if request.Body != nil && request.Body.ChatCompletions != nil {
+		loggerDebug.Info("Processing chat completion request", "messages_count", len(request.Body.ChatCompletions.Messages))
 
 		// Create preprocessing request
 		preprocessReq := &chat_completions.RenderJinjaTemplateRequest{
 			Conversations:             make([]chat_completions.ChatMessage, 0),
-			Tools:                     request.Data.ChatCompletions.Tools,
-			Documents:                 request.Data.ChatCompletions.Documents,
-			ChatTemplate:              request.Data.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Data.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Data.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Data.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Data.ChatCompletions.ChatTemplateKWArgs,
+			Tools:                     request.Body.ChatCompletions.Tools,
+			Documents:                 request.Body.ChatCompletions.Documents,
+			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
+			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
+			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
+			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
+			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
 		}
 
 		// Convert messages to the format expected by preprocessing
-		for _, msg := range request.Data.ChatCompletions.Messages {
+		for _, msg := range request.Body.ChatCompletions.Messages {
 			preprocessReq.Conversations = append(preprocessReq.Conversations, chat_completions.ChatMessage{
 				Role:    msg.Role,
 				Content: msg.Content,
@@ -216,15 +216,15 @@ func (s *PrecisePrefixCacheScorer) preprocessRequest(ctx context.Context, reques
 	}
 
 	// For regular completions, use the prompt directly
-	if request.Data != nil && request.Data.Completions != nil {
-		loggerDebug.Info("Using completion prompt directly", "prompt_length", len(request.Data.Completions.Prompt))
-		return request.Data.Completions.Prompt, nil
+	if request.Body != nil && request.Body.Completions != nil {
+		loggerDebug.Info("Using completion prompt directly", "prompt_length", len(request.Body.Completions.Prompt))
+		return request.Body.Completions.Prompt, nil
 	}
 
 	// Fallback: try to extract prompt from request body if available
-	if request.Data != nil {
+	if request.Body != nil {
 		// Try to marshal and extract prompt from raw data
-		if dataBytes, err := json.Marshal(request.Data); err == nil {
+		if dataBytes, err := json.Marshal(request.Body); err == nil {
 			var rawData map[string]interface{}
 			if err := json.Unmarshal(dataBytes, &rawData); err == nil {
 				if prompt, ok := rawData["prompt"].(string); ok && prompt != "" {
