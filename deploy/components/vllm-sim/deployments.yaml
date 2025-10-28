@@ -27,9 +27,31 @@ spec:
         - "--zmq-endpoint=tcp://${EPP_NAME}.default.svc.cluster.local:5557"
         - "--event-batch-size=16"
         - "--tokenizers-cache-dir=/tokenizer-cache"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
         - name: http
           containerPort: 8000
+          protocol: TCP
+        - name: rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: rank7
+          containerPort: 8007
           protocol: TCP
         env:
         - name: PORT

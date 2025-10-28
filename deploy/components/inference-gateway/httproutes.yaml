@@ -11,7 +11,7 @@ spec:
         type: PathPrefix
         value: /
     backendRefs:
-    - group: inference.networking.x-k8s.io
+    - group: inference.networking.k8s.io
       kind: InferencePool
       name: ${POOL_NAME}
       port: 8000

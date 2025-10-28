@@ -331,6 +331,21 @@ rules:
   - update
   - patch
 - apiGroups:
+  - "inference.networking.k8s.io"
+  resources:
+  - "inferencepools"
+  verbs:
+  - "get"
+  - "watch"
+  - "list"
+- apiGroups:
+  - "inference.networking.k8s.io"
+  resources:
+  - inferencepools/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
   - ""
   resources:
   - secrets
