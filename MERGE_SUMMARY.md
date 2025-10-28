@@ -142,10 +142,28 @@ Plus 31 upstream commits including:
 2. ✅ Docker image builds successfully
 3. ✅ All code compiles and runs correctly
 4. ✅ Image size: **637 MB** (404 MB base + 233 MB for Python dependencies)
-   - Upstream image (404MB): Go binary + zeromq only (no chat completions preprocessing support)
-   - Old fork (57c1402): ~1.69GB with chat completions using local repo clones
-   - New merged image (637MB): Chat completions using upstream modules (optimized from 1.69GB to 637MB)
-   - Size breakdown: Python 3.12 runtime (~70MB) + torch (~175MB) + transformers (~100MB) + dependencies
+   
+   **Size comparison:**
+   - **404MB image**: Upstream base image with NO chat completions support
+     - Contains: Go binary, zeromq library
+     - No Python, no torch, no chat preprocessing
+   - **637MB image**: NEW chat completions support added
+     - Base: 404MB (same upstream base)
+     - Added: +233MB for chat completions preprocessing
+   
+   **233MB breakdown (ALL REQUIRED for chat completions):**
+   - **torch==2.5.1+cpu**: ~175MB (model loading, tokenization)
+   - **transformers>=4.53.0**: ~100MB (chat template rendering)  
+   - **Python 3.12 runtime**: ~70MB (Python interpreter + libs)
+   - **Other deps**: ~30MB (pillow, jinja2, packaging)
+   
+   **Key Dockerfile lines that added size:**
+   - Builder line 9: `+python3.12-devel python3.12-pip`
+   - Builder lines 22-28: `pip install torch transformers pillow jinja2` (~175MB+100MB)
+   - Runtime line 70: `+python3.12 python3.12-libs python3.12-pip` (~70MB)
+   - Runtime line 76: `COPY ... site-packages` (torch+transformers from builder)
+   
+   **Note:** Old fork (57c1402) with chat completions was 1.69GB due to duplicate installation. New image optimized to 637MB.
 5. ✅ Chat completions preprocessing fully integrated with upstream v0.3.2
 
 **Final Commits:**
