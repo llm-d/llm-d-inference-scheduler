@@ -67,8 +67,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(err).ToNot(HaveOccurred())
 		decodeURL = url
 		cfg := Config{Connector: ConnectorNIXLV2}
-		proxy, err = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
-		Expect(err).ToNot(HaveOccurred())
+		proxy = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
 	})
 
 	It("should successfully send request to 1. prefill 2. decode with the correct fields (backward compatible behavior)", func() {
@@ -76,7 +75,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			err := proxy.Start(ctx)
+			validator := &AllowlistValidator{enabled: false}
+			err := proxy.Start(ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -139,7 +139,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			err := proxy.Start(ctx)
+			validator := &AllowlistValidator{enabled: false}
+			err := proxy.Start(ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
