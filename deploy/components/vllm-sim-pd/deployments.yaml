@@ -57,7 +57,6 @@ spec:
         - "--connector=lmcache"
         - "--secure-proxy=false"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
-        - "-v=4"
         ports:
         - name: sidecar-http
           containerPort: 8000
@@ -97,7 +96,6 @@ spec:
         - "--port=8200"
         - "--model=${MODEL_NAME}"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
-        - "-v=4"
         ports:
         - name: http
           containerPort: 8200
