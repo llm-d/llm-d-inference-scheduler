@@ -30,8 +30,7 @@ import (
 )
 
 const (
-	requestHeaderPrefillURL = "x-prefiller-url"
-	requestHeaderRequestID  = "x-request-id"
+	requestHeaderRequestID = "x-request-id"
 
 	requestFieldKVTransferParams    = "kv_transfer_params"
 	requestFieldMaxTokens           = "max_tokens"
