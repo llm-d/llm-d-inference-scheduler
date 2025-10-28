@@ -23,8 +23,6 @@ spec:
         args:
         - --pool-name
         - "${POOL_NAME}"
-        - "--pool-group"
-        - "inference.networking.x-k8s.io"
         - --v
         - "4"
         - --zap-encoder
