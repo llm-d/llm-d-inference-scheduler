@@ -68,7 +68,10 @@ export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
 export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 
-if [ "${PD_ENABLED}" != "\"true\"" ]; then
+# Data Parallel size
+export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
+
+if [ "${PD_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
     DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
   else
@@ -76,7 +79,11 @@ if [ "${PD_ENABLED}" != "\"true\"" ]; then
   fi
 else
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
-    DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+    if [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
+      DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+    else
+      DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
+    fi
   else
     echo "Invalid configuration: PD_ENABLED=true and KV_CACHE_ENABLED=true is not supported"
     exit 1
@@ -84,6 +91,7 @@ else
 fi
 
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
+
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks
 # ------------------------------------------------------------------------------
@@ -109,6 +117,16 @@ for cmd in kind kubectl kustomize ${CONTAINER_RUNTIME}; do
         exit 1
     fi
 done
+
+TARGET_PORTS="8000"
+
+NEW_LINE=$'\n'
+for ((i = 1; i < VLLM_DATA_PARALLEL_SIZE; ++i)); do
+    EXTRA_PORT=$((8000 + i))
+    TARGET_PORTS="${TARGET_PORTS}${NEW_LINE}  - number: ${EXTRA_PORT}"
+done
+
+export TARGET_PORTS
 
 # ------------------------------------------------------------------------------
 # Cluster Deployment
@@ -195,7 +213,7 @@ kustomize build --enable-helm deploy/components/crds-istio |
 # ------------------------------------------------------------------------------
 
 # Deploy the environment to the "default" namespace
-if [ "${PD_ENABLED}" != "\"true\"" ]; then
+if [ "${PD_ENABLED}" != "\"true\"" ]  &&  [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
 else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
@@ -206,8 +224,8 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
-  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${ROUTING_SIDECAR_TAG} \
-  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D}' \
+  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${ROUTING_SIDECAR_TAG} ${TARGET_PORTS} \
+  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------

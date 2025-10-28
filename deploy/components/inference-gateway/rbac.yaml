@@ -13,6 +13,14 @@ rules:
   - "watch"
   - "list"
 - apiGroups:
+  - "inference.networking.k8s.io"
+  resources:
+  - "inferencepools"
+  verbs:
+  - "get"
+  - "watch"
+  - "list"
+- apiGroups:
   - ""
   resources:
   - "pods"
