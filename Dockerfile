@@ -53,9 +53,9 @@ RUN export CGO_CFLAGS="$(python3.12-config --cflags) -I/workspace/lib" && \
     export CGO_LDFLAGS="$(python3.12-config --ldflags --embed) -L/workspace/lib -ltokenizers -ldl -lm" && \
     go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics.BuildRef=${BUILD_REF}" cmd/epp/main.go
 
-# Use ubi9 as a minimal base image to package the manager binary
-# Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+# Use alpine as a minimal base image to package the manager binary
+# Using alpine instead of UBI9 to avoid blob permission issues
+FROM alpine:latest
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
