@@ -46,8 +46,11 @@ export MODEL_NAME_SAFE=$(echo "${MODEL_ID}" | tr '[:upper:]' '[:lower:]' | tr ' 
 # Set the endpoint-picker to deploy
 export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 
+# Set a default SIDECAR_IMAGE if not provided
+: "${SIDECAR_IMAGE:=llm-d-routing-sidecar}"
+
 # Set the default routing side car image tag
-export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-0.0.6}"
+export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-dev}"
 
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
@@ -166,6 +169,14 @@ if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 else
 	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${EPP_IMAGE}:${EPP_TAG}
 fi
+
+# Load the sidecar image into the cluster
+if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+	podman save ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${ROUTING_SIDECAR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+else
+	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${ROUTING_SIDECAR_TAG}
+fi
+
 # ------------------------------------------------------------------------------
 # CRD Deployment (Gateway API + GIE)
 # ------------------------------------------------------------------------------
