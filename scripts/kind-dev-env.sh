@@ -213,7 +213,7 @@ kustomize build --enable-helm deploy/components/crds-istio |
 # ------------------------------------------------------------------------------
 
 # Deploy the environment to the "default" namespace
-if [ "${PD_ENABLED}" != "\"true\"" ]  &&  [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
+if [ "${PD_ENABLED}" != "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
 else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
