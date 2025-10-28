@@ -141,7 +141,11 @@ Plus 31 upstream commits including:
 1. ✅ Merge complete (31 upstream commits + chat completions integration)
 2. ✅ Docker image builds successfully
 3. ✅ All code compiles and runs correctly
-4. ✅ Image size: 1.69 GB (same as previous production image)
+4. ✅ Image size: **637 MB** (404 MB base + 233 MB for Python dependencies)
+   - Upstream image (404MB): Go binary + zeromq only (no chat completions preprocessing support)
+   - Old fork (57c1402): ~1.69GB with chat completions using local repo clones
+   - New merged image (637MB): Chat completions using upstream modules (optimized from 1.69GB to 637MB)
+   - Size breakdown: Python 3.12 runtime (~70MB) + torch (~175MB) + transformers (~100MB) + dependencies
 5. ✅ Chat completions preprocessing fully integrated with upstream v0.3.2
 
 **Final Commits:**
