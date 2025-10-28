@@ -18,13 +18,18 @@ COPY go.sum go.sum
 # Copy the go source
 COPY cmd/ cmd/
 COPY pkg/ pkg/
-COPY gateway-api-inference-extension/ gateway-api-inference-extension/
-COPY llm-d-kv-cache-manager/ llm-d-kv-cache-manager/
 
 # Install Python dependencies for chat completions preprocessing
-COPY llm-d-kv-cache-manager/pkg/preprocessing/chat_completions/requirements.txt ./requirements.txt
-RUN python3.12 -m pip install --upgrade pip setuptools wheel && \
-    python3.12 -m pip install -r ./requirements.txt
+# Download requirements from the kv-cache-manager module
+RUN mkdir -p /tmp/req && \
+    curl -L https://raw.githubusercontent.com/llm-d/llm-d-kv-cache-manager/v0.3.2/pkg/preprocessing/chat_completions/requirements.txt -o /tmp/req/requirements.txt && \
+    python3.12 -m pip install --upgrade pip setuptools wheel && \
+    python3.12 -m pip install -r /tmp/req/requirements.txt && \
+    rm -rf /tmp/req
+
+# Set up Python environment variables needed for the build
+ENV PYTHONPATH=/usr/lib64/python3.12/site-packages:/usr/lib/python3.12/site-packages
+ENV PYTHON=python3.12
 
 # HuggingFace tokenizer bindings
 RUN mkdir -p lib
@@ -42,9 +47,6 @@ ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
 
-# Set up Python environment variables needed for the build
-ENV PYTHONPATH=/workspace/pkg/preprocessing/chat_completions:/usr/lib64/python3.12/site-packages:/usr/lib/python3.12/site-packages
-ENV PYTHON=python3.12
 ARG COMMIT_SHA=unknown
 ARG BUILD_REF
 RUN export CGO_CFLAGS="$(python3.12-config --cflags) -I/workspace/lib" && \
@@ -57,11 +59,10 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
-# Copy Python wrapper files needed for chat template processing to a standard location
-RUN mkdir -p /opt/chat_completions/
-COPY --from=builder /workspace/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions/*.py /opt/chat_completions/
+# Note: Python chat completions preprocessing is handled by llm-d-kv-cache-manager v0.3.2
+# The module is now available upstream and doesn't require local copies
 
-# Install zeromq runtime library and Python 3.12 runtime needed by the manager.
+# Install zeromq runtime library and Python 3.12 runtime needed for chat completions preprocessing
 # The final image is UBI9, so we need epel-release-9.
 USER root
 RUN microdnf install -y dnf && \
@@ -75,13 +76,11 @@ COPY --from=builder /usr/lib/python3.12/site-packages /usr/lib/python3.12/site-p
 COPY --from=builder /usr/lib64/python3.12/site-packages /usr/lib64/python3.12/site-packages
 
 # Install Python dependencies for chat completions preprocessing in runtime
-COPY --from=builder /workspace/requirements.txt /tmp/requirements.txt
-RUN python3.12 -m pip install --upgrade pip setuptools wheel && \
-    python3.12 -m pip install -r /tmp/requirements.txt && \
-    rm /tmp/requirements.txt
-
-# Set PYTHONPATH to include the chat completions wrapper directory
-ENV PYTHONPATH="/opt/chat_completions:${PYTHONPATH}"
+RUN mkdir -p /tmp/req && \
+    curl -L https://raw.githubusercontent.com/llm-d/llm-d-kv-cache-manager/v0.3.2/pkg/preprocessing/chat_completions/requirements.txt -o /tmp/req/requirements.txt && \
+    python3.12 -m pip install --upgrade pip setuptools wheel && \
+    python3.12 -m pip install -r /tmp/req/requirements.txt && \
+    rm -rf /tmp/req
 
 # Set Hugging Face cache directory to writable location for non-root user
 ENV HF_HOME="/tmp/.cache"
