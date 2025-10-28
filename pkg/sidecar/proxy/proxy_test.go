@@ -40,6 +40,13 @@ var _ = Describe("Reverse Proxy", func() {
 			func(path string, secureProxy bool) {
 				_, ctx := ktesting.NewTestContext(GinkgoT())
 
+				var cert *tls.Certificate
+				if secureProxy {
+					tempCert, err := CreateSelfSignedTLSCertificate()
+					Expect(err).ToNot(HaveOccurred())
+					cert = &tempCert
+				}
+
 				ackHandlerFn := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(200)
 				})
@@ -50,9 +57,8 @@ var _ = Describe("Reverse Proxy", func() {
 				targetURL, err := url.Parse(decodeBackend.URL)
 				Expect(err).ToNot(HaveOccurred())
 
-				cfg := Config{SecureProxy: secureProxy}
-				proxy, err := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
-				Expect(err).ToNot(HaveOccurred())
+				cfg := Config{}
+				proxy := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
 
 				ctx, cancelFn := context.WithCancel(ctx)
 				defer cancelFn()
@@ -60,7 +66,8 @@ var _ = Describe("Reverse Proxy", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					err := proxy.Start(ctx)
+					validator := &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx, cert, validator)
 					Expect(err).ToNot(HaveOccurred())
 				}()
 
@@ -143,10 +150,8 @@ var _ = Describe("Reverse Proxy", func() {
 			var proxy *Server
 
 			BeforeEach(func() {
-				var err error
 				cfg := Config{Connector: ConnectorNIXLV2}
-				proxy, err = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
-				Expect(err).ToNot(HaveOccurred())
+				proxy = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
 
 				decodeHandler.Connector = ConnectorNIXLV2
 				prefillHandler.Connector = ConnectorNIXLV2
@@ -157,7 +162,8 @@ var _ = Describe("Reverse Proxy", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					err := proxy.Start(ctx)
+					validator := &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 				}()
 
@@ -223,7 +229,8 @@ var _ = Describe("Reverse Proxy", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					err := proxy.Start(ctx)
+					validator := &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 				}()
 
