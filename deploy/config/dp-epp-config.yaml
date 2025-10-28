@@ -8,7 +8,7 @@ plugins:
 - type: max-score-picker
 - type: data-parallel-profile-handler
   parameters:
-    targetPort: 8000
+    primaryPort: 8000
 schedulingProfiles:
 - name: default
   plugins:

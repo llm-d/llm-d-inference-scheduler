@@ -20,7 +20,7 @@ const (
 )
 
 type dataParallelProfileHandlerParameters struct {
-	TargetPort int `json:"targetPort"`
+	PrimaryPort int `json:"primaryPort"`
 }
 
 // compile-time type assertion
@@ -29,7 +29,7 @@ var _ framework.ProfileHandler = &DataParallelProfileHandler{}
 // DataParallelProfileHandlerFactory defines the factory function for the DataParallelProfileHandler
 func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
 	parameters := dataParallelProfileHandlerParameters{
-		TargetPort: 8000,
+		PrimaryPort: 8000,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -37,21 +37,21 @@ func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessag
 		}
 	}
 
-	return NewDataParallelProfileHandler(parameters.TargetPort).WithName(name), nil
+	return NewDataParallelProfileHandler(parameters.PrimaryPort).WithName(name), nil
 }
 
 // NewDataParallelProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func NewDataParallelProfileHandler(targetPort int) *DataParallelProfileHandler {
+func NewDataParallelProfileHandler(primaryPort int) *DataParallelProfileHandler {
 	return &DataParallelProfileHandler{
-		typedName:  plugins.TypedName{Type: DataParallelProfileHandlerType},
-		targetPort: strconv.Itoa(targetPort),
+		typedName:   plugins.TypedName{Type: DataParallelProfileHandlerType},
+		primaryPort: strconv.Itoa(primaryPort),
 	}
 }
 
 // DataParallelProfileHandler handles scheduler profiles for Data Parallel.
 type DataParallelProfileHandler struct {
-	typedName  plugins.TypedName
-	targetPort string
+	typedName   plugins.TypedName
+	primaryPort string
 }
 
 // TypedName returns the typed name of the plugin.
@@ -107,7 +107,7 @@ func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *types.
 
 	for _, target := range profileResult.TargetPods {
 		newPodInfo := target.GetPod().Clone()
-		newPodInfo.Port = h.targetPort
+		newPodInfo.Port = h.primaryPort
 		targetPod := &types.PodMetrics{Pod: newPodInfo, MetricsState: target.GetMetrics().Clone()}
 		newResult.TargetPods = append(newResult.TargetPods, targetPod)
 	}
