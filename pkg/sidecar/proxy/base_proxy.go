@@ -25,7 +25,7 @@ type BaseServer struct {
 	allowlistValidator *AllowlistValidator
 }
 
-// Start the HTTP reverse proxy.
+// BaseStart starts the HTTP reverse proxy.
 func (s *BaseServer) BaseStart(ctx context.Context, cert *tls.Certificate) error {
 	// Start SSRF protection validator
 	if err := s.allowlistValidator.Start(ctx); err != nil {
