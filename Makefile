@@ -372,7 +372,7 @@ env-dev-kind: ## Run under kind ($(KIND_CLUSTER_NAME))
 		echo "Error: Both PD_ENABLED and KV_CACHE_ENABLED are true. Skipping env-dev-kind."; \
 		exit 1; \
 	else \
-		$(MAKE) image-build && \
+		$(MAKE) image-build sidecar-image-build && \
 		CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 		GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 		IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
