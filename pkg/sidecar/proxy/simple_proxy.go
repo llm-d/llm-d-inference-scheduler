@@ -8,12 +8,13 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// SimpleProxy is simple straight through proxy, mostly for /metrics
 type SimpleProxy struct {
 	BaseServer
 	decoderInsecureSkipVerify bool
 }
 
-// NewProxy creates a new routing reverse proxy
+// NewSimpleProxy creates a new simple reverse proxy
 func NewSimpleProxy(port string, decoderInsecureSkipVerify bool) *SimpleProxy {
 	server := &SimpleProxy{
 		BaseServer: BaseServer{
