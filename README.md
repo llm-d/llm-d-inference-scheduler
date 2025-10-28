@@ -17,6 +17,13 @@ framework which schedules incoming inference requests to the platform via a
 The EPP extends the [Gateway API Inference Extension (GIE)] project,
 which provides the API resources and machinery for scheduling. We add some
 custom features that are specific to llm-d here, such as [P/D Disaggregation].
+The two projects collaborate closely as often a feature in llm-d might require
+enablement and extensions in the GIE code base.
+Unique and experimental features may start in llm-d and migrate, over time, to
+GIE. As a project goal, we prefer to upstream functionality to GIE when
+- it has matured sufficiently and has proven wide applicability and usefulness; and
+- it can be implemented in EPP alone (i.e., llm-d provides a full inference framework,
+  beyond scheduling).
 
 A compatible [Gateway API] implementation is used as the Gateway. The Gateway
 API implementation must utilize [Envoy] and support [ext-proc], as this is the
