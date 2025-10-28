@@ -16,6 +16,7 @@ limitations under the License.
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"net/url"
 	"os"
@@ -30,6 +31,7 @@ import (
 func main() {
 	port := flag.String("port", "8000", "the port the sidecar is listening on")
 	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
+	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
 	connector := flag.String("connector", "nixlv2", "the P/D connector being used. Either nixl, nixlv2 or lmcache")
 	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
 	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
@@ -86,23 +88,39 @@ func main() {
 		return
 	}
 
+	var cert *tls.Certificate
+	if *secureProxy {
+		var tempCert tls.Certificate
+		if *certPath != "" {
+			tempCert, err = tls.LoadX509KeyPair(*certPath+"/tls.crt", *certPath+"/tls.key")
+		} else {
+			tempCert, err = proxy.CreateSelfSignedTLSCertificate()
+		}
+		if err != nil {
+			logger.Error(err, "failed to create TLS certificate")
+			return
+		}
+		cert = &tempCert
+	}
+
 	config := proxy.Config{
 		Connector:                   *connector,
 		PrefillerUseTLS:             *prefillerUseTLS,
-		SecureProxy:                 *secureProxy,
-		CertPath:                    *certPath,
 		PrefillerInsecureSkipVerify: *prefillerInsecureSkipVerify,
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
-		EnableSSRFProtection:        *enableSSRFProtection,
-		InferencePoolNamespace:      *inferencePoolNamespace,
-		InferencePoolName:           *inferencePoolName,
+		DataParallelSize:            *vLLMDataParallelSize,
 	}
 
-	proxy, err := proxy.NewProxy(*port, targetURL, config)
+	// Create SSRF protection validator
+	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *inferencePoolNamespace, *inferencePoolName)
 	if err != nil {
-		logger.Error(err, "Failed to create proxy")
+		logger.Error(err, "failed to create SSRF protection validator")
+		return
 	}
-	if err := proxy.Start(ctx); err != nil {
+
+	proxyServer := proxy.NewProxy(*port, targetURL, config)
+
+	if err := proxyServer.Start(ctx, cert, validator); err != nil {
 		logger.Error(err, "failed to start proxy server")
 	}
 }

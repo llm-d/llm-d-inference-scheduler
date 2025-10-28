@@ -34,13 +34,11 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	prefillPodHostPort := r.Header.Get(common.PrefillPodHeader)
 
 	if prefillPodHostPort == "" {
-		// backward compatible behavior: to remove in next release
-		prefillPodHostPort = r.Header.Get(requestHeaderPrefillURL)
-	}
-
-	if prefillPodHostPort == "" {
 		s.logger.V(4).Info("skip disaggregated prefill")
-		s.decoderProxy.ServeHTTP(w, r)
+
+		if !s.dataParallelHandler(w, r) {
+			s.decoderProxy.ServeHTTP(w, r)
+		}
 		return
 	}
 
