@@ -1,15 +1,14 @@
-# LLM-D Inference Scheduler with preprocessing support
+# LLM-D Inference Scheduler with chat completions preprocessing
 
 ## Overview
 
-This repository contains a custom fork of the [llm-d-inference-scheduler](https://github.com/llm-d/llm-d-inference-scheduler) with modifications to add **chat completions preprocessing** functionality.
+This repository contains a custom fork of the [llm-d-inference-scheduler](https://github.com/llm-d/llm-d-inference-scheduler) with modifications to add **chat completions preprocessing** functionality for KV-cache aware routing.
 
 ## Repository Information
 
 - **Original Repository**: `https://github.com/llm-d/llm-d-inference-scheduler.git`
-- **Fork Location**: `/Users/guygirmonsky/llm-d-build/llm-d-inference-scheduler`
-- **Custom Image**: `ghcr.io/guygir/llm-d-inference-scheduler:latest`
-- **Base Commit**: `82f0cf2` (Makefile fixes #322)
+- **Upstream Merged**: Commit including 31 upstream commits plus local chat completions changes
+- **Custom Features**: Chat completions preprocessing integration with `llm-d-kv-cache-manager` v0.3.2
 
 ---
 
@@ -30,55 +29,42 @@ TARGETARCH=amd64 TARGETOS=linux make image-build
 
 ## Changes Made
 
-### 1. Repository Structure Changes
+### 1. Dependencies Update
 
-#### Added Local Repository Clones
-- `gateway-api-inference-extension/` - Local clone of the Gateway API Inference Extension
-- `llm-d-kv-cache-manager/` - Local clone of the KV Cache Manager with preprocessing capabilities
+**Upgraded to upstream versions:**
+- `llm-d-kv-cache-manager` v0.3.2 (from v0.2.1) - includes chat completions preprocessing
+- `gateway-api-inference-extension` v1.1.0-rc.1 (from v0.5.1)
+- Updated Kubernetes dependencies to v0.34.1
+- Updated controller-runtime to v0.22.3
 
-**Why Local Clones Were Necessary:**
-The upstream repositories had structural differences, missing functionality, and version compatibility issues that prevented successful builds:
-
-- **Package Structure Mismatch**: Upstream had `pkg/epp/config/loader` but code expected `pkg/epp/common/config/loader`
-- **API Version Issues**: Code expected `api/v1alpha2` but upstream had `apix/v1alpha2`
-- **Missing Preprocessing Code**: Chat completions preprocessing code wasn't available in upstream
-- **Version Compatibility**: Upstream v0.5.1 didn't have required functionality
-
-#### Go Module Configuration (`go.mod`)
-```go
-// Added replace directives to point to local clones:
-replace github.com/llm-d/llm-d-kv-cache-manager => ./llm-d-kv-cache-manager
-replace sigs.k8s.io/gateway-api-inference-extension => ./gateway-api-inference-extension
-```
+**API Changes:**
+- Adapted code to use `request.Body` instead of `request.Data` (v1.1.0 API change)
+- Updated ldflags path from `pkg/epp/metrics` to `version` package
 
 ### 2. Dockerfile Modifications
 
 #### Builder Stage Changes
-- Added Python 3.12 development tools and runtime
-- Integrated Python dependencies for chat completions preprocessing
-- Added CGO environment variables for Python integration
-- Modified build process to include Python libraries
+- Added Python 3.12 development headers (`python3.12-devel`) for CGO compilation
+- Downloads Python dependencies from upstream `llm-d-kv-cache-manager` v0.3.2
+- Configured CGO environment variables for Python integration
+- Preserved upstream image size optimizations (cleaning dnf cache)
 
 #### Runtime Stage Changes
 - Installed Python 3.12 runtime in final image
-- Copied Python wrapper files and dependencies
-- Set proper environment variables for Python library discovery
+- Downloads and installs Python dependencies for chat completions preprocessing
+- Sets PYTHONPATH and HF_HOME environment variables
 
 ### 3. Go Code Modifications
 
-#### Main Application Entry Point (`cmd/epp/main.go`)
-- Fixed plugin registration to use custom plugins
-- Removed call to non-existent `runner.RegisterAllPlugins()`
-
 #### Precise Prefix Cache Scorer (`pkg/plugins/scorer/precise_prefix_cache.go`)
-- Added chat completions preprocessing import
-- Modified `Score` function to preprocess requests before cache lookup
-- Added `preprocessRequest` function for chat completion handling
+- Adapts chat completions preprocessing to new `request.Body` API
+- Uses upstream `llm-d-kv-cache-manager/pkg/preprocessing/chat_completions` module
+- Preprocesses chat completion requests to get flattened prompts for KV-cache lookup
 
 #### Profile Handler (`pkg/plugins/profile/pd_profile_handler.go`)
-- Added same preprocessing functionality as the scorer
-- Modified `Pick` function to use preprocessed prompts for calculations
-- Ensures consistent preprocessing across all components
+- Applies same preprocessing functionality for PD (Prefill/Decode) profile selection
+- Uses `request.Body` API structure
+- Calculates prompt length using preprocessed output for cache hit percentage
 
 ---
 
@@ -86,16 +72,17 @@ replace sigs.k8s.io/gateway-api-inference-extension => ./gateway-api-inference-e
 
 ### Common Issues
 
-1. **Python.h not found during build**
-   - Ensure Python 3.12 development headers are installed
-   - Check that python3.12-devel package is available
+1. **Python.h not found during local build**
+   - Local builds require Python 3.12 development headers: `brew install python@3.12` (macOS)
+   - Alternatively, use Docker build which includes all dependencies: `make image-build`
+   - The Docker build is the recommended approach as it matches production environment
 
 2. **Import errors during Go build**
-   - Verify local repository clones are present
-   - Check that go.mod replace directives are correct
-   - Ensure all required files are copied to the build context
+   - Run `go mod tidy` to ensure dependencies are properly resolved
+   - The project now uses upstream `llm-d-kv-cache-manager` v0.3.2 which includes chat completions preprocessing
+   - No local repository clones or replace directives are needed
 
 3. **Runtime Python errors**
-   - Verify Python 3.12 runtime is installed in the final image
-   - Check that PYTHONPATH environment variable is set correctly
-   - Ensure all Python dependencies are properly installed
+   - Verify Python 3.12 runtime is installed in the final image (automatically included in Dockerfile)
+   - Check that PYTHONPATH and HF_HOME environment variables are set correctly (included in Dockerfile)
+   - Python dependencies are automatically installed during Docker image build
