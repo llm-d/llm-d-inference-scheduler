@@ -20,6 +20,7 @@ import (
 	"flag"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"k8s.io/klog/v2"
@@ -55,6 +56,7 @@ func main() {
 	enableSSRFProtection := flag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
 	inferencePoolNamespace := flag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "the Kubernetes namespace to watch for InferencePool resources (defaults to INFERENCE_POOL_NAMESPACE env var)")
 	inferencePoolName := flag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
+	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 
 	klog.InitFlags(nil)
 	flag.Parse()
@@ -127,6 +129,7 @@ func main() {
 		PrefillerInsecureSkipVerify: *prefillerInsecureSkipVerify,
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
 		DataParallelSize:            *vLLMDataParallelSize,
+		EnablePrefillerSampling:     *enablePrefillerSampling,
 	}
 
 	// Create SSRF protection validator

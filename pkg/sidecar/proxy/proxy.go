@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -77,6 +78,10 @@ type Config struct {
 
 	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE command line argument
 	DataParallelSize int
+
+	// EnablePrefillerSampling configures the proxy to randomly choose from the set
+	// of provided prefill hosts instead of always using the first one.
+	EnablePrefillerSampling bool
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
@@ -92,10 +97,12 @@ type Server struct {
 	runConnectorProtocol protocolRunner // the handler for running the protocol
 	prefillerURLPrefix   string
 
-	decoderProxy        *httputil.ReverseProxy            // decoder proxy handler
-	prefillerProxies    *lru.Cache[string, http.Handler]  // cached prefiller proxy handlers
-	dataParallelProxies map[string]*httputil.ReverseProxy // Proxies to other vLLM servers
-	forwardDataParallel bool                              // Use special Data Parallel work around
+	decoderProxy        http.Handler                     // decoder proxy handler
+	prefillerProxies    *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
+	dataParallelProxies map[string]http.Handler          // Proxies to other vLLM servers
+	forwardDataParallel bool                             // Use special Data Parallel work around
+
+	prefillSamplerFn func(n int) int // allow test override
 
 	config Config
 }
@@ -110,8 +117,9 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 		prefillerProxies:    cache,
 		prefillerURLPrefix:  "http://",
 		config:              config,
-		dataParallelProxies: map[string]*httputil.ReverseProxy{},
+		dataParallelProxies: map[string]http.Handler{},
 		forwardDataParallel: true,
+		prefillSamplerFn:    rand.Intn,
 	}
 	switch config.Connector {
 	case ConnectorLMCache:

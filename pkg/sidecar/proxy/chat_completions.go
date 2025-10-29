@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
@@ -31,9 +32,29 @@ var (
 )
 
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
-	prefillPodHostPort := r.Header.Get(common.PrefillPodHeader)
+	var prefillHostPorts []string
+	prefillHostPorts = r.Header.Values(common.PrefillPodHeader)
 
-	if prefillPodHostPort == "" {
+	// https://datatracker.ietf.org/doc/html/rfc7230#section-3.2.2 specifies proxies
+	// may combine multiple header values with a comma. Accept either one host per
+	// header line OR one line with multiple header values.
+	if len(prefillHostPorts) == 1 {
+		prefillHostPorts = strings.Split(prefillHostPorts[0], ",")
+	}
+
+	numHosts := len(prefillHostPorts)
+	var prefillHostPort string
+	if numHosts > 0 {
+		if s.config.EnablePrefillerSampling {
+			// Sample a host value from the list
+			prefillHostPort = strings.TrimSpace(prefillHostPorts[s.prefillSamplerFn(numHosts)])
+		} else if numHosts > 0 {
+			// Select only the first header value, consistent with previous behavior
+			prefillHostPort = strings.TrimSpace(prefillHostPorts[0])
+		}
+	}
+
+	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
 
 		if s.forwardDataParallel && !s.dataParallelHandler(w, r) {
@@ -43,9 +64,9 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// SSRF Protection: Check if the prefill target is allowed
-	if !s.allowlistValidator.IsAllowed(prefillPodHostPort) {
+	if !s.allowlistValidator.IsAllowed(prefillHostPort) {
 		s.logger.Error(nil, "SSRF protection: prefill target not in allowlist",
-			"target", prefillPodHostPort,
+			"target", prefillHostPort,
 			"clientIP", r.RemoteAddr,
 			"userAgent", r.Header.Get("User-Agent"),
 			"requestPath", r.URL.Path)
@@ -53,6 +74,6 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.logger.V(4).Info("SSRF protection: prefill target allowed", "target", prefillPodHostPort)
-	s.runConnectorProtocol(w, r, prefillPodHostPort)
+	s.logger.V(4).Info("SSRF protection: prefill target allowed", "target", prefillHostPort)
+	s.runConnectorProtocol(w, r, prefillHostPort)
 }
