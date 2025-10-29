@@ -12,10 +12,14 @@ SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
+export EPP_TAG
 IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
-SIDECAR_TAG ?= dev
+ROUTING_SIDECAR_TAG ?= dev
+export ROUTING_SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= ghcr.io/llm-d/$(SIDECAR_IMAGE_NAME)
-SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
+SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(ROUTING_SIDECAR_TAG)
+VLLM_SIMULATOR_TAG ?= v0.3.0
+export VLLM_SIMULATOR_TAG
 NAMESPACE ?= hc4ai-operator
 
 # Map go arch to typos arch
@@ -100,7 +104,7 @@ test-integration: download-tokenizer install-dependencies ## Run integration tes
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
-test-e2e: image-build sidecar-image-build ## Run end-to-end tests against a new kind cluster
+test-e2e: image-build sidecar-image-build image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	./test/scripts/run_e2e.sh
 
