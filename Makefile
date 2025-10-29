@@ -42,6 +42,7 @@ TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
 endif
 
 CONTAINER_TOOL := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
+export CONTAINER_TOOL
 BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_TOOL))
 PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
 
@@ -326,9 +327,13 @@ check-envsubst:
 
 .PHONY: check-container-tool
 check-container-tool:
-	@command -v $(CONTAINER_TOOL) >/dev/null 2>&1 || { \
-	  echo "❌ $(CONTAINER_TOOL) is not installed."; \
-	  echo "🔧 Try: sudo apt install $(CONTAINER_TOOL) OR brew install $(CONTAINER_TOOL)"; exit 1; }
+	@if [ -z "$(CONTAINER_TOOL)" ]; then \
+		echo "❌ Error: No container tool detected. Please install docker or podman."; \
+		exit 1; \
+	else \
+		echo "✅ Container tool '$(CONTAINER_TOOL)' found."; \
+	fi
+	  
 
 .PHONY: check-kubectl
 check-kubectl:
