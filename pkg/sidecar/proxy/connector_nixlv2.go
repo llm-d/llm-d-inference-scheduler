@@ -80,6 +80,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	completionRequest[requestFieldStream] = false
 	delete(completionRequest, requestFieldStreamOptions)
 	completionRequest[requestFieldMaxTokens] = 1
+	completionRequest[requestFieldMaxCompletionTokens] = 1
 
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {
