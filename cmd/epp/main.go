@@ -30,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
 )
 
@@ -37,7 +38,12 @@ func main() {
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
 
-	if err := runner.NewRunner().Run(ctrl.SetupSignalHandler()); err != nil {
+	// Increment the metric for testing purposes
+	metrics.SchedulerRequestCount.WithLabelValues("test").Inc()
+
+	if err := runner.NewRunner().
+		WithCustomCollectors(metrics.GetCollectors()...).
+		Run(ctrl.SetupSignalHandler()); err != nil {
 		os.Exit(1)
 	}
 }
