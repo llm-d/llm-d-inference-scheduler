@@ -5,7 +5,7 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 echo "Using container tool: ${CONTAINER_RUNTIME}"
 
 # Set a default EPP_TAG if not provided
-export EPP_TAG="${EPP_TAG:-dev}"
+export EPP_TAG="${EPP_TAG:-latest}"
 # Set a default VLLM_SIMULATOR_TAG if not provided
 export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.5.0}"
 # Set the default routing side car image tag
@@ -14,6 +14,9 @@ export SIDECAR_TAG="${SIDECAR_TAG:-dev}"
 EPP_IMAGE="ghcr.io/llm-d/llm-d-inference-scheduler:${EPP_TAG}"
 VLLM_SIMULATOR_IMAGE="ghcr.io/llm-d/llm-d-inference-sim:${VLLM_SIMULATOR_TAG}"
 ROUTING_SIDECAR_IMAGE="ghcr.io/llm-d/llm-d-routing-sidecar:${SIDECAR_TAG}"
+
+TARGETOS="${TARGETOS:-$(shell go env GOOS)}"
+TARGETARCH="${TARGETARCH:-$(shell go env GOARCH)}"
 
 # --- Helper Function to Ensure Image Availability ---
 # This function checks the registry first, then falls back to a local-only check.
@@ -24,7 +27,7 @@ ensure_image() {
   # Attempt to inspect the image manifest on the remote registry.
   if ${CONTAINER_RUNTIME} manifest inspect "${image_name}" > /dev/null 2>&1; then
     echo " -> Image found on registry. Pulling..."
-    if ! ${CONTAINER_RUNTIME} pull "${image_name}"; then
+    if ! ${CONTAINER_RUNTIME} pull --platform ${TARGETOS}/${TARGETARCH} "${image_name}"; then
         echo "    ❌ ERROR: Failed to pull image '${image_name}'."
         exit 1
     fi

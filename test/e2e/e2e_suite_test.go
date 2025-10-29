@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +56,7 @@ var (
 
 	testConfig *testutils.TestConfig
 
+	container_runtime = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppTag            = env.GetEnvString("EPP_TAG", "dev", ginkgo.GinkgoLogr)
 	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
 	routingSideCarTag = env.GetEnvString("SIDECAR_TAG", "dev", ginkgo.GinkgoLogr)
@@ -121,12 +121,14 @@ func setupK8sCluster() {
 
 func kindLoadImage(image string) {
 	tempDir := ginkgo.GinkgoT().TempDir()
-	target := tempDir + "/docker.tar"
+	target := tempDir + "/container.tar"
 
-	ginkgo.By(fmt.Sprintf("Loading %s into the cluster e2e-tests", image))
+	ginkgo.By(fmt.Sprintf("Loading %s into the cluster e2e-tests using %s", image, container_runtime))
 
-	command := exec.Command("docker", "save", "--platform", "linux/"+runtime.GOARCH,
-		"--output", target, image)
+	_, err := exec.LookPath(container_runtime)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", container_runtime)
+
+	command := exec.Command(container_runtime, "save", "--output", target, image)
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
