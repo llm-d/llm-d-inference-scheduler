@@ -59,7 +59,7 @@ var (
 
 	eppTag            = env.GetEnvString("EPP_TAG", "dev", ginkgo.GinkgoLogr)
 	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
-	routingSideCarTag = env.GetEnvString("ROUTING_SIDECAR_TAG", "dev", ginkgo.GinkgoLogr)
+	routingSideCarTag = env.GetEnvString("SIDECAR_TAG", "dev", ginkgo.GinkgoLogr)
 
 	readyTimeout = env.GetEnvDuration("READY_TIMEOUT", defaultReadyTimeout, ginkgo.GinkgoLogr)
 	interval     = defaultInterval

@@ -50,7 +50,7 @@ export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 : "${SIDECAR_IMAGE:=llm-d-routing-sidecar}"
 
 # Set the default routing side car image tag
-export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-dev}"
+export SIDECAR_TAG="${SIDECAR_TAG:-dev}"
 
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
@@ -190,9 +190,9 @@ fi
 
 # Load the sidecar image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${ROUTING_SIDECAR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+	podman save ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${SIDECAR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
-	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${ROUTING_SIDECAR_TAG}
+	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${SIDECAR_TAG}
 fi
 
 # ------------------------------------------------------------------------------
@@ -224,7 +224,7 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
-  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${ROUTING_SIDECAR_TAG} ${TARGET_PORTS} \
+  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_TAG} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 

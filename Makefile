@@ -12,11 +12,15 @@ SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
+export EPP_TAG
 IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
+export SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 NAMESPACE ?= hc4ai-operator
+VLLM_SIMULATOR_TAG ?= v0.5.0
+export VLLM_SIMULATOR_TAG
 
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
@@ -161,6 +165,11 @@ image-push: epp-image-push sidecar-image-push ## Push Docker images to registry
 %-image-push: check-container-tool load-version-json ## Push Docker image to registry
 	@printf "\033[33;1m==== Pushing Docker image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $($*_IMAGE)
+
+.PHONY: image-pull
+image-pull: check-container-tool ## Pull all related images using $(CONTAINER_TOOL)
+	@printf "\033[33;1m==== Pulling Container images ====\033[0m\n"
+	./scripts/pull_images.sh
 
 ##@ Install/Uninstall Targets
 
