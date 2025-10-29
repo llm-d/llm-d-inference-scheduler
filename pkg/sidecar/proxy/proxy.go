@@ -85,6 +85,10 @@ type Config struct {
 
 	// InferencePoolName InferencePool object name.
 	InferencePoolName string
+
+	// EnablePrefillerSampling configures the proxy to randomly choose from the set
+	// of provided prefill hosts instead of always using the first one.
+	EnablePrefillerSampling bool
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
