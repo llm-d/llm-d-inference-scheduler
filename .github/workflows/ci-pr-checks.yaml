@@ -50,4 +50,4 @@ jobs:
       - name: Run make build
         shell: bash
         run: |
-          make build sidecar-build
+          make build
