@@ -41,9 +41,9 @@ TAR_OPTS = --wildcards '*/typos'
 TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
 endif
 
-CONTAINER_TOOL := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
-export CONTAINER_TOOL
-BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_TOOL))
+CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
+export CONTAINER_RUNTIME
+BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_RUNTIME))
 PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
 
 GIT_COMMIT_SHA ?= "$(shell git rev-parse HEAD 2>/dev/null)"
@@ -138,9 +138,9 @@ sidecar-build: check-go ## Build the Sidecar
 ##@ Container Build/Push
 
 .PHONY:	image-build
-image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_TOOL)
+image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Building Docker image $(IMG) ====\033[0m\n"
-	$(CONTAINER_TOOL) build \
+	$(CONTAINER_RUNTIME) build \
 		--platform linux/$(TARGETARCH) \
  		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
@@ -151,17 +151,17 @@ image-build: check-container-tool ## Build Docker image ## Build Docker image us
 .PHONY: image-push
 image-push: check-container-tool ## Push Docker image $(IMG) to registry
 	@printf "\033[33;1m==== Pushing Container image $(IMG) ====\033[0m\n"
-	$(CONTAINER_TOOL) push $(IMG)
+	$(CONTAINER_RUNTIME) push $(IMG)
 
 .PHONY: image-pull
-image-pull: check-container-tool ## Pull all related images using $(CONTAINER_TOOL)
+image-pull: check-container-tool ## Pull all related images using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Pulling Container images ====\033[0m\n"
 	./scripts/pull_images.sh
 
 .PHONY: sidecar-image-build
-sidecar-image-build: check-container-tool ## Build Sidecar Docker image ## Build Sidecar Docker image using $(CONTAINER_TOOL)
+sidecar-image-build: check-container-tool ## Build Sidecar Docker image ## Build Sidecar Docker image using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Building Sidecar Docker image $(SIDECAR_IMG) ====\033[0m\n"
-	$(CONTAINER_TOOL) build \
+	$(CONTAINER_RUNTIME) build \
 		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
@@ -171,7 +171,7 @@ sidecar-image-build: check-container-tool ## Build Sidecar Docker image ## Build
 .PHONY: sidecar-image-push
 sidecar-image-push: check-container-tool load-version-json ## Push Sidecar Docker image $(SIDECAR_IMG) to registry
 	@printf "\033[33;1m==== Pushing Sidecar Docker image $(SIDECAR_IMG) ====\033[0m\n"
-	$(CONTAINER_TOOL) push $(SIDECAR_IMG)
+	$(CONTAINER_RUNTIME) push $(SIDECAR_IMG)
 
 ##@ Install/Uninstall Targets
 
@@ -185,18 +185,18 @@ uninstall: uninstall-docker ## Default uninstall using Docker
 ### Docker Targets
 
 .PHONY: install-docker
-install-docker: check-container-tool ## Install app using $(CONTAINER_TOOL)
-	@echo "Starting container with $(CONTAINER_TOOL)..."
-	$(CONTAINER_TOOL) run -d --name $(PROJECT_NAME)-container $(IMG)
-	@echo "$(CONTAINER_TOOL) installation complete."
+install-docker: check-container-tool ## Install app using $(CONTAINER_RUNTIME)
+	@echo "Starting container with $(CONTAINER_RUNTIME)..."
+	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(IMG)
+	@echo "$(CONTAINER_RUNTIME) installation complete."
 	@echo "To use $(PROJECT_NAME), run:"
-	@echo "alias $(PROJECT_NAME)='$(CONTAINER_TOOL) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"
+	@echo "alias $(PROJECT_NAME)='$(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"
 
 .PHONY: uninstall-docker
-uninstall-docker: check-container-tool ## Uninstall app from $(CONTAINER_TOOL)
-	@echo "Stopping and removing container in $(CONTAINER_TOOL)..."
-	$(CONTAINER_TOOL) stop $(PROJECT_NAME)-container && $(CONTAINER_TOOL) rm $(PROJECT_NAME)-container
-	@echo "$(CONTAINER_TOOL) uninstallation complete. Remove alias if set: unalias $(PROJECT_NAME)"
+uninstall-docker: check-container-tool ## Uninstall app from $(CONTAINER_RUNTIME)
+	@echo "Stopping and removing container in $(CONTAINER_RUNTIME)..."
+	$(CONTAINER_RUNTIME) stop $(PROJECT_NAME)-container && $(CONTAINER_RUNTIME) rm $(PROJECT_NAME)-container
+	@echo "$(CONTAINER_RUNTIME) uninstallation complete. Remove alias if set: unalias $(PROJECT_NAME)"
 
 ### Kubernetes Targets (kubectl)
 
@@ -274,7 +274,7 @@ uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 env: ## Print environment variables
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
 	@echo "IMG=$(IMG)"
-	@echo "CONTAINER_TOOL=$(CONTAINER_TOOL)"
+	@echo "CONTAINER_RUNTIME=$(CONTAINER_RUNTIME)"
 
 .PHONY: check-typos
 check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error if found)
@@ -332,11 +332,11 @@ check-envsubst:
 
 .PHONY: check-container-tool
 check-container-tool:
-	@if [ -z "$(CONTAINER_TOOL)" ]; then \
+	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \
 		echo "❌ Error: No container tool detected. Please install docker or podman."; \
 		exit 1; \
 	else \
-		echo "✅ Container tool '$(CONTAINER_TOOL)' found."; \
+		echo "✅ Container tool '$(CONTAINER_RUNTIME)' found."; \
 	fi
 	  
 
@@ -358,11 +358,11 @@ check-builder:
 .PHONY: check-alias
 check-alias: check-container-tool
 	@echo "🔍 Checking alias functionality for container '$(PROJECT_NAME)-container'..."
-	@if ! $(CONTAINER_TOOL) exec $(PROJECT_NAME)-container /app/$(PROJECT_NAME) --help >/dev/null 2>&1; then \
+	@if ! $(CONTAINER_RUNTIME) exec $(PROJECT_NAME)-container /app/$(PROJECT_NAME) --help >/dev/null 2>&1; then \
 	  echo "⚠️  The container '$(PROJECT_NAME)-container' is running, but the alias might not work."; \
-	  echo "🔧 Try: $(CONTAINER_TOOL) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)"; \
+	  echo "🔧 Try: $(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)"; \
 	else \
-	  echo "✅ Alias is likely to work: alias $(PROJECT_NAME)='$(CONTAINER_TOOL) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"; \
+	  echo "✅ Alias is likely to work: alias $(PROJECT_NAME)='$(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"; \
 	fi
 
 .PHONY: print-namespace
