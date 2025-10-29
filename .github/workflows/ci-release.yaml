@@ -40,7 +40,7 @@ jobs:
       - name: Build and push EPP image
         uses: ./.github/actions/docker-build-and-push
         with:
-          docker-file: Dockerfile
+          docker-file: Dockerfile.epp
           tag: ${{ steps.tag.outputs.tag }}
           image-name: ${{ steps.version.outputs.project_name }}
           registry: ghcr.io/llm-d
