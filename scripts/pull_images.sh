@@ -15,8 +15,8 @@ EPP_IMAGE="ghcr.io/llm-d/llm-d-inference-scheduler:${EPP_TAG}"
 VLLM_SIMULATOR_IMAGE="ghcr.io/llm-d/llm-d-inference-sim:${VLLM_SIMULATOR_TAG}"
 ROUTING_SIDECAR_IMAGE="ghcr.io/llm-d/llm-d-routing-sidecar:${SIDECAR_TAG}"
 
-TARGETOS="${TARGETOS:-$(shell go env GOOS)}"
-TARGETARCH="${TARGETARCH:-$(shell go env GOARCH)}"
+TARGETOS="${TARGETOS:-$(go env GOOS)}"
+TARGETARCH="${TARGETARCH:-$(go env GOARCH)}"
 
 # --- Helper Function to Ensure Image Availability ---
 # This function checks the registry first, then falls back to a local-only check.
