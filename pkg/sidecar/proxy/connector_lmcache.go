@@ -49,8 +49,8 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	ctx := r.Context()
 	preq := r.Clone(ctx)
 
-	completionRequest["max_tokens"] = 1
-	completionRequest["max_completion_tokens"] = 1
+	completionRequest[requestFieldMaxTokens] = 1
+	completionRequest[requestFieldMaxCompletionTokens] = 1
 
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {
