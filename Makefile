@@ -150,8 +150,13 @@ image-build: check-container-tool ## Build Docker image ## Build Docker image us
 
 .PHONY: image-push
 image-push: check-container-tool ## Push Docker image $(IMG) to registry
-	@printf "\033[33;1m==== Pushing Docker image $(IMG) ====\033[0m\n"
+	@printf "\033[33;1m==== Pushing Container image $(IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $(IMG)
+
+.PHONY: image-pull
+image-pull: check-container-tool ## Pull all related images using $(CONTAINER_TOOL)
+	@printf "\033[33;1m==== Pulling Container images ====\033[0m\n"
+	./scripts/pull_images.sh
 
 .PHONY: sidecar-image-build
 sidecar-image-build: check-container-tool ## Build Sidecar Docker image ## Build Sidecar Docker image using $(CONTAINER_TOOL)
