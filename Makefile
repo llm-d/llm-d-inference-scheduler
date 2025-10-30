@@ -18,6 +18,9 @@ SIDECAR_IMAGE_TAG_BASE ?= ghcr.io/llm-d/$(SIDECAR_IMAGE_NAME)
 SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 NAMESPACE ?= hc4ai-operator
 
+ACTIVATOR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)-activator
+ACTIVATOR_IMG = $(ACTIVATOR_IMAGE_TAG_BASE):$(EPP_TAG)
+
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
 TYPOS_TARGET_ARCH = x86_64
@@ -134,6 +137,14 @@ sidecar-build: check-go ## Build the Sidecar
 	@printf "\033[33;1m==== Building the Sidecar ====\033[0m\n"
 	go build -o bin/$(SIDECAR_NAME) cmd/$(SIDECAR_NAME)/main.go
 
+##@ Build Activator
+
+.PHONY: activator-build
+activator-build: check-go install-dependencies download-tokenizer ## Build the project
+	@printf "\033[33;1m==== Building ====\033[0m\n"
+	go build -ldflags="$(LDFLAGS)" -o bin/activator cmd/activator/main.go
+
+
 ##@ Container Build/Push
 
 .PHONY:	image-build
@@ -166,6 +177,22 @@ sidecar-image-build: check-container-tool ## Build Sidecar Docker image ## Build
 sidecar-image-push: check-container-tool load-version-json ## Push Sidecar Docker image $(SIDECAR_IMG) to registry
 	@printf "\033[33;1m==== Pushing Sidecar Docker image $(SIDECAR_IMG) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $(SIDECAR_IMG)
+
+.PHONY: activator-image-build
+activator-image-build: ## Build the activator image using Docker Buildx.
+	$(CONTAINER_TOOL) build \
+		--platform linux/$(TARGETARCH) \
+		--build-arg TARGETOS=linux \
+		--build-arg TARGETARCH=${TARGETARCH} \
+		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
+		--build-arg BUILD_REF=${BUILD_REF} \
+		 -t $(ACTIVATOR_IMG) \
+		 -f Dockerfile.activator .
+
+.PHONY: activator-image-push
+activator-image-push: check-container-tool load-version-json ## Push Activator Docker image $(ACTIVATOR_IMG) to registry
+	@printf "\033[33;1m==== Pushing Activator Docker image $(ACTIVATOR_IMG) ====\033[0m\n"
+	$(CONTAINER_TOOL) push $(ACTIVATOR_IMG)
 
 ##@ Install/Uninstall Targets
 
@@ -283,7 +310,7 @@ check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error
 		echo "$$TYPOS_OUTPUT"; \
 		exit 1; \
 	fi
-	
+
 ##@ Tools
 
 .PHONY: check-tools

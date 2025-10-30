@@ -1,0 +1,19 @@
+activator:
+  suffix: -activator
+  image:
+    name: activator
+    registry: ghcr.io/llm-d/llm-d-activator # hostname and namespace of the image registry
+    tag: main
+    pullPolicy: Always
+  port: 9004
+  healthCheckPort: 9005
+
+route:
+  name: http-route
+
+inferencePool:
+  name: inference-pool
+  group: inference.networking.x-k8s.io
+
+inferenceGateway:
+  port: 80
