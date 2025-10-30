@@ -131,6 +131,14 @@ func (cc *ChatCompletionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 			rawResponse = `{"kv_transfer_params":{"remote_block_ids":[1, 2, 3], "remote_engine_id": "5b5fb28f-3f30-4bdd-9a36-958d52459200", "remote_host":"ahost", "remote_port":4032}}`
 
 		}
+
+	case "lmcache":
+		// LMCache protocol just returns empty response
+		rawResponse = `{}`
+
+	default:
+		// Default case for unspecified connector (used for basic tests)
+		rawResponse = `{}`
 	}
 
 	var completionResponse map[string]any
