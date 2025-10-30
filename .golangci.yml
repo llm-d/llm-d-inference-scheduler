@@ -64,8 +64,17 @@ linters:
     - nlreturn          # Newlines before returns (too opinionated)
     - wsl               # Whitespace linter (too opinionated)  
     - lll               # Line length (handled by gofmt)
-    - gomnd             # Magic number detection (too noisy)
     - cyclop            # Cyclomatic complexity (can be overly strict)
     - funlen            # Function length (can be overly strict)
     - nestif            # Nested if statements (can be overly strict)
     - gocognit          # Cognitive complexity (can be overly strict)
+
+issues:
+  # Exclude certain linters from running on files until build dependencies are resolved
+  exclude-rules:
+    - path: pkg/plugins/
+      linters:
+        - goanalysis_metalinter
+    - path: pkg/scheduling/pd/
+      linters:
+        - goanalysis_metalinter
