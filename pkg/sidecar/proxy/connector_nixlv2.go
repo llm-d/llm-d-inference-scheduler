@@ -67,6 +67,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	streamValue, streamOk := completionRequest[requestFieldStream]
 	streamOptionsValue, streamOptionsOk := completionRequest[requestFieldStreamOptions]
 	maxTokensValue, maxTokensOk := completionRequest[requestFieldMaxTokens]
+	maxCompletionTokensValue, maxCompletionTokensOk := completionRequest[requestFieldMaxCompletionTokens]
 
 	completionRequest[requestFieldKVTransferParams] = map[string]any{
 		requestFieldDoRemoteDecode:  true,
@@ -80,6 +81,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	completionRequest[requestFieldStream] = false
 	delete(completionRequest, requestFieldStreamOptions)
 	completionRequest[requestFieldMaxTokens] = 1
+	completionRequest[requestFieldMaxCompletionTokens] = 1
 
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {
@@ -145,6 +147,10 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	delete(completionRequest, requestFieldMaxTokens)
 	if maxTokensOk {
 		completionRequest[requestFieldMaxTokens] = maxTokensValue
+	}
+	delete(completionRequest, requestFieldMaxCompletionTokens)
+	if maxCompletionTokensOk {
+		completionRequest[requestFieldMaxCompletionTokens] = maxCompletionTokensValue
 	}
 	completionRequest[requestFieldKVTransferParams] = pKVTransferParams
 

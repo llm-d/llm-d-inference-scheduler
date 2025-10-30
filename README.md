@@ -1,88 +1,71 @@
-# LLM-D Inference Scheduler with chat completions preprocessing
+[![Go Report Card](https://goreportcard.com/badge/github.com/llm-d/llm-d-inference-scheduler)](https://goreportcard.com/report/github.com/llm-d/llm-d-inference-scheduler)
+[![Go Reference](https://pkg.go.dev/badge/github.com/llm-d/llm-d-inference-scheduler.svg)](https://pkg.go.dev/github.com/llm-d/llm-d-inference-scheduler)
+[![License](https://img.shields.io/github/license/llm-d/llm-d-inference-scheduler)](/LICENSE)
+[![Join Slack](https://img.shields.io/badge/Join_Slack-blue?logo=slack)](https://llm-d.slack.com/archives/C08SBNRRSBD)
 
-## Overview
+# Inference Scheduler
 
-This repository contains a custom fork of the [llm-d-inference-scheduler](https://github.com/llm-d/llm-d-inference-scheduler) with modifications to add **chat completions preprocessing** functionality for KV-cache aware routing.
+This scheduler makes optimized routing decisions for inference requests to
+the llm-d inference framework.
 
-## Repository Information
+## About
 
-- **Original Repository**: `https://github.com/llm-d/llm-d-inference-scheduler.git`
-- **Upstream Merged**: Commit including 31 upstream commits plus local chat completions changes
-- **Custom Features**: Chat completions preprocessing integration with `llm-d-kv-cache-manager` v0.3.2
+This provides an "Endpoint Picker (EPP)" component to the llm-d inference
+framework which schedules incoming inference requests to the platform via a
+[Kubernetes] Gateway according to scheduler plugins. For more details on the
+llm-d inference scheduler architecture, routing logic, and different plugins
+(filters and scorers), including plugin configuration, see the [Architecture Documentation]).
 
----
+### Relation to GIE (IGW)
 
-## Quick Start
+The EPP extends the [Gateway API Inference Extension (GIE)] project,
+which provides the API resources and machinery for scheduling. We add some
+custom features that are specific to llm-d here, such as [P/D Disaggregation].
+The two projects collaborate closely as often a feature in llm-d might require
+enablement and extensions in the GIE code base.
+Unique and experimental features may start in llm-d and migrate, over time, to
+GIE. As a project goal, we prefer to upstream functionality to GIE when
+- it has matured sufficiently and has proven wide applicability and usefulness; and
+- it can be implemented in EPP alone (i.e., llm-d provides a full inference framework,
+  beyond scheduling).
 
-### Prerequisites
-- Docker/Podman
-- Go 1.25+
-- Python 3.12 development headers
+Note that in general features should go to the upstream [Gateway API Inference
+Extension (GIE)] project _first_ if applicable. The GIE is a major dependency of
+ours, and where most _general purpose_ inference features live. If you have
+something that you feel is general purpose or use, it probably should go to the
+GIE. If you have something that's _llm-d specific_ then it should go here. If
+you're not sure whether your feature belongs here or in the GIE, feel free to
+create a [discussion] or ask on [Slack].
 
-### Building the Image
-```bash
-cd /Users/guygirmonsky/llm-d-build/llm-d-inference-scheduler
-TARGETARCH=amd64 TARGETOS=linux make image-build
-```
+A compatible [Gateway API] implementation is used as the Gateway. The Gateway
+API implementation must utilize [Envoy] and support [ext-proc], as this is the
+callback mechanism the EPP relies on to make routing decisions to model serving
+workloads currently.
 
----
+[Kubernetes]:https://kubernetes.io
+[Architecture Documentation]:docs/architecture.md
+[Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
+[P/D Disaggregation]:docs/dp.md
+[Gateway API]:https://github.com/kubernetes-sigs/gateway-api
+[Envoy]:https://github.com/envoyproxy/envoy
+[ext-proc]:https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter
 
-## Changes Made
+## Contributing
 
-### 1. Dependencies Update
+Our community meeting is weekly at Wednesday 10AM PDT ([Google Meet], [Meeting Notes]).
 
-**Upgraded to upstream versions:**
-- `llm-d-kv-cache-manager` v0.3.2 (from v0.2.1) - includes chat completions preprocessing
-- `gateway-api-inference-extension` v1.1.0-rc.1 (from v0.5.1)
-- Updated Kubernetes dependencies to v0.34.1
-- Updated controller-runtime to v0.22.3
+We currently utilize the [#sig-inference-scheduler] channel in llm-d Slack workspace for communications.
 
-**API Changes:**
-- Adapted code to use `request.Body` instead of `request.Data` (v1.1.0 API change)
-- Updated ldflags path from `pkg/epp/metrics` to `version` package
+For large changes please [create an issue] first describing the change so the
+maintainers can do an assessment, and work on the details with you. See
+[DEVELOPMENT.md](DEVELOPMENT.md) for details on how to work with the codebase.
 
-### 2. Dockerfile Modifications
+Contributions are welcome!
 
-#### Builder Stage Changes
-- Added Python 3.12 development headers (`python3.12-devel`) for CGO compilation
-- Downloads Python dependencies from upstream `llm-d-kv-cache-manager` v0.3.2
-- Configured CGO environment variables for Python integration
-- Preserved upstream image size optimizations (cleaning dnf cache)
-
-#### Runtime Stage Changes
-- Installed Python 3.12 runtime in final image
-- Downloads and installs Python dependencies for chat completions preprocessing
-- Sets PYTHONPATH and HF_HOME environment variables
-
-### 3. Go Code Modifications
-
-#### Precise Prefix Cache Scorer (`pkg/plugins/scorer/precise_prefix_cache.go`)
-- Adapts chat completions preprocessing to new `request.Body` API
-- Uses upstream `llm-d-kv-cache-manager/pkg/preprocessing/chat_completions` module
-- Preprocesses chat completion requests to get flattened prompts for KV-cache lookup
-
-#### Profile Handler (`pkg/plugins/profile/pd_profile_handler.go`)
-- Applies same preprocessing functionality for PD (Prefill/Decode) profile selection
-- Uses `request.Body` API structure
-- Calculates prompt length using preprocessed output for cache hit percentage
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Python.h not found during local build**
-   - Local builds require Python 3.12 development headers: `brew install python@3.12` (macOS)
-   - Alternatively, use Docker build which includes all dependencies: `make image-build`
-   - The Docker build is the recommended approach as it matches production environment
-
-2. **Import errors during Go build**
-   - Run `go mod tidy` to ensure dependencies are properly resolved
-   - The project now uses upstream `llm-d-kv-cache-manager` v0.3.2 which includes chat completions preprocessing
-   - No local repository clones or replace directives are needed
-
-3. **Runtime Python errors**
-   - Verify Python 3.12 runtime is installed in the final image (automatically included in Dockerfile)
-   - Check that PYTHONPATH and HF_HOME environment variables are set correctly (included in Dockerfile)
-   - Python dependencies are automatically installed during Docker image build
+[create an issue]:https://github.com/llm-d/llm-d-inference-scheduler/issues/new
+[Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
+[discussion]:https://github.com/llm-d/llm-d-inference-scheduler/discussions/new?category=q-a
+[Slack]:https://llm-d.slack.com/
+[Google Meet]:https://meet.google.com/uin-yncz-rvg
+[Meeting Notes]:https://docs.google.com/document/d/1Pf3x7ZM8nNpU56nt6CzePAOmFZ24NXDeXyaYb565Wq4
+[#sig-inference-scheduler]:https://llm-d.slack.com/?redir=%2Fmessages%2Fsig-inference-scheduler
