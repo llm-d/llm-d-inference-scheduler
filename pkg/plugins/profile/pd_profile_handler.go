@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	chat_completions "github.com/llm-d/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions"
-
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -167,76 +165,6 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState
 			h.decodeProfile: profileResults[h.decodeProfile], // return decode only
 		},
 	}, nil
-}
-
-// preprocessRequest handles preprocessing of the request to extract the flattened prompt
-// For chat completions, it converts messages to a templated prompt
-// For regular completions, it uses the prompt directly
-func (h *PdProfileHandler) preprocessRequest(ctx context.Context, request *types.LLMRequest) (string, error) {
-	loggerDebug := log.FromContext(ctx).WithName(h.typedName.String()).V(logutil.DEBUG)
-
-	// If it's a chat completion request, apply preprocessing
-	if request.Body != nil && request.Body.ChatCompletions != nil {
-		loggerDebug.Info("Processing chat completion request", "messages_count", len(request.Body.ChatCompletions.Messages))
-
-		// Create preprocessing request
-		preprocessReq := &chat_completions.RenderJinjaTemplateRequest{
-			Conversations:             make([]chat_completions.ChatMessage, 0),
-			Tools:                     request.Body.ChatCompletions.Tools,
-			Documents:                 request.Body.ChatCompletions.Documents,
-			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
-		}
-
-		// Convert messages to the format expected by preprocessing
-		for _, msg := range request.Body.ChatCompletions.Messages {
-			preprocessReq.Conversations = append(preprocessReq.Conversations, chat_completions.ChatMessage{
-				Role:    msg.Role,
-				Content: msg.Content.Raw,
-			})
-		}
-
-		// Create preprocessing processor
-		processor := chat_completions.NewChatTemplatingProcessor()
-
-		// Render the template to get flattened prompt
-		resp, err := processor.RenderChatTemplate(ctx, preprocessReq)
-		if err != nil {
-			return "", fmt.Errorf("failed to render chat template: %w", err)
-		}
-
-		if len(resp.RenderedChats) == 0 {
-			return "", fmt.Errorf("no rendered chat returned from preprocessing")
-		}
-
-		loggerDebug.Info("Successfully preprocessed chat completion request", "prompt_length", len(resp.RenderedChats[0]))
-		return resp.RenderedChats[0], nil
-	}
-
-	// For regular completions, use the prompt directly
-	if request.Body != nil && request.Body.Completions != nil {
-		loggerDebug.Info("Using completion prompt directly", "prompt_length", len(request.Body.Completions.Prompt))
-		return request.Body.Completions.Prompt, nil
-	}
-
-	// Fallback: try to extract prompt from request body if available
-	if request.Body != nil {
-		// Try to marshal and extract prompt from raw data
-		if dataBytes, err := json.Marshal(request.Body); err == nil {
-			var rawData map[string]interface{}
-			if err := json.Unmarshal(dataBytes, &rawData); err == nil {
-				if prompt, ok := rawData["prompt"].(string); ok && prompt != "" {
-					loggerDebug.Info("Extracted prompt from raw data", "prompt_length", len(prompt))
-					return prompt, nil
-				}
-			}
-		}
-	}
-
-	return "", fmt.Errorf("no valid prompt found in request")
 }
 
 func getUserInputBytes(request *types.LLMRequest) ([]byte, error) {
