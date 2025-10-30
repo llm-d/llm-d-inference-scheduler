@@ -25,7 +25,9 @@ ensure_image() {
   echo "Checking for image: ${image_name}"
 
   # Attempt to inspect the image manifest on the remote registry.
-  if ${CONTAINER_RUNTIME} manifest inspect "${image_name}" > /dev/null 2>&1; then
+  if [ -n "$(${CONTAINER_RUNTIME} images -q "${image_name}")" ]; then
+    echo " -> Found local image. Proceeding."
+  elif ${CONTAINER_RUNTIME} manifest inspect "${image_name}" > /dev/null 2>&1; then
     echo " -> Image found on registry. Pulling..."
     if ! ${CONTAINER_RUNTIME} pull --platform ${TARGETOS}/${TARGETARCH} "${image_name}"; then
         echo "    ❌ ERROR: Failed to pull image '${image_name}'."
@@ -33,14 +35,8 @@ ensure_image() {
     fi
     echo "    ✅ Successfully pulled image."
   else
-    # If the image is not on the registry, check if it's already available locally.
-    echo " -> Image not found on registry. Checking for a local version..."
-    if [ -z "$(${CONTAINER_RUNTIME} images -q "${image_name}")" ]; then
-      # If it's not on the registry AND not local, it's an error.
       echo "    ❌ ERROR: Image '${image_name}' is not available locally and could not be found on the registry."
       exit 1
-    fi
-    echo " -> Found local-only image. Proceeding."
   fi
 }
 
