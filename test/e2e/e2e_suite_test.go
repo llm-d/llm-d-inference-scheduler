@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -128,7 +129,14 @@ func kindLoadImage(image string) {
 	_, err := exec.LookPath(container_runtime)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", container_runtime)
 
-	command := exec.Command(container_runtime, "save", "--output", target, image)
+	saveArgs := []string{"save", "--output", target}
+	if container_runtime == "docker" {
+		// The platform flag is required for docker save to work but it is an unsupported flag for podman
+		saveArgs = append(saveArgs, "--platform", fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
+	}
+	saveArgs = append(saveArgs, image)
+
+	command := exec.Command(container_runtime, saveArgs...)
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
