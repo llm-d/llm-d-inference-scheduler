@@ -24,7 +24,6 @@ ensure_image() {
   local image_name="$1"
   echo "Checking for image: ${image_name}"
 
-  # Attempt to inspect the image manifest on the remote registry.
   if [ -n "$(${CONTAINER_RUNTIME} images -q "${image_name}")" ]; then
     echo " -> Found local image. Proceeding."
   elif ${CONTAINER_RUNTIME} manifest inspect "${image_name}" > /dev/null 2>&1; then
