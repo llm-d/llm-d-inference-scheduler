@@ -194,4 +194,109 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(decodeHandler.CompletionRequests).To(HaveLen(1))
 	})
+
+	// Regression test for commit bb181d6: Ensure that max_completion_tokens=1 in Prefill
+	It("should set max_completion_tokens=1 in prefill and restore original value in decode", func() {
+		By("starting the proxy")
+		go func() {
+			defer GinkgoRecover()
+
+			err := proxy.Start(ctx)
+			Expect(err).ToNot(HaveOccurred())
+		}()
+
+		time.Sleep(1 * time.Second)
+		Expect(proxy.addr).ToNot(BeNil())
+		proxyBaseAddr := "http://" + proxy.addr.String()
+
+		By("sending a /v1/chat/completions request with max_completion_tokens set")
+		body := `{
+				"model": "Qwen/Qwen2-0.5B",
+				"messages": [
+				  {"role": "user", "content": "Hello"}
+				],
+				"max_tokens": 50,
+				"max_completion_tokens": 100
+			}`
+
+		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+		Expect(err).ToNot(HaveOccurred())
+		req.Header.Add(common.PrefillPodHeader, prefillBackend.URL[len("http://"):])
+
+		rp, err := http.DefaultClient.Do(req)
+		Expect(err).ToNot(HaveOccurred())
+
+		if rp.StatusCode != 200 {
+			bp, _ := io.ReadAll(rp.Body) //nolint:all
+			Fail(string(bp))
+		}
+
+		By("verifying prefill request has max_completion_tokens=1")
+		Expect(prefillHandler.RequestCount.Load()).To(BeNumerically("==", 1))
+		Expect(prefillHandler.CompletionRequests).To(HaveLen(1))
+		prefillReq := prefillHandler.CompletionRequests[0]
+
+		Expect(prefillReq).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
+		Expect(prefillReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 1)))
+
+		By("verifying decode request has original max_completion_tokens=100")
+		Expect(decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
+		Expect(decodeHandler.CompletionRequests).To(HaveLen(1))
+		decodeReq := decodeHandler.CompletionRequests[0]
+
+		// The decode request should have the original max_completion_tokens value restored
+		Expect(decodeReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 100)))
+	})
+
+	// Regression test for commit bb181d6: Ensure max_completion_tokens is handled when not provided
+	It("should set max_completion_tokens=1 in prefill when not provided in original request", func() {
+		By("starting the proxy")
+		go func() {
+			defer GinkgoRecover()
+
+			err := proxy.Start(ctx)
+			Expect(err).ToNot(HaveOccurred())
+		}()
+
+		time.Sleep(1 * time.Second)
+		Expect(proxy.addr).ToNot(BeNil())
+		proxyBaseAddr := "http://" + proxy.addr.String()
+
+		By("sending a /v1/chat/completions request without max_completion_tokens")
+		body := `{
+				"model": "Qwen/Qwen2-0.5B",
+				"messages": [
+				  {"role": "user", "content": "Hello"}
+				],
+				"max_tokens": 50
+			}`
+
+		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+		Expect(err).ToNot(HaveOccurred())
+		req.Header.Add(common.PrefillPodHeader, prefillBackend.URL[len("http://"):])
+
+		rp, err := http.DefaultClient.Do(req)
+		Expect(err).ToNot(HaveOccurred())
+
+		if rp.StatusCode != 200 {
+			bp, _ := io.ReadAll(rp.Body) //nolint:all
+			Fail(string(bp))
+		}
+
+		By("verifying prefill request has max_completion_tokens=1")
+		Expect(prefillHandler.RequestCount.Load()).To(BeNumerically("==", 1))
+		Expect(prefillHandler.CompletionRequests).To(HaveLen(1))
+		prefillReq := prefillHandler.CompletionRequests[0]
+
+		Expect(prefillReq).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
+		Expect(prefillReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 1)))
+
+		By("verifying decode request does not have max_completion_tokens since it wasn't in original request")
+		Expect(decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
+		Expect(decodeHandler.CompletionRequests).To(HaveLen(1))
+		decodeReq := decodeHandler.CompletionRequests[0]
+
+		// The decode request should not have max_completion_tokens if it wasn't in the original request
+		Expect(decodeReq).ToNot(HaveKey("max_completion_tokens"))
+	})
 })
