@@ -12,6 +12,7 @@ metadata:
 rules: # TODO: These can probably be trimmed down
 - apiGroups:
   - "inference.networking.x-k8s.io"
+  - "inference.networking.k8s.io"
   resources:
   - "inferencepools"
   verbs:
