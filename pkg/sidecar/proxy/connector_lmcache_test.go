@@ -85,6 +85,7 @@ var _ = Describe("LMCache Connector", func() {
 		proxyBaseAddr := "http://" + proxy.addr.String()
 
 		By("sending a /v1/chat/completions request with max_completion_tokens set")
+		//nolint:goconst
 		body := `{
 				"model": "Qwen/Qwen2-0.5B",
 				"messages": [
@@ -138,6 +139,7 @@ var _ = Describe("LMCache Connector", func() {
 		proxyBaseAddr := "http://" + proxy.addr.String()
 
 		By("sending a /v1/chat/completions request without max_completion_tokens")
+		//nolint:goconst
 		body := `{
 				"model": "Qwen/Qwen2-0.5B",
 				"messages": [
