@@ -57,7 +57,7 @@ var (
 
 	testConfig *testutils.TestConfig
 
-	container_runtime = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
+	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppTag            = env.GetEnvString("EPP_TAG", "dev", ginkgo.GinkgoLogr)
 	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
 	routingSideCarTag = env.GetEnvString("SIDECAR_TAG", "dev", ginkgo.GinkgoLogr)
@@ -124,19 +124,19 @@ func kindLoadImage(image string) {
 	tempDir := ginkgo.GinkgoT().TempDir()
 	target := tempDir + "/container.tar"
 
-	ginkgo.By(fmt.Sprintf("Loading %s into the cluster e2e-tests using %s", image, container_runtime))
+	ginkgo.By(fmt.Sprintf("Loading %s into the cluster e2e-tests using %s", image, containerRuntime))
 
-	_, err := exec.LookPath(container_runtime)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", container_runtime)
+	_, err := exec.LookPath(containerRuntime)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", containerRuntime)
 
 	saveArgs := []string{"save", "--output", target}
-	if container_runtime == "docker" {
+	if containerRuntime == "docker" {
 		// The platform flag is required for docker save to work but it is an unsupported flag for podman
 		saveArgs = append(saveArgs, "--platform", fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 	}
 	saveArgs = append(saveArgs, image)
 
-	command := exec.Command(container_runtime, saveArgs...)
+	command := exec.Command(containerRuntime, saveArgs...)
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
