@@ -47,16 +47,17 @@ import (
 )
 
 var (
-	grpcPort       = flag.Int("grpc-port", runserver.DefaultGrpcPort, "The gRPC port used for communicating with Envoy proxy")
-	grpcHealthPort = flag.Int("grpc-health-port", runserver.DefaultGrpcHealthPort, "The port used for gRPC liveness and readiness probes")
-	metricsPort    = flag.Int("metrics-port", runserver.DefaultMetricsPort, "The metrics port")
-	poolName       = flag.String("pool-name", runserver.DefaultPoolName, "Name of the InferencePool this Endpoint Picker is associated with.")
-	poolGroup      = flag.String("pool-group", runserver.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
-	poolNamespace  = flag.String("pool-namespace", "", "Namespace of the InferencePool this Endpoint Picker is associated with.")
-	logVerbosity   = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
-	secureServing  = flag.Bool("secure-serving", runserver.DefaultSecureServing, "Enables secure serving. Defaults to true.")
-	healthChecking = flag.Bool("health-checking", runserver.DefaultHealthChecking, "Enables health checking")
-	certPath       = flag.String("cert-path", runserver.DefaultCertPath, "The path to the certificate for secure serving. The certificate and private key files "+
+	grpcPort          = flag.Int("grpc-port", runserver.DefaultGrpcPort, "The gRPC port used for communicating with Envoy proxy")
+	grpcHealthPort    = flag.Int("grpc-health-port", runserver.DefaultGrpcHealthPort, "The port used for gRPC liveness and readiness probes")
+	metricsPort       = flag.Int("metrics-port", runserver.DefaultMetricsPort, "The metrics port")
+	poolName          = flag.String("pool-name", runserver.DefaultPoolName, "Name of the InferencePool this Endpoint Picker is associated with.")
+	poolGroup         = flag.String("pool-group", runserver.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
+	poolNamespace     = flag.String("pool-namespace", "", "Namespace of the InferencePool this Endpoint Picker is associated with.")
+	enableScaleToZero = flag.Bool("enable-scale-to-zero", false, "Enable scaling down InferencePool to zero replicas after a period of idleness")
+	logVerbosity      = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
+	secureServing     = flag.Bool("secure-serving", runserver.DefaultSecureServing, "Enables secure serving. Defaults to true.")
+	healthChecking    = flag.Bool("health-checking", runserver.DefaultHealthChecking, "Enables health checking")
+	certPath          = flag.String("cert-path", runserver.DefaultCertPath, "The path to the certificate for secure serving. The certificate and private key files "+
 		"are assumed to be named tls.crt and tls.key, respectively. If not set, and secureServing is enabled, "+
 		"then a self-signed certificate is used.")
 	haEnableLeaderElection = flag.Bool("ha-enable-leader-election", false, "Enables leader election for high availability. When enabled, readiness probes will only pass on the leader.")
@@ -107,14 +108,16 @@ func Run(ctx context.Context) error {
 	}
 
 	// --- Setup Deactivator ---
-	deactivator, err := requestcontrol.DeactivatorWithConfig(cfg, &datastore)
-	if err != nil {
-		setupLog.Error(err, "Failed to setup Deactivator")
-		return err
-	}
+	if *enableScaleToZero {
+		deactivator, err := requestcontrol.DeactivatorWithConfig(cfg, &datastore)
+		if err != nil {
+			setupLog.Error(err, "Failed to setup Deactivator")
+			return err
+		}
 
-	// Start Deactivator
-	go deactivator.MonitorInferencePoolIdleness(ctx)
+		// Start Deactivator
+		go deactivator.MonitorInferencePoolIdleness(ctx)
+	}
 
 	// --- Setup Metrics Server ---
 	metricsServerOptions := metricsserver.Options{
