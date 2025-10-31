@@ -76,3 +76,21 @@ func errorBadGateway(err error, w http.ResponseWriter) error {
 	_, err = w.Write(b)
 	return err
 }
+
+func errorServiceUnavailable(message string, w http.ResponseWriter) error {
+	er := errorResponse{
+		Object:  "error",
+		Message: message,
+		Type:    "ServiceUnavailable",
+		Code:    http.StatusServiceUnavailable,
+	}
+
+	b, err := json.Marshal(er)
+	if err != nil {
+		return err
+	}
+
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, err = w.Write(b)
+	return err
+}

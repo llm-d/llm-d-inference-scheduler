@@ -260,11 +260,18 @@ func (s *Server) createRoutes() *http.ServeMux {
 		// Log errors from the decoder proxy
 		switch {
 		case errors.Is(err, syscall.ECONNREFUSED):
-			s.logger.Error(err, "waiting for vLLM to be ready")
+			s.logger.Error(err, "failed to connect to vLLM decoder",
+				"decoderURL", s.decoderURL.String())
+			if err := errorServiceUnavailable("The decode node is not ready. Please check that the vLLM service is running and the port configuration is correct.", res); err != nil {
+				s.logger.Error(err, "failed to send error response to client")
+			}
 		default:
-			s.logger.Error(err, "http: proxy error")
+			s.logger.Error(err, "http: proxy error",
+				"decoderURL", s.decoderURL.String())
+			if err := errorBadGateway(err, res); err != nil {
+				s.logger.Error(err, "failed to send error response to client")
+			}
 		}
-		res.WriteHeader(http.StatusBadGateway)
 	}
 	s.decoderProxy = decoderProxy
 	mux.Handle("/", s.decoderProxy)
