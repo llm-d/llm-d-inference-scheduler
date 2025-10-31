@@ -30,6 +30,8 @@ type errorResponse struct {
 	Code    int    `json:"code"`
 }
 
+const decoderServiceUnavailableResponseJSON = `{"object":"error","message":"The decode node is not ready. Please check that the vLLM service is running and the port configuration is correct.","type":"ServiceUnavailable","param":"","code":503}`
+
 func errorJSONInvalid(err error, w http.ResponseWriter) error {
 	// Simulate vLLM error
 
