@@ -112,7 +112,7 @@ test-integration: download-tokenizer install-dependencies ## Run integration tes
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
-test-e2e: image-build sidecar-image-build ## Run end-to-end tests against a new kind cluster
+test-e2e: image-build ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	./test/scripts/run_e2e.sh
 
