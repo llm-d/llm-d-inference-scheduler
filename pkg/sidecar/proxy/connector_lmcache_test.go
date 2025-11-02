@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
@@ -66,7 +67,7 @@ var _ = Describe("LMCache Connector", func() {
 		Expect(err).ToNot(HaveOccurred())
 		decodeURL = url
 		cfg := Config{Connector: ConnectorLMCache}
-		proxy, err = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
+		proxy = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -76,7 +77,8 @@ var _ = Describe("LMCache Connector", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			err := proxy.Start(ctx)
+			validator := &AllowlistValidator{enabled: false}
+			err := proxy.Start(ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -97,7 +99,7 @@ var _ = Describe("LMCache Connector", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(requestHeaderPrefillURL, prefillBackend.URL)
+		req.Header.Add(common.PrefillPodHeader, prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -130,7 +132,8 @@ var _ = Describe("LMCache Connector", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			err := proxy.Start(ctx)
+			validator := &AllowlistValidator{enabled: false}
+			err := proxy.Start(ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -150,7 +153,7 @@ var _ = Describe("LMCache Connector", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(requestHeaderPrefillURL, prefillBackend.URL)
+		req.Header.Add(common.PrefillPodHeader, prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())

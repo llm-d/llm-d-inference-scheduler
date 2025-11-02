@@ -140,7 +140,9 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			err := proxy.Start(ctx)
+			validator, err := NewAllowlistValidator(false, "", "")
+			Expect(err).ToNot(HaveOccurred())
+			err = proxy.Start(ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
@@ -194,7 +196,9 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			err := proxy.Start(ctx)
+			validator, err := NewAllowlistValidator(false, "", "")
+			Expect(err).ToNot(HaveOccurred())
+			err = proxy.Start(ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 		}()
 
