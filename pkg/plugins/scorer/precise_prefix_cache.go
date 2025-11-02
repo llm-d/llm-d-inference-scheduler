@@ -79,7 +79,6 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	if err != nil {
 		return nil, fmt.Errorf("failed to create `kvcache.Indexer`: %w", err)
 	}
-	// init the preProcessor, maroon fork let him handle
 
 	go kvCacheIndexer.Run(ctx)
 
@@ -118,40 +117,35 @@ func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScor
 // The returned scores are normalized to a range of 0-1.
 func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	loggerDebug := logger.V(logutil.DEBUG)
 	
 	if request == nil {
-		logger.Info("PREPROCESSING: Request is nil, skipping scoring")
-		loggerDebug.Info("Request is nil, skipping scoring")
+		logger.V(logutil.DEBUG).Info("Request is nil, skipping scoring")
 		return nil
 	}
 
-	// Preprocess the request to get the flattened prompt
-	logger.Info("PREPROCESSING: Starting preprocessing", 
+	// Extract the flattened prompt from the request
+	logger.V(logutil.DEBUG).Info("Extracting prompt from request", 
 		"target_model", request.TargetModel,
 		"has_chat_completions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"has_completions", request.Body != nil && request.Body.Completions != nil)
 	
-	prompt, err := s.preprocessRequest(ctx, request)
+	prompt, err := s.extractPrompt(ctx, request)
 	if err != nil {
-		logger.Error(err, "PREPROCESSING: Failed to preprocess request", "target_model", request.TargetModel)
-		loggerDebug.Error(err, "Failed to preprocess request")
+		logger.Error(err, "Failed to extract prompt from request", "target_model", request.TargetModel)
 		return nil
 	}
 
-	logger.Info("PREPROCESSING: Preprocessing complete, getting pod scores", 
+	logger.V(logutil.DEBUG).Info("Getting pod scores", 
 		"prompt_length", len(prompt),
 		"target_model", request.TargetModel)
 	
 	scores, err := s.kvCacheIndexer.GetPodScores(ctx, prompt, request.TargetModel, nil)
 	if err != nil {
-		logger.Error(err, "PREPROCESSING: Failed to get pod scores", "target_model", request.TargetModel)
-		loggerDebug.Error(err, "Failed to get pod scores")
+		logger.Error(err, "Failed to get pod scores", "target_model", request.TargetModel)
 		return nil
 	}
 	
-	logger.Info("PREPROCESSING: Got pod scores", "scores_count", len(scores), "target_model", request.TargetModel)
-	loggerDebug.Info("Got pod scores", "scores", scores)
+	logger.V(logutil.DEBUG).Info("Got pod scores", "scores_count", len(scores), "scores", scores, "target_model", request.TargetModel)
 
 	podToKey := func(pod types.Pod) (string, bool) {
 		metricsPod := pod.GetPod()
@@ -165,23 +159,20 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
 }
 
-// preprocessRequest handles preprocessing of the request to extract the flattened prompt
-// For chat completions, it converts messages to a templated prompt
-// For regular completions, it uses the prompt directly
-func (s *PrecisePrefixCacheScorer) preprocessRequest(ctx context.Context, request *types.LLMRequest) (string, error) {
+// extractPrompt extracts the flattened prompt from the request.
+// For chat completions, it renders the messages using the model's chat template.
+// For regular completions, it uses the prompt directly.
+func (s *PrecisePrefixCacheScorer) extractPrompt(ctx context.Context, request *types.LLMRequest) (string, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	loggerDebug := logger.V(logutil.DEBUG)
 
-	// If it's a chat completion request, apply preprocessing
+	// If it's a chat completion request, render the chat template
 	if request.Body != nil && request.Body.ChatCompletions != nil {
-		// INFO level logging for verification
-		logger.Info("PREPROCESSING: Processing chat completion request", 
+		logger.V(logutil.DEBUG).Info("Processing chat completion request", 
 			"messages_count", len(request.Body.ChatCompletions.Messages),
 			"target_model", request.TargetModel)
-		loggerDebug.Info("Processing chat completion request", "messages_count", len(request.Body.ChatCompletions.Messages))
 
-		// Create preprocessing request
-		preprocessReq := &chat_completions.RenderJinjaTemplateRequest{
+		// Create render request
+		renderReq := &chat_completions.RenderJinjaTemplateRequest{
 			Conversations:             make([]chat_completions.ChatMessage, 0),
 			Tools:                     request.Body.ChatCompletions.Tools,
 			Documents:                 request.Body.ChatCompletions.Documents,
@@ -192,75 +183,62 @@ func (s *PrecisePrefixCacheScorer) preprocessRequest(ctx context.Context, reques
 			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
 		}
 
-		// Convert messages to the format expected by preprocessing
+		// Convert messages to the format expected by the renderer
 		for _, msg := range request.Body.ChatCompletions.Messages {
-			preprocessReq.Conversations = append(preprocessReq.Conversations, chat_completions.ChatMessage{
+			renderReq.Conversations = append(renderReq.Conversations, chat_completions.ChatMessage{
 				Role:    msg.Role,
 				Content: msg.Content.Raw, 
 			})
 		}
 
-		// Create preprocessing processor
+		// Initialize the chat templating processor
 		processor := chat_completions.NewChatTemplatingProcessor()
-
-		// Initialize the processor (this starts Python interpreter if not already started)
-		// The C code handles global initialization tracking to prevent multiple initializations
 		if err := processor.Initialize(); err != nil {
 			return "", fmt.Errorf("failed to initialize chat templating processor: %w", err)
 		}
 
-		// First, fetch the chat template from the model
+		// Fetch the chat template from the model
 		fetchReq := chat_completions.FetchChatTemplateRequest{
 			Model: request.TargetModel,
 		}
-		logger.Info("PREPROCESSING: Fetching chat template", "model", request.TargetModel)
+		logger.V(logutil.DEBUG).Info("Fetching chat template", "model", request.TargetModel)
 		chatTemplate, chatTemplateKWArgs, err := processor.FetchChatTemplate(ctx, fetchReq)
 		if err != nil {
-			logger.Error(err, "PREPROCESSING: Failed to fetch chat template", "model", request.TargetModel)
+			logger.Error(err, "Failed to fetch chat template", "model", request.TargetModel)
 			return "", fmt.Errorf("failed to fetch chat template: %w", err)
 		}
-		logger.Info("PREPROCESSING: Chat template fetched successfully", 
+		logger.V(logutil.DEBUG).Info("Chat template fetched", 
 			"model", request.TargetModel,
 			"template_length", len(chatTemplate),
 			"has_kwargs", len(chatTemplateKWArgs) > 0)
 
 		// Set the fetched template in the render request
-		preprocessReq.ChatTemplate = chatTemplate
-		preprocessReq.ChatTemplateKWArgs = chatTemplateKWArgs
+		renderReq.ChatTemplate = chatTemplate
+		renderReq.ChatTemplateKWArgs = chatTemplateKWArgs
 
 		// Render the template to get flattened prompt
-		logger.Info("PREPROCESSING: Rendering chat template", 
-			"conversations_count", len(preprocessReq.Conversations))
-		resp, err := processor.RenderChatTemplate(ctx, preprocessReq)
+		logger.V(logutil.DEBUG).Info("Rendering chat template", 
+			"conversations_count", len(renderReq.Conversations))
+		resp, err := processor.RenderChatTemplate(ctx, renderReq)
 		if err != nil {
-			logger.Error(err, "PREPROCESSING: Failed to render chat template")
+			logger.Error(err, "Failed to render chat template")
 			return "", fmt.Errorf("failed to render chat template: %w", err)
 		}
 
 		if len(resp.RenderedChats) == 0 {
-			logger.Error(nil, "PREPROCESSING: No rendered chat returned from preprocessing")
-			return "", fmt.Errorf("no rendered chat returned from preprocessing")
+			logger.Error(nil, "No rendered chat returned from template rendering")
+			return "", fmt.Errorf("no rendered chat returned from template rendering")
 		}
 
-		promptLength := len(resp.RenderedChats[0])
-		promptPreview := resp.RenderedChats[0]
-		if len(promptPreview) > 100 {
-			promptPreview = promptPreview[:100] + "..."
-		}
-		logger.Info("PREPROCESSING: Successfully preprocessed chat completion request", 
-			"prompt_length", promptLength,
-			"prompt_preview", promptPreview)
-		loggerDebug.Info("Successfully preprocessed chat completion request", "prompt_length", promptLength)
-		return resp.RenderedChats[0], nil
+		prompt := resp.RenderedChats[0]
+		logger.V(logutil.DEBUG).Info("Chat template rendered successfully", "prompt_length", len(prompt))
+		return prompt, nil
 	}
 
 	// For regular completions, use the prompt directly
 	if request.Body != nil && request.Body.Completions != nil {
 		prompt := request.Body.Completions.Prompt
-		logger.Info("PREPROCESSING: Using completion prompt directly", 
-			"prompt_length", len(prompt),
-			"target_model", request.TargetModel)
-		loggerDebug.Info("Using completion prompt directly", "prompt_length", len(prompt))
+		logger.V(logutil.DEBUG).Info("Using completion prompt directly", "prompt_length", len(prompt))
 		return prompt, nil
 	}
 
@@ -271,7 +249,7 @@ func (s *PrecisePrefixCacheScorer) preprocessRequest(ctx context.Context, reques
 			var rawData map[string]interface{}
 			if err := json.Unmarshal(dataBytes, &rawData); err == nil {
 				if prompt, ok := rawData["prompt"].(string); ok && prompt != "" {
-					loggerDebug.Info("Extracted prompt from raw data", "prompt_length", len(prompt))
+					logger.V(logutil.DEBUG).Info("Extracted prompt from raw data", "prompt_length", len(prompt))
 					return prompt, nil
 				}
 			}
