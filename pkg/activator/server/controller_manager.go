@@ -95,8 +95,8 @@ func NewDefaultManager(gknn common.GKNN, restConfig *rest.Config, metricsServerO
 	if leaderElectionEnabled {
 		opt.LeaderElection = true
 		opt.LeaderElectionResourceLock = "leases"
-		// The lease name needs to be unique per EPP deployment.
-		opt.LeaderElectionID = fmt.Sprintf("epp-%s-%s.gateway-api-inference-extension.sigs.k8s.io", gknn.Namespace, gknn.Name)
+		// The lease name needs to be unique per activator deployment.
+		opt.LeaderElectionID = fmt.Sprintf("activator-%s-%s.llm-d.ai", gknn.Namespace, gknn.Name)
 		opt.LeaderElectionNamespace = gknn.Namespace
 		opt.LeaderElectionReleaseOnCancel = true
 	}
