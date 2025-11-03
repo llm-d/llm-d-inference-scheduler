@@ -10,6 +10,7 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
@@ -179,14 +180,16 @@ func (a *Activator) inferencePoolPodsReady(logger logr.Logger, namespace, objnam
 		}
 
 		// NOTE: this assumes that the target object has a status.readyReplicas field
-		if readyReplicas, ok := unstructuredObj.Object["status"].(map[string]any)["readyReplicas"].(int64); ok {
-			if numReplicas == int32(readyReplicas) {
+		if readyReplicas, found, err := unstructured.NestedFieldNoCopy(unstructuredObj.Object, "status", "readyReplicas"); found {
+			if numReplicas == int32(readyReplicas.(int64)) {
 				logger.V(logutil.DEBUG).Info("Candidate pods are READY")
 				return true, nil
 			}
 			logger.V(logutil.DEBUG).Info("Candidate pods are NOT READY")
+		} else if err != nil {
+			logger.Error(err, "Error getting readyReplicas - candidate pods for serving the request are NOT READY")
 		} else {
-			logger.V(logutil.DEBUG).Info("Object status.readyReplicas field is not set yet - candidate pods for serving the request are NOT READY ")
+			logger.V(logutil.DEBUG).Info("Object status.readyReplicas field is not set yet - candidate pods for serving the request are NOT READY")
 			return false, nil
 		}
 

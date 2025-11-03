@@ -13,7 +13,7 @@ route:
 
 inferencePool:
   name: inference-pool
-  group: inference.networking.x-k8s.io
+  group: inference.networking.k8s.io
 
 inferenceGateway:
   port: 80

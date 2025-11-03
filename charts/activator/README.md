@@ -36,7 +36,7 @@ The following table list the configurable parameters of the chart.
 | `activator.image.pullPolicy`       | Image pull policy for the container. Possible values: `Always`, `IfNotPresent`, or `Never`. Defaults to `Always`. |
 | `inferenceGateway.port`            | The port of the Gateway. Defaults to `80`.    |
 | `inferencePool.name`               | The name of the InferencePool to target.  |
-| `inferencePool.apiVersion`         | The API version of the InferencePool. Defaults to `inference.networking.x-k8s.io`.  |
+| `inferencePool.apiVersion`         | The API version of the InferencePool. Defaults to `inference.networking.k8s.io`.  |
 | `route.name`                       | The name of the HTTPRoute to attach the activator to.  |
 
 ## Notes
