@@ -98,7 +98,7 @@ func Run(ctx context.Context) error {
 	}
 
 	// --- Setup Datastore ---
-	datastore := datastore.NewDatastore(ctx)
+	datastore := datastore.NewDatastore()
 
 	// --- Setup Activator ---
 	activator, err := requestcontrol.NewActivatorWithConfig(cfg, datastore)

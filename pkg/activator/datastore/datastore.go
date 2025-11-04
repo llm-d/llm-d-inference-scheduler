@@ -21,7 +21,6 @@ limitations under the License.
 package datastore
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"time"
@@ -50,7 +49,7 @@ type Datastore interface {
 }
 
 // NewDatastore creates a new Datastore instance with the provided parent context.
-func NewDatastore(parentCtx context.Context) Datastore {
+func NewDatastore() Datastore {
 	store := &datastore{
 		poolMu: sync.RWMutex{},
 		ticker: time.NewTicker(60 * time.Second),

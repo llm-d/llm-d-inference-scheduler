@@ -17,7 +17,6 @@ limitations under the License.
 package datastore
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -65,7 +64,7 @@ func TestPool(t *testing.T) {
 			scheme := runtime.NewScheme()
 			_ = clientgoscheme.AddToScheme(scheme)
 
-			datastore := NewDatastore(context.Background())
+			datastore := NewDatastore()
 			datastore.PoolSet(tt.inferencePool)
 			gotPool, gotErr := datastore.PoolGet()
 			if diff := cmp.Diff(tt.wantErr, gotErr, cmpopts.EquateErrors()); diff != "" {
