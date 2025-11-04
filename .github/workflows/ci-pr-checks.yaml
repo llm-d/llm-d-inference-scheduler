@@ -51,10 +51,10 @@ jobs:
           make test
 
       - name: Archive code coverage results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: code-coverage
-          path: coverage.out # Make sure to use the same file name you chose for the "-coverprofile" in the "make test" step
+          path: coverage-*.out # Make sure to use the same file name you chose for the "-coverprofile" in the "make test" step
 
       - name: Run make build
         shell: bash

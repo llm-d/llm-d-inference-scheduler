@@ -120,11 +120,19 @@ func (s *BaseServer) createDecoderProxyHandler(decoderURL *url.URL, decoderInsec
 		// Log errors from the decoder proxy
 		switch {
 		case errors.Is(err, syscall.ECONNREFUSED):
-			s.logger.Error(err, "waiting for vLLM to be ready")
+			s.logger.Error(err, "failed to connect to vLLM decoder",
+				"decoderURL", s.decoderURL.String())
+			res.WriteHeader(http.StatusServiceUnavailable)
+			if _, err = res.Write([]byte(decoderServiceUnavailableResponseJSON)); err != nil {
+				s.logger.Error(err, "failed to send error response to client")
+			}
 		default:
-			s.logger.Error(err, "http: proxy error")
+			s.logger.Error(err, "http: proxy error",
+				"decoderURL", s.decoderURL.String())
+			if err = errorBadGateway(err, res); err != nil {
+				s.logger.Error(err, "failed to send error response to client")
+			}
 		}
-		res.WriteHeader(http.StatusBadGateway)
 	}
 	return decoderProxy
 }

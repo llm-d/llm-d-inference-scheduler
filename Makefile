@@ -104,10 +104,10 @@ format: ## Format Go source files
 test: test-unit test-e2e ## Run unit tests and e2e tests
 
 .PHONY: test-unit
-test-unit: epp-test-unit sidecar-test-unit
+test-unit: test-unit-epp test-unit-sidecar
 
-.PHONY: %-test-unit
-%-test-unit: download-tokenizer install-dependencies ## Run unit tests
+.PHONY: test-unit-%
+test-unit-%: download-tokenizer install-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	go test $($*_LDFLAGS) -cover -coverprofile=coverage-$*.out -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
@@ -135,17 +135,17 @@ lint: check-golangci-lint check-typos ## Run lint
 ##@ Build
 
 .PHONY: build
-build: epp-build sidecar-build ## Build the project
+build: build-epp build-sidecar ## Build the project
 
-.PHONY: %-build
-%-build: check-go install-dependencies download-tokenizer ## Build the project
+.PHONY: build-%
+build-%: check-go install-dependencies download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
 ##@ Container Build/Push
 
 .PHONY:	image-build
-image-build: epp-image-build sidecar-image-build ## Build Docker image
+image-build: image-build-epp image-build-sidecar ## Build Docker image
 
 .PHONY:	%-image-build
 %-image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_RUNTIME)
