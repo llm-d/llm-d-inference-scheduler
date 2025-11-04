@@ -1,28 +1,42 @@
-## Multistage build
+# Build Stage: using Go 1.25 image
 FROM quay.io/projectquay/golang:1.25 AS builder
-ARG COMMIT_SHA=unknown
-ARG BUILD_REF
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-ENV CGO_ENABLED=0
-ENV GOOS=$TARGETOS
-ENV GOARCH=$TARGETARCH
+ARG TARGETOS
+ARG TARGETARCH
 
-# Dependencies
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
+WORKDIR /workspace
 
-# Sources
+# Copy the Go Modules manifests
+COPY go.mod go.mod
+COPY go.sum go.sum
+
+# Copy the go source
 COPY cmd/activator ./cmd/activator
 COPY pkg/activator ./pkg/activator
-WORKDIR /src/cmd/activator
-RUN go build -ldflags="-X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" -o /activator
 
-## Multistage deploy
+# Build
+# the GOARCH has not a default value to allow the binary be built according to the host where the command
+# was called. For example, if we call make image-build in a local env which has the Apple Silicon M1 SO
+# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
+# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
+ENV CGO_ENABLED=0
+ENV GOOS=${TARGETOS:-linux}
+ENV GOARCH=${TARGETARCH}
+ARG COMMIT_SHA=unknown
+ARG BUILD_REF
+RUN go build -a -o bin/activator -ldflags="-X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" cmd/activator/main.go
+
+
+# Use ubi9 as a minimal base image to package the manager binary
+# Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
-
 WORKDIR /
-COPY --from=builder /activator /activator
+COPY --from=builder /workspace/bin/activator /app/activator
 
-ENTRYPOINT ["/activator"]
+# expose gRPC, health and metrics ports
+EXPOSE 9002
+EXPOSE 9003
+EXPOSE 9090
+
+USER 65532:65532
+
+ENTRYPOINT ["/app/activator"]

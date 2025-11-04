@@ -41,7 +41,7 @@ type Datastore interface {
 	PoolGet() (*v1.InferencePool, error)
 	PoolHasSynced() bool
 
-	GetTicker() *time.Ticker
+	GetTickerCh() <-chan time.Time
 	ResetTicker(t time.Duration)
 	StopTicker()
 
@@ -52,16 +52,13 @@ type Datastore interface {
 // NewDatastore creates a new Datastore instance with the provided parent context.
 func NewDatastore(parentCtx context.Context) Datastore {
 	store := &datastore{
-		parentCtx: parentCtx,
-		poolMu:    sync.RWMutex{},
-		ticker:    time.NewTicker(60 * time.Second),
+		poolMu: sync.RWMutex{},
+		ticker: time.NewTicker(60 * time.Second),
 	}
 	return store
 }
 
 type datastore struct {
-	// parentCtx controls the lifecycle of the background metrics goroutines that spawn up by the datastore.
-	parentCtx context.Context
 	// poolMu is used to synchronize access to pool map.
 	poolMu sync.RWMutex
 	pool   *v1.InferencePool
@@ -79,7 +76,7 @@ func (ds *datastore) PoolSet(pool *v1.InferencePool) {
 func (ds *datastore) PoolGet() (*v1.InferencePool, error) {
 	ds.poolMu.RLock()
 	defer ds.poolMu.RUnlock()
-	if !ds.PoolHasSynced() {
+	if ds.pool == nil {
 		return nil, errPoolNotSynced
 	}
 	return ds.pool, nil
@@ -96,19 +93,19 @@ func (ds *datastore) Clear() {
 }
 
 func (ds *datastore) ResetTicker(t time.Duration) {
-	ds.poolMu.RLock()
-	defer ds.poolMu.RUnlock()
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
 	ds.ticker.Reset(t)
 }
 
-func (ds *datastore) GetTicker() *time.Ticker {
+func (ds *datastore) GetTickerCh() <-chan time.Time {
 	ds.poolMu.RLock()
 	defer ds.poolMu.RUnlock()
-	return ds.ticker
+	return ds.ticker.C
 }
 
 func (ds *datastore) StopTicker() {
-	ds.poolMu.RLock()
-	defer ds.poolMu.RUnlock()
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
 	ds.ticker.Stop()
 }

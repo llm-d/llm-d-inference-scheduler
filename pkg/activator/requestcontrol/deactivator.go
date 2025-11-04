@@ -26,11 +26,11 @@ type Deactivator struct {
 	DynamicClient *dynamic.DynamicClient
 	ScaleClient   scale.ScalesGetter
 	Mapper        meta.RESTMapper
-	datastore     *datastore.Datastore
+	datastore     datastore.Datastore
 }
 
 // DeactivatorWithConfig creates a new Deactivator with the provided REST config and Datastore.
-func DeactivatorWithConfig(config *rest.Config, datastore *datastore.Datastore) (*Deactivator, error) {
+func DeactivatorWithConfig(config *rest.Config, datastore datastore.Datastore) (*Deactivator, error) {
 	scaleClient, mapper, err := initScaleClient(config)
 	if err != nil {
 		return nil, err
@@ -51,20 +51,22 @@ func DeactivatorWithConfig(config *rest.Config, datastore *datastore.Datastore) 
 // MonitorInferencePoolIdleness monitors the InferencePool for idleness and scales it down to zero replicas
 func (da *Deactivator) MonitorInferencePoolIdleness(ctx context.Context) {
 	logger := log.FromContext(ctx)
-	ds := *(da.datastore)
+	ds := da.datastore
 
+	// The deactivator uses a ticker to periodically try and scale down the InferencePool after idleness.
+	// Upon each received requests, the ticker is reset to delay the next scale-down check.
 	ds.ResetTicker(DefaultScaleDownDelay)
 	defer ds.StopTicker()
 
-	ticker := ds.GetTicker()
+	tickerCh := ds.GetTickerCh()
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("Context cancelled, stopping deactivator")
 			return
-		case <-ticker.C:
-			logger.V(logutil.DEBUG).Info("Deactivator Time check for inferencePool idleness: " + time.Now().Format("15:04:05"))
+		case <-tickerCh:
+			logger.V(logutil.DEBUG).Info("Deactivator time check for inferencePool idleness: " + time.Now().Format("15:04:05"))
 
 			// Get InferencePool Info
 			pool, err := ds.PoolGet()

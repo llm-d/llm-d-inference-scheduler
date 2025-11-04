@@ -75,7 +75,7 @@ func Run(ctx context.Context) error {
 	flag.Parse()
 	initLogging(&opts)
 
-	setupLog.Info("GIE build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
+	setupLog.Info("Activator build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
 
 	// Validate flags
 	if err := validateFlags(); err != nil {
@@ -109,7 +109,7 @@ func Run(ctx context.Context) error {
 
 	// --- Setup Deactivator ---
 	if *enableScaleToZero {
-		deactivator, err := requestcontrol.DeactivatorWithConfig(cfg, &datastore)
+		deactivator, err := requestcontrol.DeactivatorWithConfig(cfg, datastore)
 		if err != nil {
 			setupLog.Error(err, "Failed to setup Deactivator")
 			return err
