@@ -157,7 +157,7 @@ image-build-%: check-container-tool ## Build Docker image ## Build Docker image 
 image-push: image-push-epp image-push-sidecar ## Push Docker images to registry
 
 .PHONY: image-push-%
-image-push-%: check-container-tool load-version-json ## Push Docker image to registry
+image-push-%: check-container-tool ## Push Docker image to registry
 	@printf "\033[33;1m==== Pushing Docker image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_TOOL) push $($*_IMAGE)
 
