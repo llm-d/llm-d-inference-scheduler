@@ -1,0 +1,118 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: activator
+rules:
+- apiGroups:
+  - "inference.networking.x-k8s.io"
+  resources:
+  - "inferencepools"
+  verbs:
+  - "get"
+  - "watch"
+  - "list"
+- apiGroups:
+  - ""
+  resources:
+  - "pods"
+  verbs:
+  - "get"
+  - "watch"
+  - "list"
+- apiGroups:
+  - "discovery.k8s.io"
+  resources:
+  - "endpointslices"
+  verbs:
+  - "get"
+  - "watch"
+  - "list"
+- apiGroups:
+  - "authentication.k8s.io"
+  resources:
+  - "tokenreviews"
+  verbs:
+  - "create"
+- apiGroups:
+  - "authorization.k8s.io"
+  resources:
+  - "subjectaccessreviews"
+  verbs:
+  - "create"
+- apiGroups:
+  - "apps"
+  resources:
+  - "deployments"
+  verbs:
+  - "create"
+  - "get"
+  - "list"
+  - "watch"
+  - "update"
+  - "patch"
+  - "delete"
+- apiGroups:
+  - "apps"
+  resources:
+  - "deployments/scale"
+  verbs:
+  - "get"
+  - "update"
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: activator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: activator
+subjects:
+- kind: ServiceAccount
+  name: activator
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: epp
+rules:
+- apiGroups:
+  - inference.networking.x-k8s.io
+  resources:
+  - inferenceobjectives
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups:
+  - inference.networking.x-k8s.io
+  - inference.networking.k8s.io
+  resources:
+  - inferencepools
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - watch
+  - list
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: epp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: epp
+subjects:
+- kind: ServiceAccount
+  name: epp
