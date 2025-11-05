@@ -132,7 +132,7 @@ func kindLoadImage(image string) {
 	saveArgs := []string{"save", "--output", target}
 	if containerRuntime == "docker" {
 		// The platform flag is required for docker save to work but it is an unsupported flag for podman
-		saveArgs = append(saveArgs, "--platform", fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
+		saveArgs = append(saveArgs, "--platform", fmt.Sprintf("linux/%s", runtime.GOARCH))
 	}
 	saveArgs = append(saveArgs, image)
 

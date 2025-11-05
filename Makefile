@@ -147,8 +147,8 @@ build-%: check-go install-dependencies download-tokenizer ## Build the project
 .PHONY:	image-build
 image-build: image-build-epp image-build-sidecar ## Build Docker image
 
-.PHONY:	%-image-build
-%-image-build: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_RUNTIME)
+.PHONY: image-build-%
+image-build-%: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Building Docker image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_RUNTIME) build \
 		--platform linux/$(TARGETARCH) \
@@ -159,10 +159,10 @@ image-build: image-build-epp image-build-sidecar ## Build Docker image
  		-t $($*_IMAGE) -f Dockerfile.$* .
 
 .PHONY: image-push
-image-push: epp-image-push sidecar-image-push ## Push container images to registry
+image-push: image-push-epp image-push-sidecar ## Push container images to registry
 
-.PHONY: %-image-push
-%-image-push: check-container-tool load-version-json ## Push container image to registry
+.PHONY: mage-push-%
+image-push-%: check-container-tool ## Push container image to registry
 	@printf "\033[33;1m==== Pushing Container image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_RUNTIME) push $($*_IMAGE)
 
