@@ -59,6 +59,11 @@ type Datastore interface {
 	ObjectiveDelete(namespacedName types.NamespacedName)
 	ObjectiveGetAll() []*v1alpha2.InferenceObjective
 
+	// InferenceModelRewrite operations
+	RewriteSet(infModelRewrite *v1alpha2.InferenceModelRewrite)
+	RewriteDelete(namespacedName types.NamespacedName)
+	RewriteGetAll() []*v1alpha2.InferenceModelRewrite
+
 	// PodList lists pods matching the given predicate.
 	PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics
 	PodUpdateOrAddIfNotExist(pod *corev1.Pod) bool
@@ -75,6 +80,7 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
 		poolAndObjectivesMu:    sync.RWMutex{},
 		pool:                   nil,
 		objectives:             make(map[string]*v1alpha2.InferenceObjective),
+		rewrites:               make(map[types.NamespacedName]*v1alpha2.InferenceModelRewrite),
 		pods:                   &sync.Map{},
 		modelServerMetricsPort: modelServerMetricsPort,
 		epf:                    epFactory,
@@ -96,6 +102,8 @@ type datastore struct {
 	pool                *datalayer.EndpointPool
 	// key: InferenceObjective.Spec.ModelName, value: *InferenceObjective
 	objectives map[string]*v1alpha2.InferenceObjective
+	// key: types.NamespacedName, value: *v1alpha2.InferenceModelRewrite
+	rewrites map[types.NamespacedName]*v1alpha2.InferenceModelRewrite
 	// key: types.NamespacedName, value: backendmetrics.PodMetrics
 	pods *sync.Map
 	// modelServerMetricsPort metrics port from EPP command line argument
@@ -109,6 +117,7 @@ func (ds *datastore) Clear() {
 	defer ds.poolAndObjectivesMu.Unlock()
 	ds.pool = nil
 	ds.objectives = make(map[string]*v1alpha2.InferenceObjective)
+	ds.rewrites = make(map[types.NamespacedName]*v1alpha2.InferenceModelRewrite)
 	// stop all pods go routines before clearing the pods map.
 	ds.pods.Range(func(_, v any) bool {
 		ds.epf.ReleaseEndpoint(v.(backendmetrics.PodMetrics))
@@ -199,6 +208,28 @@ func (ds *datastore) ObjectiveGetAll() []*v1alpha2.InferenceObjective {
 	defer ds.poolAndObjectivesMu.RUnlock()
 	res := []*v1alpha2.InferenceObjective{}
 	for _, v := range ds.objectives {
+		res = append(res, v)
+	}
+	return res
+}
+
+func (ds *datastore) RewriteSet(infModelRewrite *v1alpha2.InferenceModelRewrite) {
+	ds.poolAndObjectivesMu.Lock()
+	defer ds.poolAndObjectivesMu.Unlock()
+	ds.rewrites[types.NamespacedName{Name: infModelRewrite.Name, Namespace: infModelRewrite.Namespace}] = infModelRewrite
+}
+
+func (ds *datastore) RewriteDelete(namespacedName types.NamespacedName) {
+	ds.poolAndObjectivesMu.Lock()
+	defer ds.poolAndObjectivesMu.Unlock()
+	delete(ds.rewrites, namespacedName)
+}
+
+func (ds *datastore) RewriteGetAll() []*v1alpha2.InferenceModelRewrite {
+	ds.poolAndObjectivesMu.RLock()
+	defer ds.poolAndObjectivesMu.RUnlock()
+	res := []*v1alpha2.InferenceModelRewrite{}
+	for _, v := range ds.rewrites {
 		res = append(res, v)
 	}
 	return res
