@@ -83,5 +83,5 @@ func (c *InferenceModelRewriteReconciler) SetupWithManager(ctx context.Context, 
 }
 
 func (c *InferenceModelRewriteReconciler) eventPredicate(infModelRewrite *v1alpha2.InferenceModelRewrite) bool {
-	return string(infModelRewrite.Spec.PoolRef.Name) == c.PoolGKNN.Name && string(infModelRewrite.Spec.PoolRef.Group) == c.PoolGKNN.Group
+	return infModelRewrite.Spec.PoolRef != nil && string(infModelRewrite.Spec.PoolRef.Name) == c.PoolGKNN.Name && string(infModelRewrite.Spec.PoolRef.Group) == c.PoolGKNN.Group
 }

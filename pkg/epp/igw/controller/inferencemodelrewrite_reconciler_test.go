@@ -90,6 +90,7 @@ func (b *inferenceModelRewriteBuilder) Namespace(ns string) *inferenceModelRewri
 }
 
 func (b *inferenceModelRewriteBuilder) PoolName(name string) *inferenceModelRewriteBuilder {
+	b.Spec.PoolRef = &v1alpha2.PoolObjectReference{}
 	b.Spec.PoolRef.Name = v1alpha2.ObjectName(name)
 	return b
 }
