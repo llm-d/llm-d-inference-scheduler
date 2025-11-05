@@ -161,7 +161,7 @@ image-build-%: check-container-tool ## Build Docker image ## Build Docker image 
 .PHONY: image-push
 image-push: image-push-epp image-push-sidecar ## Push container images to registry
 
-.PHONY: mage-push-%
+.PHONY: image-push-%
 image-push-%: check-container-tool ## Push container image to registry
 	@printf "\033[33;1m==== Pushing Container image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_RUNTIME) push $($*_IMAGE)
