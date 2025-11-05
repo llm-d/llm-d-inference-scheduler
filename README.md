@@ -52,7 +52,7 @@ workloads currently.
 
 ## Contributing
 
-Our community meeting is weekly at Wednesday 10AM PDT ([Google Meet], [Meeting Notes]).
+Our community meeting is bi-weekly at Wednesday 10AM PDT ([Google Meet], [Meeting Notes]).
 
 We currently utilize the [#sig-inference-scheduler] channel in llm-d Slack workspace for communications.
 
