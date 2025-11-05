@@ -10,6 +10,8 @@ To install an activator-filter named `activator-filter`, you can run the followi
 $ helm install activator-filter ./charts/activator-filter
 ```
 
+> **Note:** This chart should be deployed before the [Body Based Routing](https://github.com/kubernetes-sigs/gateway-api-inference-extension/tree/main/config/charts/body-based-routing) chart for optimal functionality.
+
 ## Uninstall
 
 Run the following command to uninstall the chart:
@@ -28,4 +30,4 @@ The following table list the configurable parameters of the chart.
 
 ## Notes
 
-This chart should only be deployed once.
+This chart should only be deployed once
