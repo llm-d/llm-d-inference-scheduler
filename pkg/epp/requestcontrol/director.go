@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ type Datastore interface {
 	PoolGet() (*datalayer.EndpointPool, error)
 	ObjectiveGet(objectiveName string) *v1alpha2.InferenceObjective
 	PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics
+	RewriteGetAll() []*v1alpha2.InferenceModelRewrite
 }
 
 // Scheduler defines the interface required by the Director for scheduling.
@@ -110,11 +112,16 @@ func (d *Director) getInferenceObjective(ctx context.Context, reqCtx *handlers.R
 	return infObjective
 }
 
-// resolveTargetModel is a helper to update reqCtx with target model based on request.
-func (d *Director) resolveTargetModel(reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
+// HandleRequest orchestrates the request lifecycle.
+// It always returns the requestContext even in the error case, as the request context is used in error handling.
+func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
+	logger := log.FromContext(ctx)
+
+	// Parse Request, Resolve Target Models, and Determine Parameters
 	requestBodyMap := reqCtx.Request.Body
 	var ok bool
 	reqCtx.IncomingModelName, ok = requestBodyMap["model"].(string)
+
 	if !ok {
 		return reqCtx, errutil.Error{Code: errutil.BadRequest, Msg: "model not found in request body"}
 	}
@@ -122,22 +129,11 @@ func (d *Director) resolveTargetModel(reqCtx *handlers.RequestContext) (*handler
 		// Default to incoming model name
 		reqCtx.TargetModelName = reqCtx.IncomingModelName
 	}
+
+	d.applyWeightedModelRewrite(reqCtx)
+
 	reqCtx.Request.Body["model"] = reqCtx.TargetModelName
-	return reqCtx, nil
-}
 
-// HandleRequest orchestrates the request lifecycle.
-// It always returns the requestContext even in the error case, as the request context is used in error handling.
-func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
-	logger := log.FromContext(ctx)
-
-	// Resolve target model and update req context.
-	reqCtx, err := d.resolveTargetModel(reqCtx)
-	if err != nil {
-		return reqCtx, err
-	}
-
-	// Parse request body.
 	requestBody, err := requtil.ExtractRequestBody(reqCtx.Request.Body)
 	if err != nil {
 		return reqCtx, errutil.Error{Code: errutil.BadRequest, Msg: fmt.Errorf("failed to extract request data: %w", err).Error()}
@@ -196,6 +192,56 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	return reqCtx, nil
+}
+
+func (d *Director) applyWeightedModelRewrite(reqCtx *handlers.RequestContext) {
+	rewrites := d.datastore.RewriteGetAll()
+	if len(rewrites) == 0 {
+		return
+	}
+
+	sort.Slice(rewrites, func(i, j int) bool {
+		return rewrites[i].CreationTimestamp.Before(&rewrites[j].CreationTimestamp)
+	})
+
+	for _, rewrite := range rewrites {
+		for _, rule := range rewrite.Spec.Rules {
+			for _, match := range rule.Matches {
+				if match.Model != nil && match.Model.Value == reqCtx.IncomingModelName {
+					reqCtx.TargetModelName = d.selectWeightedModel(rule.Targets)
+					return
+				}
+			}
+		}
+	}
+}
+
+func (d *Director) selectWeightedModel(models []v1alpha2.TargetModel) string {
+	if len(models) == 0 {
+		return ""
+	}
+
+	var totalWeight int32
+	for _, model := range models {
+		totalWeight += model.Weight
+	}
+
+	if totalWeight == 0 {
+		// If total weight is 0, distribute evenly
+		return models[rand.Intn(len(models))].ModelRewrite
+	}
+
+	randomNum := rand.Intn(int(totalWeight))
+	var currentWeight int32
+	for _, model := range models {
+		currentWeight += model.Weight
+		if randomNum < int(currentWeight) {
+			return model.ModelRewrite
+		}
+	}
+
+	// Should not happen
+	return models[len(models)-1].ModelRewrite
 }
 
 // getCandidatePodsForScheduling gets the list of relevant endpoints for the scheduling cycle from the datastore.
