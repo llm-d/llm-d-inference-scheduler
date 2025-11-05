@@ -151,7 +151,7 @@ func createModelServers(withPD, withKV bool, vllmReplicas, prefillReplicas, deco
 			"${MODEL_NAME_SAFE}":      theSafeModelName,
 			"${POOL_NAME}":            poolName,
 			"${KV_CACHE_ENABLED}":     strconv.FormatBool(withKV),
-			"${ROUTING_SIDECAR_TAG}":  routingSideCarTag,
+			"${SIDECAR_TAG}":          routingSideCarTag,
 			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(vllmReplicas),
 			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
