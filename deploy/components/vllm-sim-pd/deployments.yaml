@@ -22,9 +22,31 @@ spec:
         args:
         - "--port=8000"
         - "--model=${MODEL_NAME}"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
-        - name: http
+        - name: prefill-http
           containerPort: 8000
+          protocol: TCP
+        - name: prefill-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: prefill-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: prefill-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: prefill-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: prefill-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: prefill-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: prefill-rank7
+          containerPort: 8007
           protocol: TCP
         env:
         - name: PORT
