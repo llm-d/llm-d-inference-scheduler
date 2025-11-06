@@ -2131,7 +2131,7 @@ data:
         "sts": {
           "servicePort": 0
         },
-        "tag": "1.27.1",
+        "tag": "1.28.0",
         "variant": "",
         "waypoint": {
           "affinity": {},
