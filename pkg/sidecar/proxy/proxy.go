@@ -136,7 +136,7 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 	}
 
 	grp.Go(func() error {
-		return s.startHttp(ctx, cert)
+		return s.startHTTP(ctx, cert)
 	})
 
 	return grp.Wait()

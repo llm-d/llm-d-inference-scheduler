@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// startHttp starts the HTTP reverse proxy.
-func (s *Server) startHttp(ctx context.Context, cert *tls.Certificate) error {
+// startHTTP starts the HTTP reverse proxy.
+func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
 	// Start SSRF protection validator
 	if err := s.allowlistValidator.Start(ctx); err != nil {
 		s.logger.Error(err, "Failed to start allowlist validator")
