@@ -167,5 +167,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	// 2. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	s.decoderProxy.ServeHTTP(w, dreq)
+	if s.forwardDataParallel && !s.dataParallelHandler(w, dreq) {
+		s.decoderProxy.ServeHTTP(w, dreq)
+	}
 }

@@ -84,5 +84,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	// Forward original request to local decoder
 
 	r.Body = io.NopCloser(strings.NewReader(string(original)))
-	s.decoderProxy.ServeHTTP(w, r)
+	if s.forwardDataParallel && !s.dataParallelHandler(w, r) {
+		s.decoderProxy.ServeHTTP(w, r)
+	}
 }
