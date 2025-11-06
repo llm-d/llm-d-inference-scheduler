@@ -9,13 +9,14 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
 
 const (
@@ -165,7 +166,6 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState
 	updatedResults := map[string]*types.ProfileRunResult{}
 
 	// Add decode profile to result
-
 	if h.primaryPort != "" {
 		// Data Parallel is active
 
