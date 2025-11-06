@@ -8,26 +8,26 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
+	autoscaling "k8s.io/api/autoscaling/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/discovery"
+	cached "k8s.io/client-go/discovery/cached"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
+	"k8s.io/client-go/scale"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/activator/datastore"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
-	autoscaling "k8s.io/api/autoscaling/v1"
-	"k8s.io/client-go/discovery"
-	cached "k8s.io/client-go/discovery/cached"
-	"k8s.io/client-go/scale"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/activator/datastore"
 )
 
 const (
