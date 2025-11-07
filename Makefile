@@ -109,7 +109,7 @@ test-unit: test-unit-epp test-unit-sidecar
 .PHONY: test-unit-%
 test-unit-%: download-tokenizer install-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	go test $($*_LDFLAGS) -cover -coverprofile=coverage-$*.out -v $$($($*_TEST_FILES) | tr '\n' ' ')
+	go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-integration
 test-integration: download-tokenizer install-dependencies ## Run integration tests
