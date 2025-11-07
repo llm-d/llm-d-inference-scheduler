@@ -69,6 +69,11 @@ func (s *LoadAware) WithName(name string) *LoadAware {
 	return s
 }
 
+// Dependencies returns the list of plugin dependencies.
+func (s *LoadAware) Dependencies() []plugins.TypedName {
+	return []plugins.TypedName{} // No dependencies
+}
+
 // Score scores the given pod in range of 0-1
 // Currently metrics contains number of requests waiting in the queue, there is no information about number of requests
 // that can be processed in the given pod immediately.
