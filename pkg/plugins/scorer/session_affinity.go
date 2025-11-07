@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -56,6 +56,11 @@ func (s *SessionAffinity) WithName(name string) *SessionAffinity {
 	return s
 }
 
+// Dependencies returns the list of plugin dependencies.
+func (s *SessionAffinity) Dependencies() []plugins.TypedName {
+	return []plugins.TypedName{} // No dependencies
+}
+
 // Score assign a high score to the pod used in previous requests and zero to others
 func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	scoredPods := make(map[types.Pod]float64)
@@ -84,19 +89,19 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, reques
 // TODO: this should be using a cookie and ensure not overriding any other
 // cookie values if present.
 // Tracked in https://github.com/llm-d/llm-d-inference-scheduler/issues/28
-func (s *SessionAffinity) PostResponse(ctx context.Context, _ *types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
-	if response == nil || targetPod == nil {
+func (s *SessionAffinity) PostResponse(ctx context.Context, reqCtx *handlers.RequestContext) {
+	if reqCtx == nil || reqCtx.Response == nil || reqCtx.TargetPod == nil {
 		reqID := "undefined"
-		if response != nil {
-			reqID = response.RequestId
+		if reqCtx != nil && reqCtx.SchedulingRequest != nil {
+			reqID = reqCtx.SchedulingRequest.RequestId
 		}
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetPod is nil", "req id", reqID)
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of reqCtx, response, targetPod is nil", "req id", reqID)
 		return
 	}
 
-	if response.Headers == nil { // TODO should always be populated?
-		response.Headers = make(map[string]string)
+	if reqCtx.Response.Headers == nil { // TODO should always be populated?
+		reqCtx.Response.Headers = make(map[string]string)
 	}
 
-	response.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(targetPod.NamespacedName.String()))
+	reqCtx.Response.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(reqCtx.TargetPod.NamespacedName.String()))
 }

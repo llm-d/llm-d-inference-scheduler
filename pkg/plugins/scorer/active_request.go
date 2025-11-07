@@ -128,6 +128,11 @@ func (s *ActiveRequest) WithName(name string) *ActiveRequest {
 	return s
 }
 
+// Dependencies returns the list of plugin dependencies.
+func (s *ActiveRequest) Dependencies() []plugins.TypedName {
+	return []plugins.TypedName{} // No dependencies
+}
+
 // Score scores the given pods based on the number of active requests
 // being served by each pod. The score is normalized to a range of 0-1.
 func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest,

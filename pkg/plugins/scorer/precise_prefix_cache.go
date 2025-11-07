@@ -112,6 +112,11 @@ func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScor
 	return s
 }
 
+// Dependencies returns the list of plugin dependencies.
+func (s *PrecisePrefixCacheScorer) Dependencies() []plugins.TypedName {
+	return []plugins.TypedName{} // No dependencies
+}
+
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
 func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
