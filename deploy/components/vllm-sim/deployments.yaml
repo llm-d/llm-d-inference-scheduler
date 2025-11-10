@@ -49,7 +49,6 @@ spec:
         - name: sidecar-rank7
           containerPort: 8007
           protocol: TCP
-        restartPolicy: Always
         env:
         - name: POD_IP
           valueFrom:
