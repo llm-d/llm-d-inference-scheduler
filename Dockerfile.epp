@@ -1,6 +1,6 @@
 ## Minimal runtime Dockerfile (microdnf-only, no torch, wrapper in site-packages)
-# Build Stage: using Go 1.24.1 image
-FROM quay.io/projectquay/golang:1.24.1 AS builder
+# Build Stage: using Go 1.24 image
+FROM quay.io/projectquay/golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG KVCACHE_MANAGER_VERSION=v0.3.2
