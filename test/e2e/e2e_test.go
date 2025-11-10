@@ -194,6 +194,39 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			testutils.DeleteObjects(testConfig, modelServers)
 		})
 	})
+
+	ginkgo.When("Running a vLLM Data Parallel configuration", func() {
+		ginkgo.It("should schedule inference on all ranks", func() {
+			createInferencePool(2, true)
+
+			modelServers := createModelServers(false, false, true, 1, 0, 0)
+
+			epp := createEndPointPicker(dataParallelConfig)
+
+			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
+			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
+
+			nsHdr, podHdr, portHdr := runCompletion(simplePrompt, modelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			var parallelNsHdr, parallelPodHdr, parallelPortHdr string
+			// Run inference multiple times until one is scheduled on the other port
+			for range 30 {
+				parallelNsHdr, parallelPodHdr, parallelPortHdr = runCompletion(extraPrompt, modelName)
+				gomega.Expect(parallelNsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(parallelPodHdr).Should(gomega.Equal(decodePods[0]))
+				if parallelPortHdr != portHdr {
+					break
+				}
+			}
+			gomega.Expect(parallelPortHdr).ShouldNot(gomega.Equal(portHdr))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
 })
 
 // createModelServers creates the model server resources used for testing from the given filePaths.
@@ -420,5 +453,19 @@ plugins:
 schedulingProfiles:
 - name: default
   plugins:
+  - pluginRef: max-score-picker
+`
+
+// EPP configuration for running with vLLM Data Parallel support
+const dataParallelConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: decode-filter
+- type: max-score-picker
+- type: data-parallel-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
   - pluginRef: max-score-picker
 `
