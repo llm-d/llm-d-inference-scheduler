@@ -85,9 +85,8 @@ var _ = ginkgo.BeforeSuite(func() {
 	testutils.ApplyYAMLFile(testConfig, serviceAccountManifest)
 	testutils.ApplyYAMLFile(testConfig, servicesManifest)
 
-	infPoolYaml := testutils.ReadYaml(inferExtManifest)
-	infPoolYaml = substituteMany(infPoolYaml, map[string]string{"${POOL_NAME}": modelName + "-inference-pool"})
-	testutils.CreateObjsFromYaml(testConfig, infPoolYaml)
+	// Prevent failure in tests due to InferencePool not existing before the test
+	createInferencePool(1, false)
 })
 
 var _ = ginkgo.AfterSuite(func() {
@@ -178,6 +177,28 @@ func createEnvoy() {
 	manifests := testutils.ReadYaml(envoyManifest)
 	ginkgo.By("Creating envoy proxy resources from manifest: " + envoyManifest)
 	testutils.CreateObjsFromYaml(testConfig, manifests)
+}
+
+func createInferencePool(targets int, delete bool) {
+	poolName := modelName + "-inference-pool"
+
+	if delete {
+		objName := []string{"inferencepool/" + poolName}
+		testutils.DeleteObjects(testConfig, objName)
+	}
+
+	infPoolYaml := testutils.ReadYaml(inferExtManifest)
+	targetPorts := ""
+	for idx := range targets {
+		targetPorts += fmt.Sprintf("\n  - number: %d", 8000+idx)
+	}
+	infPoolYaml = substituteMany(infPoolYaml,
+		map[string]string{
+			"${POOL_NAME}":    poolName,
+			"${TARGET_PORTS}": targetPorts,
+		})
+
+	testutils.CreateObjsFromYaml(testConfig, infPoolYaml)
 }
 
 const kindClusterConfig = `

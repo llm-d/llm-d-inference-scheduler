@@ -25,6 +25,9 @@ const (
 	// simPdDeployment references the YAML file for the deployment
 	// running the vLLM simulator with PD
 	simPdDeployment = "./yaml/vllm-sim-pd.yaml"
+	// simDpDeployment references  the YAML fiel for the deployment
+	// running the vLLM simulator with Data Parallel
+	simDpDeployment = "./yaml/vllm-sim-dp.yaml"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
@@ -40,7 +43,9 @@ var (
 var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 	ginkgo.When("Running simple non-PD configuration", func() {
 		ginkgo.It("should run successfully", func() {
-			modelServers := createModelServers(false, false, 1, 0, 0)
+			createInferencePool(1, true)
+
+			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
 			epp := createEndPointPicker(simpleConfig)
 
@@ -63,9 +68,11 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running a PD configuration", func() {
 		ginkgo.It("should run successfully", func() {
+			createInferencePool(1, true)
+
 			prefillReplicas := 1
 			decodeReplicas := 4
-			modelServers := createModelServers(true, false, 0, prefillReplicas, decodeReplicas)
+			modelServers := createModelServers(true, false, false, 0, prefillReplicas, decodeReplicas)
 
 			epp := createEndPointPicker(pdConfig)
 
@@ -110,9 +117,11 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running simple non-PD KV enabled configuration", func() {
 		ginkgo.It("should run successfully", func() {
+			createInferencePool(1, true)
+
 			epp := createEndPointPicker(kvConfig)
 
-			modelServers := createModelServers(false, true, 1, 0, 0)
+			modelServers := createModelServers(false, true, false, 1, 0, 0)
 			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
@@ -132,7 +141,9 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Scaling up and down the model servers", func() {
 		ginkgo.It("should distribute inference requests across all model servers", func() {
-			modelServers := createModelServers(false, false, 1, 0, 0)
+			createInferencePool(1, true)
+
+			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
 			epp := createEndPointPicker(scaleConfig)
 
@@ -186,7 +197,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 })
 
 // createModelServers creates the model server resources used for testing from the given filePaths.
-func createModelServers(withPD, withKV bool, vllmReplicas, prefillReplicas, decodeReplicas int) []string {
+func createModelServers(withPD, withKV, withDP bool, vllmReplicas, prefillReplicas, decodeReplicas int) []string {
 	theModelName := modelName
 	theSafeModelName := modelName
 	if withKV {
@@ -196,6 +207,8 @@ func createModelServers(withPD, withKV bool, vllmReplicas, prefillReplicas, deco
 	yaml := simDeployment
 	if withPD {
 		yaml = simPdDeployment
+	} else if withDP {
+		yaml = simDpDeployment
 	}
 
 	manifests := testutils.ReadYaml(yaml)
