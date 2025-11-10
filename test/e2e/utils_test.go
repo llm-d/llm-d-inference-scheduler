@@ -44,7 +44,6 @@ func scaleDeployment(objects []string, increment int) {
 			scale.Spec.Replicas += int32(increment)
 			_, err = client.AppsV1().Deployments(nsName).UpdateScale(testConfig.Context, split[1], scale, v1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			time.Sleep(time.Second)
 		}
 	}
 	podsInDeploymentsReady(objects)
@@ -107,7 +106,8 @@ func podsInDeploymentsReady(objects []string) {
 	var deployment appsv1.Deployment
 	helper := func(deploymentName string) bool {
 		err := testConfig.K8sClient.Get(testConfig.Context, types.NamespacedName{Namespace: nsName, Name: deploymentName}, &deployment)
-		return err == nil && deployment.Status.Replicas == deployment.Status.ReadyReplicas
+		return err == nil && *deployment.Spec.Replicas == deployment.Status.Replicas &&
+			deployment.Status.Replicas == deployment.Status.ReadyReplicas
 	}
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")

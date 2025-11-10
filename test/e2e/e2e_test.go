@@ -131,7 +131,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.When("Scaling up and down the model servers", func() {
-		ginkgo.It("work should be distributed across all model servers", func() {
+		ginkgo.It("should distribute inference requests across all model servers", func() {
 			modelServers := createModelServers(false, false, 1, 0, 0)
 
 			epp := createEndPointPicker(scaleConfig)
@@ -153,8 +153,6 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(scaledUpPrefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(scaledUpDecodePods).Should(gomega.HaveLen(2))
 
-			time.Sleep(time.Second)
-
 			var scaledNsHdr, scaledPodHdr string
 			for range 20 {
 				scaledNsHdr, scaledPodHdr = runCompletion(extraPrompt, modelName)
@@ -172,8 +170,6 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(scaledDownPrefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(scaledDownDecodePods).Should(gomega.HaveLen(1))
 			gomega.Expect(scaledDownDecodePods[0]).Should(gomega.BeElementOf(scaledUpDecodePods))
-
-			time.Sleep(time.Second)
 
 			for range 5 {
 				nsHdr, podHdr = runCompletion(simplePrompt, modelName)
