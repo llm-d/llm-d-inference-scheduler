@@ -154,7 +154,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(scaledUpDecodePods).Should(gomega.HaveLen(2))
 
 			var scaledNsHdr, scaledPodHdr string
-			for range 20 {
+			// Run inference multiple times until one is scheduled on the new pod
+			for range 30 {
 				scaledNsHdr, scaledPodHdr = runCompletion(extraPrompt, modelName)
 				gomega.Expect(scaledNsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(scaledPodHdr).Should(gomega.BeElementOf(scaledUpDecodePods))
@@ -171,6 +172,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(scaledDownDecodePods).Should(gomega.HaveLen(1))
 			gomega.Expect(scaledDownDecodePods[0]).Should(gomega.BeElementOf(scaledUpDecodePods))
 
+			// Run multiple times and insure that they are scheduled on the remaining pod
 			for range 5 {
 				nsHdr, podHdr = runCompletion(simplePrompt, modelName)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
