@@ -56,11 +56,6 @@ func defaultManagerOptions(gknn common.GKNN, metricsServerOptions metricsserver.
 						gknn.Namespace: {},
 					},
 				},
-				&v1alpha2.InferenceObjective{}: {
-					Namespaces: map[string]cache.Config{
-						gknn.Namespace: {},
-					},
-				},
 			},
 		},
 		Metrics: metricsServerOptions,
