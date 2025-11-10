@@ -53,11 +53,11 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
-			nsHdr, podHdr := runCompletion(simplePrompt, modelName)
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, modelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
-			nsHdr, podHdr = runChatCompletion(simplePrompt)
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
@@ -80,32 +80,32 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
-			nsHdr, podHdrCompletion := runCompletion(simplePrompt, modelName)
+			nsHdr, podHdrCompletion, _ := runCompletion(simplePrompt, modelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrCompletion).Should(gomega.BeElementOf(decodePods))
 
-			nsHdr, podHdrChat := runChatCompletion(simplePrompt)
+			nsHdr, podHdrChat, _ := runChatCompletion(simplePrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrChat).Should(gomega.BeElementOf(decodePods))
 
 			// Do an extra completion call with a different prompt
-			nsHdr, podHdr := runCompletion(extraPrompt, modelName)
+			nsHdr, podHdr, _ := runCompletion(extraPrompt, modelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Run completion with the original prompt
-			nsHdr, podHdr = runCompletion(simplePrompt, modelName)
+			nsHdr, podHdr, _ = runCompletion(simplePrompt, modelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrCompletion))
 
 			// Do an extra chat completion call with a different prompt
-			nsHdr, podHdr = runChatCompletion(extraPrompt)
+			nsHdr, podHdr, _ = runChatCompletion(extraPrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Run chat completion with the original prompt
-			nsHdr, podHdr = runChatCompletion(simplePrompt)
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
@@ -129,7 +129,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
 			for range 5 {
-				nsHdr, podHdr := runCompletion(simplePrompt, kvModelName)
+				nsHdr, podHdr, _ := runCompletion(simplePrompt, kvModelName)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 			}
@@ -153,7 +153,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			var nsHdr, podHdr string
 			for range 5 {
-				nsHdr, podHdr = runCompletion(simplePrompt, modelName)
+				nsHdr, podHdr, _ = runCompletion(simplePrompt, modelName)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 			}
@@ -167,7 +167,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			var scaledNsHdr, scaledPodHdr string
 			// Run inference multiple times until one is scheduled on the new pod
 			for range 30 {
-				scaledNsHdr, scaledPodHdr = runCompletion(extraPrompt, modelName)
+				scaledNsHdr, scaledPodHdr, _ = runCompletion(extraPrompt, modelName)
 				gomega.Expect(scaledNsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(scaledPodHdr).Should(gomega.BeElementOf(scaledUpDecodePods))
 				if scaledPodHdr != podHdr {
@@ -185,7 +185,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			// Run multiple times and insure that they are scheduled on the remaining pod
 			for range 5 {
-				nsHdr, podHdr = runCompletion(simplePrompt, modelName)
+				nsHdr, podHdr, _ = runCompletion(simplePrompt, modelName)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(podHdr).Should(gomega.Equal(scaledDownDecodePods[0]))
 			}
@@ -279,7 +279,7 @@ func createEndPointPicker(eppConfig string) []string {
 	return objects
 }
 
-func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (string, string) {
+func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (string, string, string) {
 	var httpResp *http.Response
 	openaiclient := openai.NewClient(
 		option.WithBaseURL(fmt.Sprintf("http://localhost:%s/v1", port)))
@@ -299,11 +299,12 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 
 	namespaceHeader := httpResp.Header.Get("x-inference-namespace")
 	podHeader := httpResp.Header.Get("x-inference-pod")
+	podPort := httpResp.Header.Get("x-inference-port")
 
-	return namespaceHeader, podHeader
+	return namespaceHeader, podHeader, podPort
 }
 
-func runChatCompletion(prompt string) (string, string) {
+func runChatCompletion(prompt string) (string, string, string) {
 	var httpResp *http.Response
 	openaiclient := openai.NewClient(
 		option.WithBaseURL(fmt.Sprintf("http://localhost:%s/v1", port)))
@@ -322,8 +323,9 @@ func runChatCompletion(prompt string) (string, string) {
 
 	namespaceHeader := httpResp.Header.Get("x-inference-namespace")
 	podHeader := httpResp.Header.Get("x-inference-pod")
+	podPort := httpResp.Header.Get("x-inference-port")
 
-	return namespaceHeader, podHeader
+	return namespaceHeader, podHeader, podPort
 }
 
 // Simple EPP configuration for running without P/D
