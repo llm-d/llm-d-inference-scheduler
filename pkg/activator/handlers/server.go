@@ -132,66 +132,36 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 }
 
 func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
-	var resp *extProcPb.ProcessingResponse
+	var code envoyTypePb.StatusCode
 
 	switch errutil.CanonicalCode(err) {
 	// This code can be returned by scheduler when there is no capacity for sheddable
 	// requests.
 	case errutil.InferencePoolResourceExhausted:
-		resp = &extProcPb.ProcessingResponse{
-			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-				ImmediateResponse: &extProcPb.ImmediateResponse{
-					Status: &envoyTypePb.HttpStatus{
-						Code: envoyTypePb.StatusCode_TooManyRequests,
-					},
-				},
-			},
-		}
+		code = envoyTypePb.StatusCode_TooManyRequests
 	// This code can be returned by when EPP processes the request and run into server-side errors.
 	case errutil.Internal:
-		resp = &extProcPb.ProcessingResponse{
-			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-				ImmediateResponse: &extProcPb.ImmediateResponse{
-					Status: &envoyTypePb.HttpStatus{
-						Code: envoyTypePb.StatusCode_InternalServerError,
-					},
-				},
-			},
-		}
+		code = envoyTypePb.StatusCode_InternalServerError
 	// This code can be returned by the director when there are no candidate pods for the request scheduling.
 	case errutil.ServiceUnavailable:
-		resp = &extProcPb.ProcessingResponse{
-			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-				ImmediateResponse: &extProcPb.ImmediateResponse{
-					Status: &envoyTypePb.HttpStatus{
-						Code: envoyTypePb.StatusCode_ServiceUnavailable,
-					},
-				},
-			},
-		}
+		code = envoyTypePb.StatusCode_ServiceUnavailable
 	// This code can be returned when users provide invalid json request.
 	case errutil.BadRequest:
-		resp = &extProcPb.ProcessingResponse{
-			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-				ImmediateResponse: &extProcPb.ImmediateResponse{
-					Status: &envoyTypePb.HttpStatus{
-						Code: envoyTypePb.StatusCode_BadRequest,
-					},
-				},
-			},
-		}
+		code = envoyTypePb.StatusCode_BadRequest
 	case errutil.BadConfiguration:
-		resp = &extProcPb.ProcessingResponse{
-			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-				ImmediateResponse: &extProcPb.ImmediateResponse{
-					Status: &envoyTypePb.HttpStatus{
-						Code: envoyTypePb.StatusCode_NotFound,
-					},
-				},
-			},
-		}
+		code = envoyTypePb.StatusCode_NotFound
 	default:
 		return nil, status.Errorf(status.Code(err), "failed to handle request: %v", err)
+	}
+
+	resp := &extProcPb.ProcessingResponse{
+		Response: &extProcPb.ProcessingResponse_ImmediateResponse{
+			ImmediateResponse: &extProcPb.ImmediateResponse{
+				Status: &envoyTypePb.HttpStatus{
+					Code: code,
+				},
+			},
+		},
 	}
 
 	if err.Error() != "" {
