@@ -212,9 +212,25 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
 			var parallelNsHdr, parallelPodHdr, parallelPortHdr string
+
 			// Run inference multiple times until one is scheduled on the other port
 			for range 30 {
 				parallelNsHdr, parallelPodHdr, parallelPortHdr = runCompletion(extraPrompt, modelName)
+				gomega.Expect(parallelNsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(parallelPodHdr).Should(gomega.Equal(decodePods[0]))
+				if parallelPortHdr != portHdr {
+					break
+				}
+			}
+			gomega.Expect(parallelPortHdr).ShouldNot(gomega.Equal(portHdr))
+
+			nsHdr, podHdr, portHdr = runChatCompletion(simplePrompt)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			// Run inference multiple times until one is scheduled on the other port
+			for range 30 {
+				parallelNsHdr, parallelPodHdr, parallelPortHdr = runChatCompletion(extraPrompt)
 				gomega.Expect(parallelNsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(parallelPodHdr).Should(gomega.Equal(decodePods[0]))
 				if parallelPortHdr != portHdr {
