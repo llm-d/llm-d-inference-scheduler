@@ -179,10 +179,10 @@ func createEnvoy() {
 	testutils.CreateObjsFromYaml(testConfig, manifests)
 }
 
-func createInferencePool(targets int, delete bool) {
+func createInferencePool(targets int, toDelete bool) {
 	poolName := modelName + "-inference-pool"
 
-	if delete {
+	if toDelete {
 		objName := []string{"inferencepool/" + poolName}
 		testutils.DeleteObjects(testConfig, objName)
 	}

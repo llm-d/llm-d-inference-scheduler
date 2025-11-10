@@ -25,7 +25,7 @@ const (
 	// simPdDeployment references the YAML file for the deployment
 	// running the vLLM simulator with PD
 	simPdDeployment = "./yaml/vllm-sim-pd.yaml"
-	// simDpDeployment references  the YAML fiel for the deployment
+	// simDpDeployment references  the YAML file for the deployment
 	// running the vLLM simulator with Data Parallel
 	simDpDeployment = "./yaml/vllm-sim-dp.yaml"
 
