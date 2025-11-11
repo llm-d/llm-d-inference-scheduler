@@ -32,6 +32,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libzmq3-dev pkg-config python3-dev
 
+      - name: Configure CGO for Python
+        run: |
+          PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
+          echo "CPATH=${PYTHON_INCLUDE}:${CPATH}" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "CGO_CFLAGS=$(python3-config --cflags --embed)" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=$(python3-config --ldflags --embed)" >> $GITHUB_ENV
+
       - name: Set PKG_CONFIG_PATH
         run: echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig" >> $GITHUB_ENV
 
@@ -43,6 +51,12 @@ jobs:
         with:
           version: 'v2.1.6'
           args: "--config=./.golangci.yml"
+        env:
+          CGO_ENABLED: ${{ env.CGO_ENABLED }}
+          CGO_CFLAGS: ${{ env.CGO_CFLAGS }}
+          CGO_LDFLAGS: ${{ env.CGO_LDFLAGS }}
+          CPATH: ${{ env.CPATH }}
+          PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
 
       - name: Run make test
         shell: bash 
