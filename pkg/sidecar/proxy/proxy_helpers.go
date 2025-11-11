@@ -10,23 +10,10 @@ import (
 	"net/url"
 	"syscall"
 	"time"
-
-	"github.com/go-logr/logr"
 )
 
-// BaseServer is the base reverse proxy server
-// It is extended for the main PD proxy server and the SimpleProxy for Data Parallel support
-type BaseServer struct {
-	logger             logr.Logger
-	addr               net.Addr     // the proxy TCP address
-	port               string       // the proxy TCP port
-	decoderURL         *url.URL     // the local decoder URL
-	handler            http.Handler // the handler function. either a Mux or a proxy
-	allowlistValidator *AllowlistValidator
-}
-
-// BaseStart starts the HTTP reverse proxy.
-func (s *BaseServer) BaseStart(ctx context.Context, cert *tls.Certificate) error {
+// startHTTP starts the HTTP reverse proxy.
+func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
 	// Start SSRF protection validator
 	if err := s.allowlistValidator.Start(ctx); err != nil {
 		s.logger.Error(err, "Failed to start allowlist validator")
@@ -97,7 +84,7 @@ func (s *BaseServer) BaseStart(ctx context.Context, cert *tls.Certificate) error
 }
 
 // Passthrough decoder handler
-func (s *BaseServer) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureSkipVerify bool) *httputil.ReverseProxy {
+func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureSkipVerify bool) *httputil.ReverseProxy {
 	decoderProxy := httputil.NewSingleHostReverseProxy(decoderURL)
 	if decoderURL.Scheme == "https" {
 		decoderProxy.Transport = &http.Transport{
@@ -118,20 +105,21 @@ func (s *BaseServer) createDecoderProxyHandler(decoderURL *url.URL, decoderInsec
 	decoderProxy.ErrorHandler = func(res http.ResponseWriter, _ *http.Request, err error) {
 
 		// Log errors from the decoder proxy
+		var writeError error
 		switch {
 		case errors.Is(err, syscall.ECONNREFUSED):
 			s.logger.Error(err, "failed to connect to vLLM decoder",
 				"decoderURL", s.decoderURL.String())
 			res.WriteHeader(http.StatusServiceUnavailable)
-			if _, err = res.Write([]byte(decoderServiceUnavailableResponseJSON)); err != nil {
-				s.logger.Error(err, "failed to send error response to client")
-			}
+			_, writeError = res.Write(decoderServiceUnavailableResponseJSON)
+
 		default:
 			s.logger.Error(err, "http: proxy error",
 				"decoderURL", s.decoderURL.String())
-			if err = errorBadGateway(err, res); err != nil {
-				s.logger.Error(err, "failed to send error response to client")
-			}
+			writeError = errorBadGateway(err, res)
+		}
+		if writeError != nil {
+			s.logger.Error(err, "failed to send error response to client")
 		}
 	}
 	return decoderProxy

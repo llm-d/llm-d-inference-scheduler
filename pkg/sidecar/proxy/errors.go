@@ -30,43 +30,43 @@ type errorResponse struct {
 	Code    int    `json:"code"`
 }
 
-const decoderServiceUnavailableResponseJSON = `{"object":"error","message":"The decode node is not ready. Please check that the vLLM service is running and the port configuration is correct.","type":"ServiceUnavailable","param":"","code":503}`
+var decoderServiceUnavailableResponseJSON []byte
+
+func init() {
+	response := errorResponse{
+		Object:  "error",
+		Message: "The decode node is not ready. Please check that the vLLM service is running and the port configuration is correct.",
+		Type:    "ServiceUnavailable",
+		Code:    http.StatusServiceUnavailable,
+	}
+	decoderServiceUnavailableResponseJSON, _ = json.Marshal(response)
+}
 
 func errorJSONInvalid(err error, w http.ResponseWriter) error {
-	// Simulate vLLM error
-
-	// Example:
-	//{
-	//	"object": "error",
-	//	"message": "[{'type': 'json_invalid', 'loc': ('body', 167), 'msg': 'JSON decode error', 'input': {}, 'ctx': {'error': 'Invalid control character at'}}]",
-	//	"type": "BadRequestError",
-	//	"param": null,
-	//	"code": 400
-	//  }
-
-	er := errorResponse{
-		Object:  "error",
-		Message: err.Error(),
-		Type:    "BadRequestError",
-		Code:    http.StatusBadRequest,
-	}
-
-	b, err := json.Marshal(er)
-	if err != nil {
-		return err
-	}
-
-	w.WriteHeader(http.StatusBadRequest)
-	_, err = w.Write(b)
-	return err
+	return sendError(err, "BadRequestError", http.StatusBadRequest, w)
 }
 
 func errorBadGateway(err error, w http.ResponseWriter) error {
+	return sendError(err, "BadGateway", http.StatusBadGateway, w)
+}
+
+// sendError simulates vLLM errors
+//
+// Example:
+//
+//	 {
+//		  "object": "error",
+//		  "message": "[{'type': 'json_invalid', 'loc': ('body', 167), 'msg': 'JSON decode error', 'input': {}, 'ctx': {'error': 'Invalid control character at'}}]",
+//		  "type": "BadRequestError",
+//		  "param": null,
+//		  "code": 400
+//	 }
+func sendError(err error, errorType string, code int, w http.ResponseWriter) error {
 	er := errorResponse{
 		Object:  "error",
 		Message: err.Error(),
-		Type:    "BadGateway",
-		Code:    http.StatusBadGateway,
+		Type:    errorType,
+		Code:    code,
 	}
 
 	b, err := json.Marshal(er)
@@ -74,7 +74,7 @@ func errorBadGateway(err error, w http.ResponseWriter) error {
 		return err
 	}
 
-	w.WriteHeader(http.StatusBadGateway)
+	w.WriteHeader(code)
 	_, err = w.Write(b)
 	return err
 }

@@ -129,6 +129,60 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			testutils.DeleteObjects(testConfig, modelServers)
 		})
 	})
+
+	ginkgo.When("Scaling up and down the model servers", func() {
+		ginkgo.It("should distribute inference requests across all model servers", func() {
+			modelServers := createModelServers(false, false, 1, 0, 0)
+
+			epp := createEndPointPicker(scaleConfig)
+
+			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
+			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
+
+			var nsHdr, podHdr string
+			for range 5 {
+				nsHdr, podHdr = runCompletion(simplePrompt, modelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+			}
+
+			scaleDeployment(modelServers, 1)
+
+			scaledUpPrefillPods, scaledUpDecodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(scaledUpPrefillPods).Should(gomega.BeEmpty())
+			gomega.Expect(scaledUpDecodePods).Should(gomega.HaveLen(2))
+
+			var scaledNsHdr, scaledPodHdr string
+			// Run inference multiple times until one is scheduled on the new pod
+			for range 30 {
+				scaledNsHdr, scaledPodHdr = runCompletion(extraPrompt, modelName)
+				gomega.Expect(scaledNsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(scaledPodHdr).Should(gomega.BeElementOf(scaledUpDecodePods))
+				if scaledPodHdr != podHdr {
+					break
+				}
+			}
+			gomega.Expect(scaledPodHdr).ShouldNot(gomega.Equal(podHdr))
+
+			scaleDeployment(modelServers, -1)
+
+			scaledDownPrefillPods, scaledDownDecodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(scaledDownPrefillPods).Should(gomega.BeEmpty())
+			gomega.Expect(scaledDownDecodePods).Should(gomega.HaveLen(1))
+			gomega.Expect(scaledDownDecodePods[0]).Should(gomega.BeElementOf(scaledUpDecodePods))
+
+			// Run multiple times and insure that they are scheduled on the remaining pod
+			for range 5 {
+				nsHdr, podHdr = runCompletion(simplePrompt, modelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.Equal(scaledDownDecodePods[0]))
+			}
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
 })
 
 // createModelServers creates the model server resources used for testing from the given filePaths.
@@ -151,7 +205,7 @@ func createModelServers(withPD, withKV bool, vllmReplicas, prefillReplicas, deco
 			"${MODEL_NAME_SAFE}":      theSafeModelName,
 			"${POOL_NAME}":            poolName,
 			"${KV_CACHE_ENABLED}":     strconv.FormatBool(withKV),
-			"${ROUTING_SIDECAR_TAG}":  routingSideCarTag,
+			"${SIDECAR_TAG}":          routingSideCarTag,
 			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(vllmReplicas),
 			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
@@ -340,4 +394,16 @@ schedulingProfiles:
   - pluginRef: max-score-picker
   - pluginRef: precise-prefix-cache-scorer
     weight: 10
+`
+
+// EPP configuration for running scale model server test
+const scaleConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: max-score-picker
 `

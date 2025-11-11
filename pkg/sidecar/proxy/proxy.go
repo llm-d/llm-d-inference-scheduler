@@ -19,11 +19,13 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 
+	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
@@ -73,13 +75,19 @@ type protocolRunner func(http.ResponseWriter, *http.Request, string)
 
 // Server is the reverse proxy server
 type Server struct {
-	BaseServer
+	logger               logr.Logger
+	addr                 net.Addr     // the proxy TCP address
+	port                 string       // the proxy TCP port
+	decoderURL           *url.URL     // the local decoder URL
+	handler              http.Handler // the handler function. either a Mux or a proxy
+	allowlistValidator   *AllowlistValidator
 	runConnectorProtocol protocolRunner // the handler for running the protocol
 	prefillerURLPrefix   string
 
 	decoderProxy        *httputil.ReverseProxy            // decoder proxy handler
 	prefillerProxies    *lru.Cache[string, http.Handler]  // cached prefiller proxy handlers
 	dataParallelProxies map[string]*httputil.ReverseProxy // Proxies to other vLLM servers
+	forwardDataParallel bool                              // Use special Data Parallel work around
 
 	config Config
 }
@@ -89,14 +97,13 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 	cache, _ := lru.New[string, http.Handler](16) // nolint:all
 
 	server := &Server{
-		BaseServer: BaseServer{
-			port:       port,
-			decoderURL: decodeURL,
-		},
+		port:                port,
+		decoderURL:          decodeURL,
 		prefillerProxies:    cache,
 		prefillerURLPrefix:  "http://",
 		config:              config,
 		dataParallelProxies: map[string]*httputil.ReverseProxy{},
+		forwardDataParallel: true,
 	}
 	switch config.Connector {
 	case ConnectorLMCache:
@@ -116,8 +123,7 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 
 // Start the HTTP reverse proxy.
 func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistValidator *AllowlistValidator) error {
-	logger := klog.FromContext(ctx).WithName("proxy server")
-	s.logger = logger
+	s.logger = klog.FromContext(ctx).WithName("proxy server on port " + s.port)
 
 	s.allowlistValidator = allowlistValidator
 
@@ -125,16 +131,31 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 	s.handler = s.createRoutes()
 
 	grp, ctx := errgroup.WithContext(ctx)
-
 	if err := s.startDataParallel(ctx, cert, grp); err != nil {
 		return err
 	}
 
 	grp.Go(func() error {
-		return s.BaseStart(ctx, cert)
+		return s.startHTTP(ctx, cert)
 	})
 
 	return grp.Wait()
+}
+
+// Clone returns a clone of the current Server struct
+func (s *Server) Clone() *Server {
+	return &Server{
+		addr:                 s.addr,
+		port:                 s.port,
+		decoderURL:           s.decoderURL,
+		handler:              s.handler,
+		allowlistValidator:   s.allowlistValidator,
+		runConnectorProtocol: s.runConnectorProtocol,
+		decoderProxy:         s.decoderProxy,
+		prefillerProxies:     s.prefillerProxies,
+		dataParallelProxies:  s.dataParallelProxies,
+		forwardDataParallel:  s.forwardDataParallel,
+	}
 }
 
 func (s *Server) createRoutes() *http.ServeMux {

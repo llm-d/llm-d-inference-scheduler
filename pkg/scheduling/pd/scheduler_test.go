@@ -247,7 +247,7 @@ func TestPDSchedule(t *testing.T) {
 			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
-			profileHandle := profile.NewPdProfileHandler(prefill, decode, prefixScorer.TypedName().Name, 10, 5)
+			profileHandle := profile.NewPdProfileHandler(prefill, decode, prefixScorer.TypedName().Name, 10, 5, 0)
 
 			schedulerConfig := scheduling.NewSchedulerConfig(profileHandle, map[string]*framework.SchedulerProfile{
 				prefill: prefillSchedulerProfile,

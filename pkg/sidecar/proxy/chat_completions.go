@@ -36,7 +36,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	if prefillPodHostPort == "" {
 		s.logger.V(4).Info("skip disaggregated prefill")
 
-		if !s.dataParallelHandler(w, r) {
+		if s.forwardDataParallel && !s.dataParallelHandler(w, r) {
 			s.decoderProxy.ServeHTTP(w, r)
 		}
 		return

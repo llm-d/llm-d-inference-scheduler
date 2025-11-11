@@ -8,10 +8,11 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
 
 const (

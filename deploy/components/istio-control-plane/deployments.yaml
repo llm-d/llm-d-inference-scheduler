@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     install.operator.istio.io/owning-resource: unknown
     istio: pilot
@@ -37,7 +37,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/name: istiod
         app.kubernetes.io/part-of: istio
-        app.kubernetes.io/version: 1.27.1
+        app.kubernetes.io/version: 1.28.0
         helm.sh/chart: istiod-1.27.1
         install.operator.istio.io/owning-resource: unknown
         istio: istiod
@@ -99,7 +99,7 @@ spec:
           value: ""
         - name: ENABLE_GATEWAY_API_INFERENCE_EXTENSION
           value: "true"
-        image: docker.io/istio/pilot:1.27.1
+        image: docker.io/istio/pilot:1.28.0
         name: discovery
         ports:
         - containerPort: 8080

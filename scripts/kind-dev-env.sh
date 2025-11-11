@@ -50,7 +50,7 @@ export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 : "${SIDECAR_IMAGE:=llm-d-routing-sidecar}"
 
 # Set the default routing side car image tag
-export ROUTING_SIDECAR_TAG="${ROUTING_SIDECAR_TAG:-dev}"
+export SIDECAR_TAG="${SIDECAR_TAG:-dev}"
 
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
@@ -71,6 +71,7 @@ export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
+PRIMARY_PORT="0"
 if [ "${PD_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
     DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
@@ -79,8 +80,11 @@ if [ "${PD_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; th
   fi
 else
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
-    if [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
+    if [ "${PD_ENABLED}" == "\"true\"" ]; then
       DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+      if [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
+        PRIMARY_PORT="8000"
+      fi
     else
       DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
     fi
@@ -91,6 +95,7 @@ else
 fi
 
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
+export PRIMARY_PORT
 
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks
@@ -190,9 +195,9 @@ fi
 
 # Load the sidecar image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${ROUTING_SIDECAR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+	podman save ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${SIDECAR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
-	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${ROUTING_SIDECAR_TAG}
+	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${SIDECAR_TAG}
 fi
 
 # ------------------------------------------------------------------------------
@@ -219,12 +224,17 @@ else
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
 fi
 
+TEMP_FILE=$(mktemp)
+# Ensure that the temporary file is deleted now matter what happens in the script
+trap "rm -f \"${TEMP_FILE}\"" EXIT
+
 kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
-kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${EPP_CONFIG}
+envsubst '$PRIMARY_PORT' < ${EPP_CONFIG} > ${TEMP_FILE}
+kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
-  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${ROUTING_SIDECAR_TAG} ${TARGET_PORTS} \
+  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_TAG} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 

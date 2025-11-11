@@ -6,7 +6,6 @@ on:
       - main
   pull_request:
     branches:
-      - dev
       - main
 
 jobs:
@@ -40,7 +39,7 @@ jobs:
         run: go mod tidy
 
       - name: Run lint checks
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: 'v2.1.6'
           args: "--config=./.golangci.yml"
@@ -49,12 +48,6 @@ jobs:
         shell: bash 
         run: |
           make test
-
-      - name: Archive code coverage results
-        uses: actions/upload-artifact@v5
-        with:
-          name: code-coverage
-          path: coverage-*.out # Make sure to use the same file name you chose for the "-coverprofile" in the "make test" step
 
       - name: Run make build
         shell: bash

@@ -11,10 +11,43 @@ import (
 	"github.com/onsi/gomega/gexec"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apilabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
+
+const (
+	deploymentKind = "deployment"
+)
+
+func scaleDeployment(objects []string, increment int) {
+	k8sCfg := config.GetConfigOrDie()
+	client, err := kubernetes.NewForConfig(k8sCfg)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	direction := "up"
+	absIncrement := increment
+	if increment < 0 {
+		direction = "down"
+		absIncrement = -increment
+	}
+
+	for _, kindAndName := range objects {
+		split := strings.Split(kindAndName, "/")
+		if strings.ToLower(split[0]) == deploymentKind {
+			ginkgo.By(fmt.Sprintf("Scaling the deployment %s %s by %d", split[1], direction, absIncrement))
+			scale, err := client.AppsV1().Deployments(nsName).GetScale(testConfig.Context, split[1], v1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			scale.Spec.Replicas += int32(increment)
+			_, err = client.AppsV1().Deployments(nsName).UpdateScale(testConfig.Context, split[1], scale, v1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+	}
+	podsInDeploymentsReady(objects)
+}
 
 // getModelServerPods Returns the list of Prefill and Decode vLLM pods separately
 func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string) ([]string, []string) {
@@ -73,11 +106,12 @@ func podsInDeploymentsReady(objects []string) {
 	var deployment appsv1.Deployment
 	helper := func(deploymentName string) bool {
 		err := testConfig.K8sClient.Get(testConfig.Context, types.NamespacedName{Namespace: nsName, Name: deploymentName}, &deployment)
-		return err == nil && deployment.Status.Replicas == deployment.Status.ReadyReplicas
+		return err == nil && *deployment.Spec.Replicas == deployment.Status.Replicas &&
+			deployment.Status.Replicas == deployment.Status.ReadyReplicas
 	}
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
-		if strings.ToLower(split[0]) == "deployment" {
+		if strings.ToLower(split[0]) == deploymentKind {
 			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
 			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
 		}

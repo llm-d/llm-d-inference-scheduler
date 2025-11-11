@@ -11,6 +11,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"golang.org/x/sync/errgroup"
+	"k8s.io/klog/v2"
 )
 
 // dataParallelHandler checks if Data Parallel handling is needed.
@@ -63,12 +64,21 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 	for idx := range s.config.DataParallelSize - 1 {
 		grp.Go(func() error {
 			rankPort := strconv.Itoa(basePort + idx + 1)
-			hostPort := net.JoinHostPort(podIP, rankPort)
-			handler := s.dataParallelProxies[hostPort]
+			decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
+			decoderURL, err := url.Parse(s.decoderURL.Scheme + "://localhost:" + decoderPort)
+			if err != nil {
+				return err
+			}
 
-			simpleProxy := NewSimpleProxy(rankPort, s.config.DecoderInsecureSkipVerify)
+			clone := s.Clone()
+			clone.logger = klog.FromContext(ctx).WithName("proxy server on port " + rankPort)
+			clone.port = rankPort
+			clone.decoderURL = decoderURL
+			clone.forwardDataParallel = false
+			// Configure handlers
+			clone.handler = clone.createRoutes()
 
-			return simpleProxy.Start(ctx, cert, s.allowlistValidator, handler)
+			return clone.startHTTP(ctx, cert)
 		})
 	}
 	return nil

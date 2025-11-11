@@ -102,7 +102,8 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	}
 
 	// 2. Forward request to prefiller
-	s.logger.V(5).Info("sending request to prefiller", "url", prefillPodHostPort, "body", string(pbody))
+	s.logger.V(4).Info("sending prefill request", "to", prefillPodHostPort)
+	s.logger.V(5).Info("Prefill request", "body", string(pbody))
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
@@ -167,5 +168,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	// 2. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	s.decoderProxy.ServeHTTP(w, dreq)
+	if s.forwardDataParallel && !s.dataParallelHandler(w, dreq) {
+		s.decoderProxy.ServeHTTP(w, dreq)
+	}
 }

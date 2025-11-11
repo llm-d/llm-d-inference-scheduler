@@ -60,7 +60,7 @@ spec:
     spec:
       initContainers:
       - name: routing-sidecar
-        image: ghcr.io/llm-d/llm-d-routing-sidecar:${ROUTING_SIDECAR_TAG}
+        image: ghcr.io/llm-d/llm-d-routing-sidecar:${SIDECAR_TAG}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8000"
