@@ -56,6 +56,20 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		}
 	}
 
+	if parameters.Threshold < 0 {
+		return nil, fmt.Errorf("invalid threshold: must be >= 0, got %d", parameters.Threshold)
+	}
+
+	if parameters.HashBlockSize <= 0 {
+		return nil, fmt.Errorf("invalid hashBlockSize: must be > 0, got %d", parameters.HashBlockSize)
+	}
+
+	if parameters.PrimaryPort != 0 {
+		if parameters.PrimaryPort < 1 || parameters.PrimaryPort > 65535 {
+			return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
+		}
+	}
+
 	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginName,
 		parameters.Threshold, parameters.HashBlockSize, parameters.PrimaryPort).WithName(name), nil
 }

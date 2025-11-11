@@ -38,6 +38,12 @@ func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessag
 		}
 	}
 
+	if parameters.PrimaryPort != 0 {
+		if parameters.PrimaryPort < 1 || parameters.PrimaryPort > 65535 {
+			return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
+		}
+	}
+
 	return NewDataParallelProfileHandler(parameters.PrimaryPort).WithName(name), nil
 }
 
