@@ -1,5 +1,7 @@
 // Package common contains items common to both the
 // EPP/Inference-Scheduler and the Routing Sidecar
+//
+//revive:disable:var-naming
 package common
 
 const (

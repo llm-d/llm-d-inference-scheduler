@@ -3,6 +3,7 @@
 FROM quay.io/projectquay/golang:1.25 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+ARG KVCACHE_MANAGER_VERSION=v0.3.2
 
 # Install build tools
 # The builder is based on UBI8, so we need epel-release-8.
@@ -23,10 +24,10 @@ COPY pkg/ pkg/
 COPY scripts/fetch-python-wrapper.sh scripts/fetch-python-wrapper.sh
 
 # Fetch requirements only (install in runtime)
-RUN curl -L https://raw.githubusercontent.com/llm-d/llm-d-kv-cache-manager/v0.3.2/pkg/preprocessing/chat_completions/requirements.txt -o /workspace/requirements.txt
+RUN curl -L https://raw.githubusercontent.com/llm-d/llm-d-kv-cache-manager/${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt -o /workspace/requirements.txt
 
 # Prepare Python wrapper file for runtime
-RUN scripts/fetch-python-wrapper.sh v0.3.2 /workspace/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions
+RUN scripts/fetch-python-wrapper.sh ${KVCACHE_MANAGER_VERSION} /workspace/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions
 
 # HuggingFace tokenizer bindings (static lib)
 RUN mkdir -p lib
