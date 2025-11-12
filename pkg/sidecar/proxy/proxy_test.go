@@ -120,9 +120,6 @@ var _ = Describe("Reverse Proxy", func() {
 	})
 
 	When("x-prefiller-url is present", func() {
-		var ctx context.Context
-		var cancelFn context.CancelFunc
-		var stoppedCh chan bool
 		var decodeBackend *httptest.Server
 		var decodeHandler *mock.ChatCompletionHandler
 		var prefillBackend *httptest.Server
@@ -130,10 +127,6 @@ var _ = Describe("Reverse Proxy", func() {
 		var decodeURL *url.URL
 
 		BeforeEach(func() {
-			_, ctx = ktesting.NewTestContext(GinkgoT())
-			ctx, cancelFn = context.WithCancel(ctx)
-			stoppedCh = make(chan bool)
-
 			// Decoder
 			decodeHandler = &mock.ChatCompletionHandler{
 				Role: mock.RoleDecode,
@@ -166,7 +159,10 @@ var _ = Describe("Reverse Proxy", func() {
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields (backward compatible behavior)", func() {
-				By("starting the proxy")
+				_, ctx := ktesting.NewTestContext(GinkgoT())
+				ctx, cancelFn := context.WithCancel(ctx)
+				stoppedCh := make(chan bool)
+
 				go func() {
 					defer GinkgoRecover()
 
@@ -237,7 +233,10 @@ var _ = Describe("Reverse Proxy", func() {
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields", func() {
-				By("starting the proxy")
+				_, ctx := ktesting.NewTestContext(GinkgoT())
+				ctx, cancelFn := context.WithCancel(ctx)
+				stoppedCh := make(chan bool)
+
 				go func() {
 					defer GinkgoRecover()
 

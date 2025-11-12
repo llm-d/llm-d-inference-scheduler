@@ -42,38 +42,39 @@ var _ = Describe("Data Parallel support", func() {
 			// and fake the first one by being the free port minus one.
 			rank1Handler := sidecarmock.GenericHandler{}
 			rank1Server := httptest.NewServer(&rank1Handler)
-			tempUrl, err := url.Parse(rank1Server.URL)
+			tempURL, err := url.Parse(rank1Server.URL)
 			Expect(err).ToNot(HaveOccurred())
-			tmpPort, err = strconv.Atoi(tempUrl.Port())
+			tmpPort, err = strconv.Atoi(tempURL.Port())
 			Expect(err).ToNot(HaveOccurred())
 			fakeDecodePort := tmpPort - 1
 
 			DeferCleanup(os.Setenv, "POD_IP", os.Getenv("POD_IP"))
-			os.Setenv("POD_IP", "127.0.0.1")
+			err = os.Setenv("POD_IP", "127.0.0.1")
+			Expect(err).ToNot(HaveOccurred())
 
-			decodeUrl, err := url.Parse("http://localhost:" + strconv.Itoa(fakeDecodePort))
+			decodeURL, err := url.Parse("http://localhost:" + strconv.Itoa(fakeDecodePort))
 			Expect(err).ToNot(HaveOccurred())
 			cfg := Config{
 				Connector:                 ConnectorNIXLV2,
 				DecoderInsecureSkipVerify: false,
 				DataParallelSize:          testDataParallelSize,
 			}
-			theProxy := NewProxy(strconv.Itoa(fakeProxyPort), decodeUrl, cfg)
+			theProxy := NewProxy(strconv.Itoa(fakeProxyPort), decodeURL, cfg)
 			theProxy.allowlistValidator, err = NewAllowlistValidator(false, "", "")
 			Expect(err).ToNot(HaveOccurred())
 
 			err = theProxy.startDataParallel(ctx, nil, grp)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(len(theProxy.dataParallelProxies)).To(Equal(testDataParallelSize))
+			Expect(theProxy.dataParallelProxies).To(HaveLen(testDataParallelSize))
 			handler := theProxy.dataParallelProxies["127.0.0.1:"+strconv.Itoa(fakeProxyPort+1)]
 			Expect(handler).ToNot(BeNil())
 
 			rank0Handler := sidecarmock.GenericHandler{}
 			rank0Server := httptest.NewServer(&rank0Handler)
-			tempUrl, err = url.Parse(rank0Server.URL)
+			tempURL, err = url.Parse(rank0Server.URL)
 			Expect(err).ToNot(HaveOccurred())
-			theProxy.decoderURL = tempUrl
+			theProxy.decoderURL = tempURL
 
 			proxyHandler := theProxy.createRoutes()
 			req := httptest.NewRequest("POST", "/v1/completions", nil)
@@ -92,7 +93,8 @@ var _ = Describe("Data Parallel support", func() {
 			rank1Server.Close()
 
 			cancel()
-			grp.Wait()
+			err = grp.Wait()
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 })
