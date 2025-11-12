@@ -43,6 +43,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 			validator := &AllowlistValidator{enabled: false}
 			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
+
+			testInfo.stoppedCh <- true
 		}()
 
 		time.Sleep(1 * time.Second)
@@ -97,5 +99,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
+
+		testInfo.cancelFn()
+		<-testInfo.stoppedCh
 	})
 })

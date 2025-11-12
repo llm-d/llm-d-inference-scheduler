@@ -61,7 +61,7 @@ var _ = Describe("Reverse Proxy", func() {
 				proxy := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
 
 				ctx, cancelFn := context.WithCancel(ctx)
-				defer cancelFn()
+				stoppedCh := make(chan bool)
 
 				go func() {
 					defer GinkgoRecover()
@@ -69,6 +69,7 @@ var _ = Describe("Reverse Proxy", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := proxy.Start(ctx, cert, validator)
 					Expect(err).ToNot(HaveOccurred())
+					stoppedCh <- true
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -99,6 +100,9 @@ var _ = Describe("Reverse Proxy", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(resp.StatusCode).To(BeNumerically("==", 200))
+
+				cancelFn()
+				<-stoppedCh
 			},
 
 			Entry("when the path is /v1/chat/completions and secure proxy is false", "/v1/chat/completions", false),
@@ -117,6 +121,8 @@ var _ = Describe("Reverse Proxy", func() {
 
 	When("x-prefiller-url is present", func() {
 		var ctx context.Context
+		var cancelFn context.CancelFunc
+		var stoppedCh chan bool
 		var decodeBackend *httptest.Server
 		var decodeHandler *mock.ChatCompletionHandler
 		var prefillBackend *httptest.Server
@@ -125,6 +131,8 @@ var _ = Describe("Reverse Proxy", func() {
 
 		BeforeEach(func() {
 			_, ctx = ktesting.NewTestContext(GinkgoT())
+			ctx, cancelFn = context.WithCancel(ctx)
+			stoppedCh = make(chan bool)
 
 			// Decoder
 			decodeHandler = &mock.ChatCompletionHandler{
@@ -165,6 +173,7 @@ var _ = Describe("Reverse Proxy", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
+					stoppedCh <- true
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -222,6 +231,9 @@ var _ = Describe("Reverse Proxy", func() {
 
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteBlockIDs))
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteEngineID))
+
+				cancelFn()
+				<-stoppedCh
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields", func() {
@@ -232,6 +244,7 @@ var _ = Describe("Reverse Proxy", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
+					stoppedCh <- true
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -289,6 +302,9 @@ var _ = Describe("Reverse Proxy", func() {
 
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteBlockIDs))
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteEngineID))
+
+				cancelFn()
+				<-stoppedCh
 			})
 		})
 	})

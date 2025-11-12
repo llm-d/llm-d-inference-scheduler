@@ -35,6 +35,8 @@ import (
 
 type sidecarTestInfo struct {
 	ctx            context.Context
+	cancelFn       context.CancelFunc
+	stoppedCh      chan bool
 	decodeBackend  *httptest.Server
 	decodeHandler  *mock.ChatCompletionHandler
 	prefillBackend *httptest.Server
@@ -60,6 +62,8 @@ var _ = Describe("Common Connector tests", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
+
+					testInfo.stoppedCh <- true
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -104,6 +108,9 @@ var _ = Describe("Common Connector tests", func() {
 
 				// The decode request should have the original max_completion_tokens value
 				Expect(decodeReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 100)))
+
+				testInfo.cancelFn()
+				<-testInfo.stoppedCh
 			})
 
 			// Regression test for commit bb181d6: Ensure max_completion_tokens is handled when not provided
@@ -117,6 +124,8 @@ var _ = Describe("Common Connector tests", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
+
+					testInfo.stoppedCh <- true
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -160,6 +169,9 @@ var _ = Describe("Common Connector tests", func() {
 
 				// The decode request should not have max_completion_tokens if it wasn't in the original request
 				Expect(decodeReq).ToNot(HaveKey("max_completion_tokens"))
+
+				testInfo.cancelFn()
+				<-testInfo.stoppedCh
 			})
 		})
 	}
@@ -169,6 +181,8 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	testInfo := sidecarTestInfo{}
 
 	_, testInfo.ctx = ktesting.NewTestContext(GinkgoT())
+	testInfo.ctx, testInfo.cancelFn = context.WithCancel(testInfo.ctx)
+	testInfo.stoppedCh = make(chan bool)
 
 	// Decoder
 	testInfo.decodeHandler = &mock.ChatCompletionHandler{
