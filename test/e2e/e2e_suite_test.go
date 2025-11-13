@@ -54,7 +54,7 @@ const (
 )
 
 var (
-	port string = env.GetEnvString("W@E_PORT", "30080", ginkgo.GinkgoLogr)
+	port string = env.GetEnvString("E2E_PORT", "30080", ginkgo.GinkgoLogr)
 
 	testConfig *testutils.TestConfig
 
