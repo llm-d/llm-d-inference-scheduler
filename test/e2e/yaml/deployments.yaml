@@ -18,13 +18,13 @@ spec:
       terminationGracePeriodSeconds: 130
       containers:
       - name: epp
-        image: ghcr.io/llm-d/llm-d-inference-scheduler:${EPP_TAG}
+        image: ${EPP_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - --pool-name
         - ${POOL_NAME}
         - --pool-namespace
-        - "default"
+        - ${NAMESPACE}
         - --v
         - "4"
         - --zap-encoder
