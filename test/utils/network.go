@@ -12,7 +12,9 @@ func GetFreePort() (string, error) {
 	if listener, err = net.Listen("tcp", ":0"); err == nil {
 		var port string
 		_, port, err = net.SplitHostPort(listener.Addr().String())
-		defer listener.Close()
+		defer func() {
+			_ = listener.Close()
+		}()
 		return port, err
 	}
 	return "", err
