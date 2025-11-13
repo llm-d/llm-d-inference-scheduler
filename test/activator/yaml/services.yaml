@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: granite-3-8b-epp
+spec:
+  selector:
+    inferencepool: granite-3-8b-epp
+  ports:
+  - name: grpc-ext-proc
+    port: 9002
+    protocol: TCP
+    targetPort: 9002
+  - name: http-metrics
+    port: 9090
+    protocol: TCP
+    targetPort: 9090
+  type: ClusterIP
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: granite-3-8b-activator
+spec:
+  selector:
+    app: granite-3-8b-activator
+  ports:
+  - name: grpc-ext-proc
+    port: 9002
+    protocol: TCP
+    targetPort: 9002
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    networking.istio.io/service-type: NodePort
+  labels:
+    gateway.istio.io/managed: istio.io-gateway-controller
+    gateway.networking.k8s.io/gateway-name: sza
+  name: sza-istio
+spec:
+  ports:
+  - appProtocol: tcp
+    name: status-port
+    nodePort: 30868
+    port: 15021
+    protocol: TCP
+    targetPort: 15021
+  - appProtocol: http
+    name: http
+    nodePort: 30080
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    gateway.networking.k8s.io/gateway-name: sza
+  sessionAffinity: None
+  type: NodePort

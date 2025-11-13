@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: granite-3-8b-activator
+spec:
+  selector:
+    matchLabels:
+      app: granite-3-8b-activator
+  template:
+    metadata:
+      labels:
+        app: granite-3-8b-activator
+    spec:
+      containers:
+      - name: activator
+        image: ${IMAGE_REGISTRY}/${IMAGE}:${TAG}
+        imagePullPolicy: IfNotPresent
+        args:
+        - --pool-name
+        - granite-3-8b-epp
+        - --pool-namespace
+        - default
+        - --pool-group
+        - inference.networking.x-k8s.io
+        - --zap-encoder
+        - json
+        - --v
+        - "2"
+        ports:
+        - containerPort: 9002
+          name: grpc
+          protocol: TCP
+        - containerPort: 9003
+          name: grpc-health
+          protocol: TCP
+      serviceAccountName: activator

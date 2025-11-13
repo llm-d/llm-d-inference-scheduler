@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: granite-3-8b
+spec:
+  replicas: 0 # for scale from zero
+  selector:
+    matchLabels:
+      llm-d.ai/model: "granite-3-8b"
+      llm-d.ai/inferenceServing: "true"
+  template:
+    metadata:
+      labels:
+        llm-d.ai/model: "granite-3-8b"
+        llm-d.ai/inferenceServing: "true"
+    spec:
+      containers:
+      - args:
+        - --model
+        - granite/granite-3-8b-instruct
+        - --port
+        - "8000"
+        image: ${IMAGE_REGISTRY}/${IMAGE}:${TAG}
+        imagePullPolicy: IfNotPresent
+        name: vllm-sim
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+             path: /health
+             port: 8000
+          initialDelaySeconds: 10 # simulate vllm startup time (optimized)
+          periodSeconds: 5
