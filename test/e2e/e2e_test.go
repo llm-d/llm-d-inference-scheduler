@@ -267,11 +267,11 @@ func createModelServers(withPD, withKV, withDP bool, vllmReplicas, prefillReplic
 			"${MODEL_NAME_SAFE}":      theSafeModelName,
 			"${POOL_NAME}":            poolName,
 			"${KV_CACHE_ENABLED}":     strconv.FormatBool(withKV),
-			"${SIDECAR_TAG}":          routingSideCarTag,
+			"${SIDECAR_IMAGE}":        sideCarImage,
 			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(vllmReplicas),
 			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
-			"${VLLM_SIMULATOR_TAG}":   vllmSimTag,
+			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
 		})
 
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
@@ -300,7 +300,7 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_TAG}":   eppTag,
+			"${EPP_IMAGE}": eppImage,
 			"${POOL_NAME}": modelName + "-inference-pool",
 		})
 
