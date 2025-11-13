@@ -43,7 +43,7 @@ var (
 var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 	ginkgo.When("Running simple non-PD configuration", func() {
 		ginkgo.It("should run successfully", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running a PD configuration", func() {
 		ginkgo.It("should run successfully", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			prefillReplicas := 1
 			decodeReplicas := 4
@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running simple non-PD KV enabled configuration", func() {
 		ginkgo.It("should run successfully", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			epp := createEndPointPicker(kvConfig)
 
@@ -141,7 +141,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Scaling up and down the model servers", func() {
 		ginkgo.It("should distribute inference requests across all model servers", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
@@ -197,7 +197,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running a vLLM Data Parallel configuration", func() {
 		ginkgo.It("should schedule inference on all ranks", func() {
-			createInferencePool(2, true)
+			infPoolObjects = createInferencePool(2, true)
 
 			modelServers := createModelServers(false, false, true, 1, 0, 0)
 
