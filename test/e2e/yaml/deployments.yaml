@@ -24,7 +24,7 @@ spec:
         - --pool-name
         - ${POOL_NAME}
         - --pool-namespace
-        - "default"
+        - ${NAMESPACE}
         - --v
         - "4"
         - --zap-encoder
