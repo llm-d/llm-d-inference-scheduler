@@ -61,6 +61,9 @@ var (
 	eppTag            = env.GetEnvString("EPP_TAG", "dev", ginkgo.GinkgoLogr)
 	vllmSimTag        = env.GetEnvString("VLLM_SIMULATOR_TAG", "dev", ginkgo.GinkgoLogr)
 	routingSideCarTag = env.GetEnvString("SIDECAR_TAG", "dev", ginkgo.GinkgoLogr)
+	eppImage         = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
+	vllmSimImage     = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:dev", ginkgo.GinkgoLogr)
+	sideCarImage     = env.GetEnvString("SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:dev", ginkgo.GinkgoLogr)
 
 	readyTimeout = env.GetEnvDuration("READY_TIMEOUT", defaultReadyTimeout, ginkgo.GinkgoLogr)
 	interval     = defaultInterval
@@ -114,9 +117,9 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	kindLoadImage("ghcr.io/llm-d/llm-d-inference-sim:" + vllmSimTag)
-	kindLoadImage("ghcr.io/llm-d/llm-d-inference-scheduler:" + eppTag)
-	kindLoadImage("ghcr.io/llm-d/llm-d-routing-sidecar:" + routingSideCarTag)
+	kindLoadImage(vllmSimImage)
+	kindLoadImage(eppImage)
+	kindLoadImage(sideCarImage)
 }
 
 func kindLoadImage(image string) {

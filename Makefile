@@ -8,19 +8,22 @@ TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
 PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
+VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-simulator
 SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 export EPP_TAG
-IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
+export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
 export SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
-SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
+export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 NAMESPACE ?= hc4ai-operator
 VLLM_SIMULATOR_TAG ?= v0.6.1
 export VLLM_SIMULATOR_TAG
+VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
+export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
 
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
@@ -57,8 +60,8 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 SRC = $(shell find . -type f -name '*.go')
 
 # Internal variables for generic targets
-epp_IMAGE = $(IMG)
-sidecar_IMAGE = $(SIDECAR_IMG)
+epp_IMAGE = $(EPP_IMAGE)
+sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
 epp_LDFLAGS = -ldflags="$(LDFLAGS)"
@@ -185,7 +188,7 @@ uninstall: uninstall-docker ## Default uninstall using Docker
 .PHONY: install-docker
 install-docker: check-container-tool ## Install app using $(CONTAINER_RUNTIME)
 	@echo "Starting container with $(CONTAINER_RUNTIME)..."
-	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(IMG)
+	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(EPP_IMAGE)
 	@echo "$(CONTAINER_RUNTIME) installation complete."
 	@echo "To use $(PROJECT_NAME), run:"
 	@echo "alias $(PROJECT_NAME)='$(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"
@@ -271,7 +274,7 @@ uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 .PHONY: env
 env: ## Print environment variables
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
-	@echo "IMG=$(IMG)"
+	@echo "EPP_IMAGE=$(EPP_IMAGE)"
 	@echo "CONTAINER_RUNTIME=$(CONTAINER_RUNTIME)"
 
 .PHONY: check-typos
