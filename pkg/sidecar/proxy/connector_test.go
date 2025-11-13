@@ -36,7 +36,7 @@ import (
 type sidecarTestInfo struct {
 	ctx            context.Context
 	cancelFn       context.CancelFunc
-	stoppedCh      chan bool
+	stoppedCh      chan struct{}
 	decodeBackend  *httptest.Server
 	decodeHandler  *mock.ChatCompletionHandler
 	prefillBackend *httptest.Server
@@ -63,7 +63,7 @@ var _ = Describe("Common Connector tests", func() {
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 
-					testInfo.stoppedCh <- true
+					testInfo.stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -125,7 +125,7 @@ var _ = Describe("Common Connector tests", func() {
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 
-					testInfo.stoppedCh <- true
+					testInfo.stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -182,7 +182,7 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 
 	_, testInfo.ctx = ktesting.NewTestContext(GinkgoT())
 	testInfo.ctx, testInfo.cancelFn = context.WithCancel(testInfo.ctx)
-	testInfo.stoppedCh = make(chan bool)
+	testInfo.stoppedCh = make(chan struct{})
 
 	// Decoder
 	testInfo.decodeHandler = &mock.ChatCompletionHandler{

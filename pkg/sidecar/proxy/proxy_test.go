@@ -61,7 +61,7 @@ var _ = Describe("Reverse Proxy", func() {
 				proxy := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
 
 				ctx, cancelFn := context.WithCancel(ctx)
-				stoppedCh := make(chan bool)
+				stoppedCh := make(chan struct{})
 
 				go func() {
 					defer GinkgoRecover()
@@ -69,7 +69,7 @@ var _ = Describe("Reverse Proxy", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := proxy.Start(ctx, cert, validator)
 					Expect(err).ToNot(HaveOccurred())
-					stoppedCh <- true
+					stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -161,7 +161,7 @@ var _ = Describe("Reverse Proxy", func() {
 			It("should successfully send request to 1. prefill 2. decode with the right fields (backward compatible behavior)", func() {
 				_, ctx := ktesting.NewTestContext(GinkgoT())
 				ctx, cancelFn := context.WithCancel(ctx)
-				stoppedCh := make(chan bool)
+				stoppedCh := make(chan struct{})
 
 				go func() {
 					defer GinkgoRecover()
@@ -169,7 +169,7 @@ var _ = Describe("Reverse Proxy", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
-					stoppedCh <- true
+					stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -235,7 +235,7 @@ var _ = Describe("Reverse Proxy", func() {
 			It("should successfully send request to 1. prefill 2. decode with the right fields", func() {
 				_, ctx := ktesting.NewTestContext(GinkgoT())
 				ctx, cancelFn := context.WithCancel(ctx)
-				stoppedCh := make(chan bool)
+				stoppedCh := make(chan struct{})
 
 				go func() {
 					defer GinkgoRecover()
@@ -243,7 +243,7 @@ var _ = Describe("Reverse Proxy", func() {
 					validator := &AllowlistValidator{enabled: false}
 					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
-					stoppedCh <- true
+					stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)

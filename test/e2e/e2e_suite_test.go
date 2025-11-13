@@ -179,7 +179,7 @@ func createEnvoy() {
 	testutils.CreateObjsFromYaml(testConfig, manifests)
 }
 
-func createInferencePool(targets int, toDelete bool) {
+func createInferencePool(numTargetPorts int, toDelete bool) {
 	poolName := modelName + "-inference-pool"
 
 	if toDelete {
@@ -189,7 +189,7 @@ func createInferencePool(targets int, toDelete bool) {
 
 	infPoolYaml := testutils.ReadYaml(inferExtManifest)
 	targetPorts := ""
-	for idx := range targets {
+	for idx := range numTargetPorts {
 		targetPorts += fmt.Sprintf("\n  - number: %d", 8000+idx)
 	}
 	infPoolYaml = substituteMany(infPoolYaml,

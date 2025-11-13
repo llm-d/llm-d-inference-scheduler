@@ -44,7 +44,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 
-			testInfo.stoppedCh <- true
+			testInfo.stoppedCh <- struct{}{}
 		}()
 
 		time.Sleep(1 * time.Second)

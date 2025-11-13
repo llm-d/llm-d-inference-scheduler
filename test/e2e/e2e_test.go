@@ -22,12 +22,12 @@ const (
 	// simDeployment references the YAML file for the deployment
 	// running the vLLM simulator without PD
 	simDeployment = "./yaml/vllm-sim.yaml"
-	// simPdDeployment references the YAML file for the deployment
+	// simPDDeployment references the YAML file for the deployment
 	// running the vLLM simulator with PD
-	simPdDeployment = "./yaml/vllm-sim-pd.yaml"
-	// simDpDeployment references  the YAML file for the deployment
+	simPDDeployment = "./yaml/vllm-sim-pd.yaml"
+	// simDPDeployment references  the YAML file for the deployment
 	// running the vLLM simulator with Data Parallel
-	simDpDeployment = "./yaml/vllm-sim-dp.yaml"
+	simDPDeployment = "./yaml/vllm-sim-dp.yaml"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
@@ -255,9 +255,9 @@ func createModelServers(withPD, withKV, withDP bool, vllmReplicas, prefillReplic
 	}
 	yaml := simDeployment
 	if withPD {
-		yaml = simPdDeployment
+		yaml = simPDDeployment
 	} else if withDP {
-		yaml = simDpDeployment
+		yaml = simDPDeployment
 	}
 
 	manifests := testutils.ReadYaml(yaml)
