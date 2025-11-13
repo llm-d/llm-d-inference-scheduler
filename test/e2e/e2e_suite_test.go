@@ -12,7 +12,10 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
+	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	k8slog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -48,8 +51,6 @@ const (
 	serviceAccountManifest = "./yaml/service-accounts.yaml"
 	// servicesManifest is the manifest for the EPP's service resources.
 	servicesManifest = "./yaml/services.yaml"
-	// nsName is the namespace in which the K8S objects will be created
-	nsName = "default"
 )
 
 var (
@@ -64,6 +65,9 @@ var (
 	eppImage         = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
 	vllmSimImage     = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:dev", ginkgo.GinkgoLogr)
 	sideCarImage     = env.GetEnvString("SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:dev", ginkgo.GinkgoLogr)
+
+	// nsName is the namespace in which the K8S objects will be created
+	nsName = env.GetEnvString("NAMESPACE", "default", ginkgo.GinkgoLogr)
 
 	readyTimeout = env.GetEnvDuration("READY_TIMEOUT", defaultReadyTimeout, ginkgo.GinkgoLogr)
 	interval     = defaultInterval
@@ -82,6 +86,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	setupK8sCluster()
 	testConfig = testutils.NewTestConfig(nsName)
 	setupK8sClient()
+	setupNameSpace()
 	createCRDs()
 	createEnvoy()
 	testutils.ApplyYAMLFile(testConfig, rbacManifest)
@@ -168,6 +173,28 @@ func setupK8sClient() {
 	testConfig.CreateCli()
 
 	k8slog.SetLogger(ginkgo.GinkgoLogr)
+}
+
+// setupNameSpace sets up the specified namespace if it doesn't exist
+func setupNameSpace() {
+	if nsName == "default" {
+		return
+	}
+	_, err := testConfig.KubeCli.CoreV1().Namespaces().Get(testConfig.Context, nsName, metav1.GetOptions{})
+	if err == nil {
+		return
+	}
+	gomega.Expect(errors.IsNotFound(err)).To(gomega.BeTrue())
+
+	ginkgo.By("Creating namespace " + nsName)
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nsName,
+		},
+	}
+	_, err = testConfig.KubeCli.CoreV1().Namespaces().Create(testConfig.Context, namespace, metav1.CreateOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	createdNameSpace = true
 }
 
 // createCRDs creates the Inference Extension CRDs used for testing.

@@ -301,6 +301,7 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
 			"${EPP_IMAGE}": eppImage,
+			"${NAMESPACE}": nsName,
 			"${POOL_NAME}": modelName + "-inference-pool",
 		})
 
