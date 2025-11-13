@@ -9,32 +9,39 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      pull-requests: write
     steps:
-      - name: 'Mark stale issues'
+      - name: 'Mark stale issues and PRs'
         uses: actions/stale@v10
         with:
           days-before-issue-stale: 90
-          days-before-pr-stale: -1
+          days-before-pr-stale: 21
           days-before-close: -1
           stale-issue-label: 'lifecycle/stale'
           exempt-issue-labels: 'lifecycle/rotten'
           stale-issue-message: 'This issue is marked as stale after 90d of inactivity. After an additional 30d of inactivity, it will be closed. To prevent this issue from being closed, add a comment or remove the `lifecycle/stale` label.'
+          stale-pr-label: 'lifecycle/stale'
+          exempt-pr-labels: 'lifecycle/rotten'
+          stale-pr-message: 'This PR is marked as stale after 21d of inactivity. After an additional 14d of inactivity, it will be closed. To prevent this PR from being closed, add a comment or remove the `lifecycle/stale` label.'
 
-      - name: 'Mark rotten issues'
+      - name: 'Mark items rotten'
         uses: actions/stale@v10
         with:
-          days-before-issue-stale: 30
-          days-before-pr-stale: -1
+          days-before-issue-stale: 15
+          days-before-pr-stale: 7
           days-before-close: -1
           stale-issue-label: 'lifecycle/rotten'
+          stale-pr-label: 'lifecycle/rotten'
           only-labels: 'lifecycle/stale'
           labels-to-remove-when-stale: 'lifecycle/stale'
 
-      - name: 'Close rotten issues'
+      - name: 'Close rotten items'
         uses: actions/stale@v10
         with:
           days-before-stale: -1
-          days-before-issue-close: 30
-          days-before-pr-close: -1
+          days-before-issue-close: 15
+          days-before-pr-close: 7
           stale-issue-label: 'lifecycle/rotten'
           stale-issue-message: 'This issue is being closed after 120d of inactivity.'
+          stale-pr-label: 'lifecycle/rotten'
+          stale-pr-message: 'This PR is being closed after 5w of inactivity.'
