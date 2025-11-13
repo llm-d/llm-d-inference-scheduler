@@ -44,4 +44,4 @@ jobs:
           stale-issue-label: 'lifecycle/rotten'
           stale-issue-message: 'This issue is being closed after 120d of inactivity.'
           stale-pr-label: 'lifecycle/rotten'
-          stale-pr-message: 'This PR is being closed after 5w of inactivity.'
+          stale-pr-message: 'This PR is being closed after 35d of inactivity.'
