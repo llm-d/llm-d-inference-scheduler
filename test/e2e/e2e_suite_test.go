@@ -54,7 +54,7 @@ const (
 )
 
 var (
-	port string
+	port string = env.GetEnvString("W@E_PORT", "30080", ginkgo.GinkgoLogr)
 
 	testConfig *testutils.TestConfig
 
@@ -81,8 +81,6 @@ func TestEndToEnd(t *testing.T) {
 }
 
 var _ = ginkgo.BeforeSuite(func() {
-	port = "30080"
-
 	setupK8sCluster()
 	testConfig = testutils.NewTestConfig(nsName)
 	setupK8sClient()
