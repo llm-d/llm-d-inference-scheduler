@@ -79,6 +79,8 @@ var (
 	serviceObjects        []string
 	infPoolObjects        []string
 	createdNameSpace      bool
+
+	portForwardSession *gexec.Session
 )
 
 func TestEndToEnd(t *testing.T) {
@@ -108,6 +110,10 @@ var _ = ginkgo.BeforeSuite(func() {
 var _ = ginkgo.AfterSuite(func() {
 	if k8sContext != "" {
 		// Used an existing Kubernetes context
+		// Stop port-forward
+		if portForwardSession != nil {
+			portForwardSession.Terminate()
+		}
 
 		// cleanup created objects
 		ginkgo.By("Deleting created Kubernetes objects")
@@ -237,6 +243,23 @@ func createEnvoy() {
 	manifests = substituteMany(manifests, map[string]string{"${NAMESPACE}": nsName})
 	ginkgo.By("Creating envoy proxy resources from manifest: " + envoyManifest)
 	envoyObjects = testutils.CreateObjsFromYaml(testConfig, manifests)
+
+	if k8sContext != "" {
+		envoyName := ""
+		for _, obj := range envoyObjects {
+			splitObj := strings.Split(obj, "/")
+			if strings.ToLower(splitObj[0]) == "deployment" {
+				envoyName = splitObj[1]
+			}
+		}
+		gomega.Expect(envoyName).ToNot(gomega.BeEmpty())
+
+		command := exec.Command("kubectl", "port-forward", "deployment/"+envoyName, port+":8081",
+			"--context="+k8sContext, "--namespace="+nsName)
+		var err error
+		portForwardSession, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	}
 }
 
 func createInferencePool(numTargetPorts int, toDelete bool) []string {
