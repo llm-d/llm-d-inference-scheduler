@@ -223,6 +223,51 @@ Filters out pods using a standard Kubernetes label selector.
 - **Parameters**: A standard Kubernetes label selector.
   - `matchLabels`: map of `{key,value}` pairs. If more than one pair are in the map, all of the keys are checked and the results are combined with AND logic.
 
+Example configuration with the above parameters set:
+
+```yaml
+plugins:
+  - type: by-label-selector
+    parameters:
+      matchLabels:
+        inference-role: decode
+        hardware-type: H100
+```
+
+In this example:
+- Only pods that have **both** labels  
+  `inference-role=decode` **and** `hardware-type=H100`  
+  will be selected.
+- Pods missing either label, or having a different value (e.g., `inference-role=prefill`), are **filtered out**.
+- The matching logic follows standard Kubernetes label selector semantics: all key-value pairs in `matchLabels` must match (**AND** logic).
+
+---
+
+#### ByLabel
+
+Filters out pods that do not have a specific label with one of the allowed values. Pods missing the label are either filtered out or retained based on the `allowsNoLabel` setting.
+
+- **Type**: `by-label`  
+- **Parameters**:
+  - `label` (string, required): The name of the Kubernetes label to inspect on each pod.
+  - `validValues` (list of strings, required unless `allowsNoLabel=true`): A list of acceptable label values. A pod is kept if its label value matches any entry in this list.
+  - `allowsNoLabel` (boolean, optional, default: `false`): If `true`, pods that **do not have the specified label at all** will be **included** in the candidate set. If `false` (default), such pods are filtered out.
+
+Example configuration with the above parameters set:
+
+```yaml
+plugins:
+  - type: by-label
+    parameters:
+      label: "inference-role"
+      validValues: ["decode", "both"]
+      allowsNoLabel: false
+```
+
+In this example:
+- Only pods labeled for decoding (`inference-role=decode`) or supporting both stages (`inference-role=both`) are selected.
+- Pods missing the `inference-role` label are not considered for decode scheduling.
+
 ---
 
 #### DecodeFilter
