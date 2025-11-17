@@ -29,6 +29,22 @@ import (
 	"time"
 )
 
+var (
+	sglangBootstrapPort int
+)
+
+func init() {
+	// Default SGLang bootstrap port
+	sglangBootstrapPort = 8998
+
+	// Override from environment variable if set
+	if portStr := os.Getenv("SGLANG_BOOTSTRAP_PORT"); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			sglangBootstrapPort = port
+		}
+	}
+}
+
 func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.V(4).Info("running SGLang protocol", "url", prefillPodHostPort)
 
@@ -36,15 +52,6 @@ func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefi
 	requestData, err := s.parseSGLangRequest(r)
 
 	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
-		}
-		return
-	}
-
-	// Validate prefill host
-	if prefillPodHostPort == "" {
-		err := fmt.Errorf("prefill host required for SGLang P/D disaggregation")
 		if err := errorJSONInvalid(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -73,18 +80,21 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	prefillReq := cloneWithJSONBody(r, body)
 	decodeReq := cloneWithJSONBody(r, body)
 
+	prefillHandler, err := s.prefillerProxyHandler(prefillHost)
+	if err != nil {
+		if err := errorBadGateway(err, w); err != nil {
+			s.logger.Error(err, "failed to send error response to client")
+		}
+		return
+	}
+
 	// Send prefill request asynchronously
 	go func() {
-		prefillHandler, err := s.prefillerProxyHandler(prefillHost)
-		if err != nil {
-			s.logger.Error(err, "failed to get prefiller proxy handler", "prefill_host", prefillHost)
-			return
-		}
 		pw := &bufferedResponseWriter{}
-
 		prefillHandler.ServeHTTP(pw, prefillReq)
 		s.logger.V(5).Info("prefill request completed", "status", pw.statusCode)
 	}()
+
 	// Send decode request synchronously
 	s.decoderProxy.ServeHTTP(w, decodeReq)
 }
@@ -140,12 +150,6 @@ func (s *Server) getBootstrapHost(prefillHostPort string) (string, int) {
 	// Extract hostname from prefill host
 	parts := strings.Split(prefillHostPort, ":")
 	hostname := parts[0]
-	// Get bootstrap port from environment variable
-	bootstrapPort := 8998 // Default SGLang bootstrap port
-	if portStr := os.Getenv("SGLANG_BOOTSTRAP_PORT"); portStr != "" {
-		if port, err := strconv.Atoi(portStr); err == nil {
-			bootstrapPort = port
-		}
-	}
-	return hostname, bootstrapPort
+
+	return hostname, sglangBootstrapPort
 }
