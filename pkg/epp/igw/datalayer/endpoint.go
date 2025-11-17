@@ -48,11 +48,20 @@ type ModelServer struct {
 	attributes *Attributes
 }
 
-// NewEndpoint return a new (uninitialized) ModelServer.
-func NewEndpoint() *ModelServer {
-	return &ModelServer{
+// NewEndpoint returns a new ModelServer with the given PodInfo and Metrics.
+func NewEndpoint(pod *PodInfo, metrics *Metrics) *ModelServer {
+	if pod == nil {
+		pod = &PodInfo{}
+	}
+	if metrics == nil {
+		metrics = NewMetrics()
+	}
+	ep := &ModelServer{
 		attributes: NewAttributes(),
 	}
+	ep.UpdatePod(pod)
+	ep.UpdateMetrics(metrics)
+	return ep
 }
 
 // String returns a representation of the ModelServer. For brevity, only names of
