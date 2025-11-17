@@ -113,16 +113,16 @@ func (s *Server) addSGLangBootstrapInfo(requestData map[string]interface{}, pref
 	}
 
 	// Generate bootstrap host from prefill host
-	bootstrapHost, bootstrapPort := s.getBootstrapHost(prefillHostPort)
+	bootstrapHost := s.getBootstrapHost(prefillHostPort)
 
 	// Add bootstrap information
 	modifiedRequest[requestFieldBootstrapHost] = bootstrapHost
-	modifiedRequest[requestFieldBootstrapPort] = bootstrapPort
+	modifiedRequest[requestFieldBootstrapPort] = sglangBootstrapPort
 	modifiedRequest[requestFieldBootstrapRoom] = roomID
 
 	s.logger.V(5).Info("bootstrap info added",
 		"bootstrap_host", bootstrapHost,
-		"bootstrap_port", bootstrapPort,
+		"bootstrap_port", sglangBootstrapPort,
 		"bootstrap_room", roomID)
 
 	return modifiedRequest
@@ -146,10 +146,8 @@ func (s *Server) generateSGLangRoomID() int64 {
 	return time.Now().UnixNano() + int64(rand.Intn(1000))
 }
 
-func (s *Server) getBootstrapHost(prefillHostPort string) (string, int) {
+func (s *Server) getBootstrapHost(prefillHostPort string) string {
 	// Extract hostname from prefill host
 	parts := strings.Split(prefillHostPort, ":")
-	hostname := parts[0]
-
-	return hostname, sglangBootstrapPort
+	return parts[0]
 }
