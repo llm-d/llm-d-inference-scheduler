@@ -18,10 +18,8 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"net/url"
 	"os"
-	"strings"
 
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -77,7 +75,7 @@ func main() {
 		}
 	}
 	if !isValidConnector {
-		logger.Info(fmt.Sprintf("Error: --connector must be one of: %s", strings.Join(supportedConnectors, ", ")))
+		logger.Info("Error: --connector must be one of: nixlv2, lmcache, sglang")
 		return
 	}
 	logger.Info("p/d connector validated", "connector", connector)
