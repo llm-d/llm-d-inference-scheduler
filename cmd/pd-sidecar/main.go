@@ -75,7 +75,7 @@ func main() {
 		}
 	}
 	if !isValidConnector {
-		logger.Info("Error: --connector must be one of: nixlv2, lmcache, sglang")
+		logger.Info("Error: --connector must be one of: " + strings.Join(supportedConnectors, ", "))
 		return
 	}
 	logger.Info("p/d connector validated", "connector", connector)
