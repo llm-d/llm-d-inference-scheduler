@@ -41,7 +41,7 @@ func main() {
 	port := flag.String("port", "8000", "the port the sidecar is listening on")
 	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
 	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
-	connector := flag.String("connector", "nixlv2", "the P/D connector being used. Either nixl, nixlv2, lmcache, or sglang")
+	connector := flag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
 	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
 	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
 	prefillerInsecureSkipVerify := flag.Bool("prefiller-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to prefiller")
