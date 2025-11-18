@@ -1,0 +1,20 @@
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: granite-3-8b-epp
+  annotations:
+    activator.llm-d.ai/scale-from-zero-grace-period: "${GRACE_PERIOD}"
+    activator.llm-d.ai/target-apiversion: ${API_VERSION}
+    activator.llm-d.ai/target-kind: ${KIND}
+    activator.llm-d.ai/target-name: ${NAME}
+spec:
+  extensionRef:
+    failureMode: FailClose
+    group: ""
+    kind: Service
+    name: granite-3-8b-epp
+    portNumber: 9002
+  selector:
+    lm-d.ai/model: "granite-3-8b"
+    llm-d.ai/inferenceServing: "true"
+  targetPortNumber: 8000
