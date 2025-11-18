@@ -1,11 +1,17 @@
 package filter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
 
 func TestByLabelFactory(t *testing.T) {
@@ -127,6 +133,129 @@ func TestByLabelFactoryInvalidJSON(t *testing.T) {
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
+		})
+	}
+}
+
+// Helper functions
+func createPod(nsn k8stypes.NamespacedName, ipaddr string, labels map[string]string) types.Pod {
+	return &types.PodMetrics{
+		Pod: &backend.Pod{
+			NamespacedName: nsn,
+			Address:        ipaddr,
+			Labels:         labels,
+		},
+		MetricsState: &backendmetrics.MetricsState{},
+	}
+}
+
+func TestByLabelFiltering(t *testing.T) {
+	pods := []types.Pod{
+		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-1"},
+			"10.0.0.1",
+			map[string]string{
+				"app":     "nginx",
+				"version": "v1.0",
+				"tier":    "frontend",
+			}),
+		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-2"},
+			"10.0.0.2",
+			map[string]string{
+				"app":     "nginx",
+				"version": "v1.1",
+				"tier":    "frontend",
+			}),
+		createPod(k8stypes.NamespacedName{Namespace: "kube-system", Name: "coredns-1"},
+			"10.0.0.3",
+			map[string]string{
+				"app":  "coredns",
+				"tier": "system",
+			}),
+		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "redis-1"},
+			"10.0.0.4",
+			map[string]string{
+				"app":        "redis",
+				"tier":       "backend",
+				"deprecated": "true",
+			}),
+		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "web-1"},
+			"10.0.0.5",
+			map[string]string{
+				"app":         "web",
+				"tier":        "frontend",
+				"environment": "production",
+			}),
+		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "no-tier-pod"},
+			"10.0.0.6",
+			map[string]string{
+				"app": "unknown",
+			}),
+	}
+
+	tests := []struct {
+		testName      string
+		label         string
+		validValues   []string
+		allowsNoLabel bool
+		expectedPods  []string // pod names that should match
+	}{
+		{
+			testName:      "match app nginx",
+			label:         "app",
+			validValues:   []string{"nginx"},
+			expectedPods:  []string{"nginx-1", "nginx-2"},
+			allowsNoLabel: false,
+		},
+		{
+			testName:      "match exact version v1.0",
+			label:         "version",
+			validValues:   []string{"v1.0"},
+			expectedPods:  []string{"nginx-1"},
+			allowsNoLabel: false,
+		},
+		{
+			testName:      "allow pods without 'tier' label",
+			label:         "tier",
+			allowsNoLabel: true,
+			expectedPods:  []string{"no-tier-pod"}, // only "no-tier-pod" doesn't have a "tier" label
+		},
+		{
+			testName:      "allow all known tier values",
+			label:         "tier",
+			validValues:   []string{"frontend", "backend", "system"},
+			allowsNoLabel: false,
+			expectedPods:  []string{"nginx-1", "nginx-2", "coredns-1", "redis-1", "web-1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.testName, func(t *testing.T) {
+			rawParams, err := json.Marshal(byLabelParameters{
+				Label:         tt.label,
+				ValidValues:   tt.validValues,
+				AllowsNoLabel: tt.allowsNoLabel,
+			})
+			require.NoError(t, err)
+
+			plugin, err := ByLabelFactory("test-label", rawParams, nil)
+			require.NoError(t, err)
+			require.NotNil(t, plugin)
+
+			blf, ok := plugin.(*ByLabel)
+			require.True(t, ok, "plugin should be of type *ByLabel")
+
+			ctx := context.Background()
+			filteredPods := blf.Filter(ctx, nil, nil, pods)
+
+			var actualPodNames []string
+			for _, pod := range filteredPods {
+				actualPodNames = append(actualPodNames, pod.GetPod().NamespacedName.Name)
+			}
+
+			assert.ElementsMatch(t, tt.expectedPods, actualPodNames,
+				"filtered pods should match expected pods")
+			assert.Len(t, filteredPods, len(tt.expectedPods),
+				"filtered pods count should match expected count")
 		})
 	}
 }
