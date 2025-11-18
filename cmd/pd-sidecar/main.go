@@ -20,6 +20,7 @@ import (
 	"flag"
 	"net/url"
 	"os"
+	"strings"
 
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
