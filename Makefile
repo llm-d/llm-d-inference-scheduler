@@ -3,6 +3,8 @@ include Makefile.tools.mk
 
 SHELL := /usr/bin/env bash
 
+UNAME_S := $(shell uname -s)
+
 # Defaults
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
@@ -59,6 +61,43 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
+LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
+
+##@ Python Configuration
+
+PYTHON_VERSION := 3.12
+
+# Unified Python configuration detection. This block runs once.
+# It prioritizes python-config, then pkg-config, for reliability.
+ifeq ($(UNAME_S),Darwin)
+    # macOS: Find Homebrew's python-config script for the most reliable flags.
+    BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
+    PYTHON_CONFIG := $(BREW_PREFIX)/bin/python$(PYTHON_VERSION)-config
+    PYTHON_ERROR := "Could not execute 'python$(PYTHON_VERSION)-config' from Homebrew. Please ensure Python is installed correctly with: 'brew install python@$(PYTHON_VERSION)'"
+else ifeq ($(UNAME_S),Linux)
+    # Linux: Use standard system tools to find flags.
+    PYTHON_CONFIG := $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
+    PYTHON_ERROR := "Python $(PYTHON_VERSION) development headers not found. Please install with: 'sudo apt install python$(PYTHON_VERSION)-dev' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"
+else
+    $(error "Unsupported OS: $(UNAME_S)")
+endif
+
+ifneq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
+    PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
+    # Use --ldflags --embed to get all necessary flags for linking
+    PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
+else ifneq ($(shell pkg-config --cflags python-$(PYTHON_VERSION) 2>/dev/null),)
+    # Fallback to pkg-config
+    PYTHON_CFLAGS := $(shell pkg-config --cflags python-$(PYTHON_VERSION))
+    PYTHON_LDFLAGS := $(shell pkg-config --libs python-$(PYTHON_VERSION))
+else
+	$(error ${PYTHON_ERROR})
+endif
+
+# CGO flags with all dependencies
+CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
+CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
+
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
@@ -66,6 +105,10 @@ epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
 epp_LDFLAGS = -ldflags="$(LDFLAGS)"
 sidecar_LDFLAGS =
+epp_CGO_CFLAGS = "${CGO_CFLAGS}"
+sidecar_CGO_CFLAGS =
+epp_CGO_LDFLAGS = "${CGO_LDFLAGS}"
+sidecar_CGO_LDFLAGS =
 epp_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/
 sidecar_TEST_FILES = go list ./pkg/sidecar/...
 
@@ -75,7 +118,6 @@ help: ## Print help
 
 ##@ Tokenizer & Linking
 
-LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
 CGO_ENABLED=1
 TOKENIZER_LIB = lib/libtokenizers.a
 # Extract RELEASE_VERSION from Dockerfile
@@ -112,7 +154,7 @@ test-unit: test-unit-epp test-unit-sidecar
 .PHONY: test-unit-%
 test-unit-%: download-tokenizer install-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
+	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-integration
 test-integration: download-tokenizer install-dependencies ## Run integration tests
@@ -132,7 +174,7 @@ post-deploy-test: ## Run post deployment tests
 .PHONY: lint
 lint: check-golangci-lint check-typos ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	golangci-lint run
+	CGO_CFLAGS="${CGO_CFLAGS}" golangci-lint run
 	$(TYPOS)
 
 ##@ Build
