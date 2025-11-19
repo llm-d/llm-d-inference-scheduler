@@ -41,79 +41,59 @@ import (
 
 var (
 	poolForRewrite = utiltest.MakeInferencePool("test-pool1").Namespace("ns1").ObjRef()
-	rewrite1       = makeInferenceModelRewrite("rewrite1").
-			Namespace(poolForRewrite.Namespace).
-			PoolName(poolForRewrite.Name).
-			CreationTimestamp(metav1.Unix(1000, 0)).
-			ObjRef()
-	rewrite1Pool2 = makeInferenceModelRewrite(rewrite1.Name).
-			Namespace(rewrite1.Namespace).
-			PoolName("test-pool2").
-			CreationTimestamp(metav1.Unix(1001, 0)).
-			ObjRef()
-	rewrite1Updated = makeInferenceModelRewrite(rewrite1.Name).
-			Namespace(rewrite1.Namespace).
-			PoolName(poolForRewrite.Name).
-			CreationTimestamp(metav1.Unix(1003, 0)).
-			Rules([]v1alpha2.InferenceModelRewriteRule{{}}).
-			ObjRef()
-	rewrite1Deleted = makeInferenceModelRewrite(rewrite1.Name).
-			Namespace(rewrite1.Namespace).
-			PoolName(poolForRewrite.Name).
-			CreationTimestamp(metav1.Unix(1004, 0)).
-			DeletionTimestamp().
-			ObjRef()
-	rewrite2 = makeInferenceModelRewrite("rewrite2").
-			Namespace(poolForRewrite.Namespace).
-			PoolName(poolForRewrite.Name).
-			CreationTimestamp(metav1.Unix(1000, 0)).
-			ObjRef()
-)
-
-type inferenceModelRewriteBuilder struct {
-	*v1alpha2.InferenceModelRewrite
-}
-
-func makeInferenceModelRewrite(name string) *inferenceModelRewriteBuilder {
-	return &inferenceModelRewriteBuilder{
-		&v1alpha2.InferenceModelRewrite{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
+	rewrite1       = &v1alpha2.InferenceModelRewrite{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "rewrite1",
+			Namespace:         poolForRewrite.Namespace,
+			CreationTimestamp: metav1.Unix(1000, 0),
+		},
+		Spec: v1alpha2.InferenceModelRewriteSpec{
+			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
 		},
 	}
-}
-
-func (b *inferenceModelRewriteBuilder) Namespace(ns string) *inferenceModelRewriteBuilder {
-	b.ObjectMeta.Namespace = ns
-	return b
-}
-
-func (b *inferenceModelRewriteBuilder) PoolName(name string) *inferenceModelRewriteBuilder {
-	b.Spec.PoolRef = &v1alpha2.PoolObjectReference{}
-	b.Spec.PoolRef.Name = v1alpha2.ObjectName(name)
-	return b
-}
-
-func (b *inferenceModelRewriteBuilder) CreationTimestamp(t metav1.Time) *inferenceModelRewriteBuilder {
-	b.ObjectMeta.CreationTimestamp = t
-	return b
-}
-
-func (b *inferenceModelRewriteBuilder) DeletionTimestamp() *inferenceModelRewriteBuilder {
-	now := metav1.Now()
-	b.ObjectMeta.DeletionTimestamp = &now
-	return b
-}
-
-func (b *inferenceModelRewriteBuilder) Rules(rules []v1alpha2.InferenceModelRewriteRule) *inferenceModelRewriteBuilder {
-	b.Spec.Rules = rules
-	return b
-}
-
-func (b *inferenceModelRewriteBuilder) ObjRef() *v1alpha2.InferenceModelRewrite {
-	return b.InferenceModelRewrite
-}
+	rewrite1Pool2 = &v1alpha2.InferenceModelRewrite{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              rewrite1.Name,
+			Namespace:         rewrite1.Namespace,
+			CreationTimestamp: metav1.Unix(1001, 0),
+		},
+		Spec: v1alpha2.InferenceModelRewriteSpec{
+			PoolRef: &v1alpha2.PoolObjectReference{Name: "test-pool2"},
+		},
+	}
+	rewrite1Updated = &v1alpha2.InferenceModelRewrite{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              rewrite1.Name,
+			Namespace:         rewrite1.Namespace,
+			CreationTimestamp: metav1.Unix(1003, 0),
+		},
+		Spec: v1alpha2.InferenceModelRewriteSpec{
+			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
+			Rules:   []v1alpha2.InferenceModelRewriteRule{{}},
+		},
+	}
+	rewrite1Deleted = &v1alpha2.InferenceModelRewrite{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              rewrite1.Name,
+			Namespace:         rewrite1.Namespace,
+			CreationTimestamp: metav1.Unix(1004, 0),
+			DeletionTimestamp: &metav1.Time{Time: time.Now()},
+		},
+		Spec: v1alpha2.InferenceModelRewriteSpec{
+			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
+		},
+	}
+	rewrite2 = &v1alpha2.InferenceModelRewrite{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "rewrite2",
+			Namespace:         poolForRewrite.Namespace,
+			CreationTimestamp: metav1.Unix(1001, 0),
+		},
+		Spec: v1alpha2.InferenceModelRewriteSpec{
+			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
+		},
+	}
+)
 
 func TestInferenceModelRewriteReconciler(t *testing.T) {
 	tests := []struct {
