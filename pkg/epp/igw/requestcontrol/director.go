@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"sort"
 	"strings"
 	"time"
 
@@ -51,7 +50,7 @@ type Datastore interface {
 	PoolGet() (*datalayer.EndpointPool, error)
 	ObjectiveGet(objectiveName string) *v1alpha2.InferenceObjective
 	PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics
-	RewriteGetAll() []*v1alpha2.InferenceModelRewrite
+	RewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule
 }
 
 // Scheduler defines the interface required by the Director for scheduling.
@@ -195,25 +194,11 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 }
 
 func (d *Director) applyWeightedModelRewrite(reqCtx *handlers.RequestContext) {
-	rewrites := d.datastore.RewriteGetAll()
-	if len(rewrites) == 0 {
+	rewriteRule := d.datastore.RewriteGet(reqCtx.IncomingModelName)
+	if rewriteRule == nil {
 		return
 	}
-
-	sort.Slice(rewrites, func(i, j int) bool {
-		return rewrites[i].CreationTimestamp.Before(&rewrites[j].CreationTimestamp)
-	})
-
-	for _, rewrite := range rewrites {
-		for _, rule := range rewrite.Spec.Rules {
-			for _, match := range rule.Matches {
-				if match.Model != nil && match.Model.Value == reqCtx.IncomingModelName {
-					reqCtx.TargetModelName = d.selectWeightedModel(rule.Targets)
-					return
-				}
-			}
-		}
-	}
+	reqCtx.TargetModelName = d.selectWeightedModel(rewriteRule.Targets)
 }
 
 func (d *Director) selectWeightedModel(models []v1alpha2.TargetModel) string {

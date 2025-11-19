@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sort"
 	"testing"
 	"time"
 
@@ -168,8 +169,32 @@ func (m mockProducedDataType) Clone() datalayer.Cloneable {
 	return mockProducedDataType{value: m.value}
 }
 
-func (ds *mockDatastore) RewriteGetAll() []*v1alpha2.InferenceModelRewrite {
-	return ds.rewrites
+func (ds *mockDatastore) RewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule {
+	// This mock implementation simulates the precedence logic for simplicity.
+	// It finds the oldest rewrite that has a rule matching the modelName.
+	var matchingRewrites []*v1alpha2.InferenceModelRewrite
+	for _, r := range ds.rewrites {
+		for _, rule := range r.Spec.Rules {
+			for _, match := range rule.Matches {
+				if match.Model != nil && match.Model.Value == modelName {
+					matchingRewrites = append(matchingRewrites, r)
+					break // break inner loop
+				}
+			}
+		}
+	}
+
+	if len(matchingRewrites) == 0 {
+		return nil
+	}
+
+	// Sort by timestamp to find the oldest.
+	sort.Slice(matchingRewrites, func(i, j int) bool {
+		return matchingRewrites[i].CreationTimestamp.Before(&matchingRewrites[j].CreationTimestamp)
+	})
+
+	// Return the first rule from the oldest rewrite.
+	return &matchingRewrites[0].Spec.Rules[0]
 }
 
 func TestDirector_HandleRequest(t *testing.T) {
@@ -224,7 +249,6 @@ func TestDirector_HandleRequest(t *testing.T) {
 			},
 		},
 	}
-	
 
 	pool := &v1.InferencePool{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
@@ -636,6 +660,9 @@ func TestDirector_HandleRequest(t *testing.T) {
 			}
 			config = config.WithAdmissionPlugins(newMockAdmissionPlugin("test-admit-plugin", test.admitRequestDenialError))
 			director := NewDirectorWithConfig(ds, mockSched, test.mockAdmissionController, config)
+			if test.name == "successful request with model rewrite" {
+				director.datastore = &mockDatastore{pods: ds.PodList(backendmetrics.AllPodsPredicate), rewrites: []*v1alpha2.InferenceModelRewrite{rewrite}}
+			}
 
 			reqCtx := &handlers.RequestContext{
 				Request: &handlers.Request{
