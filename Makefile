@@ -3,8 +3,6 @@ include Makefile.tools.mk
 
 SHELL := /usr/bin/env bash
 
-UNAME_S := $(shell uname -s)
-
 # Defaults
 TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
@@ -69,27 +67,23 @@ PYTHON_VERSION := 3.12
 
 # Unified Python configuration detection. This block runs once.
 # It prioritizes python-config, then pkg-config, for reliability.
-ifeq ($(UNAME_S),Darwin)
+ifeq ($(TARGETOS),darwin)
     # macOS: Find Homebrew's python-config script for the most reliable flags.
     BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
     PYTHON_CONFIG := $(BREW_PREFIX)/bin/python$(PYTHON_VERSION)-config
     PYTHON_ERROR := "Could not execute 'python$(PYTHON_VERSION)-config' from Homebrew. Please ensure Python is installed correctly with: 'brew install python@$(PYTHON_VERSION)'"
-else ifeq ($(UNAME_S),Linux)
+else ifeq ($(TARGETOS),linux)
     # Linux: Use standard system tools to find flags.
     PYTHON_CONFIG := $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
     PYTHON_ERROR := "Python $(PYTHON_VERSION) development headers not found. Please install with: 'sudo apt install python$(PYTHON_VERSION)-dev' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"
 else
-    $(error "Unsupported OS: $(UNAME_S)")
+    $(error "Unsupported OS: $(TARGETOS)")
 endif
 
 ifneq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
     PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
     # Use --ldflags --embed to get all necessary flags for linking
     PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
-else ifneq ($(shell pkg-config --cflags python-$(PYTHON_VERSION) 2>/dev/null),)
-    # Fallback to pkg-config
-    PYTHON_CFLAGS := $(shell pkg-config --cflags python-$(PYTHON_VERSION))
-    PYTHON_LDFLAGS := $(shell pkg-config --libs python-$(PYTHON_VERSION))
 else
 	$(error ${PYTHON_ERROR})
 endif
