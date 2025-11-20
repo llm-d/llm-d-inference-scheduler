@@ -10,7 +10,6 @@ import (
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
 	"golang.org/x/sync/errgroup"
-	"k8s.io/klog/v2/ktesting"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	sidecarmock "github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
@@ -24,7 +23,7 @@ const (
 var _ = Describe("Data Parallel support", func() {
 	When("configured with --data-parallel-size > 1", func() {
 		It("should create an extra proxy", func() {
-			_, ctx := ktesting.NewTestContext(GinkgoT())
+			ctx := newTestContext()
 			ctx, cancel := context.WithCancel(ctx)
 			grp, ctx := errgroup.WithContext(ctx)
 
