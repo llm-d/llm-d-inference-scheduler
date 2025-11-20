@@ -23,8 +23,9 @@ import (
 	"strconv"
 	"strings"
 
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
@@ -58,14 +59,15 @@ func main() {
 	inferencePoolName := flag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
 	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 
-	klog.InitFlags(nil)
+	opts := zap.Options{}
+	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
 	flag.Parse()
 
-	// make sure to flush logs before exiting
-	defer klog.Flush()
+	logger := zap.New(zap.UseFlagOptions(&opts))
+	log.SetLogger(logger)
 
 	ctx := ctrl.SetupSignalHandler()
-	logger := klog.FromContext(ctx)
+	log.IntoContext(ctx, logger)
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
