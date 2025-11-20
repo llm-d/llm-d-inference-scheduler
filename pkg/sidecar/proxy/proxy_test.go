@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -41,7 +40,7 @@ func newTestContext() context.Context {
 		zap.WriteTo(GinkgoWriter),
 		zap.UseDevMode(true),
 	)
-	ctrllog.SetLogger(logger)
+	log.SetLogger(logger)
 	ctx := context.Background()
 	log.IntoContext(ctx, logger) // not strictly needed since we called SetLogger to set default
 	return ctx
