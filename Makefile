@@ -84,7 +84,7 @@ ifneq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
     # Use --ldflags --embed to get all necessary flags for linking
     PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
 else
-	$(error ${PYTHON_ERROR})
+    $(error ${PYTHON_ERROR})
 endif
 
 # CGO flags with all dependencies
