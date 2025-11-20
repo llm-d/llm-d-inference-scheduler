@@ -5,7 +5,7 @@ Documentation for developing the inference scheduler.
 ## Requirements
 
 - [Make] `v4`+
-- [Golang] `v1.24`+
+- [Golang] `v1.25`+
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
 - [Kustomize]

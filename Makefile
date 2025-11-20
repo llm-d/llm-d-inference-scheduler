@@ -358,7 +358,7 @@ check-ginkgo:
 .PHONY: check-golangci-lint
 check-golangci-lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
-	  echo "❌ golangci-lint is not installed. Install from https://golangci-lint.run/usage/install/"; exit 1; }
+	  echo "❌ golangci-lint is not installed. Install from https://golangci-lint.run/docs/welcome/install/"; exit 1; }
 
 .PHONY: check-kustomize
 check-kustomize:

@@ -1,7 +1,5 @@
-// Package utils contains utilities for testing
-//
-//revive:disable:var-naming
-package utils
+// Package testnet contains network utilities for testing
+package testnet
 
 //revive:enable:var-naming
 
