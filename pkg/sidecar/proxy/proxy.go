@@ -29,7 +29,7 @@ import (
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
-	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -141,7 +141,7 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 
 // Start the HTTP reverse proxy.
 func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistValidator *AllowlistValidator) error {
-	s.logger = klog.FromContext(ctx).WithName("proxy server on port " + s.port)
+	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
 
 	s.allowlistValidator = allowlistValidator
 
