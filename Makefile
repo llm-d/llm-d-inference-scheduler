@@ -66,7 +66,6 @@ LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
 PYTHON_VERSION := 3.12
 
 # Unified Python configuration detection. This block runs once.
-# It prioritizes python-config, then pkg-config, for reliability.
 ifeq ($(TARGETOS),darwin)
     # macOS: Find Homebrew's python-config script for the most reliable flags.
     BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
