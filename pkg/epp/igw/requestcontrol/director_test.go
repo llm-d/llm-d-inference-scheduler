@@ -32,8 +32,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
@@ -46,6 +46,7 @@ import (
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+	poolutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pool"
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 	testutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
 )
@@ -89,7 +90,7 @@ type mockDatastore struct {
 	pods []backendmetrics.PodMetrics
 }
 
-func (ds *mockDatastore) PoolGet() (*v1.InferencePool, error) {
+func (ds *mockDatastore) PoolGet() (*datalayer.EndpointPool, error) {
 	return nil, nil
 }
 func (ds *mockDatastore) ObjectiveGet(_ string) *v1alpha2.InferenceObjective {
@@ -190,14 +191,6 @@ func TestDirector_HandleRequest(t *testing.T) {
 		CreationTimestamp(metav1.Unix(1000, 0)).
 		Priority(1).
 		ObjRef()
-
-	// Datastore setup
-	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
-	ds := datastore.NewDatastore(t.Context(), pmf, 0)
-	ds.ObjectiveSet(ioFoodReview)
-	ds.ObjectiveSet(ioFoodReviewResolve)
-	ds.ObjectiveSet(ioFoodReviewSheddable)
-
 	pool := &v1.InferencePool{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
 		Spec: v1.InferencePoolSpec{
@@ -210,10 +203,18 @@ func TestDirector_HandleRequest(t *testing.T) {
 		},
 	}
 
+	// Datastore setup
+	pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
+	ds := datastore.NewDatastore(t.Context(), pmf, 0)
+	ds.ObjectiveSet(ioFoodReview)
+	ds.ObjectiveSet(ioFoodReviewResolve)
+	ds.ObjectiveSet(ioFoodReviewSheddable)
+
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	if err := ds.PoolSet(ctx, fakeClient, pool); err != nil {
+
+	if err := ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(pool)); err != nil {
 		t.Fatalf("Error while setting inference pool: %v", err)
 	}
 
@@ -754,8 +755,9 @@ func TestGetRandomPod(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Millisecond)
+			endpointPool := poolutil.InferencePoolToEndpointPool(pool)
 			ds := datastore.NewDatastore(t.Context(), pmf, 0)
-			err := ds.PoolSet(t.Context(), fakeClient, pool)
+			err := ds.PoolSet(t.Context(), fakeClient, endpointPool)
 			if err != nil {
 				t.Errorf("unexpected error setting pool: %s", err)
 			}

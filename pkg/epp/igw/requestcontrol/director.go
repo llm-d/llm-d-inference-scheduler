@@ -27,8 +27,6 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
@@ -49,7 +47,7 @@ const (
 
 // Datastore defines the interface required by the Director.
 type Datastore interface {
-	PoolGet() (*v1.InferencePool, error)
+	PoolGet() (*datalayer.EndpointPool, error)
 	ObjectiveGet(objectiveName string) *v1alpha2.InferenceObjective
 	PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics
 }
