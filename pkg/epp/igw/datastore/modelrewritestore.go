@@ -24,39 +24,39 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 )
 
-// ModelRewriteStore encapsulates the logic for storing and retrieving
+// modelRewriteStore encapsulates the logic for storing and retrieving
 // InferenceModelRewrite rules, handling precedence correctly. This struct is not
 // thread-safe; concurrency must be managed by its consumer.
-type ModelRewriteStore struct {
+type modelRewriteStore struct {
 	genericRules           []*rewriteRuleWithMetadata
 	rulesByExactModelMatch map[string][]*rewriteRuleWithMetadata
-	allReWrites            map[types.NamespacedName]*v1alpha2.InferenceModelRewrite
+	allReWrites            map[string]*v1alpha2.InferenceModelRewrite
 }
 
-func NewModelRewriteStore() *ModelRewriteStore {
-	return &ModelRewriteStore{
+func newModelRewriteStore() *modelRewriteStore {
+	return &modelRewriteStore{
 		genericRules:           []*rewriteRuleWithMetadata{},
-		rulesByExactModelMatch: map[string][]*rewriteRuleWithMetadata{},
-		allReWrites:            map[types.NamespacedName]*v1alpha2.InferenceModelRewrite{},
+		rulesByExactModelMatch: map[string][]*rewriteRuleWithMetadata{},      // Key is the exact model name.
+		allReWrites:            map[string]*v1alpha2.InferenceModelRewrite{}, // Key is the rewrites name.
 	}
 }
 
-// Set adds or updates an InferenceModelRewrite in the store. It deconstructs the
+// set adds or updates an InferenceModelRewrite in the store. It deconstructs the
 // object into individual rules and stores them in the appropriate data structures,
 // ensuring they remain sorted by precedence.
-func (ms *ModelRewriteStore) Set(infModelRewrite *v1alpha2.InferenceModelRewrite) {
-	nn := getNN(infModelRewrite)
-
+func (ms *modelRewriteStore) set(infModelRewrite *v1alpha2.InferenceModelRewrite) {
+	name := infModelRewrite.Name
 	// If the rewrite object already exists, remove its old rules before adding new ones.
-	if _, ok := ms.allReWrites[nn]; ok {
-		ms.deleteInternal(nn)
+	if _, ok := ms.allReWrites[name]; ok {
+		ms.deleteInternal(infModelRewrite.Name)
 	}
-	ms.allReWrites[nn] = infModelRewrite
+	ms.allReWrites[name] = infModelRewrite
 
 	for i := range infModelRewrite.Spec.Rules {
-		ruleWithMetadata := newRuleWithMetadata(infModelRewrite, i)
-		if ruleWithMetadata == nil {
-			continue
+		ruleWithMetadata := &rewriteRuleWithMetadata{
+			rule:              infModelRewrite.Spec.Rules[i],
+			createTimestamp:   infModelRewrite.CreationTimestamp.Time,
+			parentRewriteName: name,
 		}
 
 		if ruleWithMetadata.isGeneric() {
@@ -80,22 +80,22 @@ func (ms *ModelRewriteStore) Set(infModelRewrite *v1alpha2.InferenceModelRewrite
 	}
 }
 
-// Delete removes an InferenceModelRewrite and all its associated rules from the store.
-func (ms *ModelRewriteStore) Delete(nn types.NamespacedName) {
-	ms.deleteInternal(nn)
+// delete removes an InferenceModelRewrite and all its associated rules from the store.
+func (ms *modelRewriteStore) delete(nn types.NamespacedName) {
+	ms.deleteInternal(nn.Name)
 }
 
 // deleteInternal is the non-locking implementation for deleting a rewrite.
-func (ms *ModelRewriteStore) deleteInternal(nn types.NamespacedName) {
-	if _, ok := ms.allReWrites[nn]; !ok {
+func (ms *modelRewriteStore) deleteInternal(n string) {
+	if _, ok := ms.allReWrites[n]; !ok {
 		return
 	}
-	delete(ms.allReWrites, nn)
+	delete(ms.allReWrites, n)
 
 	// Filter out the generic rules associated with the deleted rewrite.
 	newGenericRules := make([]*rewriteRuleWithMetadata, 0, len(ms.genericRules))
 	for _, ruleWithMd := range ms.genericRules {
-		if ruleWithMd.parentNN() != nn {
+		if ruleWithMd.parentName() != n {
 			newGenericRules = append(newGenericRules, ruleWithMd)
 		}
 	}
@@ -105,7 +105,7 @@ func (ms *ModelRewriteStore) deleteInternal(nn types.NamespacedName) {
 	for modelName, rulesWithMd := range ms.rulesByExactModelMatch {
 		newRules := make([]*rewriteRuleWithMetadata, 0, len(rulesWithMd))
 		for _, r := range rulesWithMd {
-			if r.parentNN() != nn {
+			if r.parentName() != n {
 				newRules = append(newRules, r)
 			}
 		}
@@ -118,9 +118,9 @@ func (ms *ModelRewriteStore) deleteInternal(nn types.NamespacedName) {
 	}
 }
 
-// GetRule returns the single, highest-precedence rule for a given model name.
+// getRule returns the single, highest-precedence rule for a given model name.
 // It prioritizes exact matches over generic ones, and among those, the oldest rule wins.
-func (ms *ModelRewriteStore) GetRule(modelName string) *v1alpha2.InferenceModelRewriteRule {
+func (ms *modelRewriteStore) getRule(modelName string) *v1alpha2.InferenceModelRewriteRule {
 	// Exact matches have the highest precedence.
 	if rulesWithMd, ok := ms.rulesByExactModelMatch[modelName]; ok && len(rulesWithMd) > 0 {
 		return &rulesWithMd[0].rule // The list is pre-sorted, so the first element is the oldest.
@@ -133,8 +133,8 @@ func (ms *ModelRewriteStore) GetRule(modelName string) *v1alpha2.InferenceModelR
 	return nil
 }
 
-// GetAll returns a slice of all InferenceModelRewrite objects currently in the store.
-func (ms *ModelRewriteStore) GetAll() []*v1alpha2.InferenceModelRewrite {
+// getAll returns a slice of all InferenceModelRewrite objects currently in the store.
+func (ms *modelRewriteStore) getAll() []*v1alpha2.InferenceModelRewrite {
 	rewrites := make([]*v1alpha2.InferenceModelRewrite, 0, len(ms.allReWrites))
 	for _, rewrite := range ms.allReWrites {
 		rewrites = append(rewrites, rewrite)
@@ -142,30 +142,12 @@ func (ms *ModelRewriteStore) GetAll() []*v1alpha2.InferenceModelRewrite {
 	return rewrites
 }
 
-func getNN(infModelRewrite *v1alpha2.InferenceModelRewrite) types.NamespacedName {
-	return types.NamespacedName{
-		Namespace: infModelRewrite.Namespace,
-		Name:      infModelRewrite.Name,
-	}
-}
-
 // rewriteRuleWithMetadata decorates a rule with metadata from its parent object
 // to be used in precedence sorting.
 type rewriteRuleWithMetadata struct {
-	rule            v1alpha2.InferenceModelRewriteRule
-	createTimestamp time.Time
-	parentRewriteNN types.NamespacedName
-}
-
-func newRuleWithMetadata(infModelRewrite *v1alpha2.InferenceModelRewrite, ruleIdx int) *rewriteRuleWithMetadata {
-	if ruleIdx >= len(infModelRewrite.Spec.Rules) {
-		return nil
-	}
-	return &rewriteRuleWithMetadata{
-		rule:            infModelRewrite.Spec.Rules[ruleIdx],
-		createTimestamp: infModelRewrite.CreationTimestamp.Time,
-		parentRewriteNN: getNN(infModelRewrite),
-	}
+	rule              v1alpha2.InferenceModelRewriteRule
+	createTimestamp   time.Time
+	parentRewriteName string
 }
 
 func (rr rewriteRuleWithMetadata) isGeneric() bool {
@@ -182,6 +164,6 @@ func (rr rewriteRuleWithMetadata) exactModels() map[string]bool {
 	return modelSet
 }
 
-func (rr rewriteRuleWithMetadata) parentNN() types.NamespacedName {
-	return rr.parentRewriteNN
+func (rr rewriteRuleWithMetadata) parentName() string {
+	return rr.parentRewriteName
 }

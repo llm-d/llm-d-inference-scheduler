@@ -54,7 +54,9 @@ func (c *InferenceModelRewriteReconciler) Reconcile(ctx context.Context, req ctr
 		notFound = true
 	}
 
-	if notFound || !infModelRewrite.DeletionTimestamp.IsZero() || infModelRewrite.Spec.PoolRef.Name != v1alpha2.ObjectName(c.PoolGKNN.Name) {
+	if notFound || !infModelRewrite.DeletionTimestamp.IsZero() || infModelRewrite.Spec.PoolRef == nil ||
+		infModelRewrite.Spec.PoolRef.Name != v1alpha2.ObjectName(c.PoolGKNN.Name) ||
+		(infModelRewrite.Spec.PoolRef.Group != v1alpha2.Group(c.PoolGKNN.Group) && infModelRewrite.Spec.PoolRef.Group != "inference.networking.x-k8s.io") {
 		// InferenceModelRewrite object got deleted or changed the referenced pool.
 		c.Datastore.RewriteDelete(req.NamespacedName)
 		return ctrl.Result{}, nil

@@ -31,7 +31,6 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
@@ -82,7 +81,7 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
 		pool:                   nil,
 		mu:                     sync.RWMutex{},
 		objectives:             make(map[string]*v1alpha2.InferenceObjective),
-		rewrites:               NewModelRewriteStore(),
+		rewrites:               newModelRewriteStore(),
 		pods:                   &sync.Map{},
 		modelServerMetricsPort: modelServerMetricsPort,
 		epf:                    epFactory,
@@ -101,11 +100,11 @@ type datastore struct {
 	parentCtx context.Context
 	// mu is used to synchronize access to pool, objectives, and rewrites.
 	mu   sync.RWMutex
-	pool *v1.InferencePool
+	pool *datalayer.EndpointPool
 	// key: InferenceObjective name, value: *InferenceObjective
 	objectives map[string]*v1alpha2.InferenceObjective
 	// rewrites store for InferenceModelRewrite objects.
-	rewrites *ModelRewriteStore
+	rewrites *modelRewriteStore
 	// key: types.NamespacedName, value: backendmetrics.PodMetrics
 	pods *sync.Map
 	// modelServerMetricsPort metrics port from EPP command line argument
@@ -119,7 +118,7 @@ func (ds *datastore) Clear() {
 	defer ds.mu.Unlock()
 	ds.pool = nil
 	ds.objectives = make(map[string]*v1alpha2.InferenceObjective)
-	ds.rewrites = NewModelRewriteStore()
+	ds.rewrites = newModelRewriteStore()
 	// stop all pods go routines before clearing the pods map.
 	ds.pods.Range(func(_, v any) bool {
 		ds.epf.ReleaseEndpoint(v.(backendmetrics.PodMetrics))
@@ -156,7 +155,7 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
 	return nil
 }
 
-func (ds *datastore) PoolGet() (*v1.InferencePool, error) {
+func (ds *datastore) PoolGet() (*datalayer.EndpointPool, error) {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
 	if !ds.PoolHasSynced() {
@@ -214,25 +213,25 @@ func (ds *datastore) ObjectiveGetAll() []*v1alpha2.InferenceObjective {
 func (ds *datastore) RewriteSet(infModelRewrite *v1alpha2.InferenceModelRewrite) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
-	ds.rewrites.Set(infModelRewrite)
+	ds.rewrites.set(infModelRewrite)
 }
 
 func (ds *datastore) RewriteDelete(namespacedName types.NamespacedName) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
-	ds.rewrites.Delete(namespacedName)
+	ds.rewrites.delete(namespacedName)
 }
 
 func (ds *datastore) RewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.rewrites.GetRule(modelName)
+	return ds.rewrites.getRule(modelName)
 }
 
 func (ds *datastore) RewriteGetAll() []*v1alpha2.InferenceModelRewrite {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.rewrites.GetAll()
+	return ds.rewrites.getAll()
 }
 
 // /// Pods/endpoints APIs ///

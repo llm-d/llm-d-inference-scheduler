@@ -70,7 +70,7 @@ func TestModelRewriteStore(t *testing.T) {
 	tests := []struct {
 		name         string
 		initialState []*v1alpha2.InferenceModelRewrite
-		op           func(store *ModelRewriteStore)
+		op           func(store *modelRewriteStore)
 		modelToGet   string
 		wantRule     *v1alpha2.InferenceModelRewriteRule
 		wantGetAll   []*v1alpha2.InferenceModelRewrite
@@ -127,8 +127,8 @@ func TestModelRewriteStore(t *testing.T) {
 		{
 			name:         "Delete: successfully deletes a rewrite",
 			initialState: []*v1alpha2.InferenceModelRewrite{rewriteOld, rewriteGenericOld},
-			op: func(store *ModelRewriteStore) {
-				store.Delete(getNN(rewriteOld))
+			op: func(store *modelRewriteStore) {
+				store.delete(types.NamespacedName{Namespace: rewriteOld.Namespace, Name: rewriteOld.Name})
 			},
 			modelToGet: "model1",
 			wantRule:   &ruleGeneric, // Falls back to generic
@@ -137,8 +137,8 @@ func TestModelRewriteStore(t *testing.T) {
 		{
 			name:         "Delete: non-existent rewrite does nothing",
 			initialState: []*v1alpha2.InferenceModelRewrite{rewriteOld},
-			op: func(store *ModelRewriteStore) {
-				store.Delete(types.NamespacedName{Name: "non-existent", Namespace: "default"})
+			op: func(store *modelRewriteStore) {
+				store.delete(types.NamespacedName{Name: "non-existent", Namespace: "default"})
 			},
 			modelToGet: "model1",
 			wantRule:   &ruleModel1V1,
@@ -147,8 +147,8 @@ func TestModelRewriteStore(t *testing.T) {
 		{
 			name:         "Update: Setting a rewrite with the same name replaces the old one",
 			initialState: []*v1alpha2.InferenceModelRewrite{rewriteOld},
-			op: func(store *ModelRewriteStore) {
-				store.Set(rewriteUpdated)
+			op: func(store *modelRewriteStore) {
+				store.set(rewriteUpdated)
 			},
 			modelToGet: "model1",
 			wantRule:   &ruleModel1V2,
@@ -158,24 +158,24 @@ func TestModelRewriteStore(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			store := NewModelRewriteStore()
+			store := newModelRewriteStore()
 			for _, r := range tc.initialState {
-				store.Set(r)
+				store.set(r)
 			}
 
 			if tc.op != nil {
 				tc.op(store)
 			}
 
-			gotRule := store.GetRule(tc.modelToGet)
+			gotRule := store.getRule(tc.modelToGet)
 			if diff := cmp.Diff(tc.wantRule, gotRule); diff != "" {
 				t.Errorf("GetRule() mismatch (-want +got):\n%s", diff)
 			}
 
 			if tc.wantGetAll != nil {
-				gotAll := store.GetAll()
+				gotAll := store.getAll()
 				if diff := cmp.Diff(tc.wantGetAll, gotAll, cmpopts.SortSlices(func(a, b *v1alpha2.InferenceModelRewrite) bool {
-					return getNN(a).String() < getNN(b).String()
+					return a.Name < b.Name
 				})); diff != "" {
 					t.Errorf("GetAll() mismatch (-want +got):\n%s", diff)
 				}

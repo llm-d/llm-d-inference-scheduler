@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
+	poolutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pool"
 	utiltest "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
 )
 
@@ -48,7 +49,10 @@ var (
 			CreationTimestamp: metav1.Unix(1000, 0),
 		},
 		Spec: v1alpha2.InferenceModelRewriteSpec{
-			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
+			PoolRef: &v1alpha2.PoolObjectReference{
+				Name:  v1alpha2.ObjectName(poolForRewrite.Name),
+				Group: v1alpha2.Group(poolForRewrite.GroupVersionKind().Group),
+			},
 		},
 	}
 	rewrite1Pool2 = &v1alpha2.InferenceModelRewrite{
@@ -58,7 +62,10 @@ var (
 			CreationTimestamp: metav1.Unix(1001, 0),
 		},
 		Spec: v1alpha2.InferenceModelRewriteSpec{
-			PoolRef: &v1alpha2.PoolObjectReference{Name: "test-pool2"},
+			PoolRef: &v1alpha2.PoolObjectReference{
+				Name:  "test-pool2",
+				Group: v1alpha2.Group(poolForRewrite.GroupVersionKind().Group),
+			},
 		},
 	}
 	rewrite1Updated = &v1alpha2.InferenceModelRewrite{
@@ -68,8 +75,11 @@ var (
 			CreationTimestamp: metav1.Unix(1003, 0),
 		},
 		Spec: v1alpha2.InferenceModelRewriteSpec{
-			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
-			Rules:   []v1alpha2.InferenceModelRewriteRule{{}},
+			PoolRef: &v1alpha2.PoolObjectReference{
+				Name:  v1alpha2.ObjectName(poolForRewrite.Name),
+				Group: v1alpha2.Group(poolForRewrite.GroupVersionKind().Group),
+			},
+			Rules: []v1alpha2.InferenceModelRewriteRule{{}},
 		},
 	}
 	rewrite1Deleted = &v1alpha2.InferenceModelRewrite{
@@ -78,9 +88,13 @@ var (
 			Namespace:         rewrite1.Namespace,
 			CreationTimestamp: metav1.Unix(1004, 0),
 			DeletionTimestamp: &metav1.Time{Time: time.Now()},
+			Finalizers:        []string{"deleted"},
 		},
 		Spec: v1alpha2.InferenceModelRewriteSpec{
-			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
+			PoolRef: &v1alpha2.PoolObjectReference{
+				Name:  v1alpha2.ObjectName(poolForRewrite.Name),
+				Group: v1alpha2.Group(poolForRewrite.GroupVersionKind().Group),
+			},
 		},
 	}
 	rewrite2 = &v1alpha2.InferenceModelRewrite{
@@ -90,7 +104,10 @@ var (
 			CreationTimestamp: metav1.Unix(1001, 0),
 		},
 		Spec: v1alpha2.InferenceModelRewriteSpec{
-			PoolRef: &v1alpha2.PoolObjectReference{Name: v1alpha2.ObjectName(poolForRewrite.Name)},
+			PoolRef: &v1alpha2.PoolObjectReference{
+				Name:  v1alpha2.ObjectName(poolForRewrite.Name),
+				Group: v1alpha2.Group(poolForRewrite.GroupVersionKind().Group),
+			},
 		},
 	}
 )
@@ -155,7 +172,7 @@ func TestInferenceModelRewriteReconciler(t *testing.T) {
 			_ = v1alpha2.Install(scheme)
 			_ = v1.Install(scheme)
 			initObjs := []client.Object{}
-			if test.rewrite != nil && test.rewrite.DeletionTimestamp.IsZero() {
+			if test.rewrite != nil {
 				initObjs = append(initObjs, test.rewrite)
 			}
 			for _, r := range test.rewritesInAPIServer {
@@ -170,7 +187,8 @@ func TestInferenceModelRewriteReconciler(t *testing.T) {
 			for _, r := range test.rewritesInStore {
 				ds.RewriteSet(r)
 			}
-			_ = ds.PoolSet(context.Background(), fakeClient, poolForRewrite)
+			endpointPool := poolutil.InferencePoolToEndpointPool(poolForRewrite)
+			_ = ds.PoolSet(context.Background(), fakeClient, endpointPool)
 			reconciler := &InferenceModelRewriteReconciler{
 				Reader:    fakeClient,
 				Datastore: ds,
