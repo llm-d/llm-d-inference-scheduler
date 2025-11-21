@@ -28,7 +28,7 @@ var _ = Describe("AllowlistValidator", func() {
 
 		BeforeEach(func() {
 			var err error
-			validator, err = NewAllowlistValidator(false, "test-namespace", "test-pool")
+			validator, err = NewAllowlistValidator(false, DefaultPoolGroup, "test-namespace", "test-pool")
 			Expect(err).ToNot(HaveOccurred())
 		})
 

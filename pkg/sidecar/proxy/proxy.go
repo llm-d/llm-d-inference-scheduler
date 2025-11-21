@@ -60,6 +60,11 @@ const (
 
 	// ConnectorSGLang enables SGLang P/D disaggregation protocol
 	ConnectorSGLang = "sglang"
+
+	// DefaultPoolGroup is the default pool group name
+	DefaultPoolGroup = "inference.networking.k8s.io"
+	// LegacyPoolGroup is the legacy pool group name
+	LegacyPoolGroup = "inference.networking.x-k8s.io"
 )
 
 // Config represents the proxy server configuration
