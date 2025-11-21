@@ -26,20 +26,33 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
-	"k8s.io/klog/v2/ktesting"
 )
+
+func newTestContext() context.Context {
+	logger := zap.New(
+		zap.WriteTo(GinkgoWriter),
+		zap.UseDevMode(true),
+	)
+	log.SetLogger(logger)
+	ctx := context.Background()
+	log.IntoContext(ctx, logger) // not strictly needed since we called SetLogger to set default
+	return ctx
+}
 
 var _ = Describe("Reverse Proxy", func() {
 	When("x-prefiller-url is not present", func() {
 		DescribeTable("should forward requests to decode server",
 
 			func(path string, secureProxy bool) {
-				_, ctx := ktesting.NewTestContext(GinkgoT())
 
+				ctx := newTestContext()
 				var cert *tls.Certificate
 				if secureProxy {
 					tempCert, err := CreateSelfSignedTLSCertificate()
@@ -159,7 +172,7 @@ var _ = Describe("Reverse Proxy", func() {
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields (backward compatible behavior)", func() {
-				_, ctx := ktesting.NewTestContext(GinkgoT())
+				ctx := newTestContext()
 				ctx, cancelFn := context.WithCancel(ctx)
 				stoppedCh := make(chan struct{})
 
@@ -233,7 +246,7 @@ var _ = Describe("Reverse Proxy", func() {
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields", func() {
-				_, ctx := ktesting.NewTestContext(GinkgoT())
+				ctx := newTestContext()
 				ctx, cancelFn := context.WithCancel(ctx)
 				stoppedCh := make(chan struct{})
 

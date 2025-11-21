@@ -11,7 +11,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"golang.org/x/sync/errgroup"
-	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // dataParallelHandler checks if Data Parallel handling is needed.
@@ -71,7 +71,7 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 			}
 
 			clone := s.Clone()
-			clone.logger = klog.FromContext(ctx).WithName("proxy server on port " + rankPort)
+			clone.logger = log.FromContext(ctx).WithName("proxy server on port " + rankPort)
 			clone.port = rankPort
 			clone.decoderURL = decoderURL
 			clone.forwardDataParallel = false
