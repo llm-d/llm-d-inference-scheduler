@@ -341,7 +341,12 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 		Model: theModel,
 	}
 
-	resp, err := openaiclient.Completions.New(testConfig.Context, completionParams, option.WithResponseInto(&httpResp))
+	ginkgo.By(fmt.Sprintf("Sending Completion Request: (port %s) %#v", port, completionParams))
+
+	resp, err := openaiclient.Completions.New(testConfig.Context, completionParams, option.WithResponseInto(&httpResp), option.WithRequestTimeout(readyTimeout))
+
+	ginkgo.By(fmt.Sprintf("Verifying Completion Response: %#v", resp))
+
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Expect(resp.Choices).Should(gomega.HaveLen(1))
 	gomega.Expect(resp.Choices[0].FinishReason).Should(gomega.Equal(openai.CompletionChoiceFinishReasonStop))
@@ -445,7 +450,8 @@ plugins:
         blockSize: 16                         # must match vLLM block size if not default (16)
         hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
       tokenizersPoolConfig:
-        tokenizersCacheDir: "/cache/tokenizers"
+        hf:
+          tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:
         enableMetrics: false                  # enable kv-block index metrics (prometheus)
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)

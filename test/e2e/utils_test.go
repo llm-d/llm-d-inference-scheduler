@@ -46,6 +46,8 @@ func scaleDeployment(objects []string, increment int) {
 
 // getModelServerPods Returns the list of Prefill and Decode vLLM pods separately
 func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string) ([]string, []string) {
+	ginkgo.By("Getting Model server pods")
+
 	pods := getPods(podLabels)
 
 	prefillValidator, err := apilabels.ValidatedSelectorFromSet(prefillLabels)
@@ -98,17 +100,22 @@ func getPods(labels map[string]string) []corev1.Pod {
 }
 
 func podsInDeploymentsReady(objects []string) {
-	var deployment appsv1.Deployment
-	helper := func(deploymentName string) bool {
+	isDeploymentReady := func(deploymentName string) bool {
+		var deployment appsv1.Deployment
 		err := testConfig.K8sClient.Get(testConfig.Context, types.NamespacedName{Namespace: nsName, Name: deploymentName}, &deployment)
+		ginkgo.By(fmt.Sprintf("Waiting for deployment %q to be ready (err: %v): replicas=%#v, status=%#v", deploymentName, err, *deployment.Spec.Replicas, deployment.Status))
 		return err == nil && *deployment.Spec.Replicas == deployment.Status.Replicas &&
 			deployment.Status.Replicas == deployment.Status.ReadyReplicas
 	}
+
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
 		if strings.ToLower(split[0]) == deploymentKind {
-			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
-			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
+			gomega.Eventually(isDeploymentReady).
+				WithArguments(split[1]).
+				WithPolling(interval).
+				WithTimeout(readyTimeout).
+				Should(gomega.BeTrue())
 		}
 	}
 }

@@ -41,14 +41,23 @@ var _ framework.Scorer = &PrecisePrefixCacheScorer{}
 // a new instance of the PrefixCacheTrackingPlugin.
 func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 	handle plugins.Handle) (plugins.Plugin, error) {
+
+	indexerConfig, err := kvcache.NewDefaultConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize indexer config: %w", err)
+	}
+
 	parameters := PrecisePrefixCachePluginConfig{
-		IndexerConfig:  kvcache.NewDefaultConfig(),
+		IndexerConfig:  indexerConfig,
 		KVEventsConfig: kvevents.DefaultConfig(),
 	}
 
 	// read hugging face token from environment variable if set
-	if token := os.Getenv("HF_TOKEN"); token != "" {
-		parameters.IndexerConfig.TokenizersPoolConfig.HuggingFaceToken = token
+	if token := os.Getenv("HF_TOKEN"); token != "" &&
+		parameters.IndexerConfig != nil &&
+		parameters.IndexerConfig.TokenizersPoolConfig != nil &&
+		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig != nil {
+		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken = token
 	}
 
 	if rawParameters != nil {
