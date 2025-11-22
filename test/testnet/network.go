@@ -1,5 +1,5 @@
-// Package utils contains utilities for testing
-package utils
+// Package testnet contains network utilities for testing
+package testnet
 
 import (
 	"net"
