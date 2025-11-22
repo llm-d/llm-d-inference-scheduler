@@ -24,12 +24,14 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
@@ -38,11 +40,27 @@ import (
 )
 
 const (
-	inferencePoolGroup    = "inference.networking.x-k8s.io"
-	inferencePoolVersion  = "v1alpha2"
 	inferencePoolResource = "inferencepools"
 	resyncPeriod          = 30 * time.Second
 )
+
+// candidateGVRs in order of preference
+//
+// We maintain a prioritized list of GroupVersionResource (GVR) candidates to support
+// environments where either the legacy or the new InferencePool CRD may be installed:
+//
+// 1. inference.networking.k8s.io/v1         ← Preferred (new official API group)
+// 2. inference.networking.x-k8s.io/v1alpha2 ← Fallback (legacy experimental API group)
+
+// The validator automatically detects which API is available by using the Kubernetes
+// discovery API, selecting the first supported GVR in this list.
+//
+// This approach aligns with upstream Ingress Gateway (IGW) behavior, which also supports
+// both API versions concurrently (see issue #462).
+var candidateGVRs = []schema.GroupVersionResource{
+	{Group: "inference.networking.k8s.io", Version: "v1", Resource: inferencePoolResource},
+	{Group: "inference.networking.x-k8s.io", Version: "v1alpha2", Resource: inferencePoolResource},
+}
 
 // AllowlistValidator manages allowed prefill targets based on InferencePool resources
 type AllowlistValidator struct {
@@ -51,6 +69,8 @@ type AllowlistValidator struct {
 	namespace     string
 	poolName      string
 	enabled       bool
+
+	gvr schema.GroupVersionResource // detected GVR
 
 	// allowedTargets maps hostport -> bool for allowed prefill targets
 	allowedTargets   set.Set[string]
@@ -87,16 +107,56 @@ func NewAllowlistValidator(enabled bool, namespace string, poolName string) (*Al
 		return nil, fmt.Errorf("failed to create Kubernetes dynamic client: %w", err)
 	}
 
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create discovery client: %w", err)
+	}
+
+	var detectedGVR schema.GroupVersionResource
+	for _, gvr := range candidateGVRs {
+		supported, err := isGVRSupported(discoveryClient, gvr)
+		if err != nil {
+			return nil, fmt.Errorf("error checking GVR %s: %w", gvr.String(), err)
+		}
+		if supported {
+			detectedGVR = gvr
+			break
+		}
+	}
+
+	if detectedGVR.Empty() {
+		return nil, fmt.Errorf("no supported InferencePool API found; tried: %v", candidateGVRs)
+	}
+
 	return &AllowlistValidator{
 		enabled:        true,
 		dynamicClient:  dynamicClient,
 		namespace:      namespace,
 		poolName:       poolName,
+		gvr:            detectedGVR,
 		allowedTargets: set.New[string](),
 		podInformers:   make(map[string]cache.SharedInformer),
 		podStopChans:   make(map[string]chan struct{}),
 		stopCh:         make(chan struct{}),
 	}, nil
+}
+
+func isGVRSupported(discoveryClient discovery.DiscoveryInterface, gvr schema.GroupVersionResource) (bool, error) {
+	apiResourceList, err := discoveryClient.ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+	if err != nil {
+		// If the group/version doesn't exist, Kubernetes returns a "NotFound" error
+		if errors.IsNotFound(err) {
+			return false, nil // GroupVersion not supported
+		}
+		return false, fmt.Errorf("failed to discover resources for %s: %w", gvr.String(), err)
+	}
+
+	for _, resource := range apiResourceList.APIResources {
+		if resource.Name == gvr.Resource {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Start begins watching InferencePool resources and managing the allowlist
@@ -106,25 +166,20 @@ func (av *AllowlistValidator) Start(ctx context.Context) error {
 	}
 
 	av.logger = klog.FromContext(ctx).WithName("allowlist-validator")
-	av.logger.Info("starting SSRF protection allowlist validator", "namespace", av.namespace, "poolName", av.poolName)
-
-	gvr := schema.GroupVersionResource{
-		Group:    inferencePoolGroup,
-		Version:  inferencePoolVersion,
-		Resource: inferencePoolResource,
-	}
+	av.logger.Info("starting SSRF protection allowlist validator",
+		"namespace", av.namespace, "poolName", av.poolName, "gvr", av.gvr.String())
 
 	// Create informer for the specific InferencePool resource
 	lw := &cache.ListWatch{
-		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			// List with field selector to get only the specific InferencePool
 			options.FieldSelector = "metadata.name=" + av.poolName
-			return av.dynamicClient.Resource(gvr).Namespace(av.namespace).List(ctx, options)
+			return av.dynamicClient.Resource(av.gvr).Namespace(av.namespace).List(ctx, options)
 		},
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			// Watch the specific InferencePool by name using field selector
 			options.FieldSelector = "metadata.name=" + av.poolName
-			return av.dynamicClient.Resource(gvr).Namespace(av.namespace).Watch(ctx, options)
+			return av.dynamicClient.Resource(av.gvr).Namespace(av.namespace).Watch(ctx, options)
 		},
 	}
 
@@ -142,7 +197,7 @@ func (av *AllowlistValidator) Start(ctx context.Context) error {
 
 	// Wait for cache sync
 	if !cache.WaitForCacheSync(av.stopCh, av.poolInformer.HasSynced) {
-		return fmt.Errorf("failed to sync InferencePool cache within timeout (check RBAC permissions for inferencepools.%s and that pool '%s' exists)", inferencePoolGroup, av.poolName)
+		return fmt.Errorf("failed to sync InferencePool cache within timeout (check RBAC permissions for inferencepools.%s and that pool '%s' exists)", av.gvr.Group, av.poolName)
 	}
 
 	av.logger.Info("allowlist validator started successfully")
