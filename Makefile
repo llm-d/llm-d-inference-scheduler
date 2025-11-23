@@ -21,15 +21,14 @@ SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
-export EPP_TAG
 export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
-export SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
-NAMESPACE ?= hc4ai-operator
+VLLM_SIMULATOR_TAG ?= v0.6.1
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
+NAMESPACE ?= hc4ai-operator
 
 # Map go arch to platform-specific arch
 ifeq ($(TARGETOS),darwin)
@@ -137,7 +136,7 @@ clean: ## Clean build artifacts, tools and caches
 format: check-golangci-lint ## Format Go source files
 	@printf "\033[33;1m==== Running go fmt ====\033[0m\n"
 	@gofmt -l -w $(SRC)
-	$(GOLANGCI_LINT) fmt --fix
+	$(GOLANGCI_LINT) fmt
 
 .PHONY: lint
 lint: check-golangci-lint check-typos ## Run lint
