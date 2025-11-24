@@ -96,11 +96,6 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex())
 	pool.Start(ctx)
 
-	chatTemplateRenderer := preprocessing.NewChatTemplatingProcessor()
-	if err := chatTemplateRenderer.Initialize(); err != nil {
-		return nil, fmt.Errorf("failed to initialize chat templating processor: %w", err)
-	}
-
 	return &PrecisePrefixCacheScorer{
 		typedName:      plugins.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer: kvCacheIndexer,
@@ -139,10 +134,9 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 		return nil
 	}
 
-	// Extract the flattened scores from the request
 	scores, err := s.getScores(ctx, request)
 	if err != nil {
-		logger.Error(err, "Failed to extract scores from request")
+		logger.Error(err, "Failed to get pod scores")
 		return nil
 	}
 	debugLogger.Info("Got pod scores", "scores", scores)
@@ -159,17 +153,17 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
 }
 
-// extractPrompt extracts the flattened prompt from the request.
-// For chat completions, it renders the messages using the model's chat template.
-// For regular completions, it uses the prompt directly.
+// getScores retrieves the pod scores from the KV-cache indexer
+// based on the provided LLM request.
+// If the request contains chat completions, it processes them accordingly.
+// If the request contains regular completions, it uses the prompt directly.
 func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 
 	traceLogger.Info("Getting scores",
-		"target_model", request.TargetModel,
-		"has_chat_completions", request.Body != nil && request.Body.ChatCompletions != nil,
-		"has_completions", request.Body != nil && request.Body.Completions != nil)
+		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
+		"isCompletions", request.Body != nil && request.Body.Completions != nil)
 
 	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.
 	// If an unexpected dual payload slips through (parser regression/new client), log it and use chat semantics.
@@ -198,10 +192,9 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types
 		}
 
 		traceLogger.Info("Processing chat completion request",
-			"messages_count", len(renderReq.Conversations),
-			"tools_count", len(renderReq.Tools),
-			"documents_count", len(renderReq.Documents),
-			"target_model", request.TargetModel)
+			"messagesCount", len(renderReq.Conversations),
+			"toolsCount", len(renderReq.Tools),
+			"documentsCount", len(renderReq.Documents))
 
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
 		if err != nil {
