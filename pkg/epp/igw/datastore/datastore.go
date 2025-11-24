@@ -60,10 +60,10 @@ type Datastore interface {
 	ObjectiveGetAll() []*v1alpha2.InferenceObjective
 
 	// InferenceModelRewrite operations
-	RewriteSet(infModelRewrite *v1alpha2.InferenceModelRewrite)
-	RewriteDelete(namespacedName types.NamespacedName)
-	RewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule
-	RewriteGetAll() []*v1alpha2.InferenceModelRewrite
+	ModelRewriteSet(infModelRewrite *v1alpha2.InferenceModelRewrite)
+	ModelRewriteDelete(namespacedName types.NamespacedName)
+	ModelRewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule
+	ModelRewriteGetAll() []*v1alpha2.InferenceModelRewrite
 
 	// PodList lists pods matching the given predicate.
 	PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics
@@ -81,7 +81,7 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
 		pool:                   nil,
 		mu:                     sync.RWMutex{},
 		objectives:             make(map[string]*v1alpha2.InferenceObjective),
-		rewrites:               newModelRewriteStore(),
+		modelRewrites:          newModelRewriteStore(),
 		pods:                   &sync.Map{},
 		modelServerMetricsPort: modelServerMetricsPort,
 		epf:                    epFactory,
@@ -103,8 +103,8 @@ type datastore struct {
 	pool *datalayer.EndpointPool
 	// key: InferenceObjective name, value: *InferenceObjective
 	objectives map[string]*v1alpha2.InferenceObjective
-	// rewrites store for InferenceModelRewrite objects.
-	rewrites *modelRewriteStore
+	// modelRewrites store for InferenceModelRewrite objects.
+	modelRewrites *modelRewriteStore
 	// key: types.NamespacedName, value: backendmetrics.PodMetrics
 	pods *sync.Map
 	// modelServerMetricsPort metrics port from EPP command line argument
@@ -118,7 +118,7 @@ func (ds *datastore) Clear() {
 	defer ds.mu.Unlock()
 	ds.pool = nil
 	ds.objectives = make(map[string]*v1alpha2.InferenceObjective)
-	ds.rewrites = newModelRewriteStore()
+	ds.modelRewrites = newModelRewriteStore()
 	// stop all pods go routines before clearing the pods map.
 	ds.pods.Range(func(_, v any) bool {
 		ds.epf.ReleaseEndpoint(v.(backendmetrics.PodMetrics))
@@ -210,28 +210,28 @@ func (ds *datastore) ObjectiveGetAll() []*v1alpha2.InferenceObjective {
 	return res
 }
 
-func (ds *datastore) RewriteSet(infModelRewrite *v1alpha2.InferenceModelRewrite) {
+func (ds *datastore) ModelRewriteSet(infModelRewrite *v1alpha2.InferenceModelRewrite) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
-	ds.rewrites.set(infModelRewrite)
+	ds.modelRewrites.set(infModelRewrite)
 }
 
-func (ds *datastore) RewriteDelete(namespacedName types.NamespacedName) {
+func (ds *datastore) ModelRewriteDelete(namespacedName types.NamespacedName) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
-	ds.rewrites.delete(namespacedName)
+	ds.modelRewrites.delete(namespacedName)
 }
 
-func (ds *datastore) RewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule {
+func (ds *datastore) ModelRewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.rewrites.getRule(modelName)
+	return ds.modelRewrites.getRule(modelName)
 }
 
-func (ds *datastore) RewriteGetAll() []*v1alpha2.InferenceModelRewrite {
+func (ds *datastore) ModelRewriteGetAll() []*v1alpha2.InferenceModelRewrite {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.rewrites.getAll()
+	return ds.modelRewrites.getAll()
 }
 
 // /// Pods/endpoints APIs ///
