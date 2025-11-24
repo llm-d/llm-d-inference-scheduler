@@ -92,7 +92,7 @@ type InferenceModelRewriteRule struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	//
-	Targets []TargetModel `json:"split,omitempty"`
+	Targets []TargetModel `json:"targets,omitempty"`
 }
 
 // TargetModel defines a weighted model destination for traffic distribution.
