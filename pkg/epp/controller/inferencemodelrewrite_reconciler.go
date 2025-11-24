@@ -54,17 +54,20 @@ func (c *InferenceModelRewriteReconciler) Reconcile(ctx context.Context, req ctr
 		notFound = true
 	}
 
-	if notFound || !infModelRewrite.DeletionTimestamp.IsZero() || infModelRewrite.Spec.PoolRef == nil ||
+	isDeleted := !infModelRewrite.DeletionTimestamp.IsZero()
+	isPooRefUnmatch := infModelRewrite.Spec.PoolRef == nil ||
 		infModelRewrite.Spec.PoolRef.Name != v1alpha2.ObjectName(c.PoolGKNN.Name) ||
-		(infModelRewrite.Spec.PoolRef.Group != v1alpha2.Group(c.PoolGKNN.Group) && infModelRewrite.Spec.PoolRef.Group != "inference.networking.x-k8s.io") {
+		infModelRewrite.Spec.PoolRef.Group != v1alpha2.Group(c.PoolGKNN.Group)
+
+	if notFound || isDeleted || isPooRefUnmatch {
 		// InferenceModelRewrite object got deleted or changed the referenced pool.
-		c.Datastore.RewriteDelete(req.NamespacedName)
+		c.Datastore.ModelRewriteDelete(req.NamespacedName)
 		return ctrl.Result{}, nil
 	}
 
 	// Add or update if the InferenceModelRewrite instance has a creation timestamp older than the existing entry of the model.
 	logger = logger.WithValues("poolRef", infModelRewrite.Spec.PoolRef)
-	c.Datastore.RewriteSet(infModelRewrite)
+	c.Datastore.ModelRewriteSet(infModelRewrite)
 	logger.Info("Added/Updated InferenceModelRewrite")
 
 	return ctrl.Result{}, nil

@@ -50,7 +50,7 @@ type Datastore interface {
 	PoolGet() (*datalayer.EndpointPool, error)
 	ObjectiveGet(objectiveName string) *v1alpha2.InferenceObjective
 	PodList(predicate func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics
-	RewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule
+	ModelRewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule
 }
 
 // Scheduler defines the interface required by the Director for scheduling.
@@ -194,7 +194,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 }
 
 func (d *Director) applyWeightedModelRewrite(reqCtx *handlers.RequestContext) {
-	rewriteRule := d.datastore.RewriteGet(reqCtx.IncomingModelName)
+	rewriteRule := d.datastore.ModelRewriteGet(reqCtx.IncomingModelName)
 	if rewriteRule == nil {
 		return
 	}

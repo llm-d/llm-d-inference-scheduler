@@ -185,7 +185,7 @@ func TestInferenceModelRewriteReconciler(t *testing.T) {
 			pmf := backendmetrics.NewPodMetricsFactory(&backendmetrics.FakePodMetricsClient{}, time.Second)
 			ds := datastore.NewDatastore(t.Context(), pmf, 0)
 			for _, r := range test.rewritesInStore {
-				ds.RewriteSet(r)
+				ds.ModelRewriteSet(r)
 			}
 			endpointPool := poolutil.InferencePoolToEndpointPool(poolForRewrite)
 			_ = ds.PoolSet(context.Background(), fakeClient, endpointPool)
@@ -210,8 +210,8 @@ func TestInferenceModelRewriteReconciler(t *testing.T) {
 				t.Errorf("Unexpected result diff (+got/-want): %s", diff)
 			}
 
-			if len(test.wantRewrites) != len(ds.RewriteGetAll()) {
-				t.Errorf("Unexpected number of rewrites; want: %d, got:%d", len(test.wantRewrites), len(ds.RewriteGetAll()))
+			if len(test.wantRewrites) != len(ds.ModelRewriteGetAll()) {
+				t.Errorf("Unexpected number of rewrites; want: %d, got:%d", len(test.wantRewrites), len(ds.ModelRewriteGetAll()))
 			}
 
 			if diff := diffStoreRewrites(ds, test.wantRewrites); diff != "" {
@@ -226,7 +226,7 @@ func diffStoreRewrites(ds datastore.Datastore, wantRewrites []*v1alpha2.Inferenc
 		wantRewrites = []*v1alpha2.InferenceModelRewrite{}
 	}
 
-	gotRewrites := ds.RewriteGetAll()
+	gotRewrites := ds.ModelRewriteGetAll()
 	if diff := cmp.Diff(wantRewrites, gotRewrites); diff != "" {
 		return "rewrites:" + diff
 	}

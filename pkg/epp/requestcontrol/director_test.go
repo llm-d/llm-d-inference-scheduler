@@ -169,7 +169,7 @@ func (m mockProducedDataType) Clone() datalayer.Cloneable {
 	return mockProducedDataType{value: m.value}
 }
 
-func (ds *mockDatastore) RewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule {
+func (ds *mockDatastore) ModelRewriteGet(modelName string) *v1alpha2.InferenceModelRewriteRule {
 	// This mock implementation simulates the precedence logic for simplicity.
 	// It finds the oldest rewrite that has a rule matching the modelName.
 	var matchingRewrites []*v1alpha2.InferenceModelRewrite
@@ -268,7 +268,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 	ds.ObjectiveSet(ioFoodReview)
 	ds.ObjectiveSet(ioFoodReviewResolve)
 	ds.ObjectiveSet(ioFoodReviewSheddable)
-	ds.RewriteSet(rewrite)
+	ds.ModelRewriteSet(rewrite)
 
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
