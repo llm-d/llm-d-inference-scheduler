@@ -164,10 +164,9 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 // For regular completions, it uses the prompt directly.
 func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	debugLogger := logger.V(logutil.DEBUG)
 	traceLogger := logger.V(logutil.TRACE)
 
-	debugLogger.Info("Getting scores",
+	traceLogger.Info("Getting scores",
 		"target_model", request.TargetModel,
 		"has_chat_completions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"has_completions", request.Body != nil && request.Body.Completions != nil)
