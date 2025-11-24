@@ -41,14 +41,18 @@ var _ framework.Scorer = &PrecisePrefixCacheScorer{}
 // a new instance of the PrefixCacheTrackingPlugin.
 func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 	handle plugins.Handle) (plugins.Plugin, error) {
+	indexerConfig, err := kvcache.NewDefaultConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create default indexer config: %w", err)
+	}
 	parameters := PrecisePrefixCachePluginConfig{
-		IndexerConfig:  kvcache.NewDefaultConfig(),
+		IndexerConfig:  indexerConfig,
 		KVEventsConfig: kvevents.DefaultConfig(),
 	}
 
 	// read hugging face token from environment variable if set
 	if token := os.Getenv("HF_TOKEN"); token != "" {
-		parameters.IndexerConfig.TokenizersPoolConfig.HuggingFaceToken = token
+		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken = token
 	}
 
 	if rawParameters != nil {
@@ -87,15 +91,9 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex())
 	pool.Start(ctx)
 
-	chatTemplateRenderer := preprocessing.NewChatTemplatingProcessor()
-	if err := chatTemplateRenderer.Initialize(); err != nil {
-		return nil, fmt.Errorf("failed to initialize chat templating processor: %w", err)
-	}
-
 	return &PrecisePrefixCacheScorer{
-		typedName:            plugins.TypedName{Type: PrecisePrefixCachePluginType},
-		kvCacheIndexer:       kvCacheIndexer,
-		chatTemplateRenderer: chatTemplateRenderer,
+		typedName:      plugins.TypedName{Type: PrecisePrefixCachePluginType},
+		kvCacheIndexer: kvCacheIndexer,
 	}, nil
 }
 
@@ -105,9 +103,8 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 // state, and the `kvevents.Pool` to subscribe to KV-cache events
 // to keep the internal KV-cache index state up-to-date.
 type PrecisePrefixCacheScorer struct {
-	typedName            plugins.TypedName
-	kvCacheIndexer       *kvcache.Indexer
-	chatTemplateRenderer *preprocessing.ChatTemplatingProcessor
+	typedName      plugins.TypedName
+	kvCacheIndexer *kvcache.Indexer
 }
 
 // TypedName returns the typed name of the plugin.
@@ -132,13 +129,13 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 	}
 
 	// Extract the flattened prompt from the request
-	prompt, err := s.extractPrompt(ctx, request)
+	renderReq, prompt, err := s.extractRequest(ctx, request)
 	if err != nil {
 		logger.Error(err, "Failed to extract prompt from request")
 		return nil
 	}
 
-	scores, err := s.kvCacheIndexer.GetPodScores(ctx, prompt, request.TargetModel, nil)
+	scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, prompt, request.TargetModel, nil)
 	if err != nil {
 		logger.Error(err, "Failed to get pod scores")
 		return nil
@@ -158,10 +155,10 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, _ *types.CycleStat
 	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
 }
 
-// extractPrompt extracts the flattened prompt from the request.
+// extractRequest extracts the flattened prompt from the request.
 // For chat completions, it renders the messages using the model's chat template.
 // For regular completions, it uses the prompt directly.
-func (s *PrecisePrefixCacheScorer) extractPrompt(ctx context.Context, request *types.LLMRequest) (string, error) {
+func (s *PrecisePrefixCacheScorer) extractRequest(ctx context.Context, request *types.LLMRequest) (*preprocessing.RenderJinjaTemplateRequest, string, error) {
 	traceLogger := log.FromContext(ctx).V(logutil.TRACE).WithName(s.typedName.String())
 
 	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.
@@ -194,47 +191,15 @@ func (s *PrecisePrefixCacheScorer) extractPrompt(ctx context.Context, request *t
 			})
 		}
 
-		// Fetch the chat template from the model
-		fetchReq := preprocessing.FetchChatTemplateRequest{
-			Model: request.TargetModel,
-		}
-
-		chatTemplate, chatTemplateKWArgs, err := s.chatTemplateRenderer.FetchChatTemplate(ctx, fetchReq)
-		if err != nil {
-			return "", fmt.Errorf("failed to fetch chat template: %w", err)
-		}
-
-		traceLogger.Info("Chat template fetched",
-			"model", request.TargetModel,
-			"templateLength", len(chatTemplate),
-			"hasKwargs", len(chatTemplateKWArgs) > 0)
-
-		// Set the fetched template in the render request
-		renderReq.ChatTemplate = chatTemplate
-		renderReq.ChatTemplateKWArgs = chatTemplateKWArgs
-
-		// Render the template to get flattened prompt
-		resp, err := s.chatTemplateRenderer.RenderChatTemplate(ctx, renderReq)
-		if err != nil {
-			return "", fmt.Errorf("failed to render chat template: %w", err)
-		}
-
-		if len(resp.RenderedChats) == 0 {
-			return "", errors.New("no rendered chat returned from template rendering")
-		}
-
-		prompt := resp.RenderedChats[0]
-		traceLogger.Info("Chat template rendered successfully",
-			"promptLength", len(prompt))
-		return prompt, nil
+		return renderReq, "", nil
 	}
 
 	// For regular completions, use the prompt directly
 	if request.Body != nil && request.Body.Completions != nil {
 		prompt := request.Body.Completions.Prompt
 		traceLogger.Info("Using completion prompt directly", "promptLength", len(prompt))
-		return prompt, nil
+		return nil, prompt, nil
 	}
 
-	return "", errors.New("no valid prompt found in request")
+	return nil, "", errors.New("no valid prompt found in request")
 }
