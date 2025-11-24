@@ -14,11 +14,12 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v6
 
-      - name: Set project name from repository
+      - name: Set image names
         id: version
         run: |
           repo="${GITHUB_REPOSITORY##*/}"
           echo "project_name=$repo" >> "$GITHUB_OUTPUT"
+          echo "sidecar_name=llm-d-routing-sidecar" >> "$GITHUB_OUTPUT"
 
       - name: Print project name
         run: echo "Project is ${{ steps.version.outputs.project_name }}"
@@ -52,12 +53,17 @@ jobs:
         with:
           docker-file: Dockerfile.sidecar
           tag: ${{ steps.tag.outputs.tag }}
-          image-name: llm-d-routing-sidecar
+          image-name: ${{ steps.version.outputs.sidecar_name }}
           registry: ghcr.io/llm-d
           github-token: ${{ secrets.GHCR_TOKEN }}
           prerelease: ${{ steps.tag.outputs.prerelease }}
 
-      - name: Run Trivy scan
+      - name: Run Trivy scan on EPP image
         uses: ./.github/actions/trivy-scan
         with:
           image: ghcr.io/llm-d/${{ steps.version.outputs.project_name }}:${{ steps.tag.outputs.tag }}
+
+      - name: Run Trivy scan on sidecar image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ghcr.io/llm-d/${{ steps.version.outputs.sidecar_name }}:${{ steps.tag.outputs.tag }}

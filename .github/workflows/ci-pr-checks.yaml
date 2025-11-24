@@ -27,10 +27,8 @@ jobs:
           go-version: "${{ env.GO_VERSION }}"
           cache-dependency-path: ./go.sum
 
-      - name: Install kvcache dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libzmq3-dev pkg-config python3-dev
+      - name: Install dependencies
+        run: sudo make install-dependencies
 
       - name: Configure CGO for Python
         run: |
@@ -58,12 +56,12 @@ jobs:
           CPATH: ${{ env.CPATH }}
           PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
 
-      - name: Run make test
-        shell: bash 
-        run: |
-          make test
-
       - name: Run make build
         shell: bash
         run: |
           make build
+
+      - name: Run make test
+        shell: bash
+        run: |
+          make test
