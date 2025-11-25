@@ -27,12 +27,16 @@ var (
 		},
 		[]string{"decision_type"}, // "decode-only" or "prefill-decode"
 	)
+	Retries = prometheus.NewCounter(prometheus.CounterOpts{
+		Subsystem: SchedulerSubsystem, Name: "batch_request_retries_total",
+		Help: "Total number of batch request retries.",
+	})
 )
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
 	return []prometheus.Collector{
-		SchedulerPDDecisionCount,
+		SchedulerPDDecisionCount, Retries,
 	}
 }
 
