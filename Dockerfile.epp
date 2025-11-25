@@ -4,7 +4,6 @@ FROM quay.io/projectquay/golang:1.24 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG KVCACHE_MANAGER_VERSION=v0.3.2
 
 # Install build tools
 # The builder is based on UBI8, so we need epel-release-8.
@@ -22,13 +21,17 @@ COPY go.sum go.sum
 # Copy the go source
 COPY cmd/ cmd/
 COPY pkg/ pkg/
-COPY scripts/fetch-python-wrapper.sh scripts/fetch-python-wrapper.sh
 
-# Fetch requirements only (install in runtime)
-RUN curl -L https://raw.githubusercontent.com/llm-d/llm-d-kv-cache-manager/${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt -o /workspace/requirements.txt
+RUN go mod download
 
-# Prepare Python wrapper file for runtime
-RUN scripts/fetch-python-wrapper.sh ${KVCACHE_MANAGER_VERSION} /workspace/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions
+# Copy Python wrapper and requirements from kv-cache-manager dependency
+# Extract version dynamically and copy to a known location
+RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Version}}' github.com/llm-d/llm-d-kv-cache-manager) && \
+    mkdir -p /workspace/kv-cache-manager-wrapper && \
+    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
+       /workspace/kv-cache-manager-wrapper/ && \
+    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
+       /workspace/kv-cache-manager-wrapper/requirements.txt
 
 # HuggingFace tokenizer bindings (static lib)
 RUN mkdir -p lib
@@ -77,11 +80,11 @@ RUN curl -L -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-
 
 # Install wrapper as a module in site-packages
 RUN mkdir -p /usr/local/lib/python3.12/site-packages/
-COPY --from=builder /workspace/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py /usr/local/lib/python3.12/site-packages/
+COPY --from=builder /workspace/kv-cache-manager-wrapper/render_jinja_template_wrapper.py /usr/local/lib/python3.12/site-packages/
 
 # Python deps (no cache, single target) – filter out torch
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY --from=builder /workspace/requirements.txt /tmp/requirements.txt
+COPY --from=builder /workspace/kv-cache-manager-wrapper/requirements.txt /tmp/requirements.txt
 RUN sed '/^torch\b/d' /tmp/requirements.txt > /tmp/requirements.notorch.txt && \
     python3.12 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
     python3.12 -m pip install --no-cache-dir --target /usr/local/lib/python3.12/site-packages -r /tmp/requirements.notorch.txt && \
