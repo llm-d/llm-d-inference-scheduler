@@ -1,0 +1,12 @@
+# ------------------------------------------------------------------------------
+# Batch Processor
+#
+# This deploys the batch processor and a Redis Server for the message queue.
+#
+# ------------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- service-accounts.yaml
+- deployments.yaml

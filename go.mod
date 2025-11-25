@@ -15,6 +15,7 @@ require (
 	github.com/onsi/gomega v1.38.3
 	github.com/openai/openai-go v1.12.0
 	github.com/prometheus/client_golang v1.23.2
+	github.com/alicebob/miniredis/v2 v2.35.0 
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.19.0
 	google.golang.org/grpc v1.78.0

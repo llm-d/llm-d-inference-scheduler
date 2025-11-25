@@ -39,7 +39,7 @@ func main() {
 	plugins.RegisterAllPlugins()
 
 	if err := runner.NewRunner().
-		WithCustomCollectors(metrics.GetCollectors()...).
+		WithCustomCollectors(metrics.GetEPPCollectors()...).
 		Run(ctrl.SetupSignalHandler()); err != nil {
 		os.Exit(1)
 	}
