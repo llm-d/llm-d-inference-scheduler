@@ -34,7 +34,22 @@ RUN scripts/fetch-python-wrapper.sh ${KVCACHE_MANAGER_VERSION} /workspace/llm-d-
 RUN mkdir -p lib
 # Ensure that the RELEASE_VERSION matches the one used in the imported llm-d-kv-cache-manager version
 ARG RELEASE_VERSION=v1.22.1
-RUN curl -L https://github.com/daulet/tokenizers/releases/download/${RELEASE_VERSION}/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
+# Handle ppc64le or missing prebuilt binaries
+RUN set -eux; \
+    URL="https://github.com/daulet/tokenizers/releases/download/${RELEASE_VERSION}/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz"; \
+    echo "Attempting to download prebuilt tokenizers binary from $URL"; \
+    if curl -fL "$URL" -o /tmp/libtokenizers.tar.gz; then \
+        echo "Extracting prebuilt libtokenizers..."; \
+        tar -xz -C lib -f /tmp/libtokenizers.tar.gz; \
+    else \
+        echo "No prebuilt libtokenizers found for ${TARGETARCH}, building from source..."; \
+        dnf install -y rust cargo make cmake && \
+        git clone --depth 1 --branch ${RELEASE_VERSION} https://github.com/daulet/tokenizers.git /tmp/tokenizers && \
+        cd /tmp/tokenizers && \
+        cargo build --release && \
+        cp target/release/libtokenizers.* /workspace/lib/ && \
+        cd /workspace && rm -rf /tmp/tokenizers; \
+    fi
 RUN ranlib lib/*.a
 
 # Build
