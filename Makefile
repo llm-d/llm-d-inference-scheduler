@@ -66,25 +66,27 @@ LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
 PYTHON_VERSION := 3.12
 
 # Unified Python configuration detection. This block runs once.
-ifeq ($(TARGETOS),darwin)
-    # macOS: Find Homebrew's python-config script for the most reliable flags.
-    BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
-    PYTHON_CONFIG := $(BREW_PREFIX)/bin/python$(PYTHON_VERSION)-config
-    PYTHON_ERROR := "Could not execute 'python$(PYTHON_VERSION)-config' from Homebrew. Please ensure Python is installed correctly with: 'brew install python@$(PYTHON_VERSION)'"
-else ifeq ($(TARGETOS),linux)
-    # Linux: Use standard system tools to find flags.
-    PYTHON_CONFIG := $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
-    PYTHON_ERROR := "Python $(PYTHON_VERSION) development headers not found. Please install with: 'sudo apt install python$(PYTHON_VERSION)-dev' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"
-else
-    $(error "Unsupported OS: $(TARGETOS)")
+PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
+ifeq ($(PYTHON_CONFIG),)
+	ifeq ($(TARGETOS),darwin)
+		# macOS: Find Homebrew's python-config script for the most reliable flags.
+		BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
+		PYTHON_CONFIG ?= $(BREW_PREFIX)/bin/python$(PYTHON_VERSION)-config
+		PYTHON_ERROR := "Could not execute 'python$(PYTHON_VERSION)-config'. Please ensure Python is installed correctly with: 'brew install python@$(PYTHON_VERSION)' or install python3.12 manually."
+	else ifeq ($(TARGETOS),linux)
+		# Linux: Use standard system tools to find flags.
+		PYTHON_ERROR := "Python $(PYTHON_VERSION) development headers not found. Please install with: 'sudo apt install python$(PYTHON_VERSION)-dev' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"
+	else
+		PYTHON_ERROR := "you should set up PYTHON_CONFIG variable manually"
+	endif
 endif
 
 ifneq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
-    PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
-    # Use --ldflags --embed to get all necessary flags for linking
-    PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
+	PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
+	# Use --ldflags --embed to get all necessary flags for linking
+	PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
 else
-    $(error ${PYTHON_ERROR})
+	$(error ${PYTHON_ERROR})
 endif
 
 # CGO flags with all dependencies
