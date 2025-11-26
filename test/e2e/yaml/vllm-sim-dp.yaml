@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${MODEL_NAME_SAFE}-vllm-sim-d
+  labels:
+    app: ${POOL_NAME}
+spec:
+  replicas: ${VLLM_REPLICA_COUNT}
+  selector:
+    matchLabels:
+      app: ${POOL_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${POOL_NAME}
+        llm-d.ai/role: decode
+    spec:
+      initContainers:
+      - name: routing-sidecar
+        image: ${SIDECAR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--port=8000"
+        - "--vllm-port=8200"
+        - "--connector=nixlv2"
+        - "--secure-proxy=false"
+        - "--decoder-use-tls=false"
+        - "--data-parallel-size=2"
+        ports:
+        - name: sidecar-http
+          containerPort: 8000
+          protocol: TCP
+        - name: sidecar-rank1
+          containerPort: 8001
+          protocol: TCP
+        restartPolicy: Always
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      containers:
+      - name: vllm
+        image: ${VLLM_SIMULATOR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--port=8200"
+        - "--model=${MODEL_NAME}"
+        - "--mode=echo"
+        - "--data-parallel-size=2"
+        ports:
+        - name: http
+          containerPort: 8200
+          protocol: TCP
+        - name: rank1
+          containerPort: 8201
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8200"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace

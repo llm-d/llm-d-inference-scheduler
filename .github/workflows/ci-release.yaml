@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set project name from repository
         id: version
@@ -40,7 +40,7 @@ jobs:
       - name: Build and push EPP image
         uses: ./.github/actions/docker-build-and-push
         with:
-          docker-file: Dockerfile
+          docker-file: Dockerfile.epp
           tag: ${{ steps.tag.outputs.tag }}
           image-name: ${{ steps.version.outputs.project_name }}
           registry: ghcr.io/llm-d

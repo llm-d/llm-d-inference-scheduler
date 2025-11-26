@@ -45,14 +45,14 @@ workloads currently.
 [Kubernetes]:https://kubernetes.io
 [Architecture Documentation]:docs/architecture.md
 [Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
-[P/D Disaggregation]:docs/dp.md
+[P/D Disaggregation]:docs/disagg_pd.md
 [Gateway API]:https://github.com/kubernetes-sigs/gateway-api
 [Envoy]:https://github.com/envoyproxy/envoy
 [ext-proc]:https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter
 
 ## Contributing
 
-Our community meeting is weekly at Wednesday 10AM PDT ([Google Meet], [Meeting Notes]).
+Our community meeting is bi-weekly at Wednesday 10AM PDT ([Google Meet], [Meeting Notes]).
 
 We currently utilize the [#sig-inference-scheduler] channel in llm-d Slack workspace for communications.
 

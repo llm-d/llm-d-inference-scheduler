@@ -19,24 +19,23 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
-	"errors"
-	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"k8s.io/klog/v2"
+	"golang.org/x/sync/errgroup"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
 	requestHeaderPrefillURL = "x-prefiller-url"
 	requestHeaderRequestID  = "x-request-id"
+	requestHeaderRequestID = "x-request-id"
 
 	requestFieldKVTransferParams    = "kv_transfer_params"
 	requestFieldMaxTokens           = "max_tokens"
@@ -50,11 +49,19 @@ const (
 	requestFieldStream              = "stream"
 	requestFieldStreamOptions       = "stream_options"
 
+	// SGLang bootstrap fields
+	requestFieldBootstrapHost = "bootstrap_host"
+	requestFieldBootstrapPort = "bootstrap_port"
+	requestFieldBootstrapRoom = "bootstrap_room"
+
 	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
 	ConnectorNIXLV2 = "nixlv2"
 
 	// ConnectorLMCache enables (now deprecated) P/D LMCache protocol
 	ConnectorLMCache = "lmcache"
+
+	// ConnectorSGLang enables SGLang P/D disaggregation protocol
+	ConnectorSGLang = "sglang"
 )
 
 // Config represents the proxy server configuration
@@ -65,26 +72,18 @@ type Config struct {
 	// PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers.
 	PrefillerUseTLS bool
 
-	// SecureProxy enables secure proxy when true
-	SecureProxy bool
-
-	// CertPath is the location of the TLS certificates
-	CertPath string
-
 	// PrefillerInsecureSkipVerify configure the proxy to skip TLS verification for requests to prefiller.
 	PrefillerInsecureSkipVerify bool
 
 	// DecoderInsecureSkipVerify configure the proxy to skip TLS verification for requests to decoder.
 	DecoderInsecureSkipVerify bool
 
-	// EnableSSRFProtection enables SSRF protection.
-	EnableSSRFProtection bool
+	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE command line argument
+	DataParallelSize int
 
-	// InferencePoolNamespace InferencePool object namespace.
-	InferencePoolNamespace string
-
-	// InferencePoolName InferencePool object name.
-	InferencePoolName string
+	// EnablePrefillerSampling configures the proxy to randomly choose from the set
+	// of provided prefill hosts instead of always using the first one.
+	EnablePrefillerSampling bool
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
@@ -92,40 +91,43 @@ type protocolRunner func(http.ResponseWriter, *http.Request, string)
 // Server is the reverse proxy server
 type Server struct {
 	logger               logr.Logger
-	addr                 net.Addr       // the proxy TCP address
-	port                 string         // the proxy TCP port
-	decoderURL           *url.URL       // the local decoder URL
-	decoderProxy         http.Handler   // decoder proxy handler
+	addr                 net.Addr     // the proxy TCP address
+	port                 string       // the proxy TCP port
+	decoderURL           *url.URL     // the local decoder URL
+	handler              http.Handler // the handler function. either a Mux or a proxy
+	allowlistValidator   *AllowlistValidator
 	runConnectorProtocol protocolRunner // the handler for running the protocol
 	prefillerURLPrefix   string
-	allowlistValidator   *AllowlistValidator // SSRF protection validator
 
-	prefillerProxies *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
+	decoderProxy        http.Handler                     // decoder proxy handler
+	prefillerProxies    *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
+	dataParallelProxies map[string]http.Handler          // Proxies to other vLLM servers
+	forwardDataParallel bool                             // Use special Data Parallel work around
+
+	prefillSamplerFn func(n int) int // allow test override
 
 	config Config
 }
 
 // NewProxy creates a new routing reverse proxy
-func NewProxy(port string, decodeURL *url.URL, config Config) (*Server, error) {
+func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 	cache, _ := lru.New[string, http.Handler](16) // nolint:all
 
-	// Create SSRF protection validator
-	validator, err := NewAllowlistValidator(config.EnableSSRFProtection, config.InferencePoolNamespace, config.InferencePoolName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SSRF protection validator: %w", err)
-	}
-
 	server := &Server{
-		port:               port,
-		decoderURL:         decodeURL,
-		prefillerProxies:   cache,
-		prefillerURLPrefix: "http://",
-		allowlistValidator: validator,
-		config:             config,
+		port:                port,
+		decoderURL:          decodeURL,
+		prefillerProxies:    cache,
+		prefillerURLPrefix:  "http://",
+		config:              config,
+		dataParallelProxies: map[string]http.Handler{},
+		forwardDataParallel: true,
+		prefillSamplerFn:    rand.Intn,
 	}
 	switch config.Connector {
 	case ConnectorLMCache:
 		server.runConnectorProtocol = server.runLMCacheProtocol
+	case ConnectorSGLang:
+		server.runConnectorProtocol = server.runSGLangProtocol
 	case ConnectorNIXLV2:
 		fallthrough
 	default:
@@ -136,94 +138,44 @@ func NewProxy(port string, decodeURL *url.URL, config Config) (*Server, error) {
 		server.prefillerURLPrefix = "https://"
 	}
 
-	return server, nil
+	return server
 }
 
 // Start the HTTP reverse proxy.
-func (s *Server) Start(ctx context.Context) error {
-	logger := klog.FromContext(ctx).WithName("proxy server")
-	s.logger = logger
+func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistValidator *AllowlistValidator) error {
+	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
 
-	// Start SSRF protection validator
-	if err := s.allowlistValidator.Start(ctx); err != nil {
-		logger.Error(err, "Failed to start allowlist validator")
-		return err
-	}
-
-	ln, err := net.Listen("tcp", ":"+s.port)
-	if err != nil {
-		logger.Error(err, "Failed to start")
-		return err
-	}
-	s.addr = ln.Addr()
+	s.allowlistValidator = allowlistValidator
 
 	// Configure handlers
-	mux := s.createRoutes()
+	s.handler = s.createRoutes()
 
-	server := &http.Server{
-		Handler: mux,
-		// No ReadTimeout/WriteTimeout for LLM inference - can take hours for large contexts
-		IdleTimeout:       300 * time.Second, // 5 minutes for keep-alive connections
-		ReadHeaderTimeout: 30 * time.Second,  // Reasonable for headers only
-		MaxHeaderBytes:    1 << 20,           // 1 MB for headers is sufficient
+	grp, ctx := errgroup.WithContext(ctx)
+	if err := s.startDataParallel(ctx, cert, grp); err != nil {
+		return err
 	}
 
-	// Create TLS certificates
-	if s.config.SecureProxy {
-		var cert tls.Certificate
-		if s.config.CertPath != "" {
-			cert, err = tls.LoadX509KeyPair(s.config.CertPath+"/tls.crt", s.config.CertPath+"/tls.key")
-		} else {
-			cert, err = CreateSelfSignedTLSCertificate()
-		}
-		if err != nil {
-			logger.Error(err, "failed to create TLS certificate")
-			return err
-		}
-		server.TLSConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-			CipherSuites: []uint16{
-				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-			},
-		}
-		logger.Info("server TLS configured")
+	grp.Go(func() error {
+		return s.startHTTP(ctx, cert)
+	})
+
+	return grp.Wait()
+}
+
+// Clone returns a clone of the current Server struct
+func (s *Server) Clone() *Server {
+	return &Server{
+		addr:                 s.addr,
+		port:                 s.port,
+		decoderURL:           s.decoderURL,
+		handler:              s.handler,
+		allowlistValidator:   s.allowlistValidator,
+		runConnectorProtocol: s.runConnectorProtocol,
+		decoderProxy:         s.decoderProxy,
+		prefillerProxies:     s.prefillerProxies,
+		dataParallelProxies:  s.dataParallelProxies,
+		forwardDataParallel:  s.forwardDataParallel,
 	}
-
-	// Setup graceful termination (not strictly needed for sidecars)
-	go func() {
-		<-ctx.Done()
-		logger.Info("shutting down")
-
-		// Stop allowlist validator
-		s.allowlistValidator.Stop()
-
-		ctx, cancelFn := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancelFn()
-		if err := server.Shutdown(ctx); err != nil {
-			logger.Error(err, "failed to gracefully shutdown")
-		}
-	}()
-
-	logger.Info("starting", "addr", s.addr.String())
-	if s.config.SecureProxy {
-		if err := server.ServeTLS(ln, "", ""); err != nil && err != http.ErrServerClosed {
-			logger.Error(err, "failed to start")
-			return err
-		}
-	} else {
-		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			logger.Error(err, "failed to start")
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (s *Server) createRoutes() *http.ServeMux {
@@ -237,36 +189,8 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
 	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
 
-	// Passthrough decoder handler
-	decoderProxy := httputil.NewSingleHostReverseProxy(s.decoderURL)
-	if s.decoderURL.Scheme == "https" {
-		decoderProxy.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: s.config.DecoderInsecureSkipVerify,
-				MinVersion:         tls.VersionTLS12,
-				CipherSuites: []uint16{
-					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-				},
-			},
-		}
-	}
-	decoderProxy.ErrorHandler = func(res http.ResponseWriter, _ *http.Request, err error) {
+	s.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.DecoderInsecureSkipVerify)
 
-		// Log errors from the decoder proxy
-		switch {
-		case errors.Is(err, syscall.ECONNREFUSED):
-			s.logger.Error(err, "waiting for vLLM to be ready")
-		default:
-			s.logger.Error(err, "http: proxy error")
-		}
-		res.WriteHeader(http.StatusBadGateway)
-	}
-	s.decoderProxy = decoderProxy
 	mux.Handle("/", s.decoderProxy)
 
 	return mux

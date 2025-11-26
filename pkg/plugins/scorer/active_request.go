@@ -149,7 +149,7 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types
 	for _, pod := range pods {
 		podName := pod.GetPod().NamespacedName.String()
 		if count, exists := scoredPods[podName]; exists {
-			if count == 0 {
+			if count == 0 || maxCount == 0 {
 				scoredPodsMap[pod] = 1.0 // no requests means highest score
 			} else {
 				scoredPodsMap[pod] = float64(maxCount-count) / float64(maxCount)

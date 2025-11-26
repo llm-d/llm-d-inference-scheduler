@@ -17,14 +17,36 @@ spec:
     spec:
       containers:
       - name: vllm
-        image: ghcr.io/llm-d/llm-d-inference-sim:latest
+        image: ${VLLM_SIMULATOR_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8000"
         - "--model=${MODEL_NAME}"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
-        - name: http
+        - name: prefill-http
           containerPort: 8000
+          protocol: TCP
+        - name: prefill-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: prefill-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: prefill-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: prefill-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: prefill-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: prefill-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: prefill-rank7
+          containerPort: 8007
           protocol: TCP
         env:
         - name: PORT
@@ -49,26 +71,77 @@ spec:
     spec:
       initContainers:
       - name: routing-sidecar
-        image: ghcr.io/llm-d/llm-d-routing-sidecar:latest
+        image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8000"
         - "--vllm-port=8200"
-        - "--connector=lmcache"
+        - "--connector=nixlv2"
+        - "--secure-proxy=false"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
-        - containerPort: 8000
+        - name: sidecar-http
+          containerPort: 8000
+          protocol: TCP
+        - name: sidecar-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: sidecar-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: sidecar-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: sidecar-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: sidecar-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: sidecar-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: sidecar-rank7
+          containerPort: 8007
           protocol: TCP
         restartPolicy: Always
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
       containers:
       - name: vllm
-        image: ghcr.io/llm-d/llm-d-inference-sim:latest
+        image: ${VLLM_SIMULATOR_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8200"
         - "--model=${MODEL_NAME}"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
         - name: http
           containerPort: 8200
+          protocol: TCP
+        - name: rank1
+          containerPort: 8201
+          protocol: TCP
+        - name: rank2
+          containerPort: 8202
+          protocol: TCP
+        - name: rank3
+          containerPort: 8203
+          protocol: TCP
+        - name: rank4
+          containerPort: 8204
+          protocol: TCP
+        - name: rank5
+          containerPort: 8205
+          protocol: TCP
+        - name: rank6
+          containerPort: 8206
+          protocol: TCP
+        - name: rank7
+          containerPort: 8207
           protocol: TCP
         env:
         - name: PORT

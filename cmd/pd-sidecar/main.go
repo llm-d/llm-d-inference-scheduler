@@ -16,21 +16,35 @@ limitations under the License.
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"net/url"
 	"os"
+	"strconv"
+	"strings"
 
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
 )
 
+var (
+	// supportedConnectors defines all valid P/D connector types
+	supportedConnectors = []string{
+		proxy.ConnectorNIXLV2,
+		proxy.ConnectorLMCache,
+		proxy.ConnectorSGLang,
+	}
+)
+
 func main() {
 	port := flag.String("port", "8000", "the port the sidecar is listening on")
 	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
-	connector := flag.String("connector", "nixlv2", "the P/D connector being used. Either nixl, nixlv2 or lmcache")
+	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
+	connector := flag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
 	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
 	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
 	prefillerInsecureSkipVerify := flag.Bool("prefiller-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to prefiller")
@@ -43,20 +57,30 @@ func main() {
 	enableSSRFProtection := flag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
 	inferencePoolNamespace := flag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "the Kubernetes namespace to watch for InferencePool resources (defaults to INFERENCE_POOL_NAMESPACE env var)")
 	inferencePoolName := flag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
+	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 
-	klog.InitFlags(nil)
+	opts := zap.Options{}
+	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
 	flag.Parse()
 
-	// make sure to flush logs before exiting
-	defer klog.Flush()
+	logger := zap.New(zap.UseFlagOptions(&opts))
+	log.SetLogger(logger)
 
 	ctx := ctrl.SetupSignalHandler()
-	logger := klog.FromContext(ctx)
+	log.IntoContext(ctx, logger)
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
-	if *connector != proxy.ConnectorNIXLV2 && *connector != proxy.ConnectorLMCache {
-		logger.Info("Error: --connector must either be 'nixlv2' or 'lmcache'")
+	// Validate connector
+	isValidConnector := false
+	for _, validConnector := range supportedConnectors {
+		if *connector == validConnector {
+			isValidConnector = true
+			break
+		}
+	}
+	if !isValidConnector {
+		logger.Info("Error: --connector must be one of: " + strings.Join(supportedConnectors, ", "))
 		return
 	}
 	logger.Info("p/d connector validated", "connector", connector)
@@ -86,23 +110,40 @@ func main() {
 		return
 	}
 
+	var cert *tls.Certificate
+	if *secureProxy {
+		var tempCert tls.Certificate
+		if *certPath != "" {
+			tempCert, err = tls.LoadX509KeyPair(*certPath+"/tls.crt", *certPath+"/tls.key")
+		} else {
+			tempCert, err = proxy.CreateSelfSignedTLSCertificate()
+		}
+		if err != nil {
+			logger.Error(err, "failed to create TLS certificate")
+			return
+		}
+		cert = &tempCert
+	}
+
 	config := proxy.Config{
 		Connector:                   *connector,
 		PrefillerUseTLS:             *prefillerUseTLS,
-		SecureProxy:                 *secureProxy,
-		CertPath:                    *certPath,
 		PrefillerInsecureSkipVerify: *prefillerInsecureSkipVerify,
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
-		EnableSSRFProtection:        *enableSSRFProtection,
-		InferencePoolNamespace:      *inferencePoolNamespace,
-		InferencePoolName:           *inferencePoolName,
+		DataParallelSize:            *vLLMDataParallelSize,
+		EnablePrefillerSampling:     *enablePrefillerSampling,
 	}
 
-	proxy, err := proxy.NewProxy(*port, targetURL, config)
+	// Create SSRF protection validator
+	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *inferencePoolNamespace, *inferencePoolName)
 	if err != nil {
-		logger.Error(err, "Failed to create proxy")
+		logger.Error(err, "failed to create SSRF protection validator")
+		return
 	}
-	if err := proxy.Start(ctx); err != nil {
+
+	proxyServer := proxy.NewProxy(*port, targetURL, config)
+
+	if err := proxyServer.Start(ctx, cert, validator); err != nil {
 		logger.Error(err, "failed to start proxy server")
 	}
 }

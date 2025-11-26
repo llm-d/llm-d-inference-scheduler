@@ -31,6 +31,16 @@ func ByLabelFactory(name string, rawParameters json.RawMessage, _ plugins.Handle
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelType, err)
 		}
 	}
+	if name == "" {
+		return nil, fmt.Errorf("invalid configuration for '%s' filter: name cannot be empty", ByLabelType)
+	}
+	if parameters.Label == "" {
+		return nil, fmt.Errorf("invalid configuration for '%s' filter: 'label' must be specified", ByLabelType)
+	}
+	if len(parameters.ValidValues) == 0 && !parameters.AllowsNoLabel {
+		return nil, fmt.Errorf("invalid configuration for '%s' "+
+			"filter: either 'validValues' must be non-empty or 'allowsNoLabel' must be true", ByLabelType)
+	}
 	return NewByLabel(name, parameters.Label, parameters.AllowsNoLabel, parameters.ValidValues...), nil
 }
 

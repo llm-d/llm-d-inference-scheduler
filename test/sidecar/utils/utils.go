@@ -15,6 +15,8 @@ limitations under the License.
 */
 
 // Package utils provides various utilities
+//
+//revive:disable:var-naming
 package utils
 
 import (

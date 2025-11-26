@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istio-reader
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istio-reader-clusterrole-llm-d-gateway-llm-d-istio-system
@@ -122,7 +122,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-clusterrole-llm-d-gateway-llm-d-istio-system
@@ -331,6 +331,21 @@ rules:
   - update
   - patch
 - apiGroups:
+  - "inference.networking.k8s.io"
+  resources:
+  - "inferencepools"
+  verbs:
+  - "get"
+  - "watch"
+  - "list"
+- apiGroups:
+  - "inference.networking.k8s.io"
+  resources:
+  - inferencepools/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
   - ""
   resources:
   - secrets
@@ -367,7 +382,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-gateway-controller-llm-d-gateway-llm-d-istio-system
@@ -443,7 +458,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istio-reader
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istio-reader-clusterrole-llm-d-gateway-llm-d-istio-system
@@ -466,7 +481,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-clusterrole-llm-d-gateway-llm-d-istio-system
@@ -489,7 +504,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-gateway-controller-llm-d-gateway-llm-d-istio-system
@@ -512,7 +527,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-llm-d-gateway
@@ -561,7 +576,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: istiod
     app.kubernetes.io/part-of: istio
-    app.kubernetes.io/version: 1.27.1
+    app.kubernetes.io/version: 1.28.0
     helm.sh/chart: istiod-1.27.1
     release: istio
   name: istiod-llm-d-gateway

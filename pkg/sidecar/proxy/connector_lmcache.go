@@ -71,7 +71,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		}
 		return
 	}
-
+	s.logger.V(4).Info("sending prefill request", "to", prefillPodHostPort)
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
@@ -84,5 +84,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	// Forward original request to local decoder
 
 	r.Body = io.NopCloser(strings.NewReader(string(original)))
-	s.decoderProxy.ServeHTTP(w, r)
+	if s.forwardDataParallel && !s.dataParallelHandler(w, r) {
+		s.decoderProxy.ServeHTTP(w, r)
+	}
 }

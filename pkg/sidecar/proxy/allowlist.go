@@ -33,8 +33,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/set"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -105,7 +105,7 @@ func (av *AllowlistValidator) Start(ctx context.Context) error {
 		return nil
 	}
 
-	av.logger = klog.FromContext(ctx).WithName("allowlist-validator")
+	av.logger = log.FromContext(ctx).WithName("allowlist-validator")
 	av.logger.Info("starting SSRF protection allowlist validator", "namespace", av.namespace, "poolName", av.poolName)
 
 	gvr := schema.GroupVersionResource{

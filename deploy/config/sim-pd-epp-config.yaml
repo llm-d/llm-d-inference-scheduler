@@ -16,6 +16,7 @@ plugins:
   parameters:
     threshold: 10
     hashBlockSize: 5
+    primaryPort: ${PRIMARY_PORT}
 schedulingProfiles:
 - name: prefill
   plugins:

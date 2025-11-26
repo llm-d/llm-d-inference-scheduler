@@ -26,19 +26,39 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
-	"k8s.io/klog/v2/ktesting"
 )
+
+func newTestContext() context.Context {
+	logger := zap.New(
+		zap.WriteTo(GinkgoWriter),
+		zap.UseDevMode(true),
+	)
+	log.SetLogger(logger)
+	ctx := context.Background()
+	log.IntoContext(ctx, logger) // not strictly needed since we called SetLogger to set default
+	return ctx
+}
 
 var _ = Describe("Reverse Proxy", func() {
 	When("x-prefiller-url is not present", func() {
 		DescribeTable("should forward requests to decode server",
 
 			func(path string, secureProxy bool) {
-				_, ctx := ktesting.NewTestContext(GinkgoT())
+
+				ctx := newTestContext()
+				var cert *tls.Certificate
+				if secureProxy {
+					tempCert, err := CreateSelfSignedTLSCertificate()
+					Expect(err).ToNot(HaveOccurred())
+					cert = &tempCert
+				}
 
 				ackHandlerFn := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(200)
@@ -50,18 +70,19 @@ var _ = Describe("Reverse Proxy", func() {
 				targetURL, err := url.Parse(decodeBackend.URL)
 				Expect(err).ToNot(HaveOccurred())
 
-				cfg := Config{SecureProxy: secureProxy}
-				proxy, err := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
-				Expect(err).ToNot(HaveOccurred())
+				cfg := Config{}
+				proxy := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
 
 				ctx, cancelFn := context.WithCancel(ctx)
-				defer cancelFn()
+				stoppedCh := make(chan struct{})
 
 				go func() {
 					defer GinkgoRecover()
 
-					err := proxy.Start(ctx)
+					validator := &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx, cert, validator)
 					Expect(err).ToNot(HaveOccurred())
+					stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -92,6 +113,9 @@ var _ = Describe("Reverse Proxy", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(resp.StatusCode).To(BeNumerically("==", 200))
+
+				cancelFn()
+				<-stoppedCh
 			},
 
 			Entry("when the path is /v1/chat/completions and secure proxy is false", "/v1/chat/completions", false),
@@ -109,7 +133,6 @@ var _ = Describe("Reverse Proxy", func() {
 	})
 
 	When("x-prefiller-url is present", func() {
-		var ctx context.Context
 		var decodeBackend *httptest.Server
 		var decodeHandler *mock.ChatCompletionHandler
 		var prefillBackend *httptest.Server
@@ -117,8 +140,6 @@ var _ = Describe("Reverse Proxy", func() {
 		var decodeURL *url.URL
 
 		BeforeEach(func() {
-			_, ctx = ktesting.NewTestContext(GinkgoT())
-
 			// Decoder
 			decodeHandler = &mock.ChatCompletionHandler{
 				Role: mock.RoleDecode,
@@ -143,22 +164,25 @@ var _ = Describe("Reverse Proxy", func() {
 			var proxy *Server
 
 			BeforeEach(func() {
-				var err error
 				cfg := Config{Connector: ConnectorNIXLV2}
-				proxy, err = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
-				Expect(err).ToNot(HaveOccurred())
+				proxy = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
 
 				decodeHandler.Connector = ConnectorNIXLV2
 				prefillHandler.Connector = ConnectorNIXLV2
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields (backward compatible behavior)", func() {
-				By("starting the proxy")
+				ctx := newTestContext()
+				ctx, cancelFn := context.WithCancel(ctx)
+				stoppedCh := make(chan struct{})
+
 				go func() {
 					defer GinkgoRecover()
 
-					err := proxy.Start(ctx)
+					validator := &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
+					stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -216,15 +240,23 @@ var _ = Describe("Reverse Proxy", func() {
 
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteBlockIDs))
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteEngineID))
+
+				cancelFn()
+				<-stoppedCh
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields", func() {
-				By("starting the proxy")
+				ctx := newTestContext()
+				ctx, cancelFn := context.WithCancel(ctx)
+				stoppedCh := make(chan struct{})
+
 				go func() {
 					defer GinkgoRecover()
 
-					err := proxy.Start(ctx)
+					validator := &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
+					stoppedCh <- struct{}{}
 				}()
 
 				time.Sleep(1 * time.Second)
@@ -282,6 +314,9 @@ var _ = Describe("Reverse Proxy", func() {
 
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteBlockIDs))
 				Expect(drq1kv).To(HaveKey(requestFieldRemoteEngineID))
+
+				cancelFn()
+				<-stoppedCh
 			})
 		})
 	})

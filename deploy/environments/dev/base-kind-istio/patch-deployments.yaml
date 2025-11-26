@@ -12,8 +12,6 @@ spec:
         - ${POOL_NAME}
         - --pool-namespace
         - "default"
-        - "--pool-group"
-        - "inference.networking.x-k8s.io"
         - --v
         - "4"
         - --zap-encoder

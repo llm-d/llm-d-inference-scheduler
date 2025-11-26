@@ -18,13 +18,11 @@ spec:
       terminationGracePeriodSeconds: 130
       containers:
       - name: epp
-        image: ghcr.io/llm-d/llm-d-inference-scheduler:latest
+        image: ${EPP_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - --pool-name
         - "${POOL_NAME}"
-        - "--pool-group"
-        - "inference.networking.x-k8s.io"
         - --v
         - "4"
         - --zap-encoder

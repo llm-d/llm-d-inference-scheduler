@@ -119,6 +119,73 @@ This evolved version removes the requirement for sidecars on the **prefill node*
 
 ---
 
+## Integrating External Prefill/Decode Workloads
+
+The llm-d inference scheduler supports integration with external disaggregated prefill/decode (P/D) workloads other inference frameworks that follow the same P/D separation pattern but use **different Kubernetes Pod labeling conventions**.
+
+### Labeling Convention Flexibility
+
+By default, llm-d uses the label key `llm-d.ai/role` with values:
+- `"prefill"` → prefill-only pods
+- `"decode"` or `"both"` → decode-capable pods  
+
+However, external systems may use alternative labels like:
+```yaml
+role: prefill
+role: decode
+```
+
+To accommodate this **without code changes**, you can configure the **EndpointPickerConfig** to use the generic `by-label` filter plugin instead of the hardcoded `prefill-filter` / `decode-filter`.
+
+### Configuration Example
+
+Below is a minimal `EndpointPickerConfig` that enables integration with workloads using label `role=prefill` / `role=decode`:
+
+```yaml
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+  # Prefill selection: match Pods with label role=prefill
+  - type: by-label
+    name: "prefill-pods"
+    parameters:
+      label: "role"
+      validValues: ["prefill"]
+  # Decode selection: match Pods with label role=decode
+  - type: by-label
+    name: "decode-pods"
+    parameters:
+      label: "role"
+      validValues: ["decode"]
+  - type: prefix-cache-scorer
+    parameters:
+      hashBlockSize: 5
+      maxPrefixBlocksToMatch: 256
+      lruCapacityPerServer: 31250
+  - type: max-score-picker
+  - type: prefill-header-handler
+  - type: pd-profile-handler
+    parameters:
+      threshold: 0
+      hashBlockSize: 5
+      primaryPort: 8000
+schedulingProfiles:
+  - name: prefill
+    plugins:
+      - pluginRef: "prefill-pods"
+      - pluginRef: "max-score-picker"
+      - pluginRef: "prefix-cache-scorer"
+        weight: 2
+  - name: decode
+    plugins:
+      - pluginRef: "decode-pods"
+      - pluginRef: "max-score-picker"
+      - pluginRef: "prefix-cache-scorer"
+        weight: 2
+```
+
+---
+
 ## Diagram
 
 ![Disaggregated Prefill/Decode Architecture](./images/dp_architecture.png)
