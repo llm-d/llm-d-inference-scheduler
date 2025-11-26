@@ -1,17 +1,10 @@
-version: "2"
-
 # Enhanced golangci-lint configuration for llm-d-inference-scheduler
-# Expanded from 22 to 30+ linters for improved code quality, security, and maintainability
+# Expanded from 22 to 30+ linters for improved code quality, security, and maintainability  
 # Focus on practical improvements suitable for Kubernetes controller development
 
 run:
   timeout: 10m
   allow-parallel-runners: true
-
-formatters:
-  enable:
-    - goimports
-    - gofmt
 
 linters:
   enable:
@@ -38,6 +31,10 @@ linters:
     - unused            # Unused code (helps reduce bloat)
 
     # === NEW HIGH-VALUE ADDITIONS ===
+    # Formatting and style consistency
+    - gofmt             # Ensures code is gofmt-ed
+    - goimports         # Import organization and unused import removal
+    
     # Security enhancements
     - gosec             # Security vulnerability scanner
     - bodyclose         # Ensures HTTP response bodies are closed
@@ -71,12 +68,3 @@ linters:
     - funlen            # Function length (can be overly strict)
     - nestif            # Nested if statements (can be overly strict)
     - gocognit          # Cognitive complexity (can be overly strict)
-
-issues:
-  exclude-rules:
-    - path: pkg/plugins/
-      linters:
-        - goanalysis_metalinter
-    - path: pkg/scheduling/pd/
-      linters:
-        - goanalysis_metalinter
