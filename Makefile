@@ -4,7 +4,7 @@ include Makefile.tools.mk
 SHELL := /usr/bin/env bash
 
 # Defaults
-TARGETOS ?= $(shell command -v go >/dev/null 2>&1 && go env GOOS || uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/darwin/; s/linux/linux/')
+TARGETOS ?= $(shell command -v go >/dev/null 2>&1 && go env GOOS || uname -s | tr '[:upper:]' '[:lower:]')
 TARGETARCH ?= $(shell command -v go >/dev/null 2>&1 && go env GOARCH || uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/; s/armv7l/arm/')
 PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
@@ -178,7 +178,7 @@ lint: check-golangci-lint check-typos ## Run lint
 build: build-epp build-sidecar ## Build the project
 
 .PHONY: build-%
-build-%: check-go check-dependencies download-tokenizer ## Build the project
+build-%: check-go download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
@@ -460,12 +460,12 @@ clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 check-dependencies: ## Check if development dependencies are installed
 	@if [ "$(TARGETOS)" = "linux" ]; then \
 	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1; then \
+	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
 	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
 	      exit 1; \
 	    fi; \
 	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1; then \
+	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
 	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
 	      exit 1; \
 	    fi; \
@@ -490,21 +490,21 @@ install-dependencies: ## Install development dependencies based on OS/ARCH
 	@echo "Checking and installing development dependencies..."
 	@if [ "$(TARGETOS)" = "linux" ]; then \
 	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1; then \
+	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
 	      echo "Installing dependencies with apt..."; \
-	      apt-get update && apt-get install -y libzmq3-dev g++; \
+	      apt-get update && apt-get install -y libzmq3-dev g++ python$(PYTHON_VERSION)-dev; \
 	    else \
-	      echo "✅ ZMQ and g++ are already installed."; \
+	      echo "✅ ZMQ, g++, and Python dev headers are already installed."; \
 	    fi; \
 	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1; then \
+	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
 	      echo "Installing dependencies with dnf..."; \
-	      dnf install -y zeromq-devel gcc-c++; \
+	      dnf install -y zeromq-devel gcc-c++ python$(PYTHON_VERSION)-devel; \
 	    else \
-	      echo "✅ ZMQ and gcc-c++ are already installed."; \
+	      echo "✅ ZMQ, gcc-c++, and Python dev headers are already installed."; \
 	    fi; \
 	  else \
-	    echo "ERROR: Unsupported Linux package manager. Install libzmq and g++/gcc-c++ manually."; \
+	    echo "ERROR: Unsupported Linux package manager. Install libzmq, g++/gcc-c++, and python-devel manually."; \
 	    exit 1; \
 	  fi; \
 	elif [ "$(TARGETOS)" = "darwin" ]; then \
