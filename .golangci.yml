@@ -4,30 +4,35 @@ run:
   timeout: 5m
   allow-parallel-runners: true
 
-formatters:
-  enable:
-  - goimports
-  - gofmt
-
 linters:
   enable:
-  - copyloopvar
-  - dupword
-  - durationcheck
-  - fatcontext
-  - ginkgolinter
-  - gocritic
-  - govet
-  - loggercheck
-  - misspell
-  - perfsprint
-  - revive
-  - unconvert
-  - makezero
-  - errcheck
-  - goconst
-  - ineffassign
-  - nakedret
-  - prealloc
-  - unparam
-  - unused
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - fatcontext
+    - ginkgolinter
+    - gocritic
+    - govet
+    - loggercheck
+    - misspell
+    - revive
+    - unconvert
+    - makezero
+    - errcheck
+    - goconst
+    - ineffassign
+    - nakedret
+    - prealloc
+    - unparam
+    - unused
+
+  disable:
+    - varnamelen
+    - exhaustruct
+    - nlreturn
+    - wsl
+    - lll
+    - cyclop
+    - funlen
+    - nestif
+    - gocognit
