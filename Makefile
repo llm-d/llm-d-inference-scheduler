@@ -81,13 +81,16 @@ ifeq ($(PYTHON_CONFIG),)
 	endif
 endif
 
-ifneq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
-    PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
-    # Use --ldflags --embed to get all necessary flags for linking
-    PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
-else
-    $(error $(PYTHON_ERROR))
+ifeq ($(PYTHON_CONFIG),)
+    $(error Python configuration tool not found or invalid)
 endif
+
+ifeq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
+    $(error Python configuration tool cannot provide cflags)
+endif
+
+PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
+PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
 
 # CGO flags with all dependencies
 CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
