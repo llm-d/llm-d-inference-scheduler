@@ -59,7 +59,7 @@ var _ = Describe("Data Parallel support", func() {
 				DataParallelSize:          testDataParallelSize,
 			}
 			theProxy := NewProxy(strconv.Itoa(fakeProxyPort), decodeURL, cfg)
-			theProxy.allowlistValidator, err = NewAllowlistValidator(false, "", "")
+			theProxy.allowlistValidator, err = NewAllowlistValidator(false, DefaultPoolGroup, "", "")
 			Expect(err).ToNot(HaveOccurred())
 
 			err = theProxy.startDataParallel(ctx, nil, grp)

@@ -38,11 +38,15 @@ import (
 )
 
 const (
-	inferencePoolGroup    = "inference.networking.x-k8s.io"
-	inferencePoolVersion  = "v1alpha2"
 	inferencePoolResource = "inferencepools"
 	resyncPeriod          = 30 * time.Second
 )
+
+// InferencePool API group to version mapping
+var inferencePoolGroupToVersion = map[string]string{
+	DefaultPoolGroup: "v1",
+	LegacyPoolGroup:  "v1alpha2",
+}
 
 // AllowlistValidator manages allowed prefill targets based on InferencePool resources
 type AllowlistValidator struct {
@@ -51,6 +55,8 @@ type AllowlistValidator struct {
 	namespace     string
 	poolName      string
 	enabled       bool
+
+	gvr schema.GroupVersionResource // detected GVR
 
 	// allowedTargets maps hostport -> bool for allowed prefill targets
 	allowedTargets   set.Set[string]
@@ -65,11 +71,24 @@ type AllowlistValidator struct {
 }
 
 // NewAllowlistValidator creates a new SSRF protection validator
-func NewAllowlistValidator(enabled bool, namespace string, poolName string) (*AllowlistValidator, error) {
+func NewAllowlistValidator(enabled bool, poolGroup, namespace, poolName string) (*AllowlistValidator, error) {
 	if !enabled {
 		return &AllowlistValidator{
 			enabled: false,
 		}, nil
+	}
+
+	// Determine version based on poolGroup
+	version, exists := inferencePoolGroupToVersion[poolGroup]
+	if !exists {
+		return nil, fmt.Errorf("unsupported poolGroup: %s, "+
+			"must be one of %v", poolGroup, getSupportedPoolGroups())
+	}
+
+	gvr := schema.GroupVersionResource{
+		Group:    poolGroup,
+		Version:  version,
+		Resource: inferencePoolResource,
 	}
 
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -92,11 +111,20 @@ func NewAllowlistValidator(enabled bool, namespace string, poolName string) (*Al
 		dynamicClient:  dynamicClient,
 		namespace:      namespace,
 		poolName:       poolName,
+		gvr:            gvr,
 		allowedTargets: set.New[string](),
 		podInformers:   make(map[string]cache.SharedInformer),
 		podStopChans:   make(map[string]chan struct{}),
 		stopCh:         make(chan struct{}),
 	}, nil
+}
+
+func getSupportedPoolGroups() []string {
+	groups := make([]string, 0, len(inferencePoolGroupToVersion))
+	for group := range inferencePoolGroupToVersion {
+		groups = append(groups, group)
+	}
+	return groups
 }
 
 // Start begins watching InferencePool resources and managing the allowlist
@@ -106,25 +134,20 @@ func (av *AllowlistValidator) Start(ctx context.Context) error {
 	}
 
 	av.logger = log.FromContext(ctx).WithName("allowlist-validator")
-	av.logger.Info("starting SSRF protection allowlist validator", "namespace", av.namespace, "poolName", av.poolName)
-
-	gvr := schema.GroupVersionResource{
-		Group:    inferencePoolGroup,
-		Version:  inferencePoolVersion,
-		Resource: inferencePoolResource,
-	}
+	av.logger.Info("starting SSRF protection allowlist validator",
+		"namespace", av.namespace, "poolName", av.poolName, "gvr", av.gvr.String())
 
 	// Create informer for the specific InferencePool resource
 	lw := &cache.ListWatch{
-		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			// List with field selector to get only the specific InferencePool
 			options.FieldSelector = "metadata.name=" + av.poolName
-			return av.dynamicClient.Resource(gvr).Namespace(av.namespace).List(ctx, options)
+			return av.dynamicClient.Resource(av.gvr).Namespace(av.namespace).List(ctx, options)
 		},
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			// Watch the specific InferencePool by name using field selector
 			options.FieldSelector = "metadata.name=" + av.poolName
-			return av.dynamicClient.Resource(gvr).Namespace(av.namespace).Watch(ctx, options)
+			return av.dynamicClient.Resource(av.gvr).Namespace(av.namespace).Watch(ctx, options)
 		},
 	}
 
@@ -142,7 +165,7 @@ func (av *AllowlistValidator) Start(ctx context.Context) error {
 
 	// Wait for cache sync
 	if !cache.WaitForCacheSync(av.stopCh, av.poolInformer.HasSynced) {
-		return fmt.Errorf("failed to sync InferencePool cache within timeout (check RBAC permissions for inferencepools.%s and that pool '%s' exists)", inferencePoolGroup, av.poolName)
+		return fmt.Errorf("failed to sync InferencePool cache within timeout (check RBAC permissions for inferencepools.%s and that pool '%s' exists)", av.gvr.String(), av.poolName)
 	}
 
 	av.logger.Info("allowlist validator started successfully")
