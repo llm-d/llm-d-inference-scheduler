@@ -77,6 +77,7 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 			clone.forwardDataParallel = false
 			// Configure handlers
 			clone.handler = clone.createRoutes()
+			clone.setConnector()
 
 			return clone.startHTTP(ctx, cert)
 		})

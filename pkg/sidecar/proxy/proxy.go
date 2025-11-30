@@ -126,16 +126,8 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 		forwardDataParallel: true,
 		prefillSamplerFn:    rand.Intn,
 	}
-	switch config.Connector {
-	case ConnectorLMCache:
-		server.runConnectorProtocol = server.runLMCacheProtocol
-	case ConnectorSGLang:
-		server.runConnectorProtocol = server.runSGLangProtocol
-	case ConnectorNIXLV2:
-		fallthrough
-	default:
-		server.runConnectorProtocol = server.runNIXLProtocolV2
-	}
+
+	server.setConnector()
 
 	if config.PrefillerUseTLS {
 		server.prefillerURLPrefix = "https://"
@@ -175,9 +167,24 @@ func (s *Server) Clone() *Server {
 		allowlistValidator:   s.allowlistValidator,
 		runConnectorProtocol: s.runConnectorProtocol,
 		decoderProxy:         s.decoderProxy,
+		prefillerURLPrefix:   s.prefillerURLPrefix,
 		prefillerProxies:     s.prefillerProxies,
 		dataParallelProxies:  s.dataParallelProxies,
 		forwardDataParallel:  s.forwardDataParallel,
+	}
+}
+
+func (s *Server) setConnector() {
+
+	switch s.config.Connector {
+	case ConnectorLMCache:
+		s.runConnectorProtocol = s.runLMCacheProtocol
+	case ConnectorSGLang:
+		s.runConnectorProtocol = s.runSGLangProtocol
+	case ConnectorNIXLV2:
+		fallthrough
+	default:
+		s.runConnectorProtocol = s.runNIXLProtocolV2
 	}
 }
 
