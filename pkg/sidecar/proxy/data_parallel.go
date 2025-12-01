@@ -53,11 +53,11 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 		decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
 		rankPort := strconv.Itoa(basePort + idx + 1)
 		hostPort := net.JoinHostPort(podIP, rankPort)
-		rankURL, err := url.Parse(s.decoderURL.Scheme + "://localhost:" + decoderPort)
+		decoderURL, err := url.Parse(s.decoderURL.Scheme + "://localhost:" + decoderPort)
 		if err != nil {
 			return err
 		}
-		handler := s.createDecoderProxyHandler(rankURL, s.config.DecoderInsecureSkipVerify)
+		handler := s.createDecoderProxyHandler(decoderURL, s.config.DecoderInsecureSkipVerify)
 		s.dataParallelProxies[hostPort] = handler
 	}
 
@@ -77,6 +77,7 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 			clone.forwardDataParallel = false
 			// Configure handlers
 			clone.handler = clone.createRoutes()
+			clone.setConnector()
 
 			return clone.startHTTP(ctx, cert)
 		})
