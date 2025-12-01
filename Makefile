@@ -82,7 +82,7 @@ ifeq ($(PYTHON_CONFIG),)
 endif
 
 ifeq ($(PYTHON_CONFIG),)
-    $(error Python configuration tool not found or invalid)
+    $(error ${PYTHON_ERROR})
 endif
 
 ifeq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
