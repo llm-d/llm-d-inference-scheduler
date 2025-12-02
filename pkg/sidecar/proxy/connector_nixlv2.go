@@ -21,8 +21,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
@@ -57,9 +62,20 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	uuidStr := uuid.String()
 
 	// Prefill Stage
+	tracer := telemetry.Tracer()
+	ctx := r.Context()
+
+	ctx, prefillSpan := tracer.Start(ctx, "pd_sidecar.prefill",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	prefillSpan.SetAttributes(
+		attribute.String("pd_sidecar.request_id", uuidStr),
+		attribute.String("pd_sidecar.prefill_target", prefillPodHostPort),
+		attribute.String("pd_sidecar.connector", "nixlv2"),
+	)
+	prefillStart := time.Now()
 
 	// 1. Prepare prefill request
-	ctx := r.Context()
 	preq := r.Clone(ctx)
 
 	preq.Header.Add(requestHeaderRequestID, uuidStr)
@@ -107,11 +123,21 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
+	prefillDuration := time.Since(prefillStart)
+	prefillSpan.SetAttributes(
+		attribute.Int("pd_sidecar.prefill.status_code", pw.statusCode),
+		attribute.Float64("pd_sidecar.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+	)
+
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
 		s.logger.Error(err, "request failed", "code", pw.statusCode)
+		prefillSpan.SetStatus(codes.Error, "prefill request failed")
+		prefillSpan.End()
 		w.WriteHeader(pw.statusCode)
 		return
 	}
+	prefillSpan.SetStatus(codes.Ok, "")
+	prefillSpan.End()
 
 	// Process response - extract p/d fields
 	var prefillerResponse map[string]any
@@ -133,15 +159,31 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// Decode Stage
 
+	ctx, decodeSpan := tracer.Start(ctx, "pd_sidecar.decode",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer decodeSpan.End()
+
+	decodeSpan.SetAttributes(
+		attribute.String("pd_sidecar.request_id", uuidStr),
+		attribute.String("pd_sidecar.connector", "nixlv2"),
+	)
+	decodeStart := time.Now()
+
 	// 1. Prepare decode request
 	dreq := r.Clone(ctx)
 
 	dreq.Header.Add(requestHeaderRequestID, uuidStr)
 
 	delete(completionRequest, requestFieldStream)
+	streamingEnabled := false
 	if streamOk {
 		completionRequest[requestFieldStream] = streamValue
+		if streamBool, ok := streamValue.(bool); ok {
+			streamingEnabled = streamBool
+		}
 	}
+	decodeSpan.SetAttributes(attribute.Bool("pd_sidecar.decode.streaming", streamingEnabled))
 	if streamOptionsOk {
 		completionRequest[requestFieldStreamOptions] = streamOptionsValue
 	}
@@ -168,8 +210,16 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	// 2. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	if !s.forwardDataParallel || !s.dataParallelHandler(w, dreq) {
+	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(w, dreq)
+	decodeSpan.SetAttributes(attribute.Bool("pd_sidecar.decode.data_parallel", dataParallelUsed))
+
+	if !dataParallelUsed {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
+		decodeSpan.SetAttributes(attribute.String("pd_sidecar.decode.target", s.decoderURL.Host))
 		s.decoderProxy.ServeHTTP(w, dreq)
 	}
+
+	decodeDuration := time.Since(decodeStart)
+	decodeSpan.SetAttributes(attribute.Float64("pd_sidecar.decode.duration_ms", float64(decodeDuration.Milliseconds())))
+	decodeSpan.SetStatus(codes.Ok, "")
 }

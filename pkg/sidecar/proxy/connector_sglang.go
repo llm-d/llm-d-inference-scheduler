@@ -27,6 +27,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -76,12 +81,28 @@ func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefi
 }
 
 func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string) {
+	tracer := telemetry.Tracer()
+	ctx := r.Context()
+
+	// Prefill Stage - async
+	ctx, prefillSpan := tracer.Start(ctx, "pd_sidecar.prefill",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	prefillSpan.SetAttributes(
+		attribute.String("pd_sidecar.prefill_target", prefillHost),
+		attribute.String("pd_sidecar.connector", "sglang"),
+		attribute.Bool("pd_sidecar.prefill.async", true),
+	)
+	prefillStart := time.Now()
+
 	// Create separate requests for prefill and decode
 	prefillReq := cloneWithJSONBody(r, body)
 	decodeReq := cloneWithJSONBody(r, body)
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillHost)
 	if err != nil {
+		prefillSpan.SetStatus(codes.Error, "failed to create prefill handler")
+		prefillSpan.End()
 		if err := errorBadGateway(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -90,13 +111,44 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 
 	// Send prefill request asynchronously
 	go func() {
+		defer prefillSpan.End()
 		pw := &bufferedResponseWriter{}
 		prefillHandler.ServeHTTP(pw, prefillReq)
+		prefillDuration := time.Since(prefillStart)
+		prefillSpan.SetAttributes(
+			attribute.Int("pd_sidecar.prefill.status_code", pw.statusCode),
+			attribute.Float64("pd_sidecar.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+		)
+		if pw.statusCode >= 200 && pw.statusCode < 300 {
+			prefillSpan.SetStatus(codes.Ok, "")
+		} else {
+			prefillSpan.SetStatus(codes.Error, "prefill request failed")
+		}
 		s.logger.V(5).Info("prefill request completed", "status", pw.statusCode)
 	}()
 
+	// Decode Stage - sync
+	ctx, decodeSpan := tracer.Start(ctx, "pd_sidecar.decode",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer decodeSpan.End()
+
+	decodeSpan.SetAttributes(
+		attribute.String("pd_sidecar.connector", "sglang"),
+		attribute.Bool("pd_sidecar.decode.concurrent_with_prefill", true),
+	)
+	decodeStart := time.Now()
+
 	// Send decode request synchronously
+	decodeReq = decodeReq.WithContext(ctx)
 	s.decoderProxy.ServeHTTP(w, decodeReq)
+
+	decodeDuration := time.Since(decodeStart)
+	decodeSpan.SetAttributes(
+		attribute.Float64("pd_sidecar.decode.duration_ms", float64(decodeDuration.Milliseconds())),
+		attribute.String("pd_sidecar.decode.target", s.decoderURL.Host),
+	)
+	decodeSpan.SetStatus(codes.Ok, "")
 }
 
 func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {

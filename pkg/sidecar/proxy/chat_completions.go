@@ -21,6 +21,10 @@ import (
 	"strings"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -32,6 +36,20 @@ var (
 )
 
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(r.Context(), "pd_sidecar.request",
+		trace.WithSpanKind(trace.SpanKindServer),
+	)
+	defer span.End()
+
+	// Update request context with span
+	r = r.WithContext(ctx)
+
+	span.SetAttributes(
+		attribute.String("pd_sidecar.connector", s.config.Connector),
+		attribute.String("pd_sidecar.request.path", r.URL.Path),
+	)
+
 	var prefillHostPorts []string
 	prefillHostPorts = r.Header.Values(common.PrefillPodHeader)
 
@@ -56,12 +74,23 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 
 	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
+		span.SetAttributes(
+			attribute.Bool("pd_sidecar.disaggregation_enabled", false),
+			attribute.String("pd_sidecar.reason", "no_prefill_header"),
+		)
+		span.SetStatus(codes.Ok, "")
 
 		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
 			s.decoderProxy.ServeHTTP(w, r)
 		}
 		return
 	}
+
+	span.SetAttributes(
+		attribute.Bool("pd_sidecar.disaggregation_enabled", true),
+		attribute.String("pd_sidecar.prefill_target", prefillHostPort),
+		attribute.Int("pd_sidecar.prefill_candidates", numHosts),
+	)
 
 	// SSRF Protection: Check if the prefill target is allowed
 	if !s.allowlistValidator.IsAllowed(prefillHostPort) {
@@ -70,10 +99,16 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 			"clientIP", r.RemoteAddr,
 			"userAgent", r.Header.Get("User-Agent"),
 			"requestPath", r.URL.Path)
+		span.SetAttributes(
+			attribute.String("pd_sidecar.error", "ssrf_protection_denied"),
+			attribute.String("pd_sidecar.denied_target", prefillHostPort),
+		)
+		span.SetStatus(codes.Error, "SSRF protection: prefill target not in allowlist")
 		http.Error(w, "Forbidden: prefill target not allowed by SSRF protection", http.StatusForbidden)
 		return
 	}
 
 	s.logger.V(4).Info("SSRF protection: prefill target allowed", "target", prefillHostPort)
 	s.runConnectorProtocol(w, r, prefillHostPort)
+	span.SetStatus(codes.Ok, "")
 }
