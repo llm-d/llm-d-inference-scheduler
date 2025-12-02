@@ -4,7 +4,12 @@ run:
   timeout: 5m
   allow-parallel-runners: true
 
+formatters:
+  enable:
+    - goimports
+
 linters:
+  default: none
   enable:
     - copyloopvar
     - dupword
@@ -25,14 +30,3 @@ linters:
     - prealloc
     - unparam
     - unused
-
-  disable:
-    - varnamelen
-    - exhaustruct
-    - nlreturn
-    - wsl
-    - lll
-    - cyclop
-    - funlen
-    - nestif
-    - gocognit
