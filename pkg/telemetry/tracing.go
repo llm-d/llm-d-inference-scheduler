@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -48,6 +49,10 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	if endpoint == "" {
 		endpoint = "localhost:4317"
 	}
+
+	// Strip http:// or https:// prefix if present
+	// otlptracegrpc.WithEndpoint() expects host:port only
+	endpoint = stripScheme(endpoint)
 
 	logger.Info("Initializing OpenTelemetry tracing", "endpoint", endpoint, "service", serviceName)
 
@@ -95,4 +100,12 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 // Tracer returns a tracer for the inference scheduler
 func Tracer() trace.Tracer {
 	return otel.Tracer(serviceName)
+}
+
+// stripScheme removes http:// or https:// prefix from endpoint URL
+// OpenTelemetry gRPC exporter expects host:port format only
+func stripScheme(endpoint string) string {
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	return endpoint
 }
