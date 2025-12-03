@@ -183,7 +183,7 @@ build: build-epp build-sidecar ## Build the project
 .PHONY: build-%
 build-%: check-go download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
-	go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
+	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
 ##@ Container Build/Push
 
