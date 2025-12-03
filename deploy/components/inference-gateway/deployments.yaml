@@ -63,3 +63,29 @@ spec:
           name: epp-config
       - name: cache
         emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${BATCH_NAME}
+  labels:
+    app: ${BATCH_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${BATCH_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${BATCH_NAME}
+    spec:
+      serviceAccountName: ${BATCH_NAME}
+      terminationGracePeriodSeconds: 130
+      containers:
+      - name: batch
+        image: ${BATCH_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - --redis-addr
+        - "redis-service:6379"

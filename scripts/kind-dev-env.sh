@@ -36,6 +36,13 @@ export EPP_TAG="${EPP_TAG:-dev}"
 EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
+# Set a default BATCH_TAG if not provided
+export BATCH_TAG="${BATCH_TAG:-dev}"
+
+# Set a default BATCH_IMAGE if not provided
+BATCH_IMAGE="${BATCH_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${BATCH_TAG}}"
+export BATCH_IMAGE
+
 # Set the model name to deploy
 export MODEL_NAME="${MODEL_NAME:-food-review}"
 # Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
@@ -47,6 +54,9 @@ export MODEL_NAME_SAFE=$(echo "${MODEL_ID}" | tr '[:upper:]' '[:lower:]' | tr ' 
 
 # Set the endpoint-picker to deploy
 export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
+
+# Set the batch to deploy
+export BATCH_NAME="${BATCH_NAME:-${MODEL_NAME_SAFE}-batch}"
 
 # Set the default routing side car image tag
 export SIDECAR_TAG="${SIDECAR_TAG:-dev}"
@@ -203,6 +213,13 @@ else
 	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
 fi
 
+# Load the batch image into the cluster
+if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+	podman save ${BATCH_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+else
+	kind --name ${CLUSTER_NAME} load docker-image ${BATCH_IMAGE}
+fi
+
 # ------------------------------------------------------------------------------
 # CRD Deployment (Gateway API + GIE)
 # ------------------------------------------------------------------------------
@@ -236,7 +253,7 @@ envsubst '$PRIMARY_PORT' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
-	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
+	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${BATCH_NAME} ${BATCH_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
