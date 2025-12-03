@@ -63,14 +63,14 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	var policy batch.RequestPolicy = batch.NewRandomRobinPolicy()
 
-	var impl batch.Flow = redis.NewRedisMQFlow("localhost:6379")
+	var impl batch.Flow = redis.NewRedisMQFlow("localhost:16379")
 	requestChannel := policy.MergeRequestChannels(impl.RequestChannels()).Channel
 	for w := 1; w <= *concurrency; w++ {
 		go batch.Worker(ctx, *endpoint, httpClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
 	}
 
 	impl.Start(ctx)
-
+	<-ctx.Done()
 	return nil
 }
 
