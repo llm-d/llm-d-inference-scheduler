@@ -8,6 +8,7 @@ TARGETOS ?= $(shell go env GOOS)
 TARGETARCH ?= $(shell go env GOARCH)
 PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
+BATCH_IMAGE_NAME ?= llm-d-routing-batch
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
 SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
@@ -21,7 +22,7 @@ SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 BATCH_TAG ?= dev
 export BATCH_TAG
-BATCH_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/batch
+BATCH_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(BATCH_IMAGE_NAME)
 export BATCH_IMAGE ?= $(BATCH_IMAGE_TAG_BASE):$(BATCH_TAG)
 
 NAMESPACE ?= hc4ai-operator
@@ -444,6 +445,7 @@ env-dev-kind: ## Run under kind ($(KIND_CLUSTER_NAME))
 		EPP_IMAGE=$(EPP_IMAGE) \
 		VLLM_SIMULATOR_IMAGE=${VLLM_SIMULATOR_IMAGE} \
 		SIDECAR_IMAGE=${SIDECAR_IMAGE} \
+		BATCH_IMAGE=${BATCH_IMAGE} \
 		./scripts/kind-dev-env.sh; \
 	fi
 

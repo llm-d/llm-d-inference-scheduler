@@ -1,4 +1,4 @@
-package runner
+package batchrunner
 
 import (
 	"context"
@@ -14,21 +14,22 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
-type Runner struct {
+type BatchRunner struct {
 }
 
 var (
 	setupLog     = ctrl.Log.WithName("setup")
 	logVerbosity = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
 	concurrency  = flag.Int("concurrency", 8, "number of concurrent workers")
-	endpoint     = flag.String("endpoint", "", "inference endpoint")
+	endpoint     = flag.String("endpoint", "http://localhost:30080/v1/completions", "inference endpoint")
+	redisAddr    = flag.String("redis-addr", "localhost:16379", "address of the Redis server")
 )
 
-func NewRunner() *Runner {
-	return &Runner{}
+func NewBatchRunner() *BatchRunner {
+	return &BatchRunner{}
 }
 
-func (r *Runner) Run(ctx context.Context) error {
+func (r *BatchRunner) Run(ctx context.Context) error {
 	opts := zap.Options{
 		Development: true,
 	}
@@ -63,7 +64,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	var policy batch.RequestPolicy = batch.NewRandomRobinPolicy()
 
-	var impl batch.Flow = redis.NewRedisMQFlow("localhost:16379")
+	var impl batch.Flow = redis.NewRedisMQFlow(*redisAddr)
 	requestChannel := policy.MergeRequestChannels(impl.RequestChannels()).Channel
 	for w := 1; w <= *concurrency; w++ {
 		go batch.Worker(ctx, *endpoint, httpClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
