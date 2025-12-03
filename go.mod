@@ -15,6 +15,7 @@ require (
 	github.com/onsi/gomega v1.38.2
 	github.com/openai/openai-go v1.12.0
 	github.com/prometheus/client_golang v1.23.2
+	github.com/alicebob/miniredis/v2 v2.35.0 
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.18.0
 	google.golang.org/grpc v1.76.0
@@ -93,6 +94,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect

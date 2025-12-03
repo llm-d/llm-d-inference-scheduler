@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/batch"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/batch/redis"
 )
 
-const (
-	redisURL = "localhost:6379"
-)
-
 func TestRedisImpl(t *testing.T) {
+	s := miniredis.RunT(t)
+	rAddr := s.Host() + ":" + s.Port()
+
 	ctx := context.Background()
-	flow := redis.NewRedisMQFlow(redisURL)
+	flow := redis.NewRedisMQFlow(rAddr)
 	flow.Start(ctx)
 
 	flow.RetryChannel() <- batch.RetryMessage{

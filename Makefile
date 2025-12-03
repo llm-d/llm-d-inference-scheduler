@@ -19,6 +19,11 @@ SIDECAR_TAG ?= dev
 export SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
+BATCH_TAG ?= dev
+export BATCH_TAG
+BATCH_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/batch
+export BATCH_IMAGE ?= $(BATCH_IMAGE_TAG_BASE):$(BATCH_TAG)
+
 NAMESPACE ?= hc4ai-operator
 VLLM_SIMULATOR_TAG ?= v0.6.1
 export VLLM_SIMULATOR_TAG
@@ -94,16 +99,24 @@ CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizer
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
+batch_IMAGE = $(BATCH_IMAGE)
 epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
+batch_NAME = batch
 epp_LDFLAGS = -ldflags="$(LDFLAGS)"
 sidecar_LDFLAGS =
+batch_LDFLAGS = -ldflags="$(LDFLAGS)"
 epp_CGO_CFLAGS = "${CGO_CFLAGS}"
 sidecar_CGO_CFLAGS =
+batch_CGO_CFLAGS = "${CGO_CFLAGS}"
 epp_CGO_LDFLAGS = "${CGO_LDFLAGS}"
 sidecar_CGO_LDFLAGS =
+batch_CGO_LDFLAGS = "${CGO_LDFLAGS}"
 epp_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/
 sidecar_TEST_FILES = go list ./pkg/sidecar/...
+batch_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/batch/
+
+
 
 .PHONY: help
 help: ## Print help
@@ -142,7 +155,7 @@ format: ## Format Go source files
 test: test-unit test-e2e ## Run unit tests and e2e tests
 
 .PHONY: test-unit
-test-unit: test-unit-epp test-unit-sidecar
+test-unit: test-unit-epp test-unit-sidecar test-unit-batch 
 
 .PHONY: test-unit-%
 test-unit-%: download-tokenizer install-dependencies ## Run unit tests
@@ -173,7 +186,7 @@ lint: check-golangci-lint check-typos ## Run lint
 ##@ Build
 
 .PHONY: build
-build: build-epp build-sidecar ## Build the project
+build: build-epp build-sidecar build-batch ## Build the project
 
 .PHONY: build-%
 build-%: check-go install-dependencies download-tokenizer ## Build the project
@@ -183,7 +196,7 @@ build-%: check-go install-dependencies download-tokenizer ## Build the project
 ##@ Container Build/Push
 
 .PHONY:	image-build
-image-build: image-build-epp image-build-sidecar ## Build Docker image
+image-build: image-build-epp image-build-sidecar image-build-batch ## Build Docker image
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_RUNTIME)
@@ -197,7 +210,7 @@ image-build-%: check-container-tool ## Build Docker image ## Build Docker image 
  		-t $($*_IMAGE) -f Dockerfile.$* .
 
 .PHONY: image-push
-image-push: image-push-epp image-push-sidecar ## Push container images to registry
+image-push: image-push-epp image-push-sidecar image-push-batch ## Push container images to registry
 
 .PHONY: image-push-%
 image-push-%: check-container-tool ## Push container image to registry
