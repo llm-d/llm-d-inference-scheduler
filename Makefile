@@ -152,7 +152,7 @@ test-unit: test-unit-epp test-unit-sidecar
 .PHONY: test-unit-%
 test-unit-%: download-tokenizer check-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
+	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -covermode=atomic -coverprofile=coverage.out -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-integration
 test-integration: download-tokenizer check-dependencies ## Run integration tests

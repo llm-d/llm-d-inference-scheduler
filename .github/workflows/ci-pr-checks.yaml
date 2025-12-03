@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Sanity check repo contents
         run: ls -la
@@ -72,12 +74,71 @@ jobs:
           CPATH: ${{ env.CPATH }}
           PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
 
+      - name: Base branch coverage
+        id: base_coverage
+        run: |
+          git checkout ${{ github.base_ref }}
+          make test-unit
+          BASE_COVERAGE=$(go tool cover -func=coverage.out | grep "total:" | awk '{print $NF}' | sed 's/%//')
+          echo "BASE_COVERAGE=${BASE_COVERAGE:-0.0}" >> $GITHUB_OUTPUT
+
+      - name: Head branch coverage
+        id: head_coverage
+        run: |
+          git checkout ${{ github.sha }}
+          make test-unit
+          HEAD_COVERAGE=$(go tool cover -func=coverage.out | grep "total:" | awk '{print $NF}' | sed 's/%//')
+          echo "HEAD_COVERAGE=${HEAD_COVERAGE:-0.0}" >> $GITHUB_OUTPUT
+
+      - name: Calculate diff and format report
+        id: coverage_report
+        run: |
+          BASE=${{ steps.base_coverage.outputs.BASE_COVERAGE }}
+          HEAD=${{ steps.head_coverage.outputs.HEAD_COVERAGE }}
+          
+          DIFF=$(echo "scale=2; $HEAD - $BASE" | bc)
+          DIFF_SIGN=$(echo $DIFF | sed 's/-//')
+          
+          if (( $(echo "$DIFF > 0" | bc -l) )); then
+            SIGN="⬆️ +${DIFF}%"
+            COLOR="🟢"
+          elif (( $(echo "$DIFF < 0" | bc -l) )); then
+            SIGN="⬇️ ${DIFF}%"
+            COLOR="🔴"
+          else
+            SIGN="⏸️ 0%"
+            COLOR="🟡"
+          fi
+          
+          REPORT=$(cat <<EOF
+          
+          | Branch | Coverage | Change |
+          | :--- | :--- | :--- |
+          | **Current PR** | **${HEAD}%** | ${COLOR} **${SIGN}** |
+          | Base (${{ github.base_ref }}) | ${BASE}% | N/A |
+          
+          > Coverage report compares \`${{ github.event.pull_request.head.ref }}\` against \`${{ github.base_ref }}\`.
+          EOF
+          )
+          DELIMITER=$(uuidgen)
+          echo "markdown_body<<$DELIMITER" >> $GITHUB_OUTPUT
+          echo "$REPORT" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT 
+
+      - name: Publish PR Comment
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ${{ steps.coverage_report.outputs.markdown_body }}
+
       - name: Run make build
         shell: bash
         run: |
           make build
 
-      - name: Run make test
+      - name: Run make e2e-test
         shell: bash
         run: |
-          make test
+          make test-e2e
