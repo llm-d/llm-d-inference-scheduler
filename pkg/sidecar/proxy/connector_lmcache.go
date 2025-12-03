@@ -54,12 +54,12 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	}
 
 	// Prefill Stage
-	ctx, prefillSpan := tracer.Start(ctx, "pd_sidecar.prefill",
+	ctx, prefillSpan := tracer.Start(ctx, "llm_d.pd_proxy.prefill",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	prefillSpan.SetAttributes(
-		attribute.String("pd_sidecar.prefill_target", prefillPodHostPort),
-		attribute.String("pd_sidecar.connector", "lmcache"),
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillPodHostPort),
+		attribute.String("llm_d.pd_proxy.connector", "lmcache"),
 	)
 	prefillStart := time.Now()
 
@@ -95,8 +95,8 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 
 	prefillDuration := time.Since(prefillStart)
 	prefillSpan.SetAttributes(
-		attribute.Int("pd_sidecar.prefill.status_code", pw.statusCode),
-		attribute.Float64("pd_sidecar.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+		attribute.Int("llm_d.pd_proxy.prefill.status_code", pw.statusCode),
+		attribute.Float64("llm_d.pd_proxy.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
 	)
 
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
@@ -110,12 +110,12 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	prefillSpan.End()
 
 	// Decode Stage
-	ctx, decodeSpan := tracer.Start(ctx, "pd_sidecar.decode",
+	ctx, decodeSpan := tracer.Start(ctx, "llm_d.pd_proxy.decode",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	defer decodeSpan.End()
 
-	decodeSpan.SetAttributes(attribute.String("pd_sidecar.connector", "lmcache"))
+	decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.connector", "lmcache"))
 	decodeStart := time.Now()
 
 	// Forward original request to local decoder
@@ -123,15 +123,15 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	r = r.WithContext(ctx)
 	r.Body = io.NopCloser(strings.NewReader(string(original)))
 	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(w, r)
-	decodeSpan.SetAttributes(attribute.Bool("pd_sidecar.decode.data_parallel", dataParallelUsed))
+	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.data_parallel", dataParallelUsed))
 
 	if !dataParallelUsed {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
-		decodeSpan.SetAttributes(attribute.String("pd_sidecar.decode.target", s.decoderURL.Host))
+		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host))
 		s.decoderProxy.ServeHTTP(w, r)
 	}
 
 	decodeDuration := time.Since(decodeStart)
-	decodeSpan.SetAttributes(attribute.Float64("pd_sidecar.decode.duration_ms", float64(decodeDuration.Milliseconds())))
+	decodeSpan.SetAttributes(attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())))
 	decodeSpan.SetStatus(codes.Ok, "")
 }

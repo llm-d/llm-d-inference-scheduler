@@ -28,6 +28,7 @@ import (
 	"os"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
 
@@ -71,8 +72,9 @@ func main() {
 	if err := runner.NewRunner().
 		WithCustomCollectors(metrics.GetCollectors()...).
 		Run(ctx); err != nil {
-		span.SetAttributes(attribute.String("operation.outcome", "error"))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "startup failed")
 		os.Exit(1)
 	}
-	span.SetAttributes(attribute.String("operation.outcome", "success"))
+	span.SetStatus(codes.Ok, "")
 }

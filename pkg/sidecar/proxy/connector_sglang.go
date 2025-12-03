@@ -85,13 +85,13 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	ctx := r.Context()
 
 	// Prefill Stage - async
-	ctx, prefillSpan := tracer.Start(ctx, "pd_sidecar.prefill",
+	ctx, prefillSpan := tracer.Start(ctx, "llm_d.pd_proxy.prefill",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	prefillSpan.SetAttributes(
-		attribute.String("pd_sidecar.prefill_target", prefillHost),
-		attribute.String("pd_sidecar.connector", "sglang"),
-		attribute.Bool("pd_sidecar.prefill.async", true),
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillHost),
+		attribute.String("llm_d.pd_proxy.connector", "sglang"),
+		attribute.Bool("llm_d.pd_proxy.prefill.async", true),
 	)
 	prefillStart := time.Now()
 
@@ -116,8 +116,8 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 		prefillHandler.ServeHTTP(pw, prefillReq)
 		prefillDuration := time.Since(prefillStart)
 		prefillSpan.SetAttributes(
-			attribute.Int("pd_sidecar.prefill.status_code", pw.statusCode),
-			attribute.Float64("pd_sidecar.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+			attribute.Int("llm_d.pd_proxy.prefill.status_code", pw.statusCode),
+			attribute.Float64("llm_d.pd_proxy.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
 		)
 		if pw.statusCode >= 200 && pw.statusCode < 300 {
 			prefillSpan.SetStatus(codes.Ok, "")
@@ -128,14 +128,14 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	}()
 
 	// Decode Stage - sync
-	ctx, decodeSpan := tracer.Start(ctx, "pd_sidecar.decode",
+	ctx, decodeSpan := tracer.Start(ctx, "llm_d.pd_proxy.decode",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	defer decodeSpan.End()
 
 	decodeSpan.SetAttributes(
-		attribute.String("pd_sidecar.connector", "sglang"),
-		attribute.Bool("pd_sidecar.decode.concurrent_with_prefill", true),
+		attribute.String("llm_d.pd_proxy.connector", "sglang"),
+		attribute.Bool("llm_d.pd_proxy.decode.concurrent_with_prefill", true),
 	)
 	decodeStart := time.Now()
 
@@ -145,8 +145,8 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 
 	decodeDuration := time.Since(decodeStart)
 	decodeSpan.SetAttributes(
-		attribute.Float64("pd_sidecar.decode.duration_ms", float64(decodeDuration.Milliseconds())),
-		attribute.String("pd_sidecar.decode.target", s.decoderURL.Host),
+		attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())),
+		attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host),
 	)
 	decodeSpan.SetStatus(codes.Ok, "")
 }

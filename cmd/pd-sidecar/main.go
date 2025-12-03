@@ -31,6 +31,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 var (
@@ -88,9 +89,9 @@ func main() {
 
 	// Add startup span to verify tracing is working
 	tracer := telemetry.Tracer()
-	ctx, span := tracer.Start(ctx, "pd_sidecar.startup")
+	ctx, span := tracer.Start(ctx, "llm_d.pd_proxy.startup")
 	span.SetAttributes(
-		attribute.String("component", "pd-sidecar"),
+		attribute.String("component", "llm-d-pd-proxy"),
 		attribute.String("operation", "startup"),
 	)
 	defer span.End()
@@ -133,7 +134,8 @@ func main() {
 	targetURL, err := url.Parse(scheme + "://localhost:" + *vLLMPort)
 	if err != nil {
 		logger.Error(err, "failed to create targetURL")
-		span.SetAttributes(attribute.String("operation.outcome", "error"))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to create targetURL")
 		return
 	}
 
@@ -147,7 +149,8 @@ func main() {
 		}
 		if err != nil {
 			logger.Error(err, "failed to create TLS certificate")
-			span.SetAttributes(attribute.String("operation.outcome", "error"))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to create TLS certificate")
 			return
 		}
 		cert = &tempCert
@@ -166,13 +169,14 @@ func main() {
 	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *poolGroup, *inferencePoolNamespace, *inferencePoolName)
 	if err != nil {
 		logger.Error(err, "failed to create SSRF protection validator")
-		span.SetAttributes(attribute.String("operation.outcome", "error"))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to create SSRF protection validator")
 		return
 	}
 
 	proxyServer := proxy.NewProxy(*port, targetURL, config)
 
-	span.SetAttributes(attribute.String("operation.outcome", "success"))
+	span.SetStatus(codes.Ok, "")
 
 	if err := proxyServer.Start(ctx, cert, validator); err != nil {
 		logger.Error(err, "failed to start proxy server")

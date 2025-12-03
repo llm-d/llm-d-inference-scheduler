@@ -37,7 +37,7 @@ var (
 
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
 	tracer := telemetry.Tracer()
-	ctx, span := tracer.Start(r.Context(), "pd_sidecar.request",
+	ctx, span := tracer.Start(r.Context(), "llm_d.pd_proxy.request",
 		trace.WithSpanKind(trace.SpanKindServer),
 	)
 	defer span.End()
@@ -46,8 +46,8 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	r = r.WithContext(ctx)
 
 	span.SetAttributes(
-		attribute.String("pd_sidecar.connector", s.config.Connector),
-		attribute.String("pd_sidecar.request.path", r.URL.Path),
+		attribute.String("llm_d.pd_proxy.connector", s.config.Connector),
+		attribute.String("llm_d.pd_proxy.request.path", r.URL.Path),
 	)
 
 	var prefillHostPorts []string
@@ -75,8 +75,8 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
 		span.SetAttributes(
-			attribute.Bool("pd_sidecar.disaggregation_enabled", false),
-			attribute.String("pd_sidecar.reason", "no_prefill_header"),
+			attribute.Bool("llm_d.pd_proxy.disaggregation_enabled", false),
+			attribute.String("llm_d.pd_proxy.reason", "no_prefill_header"),
 		)
 		span.SetStatus(codes.Ok, "")
 
@@ -87,9 +87,9 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	span.SetAttributes(
-		attribute.Bool("pd_sidecar.disaggregation_enabled", true),
-		attribute.String("pd_sidecar.prefill_target", prefillHostPort),
-		attribute.Int("pd_sidecar.prefill_candidates", numHosts),
+		attribute.Bool("llm_d.pd_proxy.disaggregation_enabled", true),
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillHostPort),
+		attribute.Int("llm_d.pd_proxy.prefill_candidates", numHosts),
 	)
 
 	// SSRF Protection: Check if the prefill target is allowed
@@ -100,8 +100,8 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 			"userAgent", r.Header.Get("User-Agent"),
 			"requestPath", r.URL.Path)
 		span.SetAttributes(
-			attribute.String("pd_sidecar.error", "ssrf_protection_denied"),
-			attribute.String("pd_sidecar.denied_target", prefillHostPort),
+			attribute.String("llm_d.pd_proxy.error", "ssrf_protection_denied"),
+			attribute.String("llm_d.pd_proxy.denied_target", prefillHostPort),
 		)
 		span.SetStatus(codes.Error, "SSRF protection: prefill target not in allowlist")
 		http.Error(w, "Forbidden: prefill target not allowed by SSRF protection", http.StatusForbidden)

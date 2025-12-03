@@ -30,9 +30,9 @@ func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
 	s.addr = ln.Addr()
 
 	// Wrap handler with OpenTelemetry middleware to extract trace context from incoming requests
-	handler := otelhttp.NewHandler(s.handler, "pd-sidecar",
+	handler := otelhttp.NewHandler(s.handler, "llm-d-pd-proxy",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
-			return "pd_sidecar." + r.Method + " " + r.URL.Path
+			return "llm_d.pd_proxy." + r.Method + " " + r.URL.Path
 		}),
 	)
 

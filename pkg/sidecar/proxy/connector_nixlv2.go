@@ -65,13 +65,13 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	tracer := telemetry.Tracer()
 	ctx := r.Context()
 
-	ctx, prefillSpan := tracer.Start(ctx, "pd_sidecar.prefill",
+	ctx, prefillSpan := tracer.Start(ctx, "llm_d.pd_proxy.prefill",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	prefillSpan.SetAttributes(
-		attribute.String("pd_sidecar.request_id", uuidStr),
-		attribute.String("pd_sidecar.prefill_target", prefillPodHostPort),
-		attribute.String("pd_sidecar.connector", "nixlv2"),
+		attribute.String("llm_d.pd_proxy.request_id", uuidStr),
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillPodHostPort),
+		attribute.String("llm_d.pd_proxy.connector", "nixlv2"),
 	)
 	prefillStart := time.Now()
 
@@ -125,8 +125,8 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	prefillDuration := time.Since(prefillStart)
 	prefillSpan.SetAttributes(
-		attribute.Int("pd_sidecar.prefill.status_code", pw.statusCode),
-		attribute.Float64("pd_sidecar.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+		attribute.Int("llm_d.pd_proxy.prefill.status_code", pw.statusCode),
+		attribute.Float64("llm_d.pd_proxy.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
 	)
 
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
@@ -159,14 +159,14 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// Decode Stage
 
-	ctx, decodeSpan := tracer.Start(ctx, "pd_sidecar.decode",
+	ctx, decodeSpan := tracer.Start(ctx, "llm_d.pd_proxy.decode",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	defer decodeSpan.End()
 
 	decodeSpan.SetAttributes(
-		attribute.String("pd_sidecar.request_id", uuidStr),
-		attribute.String("pd_sidecar.connector", "nixlv2"),
+		attribute.String("llm_d.pd_proxy.request_id", uuidStr),
+		attribute.String("llm_d.pd_proxy.connector", "nixlv2"),
 	)
 	decodeStart := time.Now()
 
@@ -183,7 +183,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 			streamingEnabled = streamBool
 		}
 	}
-	decodeSpan.SetAttributes(attribute.Bool("pd_sidecar.decode.streaming", streamingEnabled))
+	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.streaming", streamingEnabled))
 	if streamOptionsOk {
 		completionRequest[requestFieldStreamOptions] = streamOptionsValue
 	}
@@ -211,15 +211,15 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
 	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(w, dreq)
-	decodeSpan.SetAttributes(attribute.Bool("pd_sidecar.decode.data_parallel", dataParallelUsed))
+	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.data_parallel", dataParallelUsed))
 
 	if !dataParallelUsed {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
-		decodeSpan.SetAttributes(attribute.String("pd_sidecar.decode.target", s.decoderURL.Host))
+		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host))
 		s.decoderProxy.ServeHTTP(w, dreq)
 	}
 
 	decodeDuration := time.Since(decodeStart)
-	decodeSpan.SetAttributes(attribute.Float64("pd_sidecar.decode.duration_ms", float64(decodeDuration.Milliseconds())))
+	decodeSpan.SetAttributes(attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())))
 	decodeSpan.SetStatus(codes.Ok, "")
 }
