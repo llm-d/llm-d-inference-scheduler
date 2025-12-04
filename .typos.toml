@@ -11,5 +11,7 @@ extend-exclude = [
     "deploy/",
     "go.mod",
     "go.sum",
+    "build/",
+    "testdata/"
 ]
 
