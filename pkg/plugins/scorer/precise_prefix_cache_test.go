@@ -133,7 +133,10 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 			kvcacheConfig, err := kvcache.NewDefaultConfig()
 			kvcacheConfig.TokenizersPoolConfig.WorkersCount = 1
-			kvcacheConfig.TokenizersPoolConfig.LocalTokenizerConfig.AutoDiscoveryDir = modelDir
+			//kvcacheConfig.TokenizersPoolConfig.LocalTokenizerConfig.AutoDiscoveryDir = modelDir
+			kvcacheConfig.TokenizersPoolConfig.LocalTokenizerConfig.ModelTokenizerMap = map[string]string{
+				"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
+			}
 			kvcacheConfig.TokenizersPoolConfig.HFTokenizerConfig.Enabled = false
 			kvcacheConfig.TokenizersPoolConfig.HFTokenizerConfig.TokenizersCacheDir = "./build/tokenizers"
 			require.NoError(t, err)
@@ -144,6 +147,9 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NotNil(t, prefixCacheScorer)
+
+			// prefill
+			_ = prefixCacheScorer.Score(ctx, nil, tt.request, tt.pods)
 
 			// Populate the kvblock.Index with test data
 			if tt.kvBlockData != nil {
