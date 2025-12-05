@@ -65,6 +65,11 @@ LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
 
 PYTHON_VERSION := 3.12
 
+# Python executable for creating venv
+PYTHON_EXE := $(shell command -v python$(PYTHON_VERSION) || command -v python3)
+VENV_DIR := $(shell pwd)/build/venv
+VENV_BIN := $(VENV_DIR)/bin
+
 # Unified Python configuration detection. This block runs once.
 PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
 ifeq ($(PYTHON_CONFIG),)
@@ -95,6 +100,33 @@ PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
 # CGO flags with all dependencies
 CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
 CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
+
+.PHONY: install-python-deps
+install-python-deps: ## Sets up Python virtual environment and installs dependencies
+	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
+	@if [ -z "$(PYTHON_EXE)" ]; then \
+		echo "ERROR: Python 3 not found in PATH."; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(VENV_BIN)/pip" ]; then \
+		echo "Creating virtual environment..."; \
+		$(PYTHON_EXE) -m venv $(VENV_DIR) || { \
+			echo "ERROR: Failed to create virtual environment."; \
+			echo "Your Python installation may be missing the 'venv' module."; \
+			exit 1; \
+		}; \
+	fi
+	@echo "Upgrading pip and installing dependencies..."
+	@$(VENV_BIN)/pip install --upgrade pip --quiet
+	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null); \
+	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt" ]; then \
+		echo "Installing Python dependencies from kv-cache-manager..."; \
+		$(VENV_BIN)/pip install --quiet -r "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt"; \
+	else \
+		echo "WARNING: Could not find kv-cache-manager requirements.txt, installing minimal deps..."; \
+		$(VENV_BIN)/pip install --quiet 'transformers>=4.53.0' 'jinja2>=2.11'; \
+	fi
+	@echo "✅ Python dependencies installed in venv"
 
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
@@ -136,6 +168,7 @@ $(TOKENIZER_LIB):
 clean:
 	go clean -testcache -cache
 	rm -f $(TOKENIZER_LIB)
+	rm -rf build/
 	rmdir lib
 
 .PHONY: format
@@ -150,8 +183,10 @@ test: test-unit test-e2e ## Run unit tests and e2e tests
 test-unit: test-unit-epp test-unit-sidecar
 
 .PHONY: test-unit-%
-test-unit-%: download-tokenizer check-dependencies ## Run unit tests
+test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
+	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null || echo ""); \
+	PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
 	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-integration
