@@ -17,8 +17,10 @@ limitations under the License.
 package proxy
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
@@ -36,13 +38,15 @@ var (
 )
 
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
+	requestStart := time.Now()
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(r.Context(), "llm_d.pd_proxy.request",
 		trace.WithSpanKind(trace.SpanKindServer),
 	)
 	defer span.End()
 
-	// Update request context with span
+	// Update request context with span and start time
+	ctx = context.WithValue(ctx, "request_start_time", requestStart)
 	r = r.WithContext(ctx)
 
 	span.SetAttributes(

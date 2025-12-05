@@ -222,4 +222,49 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	decodeDuration := time.Since(decodeStart)
 	decodeSpan.SetAttributes(attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())))
 	decodeSpan.SetStatus(codes.Ok, "")
+
+	// Calculate end-to-end P/D metrics and add to parent span
+	// These metrics represent the "true" TTFT and latency from the coordinator's perspective
+	if parentSpan := trace.SpanFromContext(ctx); parentSpan.SpanContext().IsValid() {
+		// Get request start time from context
+		var totalDuration time.Duration
+		if requestStartValue := ctx.Value("request_start_time"); requestStartValue != nil {
+			if requestStart, ok := requestStartValue.(time.Time); ok {
+				totalDuration = time.Since(requestStart)
+			}
+		}
+
+		// The "true TTFT" in P/D mode is the time until the decoder can start generating
+		// This includes: prefill time + KV transfer coordination overhead
+		// The decode vLLM will report a low TTFT (since KV is already transferred),
+		// but this captures the real end-to-end TTFT from the client's perspective
+		//
+		// True TTFT = prefill duration (includes model prefill + KV cache transfer)
+		trueTTFT := prefillDuration
+
+		// KV transfer overhead: time between prefill vLLM completion and decode request start
+		// This captures the coordination overhead between prefill and decode stages
+		// Note: This is an approximation - ideally we'd measure from prefill vLLM completion
+		// to when the decode vLLM receives the first token, but that requires response parsing
+		kvTransferOverhead := decodeStart.Sub(prefillStart.Add(prefillDuration))
+
+		// For TPOT (Time Per Output Token), we would need to:
+		// 1. Parse streaming response to detect token boundaries
+		// 2. Calculate: (total_decode_time - decode_ttft) / (num_output_tokens - 1)
+		// This is complex and requires response intercepting, so we defer to trace analysis
+
+		parentSpan.SetAttributes(
+			// End-to-end P/D timing metrics
+			// These are the metrics that should be used instead of per-instance vLLM metrics
+			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.true_ttft_ms", float64(trueTTFT.Milliseconds())),
+
+			// Component breakdown for analysis
+			attribute.Float64("llm_d.pd_proxy.prefill_duration_ms", float64(prefillDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.decode_duration_ms", float64(decodeDuration.Milliseconds())),
+
+			// Coordination overhead between prefill and decode
+			attribute.Float64("llm_d.pd_proxy.kv_transfer_overhead_ms", float64(kvTransferOverhead.Milliseconds())),
+		)
+	}
 }

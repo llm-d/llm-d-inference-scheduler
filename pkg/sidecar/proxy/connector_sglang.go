@@ -149,6 +149,37 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 		attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host),
 	)
 	decodeSpan.SetStatus(codes.Ok, "")
+
+	// Calculate end-to-end P/D metrics and add to parent span
+	// Note: SGLang runs prefill and decode concurrently, so timing is different from sequential P/D
+	if parentSpan := trace.SpanFromContext(ctx); parentSpan.SpanContext().IsValid() {
+		// Get request start time from context
+		var totalDuration time.Duration
+		if requestStartValue := ctx.Value("request_start_time"); requestStartValue != nil {
+			if requestStart, ok := requestStartValue.(time.Time); ok {
+				totalDuration = time.Since(requestStart)
+			}
+		}
+
+		// For SGLang, since prefill is async and decode runs concurrently:
+		// - True TTFT is dominated by decode start time (prefill runs in parallel)
+		// - Total duration is primarily decode duration (not prefill + decode)
+		// - Prefill duration is tracked separately in the async goroutine
+		trueTTFT := decodeDuration // In concurrent mode, TTFT is the decode time
+
+		parentSpan.SetAttributes(
+			// End-to-end P/D timing metrics for concurrent P/D
+			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.true_ttft_ms", float64(trueTTFT.Milliseconds())),
+
+			// Component breakdown (note: prefill runs concurrently)
+			attribute.Float64("llm_d.pd_proxy.decode_duration_ms", float64(decodeDuration.Milliseconds())),
+
+			// Note: prefill_duration_ms is tracked in the async prefill span
+			// SGLang-specific: prefill and decode overlap in time
+			attribute.Bool("llm_d.pd_proxy.concurrent_pd", true),
+		)
+	}
 }
 
 func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {
