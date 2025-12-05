@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"net"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 const (
@@ -67,17 +71,48 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 }
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
-func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult) {
+func (p *PrefillHeaderHandler) PreRequest(ctx context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult) {
+	tracer := telemetry.Tracer()
+	_, span := tracer.Start(ctx, "llm_d.epp.prerequest.pd_disaggregation",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	// Add component and request attributes
+	span.SetAttributes(
+		attribute.String("component", "llm-d-inference-scheduler"),
+		attribute.String("operation", "prefill_disaggregation"),
+	)
+
+	if request != nil && request.TargetModel != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+	}
+	if request != nil && request.RequestId != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+	}
+
 	if _, found := request.Headers[common.PrefillPodHeader]; found {
 		request.Headers[common.PrefillPodHeader] = "" // clear header, if already set
 	}
 
 	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
 	if !exists {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_enabled", false),
+			attribute.String("llm_d.epp.pd.reason", "no_prefill_profile_result"),
+		)
+		span.SetStatus(codes.Ok, "")
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
 	targetPod := prefillProfileRunResult.TargetPods[0].GetPod()
 	prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
 	request.Headers[common.PrefillPodHeader] = prefillHostPort // in the form of <ip:port>
+
+	span.SetAttributes(
+		attribute.Bool("llm_d.epp.pd.disaggregation_enabled", true),
+		attribute.String("llm_d.epp.pd.prefill_pod_address", targetPod.Address),
+		attribute.String("llm_d.epp.pd.prefill_pod_port", targetPod.Port),
+	)
+	span.SetStatus(codes.Ok, "")
 }
