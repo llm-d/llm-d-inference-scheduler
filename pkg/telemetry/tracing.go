@@ -33,16 +33,31 @@ import (
 )
 
 const (
-	serviceName = "llm-d-inference-scheduler"
+	defaultServiceName = "llm-d-inference-scheduler"
+)
+
+var (
+	// serviceName holds the service name for the tracer
+	// Set during InitTracing() from OTEL_SERVICE_NAME env var
+	serviceName = defaultServiceName
 )
 
 // InitTracing initializes OpenTelemetry tracing with OTLP exporter.
 // Configuration is done via environment variables:
+// - OTEL_SERVICE_NAME: Service name for tracing (default: llm-d-inference-scheduler)
 // - OTEL_EXPORTER_OTLP_ENDPOINT: OTLP collector endpoint (default: http://localhost:4317)
 // - OTEL_TRACES_SAMPLER: Sampling strategy (default: parentbased_traceidratio)
 // - OTEL_TRACES_SAMPLER_ARG: Sampling ratio (default: 0.1 for 10%)
 func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	logger := log.FromContext(ctx)
+
+	// Get service name from environment, fallback to default
+	svcName := os.Getenv("OTEL_SERVICE_NAME")
+	if svcName == "" {
+		svcName = defaultServiceName
+	}
+	// Store in package variable for Tracer() function
+	serviceName = svcName
 
 	// Get OTLP endpoint from environment
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -54,7 +69,7 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	// otlptracegrpc.WithEndpoint() expects host:port only
 	endpoint = stripScheme(endpoint)
 
-	logger.Info("Initializing OpenTelemetry tracing", "endpoint", endpoint, "service", serviceName)
+	logger.Info("Initializing OpenTelemetry tracing", "endpoint", endpoint, "service", svcName)
 
 	// Create OTLP trace exporter
 	exporter, err := otlptracegrpc.New(ctx,
@@ -68,7 +83,7 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	// Create resource with service name
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceName(serviceName),
+			semconv.ServiceName(svcName),
 		),
 	)
 	if err != nil {
