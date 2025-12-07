@@ -150,24 +150,26 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	)
 	decodeSpan.SetStatus(codes.Ok, "")
 
-	// Calculate end-to-end P/D metrics and add to parent span
+	// Calculate end-to-end P/D metrics and add to decode span
 	// Note: SGLang runs prefill and decode concurrently, so timing is different from sequential P/D
-	if parentSpan := trace.SpanFromContext(ctx); parentSpan.SpanContext().IsValid() {
+	// Note: After tracer.Start() above, ctx contains the decode span, so SpanFromContext returns it
+	if currentSpan := trace.SpanFromContext(ctx); currentSpan.SpanContext().IsValid() {
 		// Get request start time from context
 		var totalDuration time.Duration
+		var trueTTFT time.Duration
 		if requestStartValue := ctx.Value("request_start_time"); requestStartValue != nil {
 			if requestStart, ok := requestStartValue.(time.Time); ok {
 				totalDuration = time.Since(requestStart)
+
+				// For SGLang, prefill and decode run concurrently, but True TTFT still needs to capture
+				// the full coordinator overhead from gateway start to when decode can begin generating.
+				// This includes: gateway routing + scheduling overhead + time to start decode request
+				// Note: In concurrent mode, this is different from sequential P/D where we wait for prefill
+				trueTTFT = decodeStart.Sub(requestStart)
 			}
 		}
 
-		// For SGLang, since prefill is async and decode runs concurrently:
-		// - True TTFT is dominated by decode start time (prefill runs in parallel)
-		// - Total duration is primarily decode duration (not prefill + decode)
-		// - Prefill duration is tracked separately in the async goroutine
-		trueTTFT := decodeDuration // In concurrent mode, TTFT is the decode time
-
-		parentSpan.SetAttributes(
+		currentSpan.SetAttributes(
 			// End-to-end P/D timing metrics for concurrent P/D
 			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
 			attribute.Float64("llm_d.pd_proxy.true_ttft_ms", float64(trueTTFT.Milliseconds())),

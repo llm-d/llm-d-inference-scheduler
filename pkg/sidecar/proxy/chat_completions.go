@@ -76,6 +76,14 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Add span for header parsing (always executed)
+	_, headerSpan := tracer.Start(ctx, "llm_d.pd_proxy.parse_headers")
+	headerSpan.SetAttributes(
+		attribute.Int("llm_d.pd_proxy.prefill_headers_count", numHosts),
+		attribute.Bool("llm_d.pd_proxy.prefiller_sampling_enabled", s.config.EnablePrefillerSampling),
+	)
+	headerSpan.End()
+
 	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
 		span.SetAttributes(

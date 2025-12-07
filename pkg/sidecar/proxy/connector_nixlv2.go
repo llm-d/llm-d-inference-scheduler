@@ -223,24 +223,27 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	decodeSpan.SetAttributes(attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())))
 	decodeSpan.SetStatus(codes.Ok, "")
 
-	// Calculate end-to-end P/D metrics and add to parent span
+	// Calculate end-to-end P/D metrics and add to decode span
 	// These metrics represent the "true" TTFT and latency from the coordinator's perspective
-	if parentSpan := trace.SpanFromContext(ctx); parentSpan.SpanContext().IsValid() {
+	// Note: After tracer.Start() above, ctx contains the decode span, so SpanFromContext returns it
+	if currentSpan := trace.SpanFromContext(ctx); currentSpan.SpanContext().IsValid() {
 		// Get request start time from context
 		var totalDuration time.Duration
+		var trueTTFT time.Duration
 		if requestStartValue := ctx.Value("request_start_time"); requestStartValue != nil {
 			if requestStart, ok := requestStartValue.(time.Time); ok {
 				totalDuration = time.Since(requestStart)
+
+				// The "true TTFT" in P/D mode is the time until the decoder can start generating
+				// This includes: gateway routing + scheduling + prefill time + KV transfer coordination overhead
+				// The decode vLLM will report a low TTFT (since KV is already transferred),
+				// but this captures the real end-to-end TTFT from the client's perspective
+				//
+				// True TTFT = time from gateway request start to decode start
+				// This includes all coordinator overhead that vLLM-level metrics miss
+				trueTTFT = decodeStart.Sub(requestStart)
 			}
 		}
-
-		// The "true TTFT" in P/D mode is the time until the decoder can start generating
-		// This includes: prefill time + KV transfer coordination overhead
-		// The decode vLLM will report a low TTFT (since KV is already transferred),
-		// but this captures the real end-to-end TTFT from the client's perspective
-		//
-		// True TTFT = prefill duration (includes model prefill + KV cache transfer)
-		trueTTFT := prefillDuration
 
 		// KV transfer overhead: time between prefill vLLM completion and decode request start
 		// This captures the coordination overhead between prefill and decode stages
@@ -253,7 +256,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		// 2. Calculate: (total_decode_time - decode_ttft) / (num_output_tokens - 1)
 		// This is complex and requires response intercepting, so we defer to trace analysis
 
-		parentSpan.SetAttributes(
+		currentSpan.SetAttributes(
 			// End-to-end P/D timing metrics
 			// These are the metrics that should be used instead of per-instance vLLM metrics
 			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
