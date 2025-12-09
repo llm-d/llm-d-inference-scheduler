@@ -26,16 +26,14 @@ import (
 func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.Info("running LMCache protocol")
 
-	// Read and parse request body
 	defer r.Body.Close() //nolint:all
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest) // TODO: check FastAPI error code when failing to read body
-		w.Write([]byte(err.Error()))         //nolint:all
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error())) //nolint:all
 		return
 	}
 
-	// Parse completion request
 	var completionRequest map[string]any
 	if err := json.Unmarshal(original, &completionRequest); err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
@@ -44,11 +42,120 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		return
 	}
 
-	// Create prefiller request. Set max_tokens to 1.
+	if s.forwardDataParallel && s.dataParallelHandler(w, r) {
+		if err := s.prefill(w, r, prefillPodHostPort, completionRequest); err != nil {
+			s.logger.Error(err, "prefill failed")
+		}
+		return
+	}
 
+	if _, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
+		s.decodeFirst(w, r, original, completionRequest, prefillPodHostPort)
+	} else {
+		s.prefillThenDecode(w, r, original, completionRequest, prefillPodHostPort)
+	}
+}
+
+// prefillThenDecode implements the prefill-first flow: prefill then decode
+func (s *Server) prefillThenDecode(w http.ResponseWriter, r *http.Request, original []byte, completionRequest map[string]any, prefillPodHostPort string) {
+	s.logger.V(4).Info("running prefill-then-decode flow")
+
+	if err := s.prefill(w, r, prefillPodHostPort, completionRequest); err != nil {
+		s.logger.Error(err, "prefill failed")
+		return
+	}
+
+	s.logger.V(4).Info("forwarding to decoder after prefill")
+	r.Body = io.NopCloser(strings.NewReader(string(original)))
+	s.decoderProxy.ServeHTTP(w, r)
+}
+
+// decodeFirst implements the decode-first flow with cache threshold checking
+func (s *Server) decodeFirst(w http.ResponseWriter, r *http.Request, original []byte, completionRequest map[string]any, prefillPodHostPort string) {
+	s.logger.V(4).Info("running decode-first flow")
+
+	// Step 1: Try decode first
+	r.Body = io.NopCloser(strings.NewReader(string(original)))
+	needsPrefill, err := s.tryDecode(w, r)
+	if err != nil {
+		s.logger.Error(err, "decode attempt failed")
+		return
+	}
+
+	// If decode succeeded (cache hit was sufficient), we're done
+	if !needsPrefill {
+		s.logger.V(4).Info("decode succeeded without prefill")
+		return
+	}
+
+	// Step 2: Cache threshold not met, execute prefill
+	s.logger.V(4).Info("cache threshold not met, executing prefill", "prefillPod", prefillPodHostPort)
+	if err := s.prefill(w, r, prefillPodHostPort, completionRequest); err != nil {
+		s.logger.Error(err, "prefill failed")
+		return
+	}
+
+	// Step 3: Retry decode after prefill
+	s.logger.V(4).Info("retrying decode after prefill")
+	r.Body = io.NopCloser(strings.NewReader(string(original)))
+	s.decoderProxy.ServeHTTP(w, r)
+}
+
+// tryDecode attempts to decode and returns whether prefill is needed
+func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (needsPrefill bool, err error) {
+	dw := &bufferedResponseWriter{}
+	s.decoderProxy.ServeHTTP(dw, r)
+
+	// Check for non-success status codes
+	if dw.statusCode < 200 || dw.statusCode >= 300 {
+		s.logger.Error(nil, "decode request failed", "code", dw.statusCode)
+		w.WriteHeader(dw.statusCode)
+		if dw.buffer.Len() > 0 {
+			w.Write([]byte(dw.buffer.String())) //nolint:all
+		}
+		return false, nil
+	}
+
+	// Parse response to check finish_reason
+	var response map[string]any
+	if err := json.Unmarshal([]byte(dw.buffer.String()), &response); err != nil {
+		s.logger.Error(err, "failed to unmarshal decoder response")
+		// Forward response as-is if we can't parse it
+		w.WriteHeader(dw.statusCode)
+		w.Write([]byte(dw.buffer.String())) //nolint:all
+		return false, nil
+	}
+
+	// Check for cache_threshold finish reason
+	if choices, ok := response[responseFieldChoices].([]any); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]any); ok {
+			if finishReason, ok := choice[responseFieldFinishReason].(string); ok {
+				if finishReason == finishReasonCacheThreshold {
+					s.logger.V(4).Info("decode rejected due to cache threshold")
+					return true, nil
+				}
+			}
+		}
+	}
+
+	// Decode succeeded, write response to client
+	for k, v := range dw.headers {
+		for _, val := range v {
+			w.Header().Add(k, val)
+		}
+	}
+	w.WriteHeader(dw.statusCode)
+	w.Write([]byte(dw.buffer.String())) //nolint:all
+
+	return false, nil
+}
+
+// prefill routes a request to a preill node
+func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, completionRequest map[string]any) error {
 	ctx := r.Context()
 	preq := r.Clone(ctx)
 
+	// Prepare prefill request
 	completionRequest[requestFieldMaxTokens] = 1
 	completionRequest[requestFieldMaxCompletionTokens] = 1
 
@@ -57,34 +164,33 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		if err := errorJSONInvalid(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
-		return
+		return err
 	}
 	preq.Body = io.NopCloser(strings.NewReader(string(pbody)))
 	preq.ContentLength = int64(len(pbody))
-
-	// Forward request to prefiller
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillPodHostPort)
 	if err != nil {
 		if err := errorBadGateway(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
-		return
+		return err
 	}
+
+	// send prefill request
 	s.logger.V(4).Info("sending prefill request", "to", prefillPodHostPort)
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
-		s.logger.Error(err, "request failed", "code", pw.statusCode)
+		s.logger.Error(nil, "prefill request failed", "code", pw.statusCode)
 		w.WriteHeader(pw.statusCode)
-		return
+		if pw.buffer.Len() > 0 {
+			w.Write([]byte(pw.buffer.String())) //nolint:all
+		}
+		return err
 	}
 
-	// Forward original request to local decoder
-
-	r.Body = io.NopCloser(strings.NewReader(string(original)))
-	if s.forwardDataParallel && !s.dataParallelHandler(w, r) {
-		s.decoderProxy.ServeHTTP(w, r)
-	}
+	s.logger.V(4).Info("prefill completed successfully")
+	return nil
 }

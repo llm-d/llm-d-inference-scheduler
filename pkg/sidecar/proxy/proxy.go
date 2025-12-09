@@ -45,6 +45,12 @@ const (
 	requestFieldRemotePort          = "remote_port"
 	requestFieldStream              = "stream"
 	requestFieldStreamOptions       = "stream_options"
+	requestFieldCacheHitThreshold   = "cache_hit_threshold"
+
+	responseFieldChoices      = "choices"
+	responseFieldFinishReason = "finish_reason"
+
+	finishReasonCacheThreshold = "cache_threshold"
 
 	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
 	ConnectorNIXLV2 = "nixlv2"
