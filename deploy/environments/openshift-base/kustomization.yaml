@@ -26,8 +26,7 @@ configMapGenerator:
 # Define the image to be updated.
 # images:
 # - name: ghcr.io/llm-d/placeholder
-#   newName: ghcr.io/llm-d/${IMAGE_TAG_BASE}
-#   newTag: ${VERSION}
+#   newName: ${EPP_IMAGE}
 patches:
 - path: common/patch-service.yaml
 - path: common/patch-statefulset.yaml

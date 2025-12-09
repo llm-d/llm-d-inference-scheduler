@@ -4,23 +4,26 @@ include Makefile.tools.mk
 SHELL := /usr/bin/env bash
 
 # Defaults
-TARGETOS ?= $(shell go env GOOS)
-TARGETARCH ?= $(shell go env GOARCH)
+TARGETOS ?= $(shell command -v go >/dev/null 2>&1 && go env GOOS || uname -s | tr '[:upper:]' '[:lower:]')
+TARGETARCH ?= $(shell command -v go >/dev/null 2>&1 && go env GOARCH || uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/; s/armv7l/arm/')
 PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
+VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
 SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 export EPP_TAG
-IMG = $(IMAGE_TAG_BASE):$(EPP_TAG)
+export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
 export SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
-SIDECAR_IMG = $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
+export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 NAMESPACE ?= hc4ai-operator
 VLLM_SIMULATOR_TAG ?= v0.6.1
 export VLLM_SIMULATOR_TAG
+VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
+export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
 
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
@@ -56,13 +59,54 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
+LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
+
+##@ Python Configuration
+
+PYTHON_VERSION := 3.12
+
+# Unified Python configuration detection. This block runs once.
+PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
+ifeq ($(PYTHON_CONFIG),)
+	ifeq ($(TARGETOS),darwin)
+        # macOS: Find Homebrew's python-config script for the most reliable flags.
+        BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
+        PYTHON_CONFIG ?= $(BREW_PREFIX)/bin/python$(PYTHON_VERSION)-config
+        PYTHON_ERROR := "Could not execute 'python$(PYTHON_VERSION)-config'. Please ensure Python is installed correctly with: 'brew install python@$(PYTHON_VERSION)' or install python3.12 manually."
+	else ifeq ($(TARGETOS),linux)
+        # Linux: Use standard system tools to find flags.
+        PYTHON_ERROR := "Python $(PYTHON_VERSION) development headers not found. Please install with: 'sudo apt install python$(PYTHON_VERSION)-dev' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"
+	else
+        PYTHON_ERROR := "you should set up PYTHON_CONFIG variable manually"
+	endif
+endif
+
+ifeq ($(PYTHON_CONFIG),)
+    $(error ${PYTHON_ERROR})
+endif
+
+ifeq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
+    $(error Python configuration tool cannot provide cflags)
+endif
+
+PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
+PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
+
+# CGO flags with all dependencies
+CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
+CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
+
 # Internal variables for generic targets
-epp_IMAGE = $(IMG)
-sidecar_IMAGE = $(SIDECAR_IMG)
+epp_IMAGE = $(EPP_IMAGE)
+sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
 epp_LDFLAGS = -ldflags="$(LDFLAGS)"
 sidecar_LDFLAGS =
+epp_CGO_CFLAGS = "${CGO_CFLAGS}"
+sidecar_CGO_CFLAGS =
+epp_CGO_LDFLAGS = "${CGO_LDFLAGS}"
+sidecar_CGO_LDFLAGS =
 epp_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/
 sidecar_TEST_FILES = go list ./pkg/sidecar/...
 
@@ -72,7 +116,6 @@ help: ## Print help
 
 ##@ Tokenizer & Linking
 
-LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
 CGO_ENABLED=1
 TOKENIZER_LIB = lib/libtokenizers.a
 # Extract RELEASE_VERSION from Dockerfile
@@ -107,12 +150,12 @@ test: test-unit test-e2e ## Run unit tests and e2e tests
 test-unit: test-unit-epp test-unit-sidecar
 
 .PHONY: test-unit-%
-test-unit-%: download-tokenizer install-dependencies ## Run unit tests
+test-unit-%: download-tokenizer check-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
+	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-integration
-test-integration: download-tokenizer install-dependencies ## Run integration tests
+test-integration: download-tokenizer check-dependencies ## Run integration tests
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
@@ -129,7 +172,7 @@ post-deploy-test: ## Run post deployment tests
 .PHONY: lint
 lint: check-golangci-lint check-typos ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	golangci-lint run
+	CGO_CFLAGS="${CGO_CFLAGS}" golangci-lint run
 	$(TYPOS)
 
 ##@ Build
@@ -138,9 +181,9 @@ lint: check-golangci-lint check-typos ## Run lint
 build: build-epp build-sidecar ## Build the project
 
 .PHONY: build-%
-build-%: check-go install-dependencies download-tokenizer ## Build the project
+build-%: check-go download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
-	go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
+	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
 ##@ Container Build/Push
 
@@ -185,7 +228,7 @@ uninstall: uninstall-docker ## Default uninstall using Docker
 .PHONY: install-docker
 install-docker: check-container-tool ## Install app using $(CONTAINER_RUNTIME)
 	@echo "Starting container with $(CONTAINER_RUNTIME)..."
-	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(IMG)
+	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(EPP_IMAGE)
 	@echo "$(CONTAINER_RUNTIME) installation complete."
 	@echo "To use $(PROJECT_NAME), run:"
 	@echo "alias $(PROJECT_NAME)='$(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"
@@ -230,12 +273,12 @@ uninstall-k8s: check-kubectl check-kustomize check-envsubst ## Uninstall from Ku
 
 .PHONY: install-openshift
 install-openshift: check-kubectl check-kustomize check-envsubst ## Install on OpenShift
-	@echo $$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION
+	@echo $$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE
 	@echo "Creating namespace $(NAMESPACE)..."
 	kubectl create namespace $(NAMESPACE) 2>/dev/null || true
 	@echo "Deploying common resources from deploy/ ..."
 	# Build and substitute the base manifests from deploy, then apply them
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl apply -n $(NAMESPACE) -f -
+	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl apply -n $(NAMESPACE) -f -
 	@echo "Waiting for pod to become ready..."
 	sleep 5
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
@@ -246,9 +289,9 @@ install-openshift: check-kubectl check-kustomize check-envsubst ## Install on Op
 .PHONY: uninstall-openshift
 uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall from OpenShift
 	@echo "Removing resources from OpenShift..."
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete --force -f - || true
+	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl delete --force -f - || true
 	# @if kubectl api-resources --api-group=route.openshift.io | grep -q Route; then \
-	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
+	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
 	# fi
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
 	echo "Deleting pod: $$POD"; \
@@ -260,18 +303,18 @@ uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall f
 .PHONY: install-rbac
 install-rbac: check-kubectl check-kustomize check-envsubst ## Install RBAC
 	@echo "Applying RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl apply -f -
+	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME' | kubectl apply -f -
 
 .PHONY: uninstall-rbac
 uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
 	@echo "Removing RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME $$NAMESPACE $$IMAGE_TAG_BASE $$VERSION' | kubectl delete -f - || true
+	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME' | kubectl delete -f - || true
 
 ##@ Environment
 .PHONY: env
 env: ## Print environment variables
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
-	@echo "IMG=$(IMG)"
+	@echo "EPP_IMAGE=$(EPP_IMAGE)"
 	@echo "CONTAINER_RUNTIME=$(CONTAINER_RUNTIME)"
 
 .PHONY: check-typos
@@ -390,7 +433,9 @@ env-dev-kind: ## Run under kind ($(KIND_CLUSTER_NAME))
 		CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 		GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 		IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-		EPP_TAG=$(EPP_TAG) \
+		EPP_IMAGE=$(EPP_IMAGE) \
+		VLLM_SIMULATOR_IMAGE=${VLLM_SIMULATOR_IMAGE} \
+		SIDECAR_IMAGE=${SIDECAR_IMAGE} \
 		./scripts/kind-dev-env.sh; \
 	fi
 
@@ -414,26 +459,55 @@ clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 
 ##@ Dependencies
 
+.PHONY: check-dependencies
+check-dependencies: ## Check if development dependencies are installed
+	@if [ "$(TARGETOS)" = "linux" ]; then \
+	  if [ -x "$$(command -v apt)" ]; then \
+	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
+	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
+	      exit 1; \
+	    fi; \
+	  elif [ -x "$$(command -v dnf)" ]; then \
+	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
+	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
+	      exit 1; \
+	    fi; \
+	  else \
+	    echo "WARNING: Unsupported Linux package manager. Cannot verify dependencies."; \
+	  fi; \
+	elif [ "$(TARGETOS)" = "darwin" ]; then \
+	  if [ -x "$$(command -v brew)" ]; then \
+	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
+	      echo "ERROR: Missing dependencies. Please run 'make install-dependencies'"; \
+	      exit 1; \
+	    fi; \
+	  else \
+	    echo "ERROR: Homebrew is not installed and is required. Install it from https://brew.sh/"; \
+	    exit 1; \
+	  fi; \
+	fi
+	@echo "✅ All dependencies are installed."
+
 .PHONY: install-dependencies
 install-dependencies: ## Install development dependencies based on OS/ARCH
 	@echo "Checking and installing development dependencies..."
 	@if [ "$(TARGETOS)" = "linux" ]; then \
 	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1; then \
+	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
 	      echo "Installing dependencies with apt..."; \
-	      apt-get update && apt-get install -y libzmq3-dev g++; \
+	      apt-get update && apt-get install -y libzmq3-dev g++ python$(PYTHON_VERSION)-dev; \
 	    else \
-	      echo "✅ ZMQ and g++ are already installed."; \
+	      echo "✅ ZMQ, g++, and Python dev headers are already installed."; \
 	    fi; \
 	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! dnf -q list installed zeromq-devel >/dev/null 2>&1 || ! dnf -q list installed gcc-c++ >/dev/null 2>&1; then \
+	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
 	      echo "Installing dependencies with dnf..."; \
-	      dnf install -y zeromq-devel gcc-c++; \
+	      dnf install -y zeromq-devel gcc-c++ python$(PYTHON_VERSION)-devel; \
 	    else \
-	      echo "✅ ZMQ and gcc-c++ are already installed."; \
+	      echo "✅ ZMQ, gcc-c++, and Python dev headers are already installed."; \
 	    fi; \
 	  else \
-	    echo "Unsupported Linux package manager. Install libzmq and g++/gcc-c++ manually."; \
+	    echo "ERROR: Unsupported Linux package manager. Install libzmq, g++/gcc-c++, and python-devel manually."; \
 	    exit 1; \
 	  fi; \
 	elif [ "$(TARGETOS)" = "darwin" ]; then \
@@ -445,10 +519,10 @@ install-dependencies: ## Install development dependencies based on OS/ARCH
 	      echo "✅ ZeroMQ and pkgconf are already installed."; \
 	    fi; \
 	  else \
-	    echo "Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
+	    echo "ERROR: Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
 	    exit 1; \
 	  fi; \
 	else \
-	  echo "Unsupported OS: $(TARGETOS). Install development dependencies manually."; \
+	  echo "ERROR: Unsupported OS: $(TARGETOS). Install development dependencies manually."; \
 	  exit 1; \
 	fi

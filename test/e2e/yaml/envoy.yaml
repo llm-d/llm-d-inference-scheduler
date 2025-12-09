@@ -78,7 +78,7 @@ data:
                     route_config:
                       name: vllm
                       virtual_hosts:
-                        - name: vllm-default
+                        - name: vllm-${NAMESPACE}
                           domains: ["*"]
                           routes:
                             - match:
@@ -100,7 +100,7 @@ data:
                           grpc_service:
                             envoy_grpc:
                               cluster_name: ext_proc
-                              authority: e2e-epp.default:9002
+                              authority: e2e-epp.${NAMESPACE}:9002
                             timeout: 10s
                           processing_mode:
                             request_header_mode: SEND
@@ -205,7 +205,7 @@ data:
                   - endpoint:
                       address:
                         socket_address:
-                          address: e2e-epp.default
+                          address: e2e-epp.${NAMESPACE}
                           port_value: 9002
                     load_balancing_weight: 1
 ---
@@ -234,7 +234,7 @@ spec:
         image: docker.io/envoyproxy/envoy:distroless-v1.33.2
         args:
           - "--service-cluster" 
-          - "default/inference-gateway"
+          - "${NAMESPACE}/inference-gateway"
           - "--service-node"
           - "$(ENVOY_POD_NAME)"
           - "--log-level"

@@ -19,10 +19,10 @@ jobs:
           days-before-close: -1
           stale-issue-label: 'lifecycle/stale'
           exempt-issue-labels: 'lifecycle/rotten'
-          stale-issue-message: 'This issue is marked as stale after 90d of inactivity. After an additional 30d of inactivity, it will be closed. To prevent this issue from being closed, add a comment or remove the `lifecycle/stale` label.'
+          stale-issue-message: 'This issue is marked as stale after 90d of inactivity. After an additional 30d of inactivity (15d to become rotten, then 15d more), it will be closed. To prevent this issue from being closed, add a comment or remove the `lifecycle/stale` label.'
           stale-pr-label: 'lifecycle/stale'
           exempt-pr-labels: 'lifecycle/rotten'
-          stale-pr-message: 'This PR is marked as stale after 21d of inactivity. After an additional 14d of inactivity, it will be closed. To prevent this PR from being closed, add a comment or remove the `lifecycle/stale` label.'
+          stale-pr-message: 'This PR is marked as stale after 21d of inactivity. After an additional 14d of inactivity (7d to become rotten, then 7d more), it will be closed. To prevent this PR from being closed, add a comment or remove the `lifecycle/stale` label.'
 
       - name: 'Mark items rotten'
         uses: actions/stale@v10

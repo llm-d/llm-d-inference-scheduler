@@ -43,7 +43,7 @@ var (
 var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 	ginkgo.When("Running simple non-PD configuration", func() {
 		ginkgo.It("should run successfully", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running a PD configuration", func() {
 		ginkgo.It("should run successfully", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			prefillReplicas := 1
 			decodeReplicas := 4
@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running simple non-PD KV enabled configuration", func() {
 		ginkgo.It("should run successfully", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			epp := createEndPointPicker(kvConfig)
 
@@ -141,7 +141,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Scaling up and down the model servers", func() {
 		ginkgo.It("should distribute inference requests across all model servers", func() {
-			createInferencePool(1, true)
+			infPoolObjects = createInferencePool(1, true)
 
 			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
@@ -197,7 +197,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 	ginkgo.When("Running a vLLM Data Parallel configuration", func() {
 		ginkgo.It("should schedule inference on all ranks", func() {
-			createInferencePool(2, true)
+			infPoolObjects = createInferencePool(2, true)
 
 			modelServers := createModelServers(false, false, true, 1, 0, 0)
 
@@ -267,11 +267,11 @@ func createModelServers(withPD, withKV, withDP bool, vllmReplicas, prefillReplic
 			"${MODEL_NAME_SAFE}":      theSafeModelName,
 			"${POOL_NAME}":            poolName,
 			"${KV_CACHE_ENABLED}":     strconv.FormatBool(withKV),
-			"${SIDECAR_TAG}":          routingSideCarTag,
+			"${SIDECAR_IMAGE}":        sideCarImage,
 			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(vllmReplicas),
 			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
-			"${VLLM_SIMULATOR_TAG}":   vllmSimTag,
+			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
 		})
 
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
@@ -300,7 +300,8 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_TAG}":   eppTag,
+			"${EPP_IMAGE}": eppImage,
+			"${NAMESPACE}": nsName,
 			"${POOL_NAME}": modelName + "-inference-pool",
 		})
 
@@ -340,7 +341,12 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 		Model: theModel,
 	}
 
-	resp, err := openaiclient.Completions.New(testConfig.Context, completionParams, option.WithResponseInto(&httpResp))
+	ginkgo.By(fmt.Sprintf("Sending Completion Request: (port %s) %#v", port, completionParams))
+
+	resp, err := openaiclient.Completions.New(testConfig.Context, completionParams, option.WithResponseInto(&httpResp), option.WithRequestTimeout(readyTimeout))
+
+	ginkgo.By(fmt.Sprintf("Verifying Completion Response: %#v", resp))
+
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Expect(resp.Choices).Should(gomega.HaveLen(1))
 	gomega.Expect(resp.Choices[0].FinishReason).Should(gomega.Equal(openai.CompletionChoiceFinishReasonStop))
@@ -444,7 +450,8 @@ plugins:
         blockSize: 16                         # must match vLLM block size if not default (16)
         hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
       tokenizersPoolConfig:
-        tokenizersCacheDir: "/cache/tokenizers"
+        hf:
+          tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:
         enableMetrics: false                  # enable kv-block index metrics (prometheus)
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)

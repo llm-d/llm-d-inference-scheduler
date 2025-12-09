@@ -14,13 +14,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
-      - name: Install lychee v0.18.1
-        run: |
-          curl -Ls https://github.com/lycheeverse/lychee/releases/download/lychee-v0.18.1/lychee-x86_64-unknown-linux-gnu.tar.gz | tar xz
-          sudo mv lychee /usr/local/bin
-
-      - name: Run lychee on Markdown files with config
-        run: |
-          find . -name "*.md" -print0 | xargs -0 lychee --config .lychee.toml --verbose --no-progress
+      - name: Run lychee link checker
+        uses: lycheeverse/lychee-action@v2.7.0
+        with:
+          args: '--config .lychee.toml --verbose --no-progress **/*.md'
+          fail: true

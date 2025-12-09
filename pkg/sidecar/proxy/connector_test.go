@@ -30,7 +30,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
-	"k8s.io/klog/v2/ktesting"
 )
 
 type sidecarTestInfo struct {
@@ -180,7 +179,7 @@ var _ = Describe("Common Connector tests", func() {
 func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	testInfo := sidecarTestInfo{}
 
-	_, testInfo.ctx = ktesting.NewTestContext(GinkgoT())
+	testInfo.ctx = newTestContext()
 	testInfo.ctx, testInfo.cancelFn = context.WithCancel(testInfo.ctx)
 	testInfo.stoppedCh = make(chan struct{})
 

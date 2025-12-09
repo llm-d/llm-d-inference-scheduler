@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -28,7 +29,7 @@ import (
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
-	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -52,11 +53,24 @@ const (
 
 	finishReasonCacheThreshold = "cache_threshold"
 
+	// SGLang bootstrap fields
+	requestFieldBootstrapHost = "bootstrap_host"
+	requestFieldBootstrapPort = "bootstrap_port"
+	requestFieldBootstrapRoom = "bootstrap_room"
+
 	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
 	ConnectorNIXLV2 = "nixlv2"
 
 	// ConnectorLMCache enables (now deprecated) P/D LMCache protocol
 	ConnectorLMCache = "lmcache"
+
+	// ConnectorSGLang enables SGLang P/D disaggregation protocol
+	ConnectorSGLang = "sglang"
+
+	// DefaultPoolGroup is the default pool group name
+	DefaultPoolGroup = "inference.networking.k8s.io"
+	// LegacyPoolGroup is the legacy pool group name
+	LegacyPoolGroup = "inference.networking.x-k8s.io"
 )
 
 // Config represents the proxy server configuration
@@ -75,6 +89,10 @@ type Config struct {
 
 	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE command line argument
 	DataParallelSize int
+
+	// EnablePrefillerSampling configures the proxy to randomly choose from the set
+	// of provided prefill hosts instead of always using the first one.
+	EnablePrefillerSampling bool
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
@@ -90,10 +108,12 @@ type Server struct {
 	runConnectorProtocol protocolRunner // the handler for running the protocol
 	prefillerURLPrefix   string
 
-	decoderProxy        *httputil.ReverseProxy            // decoder proxy handler
-	prefillerProxies    *lru.Cache[string, http.Handler]  // cached prefiller proxy handlers
-	dataParallelProxies map[string]*httputil.ReverseProxy // Proxies to other vLLM servers
-	forwardDataParallel bool                              // Use special Data Parallel work around
+	decoderProxy        http.Handler                     // decoder proxy handler
+	prefillerProxies    *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
+	dataParallelProxies map[string]http.Handler          // Proxies to other vLLM servers
+	forwardDataParallel bool                             // Use special Data Parallel work around
+
+	prefillSamplerFn func(n int) int // allow test override
 
 	config Config
 }
@@ -108,17 +128,12 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 		prefillerProxies:    cache,
 		prefillerURLPrefix:  "http://",
 		config:              config,
-		dataParallelProxies: map[string]*httputil.ReverseProxy{},
+		dataParallelProxies: map[string]http.Handler{},
 		forwardDataParallel: true,
+		prefillSamplerFn:    rand.Intn,
 	}
-	switch config.Connector {
-	case ConnectorLMCache:
-		server.runConnectorProtocol = server.runLMCacheProtocol
-	case ConnectorNIXLV2:
-		fallthrough
-	default:
-		server.runConnectorProtocol = server.runNIXLProtocolV2
-	}
+
+	server.setConnector()
 
 	if config.PrefillerUseTLS {
 		server.prefillerURLPrefix = "https://"
@@ -129,7 +144,7 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 
 // Start the HTTP reverse proxy.
 func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistValidator *AllowlistValidator) error {
-	s.logger = klog.FromContext(ctx).WithName("proxy server on port " + s.port)
+	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
 
 	s.allowlistValidator = allowlistValidator
 
@@ -158,9 +173,24 @@ func (s *Server) Clone() *Server {
 		allowlistValidator:   s.allowlistValidator,
 		runConnectorProtocol: s.runConnectorProtocol,
 		decoderProxy:         s.decoderProxy,
+		prefillerURLPrefix:   s.prefillerURLPrefix,
 		prefillerProxies:     s.prefillerProxies,
 		dataParallelProxies:  s.dataParallelProxies,
 		forwardDataParallel:  s.forwardDataParallel,
+	}
+}
+
+func (s *Server) setConnector() {
+
+	switch s.config.Connector {
+	case ConnectorLMCache:
+		s.runConnectorProtocol = s.runLMCacheProtocol
+	case ConnectorSGLang:
+		s.runConnectorProtocol = s.runSGLangProtocol
+	case ConnectorNIXLV2:
+		fallthrough
+	default:
+		s.runConnectorProtocol = s.runNIXLProtocolV2
 	}
 }
 

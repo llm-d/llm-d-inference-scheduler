@@ -330,7 +330,8 @@ plugins:
           blockSize: 64
           hashSeed: "12345"
       tokenizersPoolConfig:
-        huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
+        hf:
+          huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
       kvBlockIndexConfig:
         enableMetrics: true
 ```
@@ -359,8 +360,9 @@ plugins:
             enableMetrics: true
           tokenizersPoolConfig:
             workersCount: 8
-            huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
-            tokenizersCacheDir: /tmp/tokenizers
+            hf:
+              huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
+              tokenizersCacheDir: /tmp/tokenizers
 ```
 
 ---

@@ -9,6 +9,8 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -156,10 +158,12 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 
 		if (1.0-hitPercentagePrefix)*float64(len(userInput)) < float64(h.pdThreshold) {
 			log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
+			metrics.RecordPDDecision(metrics.DecisionTypeDecodeOnly)
 			return map[string]*framework.SchedulerProfile{} // do not run prefill
 		}
 	}
 
+	metrics.RecordPDDecision(metrics.DecisionTypePrefillDecode)
 	// run the prefill profile
 	return map[string]*framework.SchedulerProfile{
 		h.prefillProfile: profiles[h.prefillProfile],

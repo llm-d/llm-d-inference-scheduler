@@ -14,9 +14,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apilabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 const (
@@ -24,9 +22,6 @@ const (
 )
 
 func scaleDeployment(objects []string, increment int) {
-	k8sCfg := config.GetConfigOrDie()
-	client, err := kubernetes.NewForConfig(k8sCfg)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	direction := "up"
 	absIncrement := increment
 	if increment < 0 {
@@ -38,11 +33,11 @@ func scaleDeployment(objects []string, increment int) {
 		split := strings.Split(kindAndName, "/")
 		if strings.ToLower(split[0]) == deploymentKind {
 			ginkgo.By(fmt.Sprintf("Scaling the deployment %s %s by %d", split[1], direction, absIncrement))
-			scale, err := client.AppsV1().Deployments(nsName).GetScale(testConfig.Context, split[1], v1.GetOptions{})
+			scale, err := testConfig.KubeCli.AppsV1().Deployments(nsName).GetScale(testConfig.Context, split[1], v1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			scale.Spec.Replicas += int32(increment)
-			_, err = client.AppsV1().Deployments(nsName).UpdateScale(testConfig.Context, split[1], scale, v1.UpdateOptions{})
+			_, err = testConfig.KubeCli.AppsV1().Deployments(nsName).UpdateScale(testConfig.Context, split[1], scale, v1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
 	}
@@ -51,6 +46,8 @@ func scaleDeployment(objects []string, increment int) {
 
 // getModelServerPods Returns the list of Prefill and Decode vLLM pods separately
 func getModelServerPods(podLabels, prefillLabels, decodeLabels map[string]string) ([]string, []string) {
+	ginkgo.By("Getting Model server pods")
+
 	pods := getPods(podLabels)
 
 	prefillValidator, err := apilabels.ValidatedSelectorFromSet(prefillLabels)
@@ -103,17 +100,22 @@ func getPods(labels map[string]string) []corev1.Pod {
 }
 
 func podsInDeploymentsReady(objects []string) {
-	var deployment appsv1.Deployment
-	helper := func(deploymentName string) bool {
+	isDeploymentReady := func(deploymentName string) bool {
+		var deployment appsv1.Deployment
 		err := testConfig.K8sClient.Get(testConfig.Context, types.NamespacedName{Namespace: nsName, Name: deploymentName}, &deployment)
+		ginkgo.By(fmt.Sprintf("Waiting for deployment %q to be ready (err: %v): replicas=%#v, status=%#v", deploymentName, err, *deployment.Spec.Replicas, deployment.Status))
 		return err == nil && *deployment.Spec.Replicas == deployment.Status.Replicas &&
 			deployment.Status.Replicas == deployment.Status.ReadyReplicas
 	}
+
 	for _, kindAndName := range objects {
 		split := strings.Split(kindAndName, "/")
 		if strings.ToLower(split[0]) == deploymentKind {
-			ginkgo.By(fmt.Sprintf("Waiting for pods of %s to be ready", split[1]))
-			gomega.Eventually(helper, readyTimeout, interval).WithArguments(split[1]).Should(gomega.BeTrue())
+			gomega.Eventually(isDeploymentReady).
+				WithArguments(split[1]).
+				WithPolling(interval).
+				WithTimeout(readyTimeout).
+				Should(gomega.BeTrue())
 		}
 	}
 }

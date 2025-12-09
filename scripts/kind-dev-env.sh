@@ -22,17 +22,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Set the default IMAGE_REGISTRY if not provided
 : "${IMAGE_REGISTRY:=ghcr.io/llm-d}"
 
-# Set a default VLLM_SIMULATOR_IMAGE if not provided
-: "${VLLM_SIMULATOR_IMAGE:=llm-d-inference-sim}"
-
 # Set a default VLLM_SIMULATOR_TAG if not provided
 export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-latest}"
 
-# Set a default EPP_IMAGE if not provided
-: "${EPP_IMAGE:=llm-d-inference-scheduler}"
+# Set a default VLLM_SIMULATOR_IMAGE if not provided
+VLLM_SIMULATOR_IMAGE="${VLLM_SIMULATOR_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-sim:${VLLM_SIMULATOR_TAG}}"
+export VLLM_SIMULATOR_IMAGE
 
 # Set a default EPP_TAG if not provided
 export EPP_TAG="${EPP_TAG:-dev}"
+
+# Set a default EPP_IMAGE if not provided
+EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
+export EPP_IMAGE
 
 # Set the model name to deploy
 export MODEL_NAME="${MODEL_NAME:-food-review}"
@@ -46,11 +48,12 @@ export MODEL_NAME_SAFE=$(echo "${MODEL_ID}" | tr '[:upper:]' '[:lower:]' | tr ' 
 # Set the endpoint-picker to deploy
 export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 
-# Set a default SIDECAR_IMAGE if not provided
-: "${SIDECAR_IMAGE:=llm-d-routing-sidecar}"
-
 # Set the default routing side car image tag
 export SIDECAR_TAG="${SIDECAR_TAG:-dev}"
+
+# Set a default SIDECAR_IMAGE if not provided
+SIDECAR_IMAGE="${SIDECAR_IMAGE:-${IMAGE_REGISTRY}/llm-d-routing-sidecar:${SIDECAR_TAG}}"
+export SIDECAR_IMAGE
 
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
@@ -178,26 +181,26 @@ kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Rea
 
 # Load the vllm simulator image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+	podman save ${VLLM_SIMULATOR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
-	if docker image inspect "${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}" > /dev/null 2>&1; then
+	if docker image inspect "${VLLM_SIMULATOR_IMAGE}" > /dev/null 2>&1; then
 		echo "INFO: Loading image into KIND cluster..."
-		kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${VLLM_SIMULATOR_IMAGE}:${VLLM_SIMULATOR_TAG}
+		kind --name ${CLUSTER_NAME} load docker-image ${VLLM_SIMULATOR_IMAGE}
 	fi
 fi
 
 # Load the ext_proc endpoint-picker image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${IMAGE_REGISTRY}/${EPP_IMAGE}:${EPP_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+	podman save ${EPP_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
-	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${EPP_IMAGE}:${EPP_TAG}
+	kind --name ${CLUSTER_NAME} load docker-image ${EPP_IMAGE}
 fi
 
 # Load the sidecar image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${SIDECAR_TAG} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+	podman save ${SIDECAR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
 else
-	kind --name ${CLUSTER_NAME} load docker-image ${IMAGE_REGISTRY}/${SIDECAR_IMAGE}:${SIDECAR_TAG}
+	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
 fi
 
 # ------------------------------------------------------------------------------
@@ -233,8 +236,8 @@ envsubst '$PRIMARY_PORT' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
-	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_TAG} ${VLLM_SIMULATOR_TAG} \
-  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_TAG} ${TARGET_PORTS} \
+	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
+  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 

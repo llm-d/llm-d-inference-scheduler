@@ -10,8 +10,8 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check typos
-        uses: crate-ci/typos@v1.39.0
+        uses: crate-ci/typos@v1.40.0
 

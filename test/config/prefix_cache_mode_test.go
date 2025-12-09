@@ -49,13 +49,17 @@ schedulingProfiles:
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_ = os.Setenv("HF_TOKEN", "dummy_token") // needed for cache_tracking
+			rawConfig, _, err := loader.LoadConfigPhaseOne([]byte(test.configText), logr.Discard())
+			if err != nil {
+				t.Fatalf("unexpected error from LoadConfigPhaseOne: %v", err)
+			}
 			handle := utils.NewTestHandle(ctx)
-			_, err := loader.LoadConfig([]byte(test.configText), handle, logr.Discard())
+			_, err = loader.LoadConfigPhaseTwo(rawConfig, handle, logr.Discard())
+			if err != nil {
+				t.Fatalf("unexpected error from LoadConfigPhaseTwo: %v", err)
+			}
 			fmt.Println("all plugins", handle.GetAllPluginsWithNames())
 
-			if err != nil {
-				t.Fatalf("unexpected error from LoadConfig: %v", err)
-			}
 			_, err = giePlugins.PluginByType[*scorer.PrecisePrefixCacheScorer](handle, test.pluginName)
 			if err != nil {
 				t.Fatalf("expected PrecisePrefixCacheScorer, but got error: %v", err)

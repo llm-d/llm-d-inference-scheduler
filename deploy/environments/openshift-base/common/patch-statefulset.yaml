@@ -16,5 +16,5 @@ spec:
       serviceAccountName: operator-controller-manager
       containers:
         - name: cmd
-          image: ${IMAGE_TAG_BASE}:${VERSION}
+          image: ${EPP_IMAGE}
           imagePullPolicy: Always

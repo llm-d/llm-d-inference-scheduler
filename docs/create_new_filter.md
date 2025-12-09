@@ -127,7 +127,7 @@ Once a filter is defined, it can be used to modify llm-d-inference-scheduler
  
 - Add the relevant import path (if defined outside this repository);
 - Add any desired configuration knobs (e.g., environment variables); and
-- Listing the new filter in the `LoadConfig()` function's `cfg.loadPluginInfo`
+- Listing the new filter in the `LoadConfigPhaseTwo()` function's `cfg.loadPluginInfo`
  list of available plugins.
 
 In the case of the llm-d-inference-scheduler, filters can be hooked into the
@@ -137,7 +137,7 @@ In the case of the llm-d-inference-scheduler, filters can be hooked into the
  environment variables):
 
 ```go 
-func (c *Config) LoadConfig() {
+func (c *Config) LoadConfigPhaseTwo() {
 	c.loadPluginInfo(c.DecodeSchedulerPlugins, false,
 		KVCacheScorerName, ..., ByLabelFilterName, ... )
 	c.loadPluginInfo(c.PrefillSchedulerPlugins, true, ... )
