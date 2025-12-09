@@ -60,12 +60,7 @@ type mockAdmissionController struct {
 	admitErr error
 }
 
-func (m *mockAdmissionController) Admit(
-	_ context.Context,
-	_ *handlers.RequestContext,
-	_ []backendmetrics.PodMetrics,
-	_ int,
-) error {
+func (m *mockAdmissionController) Admit(context.Context, *handlers.RequestContext, int) error {
 	return m.admitErr
 }
 
@@ -673,6 +668,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 					director.datastore = mockDs
 					director.podLocator = NewCachedPodLocator(context.Background(), NewDatastorePodLocator(mockDs), time.Minute)
 				}
+
 				reqCtx := &handlers.RequestContext{
 					Request: &handlers.Request{
 						// Create a copy of the map for each test run to avoid mutation issues.
