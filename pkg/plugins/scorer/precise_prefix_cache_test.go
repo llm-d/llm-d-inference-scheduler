@@ -114,11 +114,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 				prompt := req.Completions.Prompt
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(tokenization.LocalTokenizerConfig{
-					ModelTokenizerMap: map[string]string{
-						"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-					},
-				})
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
 				require.NoError(t, err)
 
 				// use the actual tokenizer on the test prompt
@@ -230,11 +226,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NoError(t, err)
 
 				// tokenize rendered prompt
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(tokenization.LocalTokenizerConfig{
-					ModelTokenizerMap: map[string]string{
-						"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-					},
-				})
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
 				require.NoError(t, err)
 
 				tokens, _, err := testTokenizer.Encode(rendered.RenderedChats[0], model)
@@ -304,11 +296,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(tokenization.LocalTokenizerConfig{
-					ModelTokenizerMap: map[string]string{
-						"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-					},
-				})
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
 				require.NoError(t, err)
 
 				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
@@ -380,11 +368,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(tokenization.LocalTokenizerConfig{
-					ModelTokenizerMap: map[string]string{
-						"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-					},
-				})
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
 				require.NoError(t, err)
 
 				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
@@ -437,11 +421,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(tokenization.LocalTokenizerConfig{
-					ModelTokenizerMap: map[string]string{
-						"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-					},
-				})
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
 				require.NoError(t, err)
 
 				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
@@ -540,11 +520,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(tokenization.LocalTokenizerConfig{
-					ModelTokenizerMap: map[string]string{
-						"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-					},
-				})
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
 				require.NoError(t, err)
 
 				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
