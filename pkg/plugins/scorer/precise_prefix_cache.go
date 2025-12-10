@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache"
-	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache/kvevents"
 	preprocessing "github.com/llm-d/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -122,11 +121,6 @@ func (s *PrecisePrefixCacheScorer) TypedName() plugins.TypedName {
 func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScorer {
 	s.typedName.Name = name
 	return s
-}
-
-// KVBlockIndex returns the underlying kvblock.Index for testing purposes.
-func (s *PrecisePrefixCacheScorer) KVBlockIndex() kvblock.Index {
-	return s.kvCacheIndexer.KVBlockIndex()
 }
 
 // Score scores the provided pod based on the KVCache index state.

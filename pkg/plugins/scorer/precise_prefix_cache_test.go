@@ -1,4 +1,4 @@
-package scorer_test
+package scorer
 
 import (
 	"os"
@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache/kvevents"
@@ -567,7 +566,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			prefixCacheScorer, err := scorer.New(ctx, scorer.PrecisePrefixCachePluginConfig{
+			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
 				IndexerConfig:  kvcacheConfig,
 				KVEventsConfig: kvevents.DefaultConfig(),
 			})
@@ -576,7 +575,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 			// populate the kvblock.Index with test data
 			if tt.kvBlockData != nil && tt.request != nil && tt.request.Body != nil {
-				kvBlockIndex := prefixCacheScorer.KVBlockIndex()
+				kvBlockIndex := prefixCacheScorer.kvCacheIndexer.KVBlockIndex()
 				blockData := tt.kvBlockData(tt.request.Body, tt.request.TargetModel)
 				for key, entries := range blockData {
 					err := kvBlockIndex.Add(ctx, []kvblock.Key{key}, entries)
