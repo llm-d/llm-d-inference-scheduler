@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -102,28 +103,25 @@ func (s *Server) decodeFirst(w http.ResponseWriter, r *http.Request, original []
 }
 
 // tryDecode attempts to decode and returns whether prefill is needed
-func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (needsPrefill bool, err error) {
+func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (bool, error) {
 	dw := &bufferedResponseWriter{}
 	s.decoderProxy.ServeHTTP(dw, r)
 
 	// Check for non-success status codes
 	if dw.statusCode < 200 || dw.statusCode >= 300 {
-		s.logger.Error(nil, "decode request failed", "code", dw.statusCode)
 		w.WriteHeader(dw.statusCode)
 		if dw.buffer.Len() > 0 {
 			w.Write([]byte(dw.buffer.String())) //nolint:all
 		}
-		return false, nil
+		return false, fmt.Errorf("decode request failed with status code: %d", dw.statusCode)
 	}
 
 	// Parse response to check finish_reason
 	var response map[string]any
 	if err := json.Unmarshal([]byte(dw.buffer.String()), &response); err != nil {
-		s.logger.Error(err, "failed to unmarshal decoder response")
-		// Forward response as-is if we can't parse it
 		w.WriteHeader(dw.statusCode)
 		w.Write([]byte(dw.buffer.String())) //nolint:all
-		return false, nil
+		return false, err
 	}
 
 	// Check for cache_threshold finish reason
@@ -135,6 +133,7 @@ func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (needsPrefill
 					return true, nil
 				}
 			}
+
 		}
 	}
 
@@ -144,7 +143,6 @@ func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (needsPrefill
 			w.Header().Add(k, val)
 		}
 	}
-	w.WriteHeader(dw.statusCode)
 	w.Write([]byte(dw.buffer.String())) //nolint:all
 
 	return false, nil
