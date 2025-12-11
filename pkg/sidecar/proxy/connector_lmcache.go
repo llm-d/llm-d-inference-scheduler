@@ -30,8 +30,8 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	defer r.Body.Close() //nolint:all
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error())) //nolint:all
+		w.WriteHeader(http.StatusBadRequest) // TODO: check FastAPI error code when failing to read body
+		w.Write([]byte(err.Error()))         //nolint:all
 		return
 	}
 
