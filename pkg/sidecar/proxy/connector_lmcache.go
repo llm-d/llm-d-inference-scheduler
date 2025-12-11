@@ -51,53 +51,24 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	}
 
 	if _, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
-		s.decodeFirst(w, r, original, completionRequest, prefillPodHostPort)
-	} else {
-		s.prefillThenDecode(w, r, original, completionRequest, prefillPodHostPort)
+		needsPrefill, err := s.tryDecode(w, r)
+		if err != nil {
+			s.logger.Error(err, "decode attempt failed")
+			return
+		}
+		if !needsPrefill {
+			s.logger.V(4).Info("decode succeeded without prefill")
+			return
+		}
+		s.logger.Info("decode failed due to insufficient cache hit threshold. running prefill")
 	}
-}
-
-// prefillThenDecode implements the prefill-first flow: prefill then decode
-func (s *Server) prefillThenDecode(w http.ResponseWriter, r *http.Request, original []byte, completionRequest map[string]any, prefillPodHostPort string) {
-	s.logger.V(4).Info("running prefill-then-decode flow")
 
 	if err := s.prefill(w, r, prefillPodHostPort, completionRequest); err != nil {
-		s.logger.Error(err, "prefill failed")
+		s.logger.Error(err, "prefill attempt failed")
 		return
 	}
 
 	s.logger.V(4).Info("forwarding to decoder after prefill")
-	r.Body = io.NopCloser(strings.NewReader(string(original)))
-	s.decoderProxy.ServeHTTP(w, r)
-}
-
-// decodeFirst implements the decode-first flow with cache threshold checking
-func (s *Server) decodeFirst(w http.ResponseWriter, r *http.Request, original []byte, completionRequest map[string]any, prefillPodHostPort string) {
-	s.logger.V(4).Info("running decode-first flow")
-
-	// Step 1: Try decode first
-	r.Body = io.NopCloser(strings.NewReader(string(original)))
-	needsPrefill, err := s.tryDecode(w, r)
-	if err != nil {
-		s.logger.Error(err, "decode attempt failed")
-		return
-	}
-
-	// If decode succeeded (cache hit was sufficient), we're done
-	if !needsPrefill {
-		s.logger.V(4).Info("decode succeeded without prefill")
-		return
-	}
-
-	// Step 2: Cache threshold not met, execute prefill
-	s.logger.V(4).Info("cache threshold not met, executing prefill", "prefillPod", prefillPodHostPort)
-	if err := s.prefill(w, r, prefillPodHostPort, completionRequest); err != nil {
-		s.logger.Error(err, "prefill failed")
-		return
-	}
-
-	// Step 3: Retry decode after prefill
-	s.logger.V(4).Info("retrying decode after prefill")
 	r.Body = io.NopCloser(strings.NewReader(string(original)))
 	s.decoderProxy.ServeHTTP(w, r)
 }
@@ -129,7 +100,6 @@ func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (bool, error)
 		if choice, ok := choices[0].(map[string]any); ok {
 			if finishReason, ok := choice[responseFieldFinishReason].(string); ok {
 				if finishReason == finishReasonCacheThreshold {
-					s.logger.V(4).Info("decode rejected due to cache threshold")
 					return true, nil
 				}
 			}
