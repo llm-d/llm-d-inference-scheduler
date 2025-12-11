@@ -299,7 +299,7 @@ Similarly to the IGW `prefix-cache-scorer`, it provides a score based on the num
  the `precise-prefix-cache-scorer` tracks the real-time KV-cache states across the vLLM instances to
  provide more accurate scoring.
 
-When enabled, the scorer will use the `llm-d-kv-cache-manager` to track the KV-cache states
+When enabled, the scorer will use the `llm-d-kv-cache` to track the KV-cache states
  across the vLLM instances. It will use the `kvcache.Indexer` to score the pods based on the
  number of matching blocks in the KV-cache. It will also use the `kvevents.Pool` to subscribe
  to the KV-Events emitted by the vLLM instances and update the KV-cache states in near-real-time.
@@ -311,7 +311,7 @@ Configuration:
   - `indexerConfig`: Configuration for the `kvcache.Indexer`.
   - `kvEventsConfig`: Configuration for the `kvevents.Pool`.
 
-See list of parameters at [llm-d-kv-cache-manager/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache-manager/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
+See list of parameters at [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
 
 Note that in most cases you will only need to set:
 - HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.

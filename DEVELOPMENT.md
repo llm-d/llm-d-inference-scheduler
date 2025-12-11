@@ -190,14 +190,14 @@ kubectl config set-context --current --namespace="${NAMESPACE}"
 export HF_TOKEN="<HF_TOKEN>"
 ```
 
-Download the `llm-d-kv-cache-manager` repository (the installation script and Helm chart to install the vLLM environment):
+Download the `llm-d-kv-cache` repository (the installation script and Helm chart to install the vLLM environment):
 
 ```bash
-cd .. && git clone git@github.com:llm-d/llm-d-kv-cache-manager.git
+cd .. && git clone git@github.com:llm-d/llm-d-kv-cache.git
 ```
 
 If you prefer to clone it into the `/tmp` directory, make sure to update the `VLLM_CHART_DIR` environment variable:
-`export VLLM_CHART_DIR=<tmp_dir>/llm-d-kv-cache-manager/vllm-setup-helm`
+`export VLLM_CHART_DIR=<tmp_dir>/llm-d-kv-cache/vllm-setup-helm`
 
 Once all this is set up, you can deploy the environment:
 
