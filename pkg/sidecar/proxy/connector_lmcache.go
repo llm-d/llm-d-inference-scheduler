@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 )
@@ -53,18 +54,17 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	if _, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
 		needsPrefill, err := s.tryDecode(w, r)
 		if err != nil {
-			s.logger.Error(err, "decode attempt failed")
 			return
 		}
 		if !needsPrefill {
 			s.logger.V(4).Info("decode succeeded without prefill")
 			return
 		}
-		s.logger.Info("decode failed due to insufficient cache hit threshold. running prefill")
+		s.logger.Info("decode failed due to insufficient cache hit threshold.")
 	}
 
 	if err := s.prefill(w, r, prefillPodHostPort, completionRequest); err != nil {
-		s.logger.Error(err, "prefill attempt failed")
+		s.logger.Error(err, "prefill failed")
 		return
 	}
 
@@ -108,11 +108,7 @@ func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (bool, error)
 	}
 
 	// Decode succeeded, write response to client
-	for k, v := range dw.headers {
-		for _, val := range v {
-			w.Header().Add(k, val)
-		}
-	}
+	maps.Copy(w.Header(), dw.headers)
 	w.Write([]byte(dw.buffer.String())) //nolint:all
 
 	return false, nil
