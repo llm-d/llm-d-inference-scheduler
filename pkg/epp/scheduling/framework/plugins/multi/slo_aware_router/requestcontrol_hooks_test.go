@@ -36,17 +36,17 @@ import (
 )
 
 const (
-	testModelName = "test-model"
-	kvUsage       = 1
-	runningQueue  = 1
-	waitingQueue  = 1
+	testModelName   = "test-model"
+	kvUsage         = 1
+	runningRequests = 1
+	waitingQueue    = 1
 )
 
 // Helper functions
 
 func createTestSchedulingResult(pod *backend.Pod) *schedulingtypes.SchedulingResult {
 
-	mockPod := createTestPod(pod.NamespacedName.Name, kvUsage, runningQueue, waitingQueue)
+	mockPod := createTestPod(pod.NamespacedName.Name, kvUsage, runningRequests, waitingQueue)
 
 	return &schedulingtypes.SchedulingResult{
 		PrimaryProfileName: "default",
@@ -343,12 +343,12 @@ func TestSLOAwareRouter_ResponseStreaming_FirstToken(t *testing.T) {
 	sloCtx.lastSeenMetrics["prefill"] = &backendmetrics.MetricsState{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
-		RunningQueueSize:    1,
+		RunningRequestsSize: 1,
 	}
 	sloCtx.lastSeenMetrics["default"] = &backendmetrics.MetricsState{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
-		RunningQueueSize:    1,
+		RunningRequestsSize: 1,
 	}
 	router.setSLOContextForRequest(request, sloCtx)
 
@@ -394,12 +394,12 @@ func TestSLOAwareRouter_ResponseStreaming_SubsequentTokens(t *testing.T) {
 	sloCtx.lastSeenMetrics["prefill"] = &backendmetrics.MetricsState{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
-		RunningQueueSize:    1,
+		RunningRequestsSize: 1,
 	}
 	sloCtx.lastSeenMetrics["default"] = &backendmetrics.MetricsState{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
-		RunningQueueSize:    1,
+		RunningRequestsSize: 1,
 	}
 	firstTokenTime := time.Now().Add(-100 * time.Millisecond)
 
