@@ -28,6 +28,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
@@ -204,6 +205,30 @@ func (p *Plugin) TypedName() plugins.TypedName {
 func (p *Plugin) WithName(name string) *Plugin {
 	p.typedName.Name = name
 	return p
+}
+
+func (p *Plugin) Produces() map[string]any {
+	return map[string]any{approximateprefix.PrefixCacheMatchInfoKey: approximateprefix.PrefixCacheMatchInfo{}}
+}
+
+func (p *Plugin) Consumes() map[string]any {
+	return map[string]any{}
+}
+
+// PrepareRequestData hashes prompt, finds longest prefix match and stores it in pod as attribute.
+func (p *Plugin) PrepareRequestData(ctx context.Context, request *types.LLMRequest, pods []types.Pod) error {
+	hashes := hashPrompt(ctx, request, getBlockSize(pods, p.config), p.config.MaxPrefixBlocksToMatch)
+	state := &SchedulingContextState{
+		PrefixHashes:       hashes,
+		PrefixCacheServers: p.matchLongestPrefix(ctx, hashes),
+	}
+	total := len(state.PrefixHashes)
+
+	for _, pod := range pods {
+		matchLen := state.PrefixCacheServers[ServerID(pod.GetPod().NamespacedName)]
+		pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(matchLen, total))
+	}
+	return nil
 }
 
 // Score returns the scoring result for the given list of pods based on context.

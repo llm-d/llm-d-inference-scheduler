@@ -347,6 +347,9 @@ func (d *Director) runPreRequestPlugins(ctx context.Context, request *scheduling
 
 func (d *Director) runPrepareDataPlugins(ctx context.Context,
 	request *schedulingtypes.LLMRequest, pods []schedulingtypes.Pod) error {
+	if len(d.requestControlPlugins.prepareDataPlugins) == 0 {
+		return nil
+	}
 	return prepareDataPluginsWithTimeout(prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, ctx, request, pods)
 }
 
