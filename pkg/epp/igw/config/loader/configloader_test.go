@@ -58,7 +58,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 	t.Parallel()
 
 	// Register known feature gates for validation.
-	RegisterFeatureGate(datalayer.FeatureGate)
+	RegisterFeatureGate(datalayer.ExperimentalDatalayerFeatureGate)
 
 	tests := []struct {
 		name       string
@@ -90,7 +90,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 						},
 					},
 				},
-				FeatureGates: configapi.FeatureGates{datalayer.FeatureGate},
+				FeatureGates: configapi.FeatureGates{datalayer.ExperimentalDatalayerFeatureGate},
 				SaturationDetector: &configapi.SaturationDetector{
 					QueueDepthThreshold:       10,
 					KVCacheUtilThreshold:      0.8,
@@ -150,7 +150,7 @@ func TestInstantiateAndConfigure(t *testing.T) {
 	// Not parallel because it modifies global plugin registry.
 	registerTestPlugins(t)
 
-	RegisterFeatureGate(datalayer.FeatureGate)
+	RegisterFeatureGate(datalayer.ExperimentalDatalayerFeatureGate)
 
 	tests := []struct {
 		name       string
