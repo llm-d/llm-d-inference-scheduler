@@ -1,0 +1,129 @@
+# Sample EPP configuration for PD disaggregation with SLO-aware scheduling
+# This configuration enables joint (prefill, decode) pod pair optimization based on
+# TTFT and TPOT SLO headers (x-slo-ttft-ms, x-slo-tpot-ms)
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+
+plugins:
+  # Pre-request plugins
+  - type: prefill-header-handler
+    name: prefill-header-handler
+
+  # Filter plugins
+  - type: prefill-filter
+    name: prefill-filter
+
+  - type: decode-filter
+    name: decode-filter
+
+  # Scorer plugins
+  - type: prefix-cache-scorer
+    name: prefix-cache-scorer
+
+  # NEW: PD-SLO Pair Optimizer Scorer
+  # This scorer evaluates all (prefill, decode) pod combinations and selects
+  # the optimal pair based on joint TTFT and TPOT predictions
+  - type: pd-slo-pair-optimizer
+    name: pd-slo-pair-optimizer
+    parameters:
+      # Weight for TTFT headroom in blended score (default: 0.8)
+      ttftWeight: 0.8
+
+      # Weight for TPOT headroom in blended score (default: 0.2)
+      tpotWeight: 0.2
+
+      # KV cache transfer overhead in milliseconds (default: 5.0)
+      # Adjust based on your network latency (RDMA networks: 1-2ms, TCP: 5-10ms)
+      transferOverheadMs: 5.0
+
+      # SLO buffer factor for safety margin (default: 0.9)
+      # Actual SLO target = user_slo * sloBufferFactor
+      sloBufferFactor: 0.9
+
+      # Selection strategy: "weighted_random" or "best_headroom"
+      selectionStrategy: "weighted_random"
+
+      # Probability of exploring negative headroom pairs (default: 0.01)
+      negativeHeadroomProb: 0.01
+
+  # Picker plugin
+  - type: max-score-picker
+    name: max-score-picker
+
+# Profile Handler Configuration
+# NEW: PD-SLO Profile Handler
+# Coordinates execution of both prefill and decode profiles for SLO-aware scheduling
+profileHandler:
+  type: pd-slo-profile-handler
+  name: pd-slo-profile-handler
+  parameters:
+    # Name of the decode scheduling profile (default: "decode")
+    decodeProfile: "decode"
+
+    # Name of the prefill scheduling profile (default: "prefill")
+    prefillProfile: "prefill"
+
+    # Name of the prefix cache plugin (default: "prefix-cache-scorer")
+    prefixPluginName: "prefix-cache-scorer"
+
+    # Hash block size for prefix cache (default: 16)
+    hashBlockSize: 16
+
+    # KV transfer overhead in milliseconds (should match pair optimizer)
+    transferOverheadMs: 5.0
+
+# Scheduling Profiles
+schedulingProfiles:
+  # Prefill profile - selects prefill pods
+  - name: prefill
+    plugins:
+      # Filter to prefill-role pods
+      - pluginRef: prefill-filter
+
+      # Prefix cache scoring
+      - pluginRef: prefix-cache-scorer
+        weight: 2
+
+      # NEW: PD-SLO pair optimizer (evaluates prefill contribution to TTFT)
+      - pluginRef: pd-slo-pair-optimizer
+        weight: 3
+
+      # Select top-scoring pod
+      - pluginRef: max-score-picker
+
+  # Decode profile - selects decode pods
+  - name: decode
+    plugins:
+      # Filter to decode-role pods
+      - pluginRef: decode-filter
+
+      # Prefix cache scoring
+      - pluginRef: prefix-cache-scorer
+        weight: 2
+
+      # NEW: PD-SLO pair optimizer (evaluates decode contribution to TTFT and TPOT)
+      - pluginRef: pd-slo-pair-optimizer
+        weight: 3
+
+      # Select top-scoring pod
+      - pluginRef: max-score-picker
+
+# Environment Variables Required:
+# The following environment variables must be set for the EPP deployment:
+#
+# Prefill TTFT Predictor:
+#   PREFILL_TTFT_TRAINING_URL=http://prefill-ttft-predictor-svc:8000
+#   PREFILL_TTFT_PREDICTION_URL=http://prefill-ttft-predictor-svc:8001
+#
+# Decode TTFT Predictor (queue wait + startup):
+#   DECODE_TTFT_TRAINING_URL=http://decode-ttft-predictor-svc:8000
+#   DECODE_TTFT_PREDICTION_URL=http://decode-ttft-predictor-svc:8001
+#
+# Decode TPOT Predictor:
+#   DECODE_TPOT_TRAINING_URL=http://decode-tpot-predictor-svc:8000
+#   DECODE_TPOT_PREDICTION_URL=http://decode-tpot-predictor-svc:8001
+#
+# Usage:
+# Send requests with SLO headers to trigger PD-SLO scheduling:
+#   x-slo-ttft-ms: 500    # Target time-to-first-token in milliseconds
+#   x-slo-tpot-ms: 20     # Target time-per-output-token in milliseconds
