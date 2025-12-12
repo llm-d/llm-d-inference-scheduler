@@ -17,9 +17,11 @@ func RegisterAllPlugins() {
 	plugins.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
 	plugins.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
 	plugins.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
+	plugins.Register(profile.PdSLOProfileHandlerType, profile.PdSLOProfileHandlerFactory)
 	plugins.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
 	plugins.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
 	plugins.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugins.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
 	plugins.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
+	plugins.Register(scorer.PdSLOPairOptimizerType, scorer.PdSLOPairOptimizerFactory)
 }
