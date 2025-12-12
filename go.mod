@@ -29,6 +29,8 @@ require (
 	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20251211162332-db2b7ce7b90c
 )
 
+replace sigs.k8s.io/gateway-api-inference-extension => github.com/RishabhSaini/gateway-api-inference-extension v0.0.0-20251212173918-20b5577faf3e
+
 require (
 	cel.dev/expr v0.24.0 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
