@@ -296,7 +296,7 @@ func (s *PdSLOPairOptimizer) evaluateAllPairs(
 	return results
 }
 
-// predictPairLatencies calls the three predictors to get latency predictions for a pod pair
+// predictPairLatencies calls the two predictors to get latency predictions for a pod pair
 func (s *PdSLOPairOptimizer) predictPairLatencies(
 	ctx context.Context,
 	prefillPod, decodePod schedulingtypes.Pod,
@@ -304,12 +304,12 @@ func (s *PdSLOPairOptimizer) predictPairLatencies(
 ) (prefillTTFT, decodeTTFT, decodeTPOT float64) {
 	logger := log.FromContext(ctx)
 
-	// Build prediction request (common features)
-	predReq := s.buildPredictionRequest(prefillPod, decodePod, request)
+	// Build prediction request for prefill (input_tokens, prefix_cache focused)
+	prefillReq := s.buildPrefillPredictionRequest(prefillPod, request)
 
 	// Predict prefill TTFT
-	if resp, err := s.predictors.PrefillTTFTPredictor.Predict(ctx, predReq); err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Prefill TTFT prediction failed, using fallback")
+	if resp, err := s.predictors.PrefillPredictor.Predict(ctx, prefillReq); err != nil {
+		logger.V(logutil.DEBUG).Error(err, "Prefill prediction failed, using fallback")
 		prefillTTFT = s.fallbackPrefillTTFT(request)
 	} else if resp != nil {
 		prefillTTFT = resp.TTFT
@@ -317,35 +317,62 @@ func (s *PdSLOPairOptimizer) predictPairLatencies(
 		prefillTTFT = s.fallbackPrefillTTFT(request)
 	}
 
-	// Predict decode TTFT (queue wait + startup)
-	if resp, err := s.predictors.DecodeTTFTPredictor.Predict(ctx, predReq); err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Decode TTFT prediction failed, using fallback")
-		decodeTTFT = s.fallbackDecodeTTFT(decodePod)
-	} else if resp != nil {
-		decodeTTFT = resp.TTFT
-	} else {
-		decodeTTFT = s.fallbackDecodeTTFT(decodePod)
-	}
+	// Build prediction request for decode (queue, running requests, kv_cache focused)
+	decodeReq := s.buildDecodePredictionRequest(decodePod, request)
 
-	// Predict decode TPOT
-	if resp, err := s.predictors.DecodeTPOTPredictor.Predict(ctx, predReq); err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Decode TPOT prediction failed, using fallback")
+	// Predict decode TTFT and TPOT (single call returns both)
+	if resp, err := s.predictors.DecodePredictor.Predict(ctx, decodeReq); err != nil {
+		logger.V(logutil.DEBUG).Error(err, "Decode prediction failed, using fallback")
+		decodeTTFT = s.fallbackDecodeTTFT(decodePod)
 		decodeTPOT = s.fallbackDecodeTPOT(decodePod)
 	} else if resp != nil {
+		decodeTTFT = resp.TTFT
 		decodeTPOT = resp.TPOT
 	} else {
+		decodeTTFT = s.fallbackDecodeTTFT(decodePod)
 		decodeTPOT = s.fallbackDecodeTPOT(decodePod)
 	}
 
 	return prefillTTFT, decodeTTFT, decodeTPOT
 }
 
-// buildPredictionRequest constructs a prediction request from pod metrics and request info
-func (s *PdSLOPairOptimizer) buildPredictionRequest(
-	prefillPod, decodePod schedulingtypes.Pod,
+// buildPrefillPredictionRequest constructs a prediction request for prefill pod
+// Focuses on: input tokens, prefix cache score
+func (s *PdSLOPairOptimizer) buildPrefillPredictionRequest(
+	prefillPod schedulingtypes.Pod,
 	request *schedulingtypes.LLMRequest,
 ) latencypredictor.PredictionRequest {
-	// Extract metrics from decode pod (used for all predictions)
+	// Get input token length from request (dominant feature for prefill)
+	inputTokenLength := getInputTokenLength(request)
+
+	// Get prefill pod metrics (if available)
+	metrics := prefillPod.GetMetrics()
+	kvCachePercentage := 0.0
+	numRequestWaiting := 0
+	numRequestRunning := 0
+
+	if metrics != nil {
+		kvCachePercentage = metrics.KVCacheUsagePercent
+		numRequestWaiting = metrics.WaitingQueueSize
+		numRequestRunning = metrics.RunningRequestsSize
+	}
+
+	return latencypredictor.PredictionRequest{
+		KVCachePercentage: kvCachePercentage,
+		InputTokenLength:  inputTokenLength,
+		NumRequestWaiting: numRequestWaiting,
+		NumRequestRunning: numRequestRunning,
+		PrefixCacheScore:  0.0, // TODO: Get from cycle state
+	}
+}
+
+// buildDecodePredictionRequest constructs a prediction request for decode pod
+// Focuses on: queue depth, running requests, kv cache usage
+func (s *PdSLOPairOptimizer) buildDecodePredictionRequest(
+	decodePod schedulingtypes.Pod,
+	request *schedulingtypes.LLMRequest,
+) latencypredictor.PredictionRequest {
+	// Extract metrics from decode pod (dominant features for decode)
 	decodeMetrics := decodePod.GetMetrics()
 	kvCachePercentage := 0.0
 	numRequestWaiting := 0
@@ -357,7 +384,7 @@ func (s *PdSLOPairOptimizer) buildPredictionRequest(
 		numRequestRunning = decodeMetrics.RunningRequestsSize
 	}
 
-	// Get input token length from request
+	// Get input token length (less important for decode, but included)
 	inputTokenLength := getInputTokenLength(request)
 
 	return latencypredictor.PredictionRequest{
@@ -365,7 +392,7 @@ func (s *PdSLOPairOptimizer) buildPredictionRequest(
 		InputTokenLength:  inputTokenLength,
 		NumRequestWaiting: numRequestWaiting,
 		NumRequestRunning: numRequestRunning,
-		PrefixCacheScore:  0.0, // TODO: Get from cycle state
+		PrefixCacheScore:  0.0,
 	}
 }
 

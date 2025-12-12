@@ -21,9 +21,8 @@ const (
 	HeadroomOutcomeNegative = "negative_headroom"
 
 	// Predictor types
-	PredictorTypePrefillTTFT = "prefill-ttft"
-	PredictorTypeDecodeTTFT  = "decode-ttft"
-	PredictorTypeDecodeTPOT  = "decode-tpot"
+	PredictorTypePrefill = "prefill"
+	PredictorTypeDecode  = "decode"
 )
 
 var (

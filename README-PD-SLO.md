@@ -23,20 +23,17 @@ A unified profile handler that supports **both** SLO-aware and threshold-based P
 
 ### 1. Deploy Predictor Services
 
-Deploy 3 predictor services (or use heuristic predictors for MVP):
-- `prefill-ttft-predictor-svc:8000/8001`
-- `decode-ttft-predictor-svc:8000/8001`
-- `decode-tpot-predictor-svc:8000/8001`
+Deploy 2 predictor services (or use heuristic predictors for MVP):
+- `prefill-predictor-svc:8000/8001` (predicts prefill TTFT)
+- `decode-predictor-svc:8000/8001` (predicts decode TTFT + TPOT)
 
 ### 2. Set Environment Variables
 
 ```bash
-export PREFILL_TTFT_TRAINING_URL=http://prefill-ttft-predictor-svc:8000
-export PREFILL_TTFT_PREDICTION_URL=http://prefill-ttft-predictor-svc:8001
-export DECODE_TTFT_TRAINING_URL=http://decode-ttft-predictor-svc:8000
-export DECODE_TTFT_PREDICTION_URL=http://decode-ttft-predictor-svc:8001
-export DECODE_TPOT_TRAINING_URL=http://decode-tpot-predictor-svc:8000
-export DECODE_TPOT_PREDICTION_URL=http://decode-tpot-predictor-svc:8001
+export PREFILL_TRAINING_URL=http://prefill-predictor-svc:8000
+export PREFILL_PREDICTION_URL=http://prefill-predictor-svc:8001
+export DECODE_TRAINING_URL=http://decode-predictor-svc:8000
+export DECODE_PREDICTION_URL=http://decode-predictor-svc:8001
 ```
 
 ### 3. Apply Configuration
@@ -81,7 +78,8 @@ Request → PD-SLO Profile Handler
             ↓                    ↓
     PD-SLO Pair Optimizer    Use profile
     Evaluate all pairs       results directly
-    3 Predictors × N×M
+    2 Predictors × N×M       (no prediction)
+    (prefill, decode)
     Blended headroom
     Weighted random
             ↓                    ↓
@@ -97,7 +95,7 @@ Request → PD-SLO Profile Handler
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| PDPredictorSet | `pkg/predictors/pd_predictors.go` | 3 predictor clients |
+| PDPredictorSet | `pkg/predictors/pd_predictors.go` | 2 predictor clients (prefill, decode) |
 | PdSLOPairOptimizer | `pkg/plugins/scorer/pd_slo_pair_optimizer.go` | Core scoring logic |
 | PdSLOProfileHandler | `pkg/plugins/profile/pd_slo_profile_handler.go` | Profile coordination |
 | Helpers | `pkg/plugins/scorer/pd_slo_helpers.go` | Utility functions |
@@ -111,7 +109,7 @@ Request → PD-SLO Profile Handler
 llm_d_inference_scheduler_pd_slo_pair_selections_total{outcome="positive_headroom|negative_headroom"}
 
 # Predictor calls
-llm_d_inference_scheduler_pd_slo_predictor_calls_total{predictor="prefill-ttft|decode-ttft|decode-tpot", status="success|error"}
+llm_d_inference_scheduler_pd_slo_predictor_calls_total{predictor="prefill|decode", status="success|error"}
 
 # Pairs evaluated
 llm_d_inference_scheduler_pd_slo_pairs_evaluated_total
