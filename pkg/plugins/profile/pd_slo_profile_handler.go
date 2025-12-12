@@ -26,10 +26,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 )
 
 const (
@@ -50,6 +52,7 @@ type pdSLOProfileHandlerParameters struct {
 	PrefixPluginName   string  `json:"prefixPluginName"`
 	HashBlockSize      int     `json:"hashBlockSize"`
 	TransferOverheadMs float64 `json:"transferOverheadMs"`
+	PdThreshold        int     `json:"pdThreshold"` // Threshold for non-SLO fallback (0 = always PD)
 }
 
 // compile-time type assertion
@@ -63,6 +66,7 @@ func PdSLOProfileHandlerFactory(name string, rawParameters json.RawMessage, _ pl
 		PrefixPluginName:   "prefix-cache-scorer",
 		HashBlockSize:      16,
 		TransferOverheadMs: 5.0,
+		PdThreshold:        0, // Default: always use PD disaggregation
 	}
 
 	if rawParameters != nil {
@@ -79,12 +83,17 @@ func PdSLOProfileHandlerFactory(name string, rawParameters json.RawMessage, _ pl
 		return nil, fmt.Errorf("invalid transferOverheadMs: must be >= 0, got %f", parameters.TransferOverheadMs)
 	}
 
+	if parameters.PdThreshold < 0 {
+		return nil, fmt.Errorf("invalid pdThreshold: must be >= 0, got %d", parameters.PdThreshold)
+	}
+
 	return NewPdSLOProfileHandler(
 		parameters.PrefillProfile,
 		parameters.DecodeProfile,
 		parameters.PrefixPluginName,
 		parameters.HashBlockSize,
 		parameters.TransferOverheadMs,
+		parameters.PdThreshold,
 	).WithName(name), nil
 }
 
@@ -95,27 +104,31 @@ func NewPdSLOProfileHandler(
 	prefixPluginName string,
 	hashBlockSize int,
 	transferOverheadMs float64,
+	pdThreshold int,
 ) *PdSLOProfileHandler {
 	return &PdSLOProfileHandler{
-		typedName:          plugins.TypedName{Type: PdSLOProfileHandlerType},
-		decodeProfile:      decodeProfile,
-		prefillProfile:     prefillProfile,
-		prefixPluginName:   prefixPluginName,
-		hashBlockSize:      hashBlockSize,
-		transferOverheadMs: transferOverheadMs,
+		typedName:             plugins.TypedName{Type: PdSLOProfileHandlerType},
+		prefixPluginTypedName: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefixPluginName},
+		decodeProfile:         decodeProfile,
+		prefillProfile:        prefillProfile,
+		hashBlockSize:         hashBlockSize,
+		transferOverheadMs:    transferOverheadMs,
+		pdThreshold:           pdThreshold,
 	}
 }
 
 // PdSLOProfileHandler handles scheduler profiles for PD disaggregation with SLO awareness.
 // It coordinates the execution of both prefill and decode profiles and uses the PD-SLO
-// pair optimizer to select optimal (prefill, decode) pod pairs.
+// pair optimizer to select optimal (prefill, decode) pod pairs when SLO headers are present.
+// When SLO headers are absent, it falls back to threshold-based PD scheduling.
 type PdSLOProfileHandler struct {
-	typedName          plugins.TypedName
-	decodeProfile      string
-	prefillProfile     string
-	prefixPluginName   string
-	hashBlockSize      int
-	transferOverheadMs float64
+	typedName             plugins.TypedName
+	prefixPluginTypedName plugins.TypedName
+	decodeProfile         string
+	prefillProfile        string
+	hashBlockSize         int
+	transferOverheadMs    float64
+	pdThreshold           int
 }
 
 // TypedName returns the typed name of the plugin.
@@ -130,8 +143,8 @@ func (h *PdSLOProfileHandler) WithName(name string) *PdSLOProfileHandler {
 }
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles.
-// For SLO-aware PD scheduling, it always runs both prefill and decode profiles
-// to enable joint optimization.
+// Applies threshold-based logic to determine if prefill is needed (for both SLO and non-SLO requests).
+// If prefill is needed and SLO headers are present, enables joint optimization via pair optimizer.
 func (h *PdSLOProfileHandler) Pick(
 	ctx context.Context,
 	cycleState *types.CycleState,
@@ -141,18 +154,9 @@ func (h *PdSLOProfileHandler) Pick(
 ) map[string]*framework.SchedulerProfile {
 	logger := log.FromContext(ctx)
 
-	// Check if SLO headers are present
-	hasSLO := h.hasSLOHeaders(request)
-
-	if !hasSLO {
-		logger.V(logutil.DEBUG).Info("No SLO headers found, not using PD-SLO scheduling")
-		// TODO: Fallback to non-SLO PD scheduling logic if needed
-		return map[string]*framework.SchedulerProfile{}
-	}
-
-	// Run decode profile first
+	// Always run decode profile first (both SLO and non-SLO paths need it)
 	if _, executed := profileResults[h.decodeProfile]; !executed {
-		logger.V(logutil.DEBUG).Info("Running decode profile for PD-SLO scheduling")
+		logger.V(logutil.DEBUG).Info("Running decode profile")
 		return map[string]*framework.SchedulerProfile{
 			h.decodeProfile: profiles[h.decodeProfile],
 		}
@@ -164,22 +168,64 @@ func (h *PdSLOProfileHandler) Pick(
 		return map[string]*framework.SchedulerProfile{}
 	}
 
-	// Run prefill profile
+	// Check if all configured profiles have been executed
+	if len(profiles) == len(profileResults) {
+		return map[string]*framework.SchedulerProfile{}
+	}
+
+	// Apply threshold-based logic to decide if prefill is needed
+	// This applies to BOTH SLO and non-SLO requests
+	if h.pdThreshold > 0 {
+		userInput, err := getUserInputBytes(request)
+		if err != nil {
+			logger.V(logutil.DEBUG).Error(err, "Failed to get user input bytes")
+			return map[string]*framework.SchedulerProfile{}
+		}
+
+		// Calculate prefix cache hit percentage
+		hitPercentagePrefix := 0.0 // default to 0, meaning no prefix cache hit
+		prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(h.prefixPluginTypedName.String()))
+		if err != nil {
+			logger.Error(err, "unable to read prefix state")
+		} else {
+			decodePod := profileResults[h.decodeProfile].TargetPods[0].GetPod().NamespacedName
+			hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
+			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(userInput))
+			logger.V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
+				"promptLength", len(userInput))
+		}
+
+		// If non-cached suffix is smaller than threshold, use decode-only
+		if (1.0-hitPercentagePrefix)*float64(len(userInput)) < float64(h.pdThreshold) {
+			logger.Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
+			metrics.RecordPDDecision(metrics.DecisionTypeDecodeOnly)
+			return map[string]*framework.SchedulerProfile{} // do not run prefill
+		}
+	}
+
+	// Prefill is needed - run prefill profile for PD disaggregation
+	metrics.RecordPDDecision(metrics.DecisionTypePrefillDecode)
+
+	// Check if SLO headers are present (determines optimization strategy in ProcessResults)
+	hasSLO := h.hasSLOHeaders(request)
+	if hasSLO {
+		logger.V(logutil.DEBUG).Info("Running prefill profile for PD-SLO scheduling (joint optimization)")
+	} else {
+		logger.V(logutil.DEBUG).Info("Running prefill profile for threshold-based PD scheduling")
+	}
+
 	if _, executed := profileResults[h.prefillProfile]; !executed {
-		logger.V(logutil.DEBUG).Info("Running prefill profile for PD-SLO scheduling")
 		return map[string]*framework.SchedulerProfile{
 			h.prefillProfile: profiles[h.prefillProfile],
 		}
 	}
 
-	// Both profiles executed, done
-	logger.V(logutil.DEBUG).Info("Both prefill and decode profiles executed")
 	return map[string]*framework.SchedulerProfile{}
 }
 
 // ProcessResults handles the outcome of the profile runs after the selected profiles ran.
-// It retrieves the selected pod pair from the cycle state (set by the PD-SLO pair optimizer)
-// and constructs the scheduling result with the appropriate headers.
+// For SLO requests: retrieves the selected pod pair from cycle state (set by the PD-SLO pair optimizer)
+// For non-SLO requests: uses the pods selected by the profiles directly
 func (h *PdSLOProfileHandler) ProcessResults(
 	ctx context.Context,
 	cycleState *types.CycleState,
@@ -193,62 +239,87 @@ func (h *PdSLOProfileHandler) ProcessResults(
 		return nil, errors.New("failed to find available decode workers")
 	}
 
-	prefillRunResults := profileResults[h.prefillProfile]
-	if prefillRunResults == nil {
-		return nil, errors.New("failed to find available prefill workers")
-	}
+	updatedResults := map[string]*types.ProfileRunResult{}
 
-	// Get selected pod pair from cycle state (set by PD-SLO pair optimizer)
-	prefillPodName, decodePodName, err := h.getSelectedPairFromState(cycleState)
-	if err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Failed to get selected pair from cycle state")
-		// Fallback: use first pods from each profile
-		if len(prefillRunResults.TargetPods) > 0 && len(decodeRunResults.TargetPods) > 0 {
-			prefillPodName = prefillRunResults.TargetPods[0].GetPod().String()
-			decodePodName = decodeRunResults.TargetPods[0].GetPod().String()
-		} else {
-			return nil, errors.New("no pods available in profile results")
+	// Check if this is an SLO request
+	hasSLO := h.hasSLOHeaders(request)
+
+	if hasSLO {
+		// SLO path: Use pod pair selected by PD-SLO pair optimizer
+		prefillRunResults := profileResults[h.prefillProfile]
+		if prefillRunResults == nil {
+			return nil, errors.New("failed to find available prefill workers")
 		}
-	}
 
-	// Find the actual pod objects
-	var selectedPrefillPod, selectedDecodePod types.Pod
-	for _, pod := range prefillRunResults.TargetPods {
-		if pod.GetPod().String() == prefillPodName {
-			selectedPrefillPod = pod
-			break
+		// Get selected pod pair from cycle state (set by PD-SLO pair optimizer)
+		prefillPodName, decodePodName, err := h.getSelectedPairFromState(cycleState)
+		if err != nil {
+			logger.V(logutil.DEBUG).Error(err, "Failed to get selected pair from cycle state")
+			// Fallback: use first pods from each profile
+			if len(prefillRunResults.TargetPods) > 0 && len(decodeRunResults.TargetPods) > 0 {
+				prefillPodName = prefillRunResults.TargetPods[0].GetPod().String()
+				decodePodName = decodeRunResults.TargetPods[0].GetPod().String()
+			} else {
+				return nil, errors.New("no pods available in profile results")
+			}
 		}
-	}
 
-	for _, pod := range decodeRunResults.TargetPods {
-		if pod.GetPod().String() == decodePodName {
-			selectedDecodePod = pod
-			break
+		// Find the actual pod objects
+		var selectedPrefillPod, selectedDecodePod types.Pod
+		for _, pod := range prefillRunResults.TargetPods {
+			if pod.GetPod().String() == prefillPodName {
+				selectedPrefillPod = pod
+				break
+			}
 		}
-	}
 
-	if selectedPrefillPod == nil || selectedDecodePod == nil {
-		return nil, fmt.Errorf("failed to find selected pods: prefill=%s, decode=%s", prefillPodName, decodePodName)
-	}
+		for _, pod := range decodeRunResults.TargetPods {
+			if pod.GetPod().String() == decodePodName {
+				selectedDecodePod = pod
+				break
+			}
+		}
 
-	// Set prefiller header for the decode pod to use
-	prefillPodInfo := selectedPrefillPod.GetPod()
-	prefillAddr := net.JoinHostPort(prefillPodInfo.Address, prefillPodInfo.Port)
-	request.Headers[common.PrefillPodHeader] = prefillAddr
+		if selectedPrefillPod == nil || selectedDecodePod == nil {
+			return nil, fmt.Errorf("failed to find selected pods: prefill=%s, decode=%s", prefillPodName, decodePodName)
+		}
 
-	logger.Info("Set prefiller header for PD-SLO scheduling",
-		"prefillPod", prefillPodName,
-		"decodePod", decodePodName,
-		"prefillAddr", prefillAddr)
+		// Set prefiller header for the decode pod to use
+		prefillPodInfo := selectedPrefillPod.GetPod()
+		prefillAddr := net.JoinHostPort(prefillPodInfo.Address, prefillPodInfo.Port)
+		request.Headers[common.PrefillPodHeader] = prefillAddr
 
-	// Build scheduling result with both profiles
-	updatedResults := map[string]*types.ProfileRunResult{
-		h.decodeProfile: &types.ProfileRunResult{
+		logger.Info("Set prefiller header for PD-SLO scheduling",
+			"prefillPod", prefillPodName,
+			"decodePod", decodePodName,
+			"prefillAddr", prefillAddr)
+
+		// Build scheduling result with both profiles
+		updatedResults[h.decodeProfile] = &types.ProfileRunResult{
 			TargetPods: []types.Pod{selectedDecodePod},
-		},
-		h.prefillProfile: &types.ProfileRunResult{
+		}
+		updatedResults[h.prefillProfile] = &types.ProfileRunResult{
 			TargetPods: []types.Pod{selectedPrefillPod},
-		},
+		}
+	} else {
+		// Non-SLO path: Use threshold-based PD logic
+		updatedResults[h.decodeProfile] = decodeRunResults
+
+		// If both prefill and decode ran successfully (threshold decided to use PD)
+		if prefillRunResult, exists := profileResults[h.prefillProfile]; exists && prefillRunResult != nil {
+			// Set prefiller header for the decode pod to use
+			prefillPodInfo := prefillRunResult.TargetPods[0].GetPod()
+			prefillAddr := net.JoinHostPort(prefillPodInfo.Address, prefillPodInfo.Port)
+			request.Headers[common.PrefillPodHeader] = prefillAddr
+
+			logger.Info("Set prefiller header for threshold-based PD scheduling",
+				"prefillPod", prefillPodInfo.String(),
+				"decodePod", decodeRunResults.TargetPods[0].GetPod().String(),
+				"prefillAddr", prefillAddr)
+
+			// Add the prefill profile to the results
+			updatedResults[h.prefillProfile] = prefillRunResult
+		}
 	}
 
 	return &types.SchedulingResult{
@@ -287,4 +358,13 @@ func (h *PdSLOProfileHandler) getSelectedPairFromState(cycleState *types.CycleSt
 	}
 
 	return prefillPodName, decodePodName, nil
+}
+
+func getUserInputBytes(request *types.LLMRequest) ([]byte, error) {
+	if request.Body.Completions != nil { // assumed to be valid if not nil
+		return []byte(request.Body.Completions.Prompt), nil
+	}
+
+	// must be chat-completions request at this point, return bytes of entire messages
+	return json.Marshal(request.Body.ChatCompletions.Messages)
 }

@@ -2,13 +2,25 @@
 
 ## Overview
 
-This feature extends SLO-based routing to Prefill-Decode (PD) disaggregated workloads by implementing joint optimization of (prefill, decode) pod pairs based on TTFT (Time To First Token) and TPOT (Time Per Output Token) service level objectives.
+This feature provides a **unified profile handler** that supports both SLO-aware and threshold-based Prefill-Decode (PD) disaggregated scheduling.
 
-**Key Insight**: In PD disaggregation, TTFT depends on **both** prefill and decode pods:
-- **TTFT** = prefill_processing_time + decode_queue_wait + decode_startup + transfer_overhead
-- **TPOT** = decode_per_token_time (decode pod only)
+**Decision Flow**:
+1. **Threshold check** (applies to ALL requests):
+   - If non-cached suffix < `pdThreshold` → decode-only (skip prefill)
+   - Otherwise → proceed to PD disaggregation
 
-The scheduler selects optimal pod pairs using blended headroom scoring: `0.8 × TTFT_headroom + 0.2 × TPOT_headroom`
+2. **PD Optimization Strategy** (for requests needing PD):
+   - **With SLO headers** (`x-slo-ttft-ms`, `x-slo-tpot-ms`):
+     - Joint optimization of (prefill, decode) pod pairs
+     - **TTFT** = prefill_processing_time + decode_queue_wait + decode_startup + transfer_overhead
+     - **TPOT** = decode_per_token_time (decode pod only)
+     - Selects optimal pod pairs using blended headroom scoring: `0.8 × TTFT_headroom + 0.2 × TPOT_headroom`
+
+   - **Without SLO headers**:
+     - Uses pods selected by profiles directly
+     - Compatible with existing non-SLO workloads
+
+**Key Insight**: The threshold check ensures that short requests (where PD overhead exceeds benefit) always use decode-only, regardless of SLO headers.
 
 ## Architecture
 
@@ -192,9 +204,9 @@ DECODE_TPOT_PREDICTION_URL=http://decode-tpot-predictor-svc:8001
 
 ## Usage
 
-### Sending Requests with SLO Headers
+### Request Types
 
-Include SLO headers in your inference requests:
+**SLO-Aware Requests** (with SLO headers):
 
 ```bash
 curl -X POST http://gateway-endpoint/v1/completions \
@@ -208,9 +220,25 @@ curl -X POST http://gateway-endpoint/v1/completions \
   }'
 ```
 
+**Regular Requests** (without SLO headers):
+
+```bash
+curl -X POST http://gateway-endpoint/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama-3-8b",
+    "prompt": "Explain quantum computing",
+    "max_tokens": 100
+  }'
+```
+
 **SLO Headers**:
 - `x-slo-ttft-ms`: Target time-to-first-token in milliseconds
 - `x-slo-tpot-ms`: Target time-per-output-token in milliseconds
+
+**Behavior**:
+- **With SLO headers**: Joint pair optimization (PD-SLO path)
+- **Without SLO headers**: Threshold-based PD scheduling (fallback path)
 
 ### Example Scenarios
 

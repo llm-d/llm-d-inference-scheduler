@@ -6,11 +6,18 @@ This document provides a quick start guide for SLO-aware Prefill-Decode disaggre
 
 ## What is PD-SLO Scheduling?
 
-Joint optimization of (prefill, decode) pod pairs based on TTFT and TPOT SLOs.
+A unified profile handler that supports **both** SLO-aware and threshold-based PD scheduling:
 
-**Key Insight**: TTFT depends on BOTH pods:
+**With SLO headers** (`x-slo-ttft-ms`, `x-slo-tpot-ms`):
+- Joint optimization of (prefill, decode) pod pairs
 - TTFT = prefill_time + decode_queue_wait + transfer_overhead
 - TPOT = decode_per_token_time (decode only)
+- Selects optimal pair using blended headroom scoring
+
+**Without SLO headers**:
+- Falls back to threshold-based PD scheduling
+- Uses prefix cache hit percentage to decide decode-only vs PD
+- Compatible with existing non-SLO workloads
 
 ## Quick Start
 
@@ -57,16 +64,34 @@ curl http://epp-service:9090/metrics | grep pd_slo
 ## Architecture Summary
 
 ```
-Request → PD-SLO Profile Handler → PD-SLO Pair Optimizer
-                                         ↓
-                        Evaluate all (prefill, decode) pairs
-                                         ↓
-                        3 Predictors × N×M pairs
-                                         ↓
-                        Select optimal pair (weighted random)
-                                         ↓
-                        Set x-prefiller-host-port header
+Request → PD-SLO Profile Handler
+            ↓
+      Run decode profile
+            ↓
+      Threshold check (applies to ALL requests)
+      Non-cached suffix < pdThreshold?
+            ↓
+          YES → Decode-only (no prefill)
+            ↓
+           NO → PD disaggregation needed
+            ↓
+      Has SLO headers?
+            ↓                    ↓
+          YES                  NO
+            ↓                    ↓
+    PD-SLO Pair Optimizer    Use profile
+    Evaluate all pairs       results directly
+    3 Predictors × N×M
+    Blended headroom
+    Weighted random
+            ↓                    ↓
+    Set x-prefiller-host-port header
 ```
+
+**Key Behavior**:
+- **Threshold check applies to ALL requests** (both with and without SLO headers)
+- Short requests (non-cached suffix < `pdThreshold`) always use decode-only
+- Only requests needing PD disaggregation proceed to SLO-aware or regular optimization
 
 ## Components Created
 
@@ -92,8 +117,34 @@ llm_d_inference_scheduler_pd_slo_predictor_calls_total{predictor="prefill-ttft|d
 llm_d_inference_scheduler_pd_slo_pairs_evaluated_total
 ```
 
+## Behavior Examples
+
+**Example 1: Short request with SLO headers**
+- Request: 50 tokens, 80% prefix cache hit, SLO headers present
+- Non-cached suffix: 50 × (1 - 0.8) = 10 tokens
+- If `pdThreshold = 100`: **Decode-only** (threshold check fails)
+- SLO headers ignored because request too short for PD
+
+**Example 2: Long request with SLO headers**
+- Request: 500 tokens, 20% prefix cache hit, SLO headers present
+- Non-cached suffix: 500 × (1 - 0.2) = 400 tokens
+- If `pdThreshold = 100`: **PD-SLO optimization** (threshold passes → SLO path)
+- Evaluates all (prefill, decode) pairs, selects optimal
+
+**Example 3: Long request without SLO headers**
+- Request: 500 tokens, 20% prefix cache hit, no SLO headers
+- Non-cached suffix: 400 tokens
+- If `pdThreshold = 100`: **Regular PD scheduling** (threshold passes → non-SLO path)
+- Uses pods selected by profiles directly
+
+**Example 4: Always use PD (disable threshold)**
+- Set `pdThreshold = 0`
+- All requests needing prefill will use PD disaggregation
+- SLO headers determine optimization strategy (pair optimizer vs direct)
+
 ## Configuration Parameters
 
+**PD-SLO Pair Optimizer** (for SLO requests):
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `ttftWeight` | 0.8 | Weight for TTFT in blended score |
@@ -101,6 +152,13 @@ llm_d_inference_scheduler_pd_slo_pairs_evaluated_total
 | `transferOverheadMs` | 5.0 | KV transfer overhead (adjust for network) |
 | `sloBufferFactor` | 0.9 | Safety margin (0.9 = 10% buffer) |
 | `negativeHeadroomProb` | 0.01 | Exploration rate |
+
+**PD-SLO Profile Handler** (unified behavior):
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `pdThreshold` | 0 | **Applies to ALL requests**: Non-cached tokens threshold for decode-only vs PD (0 = always PD) |
+| `hashBlockSize` | 16 | Hash block size for prefix cache |
+| `transferOverheadMs` | 5.0 | KV transfer overhead |
 
 ## Troubleshooting
 

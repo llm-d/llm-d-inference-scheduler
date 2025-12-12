@@ -52,7 +52,9 @@ plugins:
 
 # Profile Handler Configuration
 # NEW: PD-SLO Profile Handler
-# Coordinates execution of both prefill and decode profiles for SLO-aware scheduling
+# Unified handler that supports both SLO-aware and threshold-based PD scheduling
+# - With SLO headers: Uses joint (prefill, decode) pair optimization
+# - Without SLO headers: Falls back to threshold-based PD scheduling
 profileHandler:
   type: pd-slo-profile-handler
   name: pd-slo-profile-handler
@@ -71,6 +73,15 @@ profileHandler:
 
     # KV transfer overhead in milliseconds (should match pair optimizer)
     transferOverheadMs: 5.0
+
+    # Threshold for PD disaggregation decision (default: 0)
+    # IMPORTANT: Applies to ALL requests (both with and without SLO headers)
+    # Uses prefix cache hit % to decide:
+    #   - If non-cached tokens < pdThreshold: decode-only (no prefill)
+    #   - Otherwise: PD disaggregation (run prefill + decode)
+    # Set to 0 to always use PD when configured (no decode-only fallback)
+    # Example: pdThreshold: 100 means requests with <100 uncached tokens use decode-only
+    pdThreshold: 0
 
 # Scheduling Profiles
 schedulingProfiles:
