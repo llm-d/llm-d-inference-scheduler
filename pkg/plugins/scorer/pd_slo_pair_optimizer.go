@@ -354,7 +354,7 @@ func (s *PdSLOPairOptimizer) buildPredictionRequest(
 	if decodeMetrics != nil {
 		kvCachePercentage = decodeMetrics.KVCacheUsagePercent
 		numRequestWaiting = decodeMetrics.WaitingQueueSize
-		numRequestRunning = decodeMetrics.RunningQueueSize
+		numRequestRunning = decodeMetrics.RunningRequestsSize
 	}
 
 	// Get input token length from request
@@ -415,7 +415,7 @@ func (s *PdSLOPairOptimizer) fallbackDecodeTPOT(decodePod schedulingtypes.Pod) f
 
 	metrics := decodePod.GetMetrics()
 	if metrics != nil {
-		congestion = float64(metrics.RunningQueueSize) * 5.0
+		congestion = float64(metrics.RunningRequestsSize) * 5.0
 		congestion += metrics.KVCacheUsagePercent * 10.0
 	}
 
