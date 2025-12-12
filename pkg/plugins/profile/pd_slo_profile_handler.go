@@ -32,6 +32,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
 const (
@@ -347,24 +348,15 @@ func (h *PdSLOProfileHandler) getSelectedPairFromState(cycleState *types.CycleSt
 		return "", "", fmt.Errorf("failed to read selected decode pod from cycle state: %w", err)
 	}
 
-	prefillPodName, ok := prefillData.(string)
+	prefillStringData, ok := prefillData.(*scorer.StringStateData)
 	if !ok {
-		return "", "", fmt.Errorf("selected prefill pod is not a string")
+		return "", "", fmt.Errorf("selected prefill pod is not StringStateData")
 	}
 
-	decodePodName, ok = decodeData.(string)
+	decodeStringData, ok := decodeData.(*scorer.StringStateData)
 	if !ok {
-		return "", "", fmt.Errorf("selected decode pod is not a string")
+		return "", "", fmt.Errorf("selected decode pod is not StringStateData")
 	}
 
-	return prefillPodName, decodePodName, nil
-}
-
-func getUserInputBytes(request *types.LLMRequest) ([]byte, error) {
-	if request.Body.Completions != nil { // assumed to be valid if not nil
-		return []byte(request.Body.Completions.Prompt), nil
-	}
-
-	// must be chat-completions request at this point, return bytes of entire messages
-	return json.Marshal(request.Body.ChatCompletions.Messages)
+	return prefillStringData.Value, decodeStringData.Value, nil
 }

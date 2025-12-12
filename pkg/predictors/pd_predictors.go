@@ -32,9 +32,9 @@ import (
 // - DecodeTTFTPredictor: Predicts decode queue wait + startup overhead
 // - DecodeTPOTPredictor: Predicts per-token latency during decode
 type PDPredictorSet struct {
-	PrefillTTFTPredictor latencypredictor.PredictorInterface
-	DecodeTTFTPredictor  latencypredictor.PredictorInterface
-	DecodeTPOTPredictor  latencypredictor.PredictorInterface
+	PrefillTTFTPredictor *latencypredictor.Predictor
+	DecodeTTFTPredictor  *latencypredictor.Predictor
+	DecodeTPOTPredictor  *latencypredictor.Predictor
 	logger               logr.Logger
 }
 

@@ -351,22 +351,10 @@ func (s *PdSLOPairOptimizer) buildPredictionRequest(
 	numRequestWaiting := 0
 	numRequestRunning := 0
 
-	if decodeMetrics != nil && decodeMetrics.Metrics != nil {
-		if val, ok := decodeMetrics.Metrics["kv_cache_usage_perc"]; ok {
-			if kvVal, ok := val.(float64); ok {
-				kvCachePercentage = kvVal
-			}
-		}
-		if val, ok := decodeMetrics.Metrics["num_requests_waiting"]; ok {
-			if waitVal, ok := val.(int); ok {
-				numRequestWaiting = waitVal
-			}
-		}
-		if val, ok := decodeMetrics.Metrics["num_requests_running"]; ok {
-			if runVal, ok := val.(int); ok {
-				numRequestRunning = runVal
-			}
-		}
+	if decodeMetrics != nil {
+		kvCachePercentage = decodeMetrics.KVCacheUsagePercent
+		numRequestWaiting = decodeMetrics.WaitingQueueSize
+		numRequestRunning = decodeMetrics.RunningQueueSize
 	}
 
 	// Get input token length from request
@@ -414,12 +402,8 @@ func (s *PdSLOPairOptimizer) fallbackPrefillTTFT(request *schedulingtypes.LLMReq
 func (s *PdSLOPairOptimizer) fallbackDecodeTTFT(decodePod schedulingtypes.Pod) float64 {
 	// Simple heuristic: ~10ms per queued request
 	metrics := decodePod.GetMetrics()
-	if metrics != nil && metrics.Metrics != nil {
-		if val, ok := metrics.Metrics["num_requests_waiting"]; ok {
-			if waitingCount, ok := val.(int); ok {
-				return float64(waitingCount) * 10.0
-			}
-		}
+	if metrics != nil {
+		return float64(metrics.WaitingQueueSize) * 10.0
 	}
 	return 10.0 // Default minimal wait
 }
@@ -430,17 +414,9 @@ func (s *PdSLOPairOptimizer) fallbackDecodeTPOT(decodePod schedulingtypes.Pod) f
 	congestion := 0.0
 
 	metrics := decodePod.GetMetrics()
-	if metrics != nil && metrics.Metrics != nil {
-		if val, ok := metrics.Metrics["num_requests_running"]; ok {
-			if runningCount, ok := val.(int); ok {
-				congestion = float64(runningCount) * 5.0
-			}
-		}
-		if val, ok := metrics.Metrics["kv_cache_usage_perc"]; ok {
-			if kvVal, ok := val.(float64); ok {
-				congestion += kvVal * 10.0
-			}
-		}
+	if metrics != nil {
+		congestion = float64(metrics.RunningQueueSize) * 5.0
+		congestion += metrics.KVCacheUsagePercent * 10.0
 	}
 
 	return baseTpot + congestion
@@ -483,7 +459,7 @@ func getInputTokenLength(request *schedulingtypes.LLMRequest) int {
 	if request.Body.ChatCompletions != nil && len(request.Body.ChatCompletions.Messages) > 0 {
 		totalChars := 0
 		for _, msg := range request.Body.ChatCompletions.Messages {
-			totalChars += len(msg.Content)
+			totalChars += len(msg.Content.Raw)
 		}
 		return totalChars / 4
 	}

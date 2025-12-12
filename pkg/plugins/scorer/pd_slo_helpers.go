@@ -37,6 +37,16 @@ const (
 	selectedDecodePodKey  = "pd-slo-selected-decode-pod"
 )
 
+// StringStateData is a StateData wrapper for string values
+type StringStateData struct {
+	Value string
+}
+
+// Clone implements plugins.StateData
+func (s *StringStateData) Clone() plugins.StateData {
+	return &StringStateData{Value: s.Value}
+}
+
 // pairResult holds the evaluation result for a (prefill, decode) pod pair
 type pairResult struct {
 	prefillPod       schedulingtypes.Pod
@@ -194,8 +204,8 @@ func storeSelectedPairInState(cycleState *schedulingtypes.CycleState, pair *pair
 	}
 
 	// Store pod names
-	cycleState.Write(plugins.StateKey(selectedPrefillPodKey), pair.prefillPod.GetPod().String())
-	cycleState.Write(plugins.StateKey(selectedDecodePodKey), pair.decodePod.GetPod().String())
+	cycleState.Write(plugins.StateKey(selectedPrefillPodKey), &StringStateData{Value: pair.prefillPod.GetPod().String()})
+	cycleState.Write(plugins.StateKey(selectedDecodePodKey), &StringStateData{Value: pair.decodePod.GetPod().String()})
 }
 
 // getSelectedPairFromState retrieves the selected pod pair from cycle state
@@ -210,17 +220,17 @@ func getSelectedPairFromState(cycleState *schedulingtypes.CycleState) (prefillPo
 		return "", "", fmt.Errorf("failed to read selected decode pod from cycle state: %w", err)
 	}
 
-	prefillPodName, ok := prefillData.(string)
+	prefillStringData, ok := prefillData.(*StringStateData)
 	if !ok {
-		return "", "", fmt.Errorf("selected prefill pod is not a string")
+		return "", "", fmt.Errorf("selected prefill pod is not StringStateData")
 	}
 
-	decodePodName, ok = decodeData.(string)
+	decodeStringData, ok := decodeData.(*StringStateData)
 	if !ok {
-		return "", "", fmt.Errorf("selected decode pod is not a string")
+		return "", "", fmt.Errorf("selected decode pod is not StringStateData")
 	}
 
-	return prefillPodName, decodePodName, nil
+	return prefillStringData.Value, decodeStringData.Value, nil
 }
 
 // findPodByName finds a pod in the list by its string representation
