@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"strconv"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -599,7 +600,7 @@ func (s *PdSLOPairOptimizer) ResponseReceived(
 		telCtx.decodeStart = time.Now()
 
 		// Check if decode response includes prefill timing from sidecar
-		if prefillTTFTHeader := response.Headers.Get("x-prefill-ttft-ms"); prefillTTFTHeader != "" {
+		if prefillTTFTHeader, ok := response.Headers["x-prefill-ttft-ms"]; ok && prefillTTFTHeader != "" {
 			if prefillTTFT, err := strconv.ParseFloat(prefillTTFTHeader, 64); err == nil {
 				// Send prefill telemetry to training server
 				s.recordPrefillTTFT(ctx, request, telCtx, prefillTTFT)
