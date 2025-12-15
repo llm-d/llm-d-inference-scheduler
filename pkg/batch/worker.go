@@ -29,6 +29,7 @@ func Worker(ctx context.Context, endpoint string, httpClient *http.Client, reque
 			logger.V(logutil.DEFAULT).Info("Worker finishing.")
 			return
 		case msg := <-requestChannel:
+			metrics.BatchReqs.Inc() // Increment batch request counter TODO: here? this includes retries
 			payloadBytes := parseAndValidateRequest(resultChannel, msg)
 			if payloadBytes == nil {
 				continue
@@ -36,14 +37,27 @@ func Worker(ctx context.Context, endpoint string, httpClient *http.Client, reque
 
 			sendInferenceRequest := func() {
 				logger.V(logutil.DEBUG).Info("Sending inference request.")
-				result, err := httpClient.Post(endpoint, "application/json", bytes.NewBuffer(payloadBytes))
+				request, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(payloadBytes))
 				if err != nil {
+					metrics.FailedReqs.Inc()
+					resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to create request to inference: %s", err.Error()))
+					return
+				}
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("x-gateway-inference-objective", "food-review-2")
+
+				result, err := httpClient.Do(request)
+				if err != nil {
+					metrics.FailedReqs.Inc()
 					resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to send request to inference: %s", err.Error()))
 					return
 				}
 				defer result.Body.Close()
-				// Retrying on any server-side error. Assuming shedding is included here.
-				if result.StatusCode >= 500 && result.StatusCode < 600 {
+				// Retrying on too many requests or any server-side error.
+				if result.StatusCode == 429 || result.StatusCode >= 500 && result.StatusCode < 600 {
+					if result.StatusCode == 429 {
+						metrics.SheddedRequests.Inc()
+					}
 					retryMessage(msg, retryChannel, resultChannel)
 				} else {
 					payloadBytes, err := io.ReadAll(result.Body)
@@ -55,9 +69,11 @@ func Worker(ctx context.Context, endpoint string, httpClient *http.Client, reque
 						err := json.Unmarshal(payloadBytes, &resultPayload)
 						if err != nil {
 							// Not retrying on unmarshalling error.
+							metrics.FailedReqs.Inc()
 							resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to unmarshal inference result payload: %v", err))
 							return
 						}
+						metrics.SuccessfulReqs.Inc()
 						resultChannel <- ResultMessage{
 							Id:      msg.Id,
 							Payload: resultPayload,
@@ -72,17 +88,20 @@ func Worker(ctx context.Context, endpoint string, httpClient *http.Client, reque
 func parseAndValidateRequest(resultChannel chan ResultMessage, msg RequestMessage) []byte {
 	deadline, err := strconv.ParseInt(msg.DeadlineUnixSec, 10, 64)
 	if err != nil {
+		metrics.FailedReqs.Inc()
 		resultChannel <- CreateErrorResultMessage(msg.Id, "Failed to parse deadline, should be in Unix seconds.")
 		return nil
 	}
 
 	if deadline < time.Now().Unix() {
+		metrics.ExceededDeadlineReqs.Inc()
 		resultChannel <- CreateDeadlineExceededResultMessage(msg.Id)
 		return nil
 	}
 
 	payloadBytes, err := json.Marshal(msg.Payload)
 	if err != nil {
+		metrics.FailedReqs.Inc()
 		resultChannel <- CreateErrorResultMessage(msg.Id, fmt.Sprintf("Failed to marshal message's payload: %s", err.Error()))
 		return nil
 	}
@@ -98,6 +117,7 @@ func retryMessage(msg RequestMessage, retryChannel chan RetryMessage, resultChan
 	}
 	secondsToDeadline := deadline - time.Now().Unix()
 	if secondsToDeadline < 0 {
+		metrics.ExceededDeadlineReqs.Inc()
 		resultChannel <- CreateDeadlineExceededResultMessage(msg.Id)
 	} else {
 		msg.RetryCount++

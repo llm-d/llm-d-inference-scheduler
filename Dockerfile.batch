@@ -18,6 +18,7 @@ COPY cmd/batch/ cmd/batch/
 COPY pkg/batch/ pkg/batch/
 COPY pkg/metrics/ pkg/metrics/
 COPY pkg/common pkg/common
+COPY pkg/sidecar/version pkg/sidecar/version
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -35,5 +36,11 @@ FROM registry.access.redhat.com/ubi9/ubi-micro:latest
 WORKDIR /
 COPY --from=builder /workspace/bin/batch /app/batch
 USER 65532:65532
+
+# expose gRPC, health and metrics ports
+EXPOSE 9002
+EXPOSE 9003
+EXPOSE 9090
+
 
 ENTRYPOINT ["/app/batch"]

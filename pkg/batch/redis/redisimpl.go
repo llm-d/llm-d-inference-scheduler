@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 
 	"strconv"
@@ -16,6 +17,8 @@ import (
 )
 
 var (
+	redisAddr = flag.String("redis-addr", "localhost:16379", "address of the Redis server")
+
 	// TODO: externalize
 	requestQueueName = "batch-queue"
 	retryQueueName   = "batch-sortedset-retry"
@@ -30,9 +33,9 @@ type RedisMQFlow struct {
 	resultChannel  chan batch.ResultMessage
 }
 
-func NewRedisMQFlow(addr string) *RedisMQFlow {
+func NewRedisMQFlow() *RedisMQFlow {
 	rdb := redis.NewClient(&redis.Options{
-		Addr: addr,
+		Addr: *redisAddr,
 
 		// TODO: check specific version of go-redis. might require higher version.
 		// Explicitly disable maintenance notifications

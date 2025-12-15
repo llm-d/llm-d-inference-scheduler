@@ -14,6 +14,7 @@ type Flow interface {
 	ResultChannel() chan ResultMessage
 }
 
+// TODO: how to handle retries here?
 type RequestPolicy interface {
 	MergeRequestChannels(channels []RequestChannel) RequestChannel
 }

@@ -54,3 +54,4 @@ func TestRedisImpl(t *testing.T) {
 	}
 
 }
+	

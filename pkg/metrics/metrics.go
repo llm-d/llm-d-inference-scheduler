@@ -31,12 +31,40 @@ var (
 		Subsystem: SchedulerSubsystem, Name: "batch_request_retries_total",
 		Help: "Total number of batch request retries.",
 	})
+
+	BatchReqs = prometheus.NewCounter(prometheus.CounterOpts{
+		Subsystem: SchedulerSubsystem, Name: "batch_request_total",
+		Help: "Total number of batch requests.",
+	})
+	ExceededDeadlineReqs = prometheus.NewCounter(prometheus.CounterOpts{
+		Subsystem: SchedulerSubsystem, Name: "batch_ßexceeded_deadline_requests_total",
+		Help: "Total number of batch requests that exceeded their deadline.",
+	})
+	FailedReqs = prometheus.NewCounter(prometheus.CounterOpts{
+		Subsystem: SchedulerSubsystem, Name: "batch_failed_requests_total",
+		Help: "Total number of batch requests that failed.",
+	})
+	SuccessfulReqs = prometheus.NewCounter(prometheus.CounterOpts{
+		Subsystem: SchedulerSubsystem, Name: "batch_successful_requests_total",
+		Help: "Total number of batch requests that succeeded.",
+	})
+	SheddedRequests = prometheus.NewCounter(prometheus.CounterOpts{
+		Subsystem: SchedulerSubsystem, Name: "batch_shedded_requests_total",
+		Help: "Total number of batch requests that were shedded.",
+	})
 )
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
-func GetCollectors() []prometheus.Collector {
+func GetEPPCollectors() []prometheus.Collector {
 	return []prometheus.Collector{
-		SchedulerPDDecisionCount, Retries,
+		SchedulerPDDecisionCount,
+	}
+}
+
+// GetCollectors returns all custom collectors for the batch processor.
+func GetBatchCollectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		Retries, BatchReqs, ExceededDeadlineReqs, FailedReqs, SuccessfulReqs, SheddedRequests,
 	}
 }
 

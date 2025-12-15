@@ -3,26 +3,36 @@ package batchrunner
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/batch"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/batch/redis"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
+	"github.com/prometheus/client_golang/prometheus"
 	uberzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
+	runserver "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/server"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 type BatchRunner struct {
+	customCollectors []prometheus.Collector
 }
 
 var (
-	setupLog     = ctrl.Log.WithName("setup")
-	logVerbosity = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
-	concurrency  = flag.Int("concurrency", 8, "number of concurrent workers")
-	endpoint     = flag.String("endpoint", "http://localhost:30080/v1/completions", "inference endpoint")
-	redisAddr    = flag.String("redis-addr", "localhost:16379", "address of the Redis server")
+	setupLog            = ctrl.Log.WithName("setup")
+	logVerbosity        = flag.Int("v", logging.DEFAULT, "number for the log level verbosity")
+	concurrency         = flag.Int("concurrency", 8, "number of concurrent workers")
+	endpoint            = flag.String("endpoint", "http://localhost:30080/v1/completions", "inference endpoint")
+	metricsPort         = flag.Int("metrics-port", runserver.DefaultMetricsPort, "The metrics port")
+	metricsEndpointAuth = flag.Bool("metrics-endpoint-auth", true, "Enables authentication and authorization of the metrics endpoint")
 )
 
 func NewBatchRunner() *BatchRunner {
@@ -59,9 +69,38 @@ func (r *BatchRunner) Run(ctx context.Context) error {
 	})
 	setupLog.Info("Flags processed", "flags", flags)
 
+	// --- Get Kubernetes Config ---
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		setupLog.Error(err, "Failed to get Kubernetes rest config")
+		return err
+	}
+
+	metrics.Register(r.customCollectors...)
+	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
+	// Register metrics handler.
+	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
+	// More info:
+	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/metrics/server
+	// - https://book.kubebuilder.io/reference/metrics.html
+	metricsServerOptions := metricsserver.Options{
+		BindAddress: fmt.Sprintf(":%d", *metricsPort),
+		FilterProvider: func() func(c *rest.Config, httpClient *http.Client) (metricsserver.Filter, error) {
+			if *metricsEndpointAuth {
+				return filters.WithAuthenticationAndAuthorization
+			}
+
+			return nil
+		}(),
+	}
+
 	httpClient := &http.Client{
 		// TODO: configure
 	}
+
+	msrv, _ := metricsserver.NewServer(metricsServerOptions, cfg, httpClient /* TODO: not sure about using the same one*/)
+	go msrv.Start(ctx)
+
 	var policy batch.RequestPolicy = batch.NewRandomRobinPolicy()
 
 	var impl batch.Flow = redis.NewRedisMQFlow(*redisAddr)
@@ -93,7 +132,10 @@ func initLogging(opts *zap.Options) {
 	logger := zap.New(zap.UseFlagOptions(opts), zap.RawZapOpts(uberzap.AddCaller()))
 	ctrl.SetLogger(logger)
 }
-
+func (r *BatchRunner) WithCustomCollectors(collectors ...prometheus.Collector) *BatchRunner {
+	r.customCollectors = collectors
+	return r
+}
 func validateFlags() error {
 
 	return nil
