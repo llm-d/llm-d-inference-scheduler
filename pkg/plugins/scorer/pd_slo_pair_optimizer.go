@@ -26,12 +26,16 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/predictors"
 )
 
@@ -492,4 +496,301 @@ func getInputTokenLength(request *schedulingtypes.LLMRequest) int {
 	}
 
 	return 100 // Default fallback
+}
+
+// ============================================================================
+// RequestControl Hook Implementations for Telemetry Collection
+// ============================================================================
+
+// Compile-time assertions for requestcontrol interfaces
+var _ requestcontrol.PreRequest = &PdSLOPairOptimizer{}
+var _ requestcontrol.ResponseReceived = &PdSLOPairOptimizer{}
+var _ requestcontrol.ResponseStreaming = &PdSLOPairOptimizer{}
+var _ requestcontrol.ResponseComplete = &PdSLOPairOptimizer{}
+
+// PreRequest is called after scheduling, before sending request to pod
+func (s *PdSLOPairOptimizer) PreRequest(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	schedulingResult *schedulingtypes.SchedulingResult,
+) {
+	logger := log.FromContext(ctx)
+
+	// Only track if we have both prefill and decode pods (PD mode active)
+	prefillAddr := request.Headers[common.PrefillPodHeader]
+	if prefillAddr == "" {
+		logger.V(logutil.DEBUG).Info("No prefill header, skipping PD telemetry")
+		return
+	}
+
+	requestID := request.Headers[requtil.RequestIdHeaderKey]
+	if requestID == "" {
+		logger.V(logutil.DEBUG).Info("No request ID, skipping PD telemetry")
+		return
+	}
+
+	telCtx := getTelemetryContext(requestID)
+	telCtx.prefillPod = prefillAddr
+
+	// Extract decode pod and metrics from scheduling result
+	if schedulingResult != nil && len(schedulingResult.ProfileResults) > 0 {
+		// Get decode pod from primary profile (should be "decode" profile)
+		primaryProfile := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
+		if primaryProfile != nil && len(primaryProfile.TargetPods) > 0 {
+			decodePodInfo := primaryProfile.TargetPods[0].GetPod()
+			telCtx.decodePod = decodePodInfo.NamespacedName.String()
+			// Store decode metrics
+			if metrics := primaryProfile.TargetPods[0].GetMetrics(); metrics != nil {
+				telCtx.decodeMetrics = metrics.Clone()
+			}
+		}
+
+		// Get prefill metrics from prefill profile
+		for profileName, profileResult := range schedulingResult.ProfileResults {
+			if profileResult != nil && len(profileResult.TargetPods) > 0 {
+				// Check if this is the prefill profile (not the primary/decode profile)
+				if profileName != schedulingResult.PrimaryProfileName {
+					if metrics := profileResult.TargetPods[0].GetMetrics(); metrics != nil {
+						telCtx.prefillMetrics = metrics.Clone()
+					}
+					break
+				}
+			}
+		}
+	}
+
+	logger.V(logutil.DEBUG).Info("PD telemetry initialized",
+		"requestID", requestID,
+		"prefillPod", telCtx.prefillPod,
+		"decodePod", telCtx.decodePod,
+		"hasPrefillMetrics", telCtx.prefillMetrics != nil,
+		"hasDecodeMetrics", telCtx.decodeMetrics != nil)
+}
+
+// ResponseReceived is called when response headers are received
+func (s *PdSLOPairOptimizer) ResponseReceived(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	response *requestcontrol.Response,
+	targetPod *backend.Pod,
+) {
+	logger := log.FromContext(ctx)
+	requestID := request.Headers[requtil.RequestIdHeaderKey]
+	if requestID == "" {
+		return
+	}
+
+	telCtx := getTelemetryContext(requestID)
+
+	// Track which phase this response is from
+	if isPrefillPod(targetPod, telCtx.prefillPod) {
+		telCtx.prefillStart = time.Now()
+		logger.V(logutil.DEBUG).Info("Prefill response received", "requestID", requestID, "pod", targetPod.NamespacedName.String())
+	} else {
+		telCtx.decodeStart = time.Now()
+		logger.V(logutil.DEBUG).Info("Decode response received", "requestID", requestID, "pod", targetPod.NamespacedName.String())
+	}
+}
+
+// ResponseStreaming is called for each token in the streaming response
+func (s *PdSLOPairOptimizer) ResponseStreaming(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	response *requestcontrol.Response,
+	targetPod *backend.Pod,
+) {
+	logger := log.FromContext(ctx)
+	requestID := request.Headers[requtil.RequestIdHeaderKey]
+	if requestID == "" || response.EndOfStream {
+		return
+	}
+
+	telCtx := getTelemetryContext(requestID)
+	now := time.Now()
+
+	// Only track tokens from decode pod (final output)
+	if isPrefillPod(targetPod, telCtx.prefillPod) {
+		// Prefill doesn't generate output tokens, only processes input
+		return
+	}
+
+	// First token from decode
+	if telCtx.firstToken.IsZero() {
+		telCtx.firstToken = now
+		telCtx.tokenCount = 1
+
+		// Calculate and record TTFT for decode pod
+		decodeTTFT := now.Sub(telCtx.decodeStart).Milliseconds()
+
+		// Send telemetry to decode training server
+		s.recordDecodeTTFT(ctx, request, telCtx, float64(decodeTTFT))
+
+		logger.V(logutil.DEBUG).Info("First token from decode",
+			"requestID", requestID,
+			"decodeTTFT_ms", decodeTTFT)
+	} else {
+		// Subsequent tokens - track for TPOT
+		telCtx.tokenCount++
+		interTokenLatency := now.Sub(telCtx.lastToken).Milliseconds()
+
+		// Send TPOT telemetry to decode training server
+		s.recordDecodeTPOT(ctx, request, telCtx, float64(interTokenLatency), telCtx.tokenCount)
+
+		logger.V(logutil.TRACE).Info("Token from decode",
+			"requestID", requestID,
+			"tokenCount", telCtx.tokenCount,
+			"interTokenLatency_ms", interTokenLatency)
+	}
+
+	telCtx.lastToken = now
+}
+
+// ResponseComplete is called when the response is fully sent
+func (s *PdSLOPairOptimizer) ResponseComplete(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	response *requestcontrol.Response,
+	targetPod *backend.Pod,
+) {
+	logger := log.FromContext(ctx)
+	requestID := request.Headers[requtil.RequestIdHeaderKey]
+	if requestID == "" {
+		return
+	}
+
+	telCtx := getTelemetryContext(requestID)
+
+	// If this is prefill completion, record prefill TTFT
+	if isPrefillPod(targetPod, telCtx.prefillPod) {
+		if !telCtx.prefillStart.IsZero() {
+			prefillTTFT := time.Since(telCtx.prefillStart).Milliseconds()
+			s.recordPrefillTTFT(ctx, request, telCtx, float64(prefillTTFT))
+
+			logger.V(logutil.DEBUG).Info("Prefill complete",
+				"requestID", requestID,
+				"prefillTTFT_ms", prefillTTFT)
+		}
+	} else {
+		// Decode completion - cleanup
+		logger.V(logutil.DEBUG).Info("Decode complete",
+			"requestID", requestID,
+			"totalTokens", telCtx.tokenCount)
+		deleteTelemetryContext(requestID)
+	}
+}
+
+// recordPrefillTTFT sends prefill TTFT telemetry to prefill training server
+func (s *PdSLOPairOptimizer) recordPrefillTTFT(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	telCtx *pdTelemetryContext,
+	ttftMs float64,
+) {
+	logger := log.FromContext(ctx)
+
+	// Get predictors
+	if s.predictors == nil || s.predictors.PrefillPredictor == nil {
+		logger.V(logutil.DEBUG).Info("No prefill predictor available for telemetry")
+		return
+	}
+
+	// Build training entry using cached metrics
+	metrics := telCtx.prefillMetrics
+	if metrics == nil {
+		logger.V(logutil.DEBUG).Info("No metrics available for prefill telemetry")
+		return
+	}
+
+	entry := latencypredictor.TrainingEntry{
+		KVCachePercentage:  metrics.KVCacheUsagePercent,
+		InputTokenLength:   getInputTokenLength(request),
+		ActualTTFT:         ttftMs,
+		ActualTPOT:         0, // Prefill doesn't produce output tokens
+		Timestamp:          time.Now(),
+		NumRequestWaiting:  metrics.WaitingQueueSize,
+		NumRequestRunning:  metrics.RunningRequestsSize,
+		NumTokensGenerated: 0,
+		PrefixCacheScore:   0, // TODO: Get from cycle state if available
+	}
+
+	if err := s.predictors.PrefillPredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+		logger.V(logutil.DEBUG).Error(err, "Failed to send prefill TTFT telemetry")
+	} else {
+		logger.V(logutil.DEBUG).Info("Sent prefill TTFT telemetry", "ttft_ms", ttftMs)
+	}
+}
+
+// recordDecodeTTFT sends decode TTFT telemetry to decode training server
+func (s *PdSLOPairOptimizer) recordDecodeTTFT(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	telCtx *pdTelemetryContext,
+	ttftMs float64,
+) {
+	logger := log.FromContext(ctx)
+
+	if s.predictors == nil || s.predictors.DecodePredictor == nil {
+		logger.V(logutil.DEBUG).Info("No decode predictor available for telemetry")
+		return
+	}
+
+	metrics := telCtx.decodeMetrics
+	if metrics == nil {
+		logger.V(logutil.DEBUG).Info("No metrics available for decode TTFT telemetry")
+		return
+	}
+
+	entry := latencypredictor.TrainingEntry{
+		KVCachePercentage:  metrics.KVCacheUsagePercent,
+		InputTokenLength:   getInputTokenLength(request),
+		ActualTTFT:         ttftMs,
+		ActualTPOT:         0,
+		Timestamp:          time.Now(),
+		NumRequestWaiting:  metrics.WaitingQueueSize,
+		NumRequestRunning:  metrics.RunningRequestsSize,
+		NumTokensGenerated: 0,
+		PrefixCacheScore:   0,
+	}
+
+	if err := s.predictors.DecodePredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+		logger.V(logutil.DEBUG).Error(err, "Failed to send decode TTFT telemetry")
+	} else {
+		logger.V(logutil.DEBUG).Info("Sent decode TTFT telemetry", "ttft_ms", ttftMs)
+	}
+}
+
+// recordDecodeTPOT sends decode TPOT telemetry to decode training server
+func (s *PdSLOPairOptimizer) recordDecodeTPOT(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	telCtx *pdTelemetryContext,
+	tpotMs float64,
+	tokenCount int,
+) {
+	logger := log.FromContext(ctx)
+
+	if s.predictors == nil || s.predictors.DecodePredictor == nil {
+		return
+	}
+
+	metrics := telCtx.decodeMetrics
+	if metrics == nil {
+		return
+	}
+
+	entry := latencypredictor.TrainingEntry{
+		KVCachePercentage:  metrics.KVCacheUsagePercent,
+		InputTokenLength:   getInputTokenLength(request),
+		ActualTTFT:         0,
+		ActualTPOT:         tpotMs,
+		Timestamp:          time.Now(),
+		NumRequestWaiting:  metrics.WaitingQueueSize,
+		NumRequestRunning:  metrics.RunningRequestsSize,
+		NumTokensGenerated: tokenCount - 1, // Previous token count
+		PrefixCacheScore:   0,
+	}
+
+	if err := s.predictors.DecodePredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+		logger.V(logutil.TRACE).Error(err, "Failed to send decode TPOT telemetry")
+	}
 }

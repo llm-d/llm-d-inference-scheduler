@@ -34,7 +34,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/predictors"
 )
 
 const (
@@ -90,38 +89,14 @@ func PdSLOProfileHandlerFactory(name string, rawParameters json.RawMessage, hand
 		return nil, fmt.Errorf("invalid pdThreshold: must be >= 0, got %d", parameters.PdThreshold)
 	}
 
-	// Initialize predictor set for telemetry collection
-	predictorSet, err := predictors.NewPDPredictorSet(ctrl.Log.WithName("pd-predictors"))
-	if err != nil {
-		// Log but don't fail - telemetry is optional
-		ctrl.Log.WithName(PdSLOProfileHandlerType).Error(err, "Failed to initialize PD predictor set, telemetry will be disabled")
-		predictorSet = nil
-	} else {
-		// Start predictors
-		if err := predictorSet.Start(handle.Context()); err != nil {
-			ctrl.Log.WithName(PdSLOProfileHandlerType).Error(err, "Failed to start PD predictor set, telemetry will be disabled")
-			predictorSet = nil
-		} else {
-			// Stop predictors on context cancellation
-			go func() {
-				<-handle.Context().Done()
-				predictorSet.Stop()
-			}()
-		}
-	}
-
-	handler := NewPdSLOProfileHandler(
+	return NewPdSLOProfileHandler(
 		parameters.PrefillProfile,
 		parameters.DecodeProfile,
 		parameters.PrefixPluginName,
 		parameters.HashBlockSize,
 		parameters.TransferOverheadMs,
 		parameters.PdThreshold,
-	).WithName(name)
-
-	handler.predictorSet = predictorSet
-
-	return handler, nil
+	).WithName(name), nil
 }
 
 // NewPdSLOProfileHandler initializes a new PdSLOProfileHandler and returns its pointer.
@@ -156,7 +131,6 @@ type PdSLOProfileHandler struct {
 	hashBlockSize         int
 	transferOverheadMs    float64
 	pdThreshold           int
-	predictorSet          *predictors.PDPredictorSet // For telemetry collection
 }
 
 // TypedName returns the typed name of the plugin.

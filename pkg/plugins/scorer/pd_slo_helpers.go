@@ -20,9 +20,13 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"strconv"
+	"sync"
 	"time"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 )
@@ -262,4 +266,55 @@ func findMinMaxHeadroom(pairs []pairResult) (min, max float64) {
 	}
 
 	return min, max
+}
+
+// ============================================================================
+// Telemetry Context for PD Request Tracking
+// ============================================================================
+
+// pdTelemetryContext tracks request lifecycle for telemetry collection in PD mode
+type pdTelemetryContext struct {
+	prefillPod      string
+	decodePod       string
+	requestReceived time.Time
+	prefillStart    time.Time
+	decodeStart     time.Time
+	firstToken      time.Time
+	lastToken       time.Time
+	tokenCount      int
+	prefillMetrics  *backendmetrics.MetricsState
+	decodeMetrics   *backendmetrics.MetricsState
+}
+
+// Store telemetry contexts per request ID
+var (
+	telemetryContexts sync.Map // map[requestID]*pdTelemetryContext
+)
+
+// getTelemetryContext retrieves or creates telemetry context for a request
+func getTelemetryContext(requestID string) *pdTelemetryContext {
+	if ctx, exists := telemetryContexts.Load(requestID); exists {
+		return ctx.(*pdTelemetryContext)
+	}
+	ctx := &pdTelemetryContext{
+		requestReceived: time.Now(),
+	}
+	telemetryContexts.Store(requestID, ctx)
+	return ctx
+}
+
+// deleteTelemetryContext removes telemetry context after request completes
+func deleteTelemetryContext(requestID string) {
+	telemetryContexts.Delete(requestID)
+}
+
+// isPrefillPod checks if the given pod is the prefill pod for this request
+// prefillAddr is in format "host:port" from x-prefiller-host-port header
+func isPrefillPod(pod *backend.Pod, prefillAddr string) bool {
+	if prefillAddr == "" {
+		return false
+	}
+	// Construct pod address from pod info
+	podAddress := net.JoinHostPort(pod.Address, pod.Port)
+	return podAddress == prefillAddr
 }
