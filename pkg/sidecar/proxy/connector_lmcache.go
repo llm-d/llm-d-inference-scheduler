@@ -28,6 +28,7 @@ import (
 func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.Info("running LMCache protocol")
 
+	// Read and parse request body
 	defer r.Body.Close() //nolint:all
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -36,6 +37,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		return
 	}
 
+	// Parse completion request
 	var completionRequest map[string]any
 	if err := json.Unmarshal(original, &completionRequest); err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
