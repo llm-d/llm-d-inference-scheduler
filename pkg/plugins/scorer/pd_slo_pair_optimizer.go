@@ -515,6 +515,7 @@ func (s *PdSLOPairOptimizer) PreRequest(
 	schedulingResult *schedulingtypes.SchedulingResult,
 ) {
 	logger := log.FromContext(ctx)
+	logger.Info("PdSLOPairOptimizer.PreRequest called")
 
 	// Only track if we have both prefill and decode pods (PD mode active)
 	prefillAddr := request.Headers[common.PrefillPodHeader]
