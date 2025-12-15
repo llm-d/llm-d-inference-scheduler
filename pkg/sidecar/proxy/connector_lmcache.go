@@ -93,8 +93,11 @@ func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (bool, error)
 	// Parse response to check finish_reason
 	var response map[string]any
 	if err := json.Unmarshal([]byte(dw.buffer.String()), &response); err != nil {
-		w.WriteHeader(dw.statusCode)
-		w.Write([]byte(dw.buffer.String())) //nolint:all
+		s.logger.Error(err, "failed to unmarshal decode response", "response", dw.buffer.String())
+
+		if err := errorInternalServerError(err, w); err != nil {
+			s.logger.Error(err, "failed to send error response to client")
+		}
 		return false, err
 	}
 
