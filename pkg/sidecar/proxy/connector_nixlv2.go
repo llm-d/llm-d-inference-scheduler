@@ -176,7 +176,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	// 2. Forward to local decoder.
 
 	// Add prefill timing to response headers so EPP can collect telemetry
-	dreq.Header.Set("x-prefill-ttft-ms", fmt.Sprintf("%d", prefillDurationMs))
+	w.Header().Set("x-prefill-ttft-ms", fmt.Sprintf("%d", prefillDurationMs))
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
 	if !s.forwardDataParallel || !s.dataParallelHandler(w, dreq) {
