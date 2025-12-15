@@ -41,7 +41,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	var completionRequest map[string]any
 	if err := json.Unmarshal(original, &completionRequest); err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+			s.logger.Error(err, "failed to send Invalid JSON error response to Client")
 		}
 		return
 	}
@@ -134,7 +134,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+			s.logger.Error(err, "failed to send Invalid JSON error response to Client")
 		}
 		return err
 	}
@@ -144,7 +144,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 	prefillHandler, err := s.prefillerProxyHandler(prefillPodHostPort)
 	if err != nil {
 		if err := errorBadGateway(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+			s.logger.Error(err, "failed to send Bad Gateway error response to Client")
 		}
 		return err
 	}
