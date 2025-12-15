@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net"
 
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -33,6 +34,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/predictors"
 )
 
 const (
@@ -88,14 +90,38 @@ func PdSLOProfileHandlerFactory(name string, rawParameters json.RawMessage, _ pl
 		return nil, fmt.Errorf("invalid pdThreshold: must be >= 0, got %d", parameters.PdThreshold)
 	}
 
-	return NewPdSLOProfileHandler(
+	// Initialize predictor set for telemetry collection
+	predictorSet, err := predictors.NewPDPredictorSet(ctrl.Log.WithName("pd-predictors"))
+	if err != nil {
+		// Log but don't fail - telemetry is optional
+		ctrl.Log.WithName(PdSLOProfileHandlerType).Error(err, "Failed to initialize PD predictor set, telemetry will be disabled")
+		predictorSet = nil
+	} else {
+		// Start predictors
+		if err := predictorSet.Start(handle.Context()); err != nil {
+			ctrl.Log.WithName(PdSLOProfileHandlerType).Error(err, "Failed to start PD predictor set, telemetry will be disabled")
+			predictorSet = nil
+		} else {
+			// Stop predictors on context cancellation
+			go func() {
+				<-handle.Context().Done()
+				predictorSet.Stop()
+			}()
+		}
+	}
+
+	handler := NewPdSLOProfileHandler(
 		parameters.PrefillProfile,
 		parameters.DecodeProfile,
 		parameters.PrefixPluginName,
 		parameters.HashBlockSize,
 		parameters.TransferOverheadMs,
 		parameters.PdThreshold,
-	).WithName(name), nil
+	).WithName(name)
+
+	handler.predictorSet = predictorSet
+
+	return handler, nil
 }
 
 // NewPdSLOProfileHandler initializes a new PdSLOProfileHandler and returns its pointer.
@@ -130,6 +156,7 @@ type PdSLOProfileHandler struct {
 	hashBlockSize         int
 	transferOverheadMs    float64
 	pdThreshold           int
+	predictorSet          *predictors.PDPredictorSet // For telemetry collection
 }
 
 // TypedName returns the typed name of the plugin.
