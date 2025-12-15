@@ -38,15 +38,16 @@ import (
 
 // Telemetry context for tracking request lifecycle in PD mode
 type pdTelemetryContext struct {
-	prefillPod      string
-	decodePod       string
-	requestReceived time.Time
-	prefillStart    time.Time
-	decodeStart     time.Time
-	firstToken      time.Time
-	lastToken       time.Time
-	tokenCount      int
-	metricsSnapshot *backendmetrics.MetricsState
+	prefillPod        string
+	decodePod         string
+	requestReceived   time.Time
+	prefillStart      time.Time
+	decodeStart       time.Time
+	firstToken        time.Time
+	lastToken         time.Time
+	tokenCount        int
+	prefillMetrics    *backendmetrics.MetricsState
+	decodeMetrics     *backendmetrics.MetricsState
 }
 
 // Store telemetry contexts per request
@@ -113,19 +114,39 @@ func (h *PdSLOProfileHandler) PreRequest(
 	telCtx := getTelemetryContext(requestID)
 	telCtx.prefillPod = prefillAddr
 
-	// Decode pod is the target from scheduling result
+	// Extract decode pod and metrics from scheduling result
 	if schedulingResult != nil && len(schedulingResult.ProfileResults) > 0 {
+		// Get decode pod from primary profile (should be "decode" profile)
 		primaryProfile := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
 		if primaryProfile != nil && len(primaryProfile.TargetPods) > 0 {
 			decodePodInfo := primaryProfile.TargetPods[0].GetPod()
 			telCtx.decodePod = decodePodInfo.NamespacedName.String()
+			// Store decode metrics
+			if metrics := primaryProfile.TargetPods[0].GetMetrics(); metrics != nil {
+				telCtx.decodeMetrics = metrics.Clone()
+			}
+		}
+
+		// Get prefill metrics from prefill profile
+		for profileName, profileResult := range schedulingResult.ProfileResults {
+			if profileResult != nil && len(profileResult.TargetPods) > 0 {
+				// Check if this is the prefill profile (not the primary/decode profile)
+				if profileName != schedulingResult.PrimaryProfileName {
+					if metrics := profileResult.TargetPods[0].GetMetrics(); metrics != nil {
+						telCtx.prefillMetrics = metrics.Clone()
+					}
+					break
+				}
+			}
 		}
 	}
 
 	logger.V(logutil.DEBUG).Info("PD telemetry initialized",
 		"requestID", requestID,
 		"prefillPod", telCtx.prefillPod,
-		"decodePod", telCtx.decodePod)
+		"decodePod", telCtx.decodePod,
+		"hasPrefillMetrics", telCtx.prefillMetrics != nil,
+		"hasDecodeMetrics", telCtx.decodeMetrics != nil)
 }
 
 // ResponseReceived is called when response headers are received
@@ -168,10 +189,9 @@ func (h *PdSLOProfileHandler) ResponseStreaming(
 
 	telCtx := getTelemetryContext(requestID)
 	now := time.Now()
-	podAddr := targetPod.NamespacedName.String()
 
 	// Only track tokens from decode pod (final output)
-	if isPrefillPod(podAddr, telCtx.prefillPod) {
+	if isPrefillPod(targetPod, telCtx.prefillPod) {
 		// Prefill doesn't generate output tokens, only processes input
 		return
 	}
@@ -185,7 +205,7 @@ func (h *PdSLOProfileHandler) ResponseStreaming(
 		decodeTTFT := now.Sub(telCtx.decodeStart).Milliseconds()
 
 		// Send telemetry to decode training server
-		h.recordDecodeTTFT(ctx, request, targetPod, float64(decodeTTFT))
+		h.recordDecodeTTFT(ctx, request, telCtx, float64(decodeTTFT))
 
 		logger.V(logutil.DEBUG).Info("First token from decode",
 			"requestID", requestID,
@@ -196,7 +216,7 @@ func (h *PdSLOProfileHandler) ResponseStreaming(
 		interTokenLatency := now.Sub(telCtx.lastToken).Milliseconds()
 
 		// Send TPOT telemetry to decode training server
-		h.recordDecodeTPOT(ctx, request, targetPod, float64(interTokenLatency), telCtx.tokenCount)
+		h.recordDecodeTPOT(ctx, request, telCtx, float64(interTokenLatency), telCtx.tokenCount)
 
 		logger.V(logutil.TRACE).Info("Token from decode",
 			"requestID", requestID,
@@ -221,13 +241,12 @@ func (h *PdSLOProfileHandler) ResponseComplete(
 	}
 
 	telCtx := getTelemetryContext(requestID)
-	podAddr := targetPod.NamespacedName.String()
 
 	// If this is prefill completion, record prefill TTFT
-	if isPrefillPod(podAddr, telCtx.prefillPod) {
+	if isPrefillPod(targetPod, telCtx.prefillPod) {
 		if !telCtx.prefillStart.IsZero() {
 			prefillTTFT := time.Since(telCtx.prefillStart).Milliseconds()
-			h.recordPrefillTTFT(ctx, request, targetPod, float64(prefillTTFT))
+			h.recordPrefillTTFT(ctx, request, telCtx, float64(prefillTTFT))
 
 			logger.V(logutil.DEBUG).Info("Prefill complete",
 				"requestID", requestID,
@@ -246,7 +265,7 @@ func (h *PdSLOProfileHandler) ResponseComplete(
 func (h *PdSLOProfileHandler) recordPrefillTTFT(
 	ctx context.Context,
 	request *types.LLMRequest,
-	pod *backend.Pod,
+	telCtx *pdTelemetryContext,
 	ttftMs float64,
 ) {
 	logger := log.FromContext(ctx)
@@ -258,8 +277,8 @@ func (h *PdSLOProfileHandler) recordPrefillTTFT(
 		return
 	}
 
-	// Build training entry
-	metrics := pod.Metrics
+	// Build training entry using cached metrics
+	metrics := telCtx.prefillMetrics
 	if metrics == nil {
 		logger.V(logutil.DEBUG).Info("No metrics available for prefill telemetry")
 		return
@@ -288,7 +307,7 @@ func (h *PdSLOProfileHandler) recordPrefillTTFT(
 func (h *PdSLOProfileHandler) recordDecodeTTFT(
 	ctx context.Context,
 	request *types.LLMRequest,
-	pod *backend.Pod,
+	telCtx *pdTelemetryContext,
 	ttftMs float64,
 ) {
 	logger := log.FromContext(ctx)
@@ -299,7 +318,7 @@ func (h *PdSLOProfileHandler) recordDecodeTTFT(
 		return
 	}
 
-	metrics := pod.Metrics
+	metrics := telCtx.decodeMetrics
 	if metrics == nil {
 		logger.V(logutil.DEBUG).Info("No metrics available for decode TTFT telemetry")
 		return
@@ -328,7 +347,7 @@ func (h *PdSLOProfileHandler) recordDecodeTTFT(
 func (h *PdSLOProfileHandler) recordDecodeTPOT(
 	ctx context.Context,
 	request *types.LLMRequest,
-	pod *backend.Pod,
+	telCtx *pdTelemetryContext,
 	tpotMs float64,
 	tokenCount int,
 ) {
@@ -339,7 +358,7 @@ func (h *PdSLOProfileHandler) recordDecodeTPOT(
 		return
 	}
 
-	metrics := pod.Metrics
+	metrics := telCtx.decodeMetrics
 	if metrics == nil {
 		return
 	}

@@ -62,7 +62,7 @@ type pdSLOProfileHandlerParameters struct {
 var _ framework.ProfileHandler = &PdSLOProfileHandler{}
 
 // PdSLOProfileHandlerFactory defines the factory function for the PdSLOProfileHandler
-func PdSLOProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func PdSLOProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
 	parameters := pdSLOProfileHandlerParameters{
 		DecodeProfile:      defaultDecodeProfileSLO,
 		PrefillProfile:     defaultPrefillProfileSLO,
