@@ -96,8 +96,7 @@ func filterPodsByRole(pods []schedulingtypes.Pod) (prefillPods, decodePods []sch
 	return prefillPods, decodePods
 }
 
-// classifyPairsByHeadroom separates pairs into positive and negative headroom groups
-func classifyPairsByHeadroom(pairs []pairResult) (positive, negative []pairResult) {
+// ============================================================================
 // Telemetry Context for PD Request Tracking
 // ============================================================================
 
