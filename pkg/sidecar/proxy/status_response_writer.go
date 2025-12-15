@@ -17,6 +17,7 @@ limitations under the License.
 package proxy
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -44,4 +45,28 @@ func (w *bufferedResponseWriter) Write(b []byte) (int, error) {
 
 func (w *bufferedResponseWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
+}
+
+// headerInjectorResponseWriter wraps an http.ResponseWriter to inject custom headers
+// before forwarding the response. Used to add prefill timing telemetry to decode responses.
+type headerInjectorResponseWriter struct {
+	http.ResponseWriter
+	prefillDurationMs int64
+	headerWritten     bool
+}
+
+func (w *headerInjectorResponseWriter) WriteHeader(statusCode int) {
+	if !w.headerWritten {
+		w.ResponseWriter.Header().Set("x-prefill-ttft-ms", fmt.Sprintf("%d", w.prefillDurationMs))
+		w.headerWritten = true
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *headerInjectorResponseWriter) Write(b []byte) (int, error) {
+	if !w.headerWritten {
+		w.ResponseWriter.Header().Set("x-prefill-ttft-ms", fmt.Sprintf("%d", w.prefillDurationMs))
+		w.headerWritten = true
+	}
+	return w.ResponseWriter.Write(b)
 }

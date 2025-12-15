@@ -175,12 +175,16 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// 2. Forward to local decoder.
 
-	// Add prefill timing to response headers so EPP can collect telemetry
-	w.Header().Set("x-prefill-ttft-ms", fmt.Sprintf("%d", prefillDurationMs))
+	// Wrap response writer to inject prefill timing header
+	wrappedWriter := &headerInjectorResponseWriter{
+		ResponseWriter:     w,
+		prefillDurationMs:  prefillDurationMs,
+		headerWritten:      false,
+	}
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	if !s.forwardDataParallel || !s.dataParallelHandler(w, dreq) {
+	if !s.forwardDataParallel || !s.dataParallelHandler(wrappedWriter, dreq) {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host, "prefill-ttft-ms", prefillDurationMs)
-		s.decoderProxy.ServeHTTP(w, dreq)
+		s.decoderProxy.ServeHTTP(wrappedWriter, dreq)
 	}
 }
