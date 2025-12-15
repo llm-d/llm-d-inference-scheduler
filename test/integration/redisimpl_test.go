@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"flag"
 	"strconv"
 	"testing"
 	"time"
@@ -16,7 +17,8 @@ func TestRedisImpl(t *testing.T) {
 	rAddr := s.Host() + ":" + s.Port()
 
 	ctx := context.Background()
-	flow := redis.NewRedisMQFlow(rAddr)
+	flag.Set("redis.addr", rAddr)
+	flow := redis.NewRedisMQFlow()
 	flow.Start(ctx)
 
 	flow.RetryChannel() <- batch.RetryMessage{
@@ -54,4 +56,3 @@ func TestRedisImpl(t *testing.T) {
 	}
 
 }
-	

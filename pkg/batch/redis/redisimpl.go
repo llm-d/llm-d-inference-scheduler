@@ -17,11 +17,11 @@ import (
 )
 
 var (
-	redisAddr = flag.String("redis-addr", "localhost:16379", "address of the Redis server")
+	redisAddr = flag.String("redis.addr", "localhost:16379", "address of the Redis server")
 
 	// TODO: externalize
 	requestQueueName = "batch-queue"
-	retryQueueName   = "batch-sortedset-retry"
+	retryQueueName   = flag.String("redis.retry-queue-name", "batch-sortedset-retry", "name of the Redis sorted set for retry messages")
 	resultQueueName  = "batch-queue-result"
 )
 
@@ -56,7 +56,7 @@ func NewRedisMQFlow() *RedisMQFlow {
 func (r *RedisMQFlow) Start(ctx context.Context) {
 	go requestWorker(ctx, r.rdb, r.requestChannel, requestQueueName)
 
-	go addMsgToRetryWorker(ctx, r.rdb, r.retryChannel, retryQueueName)
+	go addMsgToRetryWorker(ctx, r.rdb, r.retryChannel, *retryQueueName)
 
 	go retryWorker(ctx, r.rdb, r.requestChannel)
 
@@ -76,6 +76,7 @@ func (r *RedisMQFlow) ResultChannel() chan batch.ResultMessage {
 
 // Listening on the results channel and responsible for writing results into Redis.
 func resultWorker(ctx context.Context, rdb *redis.Client, resultChannel chan batch.ResultMessage, resultsQueueName string) {
+	logger := log.FromContext(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -91,8 +92,8 @@ func resultWorker(ctx context.Context, rdb *redis.Client, resultChannel chan bat
 			}
 			err = publishRedis(ctx, rdb, resultsQueueName, msgStr)
 			if err != nil {
-				// TODO: ???
-
+				// Not going to retry here. Just log the error.
+				logger.V(logutil.DEFAULT).Error(err, "Failed to publish result message to Redis")
 			}
 		}
 	}
@@ -164,7 +165,7 @@ func retryWorker(ctx context.Context, rdb *redis.Client, msgChannel chan batch.R
 
 		default:
 			currentTimeSec := float64(time.Now().Unix())
-			results, err := rdb.ZRangeByScore(ctx, retryQueueName, &redis.ZRangeBy{
+			results, err := rdb.ZRangeByScore(ctx, *retryQueueName, &redis.ZRangeBy{
 				Min: "0",
 				Max: strconv.FormatFloat(currentTimeSec, 'f', -1, 64),
 			}).Result()
@@ -178,7 +179,7 @@ func retryWorker(ctx context.Context, rdb *redis.Client, msgChannel chan batch.R
 					fmt.Println(err)
 
 				}
-				err = rdb.ZRem(ctx, retryQueueName, msg).Err()
+				err = rdb.ZRem(ctx, *retryQueueName, msg).Err()
 				if err != nil {
 					fmt.Println(err)
 
