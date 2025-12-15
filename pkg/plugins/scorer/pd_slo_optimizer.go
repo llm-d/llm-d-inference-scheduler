@@ -19,9 +19,7 @@ package scorer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"strconv"
 	"time"
@@ -42,56 +40,54 @@ import (
 )
 
 const (
-	// PdSLOPairOptimizerType is the plugin type identifier
-	PdSLOPairOptimizerType = "pd-slo-pair-optimizer"
+	// PdSLOOptimizerType is the plugin type identifier
+	PdSLOOptimizerType = "pd-slo-optimizer"
 )
 
 // Compile-time type assertion
-var _ framework.Scorer = &PdSLOPairOptimizer{}
+var _ framework.Scorer = &PdSLOOptimizer{}
 
-// pdSLOPairOptimizerConfig holds configuration parameters for the pair optimizer
-type pdSLOPairOptimizerConfig struct {
-	TTFTWeight           float64 `json:"ttftWeight"`           // Weight for TTFT headroom (default: 0.8)
-	TPOTWeight           float64 `json:"tpotWeight"`           // Weight for TPOT headroom (default: 0.2)
-	TransferOverheadMs   float64 `json:"transferOverheadMs"`   // KV transfer overhead in ms (default: 5.0)
-	SLOBufferFactor      float64 `json:"sloBufferFactor"`      // Safety margin for SLOs (default: 0.9)
-	SelectionStrategy    string  `json:"selectionStrategy"`    // "weighted_random" or "best_headroom"
-	NegativeHeadroomProb float64 `json:"negativeHeadroomProb"` // Exploration probability (default: 0.01)
+// pdSLOOptimizerConfig holds configuration parameters for the optimizer
+type pdSLOOptimizerConfig struct {
+	SLOBufferFactor float64 `json:"sloBufferFactor"` // Safety margin for SLOs (default: 0.9)
 }
 
 // Default configuration values
-var defaultPdSLOConfig = pdSLOPairOptimizerConfig{
-	TTFTWeight:           0.8,
-	TPOTWeight:           0.2,
-	TransferOverheadMs:   5.0,
-	SLOBufferFactor:      0.9,
-	SelectionStrategy:    "weighted_random",
-	NegativeHeadroomProb: 0.01,
+var defaultPdSLOConfig = pdSLOOptimizerConfig{
+	SLOBufferFactor: 0.9,
 }
 
-// PdSLOPairOptimizer implements joint (prefill, decode) pod pair optimization
-// based on SLO headroom calculations
-type PdSLOPairOptimizer struct {
+// validate checks if the configuration is valid
+func (c *pdSLOOptimizerConfig) validate() error {
+	if c.SLOBufferFactor <= 0 || c.SLOBufferFactor > 1.0 {
+		return fmt.Errorf("sloBufferFactor must be between 0 and 1.0, got %f", c.SLOBufferFactor)
+	}
+	return nil
+}
+
+// PdSLOOptimizer implements independent prefill and decode pod optimization
+// based on SLO headroom calculations using trained latency predictors
+type PdSLOOptimizer struct {
 	typedName   plugins.TypedName
-	config      pdSLOPairOptimizerConfig
+	config      pdSLOOptimizerConfig
 	predictors  *predictors.PDPredictorSet
 	initialized bool
 }
 
-// PdSLOPairOptimizerFactory creates a new PdSLOPairOptimizer instance
-func PdSLOPairOptimizerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+// PdSLOOptimizerFactory creates a new PdSLOOptimizer instance
+func PdSLOOptimizerFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
 	config := defaultPdSLOConfig
 
 	// Parse parameters if provided
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse parameters for '%s': %w", PdSLOPairOptimizerType, err)
+			return nil, fmt.Errorf("failed to parse parameters for '%s': %w", PdSLOOptimizerType, err)
 		}
 	}
 
 	// Validate configuration
 	if err := config.validate(); err != nil {
-		return nil, fmt.Errorf("invalid configuration for '%s': %w", PdSLOPairOptimizerType, err)
+		return nil, fmt.Errorf("invalid configuration for '%s': %w", PdSLOOptimizerType, err)
 	}
 
 	// Initialize predictor set
@@ -111,13 +107,13 @@ func PdSLOPairOptimizerFactory(name string, rawParameters json.RawMessage, handl
 		predictorSet.Stop()
 	}()
 
-	return NewPdSLOPairOptimizer(config, predictorSet).WithName(name), nil
+	return NewPdSLOOptimizer(config, predictorSet).WithName(name), nil
 }
 
-// NewPdSLOPairOptimizer creates a new PdSLOPairOptimizer instance
-func NewPdSLOPairOptimizer(config pdSLOPairOptimizerConfig, predictors *predictors.PDPredictorSet) *PdSLOPairOptimizer {
-	return &PdSLOPairOptimizer{
-		typedName:   plugins.TypedName{Type: PdSLOPairOptimizerType},
+// NewPdSLOOptimizer creates a new PdSLOOptimizer instance
+func NewPdSLOOptimizer(config pdSLOOptimizerConfig, predictors *predictors.PDPredictorSet) *PdSLOOptimizer {
+	return &PdSLOOptimizer{
+		typedName:   plugins.TypedName{Type: PdSLOOptimizerType},
 		config:      config,
 		predictors:  predictors,
 		initialized: true,
@@ -125,19 +121,19 @@ func NewPdSLOPairOptimizer(config pdSLOPairOptimizerConfig, predictors *predicto
 }
 
 // TypedName returns the plugin's typed name
-func (s *PdSLOPairOptimizer) TypedName() plugins.TypedName {
+func (s *PdSLOOptimizer) TypedName() plugins.TypedName {
 	return s.typedName
 }
 
 // WithName sets the plugin instance name
-func (s *PdSLOPairOptimizer) WithName(name string) *PdSLOPairOptimizer {
+func (s *PdSLOOptimizer) WithName(name string) *PdSLOOptimizer {
 	s.typedName.Name = name
 	return s
 }
 
-// Score evaluates all (prefill, decode) pod pairs and selects the optimal one
-// based on joint TTFT and TPOT predictions
-func (s *PdSLOPairOptimizer) Score(
+// Score evaluates pods independently using their respective predictors.
+// Prefill pods are scored based on TTFT predictions, decode pods on TTFT+TPOT predictions.
+func (s *PdSLOOptimizer) Score(
 	ctx context.Context,
 	cycleState *schedulingtypes.CycleState,
 	request *schedulingtypes.LLMRequest,
@@ -146,7 +142,7 @@ func (s *PdSLOPairOptimizer) Score(
 	logger := log.FromContext(ctx)
 
 	if !s.initialized {
-		logger.V(logutil.DEBUG).Info("PdSLOPairOptimizer not initialized, returning nil scores")
+		logger.V(logutil.DEBUG).Info("PdSLOOptimizer not initialized, returning nil scores")
 		return nil
 	}
 
@@ -171,353 +167,196 @@ func (s *PdSLOPairOptimizer) Score(
 	// Separate pods by role
 	prefillPods, decodePods := filterPodsByRole(pods)
 
-	if len(prefillPods) == 0 || len(decodePods) == 0 {
-		logger.V(logutil.DEBUG).Info("Insufficient pods for PD optimization",
-			"prefillPods", len(prefillPods),
+	// Independent scoring mode: score each pod type independently using its predictor
+	if len(prefillPods) == 0 && len(decodePods) > 0 {
+		logger.V(logutil.DEBUG).Info("Decode-only scoring mode",
 			"decodePods", len(decodePods))
+		return s.scoreDecodePods(ctx, request, decodePods, ttftSLO, tpotSLO)
+	}
+
+	if len(decodePods) == 0 && len(prefillPods) > 0 {
+		logger.V(logutil.DEBUG).Info("Prefill-only scoring mode",
+			"prefillPods", len(prefillPods))
+		return s.scorePrefillPods(ctx, request, prefillPods, ttftSLO)
+	}
+
+	// Joint optimization not implemented - return nil to let other scorers handle it
+	logger.V(logutil.DEBUG).Info("Both prefill and decode pods present - joint optimization not implemented, skipping",
+		"prefillPods", len(prefillPods),
+		"decodePods", len(decodePods))
+	return nil
+}
+
+// scoreDecodePods scores decode pods independently using decode predictor
+func (s *PdSLOOptimizer) scoreDecodePods(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	decodePods []schedulingtypes.Pod,
+	ttftSLO, tpotSLO float64,
+) map[schedulingtypes.Pod]float64 {
+	logger := log.FromContext(ctx)
+
+	if s.predictors == nil || s.predictors.DecodePredictor == nil {
+		logger.V(logutil.DEBUG).Info("No decode predictor available")
 		return nil
 	}
 
-	logger.V(logutil.DEBUG).Info("Evaluating PD pod pairs",
-		"prefillCandidates", len(prefillPods),
-		"decodeCandidates", len(decodePods),
-		"totalPairs", len(prefillPods)*len(decodePods))
-
-	// Evaluate all (prefill, decode) pairs
-	pairResults := s.evaluateAllPairs(ctx, request, prefillPods, decodePods, ttftSLO, tpotSLO)
-
-	if len(pairResults) == 0 {
-		logger.Error(errors.New("no valid pairs"), "Failed to evaluate any pod pairs")
-		return nil
-	}
-
-	// Classify pairs by headroom
-	positivePairs, negativePairs := classifyPairsByHeadroom(pairResults)
-
-	logger.Info("Pair headroom distribution",
-		"positiveHeadroomPairs", len(positivePairs),
-		"negativeHeadroomPairs", len(negativePairs))
-
-	// Select optimal pair
-	selectedPair := s.selectOptimalPair(positivePairs, negativePairs)
-
-	if selectedPair == nil {
-		logger.Error(errors.New("no valid pairs"), "Failed to select optimal pair")
-		return nil
-	}
-
-	// Store selected pair in cycle state for profile handler
-	storeSelectedPairInState(cycleState, selectedPair)
-
-	logger.Info("Selected optimal PD pair",
-		"prefillPod", selectedPair.prefillPod.GetPod().String(),
-		"decodePod", selectedPair.decodePod.GetPod().String(),
-		"prefillTTFT", selectedPair.prefillTTFT,
-		"decodeTTFT", selectedPair.decodeTTFT,
-		"decodeTPOT", selectedPair.decodeTPOT,
-		"jointTTFT", selectedPair.jointTTFT,
-		"ttftHeadroom", selectedPair.ttftHeadroom,
-		"tpotHeadroom", selectedPair.tpotHeadroom,
-		"blendedHeadroom", selectedPair.blendedHeadroom,
-		"ttftValid", selectedPair.ttftValid,
-		"tpotValid", selectedPair.tpotValid)
-
-	// Return scores: selected pods get 1.0, all others get 0.0
 	scores := make(map[schedulingtypes.Pod]float64)
-	for _, pod := range pods {
-		if pod.GetPod().String() == selectedPair.prefillPod.GetPod().String() ||
-			pod.GetPod().String() == selectedPair.decodePod.GetPod().String() {
-			scores[pod] = 1.0
-		} else {
-			scores[pod] = 0.0
+	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
+	bufferedTPOTSLO := tpotSLO * s.config.SLOBufferFactor
+
+	bestScore := -1e9
+	var bestPod schedulingtypes.Pod
+
+	for _, pod := range decodePods {
+		metrics := pod.GetMetrics()
+		if metrics == nil {
+			logger.V(logutil.DEBUG).Info("No metrics for decode pod", "pod", pod.GetPod().String())
+			continue
 		}
+
+		// Predict decode TTFT and TPOT
+		inputTokens := float64(getInputTokenLength(request))
+		predictedTTFT, predictedTPOT, err := s.predictors.DecodePredictor.PredictLatency(
+			metrics.KVCacheUsagePercent,
+			inputTokens,
+			float64(metrics.WaitingQueueSize),
+			float64(metrics.RunningRequestsSize),
+			0, // prefix cache score
+		)
+
+		if err != nil {
+			logger.V(logutil.DEBUG).Error(err, "Failed to predict decode latency", "pod", pod.GetPod().String())
+			continue
+		}
+
+		// Calculate headroom
+		ttftHeadroom := bufferedTTFTSLO - predictedTTFT
+		tpotHeadroom := bufferedTPOTSLO - predictedTPOT
+
+		// Combined score: favor pods with positive headroom
+		score := ttftHeadroom + tpotHeadroom
+
+		logger.Info("Decode pod scored",
+			"pod", pod.GetPod().String(),
+			"predictedTTFT", predictedTTFT,
+			"predictedTPOT", predictedTPOT,
+			"ttftSLO", bufferedTTFTSLO,
+			"tpotSLO", bufferedTPOTSLO,
+			"ttftHeadroom", ttftHeadroom,
+			"tpotHeadroom", tpotHeadroom,
+			"score", score)
+
+		if score > bestScore {
+			bestScore = score
+			bestPod = pod
+		}
+	}
+
+	if bestPod != nil {
+		for _, pod := range decodePods {
+			if pod.GetPod().String() == bestPod.GetPod().String() {
+				scores[pod] = 1.0
+			} else {
+				scores[pod] = 0.0
+			}
+		}
+		logger.Info("Selected best decode pod", "pod", bestPod.GetPod().String(), "score", bestScore)
 	}
 
 	return scores
 }
 
-// evaluateAllPairs evaluates all (prefill, decode) combinations and returns scored results
-func (s *PdSLOPairOptimizer) evaluateAllPairs(
+// scorePrefillPods scores prefill pods independently using prefill predictor
+func (s *PdSLOOptimizer) scorePrefillPods(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
-	prefillPods, decodePods []schedulingtypes.Pod,
-	ttftSLO, tpotSLO float64,
-) []pairResult {
+	prefillPods []schedulingtypes.Pod,
+	ttftSLO float64,
+) map[schedulingtypes.Pod]float64 {
 	logger := log.FromContext(ctx)
-	results := make([]pairResult, 0, len(prefillPods)*len(decodePods))
 
-	// Apply buffer factor to SLOs
+	if s.predictors == nil || s.predictors.PrefillPredictor == nil {
+		logger.V(logutil.DEBUG).Info("No prefill predictor available")
+		return nil
+	}
+
+	scores := make(map[schedulingtypes.Pod]float64)
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
-	bufferedTPOTSLO := tpotSLO * s.config.SLOBufferFactor
 
-	for _, prefillPod := range prefillPods {
-		for _, decodePod := range decodePods {
-			// Get predictions for this pair
-			prefillTTFT, decodeTTFT, decodeTPOT := s.predictPairLatencies(ctx, prefillPod, decodePod, request)
+	bestScore := -1e9
+	var bestPod schedulingtypes.Pod
 
-			// Calculate joint TTFT
-			jointTTFT := prefillTTFT + decodeTTFT + s.config.TransferOverheadMs
+	for _, pod := range prefillPods {
+		metrics := pod.GetMetrics()
+		if metrics == nil {
+			logger.V(logutil.DEBUG).Info("No metrics for prefill pod", "pod", pod.GetPod().String())
+			continue
+		}
 
-			// Calculate headrooms
-			ttftHeadroom := bufferedTTFTSLO - jointTTFT
-			tpotHeadroom := bufferedTPOTSLO - decodeTPOT
+		// Predict prefill TTFT (TPOT is always 0 for prefill)
+		inputTokens := float64(getInputTokenLength(request))
+		predictedTTFT, _, err := s.predictors.PrefillPredictor.PredictLatency(
+			metrics.KVCacheUsagePercent,
+			inputTokens,
+			float64(metrics.WaitingQueueSize),
+			float64(metrics.RunningRequestsSize),
+			0, // prefix cache score
+		)
 
-			// Validate against SLOs
-			ttftValid := ttftHeadroom > 0
-			tpotValid := tpotHeadroom > 0
+		if err != nil {
+			logger.V(logutil.DEBUG).Error(err, "Failed to predict prefill latency", "pod", pod.GetPod().String())
+			continue
+		}
 
-			// Calculate blended headroom
-			blendedHeadroom := s.config.TTFTWeight*ttftHeadroom + s.config.TPOTWeight*tpotHeadroom
+		// Calculate headroom
+		ttftHeadroom := bufferedTTFTSLO - predictedTTFT
 
-			result := pairResult{
-				prefillPod:      prefillPod,
-				decodePod:       decodePod,
-				prefillTTFT:     prefillTTFT,
-				decodeTTFT:      decodeTTFT,
-				decodeTPOT:      decodeTPOT,
-				jointTTFT:       jointTTFT,
-				ttftValid:       ttftValid,
-				tpotValid:       tpotValid,
-				ttftHeadroom:    ttftHeadroom,
-				tpotHeadroom:    tpotHeadroom,
-				blendedHeadroom: blendedHeadroom,
+		// Score is just the headroom
+		score := ttftHeadroom
+
+		logger.Info("Prefill pod scored",
+			"pod", pod.GetPod().String(),
+			"predictedTTFT", predictedTTFT,
+			"ttftSLO", bufferedTTFTSLO,
+			"ttftHeadroom", ttftHeadroom,
+			"score", score)
+
+		if score > bestScore {
+			bestScore = score
+			bestPod = pod
+		}
+	}
+
+	if bestPod != nil {
+		for _, pod := range prefillPods {
+			if pod.GetPod().String() == bestPod.GetPod().String() {
+				scores[pod] = 1.0
+			} else {
+				scores[pod] = 0.0
 			}
-
-			results = append(results, result)
-
-			logger.V(logutil.DEBUG).Info("Evaluated PD pair",
-				"prefillPod", prefillPod.GetPod().String(),
-				"decodePod", decodePod.GetPod().String(),
-				"prefillTTFT_ms", prefillTTFT,
-				"decodeTTFT_ms", decodeTTFT,
-				"decodeTPOT_ms", decodeTPOT,
-				"jointTTFT_ms", jointTTFT,
-				"ttftHeadroom_ms", ttftHeadroom,
-				"tpotHeadroom_ms", tpotHeadroom,
-				"blendedHeadroom", blendedHeadroom,
-				"valid", ttftValid && tpotValid)
 		}
+		logger.Info("Selected best prefill pod", "pod", bestPod.GetPod().String(), "score", bestScore)
 	}
 
-	return results
+	return scores
 }
 
-// predictPairLatencies calls the two predictors to get latency predictions for a pod pair
-func (s *PdSLOPairOptimizer) predictPairLatencies(
-	ctx context.Context,
-	prefillPod, decodePod schedulingtypes.Pod,
-	request *schedulingtypes.LLMRequest,
-) (prefillTTFT, decodeTTFT, decodeTPOT float64) {
-	logger := log.FromContext(ctx)
-
-	// Build prediction request for prefill (input_tokens, prefix_cache focused)
-	prefillReq := s.buildPrefillPredictionRequest(prefillPod, request)
-
-	// Predict prefill TTFT
-	if resp, err := s.predictors.PrefillPredictor.Predict(ctx, prefillReq); err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Prefill prediction failed, using fallback")
-		prefillTTFT = s.fallbackPrefillTTFT(request)
-	} else if resp != nil {
-		prefillTTFT = resp.TTFT
-	} else {
-		prefillTTFT = s.fallbackPrefillTTFT(request)
-	}
-
-	// Build prediction request for decode (queue, running requests, kv_cache focused)
-	decodeReq := s.buildDecodePredictionRequest(decodePod, request)
-
-	// Predict decode TTFT and TPOT (single call returns both)
-	if resp, err := s.predictors.DecodePredictor.Predict(ctx, decodeReq); err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Decode prediction failed, using fallback")
-		decodeTTFT = s.fallbackDecodeTTFT(decodePod)
-		decodeTPOT = s.fallbackDecodeTPOT(decodePod)
-	} else if resp != nil {
-		decodeTTFT = resp.TTFT
-		decodeTPOT = resp.TPOT
-	} else {
-		decodeTTFT = s.fallbackDecodeTTFT(decodePod)
-		decodeTPOT = s.fallbackDecodeTPOT(decodePod)
-	}
-
-	return prefillTTFT, decodeTTFT, decodeTPOT
-}
-
-// buildPrefillPredictionRequest constructs a prediction request for prefill pod
-// Focuses on: input tokens, prefix cache score
-func (s *PdSLOPairOptimizer) buildPrefillPredictionRequest(
-	prefillPod schedulingtypes.Pod,
-	request *schedulingtypes.LLMRequest,
-) latencypredictor.PredictionRequest {
-	// Get input token length from request (dominant feature for prefill)
-	inputTokenLength := getInputTokenLength(request)
-
-	// Get prefill pod metrics (if available)
-	metrics := prefillPod.GetMetrics()
-	kvCachePercentage := 0.0
-	numRequestWaiting := 0
-	numRequestRunning := 0
-
-	if metrics != nil {
-		kvCachePercentage = metrics.KVCacheUsagePercent
-		numRequestWaiting = metrics.WaitingQueueSize
-		numRequestRunning = metrics.RunningRequestsSize
-	}
-
-	return latencypredictor.PredictionRequest{
-		KVCachePercentage: kvCachePercentage,
-		InputTokenLength:  inputTokenLength,
-		NumRequestWaiting: numRequestWaiting,
-		NumRequestRunning: numRequestRunning,
-		PrefixCacheScore:  0.0, // TODO: Get from cycle state
-	}
-}
-
-// buildDecodePredictionRequest constructs a prediction request for decode pod
-// Focuses on: queue depth, running requests, kv cache usage
-func (s *PdSLOPairOptimizer) buildDecodePredictionRequest(
-	decodePod schedulingtypes.Pod,
-	request *schedulingtypes.LLMRequest,
-) latencypredictor.PredictionRequest {
-	// Extract metrics from decode pod (dominant features for decode)
-	decodeMetrics := decodePod.GetMetrics()
-	kvCachePercentage := 0.0
-	numRequestWaiting := 0
-	numRequestRunning := 0
-
-	if decodeMetrics != nil {
-		kvCachePercentage = decodeMetrics.KVCacheUsagePercent
-		numRequestWaiting = decodeMetrics.WaitingQueueSize
-		numRequestRunning = decodeMetrics.RunningRequestsSize
-	}
-
-	// Get input token length (less important for decode, but included)
-	inputTokenLength := getInputTokenLength(request)
-
-	return latencypredictor.PredictionRequest{
-		KVCachePercentage: kvCachePercentage,
-		InputTokenLength:  inputTokenLength,
-		NumRequestWaiting: numRequestWaiting,
-		NumRequestRunning: numRequestRunning,
-		PrefixCacheScore:  0.0,
-	}
-}
-
-// selectOptimalPair chooses the best pair using the configured selection strategy
-func (s *PdSLOPairOptimizer) selectOptimalPair(positivePairs, negativePairs []pairResult) *pairResult {
-	source := rand.NewSource(time.Now().UnixNano())
-	r := rand.New(source)
-
-	// Weighted random strategy: 99% positive headroom, 1% negative (exploration)
-	if len(positivePairs) > 0 {
-		if r.Float64() >= s.config.NegativeHeadroomProb {
-			// Select from positive headroom pairs
-			return selectPairWeightedRandom(positivePairs)
-		}
-	}
-
-	// Fallback to negative headroom pairs or exploration
-	if len(negativePairs) > 0 {
-		return selectPairWeightedRandom(negativePairs)
-	}
-
-	// No valid pairs at all
-	return nil
-}
-
-// Fallback heuristics when predictions fail
-
-func (s *PdSLOPairOptimizer) fallbackPrefillTTFT(request *schedulingtypes.LLMRequest) float64 {
-	// Simple heuristic: ~0.5ms per token
-	inputTokens := float64(getInputTokenLength(request))
-	return inputTokens * 0.5
-}
-
-func (s *PdSLOPairOptimizer) fallbackDecodeTTFT(decodePod schedulingtypes.Pod) float64 {
-	// Simple heuristic: ~10ms per queued request
-	metrics := decodePod.GetMetrics()
-	if metrics != nil {
-		return float64(metrics.WaitingQueueSize) * 10.0
-	}
-	return 10.0 // Default minimal wait
-}
-
-func (s *PdSLOPairOptimizer) fallbackDecodeTPOT(decodePod schedulingtypes.Pod) float64 {
-	// Simple heuristic: ~20ms base + congestion penalty
-	baseTpot := 20.0
-	congestion := 0.0
-
-	metrics := decodePod.GetMetrics()
-	if metrics != nil {
-		congestion = float64(metrics.RunningRequestsSize) * 5.0
-		congestion += metrics.KVCacheUsagePercent * 10.0
-	}
-
-	return baseTpot + congestion
-}
-
-// Helper functions
-
-func (c *pdSLOPairOptimizerConfig) validate() error {
-	var errs []error
-
-	if c.TTFTWeight < 0 || c.TPOTWeight < 0 {
-		errs = append(errs, errors.New("weights must be non-negative"))
-	}
-
-	if c.TransferOverheadMs < 0 {
-		errs = append(errs, errors.New("transferOverheadMs must be non-negative"))
-	}
-
-	if c.SLOBufferFactor <= 0 || c.SLOBufferFactor > 1 {
-		errs = append(errs, errors.New("sloBufferFactor must be in (0, 1]"))
-	}
-
-	if c.NegativeHeadroomProb < 0 || c.NegativeHeadroomProb > 1 {
-		errs = append(errs, errors.New("negativeHeadroomProb must be in [0, 1]"))
-	}
-
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
-}
-
-func getInputTokenLength(request *schedulingtypes.LLMRequest) int {
-	// Try to get from request body
-	if request.Body.Completions != nil && request.Body.Completions.Prompt != "" {
-		// Rough estimate: 4 characters per token
-		return len(request.Body.Completions.Prompt) / 4
-	}
-
-	if request.Body.ChatCompletions != nil && len(request.Body.ChatCompletions.Messages) > 0 {
-		totalChars := 0
-		for _, msg := range request.Body.ChatCompletions.Messages {
-			totalChars += len(msg.Content.Raw)
-		}
-		return totalChars / 4
-	}
-
-	return 100 // Default fallback
-}
-
-// ============================================================================
-// RequestControl Hook Implementations for Telemetry Collection
-// ============================================================================
 
 // Compile-time assertions for requestcontrol interfaces
-var _ requestcontrol.PreRequest = &PdSLOPairOptimizer{}
-var _ requestcontrol.ResponseReceived = &PdSLOPairOptimizer{}
-var _ requestcontrol.ResponseStreaming = &PdSLOPairOptimizer{}
-var _ requestcontrol.ResponseComplete = &PdSLOPairOptimizer{}
+var _ requestcontrol.PreRequest = &PdSLOOptimizer{}
+var _ requestcontrol.ResponseReceived = &PdSLOOptimizer{}
+var _ requestcontrol.ResponseStreaming = &PdSLOOptimizer{}
+var _ requestcontrol.ResponseComplete = &PdSLOOptimizer{}
 
 // PreRequest is called after scheduling, before sending request to pod
-func (s *PdSLOPairOptimizer) PreRequest(
+func (s *PdSLOOptimizer) PreRequest(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
 	schedulingResult *schedulingtypes.SchedulingResult,
 ) {
 	logger := log.FromContext(ctx)
-	logger.Info("PdSLOPairOptimizer.PreRequest called")
+	logger.Info("PdSLOOptimizer.PreRequest called")
 
 	// Only track if we have both prefill and decode pods (PD mode active)
 	prefillAddr := request.Headers[common.PrefillPodHeader]
@@ -571,7 +410,7 @@ func (s *PdSLOPairOptimizer) PreRequest(
 }
 
 // ResponseReceived is called when response headers are received
-func (s *PdSLOPairOptimizer) ResponseReceived(
+func (s *PdSLOOptimizer) ResponseReceived(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
 	response *requestcontrol.Response,
@@ -618,7 +457,7 @@ func (s *PdSLOPairOptimizer) ResponseReceived(
 }
 
 // ResponseStreaming is called for each token in the streaming response
-func (s *PdSLOPairOptimizer) ResponseStreaming(
+func (s *PdSLOOptimizer) ResponseStreaming(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
 	response *requestcontrol.Response,
@@ -671,7 +510,7 @@ func (s *PdSLOPairOptimizer) ResponseStreaming(
 }
 
 // ResponseComplete is called when the response is fully sent
-func (s *PdSLOPairOptimizer) ResponseComplete(
+func (s *PdSLOOptimizer) ResponseComplete(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
 	response *requestcontrol.Response,
@@ -717,7 +556,7 @@ func (s *PdSLOPairOptimizer) ResponseComplete(
 }
 
 // recordPrefillTTFT sends prefill TTFT telemetry to prefill training server
-func (s *PdSLOPairOptimizer) recordPrefillTTFT(
+func (s *PdSLOOptimizer) recordPrefillTTFT(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
 	telCtx *pdTelemetryContext,
@@ -758,7 +597,7 @@ func (s *PdSLOPairOptimizer) recordPrefillTTFT(
 }
 
 // recordDecodeTTFT sends decode TTFT telemetry to decode training server
-func (s *PdSLOPairOptimizer) recordDecodeTTFT(
+func (s *PdSLOOptimizer) recordDecodeTTFT(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
 	telCtx *pdTelemetryContext,
@@ -797,7 +636,7 @@ func (s *PdSLOPairOptimizer) recordDecodeTTFT(
 }
 
 // recordDecodeTPOT sends decode TPOT telemetry to decode training server
-func (s *PdSLOPairOptimizer) recordDecodeTPOT(
+func (s *PdSLOOptimizer) recordDecodeTPOT(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
 	telCtx *pdTelemetryContext,

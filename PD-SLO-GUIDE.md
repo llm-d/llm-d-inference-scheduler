@@ -7,9 +7,9 @@ SLO-aware scheduling for Prefill-Decode disaggregated architecture with dual lat
 Unified profile handler supporting both SLO-aware and threshold-based PD scheduling:
 
 **With SLO headers** (`x-slo-ttft-ms`, `x-slo-tpot-ms`):
-- Joint optimization of (prefill, decode) pod pairs using two predictors
-- `jointTTFT = prefillTTFT + decodeTTFT + transferOverhead`
-- Blended headroom: `0.8×TTFT_headroom + 0.2×TPOT_headroom`
+- Independent optimization of prefill and decode pods using trained predictors
+- Prefill: Select pod with best TTFT headroom (SLO - predictedTTFT)
+- Decode: Select pod with best combined TTFT+TPOT headroom
 
 **Without SLO headers**:
 - Threshold-based PD scheduling (prefix cache hit percentage)
@@ -43,11 +43,12 @@ Request → PD-SLO Profile Handler
            ↓                    ↓
          YES                  NO
            ↓                    ↓
-   PD-SLO Pair Optimizer    Use best pod from
-   - Evaluate N×M pairs      each profile
-   - Call 2 predictors       (fallback)
-   - Blended headroom
-   - Weighted random
+   PD-SLO Optimizer         Use best pod from
+   - Score prefill pods      each profile
+     independently           (fallback)
+   - Score decode pods
+     independently
+   - Use trained predictors
            ↓                    ↓
      Set x-prefiller-host-port header
            ↓
@@ -60,8 +61,8 @@ Request → PD-SLO Profile Handler
 |-----------|------|---------|
 | PDPredictorSet | `pkg/predictors/pd_predictors.go` | Two predictor clients (prefill + decode) |
 | PdSLOProfileHandler | `pkg/plugins/profile/pd_slo_profile_handler.go` | Coordinates dual-profile execution, threshold logic |
-| PdSLOPairOptimizer | `pkg/plugins/scorer/pd_slo_pair_optimizer.go` | Evaluates all (prefill, decode) pairs, selects optimal |
-| Helpers | `pkg/plugins/scorer/pd_slo_helpers.go` | SLO parsing, weighted selection, cycle state utilities |
+| PdSLOOptimizer | `pkg/plugins/scorer/pd_slo_optimizer.go` | Scores prefill/decode pods independently using trained predictors |
+| Helpers | `pkg/plugins/scorer/pd_slo_helpers.go` | SLO parsing, telemetry tracking, pod filtering utilities |
 
 ## Configuration
 
@@ -95,16 +96,11 @@ plugins:
       maxPrefixBlocksToMatch: 256
       lruCapacityPerServer: 31250
 
-  # PD-SLO Pair Optimizer
-  - type: pd-slo-pair-optimizer
-    name: pd-slo-pair-optimizer
+  # PD-SLO Optimizer (independent scoring)
+  - type: pd-slo-optimizer
+    name: pd-slo-optimizer
     parameters:
-      ttftWeight: 0.8                # Weight for TTFT headroom
-      tpotWeight: 0.2                # Weight for TPOT headroom
-      transferOverheadMs: 5.0        # KV transfer overhead
       sloBufferFactor: 0.9           # Safety margin (0.9 = 10% buffer)
-      selectionStrategy: "weighted_random"
-      negativeHeadroomProb: 0.01     # Exploration rate
 
   # Picker
   - type: max-score-picker
@@ -118,7 +114,6 @@ plugins:
       prefillProfile: "prefill"
       prefixPluginName: "prefix-cache-scorer"
       hashBlockSize: 5
-      transferOverheadMs: 5.0
       pdThreshold: 5                 # Skip prefill if < 5 non-cached tokens
 
 schedulingProfiles:
@@ -127,7 +122,7 @@ schedulingProfiles:
       - pluginRef: prefill-filter
       - pluginRef: prefix-cache-scorer
         weight: 2
-      - pluginRef: pd-slo-pair-optimizer
+      - pluginRef: pd-slo-optimizer
         weight: 3
       - pluginRef: max-score-picker
 
@@ -136,7 +131,7 @@ schedulingProfiles:
       - pluginRef: decode-filter
       - pluginRef: prefix-cache-scorer
         weight: 2
-      - pluginRef: pd-slo-pair-optimizer
+      - pluginRef: pd-slo-optimizer
         weight: 3
       - pluginRef: max-score-picker
 ```
@@ -146,11 +141,7 @@ schedulingProfiles:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `pdThreshold` | 5 | Non-cached tokens threshold for decode-only vs PD (0 = always PD) |
-| `ttftWeight` | 0.8 | TTFT weight in blended headroom |
-| `tpotWeight` | 0.2 | TPOT weight in blended headroom |
-| `transferOverheadMs` | 5.0 | KV transfer overhead (tune for network) |
 | `sloBufferFactor` | 0.9 | Safety margin (0.9 = aim for 90% of SLO) |
-| `negativeHeadroomProb` | 0.01 | Exploration rate for negative headroom pairs |
 
 ## Behavior
 
@@ -158,13 +149,14 @@ schedulingProfiles:
 - Input: 50 tokens, 80% prefix cache hit, SLO headers present
 - Non-cached suffix: 50 × (1 - 0.8) = 10 tokens
 - `pdThreshold = 5`: **Decode-only** (10 > 5 but PD overhead > benefit)
-- SLO headers ignored, no pair optimization
+- SLO headers ignored, no independent optimization
 
-**Example 2: Long request with SLO (joint optimization)**
+**Example 2: Long request with SLO (independent optimization)**
 - Input: 500 tokens, 20% prefix cache hit, SLO headers present
 - Non-cached suffix: 500 × (1 - 0.2) = 400 tokens
 - `pdThreshold = 5`: **PD-SLO optimization** (400 >> 5, SLO present)
-- Evaluates all (prefill, decode) pairs, selects optimal via blended headroom
+- Prefill pods scored independently by prefill predictor (TTFT headroom)
+- Decode pods scored independently by decode predictor (TTFT+TPOT headroom)
 
 **Example 3: Long request without SLO (fallback)**
 - Input: 500 tokens, 20% prefix cache hit, no SLO headers
@@ -175,14 +167,14 @@ schedulingProfiles:
 ## Metrics
 
 ```prometheus
-# Pair selection outcomes
-llm_d_inference_scheduler_pd_slo_pair_selections_total{outcome="positive_headroom|negative_headroom"}
+# Pod selection outcomes
+llm_d_inference_scheduler_pd_slo_pod_selections_total{pod_type="prefill|decode", outcome="positive_headroom|negative_headroom"}
 
 # Predictor calls
 llm_d_inference_scheduler_pd_slo_predictor_calls_total{predictor="prefill|decode", status="success|error"}
 
-# Total pairs evaluated
-llm_d_inference_scheduler_pd_slo_pairs_evaluated_total
+# Telemetry collection
+llm_d_inference_scheduler_pd_slo_telemetry_recorded_total{pod_type="prefill|decode"}
 ```
 
 ## Troubleshooting
@@ -193,9 +185,9 @@ llm_d_inference_scheduler_pd_slo_pairs_evaluated_total
 | Predictor errors | Sidecars running? | Check `kubectl get pods -n llm-d`, verify 5 containers (1 EPP + 4 sidecars) |
 | All decode-only | `pdThreshold` too high? | Reduce to 5 or 0 (always PD) |
 | All negative headroom | SLOs too strict? | Relax targets or scale up pods |
-| Fallback used | Pair optimizer skipped? | Verify both profiles ran, check EPP logs for "PD-SLO optimization" |
+| Optimizer not scoring | Plugin configured? | Verify both profiles include `pd-slo-optimizer`, check EPP logs for "Decode-only scoring mode" or "Prefill-only scoring mode" |
+| No telemetry collected | Requestcontrol hooks working? | Check EPP logs for "Received prefill TTFT from sidecar" and "Sent prefill/decode TTFT telemetry" |
 
 ## Status
 
-**Current**: Uses fallback (best pod from each profile). Pair optimizer skipped due to sequential profile execution.
-**Future**: Fix joint optimization or replace with heuristic-based selection if fallback proves sufficient.
+**Current**: Independent optimization mode - prefill and decode pods are scored separately using trained latency predictors. Joint optimization is not implemented.

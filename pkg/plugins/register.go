@@ -23,5 +23,5 @@ func RegisterAllPlugins() {
 	plugins.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugins.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
 	plugins.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
-	plugins.Register(scorer.PdSLOPairOptimizerType, scorer.PdSLOPairOptimizerFactory)
+	plugins.Register(scorer.PdSLOOptimizerType, scorer.PdSLOOptimizerFactory)
 }
