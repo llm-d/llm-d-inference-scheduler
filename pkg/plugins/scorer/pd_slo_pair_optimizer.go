@@ -597,6 +597,18 @@ func (s *PdSLOPairOptimizer) ResponseReceived(
 			"prefillPod", telCtx.prefillPod)
 	} else {
 		telCtx.decodeStart = time.Now()
+
+		// Check if decode response includes prefill timing from sidecar
+		if prefillTTFTHeader := response.Headers.Get("x-prefill-ttft-ms"); prefillTTFTHeader != "" {
+			if prefillTTFT, err := strconv.ParseFloat(prefillTTFTHeader, 64); err == nil {
+				// Send prefill telemetry to training server
+				s.recordPrefillTTFT(ctx, request, telCtx, prefillTTFT)
+				logger.Info("Received prefill TTFT from sidecar",
+					"requestID", requestID,
+					"prefillTTFT_ms", prefillTTFT)
+			}
+		}
+
 		logger.Info("Decode response received",
 			"requestID", requestID,
 			"pod", targetPod.NamespacedName.String(),

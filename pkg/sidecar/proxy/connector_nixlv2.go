@@ -18,9 +18,11 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -105,7 +107,11 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	s.logger.V(4).Info("sending prefill request", "to", prefillPodHostPort)
 	s.logger.V(5).Info("Prefill request", "body", string(pbody))
 	pw := &bufferedResponseWriter{}
+
+	// Measure prefill timing
+	prefillStartTime := time.Now()
 	prefillHandler.ServeHTTP(pw, preq)
+	prefillDurationMs := time.Since(prefillStartTime).Milliseconds()
 
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
 		s.logger.Error(err, "request failed", "code", pw.statusCode)
@@ -121,6 +127,8 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		}
 		return
 	}
+
+	s.logger.V(4).Info("prefill completed", "durationMs", prefillDurationMs)
 
 	// 3. Verify response
 
@@ -167,9 +175,12 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// 2. Forward to local decoder.
 
+	// Add prefill timing to response headers so EPP can collect telemetry
+	dreq.Header.Set("x-prefill-ttft-ms", fmt.Sprintf("%d", prefillDurationMs))
+
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
 	if !s.forwardDataParallel || !s.dataParallelHandler(w, dreq) {
-		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
+		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host, "prefill-ttft-ms", prefillDurationMs)
 		s.decoderProxy.ServeHTTP(w, dreq)
 	}
 }
