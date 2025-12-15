@@ -122,7 +122,7 @@ func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (bool, error)
 	return false, nil
 }
 
-// prefill routes a request to a preill node
+// prefill routes a request to a prefill node
 func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, completionRequest map[string]any) error {
 	ctx := r.Context()
 	preq := r.Clone(ctx)
