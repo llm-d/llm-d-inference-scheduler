@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -583,13 +584,23 @@ func (s *PdSLOPairOptimizer) ResponseReceived(
 
 	telCtx := getTelemetryContext(requestID)
 
+	podAddr := net.JoinHostPort(targetPod.Address, targetPod.Port)
+	isPrefill := isPrefillPod(targetPod, telCtx.prefillPod)
+
 	// Track which phase this response is from
-	if isPrefillPod(targetPod, telCtx.prefillPod) {
+	if isPrefill {
 		telCtx.prefillStart = time.Now()
-		logger.V(logutil.DEBUG).Info("Prefill response received", "requestID", requestID, "pod", targetPod.NamespacedName.String())
+		logger.Info("Prefill response received",
+			"requestID", requestID,
+			"pod", targetPod.NamespacedName.String(),
+			"podAddr", podAddr,
+			"prefillPod", telCtx.prefillPod)
 	} else {
 		telCtx.decodeStart = time.Now()
-		logger.V(logutil.DEBUG).Info("Decode response received", "requestID", requestID, "pod", targetPod.NamespacedName.String())
+		logger.Info("Decode response received",
+			"requestID", requestID,
+			"pod", targetPod.NamespacedName.String(),
+			"podAddr", podAddr)
 	}
 }
 
@@ -656,24 +667,36 @@ func (s *PdSLOPairOptimizer) ResponseComplete(
 	logger := log.FromContext(ctx)
 	requestID := request.Headers[requtil.RequestIdHeaderKey]
 	if requestID == "" {
+		logger.Info("ResponseComplete: no request ID")
 		return
 	}
 
 	telCtx := getTelemetryContext(requestID)
 
+	podAddr := net.JoinHostPort(targetPod.Address, targetPod.Port)
+	logger.Info("ResponseComplete called",
+		"requestID", requestID,
+		"targetPod", targetPod.NamespacedName.String(),
+		"podAddr", podAddr,
+		"prefillPod", telCtx.prefillPod,
+		"isPrefill", isPrefillPod(targetPod, telCtx.prefillPod))
+
 	// If this is prefill completion, record prefill TTFT
 	if isPrefillPod(targetPod, telCtx.prefillPod) {
+		logger.Info("Processing prefill completion", "requestID", requestID)
 		if !telCtx.prefillStart.IsZero() {
 			prefillTTFT := time.Since(telCtx.prefillStart).Milliseconds()
 			s.recordPrefillTTFT(ctx, request, telCtx, float64(prefillTTFT))
 
-			logger.V(logutil.DEBUG).Info("Prefill complete",
+			logger.Info("Prefill complete",
 				"requestID", requestID,
 				"prefillTTFT_ms", prefillTTFT)
+		} else {
+			logger.Info("Prefill completion but prefillStart is zero", "requestID", requestID)
 		}
 	} else {
 		// Decode completion - cleanup
-		logger.V(logutil.DEBUG).Info("Decode complete",
+		logger.Info("Decode complete",
 			"requestID", requestID,
 			"totalTokens", telCtx.tokenCount)
 		deleteTelemetryContext(requestID)
