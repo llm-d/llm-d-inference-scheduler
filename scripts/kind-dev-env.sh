@@ -179,14 +179,16 @@ kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Rea
 # Load Container Images
 # ------------------------------------------------------------------------------
 
-# Load the vllm simulator image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${VLLM_SIMULATOR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	if docker image inspect "${VLLM_SIMULATOR_IMAGE}" > /dev/null 2>&1; then
-		echo "INFO: Loading image into KIND cluster..."
-		kind --name ${CLUSTER_NAME} load docker-image ${VLLM_SIMULATOR_IMAGE}
-	fi
+# Load the vllm simulator image into the cluster (only if it's a locally built image)
+if [ -n "$(${CONTAINER_RUNTIME} images -q "${VLLM_SIMULATOR_IMAGE}")" ]; then
+    if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+        podman save ${VLLM_SIMULATOR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+    else
+        if docker image inspect "${VLLM_SIMULATOR_IMAGE}" > /dev/null 2>&1; then
+            echo "INFO: Loading image into KIND cluster..."
+            kind --name ${CLUSTER_NAME} load docker-image ${VLLM_SIMULATOR_IMAGE}
+        fi
+    fi
 fi
 
 # Load the ext_proc endpoint-picker image into the cluster
