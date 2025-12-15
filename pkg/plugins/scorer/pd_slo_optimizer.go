@@ -216,19 +216,23 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 		}
 
 		// Predict decode TTFT and TPOT
-		inputTokens := float64(getInputTokenLength(request))
-		predictedTTFT, predictedTPOT, err := s.predictors.DecodePredictor.PredictLatency(
-			metrics.KVCacheUsagePercent,
-			inputTokens,
-			float64(metrics.WaitingQueueSize),
-			float64(metrics.RunningRequestsSize),
-			0, // prefix cache score
-		)
+		inputTokens := getInputTokenLength(request)
+		predReq := latencypredictor.PredictionRequest{
+			KVCachePercentage:  metrics.KVCacheUsagePercent,
+			InputTokenLength:   inputTokens,
+			NumRequestWaiting:  metrics.WaitingQueueSize,
+			NumRequestRunning:  metrics.RunningRequestsSize,
+			PrefixCacheScore:   0,
+		}
 
+		predResp, err := s.predictors.DecodePredictor.Predict(ctx, predReq)
 		if err != nil {
 			logger.V(logutil.DEBUG).Error(err, "Failed to predict decode latency", "pod", pod.GetPod().String())
 			continue
 		}
+
+		predictedTTFT := predResp.TTFT
+		predictedTPOT := predResp.TPOT
 
 		// Calculate headroom
 		ttftHeadroom := bufferedTTFTSLO - predictedTTFT
@@ -295,19 +299,22 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 		}
 
 		// Predict prefill TTFT (TPOT is always 0 for prefill)
-		inputTokens := float64(getInputTokenLength(request))
-		predictedTTFT, _, err := s.predictors.PrefillPredictor.PredictLatency(
-			metrics.KVCacheUsagePercent,
-			inputTokens,
-			float64(metrics.WaitingQueueSize),
-			float64(metrics.RunningRequestsSize),
-			0, // prefix cache score
-		)
+		inputTokens := getInputTokenLength(request)
+		predReq := latencypredictor.PredictionRequest{
+			KVCachePercentage: metrics.KVCacheUsagePercent,
+			InputTokenLength:  inputTokens,
+			NumRequestWaiting: metrics.WaitingQueueSize,
+			NumRequestRunning: metrics.RunningRequestsSize,
+			PrefixCacheScore:  0,
+		}
 
+		predResp, err := s.predictors.PrefillPredictor.Predict(ctx, predReq)
 		if err != nil {
 			logger.V(logutil.DEBUG).Error(err, "Failed to predict prefill latency", "pod", pod.GetPod().String())
 			continue
 		}
+
+		predictedTTFT := predResp.TTFT
 
 		// Calculate headroom
 		ttftHeadroom := bufferedTTFTSLO - predictedTTFT

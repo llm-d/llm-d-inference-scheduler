@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,4 +146,13 @@ func isPrefillPod(pod *backend.Pod, prefillAddr string) bool {
 	// Construct pod address from pod info
 	podAddress := net.JoinHostPort(pod.Address, pod.Port)
 	return podAddress == prefillAddr
+}
+
+// getInputTokenLength extracts input token count from request
+// Uses word count as approximation (same as slo-aware-router)
+func getInputTokenLength(request *schedulingtypes.LLMRequest) int {
+	if request.Body == nil || request.Body.Completions.Prompt == "" {
+		return 0
+	}
+	return len(strings.Fields(request.Body.Completions.Prompt))
 }
