@@ -129,9 +129,7 @@ var _ = ginkgo.Describe("InferencePool", func() {
 
 	ginkgo.AfterEach(func() {
 		ginkgo.By("Deleting the InferenceObjective test resource.")
-		cleanupInferModelResources()
-
-		// Wait for InferenceObjective to be fully deleted.
+		cleanupInferObjectiveResources()
 		gomega.Eventually(func() error {
 			err := testConfig.K8sClient.Get(testConfig.Context, types.NamespacedName{Namespace: infObjective.Namespace, Name: infObjective.Name}, infObjective)
 			if err == nil {
