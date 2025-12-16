@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"math/rand"
 	"net"
 	"strconv"
@@ -49,6 +48,12 @@ const (
 
 // Compile-time type assertion
 var _ framework.Scorer = &PdSLOOptimizer{}
+
+// scoredPod holds a pod with its calculated score for selection
+type scoredPod struct {
+	pod   schedulingtypes.Pod
+	score float64
+}
 
 // pdSLOOptimizerConfig holds configuration parameters for the optimizer
 type pdSLOOptimizerConfig struct {
@@ -217,10 +222,6 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 	bufferedTPOTSLO := tpotSLO * s.config.SLOBufferFactor
 
 	// Track scored pods for epsilon-greedy selection
-	type scoredPod struct {
-		pod   schedulingtypes.Pod
-		score float64
-	}
 	var validPods []scoredPod
 	bestScore := -1e9
 	bestIdx := -1
@@ -347,10 +348,6 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
 
 	// Track scored pods for epsilon-greedy selection
-	type scoredPod struct {
-		pod   schedulingtypes.Pod
-		score float64
-	}
 	var validPods []scoredPod
 	bestScore := -1e9
 	bestIdx := -1
@@ -455,10 +452,7 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 
 // weightedRandomSelect selects a pod index with probability proportional to its score.
 // Pods with higher scores (better headroom) have higher probability of being selected.
-func (s *PdSLOOptimizer) weightedRandomSelect(pods []struct {
-	pod   schedulingtypes.Pod
-	score float64
-}) int {
+func (s *PdSLOOptimizer) weightedRandomSelect(pods []scoredPod) int {
 	if len(pods) == 0 {
 		return -1
 	}
