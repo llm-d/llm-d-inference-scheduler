@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,22 +51,28 @@ const (
 // Compile-time type assertion
 var _ framework.Scorer = &PdSLOOptimizer{}
 
-// scoredPod holds a pod with its calculated score for selection
-type scoredPod struct {
-	pod   schedulingtypes.Pod
-	score float64
-}
-
 // pdSLOOptimizerConfig holds configuration parameters for the optimizer
 type pdSLOOptimizerConfig struct {
-	SLOBufferFactor float64 `json:"sloBufferFactor"` // Safety margin for SLOs (default: 0.9)
-	Epsilon         float64 `json:"epsilon"`         // Exploration rate for epsilon-greedy (default: 0.1)
+	SLOBufferFactor       float64 `json:"sloBufferFactor"`       // Safety margin for SLOs (default: 0.9)
+	Epsilon               float64 `json:"epsilon"`               // Exploration rate for epsilon-greedy (default: 0.1)
+	NegHeadroomTTFTWeight float64 `json:"negHeadroomTTFTWeight"` // Weight for TTFT deficit in negative headroom (default: 0.8)
+	NegHeadroomTPOTWeight float64 `json:"negHeadroomTPOTWeight"` // Weight for TPOT deficit in negative headroom (default: 0.2)
+	HeadroomTTFTWeight    float64 `json:"headroomTTFTWeight"`    // Weight for TTFT in positive headroom (default: 0.8)
+	HeadroomTPOTWeight    float64 `json:"headroomTPOTWeight"`    // Weight for TPOT in positive headroom (default: 0.2)
+	EpsilonExploreNeg     float64 `json:"epsilonExploreNeg"`     // Exploration rate for negative headroom tier (default: 0.01)
+	HeadroomStrategy      string  `json:"headroomStrategy"`      // Selection strategy: "least", "most", "weighted" (default: "weighted")
 }
 
 // Default configuration values
 var defaultPdSLOConfig = pdSLOOptimizerConfig{
-	SLOBufferFactor: 0.9,
-	Epsilon:         0.1, // 10% exploration
+	SLOBufferFactor:       0.9,
+	Epsilon:               0.1,  // 10% exploration for weighted random
+	NegHeadroomTTFTWeight: 0.8,  // TTFT more important when violating SLOs
+	NegHeadroomTPOTWeight: 0.2,  // TPOT less important in negative tier
+	HeadroomTTFTWeight:    0.8,  // TTFT weight for positive headroom
+	HeadroomTPOTWeight:    0.2,  // TPOT weight for positive headroom
+	EpsilonExploreNeg:     0.01, // 1% exploration in negative tier
+	HeadroomStrategy:      "weighted",
 }
 
 // validate checks if the configuration is valid
@@ -76,17 +83,30 @@ func (c *pdSLOOptimizerConfig) validate() error {
 	if c.Epsilon < 0 || c.Epsilon > 1.0 {
 		return fmt.Errorf("epsilon must be between 0 and 1.0, got %f", c.Epsilon)
 	}
+	if c.NegHeadroomTTFTWeight < 0 || c.NegHeadroomTPOTWeight < 0 ||
+		c.HeadroomTTFTWeight < 0 || c.HeadroomTPOTWeight < 0 {
+		return fmt.Errorf("all headroom weights must be >= 0")
+	}
+	if c.EpsilonExploreNeg < 0 || c.EpsilonExploreNeg > 1.0 {
+		return fmt.Errorf("epsilonExploreNeg must be between 0 and 1.0, got %f", c.EpsilonExploreNeg)
+	}
+	validStrategies := map[string]bool{"least": true, "most": true, "weighted": true}
+	if c.HeadroomStrategy != "" && !validStrategies[c.HeadroomStrategy] {
+		return fmt.Errorf("headroomStrategy must be one of: least, most, weighted; got %s", c.HeadroomStrategy)
+	}
 	return nil
 }
 
 // PdSLOOptimizer implements independent prefill and decode pod optimization
 // based on SLO headroom calculations using trained latency predictors
 type PdSLOOptimizer struct {
-	typedName   plugins.TypedName
-	config      pdSLOOptimizerConfig
-	predictors  *predictors.PDPredictorSet
-	rand        *rand.Rand
-	initialized bool
+	typedName           plugins.TypedName
+	config              pdSLOOptimizerConfig
+	predictors          *predictors.PDPredictorSet
+	rand                *rand.Rand
+	initialized         bool
+	runningRequestLists map[string]*requestPriorityQueue // pod name -> running requests
+	mu                  sync.RWMutex                      // protects runningRequestLists
 }
 
 // PdSLOOptimizerFactory creates a new PdSLOOptimizer instance
@@ -129,11 +149,12 @@ func PdSLOOptimizerFactory(name string, rawParameters json.RawMessage, handle pl
 func NewPdSLOOptimizer(config pdSLOOptimizerConfig, predictors *predictors.PDPredictorSet) *PdSLOOptimizer {
 	source := rand.NewSource(time.Now().UnixNano())
 	return &PdSLOOptimizer{
-		typedName:   plugins.TypedName{Type: PdSLOOptimizerType},
-		config:      config,
-		predictors:  predictors,
-		rand:        rand.New(source),
-		initialized: true,
+		typedName:           plugins.TypedName{Type: PdSLOOptimizerType},
+		config:              config,
+		predictors:          predictors,
+		rand:                rand.New(source),
+		initialized:         true,
+		runningRequestLists: make(map[string]*requestPriorityQueue),
 	}
 }
 
@@ -220,18 +241,33 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 
 	scores := make(map[schedulingtypes.Pod]float64)
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
-	bufferedTPOTSLO := tpotSLO * s.config.SLOBufferFactor
 
-	// Track scored pods for epsilon-greedy selection
-	var validPods []scoredPod
-	bestScore := -1e9
-	bestIdx := -1
+	// Track pods with headroom breakdown
+	var candidatePods []podWithHeadroom
 
 	for _, pod := range decodePods {
 		metrics := pod.GetMetrics()
 		if metrics == nil {
 			logger.V(logutil.DEBUG).Info("No metrics for decode pod", "pod", pod.GetPod().String())
 			continue
+		}
+
+		// Check per-pod min TPOT SLO from running requests
+		podMinTPOTSLO := s.getPodMinTPOTSLO(pod)
+		bufferedTPOTSLO := tpotSLO * s.config.SLOBufferFactor
+
+		// Adjust buffered TPOT SLO to respect running requests
+		if podMinTPOTSLO > 0 {
+			if podMinTPOTSLO < tpotSLO {
+				logger.V(logutil.DEBUG).Info("Pod min TPOT SLO is stricter than request SLO",
+					"pod", pod.GetPod().String(),
+					"podMinTPOTSLO", podMinTPOTSLO,
+					"requestTPOTSLO", tpotSLO)
+			}
+			// Use the stricter (minimum) of the two
+			if podMinTPOTSLO*s.config.SLOBufferFactor < bufferedTPOTSLO {
+				bufferedTPOTSLO = podMinTPOTSLO * s.config.SLOBufferFactor
+			}
 		}
 
 		// Predict decode TTFT and TPOT
@@ -263,9 +299,6 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypeDecode, schedulermetrics.MetricTypeTTFT, ttftHeadroom)
 		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypeDecode, schedulermetrics.MetricTypeTPOT, tpotHeadroom)
 
-		// Combined score: favor pods with positive headroom
-		score := ttftHeadroom + tpotHeadroom
-
 		logger.Info("Decode pod scored",
 			"pod", pod.GetPod().String(),
 			"predictedTTFT", predictedTTFT,
@@ -273,58 +306,45 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 			"ttftSLO", bufferedTTFTSLO,
 			"tpotSLO", bufferedTPOTSLO,
 			"ttftHeadroom", ttftHeadroom,
-			"tpotHeadroom", tpotHeadroom,
-			"score", score)
+			"tpotHeadroom", tpotHeadroom)
 
-		// Track this pod as a valid candidate
-		validPods = append(validPods, scoredPod{pod: pod, score: score})
-		if score > bestScore {
-			bestScore = score
-			bestIdx = len(validPods) - 1
-		}
+		candidatePods = append(candidatePods, podWithHeadroom{
+			pod:          pod,
+			ttftHeadroom: ttftHeadroom,
+			tpotHeadroom: tpotHeadroom,
+			totalScore:   ttftHeadroom + tpotHeadroom,
+		})
 	}
 
-	if len(validPods) == 0 {
+	if len(candidatePods) == 0 {
 		return nil
 	}
 
-	// Epsilon-greedy selection
-	var selectedIdx int
-	var selectedPod schedulingtypes.Pod
-	var selectedScore float64
-
-	if s.rand.Float64() < s.config.Epsilon {
-		// Explore: weighted random selection based on scores
-		selectedIdx = s.weightedRandomSelect(validPods)
-		selectedPod = validPods[selectedIdx].pod
-		selectedScore = validPods[selectedIdx].score
-		logger.Info("Epsilon-greedy EXPLORE: selected weighted random decode pod",
-			"pod", selectedPod.GetPod().String(),
-			"score", selectedScore,
-			"epsilon", s.config.Epsilon)
-	} else {
-		// Exploit: select best pod
-		selectedIdx = bestIdx
-		selectedPod = validPods[bestIdx].pod
-		selectedScore = validPods[bestIdx].score
-		logger.Info("Epsilon-greedy EXPLOIT: selected best decode pod",
-			"pod", selectedPod.GetPod().String(),
-			"score", selectedScore)
+	// Tiered selection: positive vs negative headroom
+	selectedPod := s.selectPodTiered(ctx, candidatePods)
+	if selectedPod == nil {
+		return nil
 	}
 
 	// Record selection outcome metric
 	outcome := schedulermetrics.HeadroomOutcomePositive
-	if selectedScore < 0 {
+	if selectedPod.totalScore < 0 {
 		outcome = schedulermetrics.HeadroomOutcomeNegative
 	}
 	schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypeDecode, outcome)
 
+	logger.Info("Selected decode pod",
+		"pod", selectedPod.pod.GetPod().String(),
+		"ttftHeadroom", selectedPod.ttftHeadroom,
+		"tpotHeadroom", selectedPod.tpotHeadroom,
+		"totalScore", selectedPod.totalScore)
+
 	// Assign scores: 1.0 to selected pod, 0.0 to others
-	for _, sp := range validPods {
-		if sp.pod.GetPod().String() == selectedPod.GetPod().String() {
-			scores[sp.pod] = 1.0
+	for _, p := range candidatePods {
+		if p.pod.GetPod().String() == selectedPod.pod.GetPod().String() {
+			scores[p.pod] = 1.0
 		} else {
-			scores[sp.pod] = 0.0
+			scores[p.pod] = 0.0
 		}
 	}
 
@@ -348,10 +368,8 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 	scores := make(map[schedulingtypes.Pod]float64)
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
 
-	// Track scored pods for epsilon-greedy selection
-	var validPods []scoredPod
-	bestScore := -1e9
-	bestIdx := -1
+	// Track pods with headroom breakdown
+	var candidatePods []podWithHeadroom
 
 	for _, pod := range prefillPods {
 		metrics := pod.GetMetrics()
@@ -386,116 +404,56 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 		// Record actual headroom value for observability
 		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypePrefill, schedulermetrics.MetricTypeTTFT, ttftHeadroom)
 
-		// Score is just the headroom
-		score := ttftHeadroom
-
 		logger.Info("Prefill pod scored",
 			"pod", pod.GetPod().String(),
 			"predictedTTFT", predictedTTFT,
 			"ttftSLO", bufferedTTFTSLO,
-			"ttftHeadroom", ttftHeadroom,
-			"score", score)
+			"ttftHeadroom", ttftHeadroom)
 
-		// Track this pod as a valid candidate
-		validPods = append(validPods, scoredPod{pod: pod, score: score})
-		if score > bestScore {
-			bestScore = score
-			bestIdx = len(validPods) - 1
-		}
+		// For prefill, TPOT is N/A (prefill doesn't generate output tokens)
+		// Set tpotHeadroom to infinity to indicate it's always satisfied
+		candidatePods = append(candidatePods, podWithHeadroom{
+			pod:          pod,
+			ttftHeadroom: ttftHeadroom,
+			tpotHeadroom: 1e9, // Infinity - TPOT not applicable for prefill
+			totalScore:   ttftHeadroom,
+		})
 	}
 
-	if len(validPods) == 0 {
+	if len(candidatePods) == 0 {
 		return nil
 	}
 
-	// Epsilon-greedy selection
-	var selectedIdx int
-	var selectedPod schedulingtypes.Pod
-	var selectedScore float64
-
-	if s.rand.Float64() < s.config.Epsilon {
-		// Explore: weighted random selection based on scores
-		selectedIdx = s.weightedRandomSelect(validPods)
-		selectedPod = validPods[selectedIdx].pod
-		selectedScore = validPods[selectedIdx].score
-		logger.Info("Epsilon-greedy EXPLORE: selected weighted random prefill pod",
-			"pod", selectedPod.GetPod().String(),
-			"score", selectedScore,
-			"epsilon", s.config.Epsilon)
-	} else {
-		// Exploit: select best pod
-		selectedIdx = bestIdx
-		selectedPod = validPods[bestIdx].pod
-		selectedScore = validPods[bestIdx].score
-		logger.Info("Epsilon-greedy EXPLOIT: selected best prefill pod",
-			"pod", selectedPod.GetPod().String(),
-			"score", selectedScore)
+	// Tiered selection: positive vs negative headroom (based on TTFT only for prefill)
+	selectedPod := s.selectPodTiered(ctx, candidatePods)
+	if selectedPod == nil {
+		return nil
 	}
 
 	// Record selection outcome metric
 	outcome := schedulermetrics.HeadroomOutcomePositive
-	if selectedScore < 0 {
+	if selectedPod.ttftHeadroom < 0 {
 		outcome = schedulermetrics.HeadroomOutcomeNegative
 	}
 	schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypePrefill, outcome)
 
+	logger.Info("Selected prefill pod",
+		"pod", selectedPod.pod.GetPod().String(),
+		"ttftHeadroom", selectedPod.ttftHeadroom,
+		"totalScore", selectedPod.totalScore)
+
 	// Assign scores: 1.0 to selected pod, 0.0 to others
-	for _, sp := range validPods {
-		if sp.pod.GetPod().String() == selectedPod.GetPod().String() {
-			scores[sp.pod] = 1.0
+	for _, p := range candidatePods {
+		if p.pod.GetPod().String() == selectedPod.pod.GetPod().String() {
+			scores[p.pod] = 1.0
 		} else {
-			scores[sp.pod] = 0.0
+			scores[p.pod] = 0.0
 		}
 	}
 
 	return scores
 }
 
-// weightedRandomSelect selects a pod index with probability proportional to its score.
-// Pods with higher scores (better headroom) have higher probability of being selected.
-func (s *PdSLOOptimizer) weightedRandomSelect(pods []scoredPod) int {
-	if len(pods) == 0 {
-		return -1
-	}
-	if len(pods) == 1 {
-		return 0
-	}
-
-	// Find minimum score to shift all scores to positive
-	minScore := pods[0].score
-	for _, p := range pods {
-		if p.score < minScore {
-			minScore = p.score
-		}
-	}
-
-	// Shift scores to be positive (add 1 to avoid zero weights)
-	// weight[i] = score[i] - minScore + 1
-	weights := make([]float64, len(pods))
-	totalWeight := 0.0
-	for i, p := range pods {
-		weights[i] = p.score - minScore + 1.0
-		totalWeight += weights[i]
-	}
-
-	// Handle edge case where all weights are effectively zero
-	if totalWeight <= 0 {
-		return s.rand.Intn(len(pods))
-	}
-
-	// Weighted random selection using cumulative probability
-	randValue := s.rand.Float64() * totalWeight
-	cumulative := 0.0
-	for i, weight := range weights {
-		cumulative += weight
-		if randValue <= cumulative {
-			return i
-		}
-	}
-
-	// Fallback (should not reach here due to floating point precision)
-	return len(pods) - 1
-}
 
 // Compile-time assertions for requestcontrol interfaces
 var _ requestcontrol.PreRequest = &PdSLOOptimizer{}
@@ -512,16 +470,22 @@ func (s *PdSLOOptimizer) PreRequest(
 	logger := log.FromContext(ctx)
 	logger.Info("PdSLOOptimizer.PreRequest called")
 
-	// Only track if we have both prefill and decode pods (PD mode active)
-	prefillAddr := request.Headers[common.PrefillPodHeader]
-	if prefillAddr == "" {
-		logger.V(logutil.DEBUG).Info("No prefill header, skipping PD telemetry")
+	requestID := request.Headers[requtil.RequestIdHeaderKey]
+	if requestID == "" {
+		logger.V(logutil.DEBUG).Info("No request ID")
 		return
 	}
 
-	requestID := request.Headers[requtil.RequestIdHeaderKey]
-	if requestID == "" {
-		logger.V(logutil.DEBUG).Info("No request ID, skipping PD telemetry")
+	// Track running requests for per-pod min TPOT SLO checking
+	ttftSLO, tpotSLO, err := parseSLOHeaders(request)
+	if err == nil && (ttftSLO > 0 || tpotSLO > 0) {
+		s.trackRunningRequest(ctx, requestID, schedulingResult, ttftSLO, tpotSLO)
+	}
+
+	// Only track telemetry if we have both prefill and decode pods (PD mode active)
+	prefillAddr := request.Headers[common.PrefillPodHeader]
+	if prefillAddr == "" {
+		logger.V(logutil.DEBUG).Info("No prefill header, skipping PD telemetry")
 		return
 	}
 
@@ -560,6 +524,48 @@ func (s *PdSLOOptimizer) PreRequest(
 		"prefillProfile", telCtx.prefillProfileName,
 		"decodeProfile", telCtx.decodeProfileName,
 		"cachedMetricsCount", len(telCtx.lastSeenMetrics))
+}
+
+// trackRunningRequest adds a request to the running request queue for the target pod
+func (s *PdSLOOptimizer) trackRunningRequest(
+	ctx context.Context,
+	requestID string,
+	schedulingResult *schedulingtypes.SchedulingResult,
+	ttftSLO, tpotSLO float64,
+) {
+	logger := log.FromContext(ctx)
+
+	if schedulingResult == nil || len(schedulingResult.ProfileResults) == 0 {
+		return
+	}
+
+	// Get primary profile (decode pod for PD, or single pod for non-PD)
+	primaryProfile := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
+	if primaryProfile == nil || len(primaryProfile.TargetPods) == 0 {
+		return
+	}
+
+	targetPod := primaryProfile.TargetPods[0].GetPod().NamespacedName.String()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.runningRequestLists[targetPod] == nil {
+		s.runningRequestLists[targetPod] = newRequestPriorityQueue()
+	}
+
+	s.runningRequestLists[targetPod].Push(&runningRequest{
+		requestID: requestID,
+		ttft:      ttftSLO,
+		tpot:      tpotSLO,
+	})
+
+	logger.V(logutil.DEBUG).Info("Tracked running request",
+		"requestID", requestID,
+		"pod", targetPod,
+		"ttftSLO", ttftSLO,
+		"tpotSLO", tpotSLO,
+		"queueSize", s.runningRequestLists[targetPod].GetSize())
 }
 
 // ResponseReceived is called when response headers are received
@@ -721,6 +727,18 @@ func (s *PdSLOOptimizer) ResponseComplete(
 		logger.Info("ResponseComplete: no request ID")
 		return
 	}
+
+	// Remove request from running queue
+	podKey := targetPod.NamespacedName.String()
+	s.mu.Lock()
+	if queue, exists := s.runningRequestLists[podKey]; exists {
+		queue.Remove(requestID)
+		logger.V(logutil.DEBUG).Info("Removed request from running queue",
+			"requestID", requestID,
+			"pod", podKey,
+			"remainingRequests", queue.GetSize())
+	}
+	s.mu.Unlock()
 
 	telCtx := getTelemetryContext(requestID)
 

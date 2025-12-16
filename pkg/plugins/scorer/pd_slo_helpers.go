@@ -220,3 +220,62 @@ func getLatestMetricsForProfile(telCtx *pdTelemetryContext, profileName string) 
 
 	return nil, fmt.Errorf("no metrics found for profile %s", profileName)
 }
+
+// ============================================================================
+// Running Request Priority Queue (for per-pod min TPOT SLO tracking)
+// ============================================================================
+
+// runningRequest tracks SLO requirements for a running request on a pod
+type runningRequest struct {
+	requestID string
+	ttft      float64 // TTFT SLO
+	tpot      float64 // TPOT SLO
+}
+
+// requestPriorityQueue maintains running requests sorted by strictest TPOT SLO
+type requestPriorityQueue struct {
+	requests []*runningRequest
+}
+
+// newRequestPriorityQueue creates a new priority queue
+func newRequestPriorityQueue() *requestPriorityQueue {
+	return &requestPriorityQueue{
+		requests: make([]*runningRequest, 0),
+	}
+}
+
+// Push adds a request to the queue
+func (q *requestPriorityQueue) Push(req *runningRequest) {
+	q.requests = append(q.requests, req)
+}
+
+// Remove removes a request by ID
+func (q *requestPriorityQueue) Remove(requestID string) {
+	for i, req := range q.requests {
+		if req.requestID == requestID {
+			q.requests = append(q.requests[:i], q.requests[i+1:]...)
+			return
+		}
+	}
+}
+
+// Peek returns the request with strictest (minimum) TPOT SLO
+func (q *requestPriorityQueue) Peek() *runningRequest {
+	if len(q.requests) == 0 {
+		return nil
+	}
+
+	// Find minimum TPOT SLO
+	minReq := q.requests[0]
+	for _, req := range q.requests[1:] {
+		if req.tpot > 0 && (minReq.tpot == 0 || req.tpot < minReq.tpot) {
+			minReq = req
+		}
+	}
+	return minReq
+}
+
+// GetSize returns the number of running requests
+func (q *requestPriorityQueue) GetSize() int {
+	return len(q.requests)
+}
