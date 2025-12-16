@@ -15,7 +15,7 @@ type Flow interface {
 }
 
 // TODO: how to handle retries here?
-type RequestPolicy interface {
+type RequestMergePolicy interface {
 	MergeRequestChannels(channels []RequestChannel) RequestChannel
 }
 
@@ -26,6 +26,7 @@ type RequestMessage struct {
 	Payload         map[string]any `json:"payload"`
 }
 
+// TODO: decide about metadata
 type RequestChannel struct {
 	Channel  chan RequestMessage
 	Metadata map[string]any

@@ -17,12 +17,12 @@ import (
 )
 
 var (
-	redisAddr = flag.String("redis.addr", "localhost:16379", "address of the Redis server")
+	redisAddr = flag.String("redis.addr", "localhost:6379", "address of the Redis server")
 
-	// TODO: externalize
-	requestQueueName = "batch-queue"
+	// TODO: support multiple request queues with metadata (for policy)
+	requestQueueName = flag.String("redis.request-queue-name", "batch-queue", "name of the Redis queue for request messages")
 	retryQueueName   = flag.String("redis.retry-queue-name", "batch-sortedset-retry", "name of the Redis sorted set for retry messages")
-	resultQueueName  = "batch-queue-result"
+	resultQueueName  = flag.String("redis.result-queue-name", "batch-queue-result", "name of the Redis queue for result messages")
 )
 
 // TODO: think about what to do if Redis is down
@@ -54,13 +54,13 @@ func NewRedisMQFlow() *RedisMQFlow {
 }
 
 func (r *RedisMQFlow) Start(ctx context.Context) {
-	go requestWorker(ctx, r.rdb, r.requestChannel, requestQueueName)
+	go requestWorker(ctx, r.rdb, r.requestChannel, *requestQueueName)
 
 	go addMsgToRetryWorker(ctx, r.rdb, r.retryChannel, *retryQueueName)
 
 	go retryWorker(ctx, r.rdb, r.requestChannel)
 
-	go resultWorker(ctx, r.rdb, r.resultChannel, resultQueueName)
+	go resultWorker(ctx, r.rdb, r.resultChannel, *resultQueueName)
 }
 func (r *RedisMQFlow) RequestChannels() []batch.RequestChannel {
 	return []batch.RequestChannel{{Channel: r.requestChannel, Metadata: map[string]any{}}}

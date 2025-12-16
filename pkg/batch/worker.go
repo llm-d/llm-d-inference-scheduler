@@ -29,7 +29,10 @@ func Worker(ctx context.Context, endpoint string, httpClient *http.Client, reque
 			logger.V(logutil.DEFAULT).Info("Worker finishing.")
 			return
 		case msg := <-requestChannel:
-			metrics.BatchReqs.Inc() // Increment batch request counter TODO: here? this includes retries
+			if msg.RetryCount == 0 {
+				// Only count first attempt as a new request.
+				metrics.BatchReqs.Inc()
+			}
 			payloadBytes := parseAndValidateRequest(resultChannel, msg)
 			if payloadBytes == nil {
 				continue

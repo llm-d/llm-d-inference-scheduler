@@ -2,7 +2,7 @@ package batch
 
 import "reflect"
 
-func NewRandomRobinPolicy() RequestPolicy {
+func NewRandomRobinPolicy() RequestMergePolicy {
 	return &RandomRobinPolicy{}
 }
 

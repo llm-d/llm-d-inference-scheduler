@@ -33,6 +33,8 @@ var (
 	endpoint            = flag.String("endpoint", "http://localhost:30080/v1/completions", "inference endpoint")
 	metricsPort         = flag.Int("metrics-port", runserver.DefaultMetricsPort, "The metrics port")
 	metricsEndpointAuth = flag.Bool("metrics-endpoint-auth", true, "Enables authentication and authorization of the metrics endpoint")
+	requestMergePolicy  = flag.String("request-merge-policy", "random-robin", "The request merge policy to use. Supported policies: random-robin")
+	messageQueueImpl    = flag.String("message-queue-impl", "redis-pubsub", "The message queue implementation to use. Supported implementations: redis-pubsub")
 )
 
 func NewBatchRunner() *BatchRunner {
@@ -101,9 +103,26 @@ func (r *BatchRunner) Run(ctx context.Context) error {
 	msrv, _ := metricsserver.NewServer(metricsServerOptions, cfg, httpClient /* TODO: not sure about using the same one*/)
 	go msrv.Start(ctx)
 
-	var policy batch.RequestPolicy = batch.NewRandomRobinPolicy()
+	var policy batch.RequestMergePolicy
+	switch *requestMergePolicy {
+	case "random-robin":
+		policy = batch.NewRandomRobinPolicy()
+	default:
+		// TODO: validate this actually works
+		setupLog.Error(nil, "Unknown request merge policy", "policy", *requestMergePolicy)
+		return nil
+	}
 
-	var impl batch.Flow = redis.NewRedisMQFlow(*redisAddr)
+	var impl batch.Flow
+	switch *messageQueueImpl {
+	case "redis-pubsub":
+		impl = redis.NewRedisMQFlow()
+	default:
+		// TODO: validate this actually works
+		setupLog.Error(nil, "Unknown message queue implementation", "impl", *messageQueueImpl)
+		return nil
+	}
+
 	requestChannel := policy.MergeRequestChannels(impl.RequestChannels()).Channel
 	for w := 1; w <= *concurrency; w++ {
 		go batch.Worker(ctx, *endpoint, httpClient, requestChannel, impl.RetryChannel(), impl.ResultChannel())
