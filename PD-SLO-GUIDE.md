@@ -167,7 +167,10 @@ schedulingProfiles:
 ## Metrics
 
 ```prometheus
-# Pod selection outcomes
+# PD disaggregation decisions
+llm_d_inference_scheduler_pd_decision_total{decision_type="decode-only|prefill-decode"}
+
+# Pod selection outcomes (headroom-based)
 llm_d_inference_scheduler_pd_slo_pod_selections_total{pod_type="prefill|decode", outcome="positive_headroom|negative_headroom"}
 
 # Predictor calls
@@ -177,6 +180,20 @@ llm_d_inference_scheduler_pd_slo_predictor_calls_total{predictor="prefill|decode
 llm_d_inference_scheduler_pd_slo_telemetry_recorded_total{pod_type="prefill|decode"}
 ```
 
+**Example Queries:**
+```promql
+# SLO violation rate (negative headroom) for decode pods
+rate(llm_d_inference_scheduler_pd_slo_pod_selections_total{pod_type="decode", outcome="negative_headroom"}[5m])
+/ rate(llm_d_inference_scheduler_pd_slo_pod_selections_total{pod_type="decode"}[5m])
+
+# Predictor error rate
+rate(llm_d_inference_scheduler_pd_slo_predictor_calls_total{status="error"}[5m])
+/ rate(llm_d_inference_scheduler_pd_slo_predictor_calls_total[5m])
+
+# Telemetry collection rate
+rate(llm_d_inference_scheduler_pd_slo_telemetry_recorded_total[1m])
+```
+
 ## Troubleshooting
 
 | Issue | Check | Solution |
@@ -184,9 +201,10 @@ llm_d_inference_scheduler_pd_slo_telemetry_recorded_total{pod_type="prefill|deco
 | No SLO routing | Headers present? | Add `x-slo-ttft-ms` and `x-slo-tpot-ms` |
 | Predictor errors | Sidecars running? | Check `kubectl get pods -n llm-d`, verify 5 containers (1 EPP + 4 sidecars) |
 | All decode-only | `pdThreshold` too high? | Reduce to 5 or 0 (always PD) |
-| All negative headroom | SLOs too strict? | Relax targets or scale up pods |
+| All negative headroom | SLOs too strict? | Check metrics: `pd_slo_pod_selections_total{outcome="negative_headroom"}`, relax targets or scale up pods |
 | Optimizer not scoring | Plugin configured? | Verify both profiles include `pd-slo-optimizer`, check EPP logs for "Decode-only scoring mode" or "Prefill-only scoring mode" |
-| No telemetry collected | Requestcontrol hooks working? | Check EPP logs for "Received prefill TTFT from sidecar" and "Sent prefill/decode TTFT telemetry" |
+| No telemetry collected | Requestcontrol hooks working? | Check EPP logs for "Received prefill TTFT from sidecar" and "Sent prefill/decode TTFT telemetry", verify metric: `pd_slo_telemetry_recorded_total` |
+| High predictor errors | Models not loading? | Check metric: `pd_slo_predictor_calls_total{status="error"}`, verify training/prediction server logs |
 
 ## Status
 

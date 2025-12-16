@@ -23,6 +23,14 @@ const (
 	// Predictor types
 	PredictorTypePrefill = "prefill"
 	PredictorTypeDecode  = "decode"
+
+	// Pod types
+	PodTypePrefill = "prefill"
+	PodTypeDecode  = "decode"
+
+	// Predictor status
+	PredictorStatusSuccess = "success"
+	PredictorStatusError   = "error"
 )
 
 var (
@@ -36,14 +44,14 @@ var (
 		[]string{"decision_type"}, // "decode-only" or "prefill-decode"
 	)
 
-	// PDSLOPairSelectionsTotal records PD-SLO pair selections by outcome.
-	PDSLOPairSelectionsTotal = prometheus.NewCounterVec(
+	// PDSLOPodSelectionsTotal records PD-SLO pod selections by type and outcome.
+	PDSLOPodSelectionsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: SchedulerSubsystem,
-			Name:      "pd_slo_pair_selections_total",
-			Help:      metrics.HelpMsgWithStability("Total PD-SLO pair selections by headroom outcome", compbasemetrics.ALPHA),
+			Name:      "pd_slo_pod_selections_total",
+			Help:      metrics.HelpMsgWithStability("Total PD-SLO pod selections by type and headroom outcome", compbasemetrics.ALPHA),
 		},
-		[]string{"outcome"}, // "positive_headroom" or "negative_headroom"
+		[]string{"pod_type", "outcome"}, // pod_type: prefill|decode, outcome: positive_headroom|negative_headroom
 	)
 
 	// PDSLOPredictorCallsTotal records predictor calls by type and status.
@@ -53,17 +61,17 @@ var (
 			Name:      "pd_slo_predictor_calls_total",
 			Help:      metrics.HelpMsgWithStability("Total predictor calls by type and status", compbasemetrics.ALPHA),
 		},
-		[]string{"predictor", "status"}, // predictor: prefill-ttft|decode-ttft|decode-tpot, status: success|error
+		[]string{"predictor", "status"}, // predictor: prefill|decode, status: success|error
 	)
 
-	// PDSLOPairsEvaluatedTotal records the number of pod pairs evaluated.
-	PDSLOPairsEvaluatedTotal = prometheus.NewCounterVec(
+	// PDSLOTelemetryRecordedTotal records telemetry data sent to training servers.
+	PDSLOTelemetryRecordedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: SchedulerSubsystem,
-			Name:      "pd_slo_pairs_evaluated_total",
-			Help:      metrics.HelpMsgWithStability("Total number of (prefill, decode) pod pairs evaluated", compbasemetrics.ALPHA),
+			Name:      "pd_slo_telemetry_recorded_total",
+			Help:      metrics.HelpMsgWithStability("Total telemetry data points recorded by pod type", compbasemetrics.ALPHA),
 		},
-		[]string{"request_id"},
+		[]string{"pod_type"}, // pod_type: prefill|decode
 	)
 )
 
@@ -71,9 +79,9 @@ var (
 func GetCollectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		SchedulerPDDecisionCount,
-		PDSLOPairSelectionsTotal,
+		PDSLOPodSelectionsTotal,
 		PDSLOPredictorCallsTotal,
-		PDSLOPairsEvaluatedTotal,
+		PDSLOTelemetryRecordedTotal,
 	}
 }
 
@@ -82,9 +90,9 @@ func RecordPDDecision(decisionType string) {
 	SchedulerPDDecisionCount.WithLabelValues(decisionType).Inc()
 }
 
-// RecordPDSLOPairSelection records a PD-SLO pair selection outcome.
-func RecordPDSLOPairSelection(outcome string) {
-	PDSLOPairSelectionsTotal.WithLabelValues(outcome).Inc()
+// RecordPDSLOPodSelection records a PD-SLO pod selection by type and outcome.
+func RecordPDSLOPodSelection(podType, outcome string) {
+	PDSLOPodSelectionsTotal.WithLabelValues(podType, outcome).Inc()
 }
 
 // RecordPDSLOPredictorCall records a predictor call.
@@ -92,9 +100,7 @@ func RecordPDSLOPredictorCall(predictorType, status string) {
 	PDSLOPredictorCallsTotal.WithLabelValues(predictorType, status).Inc()
 }
 
-// RecordPDSLOPairsEvaluated records the number of pairs evaluated for a request.
-func RecordPDSLOPairsEvaluated(requestID string, count int) {
-	for i := 0; i < count; i++ {
-		PDSLOPairsEvaluatedTotal.WithLabelValues(requestID).Inc()
-	}
+// RecordPDSLOTelemetry records telemetry data sent to training server.
+func RecordPDSLOTelemetry(podType string) {
+	PDSLOTelemetryRecordedTotal.WithLabelValues(podType).Inc()
 }
