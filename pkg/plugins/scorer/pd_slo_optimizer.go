@@ -36,7 +36,7 @@ import (
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
+	schedulermetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/predictors"
 )
 
@@ -228,11 +228,11 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 
 		predResp, err := s.predictors.DecodePredictor.Predict(ctx, predReq)
 		if err != nil {
-			metrics.RecordPDSLOPredictorCall(metrics.PredictorTypeDecode, metrics.PredictorStatusError)
+			schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusError)
 			logger.V(logutil.DEBUG).Error(err, "Failed to predict decode latency", "pod", pod.GetPod().String())
 			continue
 		}
-		metrics.RecordPDSLOPredictorCall(metrics.PredictorTypeDecode, metrics.PredictorStatusSuccess)
+		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusSuccess)
 
 		predictedTTFT := predResp.TTFT
 		predictedTPOT := predResp.TPOT
@@ -262,11 +262,11 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 
 	if bestPod != nil {
 		// Record selection outcome metric
-		outcome := metrics.HeadroomOutcomePositive
+		outcome := schedulermetrics.HeadroomOutcomePositive
 		if bestScore < 0 {
-			outcome = metrics.HeadroomOutcomeNegative
+			outcome = schedulermetrics.HeadroomOutcomeNegative
 		}
-		metrics.RecordPDSLOPodSelection(metrics.PodTypeDecode, outcome)
+		schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypeDecode, outcome)
 
 		for _, pod := range decodePods {
 			if pod.GetPod().String() == bestPod.GetPod().String() {
@@ -320,11 +320,11 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 
 		predResp, err := s.predictors.PrefillPredictor.Predict(ctx, predReq)
 		if err != nil {
-			metrics.RecordPDSLOPredictorCall(metrics.PredictorTypePrefill, metrics.PredictorStatusError)
+			schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusError)
 			logger.V(logutil.DEBUG).Error(err, "Failed to predict prefill latency", "pod", pod.GetPod().String())
 			continue
 		}
-		metrics.RecordPDSLOPredictorCall(metrics.PredictorTypePrefill, metrics.PredictorStatusSuccess)
+		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusSuccess)
 
 		predictedTTFT := predResp.TTFT
 
@@ -349,11 +349,11 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 
 	if bestPod != nil {
 		// Record selection outcome metric
-		outcome := metrics.HeadroomOutcomePositive
+		outcome := schedulermetrics.HeadroomOutcomePositive
 		if bestScore < 0 {
-			outcome = metrics.HeadroomOutcomeNegative
+			outcome = schedulermetrics.HeadroomOutcomeNegative
 		}
-		metrics.RecordPDSLOPodSelection(metrics.PodTypePrefill, outcome)
+		schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypePrefill, outcome)
 
 		for _, pod := range prefillPods {
 			if pod.GetPod().String() == bestPod.GetPod().String() {
@@ -618,7 +618,7 @@ func (s *PdSLOOptimizer) recordPrefillTTFT(
 	if err := s.predictors.PrefillPredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to send prefill TTFT telemetry")
 	} else {
-		metrics.RecordPDSLOTelemetry(metrics.PodTypePrefill)
+		schedulermetrics.RecordPDSLOTelemetry(schedulermetrics.PodTypePrefill)
 		logger.V(logutil.DEBUG).Info("Sent prefill TTFT telemetry", "ttft_ms", ttftMs)
 	}
 }
@@ -658,7 +658,7 @@ func (s *PdSLOOptimizer) recordDecodeTTFT(
 	if err := s.predictors.DecodePredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to send decode TTFT telemetry")
 	} else {
-		metrics.RecordPDSLOTelemetry(metrics.PodTypeDecode)
+		schedulermetrics.RecordPDSLOTelemetry(schedulermetrics.PodTypeDecode)
 		logger.V(logutil.DEBUG).Info("Sent decode TTFT telemetry", "ttft_ms", ttftMs)
 	}
 }
@@ -697,6 +697,6 @@ func (s *PdSLOOptimizer) recordDecodeTPOT(
 	if err := s.predictors.DecodePredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 		logger.V(logutil.TRACE).Error(err, "Failed to send decode TPOT telemetry")
 	} else {
-		metrics.RecordPDSLOTelemetry(metrics.PodTypeDecode)
+		schedulermetrics.RecordPDSLOTelemetry(schedulermetrics.PodTypeDecode)
 	}
 }
