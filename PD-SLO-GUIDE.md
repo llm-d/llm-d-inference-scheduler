@@ -173,6 +173,10 @@ llm_d_inference_scheduler_pd_decision_total{decision_type="decode-only|prefill-d
 # Pod selection outcomes (headroom-based)
 llm_d_inference_scheduler_pd_slo_pod_selections_total{pod_type="prefill|decode", outcome="positive_headroom|negative_headroom"}
 
+# Actual headroom distribution (histogram in seconds)
+# Positive values = pod can meet SLO, negative values = SLO violation
+llm_d_inference_scheduler_pd_slo_headroom_seconds{pod_type="prefill|decode", metric_type="ttft|tpot"}
+
 # Predictor calls
 llm_d_inference_scheduler_pd_slo_predictor_calls_total{predictor="prefill|decode", status="success|error"}
 
@@ -186,6 +190,16 @@ llm_d_inference_scheduler_pd_slo_telemetry_recorded_total{pod_type="prefill|deco
 rate(llm_d_inference_scheduler_pd_slo_pod_selections_total{pod_type="decode", outcome="negative_headroom"}[5m])
 / rate(llm_d_inference_scheduler_pd_slo_pod_selections_total{pod_type="decode"}[5m])
 
+# Median TTFT headroom for decode pods (how much headroom do we typically have?)
+histogram_quantile(0.5, rate(llm_d_inference_scheduler_pd_slo_headroom_seconds_bucket{pod_type="decode", metric_type="ttft"}[5m]))
+
+# P90 TPOT headroom (90% of decode pods have this much headroom or better)
+histogram_quantile(0.9, rate(llm_d_inference_scheduler_pd_slo_headroom_seconds_bucket{pod_type="decode", metric_type="tpot"}[5m]))
+
+# Percent of prefill selections with negative headroom (violating SLO)
+sum(rate(llm_d_inference_scheduler_pd_slo_headroom_seconds_bucket{pod_type="prefill", metric_type="ttft", le="0"}[5m]))
+/ sum(rate(llm_d_inference_scheduler_pd_slo_headroom_seconds_count{pod_type="prefill", metric_type="ttft"}[5m]))
+
 # Predictor error rate
 rate(llm_d_inference_scheduler_pd_slo_predictor_calls_total{status="error"}[5m])
 / rate(llm_d_inference_scheduler_pd_slo_predictor_calls_total[5m])
@@ -193,6 +207,12 @@ rate(llm_d_inference_scheduler_pd_slo_predictor_calls_total{status="error"}[5m])
 # Telemetry collection rate
 rate(llm_d_inference_scheduler_pd_slo_telemetry_recorded_total[1m])
 ```
+
+**Interpreting Headroom Metrics:**
+- **Positive headroom** (e.g., +0.05s = +50ms): Pod has 50ms of headroom, can meet SLO comfortably
+- **Zero headroom** (0s): Pod exactly meets SLO, no margin for error
+- **Negative headroom** (e.g., -0.1s = -100ms): Pod will violate SLO by 100ms
+- **Use P50/P90 to tune `sloBufferFactor`**: If P90 headroom is very negative, increase buffer; if very positive, decrease buffer
 
 ## Troubleshooting
 

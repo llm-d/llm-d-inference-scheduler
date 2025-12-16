@@ -241,6 +241,10 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 		ttftHeadroom := bufferedTTFTSLO - predictedTTFT
 		tpotHeadroom := bufferedTPOTSLO - predictedTPOT
 
+		// Record actual headroom values for observability
+		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypeDecode, schedulermetrics.MetricTypeTTFT, ttftHeadroom)
+		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypeDecode, schedulermetrics.MetricTypeTPOT, tpotHeadroom)
+
 		// Combined score: favor pods with positive headroom
 		score := ttftHeadroom + tpotHeadroom
 
@@ -330,6 +334,9 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 
 		// Calculate headroom
 		ttftHeadroom := bufferedTTFTSLO - predictedTTFT
+
+		// Record actual headroom value for observability
+		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypePrefill, schedulermetrics.MetricTypeTTFT, ttftHeadroom)
 
 		// Score is just the headroom
 		score := ttftHeadroom
