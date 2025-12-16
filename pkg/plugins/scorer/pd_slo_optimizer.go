@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/rand"
 	"net"
 	"strconv"
 	"time"
@@ -51,17 +53,22 @@ var _ framework.Scorer = &PdSLOOptimizer{}
 // pdSLOOptimizerConfig holds configuration parameters for the optimizer
 type pdSLOOptimizerConfig struct {
 	SLOBufferFactor float64 `json:"sloBufferFactor"` // Safety margin for SLOs (default: 0.9)
+	Epsilon         float64 `json:"epsilon"`         // Exploration rate for epsilon-greedy (default: 0.1)
 }
 
 // Default configuration values
 var defaultPdSLOConfig = pdSLOOptimizerConfig{
 	SLOBufferFactor: 0.9,
+	Epsilon:         0.1, // 10% exploration
 }
 
 // validate checks if the configuration is valid
 func (c *pdSLOOptimizerConfig) validate() error {
 	if c.SLOBufferFactor <= 0 || c.SLOBufferFactor > 1.0 {
 		return fmt.Errorf("sloBufferFactor must be between 0 and 1.0, got %f", c.SLOBufferFactor)
+	}
+	if c.Epsilon < 0 || c.Epsilon > 1.0 {
+		return fmt.Errorf("epsilon must be between 0 and 1.0, got %f", c.Epsilon)
 	}
 	return nil
 }
@@ -72,6 +79,7 @@ type PdSLOOptimizer struct {
 	typedName   plugins.TypedName
 	config      pdSLOOptimizerConfig
 	predictors  *predictors.PDPredictorSet
+	rand        *rand.Rand
 	initialized bool
 }
 
@@ -113,10 +121,12 @@ func PdSLOOptimizerFactory(name string, rawParameters json.RawMessage, handle pl
 
 // NewPdSLOOptimizer creates a new PdSLOOptimizer instance
 func NewPdSLOOptimizer(config pdSLOOptimizerConfig, predictors *predictors.PDPredictorSet) *PdSLOOptimizer {
+	source := rand.NewSource(time.Now().UnixNano())
 	return &PdSLOOptimizer{
 		typedName:   plugins.TypedName{Type: PdSLOOptimizerType},
 		config:      config,
 		predictors:  predictors,
+		rand:        rand.New(source),
 		initialized: true,
 	}
 }
@@ -206,8 +216,14 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
 	bufferedTPOTSLO := tpotSLO * s.config.SLOBufferFactor
 
+	// Track scored pods for epsilon-greedy selection
+	type scoredPod struct {
+		pod   schedulingtypes.Pod
+		score float64
+	}
+	var validPods []scoredPod
 	bestScore := -1e9
-	var bestPod schedulingtypes.Pod
+	bestIdx := -1
 
 	for _, pod := range decodePods {
 		metrics := pod.GetMetrics()
@@ -258,28 +274,56 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 			"tpotHeadroom", tpotHeadroom,
 			"score", score)
 
+		// Track this pod as a valid candidate
+		validPods = append(validPods, scoredPod{pod: pod, score: score})
 		if score > bestScore {
 			bestScore = score
-			bestPod = pod
+			bestIdx = len(validPods) - 1
 		}
 	}
 
-	if bestPod != nil {
-		// Record selection outcome metric
-		outcome := schedulermetrics.HeadroomOutcomePositive
-		if bestScore < 0 {
-			outcome = schedulermetrics.HeadroomOutcomeNegative
-		}
-		schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypeDecode, outcome)
+	if len(validPods) == 0 {
+		return nil
+	}
 
-		for _, pod := range decodePods {
-			if pod.GetPod().String() == bestPod.GetPod().String() {
-				scores[pod] = 1.0
-			} else {
-				scores[pod] = 0.0
-			}
+	// Epsilon-greedy selection
+	var selectedIdx int
+	var selectedPod schedulingtypes.Pod
+	var selectedScore float64
+
+	if s.rand.Float64() < s.config.Epsilon {
+		// Explore: weighted random selection based on scores
+		selectedIdx = s.weightedRandomSelect(validPods)
+		selectedPod = validPods[selectedIdx].pod
+		selectedScore = validPods[selectedIdx].score
+		logger.Info("Epsilon-greedy EXPLORE: selected weighted random decode pod",
+			"pod", selectedPod.GetPod().String(),
+			"score", selectedScore,
+			"epsilon", s.config.Epsilon)
+	} else {
+		// Exploit: select best pod
+		selectedIdx = bestIdx
+		selectedPod = validPods[bestIdx].pod
+		selectedScore = validPods[bestIdx].score
+		logger.Info("Epsilon-greedy EXPLOIT: selected best decode pod",
+			"pod", selectedPod.GetPod().String(),
+			"score", selectedScore)
+	}
+
+	// Record selection outcome metric
+	outcome := schedulermetrics.HeadroomOutcomePositive
+	if selectedScore < 0 {
+		outcome = schedulermetrics.HeadroomOutcomeNegative
+	}
+	schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypeDecode, outcome)
+
+	// Assign scores: 1.0 to selected pod, 0.0 to others
+	for _, sp := range validPods {
+		if sp.pod.GetPod().String() == selectedPod.GetPod().String() {
+			scores[sp.pod] = 1.0
+		} else {
+			scores[sp.pod] = 0.0
 		}
-		logger.Info("Selected best decode pod", "pod", bestPod.GetPod().String(), "score", bestScore)
 	}
 
 	return scores
@@ -302,8 +346,14 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 	scores := make(map[schedulingtypes.Pod]float64)
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
 
+	// Track scored pods for epsilon-greedy selection
+	type scoredPod struct {
+		pod   schedulingtypes.Pod
+		score float64
+	}
+	var validPods []scoredPod
 	bestScore := -1e9
-	var bestPod schedulingtypes.Pod
+	bestIdx := -1
 
 	for _, pod := range prefillPods {
 		metrics := pod.GetMetrics()
@@ -348,33 +398,109 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 			"ttftHeadroom", ttftHeadroom,
 			"score", score)
 
+		// Track this pod as a valid candidate
+		validPods = append(validPods, scoredPod{pod: pod, score: score})
 		if score > bestScore {
 			bestScore = score
-			bestPod = pod
+			bestIdx = len(validPods) - 1
 		}
 	}
 
-	if bestPod != nil {
-		// Record selection outcome metric
-		outcome := schedulermetrics.HeadroomOutcomePositive
-		if bestScore < 0 {
-			outcome = schedulermetrics.HeadroomOutcomeNegative
-		}
-		schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypePrefill, outcome)
+	if len(validPods) == 0 {
+		return nil
+	}
 
-		for _, pod := range prefillPods {
-			if pod.GetPod().String() == bestPod.GetPod().String() {
-				scores[pod] = 1.0
-			} else {
-				scores[pod] = 0.0
-			}
+	// Epsilon-greedy selection
+	var selectedIdx int
+	var selectedPod schedulingtypes.Pod
+	var selectedScore float64
+
+	if s.rand.Float64() < s.config.Epsilon {
+		// Explore: weighted random selection based on scores
+		selectedIdx = s.weightedRandomSelect(validPods)
+		selectedPod = validPods[selectedIdx].pod
+		selectedScore = validPods[selectedIdx].score
+		logger.Info("Epsilon-greedy EXPLORE: selected weighted random prefill pod",
+			"pod", selectedPod.GetPod().String(),
+			"score", selectedScore,
+			"epsilon", s.config.Epsilon)
+	} else {
+		// Exploit: select best pod
+		selectedIdx = bestIdx
+		selectedPod = validPods[bestIdx].pod
+		selectedScore = validPods[bestIdx].score
+		logger.Info("Epsilon-greedy EXPLOIT: selected best prefill pod",
+			"pod", selectedPod.GetPod().String(),
+			"score", selectedScore)
+	}
+
+	// Record selection outcome metric
+	outcome := schedulermetrics.HeadroomOutcomePositive
+	if selectedScore < 0 {
+		outcome = schedulermetrics.HeadroomOutcomeNegative
+	}
+	schedulermetrics.RecordPDSLOPodSelection(schedulermetrics.PodTypePrefill, outcome)
+
+	// Assign scores: 1.0 to selected pod, 0.0 to others
+	for _, sp := range validPods {
+		if sp.pod.GetPod().String() == selectedPod.GetPod().String() {
+			scores[sp.pod] = 1.0
+		} else {
+			scores[sp.pod] = 0.0
 		}
-		logger.Info("Selected best prefill pod", "pod", bestPod.GetPod().String(), "score", bestScore)
 	}
 
 	return scores
 }
 
+// weightedRandomSelect selects a pod index with probability proportional to its score.
+// Pods with higher scores (better headroom) have higher probability of being selected.
+func (s *PdSLOOptimizer) weightedRandomSelect(pods []struct {
+	pod   schedulingtypes.Pod
+	score float64
+}) int {
+	if len(pods) == 0 {
+		return -1
+	}
+	if len(pods) == 1 {
+		return 0
+	}
+
+	// Find minimum score to shift all scores to positive
+	minScore := pods[0].score
+	for _, p := range pods {
+		if p.score < minScore {
+			minScore = p.score
+		}
+	}
+
+	// Shift scores to be positive (add 1 to avoid zero weights)
+	// weight[i] = score[i] - minScore + 1
+	weights := make([]float64, len(pods))
+	totalWeight := 0.0
+	for i, p := range pods {
+		weights[i] = p.score - minScore + 1.0
+		totalWeight += weights[i]
+	}
+
+	// Handle edge case where all weights are effectively zero
+	if totalWeight <= 0 {
+		return s.rand.Intn(len(pods))
+	}
+
+	// Weighted random selection using cumulative probability
+	randValue := s.rand.Float64() * totalWeight
+	cumulative := 0.0
+	for i, weight := range weights {
+		cumulative += weight
+		if randValue <= cumulative {
+			return i
+		}
+	}
+
+	// Fallback (should not reach here due to floating point precision)
+	return len(pods) - 1
+}
 
 // Compile-time assertions for requestcontrol interfaces
 var _ requestcontrol.PreRequest = &PdSLOOptimizer{}
