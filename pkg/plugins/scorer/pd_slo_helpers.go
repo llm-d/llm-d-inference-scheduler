@@ -17,6 +17,7 @@ limitations under the License.
 package scorer
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -24,9 +25,11 @@ import (
 	"sync"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const (
@@ -103,16 +106,34 @@ func filterPodsByRole(pods []schedulingtypes.Pod) (prefillPods, decodePods []sch
 
 // pdTelemetryContext tracks request lifecycle for telemetry collection in PD mode
 type pdTelemetryContext struct {
-	prefillPod      string
-	decodePod       string
+	// Pod identification
+	prefillPod string
+	decodePod  string
+
+	// Timing tracking
 	requestReceived time.Time
 	prefillStart    time.Time
 	decodeStart     time.Time
 	firstToken      time.Time
 	lastToken       time.Time
 	tokenCount      int
-	prefillMetrics  *backendmetrics.MetricsState
-	decodeMetrics   *backendmetrics.MetricsState
+
+	// Scheduling result references (for live metric refresh)
+	schedulingResult   *schedulingtypes.SchedulingResult
+	prefillProfileName string
+	decodeProfileName  string
+
+	// Cached metrics (refreshed periodically)
+	lastSeenMetrics map[string]*backendmetrics.MetricsState
+
+	// Token sampling for TPOT predictions
+	tokenSampler *tokenSampler
+
+	// TPOT prediction tracking
+	avgTPOT                   float64
+	avgPredictedTPOT          float64
+	tpotObservations          []float64
+	predictedTPOTObservations []float64
 }
 
 // Store telemetry contexts per request ID
@@ -155,4 +176,47 @@ func getInputTokenLength(request *schedulingtypes.LLMRequest) int {
 		return 0
 	}
 	return len(strings.Fields(request.Body.Completions.Prompt))
+}
+
+// refreshLastSeenMetrics updates the cached metrics from the scheduling result.
+// This queries potentially fresh metrics that may have been updated by background refresh loops.
+func refreshLastSeenMetrics(ctx context.Context, telCtx *pdTelemetryContext) {
+	logger := log.FromContext(ctx)
+
+	if telCtx.schedulingResult == nil {
+		logger.V(logutil.DEBUG).Info("No scheduling result available for metric refresh")
+		return
+	}
+
+	if telCtx.lastSeenMetrics == nil {
+		telCtx.lastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
+	}
+
+	// Refresh metrics for all profiles in the scheduling result
+	for profileName, profileResult := range telCtx.schedulingResult.ProfileResults {
+		if profileResult != nil && profileResult.TargetPods != nil && len(profileResult.TargetPods) > 0 {
+			// Get potentially fresh metrics from the pod
+			// The GetMetrics() call returns current state which may have been updated by background refresh
+			if metrics := profileResult.TargetPods[0].GetMetrics(); metrics != nil {
+				// Clone to prevent concurrent modification issues
+				telCtx.lastSeenMetrics[profileName] = metrics.Clone()
+			}
+		}
+	}
+
+	logger.V(logutil.TRACE).Info("Refreshed metrics from scheduling result",
+		"profileCount", len(telCtx.lastSeenMetrics))
+}
+
+// getLatestMetricsForProfile retrieves the most recently refreshed metrics for a specific profile
+func getLatestMetricsForProfile(telCtx *pdTelemetryContext, profileName string) (*backendmetrics.MetricsState, error) {
+	if len(telCtx.lastSeenMetrics) == 0 {
+		return nil, fmt.Errorf("no cached metrics available")
+	}
+
+	if metrics, exists := telCtx.lastSeenMetrics[profileName]; exists {
+		return metrics, nil
+	}
+
+	return nil, fmt.Errorf("no metrics found for profile %s", profileName)
 }

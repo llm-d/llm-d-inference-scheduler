@@ -527,39 +527,38 @@ func (s *PdSLOOptimizer) PreRequest(
 	telCtx := getTelemetryContext(requestID)
 	telCtx.prefillPod = prefillAddr
 
-	// Extract decode pod and metrics from scheduling result
+	// Store scheduling result reference for live metric refresh
 	if schedulingResult != nil && len(schedulingResult.ProfileResults) > 0 {
-		// Get decode pod from primary profile (should be "decode" profile)
-		primaryProfile := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
+		telCtx.schedulingResult = schedulingResult
+
+		// Identify decode profile (primary profile)
+		telCtx.decodeProfileName = schedulingResult.PrimaryProfileName
+		primaryProfile := schedulingResult.ProfileResults[telCtx.decodeProfileName]
 		if primaryProfile != nil && len(primaryProfile.TargetPods) > 0 {
 			decodePodInfo := primaryProfile.TargetPods[0].GetPod()
 			telCtx.decodePod = decodePodInfo.NamespacedName.String()
-			// Store decode metrics
-			if metrics := primaryProfile.TargetPods[0].GetMetrics(); metrics != nil {
-				telCtx.decodeMetrics = metrics.Clone()
+		}
+
+		// Identify prefill profile (non-primary profile)
+		for profileName := range schedulingResult.ProfileResults {
+			if profileName != schedulingResult.PrimaryProfileName {
+				telCtx.prefillProfileName = profileName
+				break
 			}
 		}
 
-		// Get prefill metrics from prefill profile
-		for profileName, profileResult := range schedulingResult.ProfileResults {
-			if profileResult != nil && len(profileResult.TargetPods) > 0 {
-				// Check if this is the prefill profile (not the primary/decode profile)
-				if profileName != schedulingResult.PrimaryProfileName {
-					if metrics := profileResult.TargetPods[0].GetMetrics(); metrics != nil {
-						telCtx.prefillMetrics = metrics.Clone()
-					}
-					break
-				}
-			}
-		}
+		// Initialize metrics cache and do initial refresh
+		telCtx.lastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
+		refreshLastSeenMetrics(ctx, telCtx)
 	}
 
-	logger.V(logutil.DEBUG).Info("PD telemetry initialized",
+	logger.V(logutil.DEBUG).Info("PD telemetry initialized with scheduling result",
 		"requestID", requestID,
 		"prefillPod", telCtx.prefillPod,
 		"decodePod", telCtx.decodePod,
-		"hasPrefillMetrics", telCtx.prefillMetrics != nil,
-		"hasDecodeMetrics", telCtx.decodeMetrics != nil)
+		"prefillProfile", telCtx.prefillProfileName,
+		"decodeProfile", telCtx.decodeProfileName,
+		"cachedMetricsCount", len(telCtx.lastSeenMetrics))
 }
 
 // ResponseReceived is called when response headers are received
@@ -636,30 +635,76 @@ func (s *PdSLOOptimizer) ResponseStreaming(
 		telCtx.firstToken = now
 		telCtx.tokenCount = 1
 
-		// Calculate and record TTFT for decode pod
+		// Calculate actual TTFT for decode pod
 		decodeTTFT := now.Sub(telCtx.decodeStart).Milliseconds()
 
-		// Send telemetry to decode training server
+		// Initialize token sampler for TPOT predictions
+		if telCtx.tokenSampler == nil {
+			telCtx.tokenSampler = newTokenSampler(requestID, DefaultSamplingMean, MaxSampledTokens)
+			logger.V(logutil.DEBUG).Info("Initialized token sampler",
+				"requestID", requestID,
+				"nextSampleToken", telCtx.tokenSampler.getNextSampleToken())
+		}
+
+		// Refresh metrics before recording training data
+		refreshLastSeenMetrics(ctx, telCtx)
+
+		// Record TTFT training data with fresh metrics
 		s.recordDecodeTTFT(ctx, request, telCtx, float64(decodeTTFT))
 
-		logger.V(logutil.DEBUG).Info("First token from decode",
+		// Predict first TPOT for decode
+		s.predictFirstTPOT(ctx, request, telCtx)
+
+		// Advance timestamp and refresh again
+		telCtx.lastToken = now
+		refreshLastSeenMetrics(ctx, telCtx)
+
+		logger.V(logutil.DEBUG).Info("First token from decode processed",
 			"requestID", requestID,
-			"decodeTTFT_ms", decodeTTFT)
+			"decodeTTFT_ms", decodeTTFT,
+			"avgPredictedTPOT", telCtx.avgPredictedTPOT)
 	} else {
 		// Subsequent tokens - track for TPOT
-		telCtx.tokenCount++
 		interTokenLatency := now.Sub(telCtx.lastToken).Milliseconds()
+		telCtx.tokenCount++
 
-		// Send TPOT telemetry to decode training server
+		// Initialize sampler if not yet created (defensive)
+		if telCtx.tokenSampler == nil {
+			telCtx.tokenSampler = newTokenSampler(requestID, DefaultSamplingMean, MaxSampledTokens)
+			logger.V(logutil.DEBUG).Info("Initialized token sampler for subsequent tokens",
+				"requestID", requestID,
+				"nextSampleToken", telCtx.tokenSampler.getNextSampleToken())
+		}
+
+		// Track actual TPOT for sampled tokens
+		if telCtx.tokenCount == 2 || telCtx.tokenSampler.shouldPredict(telCtx.tokenCount) {
+			telCtx.tpotObservations = append(telCtx.tpotObservations, float64(interTokenLatency))
+			telCtx.avgTPOT = calculateRunningAverage(telCtx.avgTPOT, float64(interTokenLatency),
+				len(telCtx.tpotObservations))
+		}
+
+		// Refresh metrics before recording training data
+		refreshLastSeenMetrics(ctx, telCtx)
+
+		// Record TPOT training data (always, for training)
 		s.recordDecodeTPOT(ctx, request, telCtx, float64(interTokenLatency), telCtx.tokenCount)
+
+		// Predict TPOT at sampled intervals
+		if telCtx.tokenSampler.shouldPredict(telCtx.tokenCount) {
+			s.predictSubsequentTPOT(ctx, request, telCtx)
+			telCtx.tokenSampler.recordPrediction(telCtx.tokenCount)
+		}
+
+		// Advance timestamp and refresh metrics again
+		telCtx.lastToken = now
+		refreshLastSeenMetrics(ctx, telCtx)
 
 		logger.V(logutil.TRACE).Info("Token from decode",
 			"requestID", requestID,
 			"tokenCount", telCtx.tokenCount,
-			"interTokenLatency_ms", interTokenLatency)
+			"interTokenLatency_ms", interTokenLatency,
+			"shouldPredict", telCtx.tokenSampler.shouldPredict(telCtx.tokenCount))
 	}
-
-	telCtx.lastToken = now
 }
 
 // ResponseComplete is called when the response is fully sent
@@ -723,10 +768,10 @@ func (s *PdSLOOptimizer) recordPrefillTTFT(
 		return
 	}
 
-	// Build training entry using cached metrics
-	metrics := telCtx.prefillMetrics
-	if metrics == nil {
-		logger.V(logutil.DEBUG).Info("No metrics available for prefill telemetry")
+	// Get latest metrics for prefill profile
+	metrics, err := getLatestMetricsForProfile(telCtx, telCtx.prefillProfileName)
+	if err != nil {
+		logger.V(logutil.DEBUG).Info("No metrics available for prefill telemetry", "error", err)
 		return
 	}
 
@@ -764,9 +809,10 @@ func (s *PdSLOOptimizer) recordDecodeTTFT(
 		return
 	}
 
-	metrics := telCtx.decodeMetrics
-	if metrics == nil {
-		logger.V(logutil.DEBUG).Info("No metrics available for decode TTFT telemetry")
+	// Get latest metrics for decode profile
+	metrics, err := getLatestMetricsForProfile(telCtx, telCtx.decodeProfileName)
+	if err != nil {
+		logger.V(logutil.DEBUG).Info("No metrics available for decode TTFT telemetry", "error", err)
 		return
 	}
 
@@ -804,8 +850,10 @@ func (s *PdSLOOptimizer) recordDecodeTPOT(
 		return
 	}
 
-	metrics := telCtx.decodeMetrics
-	if metrics == nil {
+	// Get latest metrics for decode profile
+	metrics, err := getLatestMetricsForProfile(telCtx, telCtx.decodeProfileName)
+	if err != nil {
+		logger.V(logutil.TRACE).Info("No metrics available for decode TPOT telemetry", "error", err)
 		return
 	}
 
@@ -825,5 +873,115 @@ func (s *PdSLOOptimizer) recordDecodeTPOT(
 		logger.V(logutil.TRACE).Error(err, "Failed to send decode TPOT telemetry")
 	} else {
 		schedulermetrics.RecordPDSLOTelemetry(schedulermetrics.PodTypeDecode)
+	}
+}
+
+// calculateRunningAverage computes the running average given the old average, new value, and count
+func calculateRunningAverage(oldAvg, newValue float64, count int) float64 {
+	if count <= 0 {
+		return newValue
+	}
+	return oldAvg + (newValue-oldAvg)/float64(count)
+}
+
+// predictFirstTPOT predicts the first TPOT for the decode pod after TTFT
+func (s *PdSLOOptimizer) predictFirstTPOT(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	telCtx *pdTelemetryContext,
+) {
+	logger := log.FromContext(ctx)
+
+	if s.predictors == nil || s.predictors.DecodePredictor == nil {
+		logger.V(logutil.DEBUG).Info("No decode predictor available for TPOT prediction")
+		return
+	}
+
+	// Get latest metrics for decode profile
+	metrics, err := getLatestMetricsForProfile(telCtx, telCtx.decodeProfileName)
+	if err != nil {
+		logger.V(logutil.DEBUG).Info("Skipping first TPOT prediction due to missing metrics",
+			"error", err)
+		return
+	}
+
+	// Build prediction request
+	predReq := latencypredictor.PredictionRequest{
+		KVCachePercentage:  metrics.KVCacheUsagePercent,
+		InputTokenLength:   getInputTokenLength(request),
+		NumRequestWaiting:  metrics.WaitingQueueSize,
+		NumRequestRunning:  metrics.RunningRequestsSize,
+		NumTokensGenerated: telCtx.tokenCount,
+		PrefixCacheScore:   0,
+	}
+
+	start := time.Now()
+	predResp, err := s.predictors.DecodePredictor.Predict(ctx, predReq)
+	dur := time.Since(start)
+
+	if err != nil || predResp == nil {
+		logger.V(logutil.DEBUG).Error(err, "First TPOT predict failed",
+			"duration_ms", dur.Milliseconds())
+		telCtx.predictedTPOTObservations = append(telCtx.predictedTPOTObservations, 0)
+		telCtx.avgPredictedTPOT = calculateRunningAverage(telCtx.avgPredictedTPOT, 0,
+			len(telCtx.predictedTPOTObservations))
+	} else {
+		logger.V(logutil.DEBUG).Info("First TPOT predict succeeded",
+			"value_ms", predResp.TPOT,
+			"duration_ms", dur.Milliseconds())
+		telCtx.predictedTPOTObservations = append(telCtx.predictedTPOTObservations, predResp.TPOT)
+		telCtx.avgPredictedTPOT = calculateRunningAverage(telCtx.avgPredictedTPOT, predResp.TPOT,
+			len(telCtx.predictedTPOTObservations))
+	}
+}
+
+// predictSubsequentTPOT predicts TPOT for subsequent tokens at sampled intervals
+func (s *PdSLOOptimizer) predictSubsequentTPOT(
+	ctx context.Context,
+	request *schedulingtypes.LLMRequest,
+	telCtx *pdTelemetryContext,
+) {
+	logger := log.FromContext(ctx)
+
+	if s.predictors == nil || s.predictors.DecodePredictor == nil {
+		return
+	}
+
+	// Get latest metrics for decode profile
+	metrics, err := getLatestMetricsForProfile(telCtx, telCtx.decodeProfileName)
+	if err != nil {
+		logger.V(logutil.DEBUG).Info("Skipping TPOT prediction due to missing metrics",
+			"error", err)
+		return
+	}
+
+	// Build prediction request
+	predReq := latencypredictor.PredictionRequest{
+		KVCachePercentage:  metrics.KVCacheUsagePercent,
+		InputTokenLength:   getInputTokenLength(request),
+		NumRequestWaiting:  metrics.WaitingQueueSize,
+		NumRequestRunning:  metrics.RunningRequestsSize,
+		NumTokensGenerated: telCtx.tokenCount,
+		PrefixCacheScore:   0, // TPOT doesn't use prefix cache score
+	}
+
+	start := time.Now()
+	predResp, err := s.predictors.DecodePredictor.Predict(ctx, predReq)
+	dur := time.Since(start)
+
+	if err != nil || predResp == nil {
+		logger.V(logutil.DEBUG).Error(err, "TPOT predict failed",
+			"duration_ms", dur.Milliseconds())
+		telCtx.predictedTPOTObservations = append(telCtx.predictedTPOTObservations, 0)
+		telCtx.avgPredictedTPOT = calculateRunningAverage(telCtx.avgPredictedTPOT, 0,
+			len(telCtx.predictedTPOTObservations))
+	} else {
+		logger.V(logutil.DEBUG).Info("TPOT predict succeeded",
+			"value_ms", predResp.TPOT,
+			"duration_ms", dur.Milliseconds(),
+			"tokenCount", telCtx.tokenCount)
+		telCtx.predictedTPOTObservations = append(telCtx.predictedTPOTObservations, predResp.TPOT)
+		telCtx.avgPredictedTPOT = calculateRunningAverage(telCtx.avgPredictedTPOT, predResp.TPOT,
+			len(telCtx.predictedTPOTObservations))
 	}
 }
