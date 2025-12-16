@@ -40,7 +40,6 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	schedulermetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/predictors"
 )
 
 const (
@@ -102,7 +101,7 @@ func (c *pdSLOOptimizerConfig) validate() error {
 type PdSLOOptimizer struct {
 	typedName           plugins.TypedName
 	config              pdSLOOptimizerConfig
-	predictors          *predictors.PDPredictorSet
+	predictor           latencypredictor.PredictorInterface
 	rand                *rand.Rand
 	initialized         bool
 	runningRequestLists map[string]*requestPriorityQueue // pod name -> running requests
@@ -125,33 +124,31 @@ func PdSLOOptimizerFactory(name string, rawParameters json.RawMessage, handle pl
 		return nil, fmt.Errorf("invalid configuration for '%s': %w", PdSLOOptimizerType, err)
 	}
 
-	// Initialize predictor set
-	predictorSet, err := predictors.NewPDPredictorSet(ctrl.Log.WithName("pd-predictors"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize PD predictor set: %w", err)
+	// Initialize single predictor (handles both prefill and decode via pod_type feature)
+	predictorConfig := latencypredictor.ConfigFromEnv()
+	predictor := latencypredictor.New(predictorConfig, ctrl.Log.WithName("pd-slo-predictor"))
+
+	// Start predictor
+	if err := predictor.Start(handle.Context()); err != nil {
+		return nil, fmt.Errorf("failed to start predictor: %w", err)
 	}
 
-	// Start predictors
-	if err := predictorSet.Start(handle.Context()); err != nil {
-		return nil, fmt.Errorf("failed to start PD predictor set: %w", err)
-	}
-
-	// Stop predictors on context cancellation
+	// Stop predictor on context cancellation
 	go func() {
 		<-handle.Context().Done()
-		predictorSet.Stop()
+		predictor.Stop()
 	}()
 
-	return NewPdSLOOptimizer(config, predictorSet).WithName(name), nil
+	return NewPdSLOOptimizer(config, predictor).WithName(name), nil
 }
 
 // NewPdSLOOptimizer creates a new PdSLOOptimizer instance
-func NewPdSLOOptimizer(config pdSLOOptimizerConfig, predictors *predictors.PDPredictorSet) *PdSLOOptimizer {
+func NewPdSLOOptimizer(config pdSLOOptimizerConfig, predictor latencypredictor.PredictorInterface) *PdSLOOptimizer {
 	source := rand.NewSource(time.Now().UnixNano())
 	return &PdSLOOptimizer{
 		typedName:           plugins.TypedName{Type: PdSLOOptimizerType},
 		config:              config,
-		predictors:          predictors,
+		predictor:           predictor,
 		rand:                rand.New(source),
 		initialized:         true,
 		runningRequestLists: make(map[string]*requestPriorityQueue),
@@ -234,8 +231,8 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 ) map[schedulingtypes.Pod]float64 {
 	logger := log.FromContext(ctx)
 
-	if s.predictors == nil || s.predictors.DecodePredictor == nil {
-		logger.V(logutil.DEBUG).Info("No decode predictor available")
+	if s.predictor == nil {
+		logger.V(logutil.DEBUG).Info("No predictor available")
 		return nil
 	}
 
@@ -278,9 +275,10 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 			NumRequestWaiting:  metrics.WaitingQueueSize,
 			NumRequestRunning:  metrics.RunningRequestsSize,
 			PrefixCacheScore:   0,
+			PodType:            "decode", // Decode pod handles both TTFT and TPOT
 		}
 
-		predResp, err := s.predictors.DecodePredictor.Predict(ctx, predReq)
+		predResp, err := s.predictor.Predict(ctx, predReq)
 		if err != nil {
 			schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusError)
 			logger.V(logutil.DEBUG).Error(err, "Failed to predict decode latency", "pod", pod.GetPod().String())
@@ -360,8 +358,8 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 ) map[schedulingtypes.Pod]float64 {
 	logger := log.FromContext(ctx)
 
-	if s.predictors == nil || s.predictors.PrefillPredictor == nil {
-		logger.V(logutil.DEBUG).Info("No prefill predictor available")
+	if s.predictor == nil {
+		logger.V(logutil.DEBUG).Info("No predictor available")
 		return nil
 	}
 
@@ -386,9 +384,10 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 			NumRequestWaiting: metrics.WaitingQueueSize,
 			NumRequestRunning: metrics.RunningRequestsSize,
 			PrefixCacheScore:  0,
+			PodType:           "prefill", // Prefill pod only handles TTFT
 		}
 
-		predResp, err := s.predictors.PrefillPredictor.Predict(ctx, predReq)
+		predResp, err := s.predictor.Predict(ctx, predReq)
 		if err != nil {
 			schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusError)
 			logger.V(logutil.DEBUG).Error(err, "Failed to predict prefill latency", "pod", pod.GetPod().String())
@@ -781,9 +780,9 @@ func (s *PdSLOOptimizer) recordPrefillTTFT(
 ) {
 	logger := log.FromContext(ctx)
 
-	// Get predictors
-	if s.predictors == nil || s.predictors.PrefillPredictor == nil {
-		logger.V(logutil.DEBUG).Info("No prefill predictor available for telemetry")
+	// Get predictor
+	if s.predictor == nil {
+		logger.V(logutil.DEBUG).Info("No predictor available for telemetry")
 		return
 	}
 
@@ -804,9 +803,10 @@ func (s *PdSLOOptimizer) recordPrefillTTFT(
 		NumRequestRunning:  metrics.RunningRequestsSize,
 		NumTokensGenerated: 0,
 		PrefixCacheScore:   0, // TODO: Get from cycle state if available
+		PodType:            "prefill",
 	}
 
-	if err := s.predictors.PrefillPredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+	if err := s.predictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to send prefill TTFT telemetry")
 	} else {
 		schedulermetrics.RecordPDSLOTelemetry(schedulermetrics.PodTypePrefill)
@@ -823,8 +823,8 @@ func (s *PdSLOOptimizer) recordDecodeTTFT(
 ) {
 	logger := log.FromContext(ctx)
 
-	if s.predictors == nil || s.predictors.DecodePredictor == nil {
-		logger.V(logutil.DEBUG).Info("No decode predictor available for telemetry")
+	if s.predictor == nil {
+		logger.V(logutil.DEBUG).Info("No predictor available for telemetry")
 		return
 	}
 
@@ -845,9 +845,10 @@ func (s *PdSLOOptimizer) recordDecodeTTFT(
 		NumRequestRunning:  metrics.RunningRequestsSize,
 		NumTokensGenerated: 0,
 		PrefixCacheScore:   0,
+		PodType:            "decode",
 	}
 
-	if err := s.predictors.DecodePredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+	if err := s.predictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to send decode TTFT telemetry")
 	} else {
 		schedulermetrics.RecordPDSLOTelemetry(schedulermetrics.PodTypeDecode)
@@ -865,7 +866,7 @@ func (s *PdSLOOptimizer) recordDecodeTPOT(
 ) {
 	logger := log.FromContext(ctx)
 
-	if s.predictors == nil || s.predictors.DecodePredictor == nil {
+	if s.predictor == nil {
 		return
 	}
 
@@ -886,9 +887,10 @@ func (s *PdSLOOptimizer) recordDecodeTPOT(
 		NumRequestRunning:  metrics.RunningRequestsSize,
 		NumTokensGenerated: tokenCount - 1, // Previous token count
 		PrefixCacheScore:   0,
+		PodType:            "decode",
 	}
 
-	if err := s.predictors.DecodePredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+	if err := s.predictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 		logger.V(logutil.TRACE).Error(err, "Failed to send decode TPOT telemetry")
 	} else {
 		schedulermetrics.RecordPDSLOTelemetry(schedulermetrics.PodTypeDecode)
@@ -911,8 +913,8 @@ func (s *PdSLOOptimizer) predictFirstTPOT(
 ) {
 	logger := log.FromContext(ctx)
 
-	if s.predictors == nil || s.predictors.DecodePredictor == nil {
-		logger.V(logutil.DEBUG).Info("No decode predictor available for TPOT prediction")
+	if s.predictor == nil {
+		logger.V(logutil.DEBUG).Info("No predictor available for TPOT prediction")
 		return
 	}
 
@@ -932,10 +934,11 @@ func (s *PdSLOOptimizer) predictFirstTPOT(
 		NumRequestRunning:  metrics.RunningRequestsSize,
 		NumTokensGenerated: telCtx.tokenCount,
 		PrefixCacheScore:   0,
+		PodType:            "decode",
 	}
 
 	start := time.Now()
-	predResp, err := s.predictors.DecodePredictor.Predict(ctx, predReq)
+	predResp, err := s.predictor.Predict(ctx, predReq)
 	dur := time.Since(start)
 
 	if err != nil || predResp == nil {
@@ -962,7 +965,7 @@ func (s *PdSLOOptimizer) predictSubsequentTPOT(
 ) {
 	logger := log.FromContext(ctx)
 
-	if s.predictors == nil || s.predictors.DecodePredictor == nil {
+	if s.predictor == nil {
 		return
 	}
 
@@ -982,10 +985,11 @@ func (s *PdSLOOptimizer) predictSubsequentTPOT(
 		NumRequestRunning:  metrics.RunningRequestsSize,
 		NumTokensGenerated: telCtx.tokenCount,
 		PrefixCacheScore:   0, // TPOT doesn't use prefix cache score
+		PodType:            "decode",
 	}
 
 	start := time.Now()
-	predResp, err := s.predictors.DecodePredictor.Predict(ctx, predReq)
+	predResp, err := s.predictor.Predict(ctx, predReq)
 	dur := time.Since(start)
 
 	if err != nil || predResp == nil {
