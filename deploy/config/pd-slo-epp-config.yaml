@@ -1,121 +1,46 @@
 # Sample EPP configuration for PD disaggregation with SLO-aware scheduling
-# This configuration enables independent prefill and decode pod optimization based on
-# TTFT and TPOT SLO headers (x-slo-ttft-ms, x-slo-tpot-ms) using trained latency predictors
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
-
 plugins:
-  # Pre-request plugins
-  - type: prefill-header-handler
-    name: prefill-header-handler
-
-  # Filter plugins
-  - type: prefill-filter
-    name: prefill-filter
-
-  - type: decode-filter
-    name: decode-filter
-
-  # Scorer plugins
-  - type: prefix-cache-scorer
-    name: prefix-cache-scorer
-
-  # NEW: PD-SLO Optimizer Scorer
-  # This scorer evaluates prefill and decode pods independently using trained
-  # latency predictors to select pods with best SLO headroom
-  - type: pd-slo-optimizer
-    name: pd-slo-optimizer
-    parameters:
-      # SLO buffer factor for safety margin (default: 0.9)
-      # Actual SLO target = user_slo * sloBufferFactor
-      sloBufferFactor: 0.9
-
-  # Picker plugin
-  - type: max-score-picker
-    name: max-score-picker
-
-# Profile Handler Configuration
-# NEW: PD-SLO Profile Handler
-# Unified handler that supports both SLO-aware and threshold-based PD scheduling
-# - With SLO headers: Uses independent prefill/decode optimization with trained predictors
-# - Without SLO headers: Falls back to threshold-based PD scheduling
-profileHandler:
-  type: pd-slo-profile-handler
+- type: prefill-filter
+  name: prefill-filter
+- type: decode-filter
+  name: decode-filter
+- type: prefix-cache-scorer
+  name: prefix-cache-scorer
+  parameters:
+    hashBlockSize: 5
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 31250
+- type: pd-slo-optimizer
+  name: pd-slo-optimizer
+  parameters:
+    sloBufferFactor: 0.9
+- type: max-score-picker
+  name: max-score-picker
+- type: pd-slo-profile-handler
   name: pd-slo-profile-handler
   parameters:
-    # Name of the decode scheduling profile (default: "decode")
     decodeProfile: "decode"
-
-    # Name of the prefill scheduling profile (default: "prefill")
     prefillProfile: "prefill"
-
-    # Name of the prefix cache plugin (default: "prefix-cache-scorer")
     prefixPluginName: "prefix-cache-scorer"
+    hashBlockSize: 5
+    pdThreshold: 5
 
-    # Hash block size for prefix cache (default: 16)
-    hashBlockSize: 16
-
-    # Threshold for PD disaggregation decision (default: 0)
-    # IMPORTANT: Applies to ALL requests (both with and without SLO headers)
-    # Uses prefix cache hit % to decide:
-    #   - If non-cached tokens < pdThreshold: decode-only (no prefill)
-    #   - Otherwise: PD disaggregation (run prefill + decode)
-    # Set to 0 to always use PD when configured (no decode-only fallback)
-    # Example: pdThreshold: 100 means requests with <100 uncached tokens use decode-only
-    pdThreshold: 0
-
-# Scheduling Profiles
 schedulingProfiles:
-  # Prefill profile - selects prefill pods
-  - name: prefill
-    plugins:
-      # Filter to prefill-role pods
-      - pluginRef: prefill-filter
-
-      # Prefix cache scoring
-      - pluginRef: prefix-cache-scorer
-        weight: 2
-
-      # NEW: PD-SLO optimizer (evaluates prefill TTFT with trained predictor)
-      - pluginRef: pd-slo-optimizer
-        weight: 3
-
-      # Select top-scoring pod
-      - pluginRef: max-score-picker
-
-  # Decode profile - selects decode pods
-  - name: decode
-    plugins:
-      # Filter to decode-role pods
-      - pluginRef: decode-filter
-
-      # Prefix cache scoring
-      - pluginRef: prefix-cache-scorer
-        weight: 2
-
-      # NEW: PD-SLO optimizer (evaluates decode TTFT+TPOT with trained predictor)
-      - pluginRef: pd-slo-optimizer
-        weight: 3
-
-      # Select top-scoring pod
-      - pluginRef: max-score-picker
-
-# Environment Variables Required:
-# The following environment variables must be set for the EPP deployment:
-#
-# Prefill TTFT Predictor:
-#   PREFILL_TTFT_TRAINING_URL=http://prefill-ttft-predictor-svc:8000
-#   PREFILL_TTFT_PREDICTION_URL=http://prefill-ttft-predictor-svc:8001
-#
-# Decode TTFT Predictor (queue wait + startup):
-#   DECODE_TTFT_TRAINING_URL=http://decode-ttft-predictor-svc:8000
-#   DECODE_TTFT_PREDICTION_URL=http://decode-ttft-predictor-svc:8001
-#
-# Decode TPOT Predictor:
-#   DECODE_TPOT_TRAINING_URL=http://decode-tpot-predictor-svc:8000
-#   DECODE_TPOT_PREDICTION_URL=http://decode-tpot-predictor-svc:8001
-#
-# Usage:
-# Send requests with SLO headers to trigger PD-SLO scheduling:
-#   x-slo-ttft-ms: 500    # Target time-to-first-token in milliseconds
-#   x-slo-tpot-ms: 20     # Target time-per-output-token in milliseconds
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: pd-slo-optimizer
+    weight: 3
+  - pluginRef: max-score-picker
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: pd-slo-optimizer
+    weight: 3
+  - pluginRef: max-score-picker
