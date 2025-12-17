@@ -68,13 +68,24 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		s.logger.V(4).Info("decode failed due to insufficient cache hit threshold.", requestFieldCacheHitThreshold, cacheHitThreshold)
 	}
 
-	if err := s.prefill(w, r, prefillPodHostPort, completionRequest); err != nil {
+	// we clone the completion request to avoid modifying the original request
+	prefillRequest := maps.Clone(completionRequest)
+	if err := s.prefill(w, r, prefillPodHostPort, prefillRequest); err != nil {
 		s.logger.Error(err, "prefill failed")
 		return
 	}
 
 	s.logger.V(4).Info("forwarding to decoder after prefill")
-	r.Body = io.NopCloser(strings.NewReader(string(original)))
+	completionRequest[requestFieldCacheHitThreshold] = 0
+	decodeRequest, err := json.Marshal(completionRequest)
+	if err != nil {
+		if err := errorJSONInvalid(err, w); err != nil {
+			s.logger.Error(err, "failed to send Invalid JSON error response to Client")
+		}
+		return
+	}
+
+	r.Body = io.NopCloser(strings.NewReader(string(decodeRequest)))
 	s.decoderProxy.ServeHTTP(w, r)
 }
 
@@ -130,7 +141,6 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 	// Prepare prefill request
 	completionRequest[requestFieldMaxTokens] = 1
 	completionRequest[requestFieldMaxCompletionTokens] = 1
-	completionRequest[requestFieldCacheHitThreshold] = 0
 
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {
