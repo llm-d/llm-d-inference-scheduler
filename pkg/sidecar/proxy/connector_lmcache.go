@@ -53,7 +53,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		return
 	}
 
-	// If "cache_hit_threshold" is present in the request, we try to decode first. The decode node must mit the cache hit threshold in order to execute.
+	// If "cache_hit_threshold" is present in the request, we try to decode first. The decode node must meet the cache hit threshold in order to execute.
 	// If the decode node is below the threshold, it won't process the request and return a "cache_threshold" finish reason. In that case, we need to prefill.
 	// For more infromation refer to the RFC https://github.com/vllm-project/vllm/issues/24256
 	if cacheHitThreshold, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
