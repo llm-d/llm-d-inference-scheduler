@@ -202,7 +202,8 @@ func TestNoHitLRUScorer(t *testing.T) {
 			// Create cycle state and set prefix state
 			cycleState := &types.CycleState{}
 			if test.prefixState != nil {
-				cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), test.prefixState)
+				cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+					Name: prefix.PrefixCachePluginType}.String()), test.prefixState)
 			}
 
 			got := test.scorer.Score(context.Background(), cycleState, test.req, test.input)
@@ -234,7 +235,8 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 		PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 	}
 	cycleState := &types.CycleState{}
-	cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), coldPrefixState)
+	cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+		Name: prefix.PrefixCachePluginType}.String()), coldPrefixState)
 
 	scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, pods)
 
@@ -295,7 +297,8 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	primaryProfile := "primary-profile"
 	toPrefixState := func(entries map[prefix.ServerID]int) *types.CycleState {
 		cycle := &types.CycleState{}
-		cycle.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{PrefixCacheServers: entries})
+		cycle.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{PrefixCacheServers: entries})
 		return cycle
 	}
 
@@ -406,7 +409,8 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	t.Run("empty pods list", func(t *testing.T) {
 		emptyPods := []types.Pod{}
 		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
@@ -419,7 +423,8 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 
 	t.Run("nil pods list", func(t *testing.T) {
 		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
@@ -436,7 +441,8 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	t.Run("single pod returns 1.0", func(t *testing.T) {
 		pods := []types.Pod{podA}
 		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
