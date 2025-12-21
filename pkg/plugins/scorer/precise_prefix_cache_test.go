@@ -583,7 +583,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				}
 			}
 
-			got := prefixCacheScorer.Score(ctx, nil, tt.request, tt.pods)
+			got := prefixCacheScorer.Score(ctx, types.NewCycleState(), tt.request, tt.pods)
 
 			gotByAddress := make(map[string]float64)
 			for pod, score := range got {
