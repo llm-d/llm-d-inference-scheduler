@@ -140,7 +140,7 @@ func (c *Config) validate() error {
 	if c.AffinityGateTau < 0 || c.AffinityGateTau > 1 {
 		errs = append(errs, fmt.Errorf("affinityGateTau must be in [0, 1], got %f", c.AffinityGateTau))
 	}
-	if c.AffinityGateTauGlobal <= 0 || c.AffinityGateTauGlobal > 1 {
+	if c.AffinityGateTauGlobal < 0 || c.AffinityGateTauGlobal > 1 {
 		errs = append(errs, fmt.Errorf("affinityGateTauGlobal must be in (0, 1], got %f", c.AffinityGateTauGlobal))
 	}
 
@@ -230,7 +230,7 @@ func (s *SLOAwareRouter) epsilonGreedyAffinityGate(
 // when latency predictions are unavailable
 func (s *SLOAwareRouter) scoreWithoutPredictions(
 	ctx context.Context,
-	state *schedulingtypes.CycleState,
+	sloCtx *sloRequestContext,
 	pods []schedulingtypes.Pod,
 	r *rand.Rand,
 ) map[schedulingtypes.Pod]float64 {
@@ -249,7 +249,7 @@ func (s *SLOAwareRouter) scoreWithoutPredictions(
 	// Build prediction results with only prefix cache scores
 	podResults := make([]podPredictionResult, 0, len(pods))
 	for _, pod := range pods {
-		prefixScore := s.getPrefixCacheScoreForPod(ctx, state, pod)
+		prefixScore := sloCtx.prefixCacheScoresForPods[pod.GetPod().String()]
 		podResults = append(podResults, podPredictionResult{
 			Pod:              pod,
 			PrefixCacheScore: prefixScore,
@@ -275,41 +275,25 @@ func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.Cycle
 		return nil
 	}
 
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
 	sloCtx := s.getOrMakeSLORequestContext(request)
 
-	s.parseSLOHeaders(ctx, request, sloCtx)
-
-	for _, pod := range pods {
-		prefixCacheScore := s.getPrefixCacheScoreForPod(ctx, state, pod)
-		sloCtx.prefixCacheScoresForPods[pod.GetPod().String()] = prefixCacheScore
-	}
-
-	// Check if SLOs are provided
-	if !sloCtx.predictorBasedScheduling {
-		logger.V(logutil.DEBUG).Info("PredictorBasedScheduling turned off, skipping prediction-based filtering")
+	predictions, err := s.generatePredictions(ctx, request, sloCtx, pods)
+	if err != nil || len(predictions) == 0 {
+		logger.V(logutil.DEBUG).Error(err, "SLOAwareRouter: Error generating predictions, falling back to composite-only scoring")
 		s.setSLOContextForRequest(request, sloCtx)
-		return nil
+		return s.scoreWithoutPredictions(ctx, sloCtx, pods, rng)
 	}
+	s.updateRequestContextWithPredictions(sloCtx, predictions)
 
 	// Initialize scores map with all pods having score 0
 	scores := make(map[schedulingtypes.Pod]float64, len(pods))
 	for _, pod := range pods {
 		scores[pod] = 0
 	}
-
-	source := rand.NewSource(time.Now().UnixNano())
-	r := rand.New(source)
-	predictions, err := s.generatePredictions(ctx, state, request, sloCtx, pods)
-	if err != nil {
-		logger.V(logutil.DEBUG).Error(err, "SLOAwareRouter: Error generating predictions, falling back to composite-only scoring")
-		// Fall back to composite-only scoring using prefix cache scores
-		s.setSLOContextForRequest(request, sloCtx)
-		return s.scoreWithoutPredictions(ctx, state, pods, r)
-	}
-	s.updateRequestContextWithPredictions(sloCtx, predictions)
-
 	allPreds := append([]podPredictionResult(nil), predictions...)
-	allPreds, sticky := s.epsilonGreedyAffinityGate(ctx, allPreds, r, "overall", AffinityGateTauGlobal)
+	allPreds, sticky := s.epsilonGreedyAffinityGate(ctx, allPreds, rng, "overall", AffinityGateTauGlobal)
 
 	// Check if all pods are invalid and all have running requests
 	allPodsInvalid := (sloCtx.ttftSLO > 0 && sloCtx.avgTPOTSLO > 0)
@@ -339,7 +323,7 @@ func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.Cycle
 		"positivePods", len(posHeadroomPods),
 		"negativePods", len(negHeadroomPods))
 
-	selectedPod := s.selectPodBasedOnStrategy(ctx, r, allPreds, posHeadroomPods, negHeadroomPods)
+	selectedPod := s.selectPodBasedOnStrategy(ctx, rng, allPreds, posHeadroomPods, negHeadroomPods)
 
 	// Set score = 1 for selected pod, 0 for all others
 	if selectedPod != nil {
@@ -357,6 +341,7 @@ func (t *SLOAwareRouter) getOrMakeSLORequestContext(request *schedulingtypes.LLM
 	if err != nil {
 		sloCtx = newSLORequestContext(request)
 	}
+
 	return sloCtx
 }
 
