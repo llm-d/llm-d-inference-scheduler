@@ -1,11 +1,11 @@
 package filter
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
 
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -244,7 +244,8 @@ func TestByLabelFiltering(t *testing.T) {
 			blf, ok := plugin.(*ByLabel)
 			require.True(t, ok, "plugin should be of type *ByLabel")
 
-			ctx := context.Background()
+			ctx := utils.NewTestContext(t)
+
 			filteredPods := blf.Filter(ctx, nil, nil, pods)
 
 			var actualPodNames []string

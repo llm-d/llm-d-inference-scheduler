@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 var _ plugins.Handle = &fakeHandle{}
@@ -76,13 +77,13 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 	}{
 		{
 			name:        "missing prefix cache plugin - should work as optimization",
-			handle:      newFakeHandle(context.Background()),
+			handle:      newFakeHandle(utils.NewTestContext(t)),
 			expectError: false,
 		},
 		{
 			name: "prefix plugin present - should work",
 			handle: func() *fakeHandle {
-				h := newFakeHandle(context.Background())
+				h := newFakeHandle(utils.NewTestContext(t))
 				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefix.PrefixCachePluginType}})
 				return h
 			}(),
@@ -146,7 +147,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 	}{
 		{
 			name:   "cold request - all pods never used",
-			scorer: scorer.NewNoHitLRU(context.Background(), nil),
+			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -163,7 +164,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		},
 		{
 			name:   "cache hit - neutral scores",
-			scorer: scorer.NewNoHitLRU(context.Background(), nil),
+			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -182,7 +183,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		},
 		{
 			name:   "single pod - max score",
-			scorer: scorer.NewNoHitLRU(context.Background(), nil),
+			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -205,7 +206,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 				cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), test.prefixState)
 			}
 
-			got := test.scorer.Score(context.Background(), cycleState, test.req, test.input)
+			got := test.scorer.Score(utils.NewTestContext(t), cycleState, test.req, test.input)
 
 			if diff := cmp.Diff(test.wantScores, got); diff != "" {
 				t.Errorf("%s: Unexpected output (-want +got): %v", test.description, diff)
@@ -215,7 +216,8 @@ func TestNoHitLRUScorer(t *testing.T) {
 }
 
 func TestNoHitLRUBasicFunctionality(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
+
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{
@@ -257,7 +259,7 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 }
 
 func TestNoPrefixCacheStateFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{
@@ -275,7 +277,7 @@ func TestNoPrefixCacheStateFound(t *testing.T) {
 }
 
 func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{
@@ -395,7 +397,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 }
 
 func TestNoHitLRUEdgeCases(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{

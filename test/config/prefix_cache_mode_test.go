@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestPrecisePrefixCacheScorer(t *testing.T) {
@@ -42,7 +42,7 @@ schedulingProfiles:
 `,
 		},
 	}
-	ctx := context.Background()
+	ctx := testutils.NewTestContext(t)
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
 

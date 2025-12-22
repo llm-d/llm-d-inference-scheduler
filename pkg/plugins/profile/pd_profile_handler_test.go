@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestPdProfileHandlerFactory(t *testing.T) {
@@ -214,7 +215,7 @@ func newMockSchedulerProfile() *framework.SchedulerProfile {
 }
 
 func TestPdProfileHandler_Pick(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 	request := &types.LLMRequest{
 		Body: &types.LLMRequestBody{
 			Completions: &types.CompletionsRequest{
