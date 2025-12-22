@@ -59,7 +59,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 			s.logger.V(4).Info("decode succeeded without prefill")
 			return
 		}
-		s.logger.V(4).Info("decode failed due to insufficient cache hit threshold.", requestFieldCacheHitThreshold, cacheHitThreshold)
+		s.logger.V(4).Info("decode failed due to failing to meet the cache hit threshold", requestFieldCacheHitThreshold, cacheHitThreshold)
 	}
 
 	// we clone the completion request to avoid modifying the original request
