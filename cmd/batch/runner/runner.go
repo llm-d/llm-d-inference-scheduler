@@ -108,8 +108,7 @@ func (r *BatchRunner) Run(ctx context.Context) error {
 	case "random-robin":
 		policy = batch.NewRandomRobinPolicy()
 	default:
-		// TODO: validate this actually works
-		setupLog.Error(nil, "Unknown request merge policy", "policy", *requestMergePolicy)
+		setupLog.Error(nil, "Unknown request merge policy", "request-merge-policy", *requestMergePolicy)
 		return nil
 	}
 
@@ -118,8 +117,7 @@ func (r *BatchRunner) Run(ctx context.Context) error {
 	case "redis-pubsub":
 		impl = redis.NewRedisMQFlow()
 	default:
-		// TODO: validate this actually works
-		setupLog.Error(nil, "Unknown message queue implementation", "impl", *messageQueueImpl)
+		setupLog.Error(nil, "Unknown message queue implementation", "message-queue-impl", *messageQueueImpl)
 		return nil
 	}
 
