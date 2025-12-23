@@ -447,3 +447,147 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
+	ctx := context.Background()
+	s := scorer.NewNoHitLRU(ctx, nil)
+
+	// Prefill worker pods
+	prefillPodA := &types.PodMetrics{
+		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "prefill-a", Namespace: "default"}},
+		MetricsState: &backendmetrics.MetricsState{},
+	}
+	prefillPodB := &types.PodMetrics{
+		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "prefill-b", Namespace: "default"}},
+		MetricsState: &backendmetrics.MetricsState{},
+	}
+
+	// Decode worker pods
+	decodePodA := &types.PodMetrics{
+		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "decode-a", Namespace: "default"}},
+		MetricsState: &backendmetrics.MetricsState{},
+	}
+	decodePodB := &types.PodMetrics{
+		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "decode-b", Namespace: "default"}},
+		MetricsState: &backendmetrics.MetricsState{},
+	}
+
+	prefillPods := []types.Pod{prefillPodA, prefillPodB}
+	decodePods := []types.Pod{decodePodA, decodePodB}
+
+	coldPrefixState := &types.CycleState{}
+	coldPrefixState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+		PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
+	})
+
+	t.Run("P/D scenario - both profiles tracked separately", func(t *testing.T) {
+		// First cold request with P/D
+		req1 := &types.LLMRequest{RequestId: "pd-request-1"}
+		s.Score(ctx, coldPrefixState, req1, append(prefillPods, decodePods...))
+
+		// Simulate scheduling result with both prefill and decode profiles
+		pdResult := &types.SchedulingResult{
+			PrimaryProfileName: "decode",
+			ProfileResults: map[string]*types.ProfileRunResult{
+				"prefill": {
+					TargetPods: []types.Pod{prefillPodA},
+				},
+				"decode": {
+					TargetPods: []types.Pod{decodePodA},
+				},
+			},
+		}
+		s.PreRequest(ctx, req1, pdResult)
+
+		// Second cold request - both prefillPodB and decodePodB should score higher
+		// since prefillPodA and decodePodA were just used
+		req2 := &types.LLMRequest{RequestId: "pd-request-2"}
+		prefillScores := s.Score(ctx, coldPrefixState, req2, prefillPods)
+		decodeScores := s.Score(ctx, coldPrefixState, req2, decodePods)
+
+		if prefillScores[prefillPodB] <= prefillScores[prefillPodA] {
+			t.Errorf("Expected prefill-b to score higher than prefill-a after prefill-a was used: %+v", prefillScores)
+		}
+
+		if decodeScores[decodePodB] <= decodeScores[decodePodA] {
+			t.Errorf("Expected decode-b to score higher than decode-a after decode-a was used: %+v", decodeScores)
+		}
+	})
+
+	t.Run("non-P/D scenario - only primary profile exists", func(t *testing.T) {
+		req := &types.LLMRequest{RequestId: "non-pd-request"}
+		s.Score(ctx, coldPrefixState, req, decodePods)
+
+		// Scheduling result with only decode profile (no prefill)
+		result := &types.SchedulingResult{
+			PrimaryProfileName: "decode",
+			ProfileResults: map[string]*types.ProfileRunResult{
+				"decode": {
+					TargetPods: []types.Pod{decodePodA},
+				},
+				// No "prefill" profile in results
+			},
+		}
+		// Should not panic when prefill profile doesn't exist
+		s.PreRequest(ctx, req, result)
+
+		// Verify decodePodA was tracked
+		req2 := &types.LLMRequest{RequestId: "non-pd-request-2"}
+		scores := s.Score(ctx, coldPrefixState, req2, decodePods)
+
+		if scores[decodePodB] <= scores[decodePodA] {
+			t.Errorf("Expected decode-b to score higher than decode-a: %+v", scores)
+		}
+	})
+
+	t.Run("custom prefill profile name", func(t *testing.T) {
+		// Create scorer with custom prefill profile name
+		customScorer := scorer.NewNoHitLRU(ctx, &scorer.NoHitLRUParameters{
+			PrefillProfile: "custom-prefill",
+		})
+
+		req := &types.LLMRequest{RequestId: "custom-prefill-request"}
+		customScorer.Score(ctx, coldPrefixState, req, prefillPods)
+
+		result := &types.SchedulingResult{
+			PrimaryProfileName: "decode",
+			ProfileResults: map[string]*types.ProfileRunResult{
+				"custom-prefill": {
+					TargetPods: []types.Pod{prefillPodA},
+				},
+				"decode": {
+					TargetPods: []types.Pod{decodePodA},
+				},
+			},
+		}
+		customScorer.PreRequest(ctx, req, result)
+
+		// Verify custom prefill profile was tracked
+		req2 := &types.LLMRequest{RequestId: "custom-prefill-request-2"}
+		scores := customScorer.Score(ctx, coldPrefixState, req2, prefillPods)
+
+		if scores[prefillPodB] <= scores[prefillPodA] {
+			t.Errorf("Expected prefill-b to score higher with custom profile name: %+v", scores)
+		}
+	})
+
+	t.Run("nil scheduling result - graceful handling", func(t *testing.T) {
+		req := &types.LLMRequest{RequestId: "nil-result"}
+		s.Score(ctx, coldPrefixState, req, decodePods)
+
+		// Should not panic with nil result
+		s.PreRequest(ctx, req, nil)
+	})
+
+	t.Run("empty profile results - graceful handling", func(t *testing.T) {
+		req := &types.LLMRequest{RequestId: "empty-results"}
+		s.Score(ctx, coldPrefixState, req, decodePods)
+
+		result := &types.SchedulingResult{
+			PrimaryProfileName: "decode",
+			ProfileResults:     map[string]*types.ProfileRunResult{},
+		}
+		// Should not panic with empty profile results
+		s.PreRequest(ctx, req, result)
+	})
+}
