@@ -1,14 +1,11 @@
 package scorer
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr/testr"
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
@@ -106,10 +103,7 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 }
 
 func TestActiveRequestScorer_PreRequest(t *testing.T) {
-	ctx := context.Background()
-	logger := testr.New(t)
-	ctx = log.IntoContext(ctx, logger)
-
+	ctx := utils.NewTestContext(t)
 	scorer := NewActiveRequest(ctx, nil)
 
 	podA := &types.PodMetrics{
