@@ -18,7 +18,9 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 )
@@ -39,53 +41,219 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	var completionRequest map[string]any
 	if err := json.Unmarshal(original, &completionRequest); err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+			s.logger.Error(err, "failed to send Invalid JSON error response to Client")
 		}
 		return
 	}
 
-	// Create prefiller request. Set max_tokens to 1.
+	// If "cache_hit_threshold" is present in the request, we try to decode first. The decode node must meet the cache hit threshold in order to execute.
+	// If the decode node is below the threshold, it won't process the request and return a "cache_threshold" finish reason. In that case,
+	// we fall back to P/D disaggregation: perform prefill and then decode.
+	// For more infromation refer to the RFC https://github.com/vllm-project/vllm/issues/24256
+	if cacheHitThreshold, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
+		needsPrefill, err := s.tryDecode(w, r)
+		if err != nil {
+			return
+		}
+		if !needsPrefill {
+			s.logger.V(4).Info("decode succeeded without prefill")
+			return
+		}
+		s.logger.V(4).Info("decode failed due to failing to meet the cache hit threshold", requestFieldCacheHitThreshold, cacheHitThreshold)
+	}
 
+	// we clone the completion request to avoid modifying the original request
+	prefillRequest := maps.Clone(completionRequest)
+	if err := s.prefill(w, r, prefillPodHostPort, prefillRequest); err != nil {
+		s.logger.Error(err, "prefill failed")
+		return
+	}
+
+	s.logger.V(4).Info("forwarding to decoder after prefill")
+	completionRequest[requestFieldCacheHitThreshold] = 0
+	decodeRequest, err := json.Marshal(completionRequest)
+	if err != nil {
+		if err := errorJSONInvalid(err, w); err != nil {
+			s.logger.Error(err, "failed to send Invalid JSON error response to Client")
+		}
+		return
+	}
+
+	r.Body = io.NopCloser(strings.NewReader(string(decodeRequest)))
+	s.decoderProxy.ServeHTTP(w, r)
+}
+
+// tryDecode attempts to decode and returns whether prefill is needed.
+// If w supports streaming (implements http.Flusher), it will use a streaming
+// approach that buffers initial response for inspection, then switches to
+// direct pass-through mode if decode succeeds.
+func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (bool, error) {
+	// Check if w supports streaming
+	if flusher, ok := w.(flushableResponseWriter); ok {
+		bw := newResponseWriterWithBuffer(flusher)
+		return s.tryDecodeStreaming(bw, r)
+	}
+	return s.tryDecodeBuffered(w, r)
+}
+
+// tryDecodeBuffered handles non-streaming decode attempts.
+// It buffers the entire response before inspecting it.
+func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool, error) {
+	dw := &bufferedResponseWriter{}
+	s.decoderProxy.ServeHTTP(dw, r)
+
+	// Check for non-success status codes
+	if dw.statusCode < 200 || dw.statusCode >= 300 {
+		w.WriteHeader(dw.statusCode)
+		if dw.buffer.Len() > 0 {
+			w.Write([]byte(dw.buffer.String())) //nolint:all
+		}
+		return false, fmt.Errorf("decode request failed with status code: %d", dw.statusCode)
+	}
+
+	// Parse response to check finish_reason
+	var response map[string]any
+	if err := json.Unmarshal([]byte(dw.buffer.String()), &response); err != nil {
+		s.logger.Error(err, "failed to unmarshal decode response", "response", dw.buffer.String())
+
+		if err := errorInternalServerError(err, w); err != nil {
+			s.logger.Error(err, "failed to send error response to client")
+		}
+		return false, err
+	}
+
+	// Check for cache_threshold finish reason
+	if s.hasCacheThresholdFinishReason(response) {
+		return true, nil
+	}
+
+	// Decode succeeded, write response to client
+	maps.Copy(w.Header(), dw.headers)
+	w.Write([]byte(dw.buffer.String())) //nolint:all
+
+	return false, nil
+}
+
+// tryDecodeStreaming handles streaming decode attempts.
+// It buffers the initial response to check for cache_threshold, then switches
+// to direct streaming mode if decode succeeds.
+func (s *Server) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request) (bool, error) {
+	// Run ServeHTTP in a goroutine so we can inspect the initial choice to determine if we need to prefill.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.decoderProxy.ServeHTTP(w, r)
+	}()
+
+	// Wait for either:
+	// - firstChunkReady(): first body data is available in buffer
+	// - done: request completed (possibly with no body, e.g., error response)
+	select {
+	case err := <-w.firstChunkReady():
+		if err != nil {
+			s.logger.Error(err, "error while buffering initial response")
+			return false, err
+		}
+	case <-done:
+		s.logger.V(4).Info("request completed without body data")
+	}
+
+	statusCode := w.getStatusCode()
+	if statusCode < 200 || statusCode >= 300 {
+		if err := w.flushBufferAndGoDirect(); err != nil {
+			s.logger.Error(err, "failed to flush buffer to client")
+			return false, err
+		}
+		return false, fmt.Errorf("decode request failed with status code: %d", statusCode)
+	}
+
+	// Check buffered content for cache_threshold finish reason
+	buffered := w.buffered()
+	// Parse response to check finish_reason
+	var response map[string]any
+	if err := json.Unmarshal([]byte(buffered), &response); err != nil {
+		s.logger.Error(err, "failed to unmarshal buffered decode response", "response", buffered)
+
+		if err := errorInternalServerError(err, w); err != nil {
+			s.logger.Error(err, "failed to send error response to client")
+		}
+		return false, err
+	}
+
+	if s.hasCacheThresholdFinishReason(response) {
+		s.logger.V(4).Info("finish reason cache_threshold detected, needs prefill")
+		return true, nil
+	}
+
+	// No cache_threshold found, flush buffer and switch to direct mode
+	// to let the rest of the response stream through.
+	s.logger.V(4).Info("no cache_threshold, switching to direct mode")
+	if err := w.flushBufferAndGoDirect(); err != nil {
+		s.logger.Error(err, "failed to flush buffer to client and switch to direct mode")
+		return false, err
+	}
+	<-done
+	return false, nil
+}
+
+// hasCacheThresholdFinishReason checks if a parsed response contains cache_threshold finish reason.
+func (s *Server) hasCacheThresholdFinishReason(response map[string]any) bool {
+	choices, ok := response[responseFieldChoices].([]any)
+	if !ok || len(choices) == 0 {
+		return false
+	}
+
+	choice, ok := choices[0].(map[string]any)
+	if !ok {
+		return false
+	}
+
+	finishReason, ok := choice[responseFieldFinishReason].(string)
+	return ok && finishReason == finishReasonCacheThreshold
+}
+
+// prefill routes a request to a prefill node
+func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, completionRequest map[string]any) error {
 	ctx := r.Context()
 	preq := r.Clone(ctx)
 
+	// Prepare prefill request
 	completionRequest[requestFieldMaxTokens] = 1
 	completionRequest[requestFieldMaxCompletionTokens] = 1
+	completionRequest[requestFieldCacheHitThreshold] = 0
 
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+			s.logger.Error(err, "failed to send Invalid JSON error response to Client")
 		}
-		return
+		return err
 	}
 	preq.Body = io.NopCloser(strings.NewReader(string(pbody)))
 	preq.ContentLength = int64(len(pbody))
 
-	// Forward request to prefiller
-
 	prefillHandler, err := s.prefillerProxyHandler(prefillPodHostPort)
 	if err != nil {
 		if err := errorBadGateway(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+			s.logger.Error(err, "failed to send Bad Gateway error response to Client")
 		}
-		return
+		return err
 	}
+
+	// send prefill request
 	s.logger.V(4).Info("sending prefill request", "to", prefillPodHostPort)
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
-		s.logger.Error(err, "request failed", "code", pw.statusCode)
+		s.logger.Error(nil, "prefill request failed", "code", pw.statusCode)
 		w.WriteHeader(pw.statusCode)
-		return
+		if pw.buffer.Len() > 0 {
+			w.Write([]byte(pw.buffer.String())) //nolint:all
+		}
+		return err
 	}
 
-	// Forward original request to local decoder
-
-	r.Body = io.NopCloser(strings.NewReader(string(original)))
-	if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
-		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
-		s.decoderProxy.ServeHTTP(w, r)
-	}
+	s.logger.V(4).Info("prefill completed successfully")
+	return nil
 }
