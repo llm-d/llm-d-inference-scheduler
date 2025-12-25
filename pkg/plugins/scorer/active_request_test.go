@@ -7,13 +7,14 @@ import (
 
 	"github.com/go-logr/logr/testr"
 	"github.com/google/go-cmp/cmp"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestActiveRequestScorer_Score(t *testing.T) {

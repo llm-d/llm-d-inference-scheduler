@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestByLabelFactory(t *testing.T) {
