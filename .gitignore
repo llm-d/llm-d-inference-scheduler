@@ -33,3 +33,6 @@ go.work.sum
 .vscode
 
 vendor
+
+# Build output
+/build

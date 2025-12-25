@@ -233,6 +233,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 		name             string
 		pdThreshold      int
 		hashBlockSize    int
+		prefixPluginType string
 		prefixPluginName string
 		setupPrefixState func(*types.CycleState)
 		profileResults   map[string]*types.ProfileRunResult
@@ -242,6 +243,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			name:             "decode not executed yet → run decode",
 			pdThreshold:      100,
 			hashBlockSize:    16,
+			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
 			profileResults:   map[string]*types.ProfileRunResult{},
 			expectedProfiles: []string{"decode"},
@@ -250,6 +252,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			name:             "decode failed (nil result) → run nothing",
 			pdThreshold:      100,
 			hashBlockSize:    16,
+			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
 			profileResults: map[string]*types.ProfileRunResult{
 				"decode": nil,
@@ -260,6 +263,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			name:             "all profiles already executed → run nothing",
 			pdThreshold:      100,
 			hashBlockSize:    16,
+			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
 			profileResults: map[string]*types.ProfileRunResult{
 				"decode":  newMockProfileRunResult(DefaultTestPodPort, "pod1"),
@@ -271,6 +275,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			name:             "pd threshold NOT triggered → run prefill",
 			pdThreshold:      5,
 			hashBlockSize:    16,
+			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
 			setupPrefixState: func(cs *types.CycleState) {
 				state := &prefix.SchedulingContextState{
@@ -290,6 +295,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			name:             "pd threshold triggered (short non-cached suffix) → skip prefill",
 			pdThreshold:      100,
 			hashBlockSize:    16,
+			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
 			setupPrefixState: func(cs *types.CycleState) {
 				state := &prefix.SchedulingContextState{
@@ -312,6 +318,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			handler := NewPdProfileHandler(
 				"prefill",
 				"decode",
+				tt.prefixPluginType,
 				tt.prefixPluginName,
 				tt.pdThreshold,
 				tt.hashBlockSize,
@@ -402,6 +409,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 			handler := NewPdProfileHandler(
 				"prefill",
 				"decode",
+				prefix.PrefixCachePluginType,
 				prefix.PrefixCachePluginType,
 				0,
 				prefix.DefaultBlockSize,
