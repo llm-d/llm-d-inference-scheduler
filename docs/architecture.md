@@ -10,8 +10,7 @@
 
 The design enables:
 
-- Support for **multiple base models** within a shared cluster [Not supported in
-Phase1]
+- Support for **multiple base models** within a shared cluster (see [serving multiple gen AI models and LoRAs](https://gateway-api-inference-extension.sigs.k8s.io/guides/serve-multiple-genai-models/))
 - Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
@@ -39,6 +38,7 @@ The inference scheduler is built on top of:
 
 - **Envoy** as a programmable data plane
 - **EPP (External Processing Plugin)** using **GIE**
+- **BBR (External Processing Plugin)** using **GIE**
 
 ---
 
