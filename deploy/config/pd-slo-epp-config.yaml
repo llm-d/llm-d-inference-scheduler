@@ -1,0 +1,46 @@
+# Sample EPP configuration for PD disaggregation with SLO-aware scheduling
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefill-filter
+  name: prefill-filter
+- type: decode-filter
+  name: decode-filter
+- type: prefix-cache-scorer
+  name: prefix-cache-scorer
+  parameters:
+    hashBlockSize: 5
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 31250
+- type: pd-slo-optimizer
+  name: pd-slo-optimizer
+  parameters:
+    sloBufferFactor: 0.9
+- type: max-score-picker
+  name: max-score-picker
+- type: pd-slo-profile-handler
+  name: pd-slo-profile-handler
+  parameters:
+    decodeProfile: "decode"
+    prefillProfile: "prefill"
+    prefixPluginName: "prefix-cache-scorer"
+    hashBlockSize: 5
+    pdThreshold: 5
+
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: pd-slo-optimizer
+    weight: 3
+  - pluginRef: max-score-picker
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: pd-slo-optimizer
+    weight: 3
+  - pluginRef: max-score-picker
