@@ -469,6 +469,12 @@ func (s *PdSLOOptimizer) PreRequest(
 	logger := log.FromContext(ctx)
 	logger.Info("PdSLOOptimizer.PreRequest called")
 
+	// Handle nil request (defensive check)
+	if request == nil {
+		logger.V(4).Info("Skipping PreRequest: request is nil")
+		return
+	}
+
 	requestID := request.Headers[requtil.RequestIdHeaderKey]
 	if requestID == "" {
 		logger.V(logutil.DEBUG).Info("No request ID")
@@ -575,6 +581,13 @@ func (s *PdSLOOptimizer) ResponseReceived(
 	targetPod *backend.Pod,
 ) {
 	logger := log.FromContext(ctx)
+
+	// Handle nil request (can happen for responses without associated request context)
+	if request == nil {
+		logger.V(4).Info("Skipping ResponseReceived: request is nil")
+		return
+	}
+
 	requestID := request.Headers[requtil.RequestIdHeaderKey]
 	if requestID == "" {
 		return
@@ -622,6 +635,13 @@ func (s *PdSLOOptimizer) ResponseStreaming(
 	targetPod *backend.Pod,
 ) {
 	logger := log.FromContext(ctx)
+
+	// Handle nil request (can happen for responses without associated request context)
+	if request == nil {
+		logger.V(4).Info("Skipping ResponseStreaming: request is nil")
+		return
+	}
+
 	requestID := request.Headers[requtil.RequestIdHeaderKey]
 	if requestID == "" || response.EndOfStream {
 		return
@@ -721,6 +741,13 @@ func (s *PdSLOOptimizer) ResponseComplete(
 	targetPod *backend.Pod,
 ) {
 	logger := log.FromContext(ctx)
+
+	// Handle nil request (can happen for responses without associated request context)
+	if request == nil {
+		logger.V(4).Info("Skipping ResponseComplete: request is nil")
+		return
+	}
+
 	requestID := request.Headers[requtil.RequestIdHeaderKey]
 	if requestID == "" {
 		logger.Info("ResponseComplete: no request ID")
