@@ -163,12 +163,12 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 
 		if (1.0-hitPercentagePrefix)*float64(len(userInput)) < float64(h.pdThreshold) {
 			log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
-			metrics.RecordPDDecision(metrics.DecisionTypeDecodeOnly)
+			metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
 			return map[string]*framework.SchedulerProfile{} // do not run prefill
 		}
 	}
 
-	metrics.RecordPDDecision(metrics.DecisionTypePrefillDecode)
+	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
 	// run the prefill profile
 	return map[string]*framework.SchedulerProfile{
 		h.prefillProfile: profiles[h.prefillProfile],
