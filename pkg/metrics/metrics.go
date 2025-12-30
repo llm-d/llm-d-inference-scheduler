@@ -25,7 +25,7 @@ var (
 			Name:      "pd_decision_total",
 			Help:      metrics.HelpMsgWithStability("Total number of P/D disaggregation decisions made", compbasemetrics.ALPHA),
 		},
-		[]string{"decision_type"}, // "decode-only" or "prefill-decode"
+		[]string{"model_name", "decision_type"}, // "decode-only" or "prefill-decode"
 	)
 )
 
@@ -36,7 +36,13 @@ func GetCollectors() []prometheus.Collector {
 	}
 }
 
-// RecordPDDecision records the type of P/D disaggregation decision made.
-func RecordPDDecision(decisionType string) {
-	SchedulerPDDecisionCount.WithLabelValues(decisionType).Inc()
+// RecordPDDecision increments the counter for a specific P/D routing decision.
+// The decisionType must be one of the DecisionType* constants (e.g., DecisionTypeDecodeOnly).
+// The model parameter should be the target model name (e.g., from request.TargetModel);
+// if empty, the caller should pass a placeholder like "unknown" to avoid empty labels.
+func RecordPDDecision(modelName, decisionType string) {
+	if modelName == "" {
+		modelName = "unknown"
+	}
+	SchedulerPDDecisionCount.WithLabelValues(modelName, decisionType).Inc()
 }
