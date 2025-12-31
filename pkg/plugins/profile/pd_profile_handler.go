@@ -27,13 +27,14 @@ const (
 
 	defaultDecodeProfile    = "decode"
 	defaultPrefillProfile   = "prefill"
-	defaultPrefixPluginName = prefix.PrefixCachePluginType
+	defaultPrefixPluginType = prefix.PrefixCachePluginType
 )
 
 type pdProfileHandlerParameters struct {
 	Threshold        int    `json:"threshold"`
 	DecodeProfile    string `json:"decodeProfile"`
 	PrefillProfile   string `json:"prefillProfile"`
+	PrefixPluginType string `json:"prefixPluginType"`
 	PrefixPluginName string `json:"prefixPluginName"`
 	HashBlockSize    int    `json:"hashBlockSize"`
 	PrimaryPort      int    `json:"primaryPort"`
@@ -48,7 +49,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		Threshold:        0,
 		DecodeProfile:    defaultDecodeProfile,
 		PrefillProfile:   defaultPrefillProfile,
-		PrefixPluginName: defaultPrefixPluginName,
+		PrefixPluginType: defaultPrefixPluginType,
 		HashBlockSize:    prefix.DefaultBlockSize,
 		PrimaryPort:      0,
 	}
@@ -56,6 +57,10 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", PdProfileHandlerType, err)
 		}
+	}
+
+	if parameters.PrefixPluginName == "" {
+		parameters.PrefixPluginName = parameters.PrefixPluginType
 	}
 
 	if parameters.Threshold < 0 {
@@ -72,15 +77,15 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		}
 	}
 
-	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginName,
+	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginType, parameters.PrefixPluginName,
 		parameters.Threshold, parameters.HashBlockSize, parameters.PrimaryPort).WithName(name), nil
 }
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func NewPdProfileHandler(prefillProfile string, decodeProfile string, prefixPluginName string, pdThreshold int, hashBlockSize int, primaryPort int) *PdProfileHandler {
+func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string, pdThreshold, hashBlockSize, primaryPort int) *PdProfileHandler {
 	result := &PdProfileHandler{
 		typedName:             plugins.TypedName{Type: PdProfileHandlerType},
-		prefixPluginTypedName: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefixPluginName},
+		prefixPluginTypedName: plugins.TypedName{Type: prefixPluginType, Name: prefixPluginName},
 		decodeProfile:         decodeProfile,
 		prefillProfile:        prefillProfile,
 		pdThreshold:           pdThreshold,

@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestSessionAffinity_Score(t *testing.T) {
@@ -131,7 +132,7 @@ func TestSessionAffinity_ResponseComplete(t *testing.T) {
 	}
 
 	s := scorer.NewSessionAffinity()
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

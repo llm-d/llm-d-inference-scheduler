@@ -1,7 +1,6 @@
 package filter
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -12,6 +11,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestByLabelFactory(t *testing.T) {
@@ -244,7 +245,8 @@ func TestByLabelFiltering(t *testing.T) {
 			blf, ok := plugin.(*ByLabel)
 			require.True(t, ok, "plugin should be of type *ByLabel")
 
-			ctx := context.Background()
+			ctx := utils.NewTestContext(t)
+
 			filteredPods := blf.Filter(ctx, nil, nil, pods)
 
 			var actualPodNames []string

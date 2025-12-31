@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 var _ plugins.Handle = &fakeHandle{}
@@ -76,13 +77,13 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 	}{
 		{
 			name:        "missing prefix cache plugin - should work as optimization",
-			handle:      newFakeHandle(context.Background()),
+			handle:      newFakeHandle(utils.NewTestContext(t)),
 			expectError: false,
 		},
 		{
 			name: "prefix plugin present - should work",
 			handle: func() *fakeHandle {
-				h := newFakeHandle(context.Background())
+				h := newFakeHandle(utils.NewTestContext(t))
 				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefix.PrefixCachePluginType}})
 				return h
 			}(),
@@ -146,7 +147,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 	}{
 		{
 			name:   "cold request - all pods never used",
-			scorer: scorer.NewNoHitLRU(context.Background(), nil),
+			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -163,7 +164,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		},
 		{
 			name:   "cache hit - neutral scores",
-			scorer: scorer.NewNoHitLRU(context.Background(), nil),
+			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -182,7 +183,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		},
 		{
 			name:   "single pod - max score",
-			scorer: scorer.NewNoHitLRU(context.Background(), nil),
+			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -202,10 +203,11 @@ func TestNoHitLRUScorer(t *testing.T) {
 			// Create cycle state and set prefix state
 			cycleState := &types.CycleState{}
 			if test.prefixState != nil {
-				cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), test.prefixState)
+				cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+					Name: prefix.PrefixCachePluginType}.String()), test.prefixState)
 			}
 
-			got := test.scorer.Score(context.Background(), cycleState, test.req, test.input)
+			got := test.scorer.Score(utils.NewTestContext(t), cycleState, test.req, test.input)
 
 			if diff := cmp.Diff(test.wantScores, got); diff != "" {
 				t.Errorf("%s: Unexpected output (-want +got): %v", test.description, diff)
@@ -215,7 +217,8 @@ func TestNoHitLRUScorer(t *testing.T) {
 }
 
 func TestNoHitLRUBasicFunctionality(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
+
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{
@@ -234,7 +237,8 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 		PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 	}
 	cycleState := &types.CycleState{}
-	cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), coldPrefixState)
+	cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+		Name: prefix.PrefixCachePluginType}.String()), coldPrefixState)
 
 	scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, pods)
 
@@ -257,7 +261,7 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 }
 
 func TestNoPrefixCacheStateFound(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{
@@ -275,7 +279,7 @@ func TestNoPrefixCacheStateFound(t *testing.T) {
 }
 
 func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{
@@ -295,7 +299,8 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	primaryProfile := "primary-profile"
 	toPrefixState := func(entries map[prefix.ServerID]int) *types.CycleState {
 		cycle := &types.CycleState{}
-		cycle.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{PrefixCacheServers: entries})
+		cycle.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{PrefixCacheServers: entries})
 		return cycle
 	}
 
@@ -395,7 +400,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 }
 
 func TestNoHitLRUEdgeCases(t *testing.T) {
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
 	podA := &types.PodMetrics{
@@ -406,7 +411,8 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	t.Run("empty pods list", func(t *testing.T) {
 		emptyPods := []types.Pod{}
 		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
@@ -419,7 +425,8 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 
 	t.Run("nil pods list", func(t *testing.T) {
 		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
@@ -436,7 +443,8 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	t.Run("single pod returns 1.0", func(t *testing.T) {
 		pods := []types.Pod{podA}
 		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 

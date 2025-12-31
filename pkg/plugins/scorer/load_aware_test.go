@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestLoadBasedScorer(t *testing.T) {
@@ -44,7 +45,7 @@ func TestLoadBasedScorer(t *testing.T) {
 	}{
 		{
 			name:   "load based scorer",
-			scorer: scorer.NewLoadAware(context.Background(), 10),
+			scorer: scorer.NewLoadAware(utils.NewTestContext(t), 10),
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 			},

@@ -29,6 +29,9 @@ var _ requestcontrol.PreRequest = &NoHitLRU{}
 
 // NoHitLRUParameters defines the parameters for the NoHitLRU scorer.
 type NoHitLRUParameters struct {
+	// PrefixPluginType defines the type of the prefix cache plugin to read state from.
+	// Defaults to "prefix-cache-scorer".
+	PrefixPluginType string `json:"prefixPluginType"`
 	// PrefixPluginName defines the name of the prefix cache plugin to read state from.
 	// Defaults to "prefix-cache-scorer".
 	PrefixPluginName string `json:"prefixPluginName"`
@@ -69,10 +72,14 @@ func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugins.
 
 // NewNoHitLRU creates a new NoHitLRU scorer
 func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
+	prefixPluginType := prefix.PrefixCachePluginType
 	prefixPluginName := prefix.PrefixCachePluginType
 	lruSize := defaultLRUSize
 
 	if params != nil {
+		if params.PrefixPluginType != "" {
+			prefixPluginType = params.PrefixPluginType
+		}
 		if params.PrefixPluginName != "" {
 			prefixPluginName = params.PrefixPluginName
 		}
@@ -88,10 +95,10 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 	}
 
 	return &NoHitLRU{
-		typedName:        plugins.TypedName{Type: NoHitLRUType},
-		lruCache:         lruCache,
-		prefixPluginName: prefixPluginName,
-		pluginState:      plugins.NewPluginState(ctx),
+		typedName:             plugins.TypedName{Type: NoHitLRUType},
+		lruCache:              lruCache,
+		prefixPluginTypedName: plugins.TypedName{Type: prefixPluginType, Name: prefixPluginName},
+		pluginState:           plugins.NewPluginState(ctx),
 	}
 }
 
@@ -99,10 +106,10 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 // This can help evenly distribute cache growth, since cold requests result in more
 // new KV blocks.
 type NoHitLRU struct {
-	typedName        plugins.TypedName
-	lruCache         *lru.Cache[string, struct{}] // pod name -> dummy value (we only care about order)
-	prefixPluginName string
-	pluginState      *plugins.PluginState
+	typedName             plugins.TypedName
+	lruCache              *lru.Cache[string, struct{}] // pod name -> dummy value (we only care about order)
+	prefixPluginTypedName plugins.TypedName
+	pluginState           *plugins.PluginState
 }
 
 // TypedName returns the typed name of the plugin.
@@ -123,7 +130,7 @@ func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *types.CycleSta
 
 	// Read prefix cache state to determine if this is a cold request
 	// This is treated as an optimization - if the state isn't available, we assume cold request
-	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(s.prefixPluginName))
+	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(s.prefixPluginTypedName.String()))
 
 	if err != nil {
 		logger.Info("No prefix cache state found, treating as cold request for LRU optimization", "error", err)

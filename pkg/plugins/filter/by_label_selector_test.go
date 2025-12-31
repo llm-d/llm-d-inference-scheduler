@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestByLabelSelectorFactoryWithJSON(t *testing.T) {
@@ -298,7 +299,8 @@ func TestByLabelSelectorFiltering(t *testing.T) {
 			blf, ok := plugin.(*filter.ByLabelSelector)
 			require.True(t, ok, "plugin should be of type *ByLabelSelector")
 
-			ctx := context.Background()
+			ctx := utils.NewTestContext(t)
+
 			filteredPods := blf.Filter(ctx, nil, nil, pods)
 
 			var actualPodNames []string
@@ -322,7 +324,7 @@ func TestByLabelSelectorFilterEdgeCases(t *testing.T) {
 	blf, ok := plugin.(*filter.ByLabelSelector)
 	require.True(t, ok)
 
-	ctx := context.Background()
+	ctx := utils.NewTestContext(t)
 
 	t.Run("empty pods slice", func(t *testing.T) {
 		result := blf.Filter(ctx, nil, nil, []types.Pod{})
