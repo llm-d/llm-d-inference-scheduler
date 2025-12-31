@@ -17,6 +17,7 @@ limitations under the License.
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,8 @@ import (
 
 func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.Info("running LMCache protocol")
+
+	ctx := r.Context()
 
 	// Read and parse request body
 	defer r.Body.Close() //nolint:all
@@ -51,7 +54,10 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	// we fall back to P/D disaggregation: perform prefill and then decode.
 	// For more infromation refer to the RFC https://github.com/vllm-project/vllm/issues/24256
 	if cacheHitThreshold, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
-		needsPrefill, err := s.tryDecode(w, r)
+		decodeReq := r.Clone(ctx)
+		decodeReq.Body = io.NopCloser(bytes.NewReader(original))
+		decodeReq.ContentLength = int64(len(original))
+		needsPrefill, err := s.tryDecode(w, decodeReq)
 		if err != nil {
 			return
 		}
@@ -71,7 +77,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 
 	s.logger.V(4).Info("forwarding to decoder after prefill")
 	completionRequest[requestFieldCacheHitThreshold] = 0
-	decodeRequest, err := json.Marshal(completionRequest)
+	decodeRequestBody, err := json.Marshal(completionRequest)
 	if err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
 			s.logger.Error(err, "failed to send Invalid JSON error response to Client")
@@ -79,8 +85,10 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		return
 	}
 
-	r.Body = io.NopCloser(strings.NewReader(string(decodeRequest)))
-	s.decoderProxy.ServeHTTP(w, r)
+	decodeReq := r.Clone(ctx)
+	decodeReq.Body = io.NopCloser(bytes.NewReader(decodeRequestBody))
+	decodeReq.ContentLength = int64(len(decodeRequestBody))
+	s.decoderProxy.ServeHTTP(w, decodeReq)
 }
 
 // tryDecode attempts to decode and returns whether prefill is needed.
