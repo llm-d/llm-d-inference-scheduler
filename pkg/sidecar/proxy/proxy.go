@@ -46,6 +46,12 @@ const (
 	requestFieldRemotePort          = "remote_port"
 	requestFieldStream              = "stream"
 	requestFieldStreamOptions       = "stream_options"
+	requestFieldCacheHitThreshold   = "cache_hit_threshold"
+
+	responseFieldChoices      = "choices"
+	responseFieldFinishReason = "finish_reason"
+
+	finishReasonCacheThreshold = "cache_threshold"
 
 	// SGLang bootstrap fields
 	requestFieldBootstrapHost = "bootstrap_host"
