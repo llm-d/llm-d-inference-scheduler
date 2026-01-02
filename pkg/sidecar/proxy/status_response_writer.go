@@ -72,7 +72,7 @@ type responseWriterWithBuffer struct {
 
 	// ready receives an error (or nil) when the first Write happens,
 	// signaling that there's data available for inspection or an error occurred.
-	ready     chan error
+	ready     chan struct{}
 	readyOnce sync.Once
 }
 
@@ -80,7 +80,7 @@ type responseWriterWithBuffer struct {
 func newResponseWriterWithBuffer(w flushableResponseWriter) *responseWriterWithBuffer {
 	rw := &responseWriterWithBuffer{
 		writerFlusher: w,
-		ready:         make(chan error, 1), // buffered to avoid blocking sender
+		ready:         make(chan struct{}, 1), // buffered to avoid blocking sender
 	}
 	rw.buffering.Store(true)
 	return rw
@@ -88,7 +88,7 @@ func newResponseWriterWithBuffer(w flushableResponseWriter) *responseWriterWithB
 
 // FirstChunkReady returns a channel that receives nil when the first chunk of
 // body data is available in the buffer, or an error if the write failed.
-func (w *responseWriterWithBuffer) FirstChunkReady() <-chan error {
+func (w *responseWriterWithBuffer) FirstChunkReady() <-chan struct{} {
 	return w.ready
 }
 
@@ -114,11 +114,18 @@ func (w *responseWriterWithBuffer) Write(b []byte) (int, error) {
 		w.statusCode = http.StatusOK
 	}
 
-	// Write to buffer before signaling ready, so callers waiting on Ready()
-	// will see the data when they read Buffered().
-	n, err := w.buffer.Write(b)
-	w.signalReady(err)
-	return n, err
+	// Write() always returns a nil error
+	n, _ := w.buffer.Write(b)
+
+	// Signal ready when buffer contains at least 2 complete SSE events.
+	// For SSE streaming, the first chunk is just the role announcement with
+	// finish_reason:null. We need the second chunk to see if cache_threshold
+	// was returned (early abort) or if decode is proceeding normally.
+	if strings.Count(w.buffer.String(), "\n\n") >= 2 {
+		w.signalReady()
+	}
+
+	return n, nil
 }
 
 func (w *responseWriterWithBuffer) WriteHeader(statusCode int) {
@@ -142,20 +149,29 @@ func (w *responseWriterWithBuffer) WriteHeader(statusCode int) {
 
 func (w *responseWriterWithBuffer) Flush() {
 	if w.buffering.Load() {
+		// Apply same logic as Write(): only signal when we have at least 2 SSE events.
+		w.mu.Lock()
+		shouldSignal := strings.Count(w.buffer.String(), "\n\n") >= 2
+		w.mu.Unlock()
+		if shouldSignal {
+			w.signalReady()
+		}
 		return
 	}
 	w.writerFlusher.Flush()
 }
 
-// firstChunkReady returns a channel that receives nil when the first chunk of
-// body data is available in the buffer, or an error if the write failed.
-func (w *responseWriterWithBuffer) firstChunkReady() <-chan error {
+// firstChunkReady returns a channel that receives nil when the first complete
+// chunk of body data is available in the buffer. For SSE streaming responses,
+// this is signaled when the buffer contains "\n\n" (complete SSE event).
+// As a fallback, Flush() also signals readiness.
+func (w *responseWriterWithBuffer) firstChunkReady() <-chan struct{} {
 	return w.ready
 }
 
-func (w *responseWriterWithBuffer) signalReady(err error) {
+func (w *responseWriterWithBuffer) signalReady() {
 	w.readyOnce.Do(func() {
-		w.ready <- err
+		w.ready <- struct{}{}
 		close(w.ready)
 	})
 }

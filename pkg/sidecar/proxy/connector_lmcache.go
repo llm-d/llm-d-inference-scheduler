@@ -57,7 +57,8 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		decodeReq := r.Clone(ctx)
 		decodeReq.Body = io.NopCloser(bytes.NewReader(original))
 		decodeReq.ContentLength = int64(len(original))
-		needsPrefill, err := s.tryDecode(w, decodeReq)
+		isStreaming, _ := completionRequest[requestFieldStream].(bool)
+		needsPrefill, err := s.tryDecode(w, decodeReq, isStreaming)
 		if err != nil {
 			return
 		}
@@ -92,14 +93,12 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 }
 
 // tryDecode attempts to decode and returns whether prefill is needed.
-// If w supports streaming (implements http.Flusher), it will use a streaming
-// approach that buffers initial response for inspection, then switches to
-// direct pass-through mode if decode succeeds.
-func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request) (bool, error) {
-	// Check if w supports streaming
-	if flusher, ok := w.(flushableResponseWriter); ok {
-		bw := newResponseWriterWithBuffer(flusher)
-		return s.tryDecodeStreaming(bw, r)
+func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request, isStreaming bool) (bool, error) {
+	if isStreaming {
+		if flusher, ok := w.(flushableResponseWriter); ok {
+			bw := newResponseWriterWithBuffer(flusher)
+			return s.tryDecodeStreaming(bw, r)
+		}
 	}
 	return s.tryDecodeBuffered(w, r)
 }
@@ -157,11 +156,7 @@ func (s *Server) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request
 	// - firstChunkReady(): first body data is available in buffer
 	// - done: request completed (possibly with no body, e.g., error response)
 	select {
-	case err := <-w.firstChunkReady():
-		if err != nil {
-			s.logger.Error(err, "error while buffering initial response")
-			return false, err
-		}
+	case <-w.firstChunkReady():
 	case <-done:
 		s.logger.V(4).Info("request completed without body data")
 	}
@@ -175,20 +170,8 @@ func (s *Server) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request
 		return false, fmt.Errorf("decode request failed with status code: %d", statusCode)
 	}
 
-	// Check buffered content for cache_threshold finish reason
-	buffered := w.buffered()
-	// Parse response to check finish_reason
-	var response map[string]any
-	if err := json.Unmarshal([]byte(buffered), &response); err != nil {
-		s.logger.Error(err, "failed to unmarshal buffered decode response", "response", buffered)
-
-		if err := errorInternalServerError(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
-		}
-		return false, err
-	}
-
-	if s.hasCacheThresholdFinishReason(response) {
+	// Check buffered SSE content for cache_threshold finish reason.
+	if s.checkBufferedResponseForCacheThreshold(w.buffered()) {
 		s.logger.V(4).Info("finish reason cache_threshold detected, needs prefill")
 		return true, nil
 	}
@@ -218,6 +201,30 @@ func (s *Server) hasCacheThresholdFinishReason(response map[string]any) bool {
 
 	finishReason, ok := choice[responseFieldFinishReason].(string)
 	return ok && finishReason == finishReasonCacheThreshold
+}
+
+// checkBufferedResponseForCacheThreshold checks the buffered SSE response for cache_threshold finish reason.
+// This is only called for streaming responses, so data is always in SSE format.
+func (s *Server) checkBufferedResponseForCacheThreshold(data string) bool {
+	// Parse SSE format: "data: {...json...}\n\ndata: {...json...}\n\n"
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "data: [DONE]" || !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		jsonData := strings.TrimPrefix(line, "data: ")
+		var response map[string]any
+		if err := json.Unmarshal([]byte(jsonData), &response); err != nil {
+			s.logger.V(4).Info("skipping malformed SSE chunk", "chunk", jsonData)
+			continue
+		}
+
+		if s.hasCacheThresholdFinishReason(response) {
+			return true
+		}
+	}
+	return false
 }
 
 // prefill routes a request to a prefill node
@@ -259,7 +266,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 		if pw.buffer.Len() > 0 {
 			w.Write([]byte(pw.buffer.String())) //nolint:all
 		}
-		return err
+		return fmt.Errorf("prefill request failed with status code: %d", pw.statusCode)
 	}
 
 	s.logger.V(4).Info("prefill completed successfully")
