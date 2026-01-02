@@ -54,6 +54,7 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	// we fall back to P/D disaggregation: perform prefill and then decode.
 	// For more infromation refer to the RFC https://github.com/vllm-project/vllm/issues/24256
 	if cacheHitThreshold, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
+		s.logger.V(4).Info("cache_hit_threshold field found in the request, trying to decode first", requestFieldCacheHitThreshold, cacheHitThreshold)
 		decodeReq := r.Clone(ctx)
 		decodeReq.Body = io.NopCloser(bytes.NewReader(original))
 		decodeReq.ContentLength = int64(len(original))
@@ -176,9 +177,9 @@ func (s *Server) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request
 		return true, nil
 	}
 
-	// No cache_threshold found, flush buffer and switch to direct mode
+	// No cache_threshold finish reasonfound, flush buffer and switch to direct mode
 	// to let the rest of the response stream through.
-	s.logger.V(4).Info("no cache_threshold, switching to direct mode")
+	s.logger.V(4).Info("first response for request shows success without cache_threshold finishreason")
 	if err := w.flushBufferAndGoDirect(); err != nil {
 		s.logger.Error(err, "failed to flush buffer to client and switch to direct mode")
 		return false, err
