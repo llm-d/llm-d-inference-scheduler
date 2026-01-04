@@ -206,13 +206,29 @@ Selects the profiles to use when running with disaggregated prefill/decode
 
 - **Type**: `pd-profile-handler`
 - **Parameters**:
-  - `threshold`: specifies the threshold at which there are enough new input tokens to send the request to prefill and then decode, vs just to decode.
-  - `hashBlockSize`: specifies the length of the prompt chunk that a block is keyed by. This must the same value used for the PrefixCachePlugin.
   - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
   - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
+  - `decider`: specifies the name of the decidder, which determines whether disaggregated PD should be executed
+    - `name`: decider name, currently supported values are: "prefix-disaggregation-decider" and "always-disaggregation-decider"
+    - `parameters`: paramaters for this specific decider type
+  - `primaryPort`: the base port number used for data parallel communication.
 
 **Note:** When using this plugin you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
 
+**Parameters for `prefix-disaggregation-decider`**
+- `nonCachedTokens`: length of non-cached patr of the user input to trigger disaggregated PD, defined in tokens.
+- `pluginName`: the prefix plugin name. Optional, required when overriding the default plugin name.
+
+**Example**
+```yaml
+- type: pd-profile-handler
+  parameters:
+    primaryPort: 8000
+    decider: 
+      name: prefix-disaggregation-decider
+      parameters:
+        nonCachedTokens: 10 
+```
 ---
 
 #### ByLabelSelector
