@@ -116,7 +116,11 @@ func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool
 		if dw.buffer.Len() > 0 {
 			w.Write([]byte(dw.buffer.String())) //nolint:all
 		}
-		return false, fmt.Errorf("decode request failed with status code: %d", dw.statusCode)
+
+		err := fmt.Errorf("decode request failed")
+		s.logger.Error(err, "unexpected status code", "code", dw.statusCode)
+
+		return false, err
 	}
 
 	// Parse response to check finish_reason
