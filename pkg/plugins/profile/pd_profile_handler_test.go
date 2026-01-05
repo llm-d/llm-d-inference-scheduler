@@ -341,7 +341,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			setupPrefixState(cs, tt.cachedTokens)
 
 			// set prefix to the given cached tokens number for pod "pod1" in decode profile results
-			inputTokens := len(request.Body.Completions.Prompt) / prefix.AverageCharactersPerToken
+			inputTokens := len(request.Body.Completions.Prompt) / AverageCharactersPerToken
 
 			for profileName, profileRes := range tt.profileResults {
 				if profileName == defaultDecodeProfile && profileRes != nil {
@@ -391,7 +391,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 				expectedProfiles: []string{defaultPrefillProfile},
 			}, {
 				request:          request,
-				cachedTokens:     len(request.Body.Completions.Prompt) / averageCharactersPerToken,
+				cachedTokens:     len(request.Body.Completions.Prompt) / AverageCharactersPerToken,
 				expectedProfiles: []string{},
 			}},
 		}, {
@@ -405,7 +405,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 				expectedProfiles: []string{defaultPrefillProfile},
 			}, {
 				request:          longerRequest,
-				cachedTokens:     len(request.Body.Completions.Prompt) / averageCharactersPerToken,
+				cachedTokens:     len(request.Body.Completions.Prompt) / AverageCharactersPerToken,
 				expectedProfiles: []string{},
 			}},
 		}, {
@@ -419,7 +419,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 				expectedProfiles: []string{defaultPrefillProfile},
 			}, {
 				request:          longRequest,
-				cachedTokens:     len(request.Body.Completions.Prompt) / averageCharactersPerToken,
+				cachedTokens:     len(request.Body.Completions.Prompt) / AverageCharactersPerToken,
 				expectedProfiles: []string{defaultPrefillProfile},
 			}},
 		},
@@ -444,7 +444,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 				setupPrefixState(cs, innerTest.cachedTokens)
 
 				// set prefix to the given cached tokens number for pod "pod1" in decode profile results
-				inputTokens := len(innerTest.request.Body.Completions.Prompt) / prefix.AverageCharactersPerToken
+				inputTokens := len(innerTest.request.Body.Completions.Prompt) / AverageCharactersPerToken
 
 				for profileName, profileRes := range profileResults {
 					if profileName == defaultDecodeProfile && profileRes != nil {

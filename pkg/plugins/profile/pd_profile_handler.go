@@ -29,6 +29,9 @@ const (
 	defaultPrefillProfile   = "prefill"
 	defaultPrefixPluginType = prefix.PrefixCachePluginType
 	defaultDeciderName      = alwaysDeciderName
+
+	// AverageCharactersPerToken is an estimated average characters per token, used since the request we cached is not tokenized.
+	AverageCharactersPerToken = 4
 )
 
 type pdProfileHandlerParameters struct {
@@ -135,7 +138,7 @@ func (h *PdProfileHandler) WithName(name string) *PdProfileHandler {
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
+func (h *PdProfileHandler) Pick(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
 	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
 	if _, executed := profileResults[h.decodeProfile]; !executed {
 		// if decode profile was not executed yet, first let the scheduler run the decode profile
@@ -218,7 +221,7 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState
 
 func getUserInputTokens(request *types.LLMRequest) (int, error) {
 	if request.Body.Completions != nil { // assumed to be valid if not nil
-		return len([]byte(request.Body.Completions.Prompt)) / averageCharactersPerToken, nil
+		return len([]byte(request.Body.Completions.Prompt)) / AverageCharactersPerToken, nil
 	}
 
 	// must be chat-completions request at this point, return bytes of entire messages
@@ -228,5 +231,5 @@ func getUserInputTokens(request *types.LLMRequest) (int, error) {
 		return 0, err
 	}
 
-	return len(prompt) / averageCharactersPerToken, nil
+	return len(prompt) / AverageCharactersPerToken, nil
 }

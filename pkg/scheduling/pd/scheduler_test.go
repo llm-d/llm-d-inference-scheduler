@@ -263,7 +263,7 @@ func TestPDSchedule(t *testing.T) {
 			})
 			scheduler := scheduling.NewSchedulerWithConfig(schedulerConfig)
 
-			inputTokens := len(test.req.Body.Completions.Prompt) / prefix.AverageCharactersPerToken
+			inputTokens := len(test.req.Body.Completions.Prompt) / profile.AverageCharactersPerToken
 			for _, pod := range test.input {
 				pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(0, inputTokens))
 			}

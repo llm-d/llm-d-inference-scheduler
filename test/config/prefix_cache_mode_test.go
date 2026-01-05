@@ -49,12 +49,12 @@ schedulingProfiles:
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_ = os.Setenv("HF_TOKEN", "dummy_token") // needed for cache_tracking
-			rawConfig, _, err := loader.LoadConfigPhaseOne([]byte(test.configText), logr.Discard())
+			rawConfig, _, err := loader.LoadRawConfig([]byte(test.configText), logr.Discard())
 			if err != nil {
 				t.Fatalf("unexpected error from LoadConfigPhaseOne: %v", err)
 			}
 			handle := utils.NewTestHandle(ctx)
-			_, err = loader.LoadConfigPhaseTwo(rawConfig, handle, logr.Discard())
+			_, err = loader.InstantiateAndConfigure(rawConfig, handle, logr.Discard())
 			if err != nil {
 				t.Fatalf("unexpected error from LoadConfigPhaseTwo: %v", err)
 			}
