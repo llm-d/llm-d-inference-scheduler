@@ -26,10 +26,10 @@ const (
 	defaultDecodeProfile    = "decode"
 	defaultPrefillProfile   = "prefill"
 	defaultPrefixPluginType = prefix.PrefixCachePluginType
+	defaultDeciderName      = alwaysDeciderName
 
-	// An estimated average characters per token, used since the request we cached is not tokenized.
+	// AverageCharactersPerToken is an estimated average characters per token, used since the request we cached is not tokenized.
 	AverageCharactersPerToken = 4
-	defaultDeciderName        = alwaysDeciderName
 )
 
 type pdProfileHandlerParameters struct {
@@ -136,7 +136,7 @@ func (h *PdProfileHandler) WithName(name string) *PdProfileHandler {
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	if _, executed := profileResults[h.decodeProfile]; !executed {
 		// if decode profile was not executed yet, first let the scheduler run the decode profile
