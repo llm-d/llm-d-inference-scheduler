@@ -110,8 +110,8 @@ func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool
 	dw := &bufferedResponseWriter{}
 	s.decoderProxy.ServeHTTP(dw, r)
 
-	// Check for non-success status codes
-	if dw.statusCode < 200 || dw.statusCode >= 300 {
+	if isHTTPError(dw.statusCode) {
+
 		w.WriteHeader(dw.statusCode)
 		if dw.buffer.Len() > 0 {
 			w.Write([]byte(dw.buffer.String())) //nolint:all
@@ -167,7 +167,7 @@ func (s *Server) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request
 	}
 
 	statusCode := w.getStatusCode()
-	if statusCode < 200 || statusCode >= 300 {
+	if isHTTPError(statusCode) {
 		if err := w.flushBufferAndGoDirect(); err != nil {
 			s.logger.Error(err, "failed to flush buffer to client")
 			return false, err
@@ -265,7 +265,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
-	if pw.statusCode < 200 || pw.statusCode >= 300 {
+	if isHTTPError(pw.statusCode) {
 		s.logger.Error(nil, "prefill request failed", "code", pw.statusCode)
 		w.WriteHeader(pw.statusCode)
 		if pw.buffer.Len() > 0 {
