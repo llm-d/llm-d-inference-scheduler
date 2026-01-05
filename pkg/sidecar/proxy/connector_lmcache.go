@@ -177,9 +177,9 @@ func (s *Server) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request
 		return true, nil
 	}
 
-	// No cache_threshold finish reasonfound, flush buffer and switch to direct mode
+	// No cache_threshold finish reason found, flush buffer and switch to direct mode
 	// to let the rest of the response stream through.
-	s.logger.V(4).Info("first response for request shows success without cache_threshold finishreason")
+	s.logger.V(4).Info("first response for request shows success without cache_threshold finish reason")
 	if err := w.flushBufferAndGoDirect(); err != nil {
 		s.logger.Error(err, "failed to flush buffer to client and switch to direct mode")
 		return false, err
