@@ -40,11 +40,6 @@ import (
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 )
 
-const (
-	// Certain envoy implementations set a max limit of 64Kb per streamed chunk, intentionally setting this lower for a safe margin.
-	bodyByteLimit = 62000
-)
-
 func NewStreamingServer(datastore Datastore, director Director) *StreamingServer {
 	return &StreamingServer{
 		director:  director,
@@ -485,49 +480,4 @@ func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 	}
 
 	return resp, nil
-}
-
-func buildCommonResponses(bodyBytes []byte, byteLimit int, setEos bool) []*extProcPb.CommonResponse {
-	responses := []*extProcPb.CommonResponse{}
-	startingIndex := 0
-	bodyLen := len(bodyBytes)
-
-	if bodyLen == 0 {
-		return []*extProcPb.CommonResponse{
-			{
-				BodyMutation: &extProcPb.BodyMutation{
-					Mutation: &extProcPb.BodyMutation_StreamedResponse{
-						StreamedResponse: &extProcPb.StreamedBodyResponse{
-							Body:        bodyBytes,
-							EndOfStream: setEos,
-						},
-					},
-				},
-			},
-		}
-	}
-
-	for startingIndex < bodyLen {
-		eos := false
-		len := min(bodyLen-startingIndex, byteLimit)
-		chunk := bodyBytes[startingIndex : len+startingIndex]
-		if setEos && len+startingIndex >= bodyLen {
-			eos = true
-		}
-
-		commonResp := &extProcPb.CommonResponse{
-			BodyMutation: &extProcPb.BodyMutation{
-				Mutation: &extProcPb.BodyMutation_StreamedResponse{
-					StreamedResponse: &extProcPb.StreamedBodyResponse{
-						Body:        chunk,
-						EndOfStream: eos,
-					},
-				},
-			},
-		}
-		responses = append(responses, commonResp)
-		startingIndex += len
-	}
-
-	return responses
 }
