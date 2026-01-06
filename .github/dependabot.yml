@@ -6,6 +6,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      - dependency-name: "go"      
     open-pull-requests-limit: 10
     commit-message:
       prefix: "deps(go)"
