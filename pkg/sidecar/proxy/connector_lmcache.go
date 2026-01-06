@@ -19,6 +19,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -117,7 +118,7 @@ func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool
 			w.Write([]byte(dw.buffer.String())) //nolint:all
 		}
 
-		err := fmt.Errorf("decode request failed")
+		err := errors.New("decode request failed")
 		s.logger.Error(err, "unexpected status code", "code", dw.statusCode)
 
 		return false, err
