@@ -8,7 +8,7 @@ plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
   parameters:
-    blockSize: 8
+    blockSizeTokens: 8
     autoTune: false
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250

@@ -235,12 +235,13 @@ func TestPDSchedule(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			//  initialize scheduler with config
-			prefixScorer, _ := prefix.New(ctx, prefix.Config{AutoTune: false, BlockSizeTokens: 2, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
+			prefixScorer, err := prefix.New(ctx, prefix.Config{AutoTune: false, BlockSizeTokens: 2, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
+			assert.NoError(t, err, "Prefix plugin creation returned unexpected error")
 
 			prefillSchedulerProfile := scheduling.NewSchedulerProfile().
 				WithFilters(filter.NewPrefillRole()).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
-			err := prefillSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 50))
+			err = prefillSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := scheduling.NewSchedulerProfile().
