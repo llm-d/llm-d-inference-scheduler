@@ -189,9 +189,10 @@ func (s *PdSLOOptimizer) Score(
 	}
 
 	if ttftSLO == 0 && tpotSLO == 0 {
-		// No SLOs specified, let other scorers handle it
-		logger.V(logutil.DEBUG).Info("No SLO headers found, skipping PD-SLO optimization")
-		return nil
+		// No SLOs specified - use queue-based scoring as fallback
+		// This enables non-SLO/baseline requests to benefit from load balancing
+		logger.V(logutil.DEBUG).Info("No SLO headers found, using queue-based fallback scoring")
+		return s.scoreByQueueDepth(ctx, pods)
 	}
 
 	logger.V(logutil.DEBUG).Info("PD-SLO optimization triggered",
@@ -448,6 +449,67 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 		} else {
 			scores[p.pod] = 0.0
 		}
+	}
+
+	return scores
+}
+
+// scoreByQueueDepth provides fallback scoring for non-SLO requests based on queue depth.
+// Uses the same min-max normalization as the standard queue-scorer.
+// Scores pods inversely to their waiting queue size (fewer waiting requests = higher score).
+func (s *PdSLOOptimizer) scoreByQueueDepth(
+	ctx context.Context,
+	pods []schedulingtypes.Pod,
+) map[schedulingtypes.Pod]float64 {
+	logger := log.FromContext(ctx)
+	scores := make(map[schedulingtypes.Pod]float64)
+
+	if len(pods) == 0 {
+		return scores
+	}
+
+	// Find min and max queue sizes
+	minQueueSize := int(^uint(0) >> 1) // MaxInt
+	maxQueueSize := int(-1 << 63)      // MinInt
+
+	for _, pod := range pods {
+		metrics := pod.GetMetrics()
+		if metrics == nil {
+			continue
+		}
+		queueSize := metrics.WaitingQueueSize
+		if queueSize < minQueueSize {
+			minQueueSize = queueSize
+		}
+		if queueSize > maxQueueSize {
+			maxQueueSize = queueSize
+		}
+	}
+
+	// Score each pod using min-max normalization
+	// Higher score for lower queue depth
+	for _, pod := range pods {
+		metrics := pod.GetMetrics()
+		if metrics == nil {
+			logger.V(logutil.DEBUG).Info("No metrics for pod (queue fallback)", "pod", pod.GetPod().String())
+			continue
+		}
+
+		var score float64
+		if maxQueueSize == minQueueSize {
+			// All pods have same queue size - return neutral score
+			score = 1.0
+		} else {
+			// Normalize: score ranges from 0.0 (max queue) to 1.0 (min queue)
+			score = float64(maxQueueSize-metrics.WaitingQueueSize) / float64(maxQueueSize-minQueueSize)
+		}
+
+		scores[pod] = score
+
+		logger.V(logutil.DEBUG).Info("Queue-based fallback score",
+			"pod", pod.GetPod().String(),
+			"waitingQueue", metrics.WaitingQueueSize,
+			"score", score)
 	}
 
 	return scores
