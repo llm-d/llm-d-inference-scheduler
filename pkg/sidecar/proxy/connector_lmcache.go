@@ -30,8 +30,6 @@ import (
 func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.Info("running LMCache protocol")
 
-	ctx := r.Context()
-
 	// Read and parse request body
 	defer r.Body.Close() //nolint:all
 	original, err := io.ReadAll(r.Body)
@@ -56,11 +54,8 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	// For more information refer to the RFC https://github.com/vllm-project/vllm/issues/24256
 	if cacheHitThreshold, hasCacheHitThreshold := completionRequest[requestFieldCacheHitThreshold]; hasCacheHitThreshold {
 		s.logger.V(4).Info("cache_hit_threshold field found in the request, trying to decode first", requestFieldCacheHitThreshold, cacheHitThreshold)
-		decodeReq := r.Clone(ctx)
-		decodeReq.Body = io.NopCloser(bytes.NewReader(original))
-		decodeReq.ContentLength = int64(len(original))
-		isStreaming, _ := completionRequest[requestFieldStream].(bool)
-		needsPrefill, err := s.tryDecode(w, decodeReq, isStreaming)
+		decodeReq := cloneRequestWithBody(r, original)
+		needsPrefill, err := s.tryDecode(w, decodeReq, completionRequest)
 		if err != nil {
 			return
 		}
@@ -88,15 +83,13 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		return
 	}
 
-	decodeReq := r.Clone(ctx)
-	decodeReq.Body = io.NopCloser(bytes.NewReader(decodeRequestBody))
-	decodeReq.ContentLength = int64(len(decodeRequestBody))
+	decodeReq := cloneRequestWithBody(r, decodeRequestBody)
 	s.decoderProxy.ServeHTTP(w, decodeReq)
 }
 
 // tryDecode attempts to decode and returns whether prefill is needed.
-func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request, isStreaming bool) (bool, error) {
-	if isStreaming {
+func (s *Server) tryDecode(w http.ResponseWriter, r *http.Request, completionRequest map[string]any) (bool, error) {
+	if isStreaming, _ := completionRequest[requestFieldStream].(bool); isStreaming {
 		if flusher, ok := w.(flushableResponseWriter); ok {
 			bw := newResponseWriterWithBuffer(flusher)
 			return s.tryDecodeStreaming(bw, r)
@@ -235,9 +228,6 @@ func (s *Server) checkBufferedResponseForCacheThreshold(data string) bool {
 
 // prefill routes a request to a prefill node
 func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, completionRequest map[string]any) error {
-	ctx := r.Context()
-	preq := r.Clone(ctx)
-
 	// Prepare prefill request
 	completionRequest[requestFieldMaxTokens] = 1
 	completionRequest[requestFieldMaxCompletionTokens] = 1
@@ -250,8 +240,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 		}
 		return err
 	}
-	preq.Body = io.NopCloser(strings.NewReader(string(pbody)))
-	preq.ContentLength = int64(len(pbody))
+	preq := cloneRequestWithBody(r, pbody)
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillPodHostPort)
 	if err != nil {
@@ -277,4 +266,11 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 
 	s.logger.V(4).Info("prefill completed successfully")
 	return nil
+}
+
+func cloneRequestWithBody(r *http.Request, body []byte) *http.Request {
+	cloned := r.Clone(r.Context())
+	cloned.Body = io.NopCloser(bytes.NewReader(body))
+	cloned.ContentLength = int64(len(body))
+	return cloned
 }
