@@ -123,7 +123,7 @@ func (w *responseWriterWithBuffer) Write(b []byte) (int, error) {
 	// For SSE streaming, the first chunk is just the role announcement with
 	// finish_reason:null. We need the second chunk to see if cache_threshold
 	// was returned (early abort) or if decode is proceeding normally.
-	if countSSEEvents(w.buffer.String()) >= 2 {
+	if shouldSignal(w.buffer.String()) {
 		w.signalReady()
 	}
 
@@ -153,7 +153,7 @@ func (w *responseWriterWithBuffer) Flush() {
 	if w.buffering.Load() {
 		// Apply same logic as Write(): only signal when we have at least 2 SSE events.
 		w.mu.Lock()
-		shouldSignal := countSSEEvents(w.buffer.String()) >= 2
+		shouldSignal := shouldSignal(w.buffer.String())
 		w.mu.Unlock()
 		if shouldSignal {
 			w.signalReady()
@@ -234,6 +234,6 @@ func (w *responseWriterWithBuffer) flushBufferAndGoDirect() error {
 	return nil
 }
 
-func countSSEEvents(data string) int {
-	return strings.Count(data, sseEventDelimiter)
+func shouldSignal(data string) bool {
+	return strings.Count(data, sseEventDelimiter) >= 2
 }
