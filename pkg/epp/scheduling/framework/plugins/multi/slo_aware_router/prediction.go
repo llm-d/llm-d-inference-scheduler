@@ -89,7 +89,7 @@ func (s *SLOAwareRouter) generatePredictions(ctx context.Context, request *sched
 			"prefixCacheScore", predResult.PrefixCacheScore,
 			"TTFT", prediction.TTFT,
 			"TPOT", prediction.TPOT,
-			"buffer", SLOBufferFactor,
+			"buffer", s.config.SLOBufferFactor,
 			"podMinTPOTSLO", podMinTPOTSLO,
 			"ttftSLO", sloCtx.ttftSLO,
 			"requestTPOTSLO", sloCtx.avgTPOTSLO,
@@ -116,20 +116,27 @@ func (s *SLOAwareRouter) validatePrediction(
 	podMinTPOTSLO float64,
 ) (ttftOk, tpotOk, isValid bool, headroom float64, ttftHeadroom float64) {
 
-	bufferedTPOT := sloCtx.avgTPOTSLO * s.config.SLOBufferFactor
-	// a podMinTPOTSLO of 0 means no either no requests, or no TPOT SLOs specified on running requests
-	if podMinTPOTSLO > 0 {
-		if podMinTPOTSLO < sloCtx.avgTPOTSLO {
-			log.FromContext(context.Background()).V(logutil.DEBUG).Info("Pod min TPOT SLO is less than the req SLO, adjusting", "podMinTPOTSLO", podMinTPOTSLO, "bufferedTPOT", sloCtx.avgTPOTSLO)
+	ttftOk = pred.TTFT < sloCtx.ttftSLO
+	ttftHeadroom = sloCtx.ttftSLO - pred.TTFT
+
+	tpotOk = true
+	headroom = 0.0
+
+	if s.config.StreamingMode {
+		bufferedTPOT := sloCtx.avgTPOTSLO * s.config.SLOBufferFactor
+		// a podMinTPOTSLO of 0 means no either no requests, or no TPOT SLOs specified on running requests
+		if podMinTPOTSLO > 0 {
+			if podMinTPOTSLO < sloCtx.avgTPOTSLO {
+				log.FromContext(context.Background()).V(logutil.DEBUG).Info("Pod min TPOT SLO is less than the req SLO, adjusting", "podMinTPOTSLO", podMinTPOTSLO, "bufferedTPOT", sloCtx.avgTPOTSLO)
+			}
+			bufferedTPOT = min(bufferedTPOT, podMinTPOTSLO*s.config.SLOBufferFactor)
 		}
-		bufferedTPOT = min(bufferedTPOT, podMinTPOTSLO*s.config.SLOBufferFactor)
+
+		tpotOk = pred.TPOT < bufferedTPOT
+		headroom = bufferedTPOT - pred.TPOT
 	}
 
-	tpotOk = pred.TPOT < bufferedTPOT
-	ttftOk = pred.TTFT < sloCtx.ttftSLO
-
 	isValid = ttftOk && tpotOk
-	headroom = bufferedTPOT - pred.TPOT
-	ttftHeadroom = sloCtx.ttftSLO - pred.TTFT
+
 	return
 }
