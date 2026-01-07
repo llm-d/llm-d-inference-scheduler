@@ -12,8 +12,8 @@ var _ pdDecider = &AlwaysDisaggregationDecider{}
 
 const alwaysDeciderName = "always-disaggregation-decider"
 
-// NewAlwaysDisaggregationDecider initializes a new AlwaysDisaggregationDecider and returns its pointer.
-func NewAlwaysDisaggregationDecider(_ json.RawMessage) (*AlwaysDisaggregationDecider, error) {
+// newAlwaysDisaggregationDecider initializes a new AlwaysDisaggregationDecider and returns its pointer.
+func newAlwaysDisaggregationDecider(_ json.RawMessage) (*AlwaysDisaggregationDecider, error) {
 	return &AlwaysDisaggregationDecider{}, nil
 }
 

@@ -88,7 +88,7 @@ func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefix
 
 	switch deciderName {
 	case alwaysDeciderName:
-		decider, err = NewAlwaysDisaggregationDecider(deciderParams)
+		decider, err = newAlwaysDisaggregationDecider(deciderParams)
 	case PrefixDeciderName:
 		decider, err = newPrefixDisaggregationDecider(deciderParams)
 	default:
@@ -152,7 +152,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	inputTokens, err := getUserInputTokens(request)
+	inputTokens, err := getUserInputLenInTokens(request)
 	if err != nil {
 		log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input")
 		return nil
@@ -218,7 +218,7 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 }
 
 // returns lenght of user input in tokens
-func getUserInputTokens(request *scheduling.LLMRequest) (int, error) {
+func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
 	if request.Body.Completions != nil { // assumed to be valid if not nil
 		return len([]byte(request.Body.Completions.Prompt)) / AverageCharactersPerToken, nil
 	}
