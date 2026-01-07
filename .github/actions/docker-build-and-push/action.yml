@@ -19,6 +19,10 @@ inputs:
   prerelease:
     required: true
     description: indicates whether or not this is a pre-release (not a release) build
+  python-version:
+    required: false
+    description: Python version to use (defaults to 3.12)
+    default: '3.12'
 runs:
   using: "composite"
   steps:
@@ -45,6 +49,7 @@ runs:
         fi
         docker buildx build \
           --platform linux/amd64,linux/arm64 \
+          --build-arg PYTHON_VERSION=${{ inputs.python-version }} \
           -t ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.tag }} \
           ${LATEST_TAG} -f ${{ inputs.docker-file }} --push .
       shell: bash
