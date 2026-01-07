@@ -208,7 +208,7 @@ Selects the profiles to use when running with disaggregated prefill/decode
 - **Parameters**:
   - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
   - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-  - `decider`: specifies the name of the decidder, which determines whether disaggregated PD should be executed
+  - `decider`: specifies the name of the decider, which determines whether disaggregated PD should be executed
     - `name`: decider name, currently supported values are: "prefix-disaggregation-decider" and "always-disaggregation-decider"
     - `parameters`: parameters for this specific decider type
   - `primaryPort`: the base port number used for data parallel communication.
