@@ -15,7 +15,7 @@ import (
 )
 
 // compile-time type assertion
-var _ pdDecider = &PrefixDisaggregationDecider{}
+var _ pdDecider = &prefixDisaggregationDecider{}
 
 // PrefixDeciderName name of the prefix decider
 const PrefixDeciderName = "prefix-disaggregation-decider"
@@ -45,7 +45,7 @@ func (p prefixDisaggregationDeciderParameters) validate() error {
 }
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func newPrefixDisaggregationDecider(rawParameters json.RawMessage) (*PrefixDisaggregationDecider, error) {
+func newPrefixDisaggregationDecider(rawParameters json.RawMessage) (*prefixDisaggregationDecider, error) {
 	parameters := defaultParams
 
 	if rawParameters != nil {
@@ -58,20 +58,20 @@ func newPrefixDisaggregationDecider(rawParameters json.RawMessage) (*PrefixDisag
 		return nil, err
 	}
 
-	return &PrefixDisaggregationDecider{
+	return &prefixDisaggregationDecider{
 		prefixPluginTypedName: plugin.TypedName{Type: prefix.PrefixCachePluginType, Name: parameters.PluginName},
 		nonCachedTokens:       parameters.NonCachedTokens,
 	}, nil
 }
 
-// PrefixDisaggregationDecider handles scheduler profiles for PD.
-type PrefixDisaggregationDecider struct {
+// prefixDisaggregationDecider handles scheduler profiles for PD.
+type prefixDisaggregationDecider struct {
 	prefixPluginTypedName plugin.TypedName
 	nonCachedTokens       int
 }
 
 // isDisaggregationRequired checks if disaggregated PD is required for the given request and endpoint.
-func (d *PrefixDisaggregationDecider) isDisaggregationRequired(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
+func (d *prefixDisaggregationDecider) isDisaggregationRequired(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
