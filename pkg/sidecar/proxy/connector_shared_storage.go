@@ -27,8 +27,8 @@ import (
 	"strings"
 )
 
-func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
-	s.logger.Info("running LMCache protocol")
+func (s *Server) runSharedStorageProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
+	s.logger.V(4).Info("running Shared Storage protocol", "url", prefillPodHostPort)
 
 	// Read and parse request body
 	defer r.Body.Close() //nolint:all
