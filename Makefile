@@ -10,6 +10,7 @@ PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
 SIDECAR_NAME ?= pd-sidecar
+UNIT_TESTS_IMAGE_NAME ?= llm-d-unit-tests
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
@@ -24,6 +25,10 @@ VLLM_SIMULATOR_TAG ?= v0.6.1
 export VLLM_SIMULATOR_TAG
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
+UNIT_TESTS_TAG ?= dev
+export UNIT_TESTS_TAG
+UNIT_TESTS_TAG_BASE ?= $(IMAGE_REGISTRY)/$(UNIT_TESTS_IMAGE_NAME)
+export UNIT_TESTS_IMAGE ?= $(UNIT_TESTS_TAG_BASE):$(UNIT_TESTS_TAG)
 
 # Map go arch to typos arch
 ifeq ($(TARGETARCH),amd64)
@@ -65,11 +70,6 @@ LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
 
 PYTHON_VERSION := 3.12
 
-# Python executable for creating venv
-PYTHON_EXE := $(shell command -v python$(PYTHON_VERSION) || command -v python3)
-VENV_DIR := $(shell pwd)/build/venv
-VENV_BIN := $(VENV_DIR)/bin
-
 # Unified Python configuration detection. This block runs once.
 PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
 ifeq ($(PYTHON_CONFIG),)
@@ -101,33 +101,6 @@ PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
 CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
 CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
 
-.PHONY: install-python-deps
-install-python-deps: ## Sets up Python virtual environment and installs dependencies
-	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
-	@if [ -z "$(PYTHON_EXE)" ]; then \
-		echo "ERROR: Python 3 not found in PATH."; \
-		exit 1; \
-	fi
-	@if [ ! -f "$(VENV_BIN)/pip" ]; then \
-		echo "Creating virtual environment..."; \
-		$(PYTHON_EXE) -m venv $(VENV_DIR) || { \
-			echo "ERROR: Failed to create virtual environment."; \
-			echo "Your Python installation may be missing the 'venv' module."; \
-			exit 1; \
-		}; \
-	fi
-	@echo "Upgrading pip and installing dependencies..."
-	@$(VENV_BIN)/pip install --upgrade pip --quiet
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null); \
-	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt" ]; then \
-		echo "Installing Python dependencies from kv-cache-manager..."; \
-		$(VENV_BIN)/pip install --quiet -r "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt"; \
-	else \
-		echo "WARNING: Could not find kv-cache-manager requirements.txt, installing minimal deps..."; \
-		$(VENV_BIN)/pip install --quiet 'transformers>=4.53.0' 'jinja2>=2.11'; \
-	fi
-	@echo "✅ Python dependencies installed in venv"
-
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
@@ -139,8 +112,8 @@ epp_CGO_CFLAGS = "${CGO_CFLAGS}"
 sidecar_CGO_CFLAGS =
 epp_CGO_LDFLAGS = "${CGO_LDFLAGS}"
 sidecar_CGO_LDFLAGS =
-epp_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/
-sidecar_TEST_FILES = go list ./pkg/sidecar/...
+epp_TEST_PACKAGES = $$(go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/)
+sidecar_TEST_PACKAGES = ./pkg/sidecar/...
 
 .PHONY: help
 help: ## Print help
@@ -180,19 +153,31 @@ format: ## Format Go source files
 test: test-unit test-e2e ## Run unit tests and e2e tests
 
 .PHONY: test-unit
-test-unit: test-unit-epp test-unit-sidecar
+test-unit: image-build-unit-test test-unit-epp test-unit-sidecar
 
-.PHONY: test-unit-%
-test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
-	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null || echo ""); \
-	PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
-	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
+.PHONY: test-unit-epp
+test-unit-epp: image-build-unit-test
+	@printf "\033[33;1m==== Running EPP Unit Tests ====\033[0m\n"
+	$(CONTAINER_RUNTIME) run --rm -v $$(pwd):/app $(UNIT_TESTS_IMAGE) sh -c '\
+		CGO_CFLAGS="$$(python3-config --cflags)" \
+		CGO_LDFLAGS="$$(python3-config --ldflags --embed) -ltokenizers -ldl -lm" \
+		KV_CACHE_PKG="$$(go list -m -f "{{.Dir}}/pkg/preprocessing/chat_completions" github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null || echo "")" \
+		PYTHONPATH="$${PYTHONPATH}:$${KV_CACHE_PKG}" \
+		go test -v $(epp_TEST_PACKAGES)'
+
+.PHONY: test-unit-sidecar
+test-unit-sidecar: image-build-unit-test
+	@printf "\033[33;1m==== Running Sidecar Unit Tests ====\033[0m\n"
+	$(CONTAINER_RUNTIME) run --rm -v $$(pwd):/app $(UNIT_TESTS_IMAGE) go test -v $(sidecar_TEST_PACKAGES)
 
 .PHONY: test-integration
-test-integration: download-tokenizer check-dependencies ## Run integration tests
+test-integration: image-build-unit-test ## Run integration tests (requires KUBECONFIG and running cluster)
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
-	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
+	$(CONTAINER_RUNTIME) run --rm --network=host \
+		-v $$(pwd):/app \
+		-v $${HOME}/.kube:/root/.kube:ro \
+		-e KUBECONFIG=/root/.kube/config \
+		$(UNIT_TESTS_IMAGE) go test -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
 test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
@@ -235,6 +220,13 @@ image-build-%: check-container-tool ## Build Docker image ## Build Docker image 
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
  		-t $($*_IMAGE) -f Dockerfile.$* .
+
+.PHONY: image-build-unit-test
+image-build-unit-test:
+	@printf "\033[33;1m==== Building image $(UNIT_TESTS_IMAGE) ====\033[0m\n"
+	$(CONTAINER_RUNTIME) build \
+		-f Dockerfile.unittest \
+		-t $(UNIT_TESTS_IMAGE)
 
 .PHONY: image-push
 image-push: image-push-epp image-push-sidecar ## Push container images to registry
@@ -365,7 +357,7 @@ check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error
 		echo "$$TYPOS_OUTPUT"; \
 		exit 1; \
 	fi
-	
+
 ##@ Tools
 
 .PHONY: check-tools
@@ -414,7 +406,6 @@ check-container-tool:
 	else \
 		echo "✅ Container tool '$(CONTAINER_RUNTIME)' found."; \
 	fi
-	  
 
 .PHONY: check-kubectl
 check-kubectl:
@@ -491,73 +482,3 @@ env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
 	@CLEAN=true ./scripts/kubernetes-dev-env.sh 2>&1
 	@echo "INFO: Finished cleanup of development environment for namespace $(NAMESPACE)"
-
-##@ Dependencies
-
-.PHONY: check-dependencies
-check-dependencies: ## Check if development dependencies are installed
-	@if [ "$(TARGETOS)" = "linux" ]; then \
-	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  else \
-	    echo "WARNING: Unsupported Linux package manager. Cannot verify dependencies."; \
-	  fi; \
-	elif [ "$(TARGETOS)" = "darwin" ]; then \
-	  if [ -x "$$(command -v brew)" ]; then \
-	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  else \
-	    echo "ERROR: Homebrew is not installed and is required. Install it from https://brew.sh/"; \
-	    exit 1; \
-	  fi; \
-	fi
-	@echo "✅ All dependencies are installed."
-
-.PHONY: install-dependencies
-install-dependencies: ## Install development dependencies based on OS/ARCH
-	@echo "Checking and installing development dependencies..."
-	@if [ "$(TARGETOS)" = "linux" ]; then \
-	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
-	      echo "Installing dependencies with apt..."; \
-	      apt-get update && apt-get install -y libzmq3-dev g++ python$(PYTHON_VERSION)-dev; \
-	    else \
-	      echo "✅ ZMQ, g++, and Python dev headers are already installed."; \
-	    fi; \
-	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
-	      echo "Installing dependencies with dnf..."; \
-	      dnf install -y zeromq-devel gcc-c++ python$(PYTHON_VERSION)-devel; \
-	    else \
-	      echo "✅ ZMQ, gcc-c++, and Python dev headers are already installed."; \
-	    fi; \
-	  else \
-	    echo "ERROR: Unsupported Linux package manager. Install libzmq, g++/gcc-c++, and python-devel manually."; \
-	    exit 1; \
-	  fi; \
-	elif [ "$(TARGETOS)" = "darwin" ]; then \
-	  if [ -x "$$(command -v brew)" ]; then \
-	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
-	      echo "Installing dependencies with brew..."; \
-	      brew install zeromq pkg-config; \
-	    else \
-	      echo "✅ ZeroMQ and pkgconf are already installed."; \
-	    fi; \
-	  else \
-	    echo "ERROR: Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
-	    exit 1; \
-	  fi; \
-	else \
-	  echo "ERROR: Unsupported OS: $(TARGETOS). Install development dependencies manually."; \
-	  exit 1; \
-	fi
