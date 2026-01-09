@@ -2,7 +2,7 @@
 
 ## Overview
 There are certain usecases where the inference requests are not latency sensitive (i.e., cardinality of the required SLO >= minutes). For these usecases, an asynchronous, queue-based support is required.
-=======
+
 
 The batch processor is a composable component that provides services in managing such requests.
 
