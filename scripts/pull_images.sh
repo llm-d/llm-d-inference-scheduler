@@ -10,10 +10,13 @@ EPP_TAG="${EPP_TAG:-dev}"
 VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.6.1}"
 # Set the default routing side car image tag
 SIDECAR_TAG="${SIDECAR_TAG:-dev}"
+# Set the default batch image tag
+BATCH_TAG="${BATCH_TAG:-dev}"
 
 export EPP_IMAGE="${EPP_IMAGE:-ghcr.io/llm-d/llm-d-inference-scheduler:${EPP_TAG}}"
 export VLLM_SIMULATOR_IMAGE="${VLLM_SIMULATOR_IMAGE:-ghcr.io/llm-d/llm-d-inference-sim:${VLLM_SIMULATOR_TAG}}"
 export SIDECAR_IMAGE="${SIDECAR_IMAGE:-ghcr.io/llm-d/llm-d-routing-sidecar:${SIDECAR_TAG}}"
+export BATCH_IMAGE="${BATCH_IMAGE:-ghcr.io/llm-d/llm-d-inference-scheduler-batch:${BATCH_TAG}}"
 
 TARGETOS="${TARGETOS:-linux}"
 TARGETARCH="${TARGETARCH:-$(go env GOARCH)}"
@@ -44,10 +47,12 @@ echo "--- Using the following images ---"
 echo "Scheduler Image:     ${EPP_IMAGE}"
 echo "Simulator Image:     ${VLLM_SIMULATOR_IMAGE}"
 echo "Sidecar Image:       ${SIDECAR_IMAGE}"
+echo "Batch Image:         ${BATCH_IMAGE}"
 echo "----------------------------------------------------"
 
 echo "Pulling dependencies..."
 ensure_image "${EPP_IMAGE}"
 ensure_image "${VLLM_SIMULATOR_IMAGE}"
 ensure_image "${SIDECAR_IMAGE}"
+ensure_image "${BATCH_IMAGE}"
 echo "Successfully pulled dependencies"

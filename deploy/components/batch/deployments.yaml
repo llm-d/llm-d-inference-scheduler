@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${BATCH_NAME}
+  labels:
+    app: ${BATCH_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${BATCH_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${BATCH_NAME}
+    spec:
+      serviceAccountName: ${BATCH_NAME}
+      terminationGracePeriodSeconds: 130
+      containers:
+      - name: batch
+        image: ${BATCH_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - --endpoint
+        - "http://inference-gateway-istio:80/v1/completions"
+        - --redis.addr
+        - "redis-service:6379"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-standalone
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:latest # Uses the official Redis image from Docker Hub
+        ports:
+        - containerPort: 6379
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+        # Note: This emptyDir volume is ephemeral. Data will be lost if the node fails.
+        # For persistent data, use a PersistentVolumeClaim.
+      - name: redis-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+spec:
+  selector:
+    app: redis
+  ports:
+  - protocol: TCP
+    port: 6379
+    targetPort: 6379
