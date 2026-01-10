@@ -200,27 +200,30 @@ func (s *PdSLOOptimizer) Score(
 		"tpotSLO", tpotSLO,
 		"totalPods", len(pods))
 
-	// Separate pods by role
-	prefillPods, decodePods := filterPodsByRole(pods)
-
-	// Independent scoring mode: score each pod type independently using its predictor
-	if len(prefillPods) == 0 && len(decodePods) > 0 {
-		logger.V(logutil.DEBUG).Info("Decode-only scoring mode",
-			"decodePods", len(decodePods))
-		return s.scoreDecodePods(ctx, request, decodePods, ttftSLO, tpotSLO)
+	if len(pods) == 0 {
+		return nil
 	}
 
-	if len(decodePods) == 0 && len(prefillPods) > 0 {
-		logger.V(logutil.DEBUG).Info("Prefill-only scoring mode",
-			"prefillPods", len(prefillPods))
-		return s.scorePrefillPods(ctx, request, prefillPods, ttftSLO)
+	// Pods are already filtered by upstream role-based filters (prefill-filter or decode-filter).
+	// All pods will have the same role. Check the first pod to determine which scoring to use.
+	firstPod := pods[0]
+	role, hasRole := firstPod.GetPod().Labels["llm-d.ai/role"]
+	if !hasRole {
+		logger.V(logutil.DEBUG).Info("Pod has no role label, skipping")
+		return nil
 	}
 
-	// Joint optimization not implemented - return nil to let other scorers handle it
-	logger.V(logutil.DEBUG).Info("Both prefill and decode pods present - joint optimization not implemented, skipping",
-		"prefillPods", len(prefillPods),
-		"decodePods", len(decodePods))
-	return nil
+	switch role {
+	case "prefill":
+		logger.V(logutil.DEBUG).Info("Prefill-only scoring mode", "prefillPods", len(pods))
+		return s.scorePrefillPods(ctx, request, pods, ttftSLO)
+	case "decode", "both":
+		logger.V(logutil.DEBUG).Info("Decode-only scoring mode", "decodePods", len(pods))
+		return s.scoreDecodePods(ctx, request, pods, ttftSLO, tpotSLO)
+	default:
+		logger.V(logutil.DEBUG).Info("Unknown pod role, skipping", "role", role)
+		return nil
+	}
 }
 
 // scoreDecodePods scores decode pods independently using decode predictor
@@ -237,11 +240,22 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 		return nil
 	}
 
+	if len(decodePods) == 0 {
+		return nil
+	}
+
 	scores := make(map[schedulingtypes.Pod]float64)
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
 
-	// Track pods with headroom breakdown
-	var candidatePods []podWithHeadroom
+	// Prepare bulk prediction requests
+	type podContext struct {
+		pod             schedulingtypes.Pod
+		bufferedTPOTSLO float64
+	}
+
+	bulkRequests := make([]latencypredictor.PredictionRequest, 0, len(decodePods))
+	podContexts := make([]podContext, 0, len(decodePods))
+	inputTokens := getInputTokenLength(request)
 
 	for _, pod := range decodePods {
 		metrics := pod.GetMetrics()
@@ -268,47 +282,68 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 			}
 		}
 
-		// Predict decode TTFT and TPOT
-		inputTokens := getInputTokenLength(request)
-		predReq := latencypredictor.PredictionRequest{
+		// Build prediction request for this pod
+		bulkRequests = append(bulkRequests, latencypredictor.PredictionRequest{
 			KVCachePercentage:  metrics.KVCacheUsagePercent,
 			InputTokenLength:   inputTokens,
 			NumRequestWaiting:  metrics.WaitingQueueSize,
 			NumRequestRunning:  metrics.RunningRequestsSize,
 			PrefixCacheScore:   0,
 			PodType:            "decode", // Decode pod handles both TTFT and TPOT
-		}
+		})
 
-		predResp, err := s.predictor.Predict(ctx, predReq)
-		if err != nil {
-			schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusError)
-			logger.V(logutil.DEBUG).Error(err, "Failed to predict decode latency", "pod", pod.GetPod().String())
-			continue
-		}
-		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusSuccess)
+		podContexts = append(podContexts, podContext{
+			pod:             pod,
+			bufferedTPOTSLO: bufferedTPOTSLO,
+		})
+	}
 
+	if len(bulkRequests) == 0 {
+		return nil
+	}
+
+	// Perform bulk prediction
+	bulkResponse, err := s.predictor.PredictBulkStrict(ctx, bulkRequests)
+	if err != nil {
+		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusError)
+		logger.V(logutil.DEBUG).Error(err, "Bulk decode prediction failed", "podCount", len(bulkRequests))
+		return nil
+	}
+
+	if bulkResponse == nil || len(bulkResponse.Predictions) != len(bulkRequests) {
+		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusError)
+		logger.V(logutil.DEBUG).Info("Invalid bulk prediction response")
+		return nil
+	}
+
+	schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusSuccess)
+
+	// Process bulk prediction results
+	var candidatePods []podWithHeadroom
+	for i, predResp := range bulkResponse.Predictions {
+		podCtx := podContexts[i]
 		predictedTTFT := predResp.TTFT
 		predictedTPOT := predResp.TPOT
 
 		// Calculate headroom
 		ttftHeadroom := bufferedTTFTSLO - predictedTTFT
-		tpotHeadroom := bufferedTPOTSLO - predictedTPOT
+		tpotHeadroom := podCtx.bufferedTPOTSLO - predictedTPOT
 
 		// Record actual headroom values for observability
 		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypeDecode, schedulermetrics.MetricTypeTTFT, ttftHeadroom)
 		schedulermetrics.RecordPDSLOHeadroom(schedulermetrics.PodTypeDecode, schedulermetrics.MetricTypeTPOT, tpotHeadroom)
 
 		logger.Info("Decode pod scored",
-			"pod", pod.GetPod().String(),
+			"pod", podCtx.pod.GetPod().String(),
 			"predictedTTFT", predictedTTFT,
 			"predictedTPOT", predictedTPOT,
 			"ttftSLO", bufferedTTFTSLO,
-			"tpotSLO", bufferedTPOTSLO,
+			"tpotSLO", podCtx.bufferedTPOTSLO,
 			"ttftHeadroom", ttftHeadroom,
 			"tpotHeadroom", tpotHeadroom)
 
 		candidatePods = append(candidatePods, podWithHeadroom{
-			pod:          pod,
+			pod:          podCtx.pod,
 			ttftHeadroom: ttftHeadroom,
 			tpotHeadroom: tpotHeadroom,
 			totalScore:   ttftHeadroom + tpotHeadroom,
@@ -364,11 +399,17 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 		return nil
 	}
 
+	if len(prefillPods) == 0 {
+		return nil
+	}
+
 	scores := make(map[schedulingtypes.Pod]float64)
 	bufferedTTFTSLO := ttftSLO * s.config.SLOBufferFactor
 
-	// Track pods with headroom breakdown
-	var candidatePods []podWithHeadroom
+	// Prepare bulk prediction requests
+	bulkRequests := make([]latencypredictor.PredictionRequest, 0, len(prefillPods))
+	validPods := make([]schedulingtypes.Pod, 0, len(prefillPods))
+	inputTokens := getInputTokenLength(request)
 
 	for _, pod := range prefillPods {
 		metrics := pod.GetMetrics()
@@ -377,25 +418,43 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 			continue
 		}
 
-		// Predict prefill TTFT (TPOT is always 0 for prefill)
-		inputTokens := getInputTokenLength(request)
-		predReq := latencypredictor.PredictionRequest{
+		// Build prediction request for this pod
+		bulkRequests = append(bulkRequests, latencypredictor.PredictionRequest{
 			KVCachePercentage: metrics.KVCacheUsagePercent,
 			InputTokenLength:  inputTokens,
 			NumRequestWaiting: metrics.WaitingQueueSize,
 			NumRequestRunning: metrics.RunningRequestsSize,
 			PrefixCacheScore:  0,
 			PodType:           "prefill", // Prefill pod only handles TTFT
-		}
+		})
 
-		predResp, err := s.predictor.Predict(ctx, predReq)
-		if err != nil {
-			schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusError)
-			logger.V(logutil.DEBUG).Error(err, "Failed to predict prefill latency", "pod", pod.GetPod().String())
-			continue
-		}
-		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusSuccess)
+		validPods = append(validPods, pod)
+	}
 
+	if len(bulkRequests) == 0 {
+		return nil
+	}
+
+	// Perform bulk prediction
+	bulkResponse, err := s.predictor.PredictBulkStrict(ctx, bulkRequests)
+	if err != nil {
+		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusError)
+		logger.V(logutil.DEBUG).Error(err, "Bulk prefill prediction failed", "podCount", len(bulkRequests))
+		return nil
+	}
+
+	if bulkResponse == nil || len(bulkResponse.Predictions) != len(bulkRequests) {
+		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusError)
+		logger.V(logutil.DEBUG).Info("Invalid bulk prediction response")
+		return nil
+	}
+
+	schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusSuccess)
+
+	// Process bulk prediction results
+	var candidatePods []podWithHeadroom
+	for i, predResp := range bulkResponse.Predictions {
+		pod := validPods[i]
 		predictedTTFT := predResp.TTFT
 
 		// Calculate headroom

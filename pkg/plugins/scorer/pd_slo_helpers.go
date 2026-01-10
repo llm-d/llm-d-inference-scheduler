@@ -77,29 +77,6 @@ func hasSLOHeaders(request *schedulingtypes.LLMRequest) bool {
 	return hasTTFT || hasTPOT
 }
 
-// filterPodsByRole separates pods into prefill and decode based on their role label
-func filterPodsByRole(pods []schedulingtypes.Pod) (prefillPods, decodePods []schedulingtypes.Pod) {
-	prefillPods = make([]schedulingtypes.Pod, 0)
-	decodePods = make([]schedulingtypes.Pod, 0)
-
-	for _, pod := range pods {
-		// Check pod labels for role
-		role, hasRole := pod.GetPod().Labels["llm-d.ai/role"]
-		if !hasRole {
-			continue
-		}
-
-		switch role {
-		case "prefill":
-			prefillPods = append(prefillPods, pod)
-		case "decode", "both":
-			decodePods = append(decodePods, pod)
-		}
-	}
-
-	return prefillPods, decodePods
-}
-
 // ============================================================================
 // Telemetry Context for PD Request Tracking
 // ============================================================================
