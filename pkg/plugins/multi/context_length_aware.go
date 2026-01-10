@@ -292,7 +292,7 @@ func calculateRangeScore(contextLength int, ranges []contextRange) float64 {
 			// Calculate position score (closer to middle is better)
 			rangeMiddle := (r.min + r.max) / 2
 			distanceFromMiddle := abs(contextLength - rangeMiddle)
-			positionScore := 1.0 - (float64(distanceFromMiddle) / float64(rangeWidth/2))
+			positionScore := 1.0 - (float64(distanceFromMiddle) / float64(rangeWidth/2.0))
 
 			// Combine scores (width is more important than position)
 			score := 0.7*widthScore + 0.3*positionScore
