@@ -124,3 +124,8 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 	}
 	return decoderProxy
 }
+
+// isHTTPError returns true if the status code indicates an error (not in the 2xx range).
+func isHTTPError(statusCode int) bool {
+	return statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices
+}

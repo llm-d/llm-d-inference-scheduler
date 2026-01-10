@@ -35,7 +35,7 @@ var (
 	// supportedConnectors defines all valid P/D connector types
 	supportedConnectors = []string{
 		proxy.ConnectorNIXLV2,
-		proxy.ConnectorLMCache,
+		proxy.ConnectorSharedStorage,
 		proxy.ConnectorSGLang,
 	}
 )

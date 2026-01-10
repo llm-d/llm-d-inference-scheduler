@@ -132,8 +132,8 @@ func (cc *ChatCompletionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 		}
 
-	case "lmcache":
-		// LMCache protocol just returns empty response
+	case "shared-storage":
+		// Shared Storage protocol just returns empty response
 		rawResponse = `{}`
 
 	default:
