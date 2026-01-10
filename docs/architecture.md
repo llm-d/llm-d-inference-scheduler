@@ -462,6 +462,124 @@ When integrating with a prefix-cache scorer, the prefix-cache scorer should be d
 
 ---
 
+#### ContextLengthAware
+
+A multi-purpose plugin that can operate as both a **Filter** and a **Scorer** to route inference requests 
+based on the estimated context length. This enables optimized resource allocation by directing requests to 
+pods configured for specific context length ranges.
+
+**Use Cases:**
+- Route short prompts to pods with smaller GPU memory
+- Direct long-context requests to specialized high-memory pods
+- Optimize performance by matching workload characteristics to hardware capabilities
+- Support heterogeneous deployments with different GPU configurations
+
+**Operation Modes:**
+
+1. **Filter Mode**: Excludes pods that don't have a context length range matching the request
+   - Pods without the label are included (they accept any context length)
+   - Pods with matching ranges are included
+   
+2. **Score Mode** (Default): Scores all pods based on how well their ranges match the request
+   - Higher scores for tighter/more specific ranges
+   - Lower scores for very wide ranges
+   - Zero score for non-matching ranges
+   - Neutral score (0.5) for pods without labels
+
+**Configuration:**
+
+- **Type**: `context-length-aware`
+- **Parameters**:
+  - `label` (optional): Pod label name containing context length range(s). 
+    Default: `llm-d.ai/context-length-range`
+  - `mode` (optional): Operation mode - `filter` or `score`. Default: `score`
+
+**Label Format:**
+
+Pods should be labeled with context length ranges using the format `"min-max"`:
+
+```yaml
+llm-d.ai/context-length-range: "0-2048"
+```
+
+Multiple ranges can be specified with comma separation:
+
+```yaml
+llm-d.ai/context-length-range: "0-2048,8192-16384"
+```
+
+**Example - Scorer Configuration:**
+
+```yaml
+plugins:
+  - type: context-length-aware
+    parameters:
+      mode: score
+      label: llm-d.ai/context-length-range
+  - type: load-aware-scorer
+  - type: max-score-picker
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: context-length-aware
+        weight: 3
+      - pluginRef: load-aware-scorer
+        weight: 1
+      - pluginRef: max-score-picker
+```
+
+**Example - Filter Configuration:**
+
+```yaml
+plugins:
+  - type: context-length-aware
+    parameters:
+      mode: filter
+      label: llm-d.ai/context-length-range
+  - type: max-score-picker
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: context-length-aware
+      - pluginRef: max-score-picker
+```
+
+**Example Pod Labels:**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-short-context
+  labels:
+    llm-d.ai/context-length-range: "0-2048"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-long-context
+  labels:
+    llm-d.ai/context-length-range: "2048-8192"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-flexible
+  labels:
+    llm-d.ai/context-length-range: "0-2048,4096-32768"
+```
+
+**Context Length Estimation:**
+
+The plugin estimates context length by:
+1. For chat completions: counting characters across all messages
+2. For regular completions: counting characters in the prompt
+3. Converting characters to approximate token count (multiplier: 0.25)
+
+**Note:** This is a rough estimation. Actual token counts may vary depending on the tokenizer.
+
+---
+
 ### Sample Disaggregated Prefill/Decode Configuration
 
 The following is an example of what a configuration for disaggregated Prefill/Decode might look like:
