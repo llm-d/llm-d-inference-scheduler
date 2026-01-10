@@ -492,7 +492,8 @@ pods configured for specific context length ranges.
 - **Parameters**:
   - `label` (optional): Pod label name containing context length range(s). 
     Default: `llm-d.ai/context-length-range`
-  - `mode` (optional): Operation mode - `filter` or `score`. Default: `score`
+  - `mode` (optional): Operation mode - `filter` or `score`. 
+    Default: `score`
 
 **Label Format:**
 
