@@ -2,6 +2,7 @@ package pd_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
@@ -33,6 +36,7 @@ const (
 // Tests the scheduler expected behavior.
 func TestPDSchedule(t *testing.T) {
 	pod1 := &types.PodMetrics{
+		AttributeMap: datalayer.NewAttributes(),
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
 			Address:        "1.2.3.4",
@@ -41,6 +45,7 @@ func TestPDSchedule(t *testing.T) {
 		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 0},
 	}
 	pod2 := &types.PodMetrics{
+		AttributeMap: datalayer.NewAttributes(),
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod2"},
 			Address:        "5.6.7.8",
@@ -49,6 +54,7 @@ func TestPDSchedule(t *testing.T) {
 		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 0},
 	}
 	noRolePod1 := &types.PodMetrics{
+		AttributeMap: datalayer.NewAttributes(),
 		Pod: &backend.Pod{
 			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod1"},
 			Address:        "1.1.1.1",
@@ -213,7 +219,7 @@ func TestPDSchedule(t *testing.T) {
 				TargetModel: "critical",
 				Body: &types.LLMRequestBody{
 					Completions: &types.CompletionsRequest{
-						Prompt: "12345678906",
+						Prompt: "1234567890123456789012345678901234567890",
 					},
 				},
 			},
@@ -232,12 +238,13 @@ func TestPDSchedule(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			//  initialize scheduler with config
-			prefixScorer := prefix.New(ctx, prefix.Config{BlockSize: 5, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
+			prefixScorer, err := prefix.New(ctx, prefix.Config{AutoTune: false, BlockSizeTokens: 2, MaxPrefixBlocksToMatch: 256, LRUCapacityPerServer: 31250})
+			assert.NoError(t, err, "Prefix plugin creation returned unexpected error")
 
 			prefillSchedulerProfile := framework.NewSchedulerProfile().
 				WithFilters(filter.NewPrefillRole()).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
-			err := prefillSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 50))
+			err = prefillSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := framework.NewSchedulerProfile().
@@ -247,34 +254,55 @@ func TestPDSchedule(t *testing.T) {
 			err = decodeSchedulerProfile.AddPlugins(framework.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
-			profileHandle := profile.NewPdProfileHandler(prefill, decode, prefixScorer.TypedName().Type, prefixScorer.TypedName().Name, 10, 5, 0)
+			profileHandle, err := profile.NewPdProfileHandler(prefill, decode, prefixScorer.TypedName().Type, prefixScorer.TypedName().Name,
+				0, profile.PrefixDeciderName, json.RawMessage("{\"nonCachedTokens\": 2}"))
+			assert.NoError(t, err)
 
 			schedulerConfig := scheduling.NewSchedulerConfig(profileHandle, map[string]*framework.SchedulerProfile{
 				prefill: prefillSchedulerProfile,
 				decode:  decodeSchedulerProfile,
 			})
 			scheduler := scheduling.NewSchedulerWithConfig(schedulerConfig)
+
+			inputTokens := len(test.req.Body.Completions.Prompt) / profile.AverageCharactersPerToken
+			for _, pod := range test.input {
+				pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(0, inputTokens))
+			}
 			got, err := scheduler.Schedule(ctx, test.req, test.input)
 
 			if test.err != (err != nil) {
 				t.Errorf("Unexpected error, got %v, want %v", err, test.err)
 			}
 
-			if diff := cmp.Diff(test.wantRes, got, cmpopts.IgnoreFields(types.ScoredPod{}, "Score")); diff != "" {
+			if diff := cmp.Diff(
+				test.wantRes,
+				got,
+				cmpopts.IgnoreFields(types.ScoredPod{}, "Score"),
+				cmpopts.IgnoreTypes(datalayer.Attributes{}),
+			); diff != "" {
 				t.Errorf("Unexpected output (-want +got): %v", diff)
 			}
-
 			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
 				// make sure prefix plugin stores the prefix hit in cache, so we can test it in the following schedule call
 				prefixScorer.PreRequest(ctx, test.req, got)
 				time.Sleep(time.Second)
+
+				// update number of cached tokens "stored" in the first schedule execution
+				for _, pod := range test.input {
+					pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(inputTokens, inputTokens))
+				}
 
 				got, err = scheduler.Schedule(ctx, test.req, test.input)
 				if test.err != (err != nil) {
 					t.Errorf("Unexpected error in schedule call, got %v, want %v", err, test.err)
 				}
 
-				if diff := cmp.Diff(test.wantRes2, got, cmpopts.IgnoreFields(types.ScoredPod{}, "Score")); diff != "" {
+				if diff := cmp.Diff(
+					test.wantRes2,
+					got,
+					cmpopts.IgnoreFields(types.ScoredPod{}, "Score"),
+					cmpopts.IgnoreTypes(datalayer.Attributes{}),
+				); diff != "" {
 					t.Errorf("Unexpected output in subsequent schedule call (-want +got): %v", diff)
 				}
 			}
