@@ -4,13 +4,18 @@ FROM quay.io/projectquay/golang:1.24 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG PYTHON_VERSION=3.12
+
+ENV PYTHON=python${PYTHON_VERSION}
+ENV PYTHONPATH=/usr/lib64/${PYTHON}/site-packages:/usr/lib/${PYTHON}/site-packages
 
 # Install build tools
 # The builder is based on UBI8, so we need epel-release-8.
+# ${PYTHON}-devel needed for CGO compilation (Python headers and ${PYTHON}-config for linker flags)
 RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
-    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig python3.12-devel python3.12-pip git && \
+    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig ${PYTHON}-devel ${PYTHON}-pip git && \
     dnf clean all
-# python3.12-devel needed for CGO compilation (Python headers and python3.12-config for linker flags)
+
 
 WORKDIR /workspace
 
@@ -24,14 +29,15 @@ COPY pkg/ pkg/
 
 RUN go mod download
 
-# Copy Python wrapper and requirements from kv-cache-manager dependency
+# Copy Python wrapper and requirements from llm-d-kv-cache-manager dependency
 # Extract version dynamically and copy to a known location
+# We need to keep llm-d-kv-cache-manager as go module path is kept the old name
 RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Version}}' github.com/llm-d/llm-d-kv-cache-manager) && \
-    mkdir -p /workspace/kv-cache-manager-wrapper && \
+    mkdir -p /workspace/kv-cache && \
     cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
-       /workspace/kv-cache-manager-wrapper/ && \
+       /workspace/kv-cache/render_jinja_template_wrapper.py && \
     cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
-       /workspace/kv-cache-manager-wrapper/requirements.txt
+       /workspace/kv-cache/requirements.txt
 
 # HuggingFace tokenizer bindings (static lib)
 RUN mkdir -p lib
@@ -48,53 +54,56 @@ RUN ranlib lib/*.a
 ENV CGO_ENABLED=1
 ENV GOOS=${TARGETOS:-linux}
 ENV GOARCH=${TARGETARCH}
-ENV PYTHON=python3.12
-ENV PYTHONPATH=/usr/lib64/python3.12/site-packages:/usr/lib/python3.12/site-packages
+
 
 ARG COMMIT_SHA=unknown
 ARG BUILD_REF
-RUN export CGO_CFLAGS="$(python3.12-config --cflags) -I/workspace/lib" && \
-    export CGO_LDFLAGS="$(python3.12-config --ldflags --embed) -L/workspace/lib -ltokenizers -ldl -lm" && \
+RUN CGO_CFLAGS="$(${PYTHON}-config --cflags) -I/workspace/lib" && \
+    CGO_LDFLAGS="$(${PYTHON}-config --ldflags --embed) -L/workspace/lib -ltokenizers -ldl -lm" && \
+    export CGO_CFLAGS CGO_LDFLAGS && \
     go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" cmd/epp/main.go
 
 # Runtime stage
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+ARG PYTHON_VERSION=3.12
 WORKDIR /
 COPY --from=builder /workspace/bin/epp /app/epp
 
 USER root
+
+ENV PYTHON=python${PYTHON_VERSION}
 # Install zeromq runtime library and Python runtime needed by the manager.
 # The final image is UBI9, so we need epel-release-9.
 # Using microdnf for minimal image size
 RUN curl -L -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     rpm -i /tmp/epel-release.rpm && \
     rm /tmp/epel-release.rpm && \
-    microdnf install -y --setopt=install_weak_deps=0 zeromq python3.12 python3.12-libs python3.12-pip && \
+    microdnf install -y --setopt=install_weak_deps=0 zeromq ${PYTHON} ${PYTHON}-libs ${PYTHON}-pip && \
     microdnf clean all && \
     rm -rf /var/cache/yum /var/lib/yum && \
-    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
-    ln -sf /usr/bin/python3.12 /usr/bin/python
-# Note: python3.12 package does not automatically create python3/python symlinks - they must be created manually
+    # Note: ${PYTHON} package does not automatically create python3/python symlinks - they must be created manually
+    ln -sf /usr/bin/${PYTHON} /usr/bin/python3 && \
+    ln -sf /usr/bin/${PYTHON} /usr/bin/python
+
 
 # Install wrapper as a module in site-packages
-RUN mkdir -p /usr/local/lib/python3.12/site-packages/
-COPY --from=builder /workspace/kv-cache-manager-wrapper/render_jinja_template_wrapper.py /usr/local/lib/python3.12/site-packages/
+RUN mkdir -p /usr/local/lib/${PYTHON}/site-packages/
+COPY --from=builder /workspace/kv-cache/render_jinja_template_wrapper.py /usr/local/lib/${PYTHON}/site-packages/
 
 # Python deps (no cache, single target) – filter out torch
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY --from=builder /workspace/kv-cache-manager-wrapper/requirements.txt /tmp/requirements.txt
+COPY --from=builder /workspace/kv-cache/requirements.txt /tmp/requirements.txt
 RUN sed '/^torch\b/d' /tmp/requirements.txt > /tmp/requirements.notorch.txt && \
-    python3.12 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    python3.12 -m pip install --no-cache-dir --target /usr/local/lib/python3.12/site-packages -r /tmp/requirements.notorch.txt && \
-    python3.12 -m pip install --no-cache-dir --target /usr/local/lib/python3.12/site-packages PyYAML && \
+    ${PYTHON} -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    ${PYTHON} -m pip install --no-cache-dir --target /usr/local/lib/${PYTHON}/site-packages -r /tmp/requirements.notorch.txt && \
+    ${PYTHON} -m pip install --no-cache-dir --target /usr/local/lib/${PYTHON}/site-packages PyYAML && \
     rm /tmp/requirements.txt /tmp/requirements.notorch.txt && \
     rm -rf /root/.cache/pip
 
 # Python env
-ENV PYTHONPATH="/usr/local/lib/python3.12/site-packages:/usr/lib/python3.12/site-packages"
-ENV PYTHON=python3.12
+ENV PYTHONPATH="/usr/local/lib/${PYTHON}/site-packages:/usr/lib/${PYTHON}/site-packages"
 ENV PATH=/usr/bin:/usr/local/bin:$PATH
 ENV HF_HOME="/tmp/.cache"
 
