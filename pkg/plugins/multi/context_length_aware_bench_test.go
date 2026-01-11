@@ -87,7 +87,7 @@ func BenchmarkContextLengthAwareScore_LargePodSet(b *testing.B) {
 			Pod: &backend.Pod{
 				NamespacedName: k8stypes.NamespacedName{
 					Namespace: "default",
-					Name:      "pod-" + string(rune(i)),
+					Name:      fmt.Sprintf("pod-%d", i),
 				},
 				Address: "10.0.0.1",
 				Labels:  label,
