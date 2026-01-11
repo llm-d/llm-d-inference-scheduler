@@ -60,10 +60,6 @@ func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plu
 		}
 	}
 
-	if name == "" {
-		return nil, fmt.Errorf("invalid configuration for '%s' plugin: name cannot be empty", ContextLengthAwareType)
-	}
-
 	if parameters.Label == "" {
 		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'label' must be specified", ContextLengthAwareType)
 	}
@@ -289,10 +285,9 @@ func calculateRangeScore(contextLength int, ranges []contextRange) float64 {
 			// Use log scale to handle very large ranges
 			widthScore := 1.0 / (1.0 + float64(rangeWidth)/10000.0)
 
-			// Calculate position score (closer to middle is better)
-			rangeMiddle := (r.min + r.max) / 2
-			distanceFromMiddle := abs(contextLength - rangeMiddle)
-			positionScore := 1.0 - (float64(distanceFromMiddle) / float64(rangeWidth/2.0))
+			// Score based on distance from maximum (more headroom = better)
+			headroom := float64(r.max - contextLength)
+			positionScore := headroom / float64(rangeWidth)
 
 			// Combine scores (width is more important than position)
 			score := 0.7*widthScore + 0.3*positionScore
@@ -304,12 +299,4 @@ func calculateRangeScore(contextLength int, ranges []contextRange) float64 {
 	}
 
 	return bestScore
-}
-
-// abs returns the absolute value of an integer
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
