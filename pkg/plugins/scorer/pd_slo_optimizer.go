@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
@@ -59,7 +60,17 @@ type pdSLOOptimizerConfig struct {
 	HeadroomTTFTWeight    float64 `json:"headroomTTFTWeight"`    // Weight for TTFT in positive headroom (default: 0.8)
 	HeadroomTPOTWeight    float64 `json:"headroomTPOTWeight"`    // Weight for TPOT in positive headroom (default: 0.2)
 	EpsilonExploreNeg     float64 `json:"epsilonExploreNeg"`     // Exploration rate for negative headroom tier (default: 0.01)
-	HeadroomStrategy      string  `json:"headroomStrategy"`      // Selection strategy: "least", "most", "weighted" (default: "weighted")
+	HeadroomStrategy      string  `json:"headroomStrategy"`      // Selection strategy: "least", "most", "composite-least", "composite-most", "composite-only" (default: "least")
+
+	// Composite scoring weights (used in composite modes)
+	CompositeKVWeight     float64 `json:"compositeKVWeight"`     // Weight for KV cache in composite scoring (default: 1.0)
+	CompositeQueueWeight  float64 `json:"compositeQueueWeight"`  // Weight for queue depth in composite scoring (default: 1.0)
+	CompositePrefixWeight float64 `json:"compositePrefixWeight"` // Weight for prefix cache in composite scoring (default: 1.0)
+
+	// Affinity gate (prefix cache stickiness) parameters
+	EpsilonExploreSticky  float64 `json:"epsilonExploreSticky"`  // Exploration rate for affinity gate (default: 0.01)
+	AffinityGateTau       float64 `json:"affinityGateTau"`       // Per-tier stickiness threshold (default: 0.80)
+	AffinityGateTauGlobal float64 `json:"affinityGateTauGlobal"` // Global stickiness threshold (default: 0.99)
 }
 
 // Default configuration values
@@ -71,7 +82,17 @@ var defaultPdSLOConfig = pdSLOOptimizerConfig{
 	HeadroomTTFTWeight:    0.8,  // TTFT weight for positive headroom
 	HeadroomTPOTWeight:    0.2,  // TPOT weight for positive headroom
 	EpsilonExploreNeg:     0.01, // 1% exploration in negative tier
-	HeadroomStrategy:      "weighted",
+	HeadroomStrategy:      "least",
+
+	// Composite scoring defaults
+	CompositeKVWeight:     1.0,
+	CompositeQueueWeight:  1.0,
+	CompositePrefixWeight: 1.0,
+
+	// Affinity gate defaults
+	EpsilonExploreSticky:  0.01, // 1% exploration
+	AffinityGateTau:       0.80, // Per-tier threshold
+	AffinityGateTauGlobal: 0.99, // Global threshold
 }
 
 // validate checks if the configuration is valid
@@ -89,9 +110,27 @@ func (c *pdSLOOptimizerConfig) validate() error {
 	if c.EpsilonExploreNeg < 0 || c.EpsilonExploreNeg > 1.0 {
 		return fmt.Errorf("epsilonExploreNeg must be between 0 and 1.0, got %f", c.EpsilonExploreNeg)
 	}
-	validStrategies := map[string]bool{"least": true, "most": true, "weighted": true}
+	validStrategies := map[string]bool{
+		"least":           true,
+		"most":            true,
+		"composite-least": true,
+		"composite-most":  true,
+		"composite-only":  true,
+	}
 	if c.HeadroomStrategy != "" && !validStrategies[c.HeadroomStrategy] {
-		return fmt.Errorf("headroomStrategy must be one of: least, most, weighted; got %s", c.HeadroomStrategy)
+		return fmt.Errorf("headroomStrategy must be one of: least, most, composite-least, composite-most, composite-only; got %s", c.HeadroomStrategy)
+	}
+	if c.CompositeKVWeight < 0 || c.CompositeQueueWeight < 0 || c.CompositePrefixWeight < 0 {
+		return fmt.Errorf("all composite weights must be >= 0")
+	}
+	if c.EpsilonExploreSticky < 0 || c.EpsilonExploreSticky > 1.0 {
+		return fmt.Errorf("epsilonExploreSticky must be between 0 and 1.0, got %f", c.EpsilonExploreSticky)
+	}
+	if c.AffinityGateTau < 0 || c.AffinityGateTau > 1.0 {
+		return fmt.Errorf("affinityGateTau must be between 0 and 1.0, got %f", c.AffinityGateTau)
+	}
+	if c.AffinityGateTauGlobal < 0 || c.AffinityGateTauGlobal > 1.0 {
+		return fmt.Errorf("affinityGateTauGlobal must be between 0 and 1.0, got %f", c.AffinityGateTauGlobal)
 	}
 	return nil
 }
@@ -181,19 +220,37 @@ func (s *PdSLOOptimizer) Score(
 		return nil
 	}
 
+	// Get or create SLO context for this request
+	sloCtx := getOrMakePDSLOContext(request)
+
+	// Read prefix cache scores from cycle state for all pods
+	for _, pod := range pods {
+		prefixCacheScore := getPrefixCacheScoreForPod(ctx, cycleState, pod)
+		sloCtx.prefixCacheScoresForPods[pod.GetPod().String()] = prefixCacheScore
+	}
+
 	// Parse SLO headers
 	ttftSLO, tpotSLO, err := parseSLOHeaders(request)
 	if err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to parse SLO headers")
+		setPDSLOContextForRequest(request, sloCtx)
 		return nil
 	}
+
+	// Store SLOs in context
+	sloCtx.ttftSLO = ttftSLO
+	sloCtx.tpotSLO = tpotSLO
 
 	if ttftSLO == 0 && tpotSLO == 0 {
 		// No SLOs specified - use queue-based scoring as fallback
 		// This enables non-SLO/baseline requests to benefit from load balancing
 		logger.V(logutil.DEBUG).Info("No SLO headers found, using queue-based fallback scoring")
+		sloCtx.predictorBasedScheduling = false
+		setPDSLOContextForRequest(request, sloCtx)
 		return s.scoreByQueueDepth(ctx, pods)
 	}
+
+	sloCtx.predictorBasedScheduling = true
 
 	logger.V(logutil.DEBUG).Info("PD-SLO optimization triggered",
 		"ttftSLO", ttftSLO,
@@ -201,6 +258,7 @@ func (s *PdSLOOptimizer) Score(
 		"totalPods", len(pods))
 
 	if len(pods) == 0 {
+		setPDSLOContextForRequest(request, sloCtx)
 		return nil
 	}
 
@@ -213,22 +271,29 @@ func (s *PdSLOOptimizer) Score(
 		return nil
 	}
 
+	var scores map[schedulingtypes.Pod]float64
 	switch role {
 	case "prefill":
 		logger.V(logutil.DEBUG).Info("Prefill-only scoring mode", "prefillPods", len(pods))
-		return s.scorePrefillPods(ctx, request, pods, ttftSLO)
+		scores = s.scorePrefillPods(ctx, sloCtx, request, pods, ttftSLO)
 	case "decode", "both":
 		logger.V(logutil.DEBUG).Info("Decode-only scoring mode", "decodePods", len(pods))
-		return s.scoreDecodePods(ctx, request, pods, ttftSLO, tpotSLO)
+		scores = s.scoreDecodePods(ctx, sloCtx, request, pods, ttftSLO, tpotSLO)
 	default:
 		logger.V(logutil.DEBUG).Info("Unknown pod role, skipping", "role", role)
+		setPDSLOContextForRequest(request, sloCtx)
 		return nil
 	}
+
+	// Store context for future use (e.g., telemetry, debugging)
+	setPDSLOContextForRequest(request, sloCtx)
+	return scores
 }
 
 // scoreDecodePods scores decode pods independently using decode predictor
 func (s *PdSLOOptimizer) scoreDecodePods(
 	ctx context.Context,
+	sloCtx *pdSLOContext,
 	request *schedulingtypes.LLMRequest,
 	decodePods []schedulingtypes.Pod,
 	ttftSLO, tpotSLO float64,
@@ -306,14 +371,14 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 	bulkResponse, err := s.predictor.PredictBulkStrict(ctx, bulkRequests)
 	if err != nil {
 		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusError)
-		logger.V(logutil.DEBUG).Error(err, "Bulk decode prediction failed", "podCount", len(bulkRequests))
-		return nil
+		logger.V(logutil.DEBUG).Error(err, "Bulk decode prediction failed, using fallback", "podCount", len(bulkRequests))
+		return s.scoreWithoutPredictions(ctx, sloCtx, decodePods)
 	}
 
 	if bulkResponse == nil || len(bulkResponse.Predictions) != len(bulkRequests) {
 		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusError)
-		logger.V(logutil.DEBUG).Info("Invalid bulk prediction response")
-		return nil
+		logger.V(logutil.DEBUG).Info("Invalid bulk prediction response, using fallback")
+		return s.scoreWithoutPredictions(ctx, sloCtx, decodePods)
 	}
 
 	schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypeDecode, schedulermetrics.PredictorStatusSuccess)
@@ -343,10 +408,11 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 			"tpotHeadroom", tpotHeadroom)
 
 		candidatePods = append(candidatePods, podWithHeadroom{
-			pod:          podCtx.pod,
-			ttftHeadroom: ttftHeadroom,
-			tpotHeadroom: tpotHeadroom,
-			totalScore:   ttftHeadroom + tpotHeadroom,
+			pod:              podCtx.pod,
+			ttftHeadroom:     ttftHeadroom,
+			tpotHeadroom:     tpotHeadroom,
+			totalScore:       ttftHeadroom + tpotHeadroom,
+			prefixCacheScore: sloCtx.prefixCacheScoresForPods[podCtx.pod.GetPod().String()],
 		})
 	}
 
@@ -354,8 +420,49 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 		return nil
 	}
 
-	// Tiered selection: positive vs negative headroom
-	selectedPod := s.selectPodTiered(ctx, candidatePods)
+	// Store predictions in sloCtx for observability
+	ttftPredictions := make([]float64, len(podContexts))
+	tpotPredictions := make([]float64, len(podContexts))
+	validPods := make([]schedulingtypes.Pod, len(podContexts))
+	for i, predResp := range bulkResponse.Predictions {
+		ttftPredictions[i] = predResp.TTFT
+		tpotPredictions[i] = predResp.TPOT
+		validPods[i] = podContexts[i].pod
+	}
+	updatePDSLOContextWithPredictions(sloCtx, validPods, ttftPredictions, tpotPredictions)
+
+	// Apply global affinity gate (filter by prefix cache score)
+	allPods := candidatePods
+	candidatePods, sticky := s.epsilonGreedyAffinityGate(ctx, candidatePods, "overall", s.config.AffinityGateTauGlobal)
+
+	// Check if all pods are invalid and all have running requests
+	allPodsInvalid := true
+	allPodsHaveRunningRequests := true
+	for _, p := range candidatePods {
+		if p.ttftHeadroom > 0 && p.tpotHeadroom > 0 {
+			allPodsInvalid = false
+		}
+		runningRequestCount := s.getPodRunningRequestCount(p.pod)
+		if runningRequestCount == 0 {
+			allPodsHaveRunningRequests = false
+		}
+	}
+
+	// Set hasValidPod to false if all pods are invalid and all have running requests
+	if allPodsInvalid && allPodsHaveRunningRequests && !sticky {
+		sloCtx.hasValidPod = false
+		logger.V(logutil.DEBUG).Info("All pods are invalid and have running requests, setting hasValidPod to false")
+	}
+
+	// Classify pods by headroom
+	positivePods, negativePods := classifyPodsByHeadroom(candidatePods)
+
+	logger.V(logutil.DEBUG).Info("Pod headroom distribution",
+		"positivePods", len(positivePods),
+		"negativePods", len(negativePods))
+
+	// Strategy-based selection with composite mode support
+	selectedPod := s.selectPodBasedOnStrategy(ctx, allPods, positivePods, negativePods)
 	if selectedPod == nil {
 		return nil
 	}
@@ -388,6 +495,7 @@ func (s *PdSLOOptimizer) scoreDecodePods(
 // scorePrefillPods scores prefill pods independently using prefill predictor
 func (s *PdSLOOptimizer) scorePrefillPods(
 	ctx context.Context,
+	sloCtx *pdSLOContext,
 	request *schedulingtypes.LLMRequest,
 	prefillPods []schedulingtypes.Pod,
 	ttftSLO float64,
@@ -439,14 +547,14 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 	bulkResponse, err := s.predictor.PredictBulkStrict(ctx, bulkRequests)
 	if err != nil {
 		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusError)
-		logger.V(logutil.DEBUG).Error(err, "Bulk prefill prediction failed", "podCount", len(bulkRequests))
-		return nil
+		logger.V(logutil.DEBUG).Error(err, "Bulk prefill prediction failed, using fallback", "podCount", len(bulkRequests))
+		return s.scoreWithoutPredictions(ctx, sloCtx, prefillPods)
 	}
 
 	if bulkResponse == nil || len(bulkResponse.Predictions) != len(bulkRequests) {
 		schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusError)
-		logger.V(logutil.DEBUG).Info("Invalid bulk prediction response")
-		return nil
+		logger.V(logutil.DEBUG).Info("Invalid bulk prediction response, using fallback")
+		return s.scoreWithoutPredictions(ctx, sloCtx, prefillPods)
 	}
 
 	schedulermetrics.RecordPDSLOPredictorCall(schedulermetrics.PredictorTypePrefill, schedulermetrics.PredictorStatusSuccess)
@@ -472,10 +580,11 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 		// For prefill, TPOT is N/A (prefill doesn't generate output tokens)
 		// Set tpotHeadroom to infinity to indicate it's always satisfied
 		candidatePods = append(candidatePods, podWithHeadroom{
-			pod:          pod,
-			ttftHeadroom: ttftHeadroom,
-			tpotHeadroom: 1e9, // Infinity - TPOT not applicable for prefill
-			totalScore:   ttftHeadroom,
+			pod:              pod,
+			ttftHeadroom:     ttftHeadroom,
+			tpotHeadroom:     1e9, // Infinity - TPOT not applicable for prefill
+			totalScore:       ttftHeadroom,
+			prefixCacheScore: sloCtx.prefixCacheScoresForPods[pod.GetPod().String()],
 		})
 	}
 
@@ -483,8 +592,47 @@ func (s *PdSLOOptimizer) scorePrefillPods(
 		return nil
 	}
 
-	// Tiered selection: positive vs negative headroom (based on TTFT only for prefill)
-	selectedPod := s.selectPodTiered(ctx, candidatePods)
+	// Store predictions in sloCtx for observability
+	ttftPredictions := make([]float64, len(validPods))
+	tpotPredictions := make([]float64, len(validPods)) // Always 0 for prefill
+	for i, predResp := range bulkResponse.Predictions {
+		ttftPredictions[i] = predResp.TTFT
+		tpotPredictions[i] = 0 // Prefill doesn't generate tokens
+	}
+	updatePDSLOContextWithPredictions(sloCtx, validPods, ttftPredictions, tpotPredictions)
+
+	// Apply global affinity gate (filter by prefix cache score)
+	allPods := candidatePods
+	candidatePods, sticky := s.epsilonGreedyAffinityGate(ctx, candidatePods, "overall", s.config.AffinityGateTauGlobal)
+
+	// Check if all pods are invalid and all have running requests
+	allPodsInvalid := true
+	allPodsHaveRunningRequests := true
+	for _, p := range candidatePods {
+		if p.ttftHeadroom > 0 {
+			allPodsInvalid = false
+		}
+		runningRequestCount := s.getPodRunningRequestCount(p.pod)
+		if runningRequestCount == 0 {
+			allPodsHaveRunningRequests = false
+		}
+	}
+
+	// Set hasValidPod to false if all pods are invalid and all have running requests
+	if allPodsInvalid && allPodsHaveRunningRequests && !sticky {
+		sloCtx.hasValidPod = false
+		logger.V(logutil.DEBUG).Info("All pods are invalid and have running requests, setting hasValidPod to false")
+	}
+
+	// Classify pods by headroom
+	positivePods, negativePods := classifyPodsByHeadroom(candidatePods)
+
+	logger.V(logutil.DEBUG).Info("Pod headroom distribution",
+		"positivePods", len(positivePods),
+		"negativePods", len(negativePods))
+
+	// Strategy-based selection with composite mode support
+	selectedPod := s.selectPodBasedOnStrategy(ctx, allPods, positivePods, negativePods)
 	if selectedPod == nil {
 		return nil
 	}
@@ -570,6 +718,56 @@ func (s *PdSLOOptimizer) scoreByQueueDepth(
 			"waitingQueue", metrics.WaitingQueueSize,
 			"score", score)
 	}
+
+	return scores
+}
+
+// scoreWithoutPredictions provides fallback scoring when predictor fails
+// Uses composite-only mode based on pod metrics (KV cache, queue depth, prefix cache)
+// Similar to GAIE's scoreWithoutPredictions
+func (s *PdSLOOptimizer) scoreWithoutPredictions(
+	ctx context.Context,
+	sloCtx *pdSLOContext,
+	pods []schedulingtypes.Pod,
+) map[schedulingtypes.Pod]float64 {
+	logger := log.FromContext(ctx)
+	logger.V(logutil.DEBUG).Info("Falling back to composite-only scoring (predictor failed)")
+
+	scores := make(map[schedulingtypes.Pod]float64)
+	if len(pods) == 0 {
+		return scores
+	}
+
+	// Convert pods to podWithHeadroom (with zero headroom values)
+	candidatePods := make([]podWithHeadroom, 0, len(pods))
+	for _, pod := range pods {
+		candidatePods = append(candidatePods, podWithHeadroom{
+			pod:              pod,
+			ttftHeadroom:     0,
+			tpotHeadroom:     0,
+			totalScore:       0,
+			prefixCacheScore: sloCtx.prefixCacheScoresForPods[pod.GetPod().String()],
+		})
+	}
+
+	// Use composite-only selection
+	selectedPod := s.selectFromCompositeScores(ctx, candidatePods, "composite-only")
+	if selectedPod == nil {
+		logger.V(logutil.DEBUG).Info("Composite fallback failed, no pod selected")
+		return scores
+	}
+
+	// Assign binary scores: 1.0 to selected pod, 0.0 to others
+	for _, pod := range pods {
+		if pod.GetPod().String() == selectedPod.pod.GetPod().String() {
+			scores[pod] = 1.0
+		} else {
+			scores[pod] = 0.0
+		}
+	}
+
+	logger.V(logutil.DEBUG).Info("Selected pod via composite fallback",
+		"pod", selectedPod.pod.GetPod().String())
 
 	return scores
 }

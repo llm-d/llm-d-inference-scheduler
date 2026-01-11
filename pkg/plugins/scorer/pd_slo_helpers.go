@@ -28,6 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
@@ -75,6 +77,48 @@ func hasSLOHeaders(request *schedulingtypes.LLMRequest) bool {
 	_, hasTTFT := request.Headers[ttftSLOHeaderKey]
 	_, hasTPOT := request.Headers[tpotSLOHeaderKey]
 	return hasTTFT || hasTPOT
+}
+
+// getPrefixCacheScoreForPod reads the prefix cache score for a pod from cycle state
+// Returns 0.0 if no prefix cache state is found or if the pod has no score
+func getPrefixCacheScoreForPod(ctx context.Context, cycleState *schedulingtypes.CycleState, pod schedulingtypes.Pod) float64 {
+	logger := log.FromContext(ctx)
+	logger.V(logutil.DEBUG).Info("Getting prefix cache score for pod", "pod", pod.GetPod().String())
+
+	plugintype := prefix.PrefixCachePluginType
+	pluginname := prefix.PrefixCachePluginType
+	cycleStateKey := (plugins.TypedName{Type: plugintype, Name: pluginname}).String()
+
+	logger.V(logutil.DEBUG).Info("Reading prefix cache state from cycle state", "stateKey", cycleStateKey)
+
+	stateData, err := cycleState.Read(plugins.StateKey(cycleStateKey))
+	if err != nil {
+		logger.V(logutil.DEBUG).Info("prefix cache state not found in cycle state, returning prefix cache score of 0.0", "pod", pod.GetPod().String())
+		return 0.0
+	}
+
+	// Type assert to *prefix.SchedulingContextState
+	prefixState, ok := stateData.(*prefix.SchedulingContextState)
+	if !ok {
+		logger.Error(fmt.Errorf("unexpected state type: %T", stateData), "failed to read prefix cache state")
+		return 0.0
+	}
+
+	// Check if there are any prefixes
+	if len(prefixState.Prefixes) == 0 {
+		logger.V(logutil.DEBUG).Info("No prefixes found in request, returning prefix cache score of 0.0")
+		return 0.0
+	}
+
+	// Get the score for this pod
+	podKey := pod.GetPod().String()
+	if score, exists := prefixState.Scores[podKey]; exists {
+		logger.V(logutil.DEBUG).Info("Found prefix cache score for pod", "pod", podKey, "score", score)
+		return score
+	}
+
+	logger.V(logutil.DEBUG).Info("No prefix cache score found for pod", "pod", podKey)
+	return 0.0
 }
 
 // ============================================================================

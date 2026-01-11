@@ -33,10 +33,11 @@ const (
 
 // podWithHeadroom extends scoredPod with headroom breakdown
 type podWithHeadroom struct {
-	pod          schedulingtypes.Pod
-	ttftHeadroom float64
-	tpotHeadroom float64
-	totalScore   float64 // Combined score (for positive tier)
+	pod              schedulingtypes.Pod
+	ttftHeadroom     float64
+	tpotHeadroom     float64
+	totalScore       float64 // Combined score (for positive tier)
+	prefixCacheScore float64 // Prefix cache score from cycle state
 }
 
 // choice represents a weighted choice for random selection
@@ -113,11 +114,31 @@ func (s *PdSLOOptimizer) selectFromPositiveTier(
 		return &positivePods[0]
 	}
 
-	// Calculate weights based on headroom strategy
-	weights := s.calculatePositiveWeights(ctx, positivePods)
+	// Apply per-tier affinity gate (filter by prefix cache score)
+	candidates, sticky := s.epsilonGreedyAffinityGate(ctx, positivePods, "positive", s.config.AffinityGateTau)
+
+	// If perfect stickiness collapsed us to a single pod, short-circuit
+	if sticky && len(candidates) == 1 {
+		logger.V(logutil.DEBUG).Info("Sticky affinity gate selected single pod",
+			"pod", candidates[0].pod.GetPod().String())
+		return &candidates[0]
+	}
+
+	// Check if using composite modes
+	switch s.config.HeadroomStrategy {
+	case "composite-most":
+		logger.V(logutil.DEBUG).Info("Using composite-most strategy for positive tier")
+		return s.selectFromCompositeScores(ctx, candidates, "composite-most")
+	case "composite-least":
+		logger.V(logutil.DEBUG).Info("Using composite-least strategy for positive tier")
+		return s.selectFromCompositeScores(ctx, candidates, "composite-least")
+	}
+
+	// Fall through to SLO headroom-based selection (least/most/weighted)
+	weights := s.calculatePositiveWeights(ctx, candidates)
 
 	// Weighted random selection
-	selectedPod := s.performWeightedSelection(positivePods, weights)
+	selectedPod := s.performWeightedSelection(candidates, weights)
 
 	logger.V(logutil.DEBUG).Info("Selected from positive tier",
 		"pod", selectedPod.pod.GetPod().String(),
@@ -197,9 +218,9 @@ func (s *PdSLOOptimizer) calculatePositiveWeights(
 		case "most":
 			// Prefer pods with MOST headroom (conservative)
 			finalScore = blended
-		default: // "weighted" or any other
-			// Use blended score directly
-			finalScore = blended
+		default:
+			// Fallback to "least" (should not happen if validation works)
+			finalScore = 1.0 - blended
 		}
 
 		// Convert to integer weight [minWeight, wMax]
