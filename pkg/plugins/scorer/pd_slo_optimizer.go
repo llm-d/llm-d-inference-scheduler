@@ -976,7 +976,11 @@ func (s *PdSLOOptimizer) ResponseStreaming(
 		telCtx.firstToken = now
 		telCtx.tokenCount = 1
 
-		// Calculate actual TTFT for decode pod
+		// Calculate end-to-end TTFT (from request arrival to first token)
+		// This includes prefill time + decode time, which matches user-perceived latency
+		endToEndTTFT := now.Sub(telCtx.requestReceived).Milliseconds()
+
+		// Also calculate decode-only TTFT for debugging
 		decodeTTFT := now.Sub(telCtx.decodeStart).Milliseconds()
 
 		// Initialize token sampler for TPOT predictions
@@ -990,8 +994,8 @@ func (s *PdSLOOptimizer) ResponseStreaming(
 		// Refresh metrics before recording training data
 		refreshLastSeenMetrics(ctx, telCtx)
 
-		// Record TTFT training data with fresh metrics
-		s.recordDecodeTTFT(ctx, request, telCtx, float64(decodeTTFT))
+		// Record end-to-end TTFT training data with fresh metrics
+		s.recordDecodeTTFT(ctx, request, telCtx, float64(endToEndTTFT))
 
 		// Predict first TPOT for decode
 		s.predictFirstTPOT(ctx, request, telCtx)
@@ -1002,6 +1006,7 @@ func (s *PdSLOOptimizer) ResponseStreaming(
 
 		logger.V(logutil.DEBUG).Info("First token from decode processed",
 			"requestID", requestID,
+			"endToEndTTFT_ms", endToEndTTFT,
 			"decodeTTFT_ms", decodeTTFT,
 			"avgPredictedTPOT", telCtx.avgPredictedTPOT)
 	} else {
