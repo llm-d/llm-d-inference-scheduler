@@ -835,8 +835,7 @@ func (s *PdSLOOptimizer) PreRequest(
 			}
 		}
 
-		// Initialize metrics cache and do initial refresh
-		telCtx.lastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
+		// Do initial metrics refresh (sync.Map doesn't need initialization)
 		refreshLastSeenMetrics(ctx, telCtx)
 	}
 
@@ -845,8 +844,7 @@ func (s *PdSLOOptimizer) PreRequest(
 		"prefillPod", telCtx.prefillPod,
 		"decodePod", telCtx.decodePod,
 		"prefillProfile", telCtx.prefillProfileName,
-		"decodeProfile", telCtx.decodeProfileName,
-		"cachedMetricsCount", len(telCtx.lastSeenMetrics))
+		"decodeProfile", telCtx.decodeProfileName)
 }
 
 // trackRunningRequest adds a request to the running request queue for the target pod

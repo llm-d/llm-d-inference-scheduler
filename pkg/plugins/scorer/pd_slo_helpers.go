@@ -140,8 +140,8 @@ type pdTelemetryContext struct {
 	prefillProfileName string
 	decodeProfileName  string
 
-	// Cached metrics (refreshed periodically)
-	lastSeenMetrics map[string]*backendmetrics.MetricsState
+	// Cached metrics (refreshed periodically) - using sync.Map for thread-safe concurrent access
+	lastSeenMetrics sync.Map
 
 	// Token sampling for TPOT predictions
 	tokenSampler *tokenSampler
@@ -205,9 +205,8 @@ func refreshLastSeenMetrics(ctx context.Context, telCtx *pdTelemetryContext) {
 		return
 	}
 
-	if telCtx.lastSeenMetrics == nil {
-		telCtx.lastSeenMetrics = make(map[string]*backendmetrics.MetricsState)
-	}
+	// Count profiles for logging
+	profileCount := 0
 
 	// Refresh metrics for all profiles in the scheduling result
 	for profileName, profileResult := range telCtx.schedulingResult.ProfileResults {
@@ -216,23 +215,25 @@ func refreshLastSeenMetrics(ctx context.Context, telCtx *pdTelemetryContext) {
 			// The GetMetrics() call returns current state which may have been updated by background refresh
 			if metrics := profileResult.TargetPods[0].GetMetrics(); metrics != nil {
 				// Clone to prevent concurrent modification issues
-				telCtx.lastSeenMetrics[profileName] = metrics.Clone()
+				// Use sync.Map.Store for thread-safe concurrent write
+				telCtx.lastSeenMetrics.Store(profileName, metrics.Clone())
+				profileCount++
 			}
 		}
 	}
 
 	logger.V(logutil.TRACE).Info("Refreshed metrics from scheduling result",
-		"profileCount", len(telCtx.lastSeenMetrics))
+		"profileCount", profileCount)
 }
 
 // getLatestMetricsForProfile retrieves the most recently refreshed metrics for a specific profile
 func getLatestMetricsForProfile(telCtx *pdTelemetryContext, profileName string) (*backendmetrics.MetricsState, error) {
-	if len(telCtx.lastSeenMetrics) == 0 {
-		return nil, fmt.Errorf("no cached metrics available")
-	}
-
-	if metrics, exists := telCtx.lastSeenMetrics[profileName]; exists {
-		return metrics, nil
+	// Use sync.Map.Load for thread-safe concurrent read
+	if value, exists := telCtx.lastSeenMetrics.Load(profileName); exists {
+		if metrics, ok := value.(*backendmetrics.MetricsState); ok {
+			return metrics, nil
+		}
+		return nil, fmt.Errorf("invalid metrics type for profile %s", profileName)
 	}
 
 	return nil, fmt.Errorf("no metrics found for profile %s", profileName)
