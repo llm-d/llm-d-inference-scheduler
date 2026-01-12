@@ -56,7 +56,7 @@ var (
 
 // getOrMakePDSLOContext retrieves or creates an SLO context for a request
 func getOrMakePDSLOContext(request *schedulingtypes.LLMRequest) *pdSLOContext {
-	requestID := request.ID
+	requestID := request.RequestId
 
 	// Try to get existing context
 	if ctx, exists := pdSLOContexts.Load(requestID); exists {
@@ -73,7 +73,7 @@ func getOrMakePDSLOContext(request *schedulingtypes.LLMRequest) *pdSLOContext {
 
 // setPDSLOContextForRequest stores the SLO context for a request
 func setPDSLOContextForRequest(request *schedulingtypes.LLMRequest, sloCtx *pdSLOContext) {
-	pdSLOContexts.Store(request.ID, sloCtx)
+	pdSLOContexts.Store(request.RequestId, sloCtx)
 }
 
 // deletePDSLOContext removes the SLO context for a request (cleanup)
