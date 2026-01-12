@@ -6,16 +6,38 @@ Documentation for developing the inference scheduler.
 
 - [Make] `v4`+
 - [Golang] `v1.24`+
+- [Python] `v3.12`
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
 - [Kustomize]
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
+[Python]:https://www.python.org/
 [Docker]:https://www.docker.com/
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
 [Kustomize]:https://kubectl.docs.kubernetes.io/installation/kustomize/
+
+### Python Version Configuration
+
+The project uses Python 3.12 by default, but this can be configured:
+
+**For local development:**
+`PYTHON_VERSION` in the Makefile set which Python version is used.
+
+**For Docker builds:**
+The Python version is parameterized in the Dockerfile via the `PYTHON_VERSION` build argument, which defaults to 3.12. To build with a different Python version:
+
+```bash
+PYTHON_VERSION=3.13 make image-build
+
+# Or directly with Docker
+docker build --build-arg PYTHON_VERSION=3.13 -f Dockerfile.epp .
+```
+
+**For CI/CD:**
+Workflow uses Python 3.12 by default. The version can be set by modifying the `python-version` input in workflow file.
 
 ## Kind Development Environment
 

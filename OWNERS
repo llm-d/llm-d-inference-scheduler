@@ -15,3 +15,15 @@ reviewers:
 - nirrozenbaum
 - shmuelk
 - vMaroon
+
+# Auto-assign configuration for global assignment
+# Works in addition to GitHub's built-in CODEOWNERS functionality
+# Implemented via a custom GitHub Action
+auto-assign:
+  - elevran
+  - kfirtoledo
+  - kfswain
+  - nilig
+  - nirrozenbaum
+  - shmuelk
+  - vMaroon

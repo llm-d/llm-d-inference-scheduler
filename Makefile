@@ -246,6 +246,7 @@ image-build-%: check-container-tool ## Build Docker image ## Build Docker image 
 		--platform linux/$(TARGETARCH) \
  		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
+		--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
  		-t $($*_IMAGE) -f Dockerfile.$* .

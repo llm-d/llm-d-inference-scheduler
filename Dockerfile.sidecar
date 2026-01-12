@@ -30,7 +30,7 @@ RUN go build -a -o bin/pd-sidecar \
        -ldflags="-X github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version.CommitSHA=${COMMIT_SHA} -X github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version.BuildRef=${BUILD_REF}" \
        cmd/cmd.go
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:latest
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
 WORKDIR /
 COPY --from=builder /workspace/bin/pd-sidecar /app/pd-sidecar
 USER 65532:65532
