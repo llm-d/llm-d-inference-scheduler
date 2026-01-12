@@ -98,7 +98,7 @@ func (d *prefixDisaggregationDecider) isDisaggregationRequired(ctx context.Conte
 	}
 
 	// number of cached tokens
-	hitPrefix := float64(prefixCacheMatchInfo.MatchLength())
+	hitPrefix := float64(prefixCacheMatchInfo.MatchBlocks() * prefixCacheMatchInfo.BlockSizeTokens())
 	// length of the cached part in percentages
 	hitPercentagePrefix := hitPrefix / float64(inputTokens)
 	debugLogger.Info("Computed hit percentage for prefix cache",

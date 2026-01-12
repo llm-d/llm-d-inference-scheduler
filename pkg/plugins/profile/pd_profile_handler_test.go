@@ -348,7 +348,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 				if profileName == defaultDecodeProfile && profileRes != nil {
 					for _, pod := range profileRes.TargetPods {
 						pod.Put(approximateprefix.PrefixCacheMatchInfoKey,
-							approximateprefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens))
+							approximateprefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, 1))
 					}
 				}
 			}
@@ -451,7 +451,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 					if profileName == defaultDecodeProfile && profileRes != nil {
 						for _, pod := range profileRes.TargetPods {
 							pod.Put(approximateprefix.PrefixCacheMatchInfoKey,
-								approximateprefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens))
+								approximateprefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, 1))
 						}
 					}
 				}
