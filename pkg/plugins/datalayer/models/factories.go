@@ -1,0 +1,67 @@
+package models
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/http"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+)
+
+const (
+	// ModelsDataSourceType is models data source type
+	ModelsDataSourceType = "models-data-source"
+	// ModelsExtractorType is models extractor type
+	ModelsExtractorType = "model-server-protocol-models"
+)
+
+// Configuration parameters for models data source.
+type modelsDatasourceParams struct {
+	// Scheme defines the protocol scheme used in models retrieval (e.g., "http").
+	Scheme string `json:"scheme"`
+	// Path defines the URL path used in models retrieval (e.g., "/v1/models").
+	Path string `json:"path"`
+	// InsecureSkipVerify defines whether model server certificate should be verified or not.
+	InsecureSkipVerify bool `json:"insecureSkipVerify"`
+}
+
+// ModelDataSourceFactory is a factory function used to instantiate data layer's
+// models data source plugins specified in a configuration.
+func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	cfg := defaultDataSourceConfigParams()
+	if parameters != nil { // overlay the defaults with configured values
+		if err := json.Unmarshal(parameters, cfg); err != nil {
+			return nil, err
+		}
+	}
+
+	ds := http.NewHTTPDataSource(cfg.Scheme, cfg.Path, cfg.InsecureSkipVerify, ModelsDataSourceType,
+		name, parseModels, ModelsResponseType)
+	return ds, nil
+}
+
+// ModelServerExtractorFactory is a factory function used to instantiate data layer's models
+// Extractor plugins specified in a configuration.
+func ModelServerExtractorFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+	extractor, err := NewModelExtractor()
+	if err != nil {
+		return nil, err
+	}
+	extractor.typedName.Name = name
+	return extractor, nil
+}
+
+func defaultDataSourceConfigParams() *modelsDatasourceParams {
+	return &modelsDatasourceParams{Scheme: "http", Path: "/v1/models", InsecureSkipVerify: true}
+}
+
+func parseModels(data io.Reader) (any, error) {
+	body, err := io.ReadAll(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+	var modelsResponse ModelResponse
+	err = json.Unmarshal(body, &modelsResponse)
+	return &modelsResponse, err
+}
