@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -74,12 +75,19 @@ func (h *DataParallelProfileHandler) WithName(name string) *DataParallelProfileH
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *DataParallelProfileHandler) Pick(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
+func (h *DataParallelProfileHandler) Pick(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
 	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
 	if len(profiles) == len(profileResults) { // all profiles have been executed already in previous call
 		return map[string]*framework.SchedulerProfile{}
 	}
-	// return all profiles
+	// Validate that only one profile is configured for Data Parallel mode
+	if len(profiles) != 1 {
+		log.FromContext(ctx).Error(nil, "Data Parallel profile handler requires exactly one scheduling profile",
+			"profileCount", len(profiles),
+		)
+		return map[string]*framework.SchedulerProfile{} // return empty map for fast exit in later steps
+	}
+	// return only one profile
 	return profiles
 }
 
