@@ -263,7 +263,7 @@ func TestPDSchedule(t *testing.T) {
 
 			inputTokens := len(test.req.Body.Completions.Prompt) / profile.AverageCharactersPerToken
 			for _, pod := range test.input {
-				pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(0, inputTokens, 16))
+				pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(0, inputTokens, 1))
 			}
 			got, err := scheduler.Schedule(ctx, test.req, test.input)
 
@@ -281,7 +281,7 @@ func TestPDSchedule(t *testing.T) {
 
 				// update number of cached tokens "stored" in the first schedule execution
 				for _, pod := range test.input {
-					pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(inputTokens, inputTokens, 16))
+					pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(inputTokens, inputTokens, 1))
 				}
 
 				got, err = scheduler.Schedule(ctx, test.req, test.input)

@@ -257,7 +257,6 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	request := createRequest("hello world hello world hello world")
 
-	blockSize := 16 // tokens
 	profiles := map[string]scheduling.SchedulerProfile{
 		"decode":  newMockSchedulerProfile(),
 		"prefill": newMockSchedulerProfile(),
@@ -352,7 +351,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 				if profileName == defaultDecodeProfile && profileRes != nil {
 					for _, pod := range profileRes.TargetEndpoints {
 						pod.Put(approximateprefix.PrefixCacheMatchInfoKey,
-							approximateprefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, blockSize))
+							approximateprefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, 1))
 					}
 				}
 			}
@@ -365,7 +364,6 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 func TestPdProfileHandler_PickSeries(t *testing.T) {
 	ctx := context.Background()
 	prompt := "hello world, hello world, hello world, hello world, hello world, hello world, hello world!"
-	blockSize := 16
 	request := createRequest(prompt)
 	longerRequest := createRequest(prompt + "123")
 	longRequest := createRequest(prompt + prompt)
@@ -456,7 +454,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 					if profileName == defaultDecodeProfile && profileRes != nil {
 						for _, endpoint := range profileRes.TargetEndpoints {
 							endpoint.Put(approximateprefix.PrefixCacheMatchInfoKey,
-								approximateprefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, blockSize))
+								approximateprefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, 1))
 						}
 					}
 				}
