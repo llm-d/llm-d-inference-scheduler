@@ -4,31 +4,24 @@ $(LOCALBIN):
 
 ## Tool binary names.
 GINKGO = $(LOCALBIN)/ginkgo
-GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 KUSTOMIZE = $(LOCALBIN)/kustomize
 TYPOS = $(LOCALBIN)/typos
 
 ## Tool fixed versions.
 GINKGO_VERSION ?= v2.27.2
-GOLANGCI_LINT_VERSION ?= v2.1.6
 KUSTOMIZE_VERSION ?= v5.5.0
 TYPOS_VERSION ?= v1.34.0
 
 ##@ Tools
 
 .PHONY: install-tools
-install-tools: install-ginkgo install-golangci-lint install-kustomize install-typos ## Install all development tools
+install-tools: install-ginkgo install-kustomize install-typos ## Install all development tools
 	@echo "All development tools are installed."
 
 .PHONY: install-ginkgo
 install-ginkgo: $(GINKGO)
 $(GINKGO): | $(LOCALBIN)
 	$(call go-install-tool,$(GINKGO),github.com/onsi/ginkgo/v2/ginkgo,$(GINKGO_VERSION))
-
-.PHONY: install-golangci-lint
-install-golangci-lint: $(GOLANGCI_LINT)
-$(GOLANGCI_LINT): | $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
 .PHONY: install-kustomize
 install-kustomize: $(KUSTOMIZE)
@@ -44,7 +37,7 @@ $(TYPOS): | $(LOCALBIN)
 	@echo "typos installed successfully."
 
 .PHONY: check-tools
-check-tools: check-go check-ginkgo check-golangci-lint check-kustomize check-envsubst check-container-tool check-kubectl check-buildah check-typos ## Check that all required tools are installed
+check-tools: check-go check-ginkgo check-kustomize check-envsubst check-container-tool check-kubectl check-buildah check-typos ## Check that all required tools are installed
 	@echo "All required tools are available."
 
 .PHONY: check-go
@@ -57,13 +50,6 @@ check-ginkgo:
 	@command -v ginkgo >/dev/null 2>&1 || [ -f "$(GINKGO)" ] || { \
 	  echo "ERROR: ginkgo is not installed."; \
 	  echo "Run: make install-ginkgo (or install-tools)"; \
-	  exit 1; }
-
-.PHONY: check-golangci-lint
-check-golangci-lint:
-	@command -v golangci-lint >/dev/null 2>&1 || [ -f "$(GOLANGCI_LINT)" ] || { \
-	  echo "ERROR: golangci-lint is not installed."; \
-	  echo "Run: make install-golangci-lint (or install-tools)"; \
 	  exit 1; }
 
 .PHONY: check-kustomize

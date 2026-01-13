@@ -64,15 +64,17 @@ clean: ## Clean build artifacts, tools and caches
 	rm -rf $(LOCALBIN) build
 
 .PHONY: format
-format: check-golangci-lint ## Format Go source files
+format: image-build-builder ## Format Go source files
 	@printf "\033[33;1m==== Running go fmt ====\033[0m\n"
 	@gofmt -l -w $(SRC)
-	$(GOLANGCI_LINT) fmt
+	$(CONTAINER_RUNTIME) run --rm -u $$(id -u):$$(id -g) -v $$(pwd):/app:Z -w /app $(BUILDER_IMAGE) \
+		golangci-lint fmt
 
 .PHONY: lint
-lint: check-golangci-lint check-typos ## Run lint
+lint: image-build-builder ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	CGO_CFLAGS="${CGO_CFLAGS}" $(GOLANGCI_LINT) run
+	$(CONTAINER_RUNTIME) run --rm -u $$(id -u):$$(id -g) -v $$(pwd):/app:Z -w /app $(BUILDER_IMAGE) \
+		golangci-lint run --config=./.golangci.yml
 	$(TYPOS)
 
 .PHONY: install-hooks
@@ -134,7 +136,6 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 		--platform linux/$(TARGETARCH) \
  		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
-		--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
  		-t $($*_IMAGE) -f Dockerfile.$* .
@@ -180,7 +181,6 @@ stop-container: check-container-tool ## Stop and remove container
 env: ## Print environment variables
 	@echo "TARGETOS=$(TARGETOS)"
 	@echo "TARGETARCH=$(TARGETARCH)"
-	@echo "PYTHON_VERSION=$(PYTHON_VERSION)"
 	@echo "CONTAINER_RUNTIME=$(CONTAINER_RUNTIME)"
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
 	@echo "EPP_TAG=$(EPP_TAG)"

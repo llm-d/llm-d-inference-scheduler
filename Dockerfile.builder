@@ -3,10 +3,12 @@ FROM quay.io/fedora/fedora:latest
 RUN mkdir /app
 WORKDIR /app
 
+
 RUN dnf install -y \
     binutils zeromq-devel gcc-c++ \
-    python3-devel python3-pip golang && \
+    python3-devel python3-pip golang golangci-lint && \
     dnf clean all
+
 
 COPY go.mod .
 COPY go.sum .
