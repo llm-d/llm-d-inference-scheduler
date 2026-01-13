@@ -28,7 +28,7 @@ export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 VLLM_SIMULATOR_TAG ?= v0.6.1
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
-NAMESPACE ?= hc4ai-operator
+NAMESPACE ?= default
 
 # Map go arch to platform-specific arch
 ifeq ($(TARGETOS),darwin)
@@ -72,7 +72,7 @@ SRC = $(shell find . -type f -name '*.go')
 
 # Tokenizer & Linking
 LDFLAGS ?= -extldflags '-L$(LOCALLIB)'
-CGO_ENABLED=1 # TODO: do we need this? it is set in both Dockerfiles
+CGO_ENABLED=1
 
 # Unified Python configuration detection. This block runs once.
 PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
