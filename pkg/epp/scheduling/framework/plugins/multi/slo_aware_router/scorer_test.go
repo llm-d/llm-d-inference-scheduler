@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
 
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
@@ -111,7 +110,7 @@ func createTestEndpoint(name string, kvCacheUsage float64, runningRequestsSize, 
 				Namespace: "default",
 			},
 		},
-		MetricsState: &backendmetrics.MetricsState{
+		Metrics: &datalayer.Metrics{
 			KVCacheUsagePercent: kvCacheUsage,
 			RunningRequestsSize: runningRequestsSize,
 			WaitingQueueSize:    waitingQueueSize,

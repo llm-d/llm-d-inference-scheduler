@@ -24,7 +24,7 @@ import (
 	"github.com/google/uuid"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
+	// Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
@@ -81,7 +81,7 @@ func TestSchedule(t *testing.T) {
 			input: []types.Endpoint{
 				&types.PodMetrics{
 					EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize:    0,
 						KVCacheUsagePercent: 0.2,
 						MaxActiveModels:     2,
@@ -93,7 +93,7 @@ func TestSchedule(t *testing.T) {
 				},
 				&types.PodMetrics{
 					EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize:    0,
 						KVCacheUsagePercent: 0.2,
 						MaxActiveModels:     2,
@@ -105,7 +105,7 @@ func TestSchedule(t *testing.T) {
 				},
 				&types.PodMetrics{
 					EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod3"}},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize:    10,
 						KVCacheUsagePercent: 0.8,
 						MaxActiveModels:     2,
@@ -122,7 +122,7 @@ func TestSchedule(t *testing.T) {
 							&types.ScoredEndpoint{
 								Endpoint: &types.PodMetrics{
 									EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}},
-									MetricsState: &backendmetrics.MetricsState{
+									Metrics: &datalayer.Metrics{
 										WaitingQueueSize:    0,
 										KVCacheUsagePercent: 0.2,
 										MaxActiveModels:     2,

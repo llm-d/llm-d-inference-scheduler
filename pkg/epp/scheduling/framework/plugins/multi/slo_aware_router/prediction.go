@@ -21,7 +21,7 @@ import (
 	"context"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
@@ -46,7 +46,7 @@ func (s *SLOAwareRouter) generatePredictions(ctx context.Context, request *sched
 	predictions := make([]endpointPredictionResult, 0, len(candidateEndpoints))
 
 	// Prepare inputs for bulk prediction
-	metricsStates := make([]*backendmetrics.MetricsState, len(candidateEndpoints))
+	metricsStates := make([]*datalayer.Metrics, len(candidateEndpoints))
 	prompts := make([]string, len(candidateEndpoints))
 	generatedTokenCounts := make([]int, len(candidateEndpoints))
 	prefixCacheScores := make([]float64, len(candidateEndpoints))

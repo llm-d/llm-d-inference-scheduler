@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/types"
 
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -340,12 +339,12 @@ func TestSLOAwareRouter_ResponseStreaming_FirstToken(t *testing.T) {
 	sloCtx.predictedTTFT = 80.0
 	sloCtx.avgPredictedTPOT = 30.0
 	// ADD THIS - populate metrics
-	sloCtx.lastSeenMetrics["prefill"] = &backendmetrics.MetricsState{
+	sloCtx.lastSeenMetrics["prefill"] = &datalayer.Metrics{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
 		RunningRequestsSize: 1,
 	}
-	sloCtx.lastSeenMetrics["default"] = &backendmetrics.MetricsState{
+	sloCtx.lastSeenMetrics["default"] = &datalayer.Metrics{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
 		RunningRequestsSize: 1,
@@ -391,12 +390,12 @@ func TestSLOAwareRouter_ResponseStreaming_SubsequentTokens(t *testing.T) {
 	sloCtx.predictedTTFT = 80.0
 	sloCtx.avgPredictedTPOT = 30.0
 	// ADD THIS - populate metrics
-	sloCtx.lastSeenMetrics["prefill"] = &backendmetrics.MetricsState{
+	sloCtx.lastSeenMetrics["prefill"] = &datalayer.Metrics{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
 		RunningRequestsSize: 1,
 	}
-	sloCtx.lastSeenMetrics["default"] = &backendmetrics.MetricsState{
+	sloCtx.lastSeenMetrics["default"] = &datalayer.Metrics{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    1,
 		RunningRequestsSize: 1,
@@ -669,7 +668,7 @@ func TestSLORequestContext_UpdateMetrics(t *testing.T) {
 	ctx := newSLORequestContext(request)
 
 	// Add some metrics
-	metricsState := &backendmetrics.MetricsState{
+	metricsState := &datalayer.Metrics{
 		KVCacheUsagePercent: 0.5,
 		WaitingQueueSize:    3,
 	}
