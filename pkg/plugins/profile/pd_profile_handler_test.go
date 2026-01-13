@@ -10,6 +10,8 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
@@ -35,14 +37,19 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 		{
 			name:       "valid configuration with custom values",
 			pluginName: "custom-handler",
-			jsonParams: `{
-				"threshold": 100,
+			jsonParams: fmt.Sprintf(`{
 				"decodeProfile": "my-decode",
 				"prefillProfile": "my-prefill",
 				"prefixPluginName": "my-prefix-cache",
-				"hashBlockSize": 32,
-				"primaryPort": 8080
-			}`,
+				"primaryPort": 8080,
+				"decider": {
+					"name": "%s",
+					"parameters": {
+						"nonCachedTokens": 100,
+						"pluginName": "my-prefix-cache"
+					}
+				}
+			}`, PrefixDeciderName),
 			expectErr: false,
 		},
 		{
@@ -52,27 +59,15 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 			expectErr:  false,
 		},
 		{
-			name:       "threshold = 0 is allowed",
-			pluginName: "zero-threshold",
-			jsonParams: `{"threshold": 0}`,
+			name:       "nonCachedTokens = 0 is allowed",
+			pluginName: "zero-non-cached-tokens",
+			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": 0}}}`,
 			expectErr:  false,
 		},
 		{
-			name:       "negative threshold should error",
-			pluginName: "neg-threshold",
-			jsonParams: `{"threshold": -1}`,
-			expectErr:  true,
-		},
-		{
-			name:       "hashBlockSize = 0 should error",
-			pluginName: "zero-block-size",
-			jsonParams: `{"hashBlockSize": 0}`,
-			expectErr:  true,
-		},
-		{
-			name:       "negative hashBlockSize should error",
-			pluginName: "neg-block-size",
-			jsonParams: `{"hashBlockSize": -5}`,
+			name:       "negative nonCachedTokens should error",
+			pluginName: "neg-non-cached-tokens",
+			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": -1}}}`,
 			expectErr:  true,
 		},
 		{
@@ -151,15 +146,15 @@ func TestPdProfileHandlerFactoryInvalidJSON(t *testing.T) {
 	}{
 		{
 			name:       "malformed JSON",
-			jsonParams: `{"threshold": 100, "hashBlockSize":`, // incomplete
+			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens":`, // incomplete
 		},
 		{
-			name:       "threshold as string instead of int",
-			jsonParams: `{"threshold": "100"}`,
+			name:       "nonCachedTokens as string instead of int",
+			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": true}}}`,
 		},
 		{
-			name:       "hashBlockSize as boolean",
-			jsonParams: `{"hashBlockSize": true}`,
+			name:       "nonCachedTokens as boolean",
+			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": true}}}`,
 		},
 		{
 			name:       "primaryPort as float",
@@ -183,6 +178,7 @@ const DefaultTestPodPort = "8000"
 // createPod creates a mock Pod with customizable IP and port.
 func createPod(nsn k8stypes.NamespacedName, ipaddr, port string, labels map[string]string) types.Pod {
 	return &types.PodMetrics{
+		AttributeMap: datalayer.NewAttributes(),
 		Pod: &backend.Pod{
 			NamespacedName: nsn,
 			Address:        ipaddr,
@@ -214,100 +210,116 @@ func newMockSchedulerProfile() *framework.SchedulerProfile {
 	return &framework.SchedulerProfile{}
 }
 
-func TestPdProfileHandler_Pick(t *testing.T) {
-	ctx := utils.NewTestContext(t)
-	request := &types.LLMRequest{
+// setups cycle state for the prefix plugin for the given cached tokens number
+func setupPrefixState(cs *types.CycleState, cachedTokens int) {
+	prefixMap := map[prefix.ServerID]int{}
+	if cachedTokens > 0 {
+		prefixMap[prefix.ServerID(k8stypes.NamespacedName{Name: "pod1", Namespace: "default"})] = cachedTokens
+	}
+	state := &prefix.SchedulingContextState{PrefixCacheServers: prefixMap}
+	key := plugins.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
+	cs.Write(key, state)
+}
+
+// returns prefix decider parameters as raw json for the given number of non cached tokens limit
+func getDeciderParamsRaw(nonCachedTokensLimit int) json.RawMessage {
+	return json.RawMessage(fmt.Sprintf("{\"nonCachedTokens\": %d}", nonCachedTokensLimit))
+}
+
+// creates and returns llm completion request forthe given prompt
+func createRequest(prompt string) *types.LLMRequest {
+	return &types.LLMRequest{
 		Body: &types.LLMRequestBody{
 			Completions: &types.CompletionsRequest{
-				Prompt: "hello world",
+				Prompt: prompt,
 			},
 		},
 	}
+}
+
+// returns array of profile names in the given profile pick result
+func getProfilesFromResult(result map[string]*framework.SchedulerProfile) []string {
+	profiles := make([]string, len(result))
+	index := 0
+
+	for name := range result {
+		profiles[index] = name
+		index++
+	}
+
+	return profiles
+}
+
+func TestPdProfileHandler_Pick(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	request := createRequest("hello world hello world hello world")
 
 	profiles := map[string]*framework.SchedulerProfile{
-		"decode":  newMockSchedulerProfile(),
-		"prefill": newMockSchedulerProfile(),
+		defaultDecodeProfile:  newMockSchedulerProfile(),
+		defaultPrefillProfile: newMockSchedulerProfile(),
 	}
 
 	tests := []struct {
-		name             string
-		pdThreshold      int
-		hashBlockSize    int
-		prefixPluginType string
-		prefixPluginName string
-		setupPrefixState func(*types.CycleState)
-		profileResults   map[string]*types.ProfileRunResult
-		expectedProfiles []string
+		name                 string
+		nonCachedTokensLimit int
+		prefixPluginType     string
+		prefixPluginName     string
+		cachedTokens         int
+		profileResults       map[string]*types.ProfileRunResult
+		expectedProfiles     []string
 	}{
 		{
-			name:             "decode not executed yet → run decode",
-			pdThreshold:      100,
-			hashBlockSize:    16,
-			prefixPluginType: prefix.PrefixCachePluginType,
-			prefixPluginName: prefix.PrefixCachePluginType,
-			profileResults:   map[string]*types.ProfileRunResult{},
-			expectedProfiles: []string{"decode"},
+			name:                 "decode not executed yet → run decode",
+			nonCachedTokensLimit: 10,
+			prefixPluginType:     prefix.PrefixCachePluginType,
+			prefixPluginName:     prefix.PrefixCachePluginType,
+			profileResults:       map[string]*types.ProfileRunResult{},
+			expectedProfiles:     []string{defaultDecodeProfile},
 		},
 		{
-			name:             "decode failed (nil result) → run nothing",
-			pdThreshold:      100,
-			hashBlockSize:    16,
-			prefixPluginType: prefix.PrefixCachePluginType,
-			prefixPluginName: prefix.PrefixCachePluginType,
+			name:                 "decode failed (nil result) → run nothing",
+			nonCachedTokensLimit: 10,
+			prefixPluginType:     prefix.PrefixCachePluginType,
+			prefixPluginName:     prefix.PrefixCachePluginType,
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode": nil,
+				defaultDecodeProfile: nil,
 			},
 			expectedProfiles: []string{},
 		},
 		{
-			name:             "all profiles already executed → run nothing",
-			pdThreshold:      100,
-			hashBlockSize:    16,
-			prefixPluginType: prefix.PrefixCachePluginType,
-			prefixPluginName: prefix.PrefixCachePluginType,
+			name:                 "all profiles already executed → run nothing",
+			nonCachedTokensLimit: 10,
+			prefixPluginType:     prefix.PrefixCachePluginType,
+			prefixPluginName:     prefix.PrefixCachePluginType,
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode":  newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				"prefill": newMockProfileRunResult(DefaultTestPodPort, "pod2"),
+				defaultDecodeProfile:  newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultPrefillProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectedProfiles: []string{},
 		},
 		{
-			name:             "pd threshold NOT triggered → run prefill",
-			pdThreshold:      5,
-			hashBlockSize:    16,
-			prefixPluginType: prefix.PrefixCachePluginType,
-			prefixPluginName: prefix.PrefixCachePluginType,
-			setupPrefixState: func(cs *types.CycleState) {
-				state := &prefix.SchedulingContextState{
-					PrefixCacheServers: map[prefix.ServerID]int{
-						prefix.ServerID(k8stypes.NamespacedName{Name: "pod1", Namespace: "default"}): 1,
-					},
-				}
-				key := plugins.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
-				cs.Write(key, state)
-			},
+			name: "has enough not-cached tokens → run prefill",
+			// Need at least 4 non-cached tokens (16+ chars) to trigger disaggregated prefill
+			// In this case: prompt length is 35 chars (8 tokens), cached length is 2 tokens -> disaggregated prefill should trigger
+			nonCachedTokensLimit: 4,
+			cachedTokens:         2,
+			prefixPluginType:     prefix.PrefixCachePluginType,
+			prefixPluginName:     prefix.PrefixCachePluginType,
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
-			expectedProfiles: []string{"prefill"},
+			expectedProfiles: []string{defaultPrefillProfile},
 		},
 		{
-			name:             "pd threshold triggered (short non-cached suffix) → skip prefill",
-			pdThreshold:      100,
-			hashBlockSize:    16,
-			prefixPluginType: prefix.PrefixCachePluginType,
-			prefixPluginName: prefix.PrefixCachePluginType,
-			setupPrefixState: func(cs *types.CycleState) {
-				state := &prefix.SchedulingContextState{
-					PrefixCacheServers: map[prefix.ServerID]int{
-						prefix.ServerID(k8stypes.NamespacedName{Name: "pod1", Namespace: "default"}): 5,
-					},
-				}
-				key := plugins.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
-				cs.Write(key, state)
-			},
+			name: "short non-cached suffix → skip prefill",
+			// Need at least 4 non-cached tokens (16+ chars) to trigger disaggregated prefill
+			// In this case: prompt length is 35 chars (8 tokens), cached length is 5 tokens -> skip prefill
+			nonCachedTokensLimit: 4,
+			cachedTokens:         5,
+			prefixPluginType:     prefix.PrefixCachePluginType,
+			prefixPluginName:     prefix.PrefixCachePluginType,
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
 			expectedProfiles: []string{},
 		},
@@ -315,29 +327,138 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewPdProfileHandler(
-				"prefill",
-				"decode",
+			handler, err := NewPdProfileHandler(
+				defaultPrefillProfile,
+				defaultDecodeProfile,
 				tt.prefixPluginType,
 				tt.prefixPluginName,
-				tt.pdThreshold,
-				tt.hashBlockSize,
 				0,
-			).WithName("test-handler")
+				PrefixDeciderName,
+				getDeciderParamsRaw(tt.nonCachedTokensLimit),
+			)
+			assert.NoError(t, err)
 
 			cs := &types.CycleState{}
-			if tt.setupPrefixState != nil {
-				tt.setupPrefixState(cs)
-			}
+			setupPrefixState(cs, tt.cachedTokens)
 
+			// set prefix to the given cached tokens number for pod "pod1" in decode profile results
+			inputTokens := len(request.Body.Completions.Prompt) / AverageCharactersPerToken
+
+			for profileName, profileRes := range tt.profileResults {
+				if profileName == defaultDecodeProfile && profileRes != nil {
+					for _, pod := range profileRes.TargetPods {
+						pod.Put(approximateprefix.PrefixCacheMatchInfoKey,
+							approximateprefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, 1))
+					}
+				}
+			}
 			result := handler.Pick(ctx, cs, request, profiles, tt.profileResults)
+			assert.ElementsMatch(t, tt.expectedProfiles, getProfilesFromResult(result))
+		})
+	}
+}
 
-			var actual []string
-			for name := range result {
-				actual = append(actual, name)
+func TestPdProfileHandler_PickSeries(t *testing.T) {
+	ctx := context.Background()
+	prompt := "hello world, hello world, hello world, hello world, hello world, hello world, hello world!"
+	request := createRequest(prompt)
+	longerRequest := createRequest(prompt + "123")
+	longRequest := createRequest(prompt + prompt)
+
+	profiles := map[string]*framework.SchedulerProfile{
+		defaultDecodeProfile:  newMockSchedulerProfile(),
+		defaultPrefillProfile: newMockSchedulerProfile(),
+	}
+	profileResults := map[string]*types.ProfileRunResult{
+		defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+	}
+
+	type testData struct {
+		request          *types.LLMRequest
+		cachedTokens     int
+		expectedProfiles []string
+	}
+	tests := []struct {
+		name                 string
+		nonCachedTokensLimit int
+		tests                []testData
+	}{
+		{
+			name:                 "same request twice",
+			nonCachedTokensLimit: 2,
+			tests: []testData{{
+				request:          request,
+				cachedTokens:     0,
+				expectedProfiles: []string{defaultPrefillProfile},
+			}, {
+				request:          request,
+				cachedTokens:     len(request.Body.Completions.Prompt) / AverageCharactersPerToken,
+				expectedProfiles: []string{},
+			}},
+		}, {
+			name: "short request and a little bit longer after it",
+			// Need at least 2 non-cached tokens (8+ chars) to trigger disaggregated prefill
+			// In this case: longer request is longer in 4 chars than the request -> no disaggregated prefill
+			nonCachedTokensLimit: 2,
+			tests: []testData{{
+				request:          request,
+				cachedTokens:     0,
+				expectedProfiles: []string{defaultPrefillProfile},
+			}, {
+				request:          longerRequest,
+				cachedTokens:     len(request.Body.Completions.Prompt) / AverageCharactersPerToken,
+				expectedProfiles: []string{},
+			}},
+		}, {
+			name: "short request and a long one after it",
+			// Need at least 2 non-cached tokens (8+ chars) to trigger disaggregated prefill
+			// In this case: long request is longer enough than the request -> should have disaggregated prefill
+			nonCachedTokensLimit: 2,
+			tests: []testData{{
+				request:          request,
+				cachedTokens:     0,
+				expectedProfiles: []string{defaultPrefillProfile},
+			}, {
+				request:          longRequest,
+				cachedTokens:     len(request.Body.Completions.Prompt) / AverageCharactersPerToken,
+				expectedProfiles: []string{defaultPrefillProfile},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, err := NewPdProfileHandler(
+				defaultPrefillProfile,
+				defaultDecodeProfile,
+				prefix.PrefixCachePluginType,
+				prefix.PrefixCachePluginType,
+				0,
+				PrefixDeciderName,
+				getDeciderParamsRaw(tt.nonCachedTokensLimit),
+			)
+			assert.NoError(t, err)
+
+			// run sequences of request
+			for _, innerTest := range tt.tests {
+				cs := &types.CycleState{}
+				setupPrefixState(cs, innerTest.cachedTokens)
+
+				// set prefix to the given cached tokens number for pod "pod1" in decode profile results
+				inputTokens := len(innerTest.request.Body.Completions.Prompt) / AverageCharactersPerToken
+
+				for profileName, profileRes := range profileResults {
+					if profileName == defaultDecodeProfile && profileRes != nil {
+						for _, pod := range profileRes.TargetPods {
+							pod.Put(approximateprefix.PrefixCacheMatchInfoKey,
+								approximateprefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, 1))
+						}
+					}
+				}
+
+				result := handler.Pick(ctx, cs, innerTest.request, profiles, profileResults)
+				assert.ElementsMatch(t, innerTest.expectedProfiles, getProfilesFromResult(result))
 			}
-
-			assert.ElementsMatch(t, tt.expectedProfiles, actual)
 		})
 	}
 }
@@ -353,7 +474,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 		{
 			name: "decode failed → error",
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode": nil,
+				defaultDecodeProfile: nil,
 			},
 			expectError: true,
 		},
@@ -361,14 +482,14 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 			name:        "decode success, no prefill, no primaryPort",
 			primaryPort: 0,
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
-				assert.Equal(t, "decode", res.PrimaryProfileName)
-				assert.Contains(t, res.ProfileResults, "decode")
-				assert.NotContains(t, res.ProfileResults, "prefill")
-				pod := res.ProfileResults["decode"].TargetPods[0].GetPod()
+				assert.Equal(t, defaultDecodeProfile, res.PrimaryProfileName)
+				assert.Contains(t, res.ProfileResults, defaultDecodeProfile)
+				assert.NotContains(t, res.ProfileResults, defaultPrefillProfile)
+				pod := res.ProfileResults[defaultDecodeProfile].TargetPods[0].GetPod()
 				assert.Equal(t, DefaultTestPodPort, pod.Port)
 				assert.Empty(t, headers[common.DataParallelPodHeader])
 			},
@@ -377,25 +498,25 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 			name:        "decode success, with prefill",
 			primaryPort: 0,
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode":  newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				"prefill": newMockProfileRunResult(DefaultTestPodPort, "pod2"),
+				defaultDecodeProfile:  newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultPrefillProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *types.SchedulingResult, _ map[string]string) {
-				assert.Equal(t, "decode", res.PrimaryProfileName)
-				assert.Contains(t, res.ProfileResults, "decode")
-				assert.Contains(t, res.ProfileResults, "prefill")
+				assert.Equal(t, defaultDecodeProfile, res.PrimaryProfileName)
+				assert.Contains(t, res.ProfileResults, defaultDecodeProfile)
+				assert.Contains(t, res.ProfileResults, defaultPrefillProfile)
 			},
 		},
 		{
 			name:        "with primaryPort → port updated and header set",
 			primaryPort: 9000,
 			profileResults: map[string]*types.ProfileRunResult{
-				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
-				pod := res.ProfileResults["decode"].TargetPods[0].GetPod()
+				pod := res.ProfileResults[defaultDecodeProfile].TargetPods[0].GetPod()
 				assert.Equal(t, "9000", pod.Port)
 
 				hostPort := headers[common.DataParallelPodHeader]
@@ -406,15 +527,16 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewPdProfileHandler(
-				"prefill",
-				"decode",
+			handler, err := NewPdProfileHandler(
+				defaultPrefillProfile,
+				defaultDecodeProfile,
 				prefix.PrefixCachePluginType,
 				prefix.PrefixCachePluginType,
-				0,
-				prefix.DefaultBlockSize,
 				tt.primaryPort,
-			).WithName("test-handler")
+				PrefixDeciderName,
+				getDeciderParamsRaw(0),
+			)
+			assert.NoError(t, err)
 
 			headers := make(map[string]string)
 			req := &types.LLMRequest{
