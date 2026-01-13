@@ -3,12 +3,16 @@ FROM quay.io/fedora/fedora:latest
 RUN mkdir /app
 WORKDIR /app
 
+ARG TYPOS_VERSION=v1.34.0
 
 RUN dnf install -y \
     binutils zeromq-devel gcc-c++ \
     python3-devel python3-pip golang golangci-lint && \
     dnf clean all
 
+
+# Install typos
+RUN curl -sSfL https://github.com/crate-ci/typos/releases/download/${TYPOS_VERSION}/typos-${TYPOS_VERSION}-$(uname -m)-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin
 
 COPY go.mod .
 COPY go.sum .

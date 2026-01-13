@@ -74,8 +74,7 @@ format: image-build-builder ## Format Go source files
 lint: image-build-builder ## Run lint
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
 	$(CONTAINER_RUNTIME) run --rm -u $$(id -u):$$(id -g) -v $$(pwd):/app:Z -w /app $(BUILDER_IMAGE) \
-		golangci-lint run --config=./.golangci.yml
-	$(TYPOS)
+		sh -c 'golangci-lint run --config=./.golangci.yml && typos'
 
 .PHONY: install-hooks
 install-hooks: ## Install git hooks
