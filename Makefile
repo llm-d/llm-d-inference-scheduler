@@ -2,7 +2,6 @@ SHELL := /usr/bin/env bash
 
 # Local directories
 LOCALBIN ?= $(shell pwd)/bin
-LOCALLIB ?= $(shell pwd)/lib
 
 # Build tools and dependencies are defined in Makefile.tools.mk.
 include Makefile.tools.mk
@@ -18,6 +17,7 @@ PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
 SIDECAR_NAME ?= pd-sidecar
+BUILDER_IMAGE_NAME ?= llm-d-builder
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
@@ -28,41 +28,13 @@ export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 VLLM_SIMULATOR_TAG ?= v0.6.1
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
+BUILDER_TAG ?= dev
+BUILDER_TAG_BASE ?= $(IMAGE_REGISTRY)/$(BUILDER_IMAGE_NAME)
+export BUILDER_IMAGE ?= $(BUILDER_TAG_BASE):$(BUILDER_TAG)
 NAMESPACE ?= hc4ai-operator
-
-# Map go arch to platform-specific arch
-ifeq ($(TARGETOS),darwin)
-	ifeq ($(TARGETARCH),amd64)
-		TOKENIZER_ARCH = x86_64
-		TYPOS_TARGET_ARCH = x86_64
-	else ifeq ($(TARGETARCH),arm64)
-		TOKENIZER_ARCH = arm64
-		TYPOS_TARGET_ARCH = aarch64
-	else
-		TOKENIZER_ARCH = $(TARGETARCH)
-		TYPOS_TARGET_ARCH = $(TARGETARCH)
-	endif
-	TAR_OPTS = --strip-components 1
-	TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-apple-darwin
-else
-	ifeq ($(TARGETARCH),amd64)
-		TOKENIZER_ARCH = amd64
-		TYPOS_TARGET_ARCH = x86_64
-	else ifeq ($(TARGETARCH),arm64)
-		TOKENIZER_ARCH = arm64
-		TYPOS_TARGET_ARCH = aarch64
-	else
-		TOKENIZER_ARCH = $(TARGETARCH)
-		TYPOS_TARGET_ARCH = $(TARGETARCH)
-	endif
-	TAR_OPTS = --wildcards '*/typos'
-	TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
-endif
 
 CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
 export CONTAINER_RUNTIME
-BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_RUNTIME))
-PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
 
 GIT_COMMIT_SHA ?= "$(shell git rev-parse HEAD 2>/dev/null)"
 BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
@@ -70,67 +42,26 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
-# Tokenizer & Linking
-LDFLAGS ?= -extldflags '-L$(LOCALLIB)'
-CGO_ENABLED=1
-
-# Unified Python configuration detection. This block runs once.
-PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
-ifeq ($(PYTHON_CONFIG),)
-	ifeq ($(TARGETOS),darwin)
-        # macOS: Find Homebrew's python-config script for the most reliable flags.
-        BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
-        PYTHON_CONFIG ?= $(BREW_PREFIX)/bin/python$(PYTHON_VERSION)-config
-        PYTHON_ERROR := "Could not execute 'python$(PYTHON_VERSION)-config'. Please ensure Python is installed correctly with: 'brew install python@$(PYTHON_VERSION)' or install python3.12 manually."
-	else ifeq ($(TARGETOS),linux)
-        # Linux: Use standard system tools to find flags.
-        PYTHON_ERROR := "Python $(PYTHON_VERSION) development headers not found. Please install with: 'sudo apt install python$(PYTHON_VERSION)-dev' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"
-	else
-        PYTHON_ERROR := "you should set up PYTHON_CONFIG variable manually"
-	endif
-endif
-
-ifeq ($(PYTHON_CONFIG),)
-    $(error ${PYTHON_ERROR})
-endif
-
-ifeq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
-    $(error Python configuration tool cannot provide cflags)
-endif
-
-PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
-PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
-
-# CGO flags with all dependencies
-CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
-CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
-
+# test packages
+epp_TEST_PACKAGES = $$(go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/)
+sidecar_TEST_PACKAGES = ./pkg/sidecar/...
 
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
-epp_LDFLAGS = -ldflags="$(LDFLAGS)"
-sidecar_LDFLAGS =
-epp_CGO_CFLAGS = "${CGO_CFLAGS}"
-sidecar_CGO_CFLAGS =
-epp_CGO_LDFLAGS = "${CGO_LDFLAGS}"
-sidecar_CGO_LDFLAGS =
-epp_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/
-sidecar_TEST_FILES = go list ./pkg/sidecar/...
 
 .PHONY: help
 help: ## Print help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
-
 
 ##@ Development
 
 .PHONY: clean
 clean: ## Clean build artifacts, tools and caches
 	go clean -testcache -cache
-	rm -rf $(LOCALLIB) $(LOCALBIN) build
+	rm -rf $(LOCALBIN) build
 
 .PHONY: format
 format: check-golangci-lint ## Format Go source files
@@ -155,16 +86,19 @@ test: test-unit test-e2e ## Run all tests (unit and e2e)
 test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
 .PHONY: test-unit-%
-test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
-	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null || echo ""); \
-	PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
-	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
+test-unit-%: image-build-builder
+	@printf "\033[33;1m==== Running $* Unit Tests ====\033[0m\n"
+	$(CONTAINER_RUNTIME) run --rm -u $$(id -u):$$(id -g) -v $$(pwd):/app:Z -w /app $(BUILDER_IMAGE) \
+		go test -v $($*_TEST_PACKAGES)
 
 .PHONY: test-integration
-test-integration: download-tokenizer check-dependencies ## Run integration tests
+test-integration: image-build-builder ## Run integration tests (requires KUBECONFIG and running cluster)
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
-	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
+	$(CONTAINER_RUNTIME) run --rm -u $$(id -u):$$(id -g) -v $$(pwd):/app:Z -w /app \
+		--network=host \
+		-v $${HOME}/.kube:/.kube:ro \
+		-e KUBECONFIG=/.kube/config $(BUILDER_IMAGE) \
+		go test -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
 test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
@@ -183,9 +117,10 @@ post-deploy-test: ## Run post deployment tests
 build: build-epp build-sidecar ## Build the project for both epp and sidecar
 
 .PHONY: build-%
-build-%: check-go download-tokenizer ## Build the project
-	@printf "\033[33;1m==== Building ====\033[0m\n"
-	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
+build-%: image-build-builder ## Build the project
+	@printf "\033[33;1m==== Building $* ====\033[0m\n"
+	$(CONTAINER_RUNTIME) run --rm -u $$(id -u):$$(id -g) -v $$(pwd):/app:Z -w /app $(BUILDER_IMAGE) \
+		go build -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
 ##@ Container image Build/Push/Pull
 
@@ -203,6 +138,13 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
  		-t $($*_IMAGE) -f Dockerfile.$* .
+
+.PHONY: image-build-builder
+image-build-builder:
+	@printf "\033[33;1m==== Building image $(BUILDER_IMAGE) ====\033[0m\n"
+	$(CONTAINER_RUNTIME) build --quiet \
+		-f Dockerfile.builder \
+		-t $(BUILDER_IMAGE) .
 
 .PHONY: image-push
 image-push: image-push-epp image-push-sidecar ## Push container images to registry using $(CONTAINER_RUNTIME)
@@ -247,6 +189,7 @@ env: ## Print environment variables
 	@echo "SIDECAR_IMAGE=$(SIDECAR_IMAGE)"
 	@echo "VLLM_SIMULATOR_TAG=$(VLLM_SIMULATOR_TAG)"
 	@echo "VLLM_SIMULATOR_IMAGE=$(VLLM_SIMULATOR_IMAGE)"
+	@echo "BUILDER_IMAGE=$(BUILDER_IMAGE)"
 
 .PHONY: print-namespace
 print-namespace: ## Print the current namespace
