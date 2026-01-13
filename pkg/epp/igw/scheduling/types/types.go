@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"strings"
 
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 )
 
@@ -189,7 +188,7 @@ func (mc Content) PlainText() string {
 
 type Endpoint interface {
 	GetMetadata() *datalayer.EndpointMetadata
-	GetMetrics() *backendmetrics.MetricsState
+	GetMetrics() *datalayer.Metrics
 	String() string
 	Get(string) (datalayer.Cloneable, bool)
 	Put(string, datalayer.Cloneable)
@@ -213,13 +212,13 @@ func (pm *PodMetrics) GetMetadata() *datalayer.EndpointMetadata {
 	return pm.EndpointMetadata
 }
 
-func (pm *PodMetrics) GetMetrics() *backendmetrics.MetricsState {
-	return pm.MetricsState
+func (pm *PodMetrics) GetMetrics() *datalayer.Metrics {
+	return pm.Metrics
 }
 
 type PodMetrics struct {
 	*datalayer.EndpointMetadata
-	*backendmetrics.MetricsState
+	*datalayer.Metrics
 	datalayer.AttributeMap
 }
 

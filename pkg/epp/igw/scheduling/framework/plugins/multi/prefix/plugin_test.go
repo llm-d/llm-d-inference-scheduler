@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	dplugins "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
@@ -46,9 +45,9 @@ func TestPrefixPluginCompletion(t *testing.T) {
 	}
 	plugin := New(context.Background(), config)
 
-	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, MetricsState: backendmetrics.NewMetricsState()}
-	endpoint2 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}}, MetricsState: backendmetrics.NewMetricsState()}
-	endpoint3 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod3"}}, MetricsState: backendmetrics.NewMetricsState()}
+	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, Metrics: datalayer.NewMetrics()}
+	endpoint2 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}}, Metrics: datalayer.NewMetrics()}
+	endpoint3 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod3"}}, Metrics: datalayer.NewMetrics()}
 	endpoints := []types.Endpoint{endpoint1, endpoint2, endpoint3}
 
 	// First request.
@@ -215,7 +214,7 @@ func TestPrefixPluginChatCompletions(t *testing.T) {
 	}
 	plugin := New(context.Background(), config)
 
-	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, MetricsState: &backendmetrics.MetricsState{}}
+	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, Metrics: &datalayer.Metrics{}}
 	endpoints := []types.Endpoint{endpoint1}
 
 	// Test with chat completions request
@@ -249,8 +248,8 @@ func TestPrefixPluginChatCompletionsGrowth(t *testing.T) {
 	}
 	plugin := New(context.Background(), config)
 
-	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, MetricsState: &backendmetrics.MetricsState{}}
-	endpoint2 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}}, MetricsState: &backendmetrics.MetricsState{}}
+	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, Metrics: &datalayer.Metrics{}}
+	endpoint2 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}}, Metrics: &datalayer.Metrics{}}
 	endpoints := []types.Endpoint{endpoint1, endpoint2}
 
 	// First request with initial conversation
@@ -479,7 +478,7 @@ func TestPrefixPluginAutoTune(t *testing.T) {
 	podName := "pod-autotune"
 	endpoint := &types.PodMetrics{
 		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: podName}},
-		MetricsState: &backendmetrics.MetricsState{
+		Metrics: &datalayer.Metrics{
 			CacheBlockSize:    16,   // 16 tokens * 4 chars/token = 64 chars per block
 			CacheNumGPUBlocks: 1000, // 1000 blocks capacity
 		},
@@ -587,8 +586,8 @@ func TestPrepareRequestData(t *testing.T) {
 	}
 	plugin := New(context.Background(), config)
 
-	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, MetricsState: backendmetrics.NewMetricsState(), AttributeMap: datalayer.NewAttributes()}
-	endpoint2 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}}, MetricsState: backendmetrics.NewMetricsState(), AttributeMap: datalayer.NewAttributes()}
+	endpoint1 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, Metrics: datalayer.NewMetrics(), AttributeMap: datalayer.NewAttributes()}
+	endpoint2 := &types.PodMetrics{EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}}, Metrics: datalayer.NewMetrics(), AttributeMap: datalayer.NewAttributes()}
 	endpoints := []types.Endpoint{endpoint1, endpoint2}
 
 	// First request to populate cache.

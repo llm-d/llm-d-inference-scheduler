@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"k8s.io/apimachinery/pkg/types"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
@@ -44,7 +43,7 @@ type sloRequestContext struct {
 	schedulingRequest         schedulingtypes.LLMRequest
 	targetMetadata            *datalayer.EndpointMetadata
 	schedulingResult          *schedulingtypes.SchedulingResult
-	lastSeenMetrics           map[string]*backendmetrics.MetricsState
+	lastSeenMetrics           map[string]*datalayer.Metrics
 	lastTokenTimestamp        time.Time
 	requestReceivedTimestamp  time.Time
 	generatedTokenCount       int
@@ -74,7 +73,7 @@ type sloRequestContext struct {
 func newSLORequestContext(request *schedulingtypes.LLMRequest) *sloRequestContext {
 	return &sloRequestContext{
 		schedulingRequest:             *request,
-		lastSeenMetrics:               make(map[string]*backendmetrics.MetricsState),
+		lastSeenMetrics:               make(map[string]*datalayer.Metrics),
 		prefixCacheScoresForEndpoints: make(map[string]float64),
 		predictionsForScheduling:      make([]endpointPredictionResult, 0),
 	}

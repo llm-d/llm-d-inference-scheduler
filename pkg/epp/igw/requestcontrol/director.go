@@ -271,9 +271,9 @@ func (d *Director) toSchedulerPodMetrics(pods []backendmetrics.PodMetrics) []sch
 	pm := make([]schedulingtypes.Endpoint, len(pods))
 	for i, pod := range pods {
 		if pod.GetAttributes() != nil {
-			pm[i] = &schedulingtypes.PodMetrics{EndpointMetadata: pod.GetMetadata().Clone(), MetricsState: pod.GetMetrics().Clone(), AttributeMap: pod.GetAttributes().Clone()}
+			pm[i] = &schedulingtypes.PodMetrics{EndpointMetadata: pod.GetMetadata().Clone(), Metrics: pod.GetMetrics().Clone(), AttributeMap: pod.GetAttributes().Clone()}
 		} else {
-			pm[i] = &schedulingtypes.PodMetrics{EndpointMetadata: pod.GetMetadata().Clone(), MetricsState: pod.GetMetrics().Clone(), AttributeMap: datalayer.NewAttributes()}
+			pm[i] = &schedulingtypes.PodMetrics{EndpointMetadata: pod.GetMetadata().Clone(), Metrics: pod.GetMetrics().Clone(), AttributeMap: datalayer.NewAttributes()}
 		}
 	}
 
