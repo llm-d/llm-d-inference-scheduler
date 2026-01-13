@@ -55,8 +55,8 @@ func (h *fakeHandle) GetAllPluginsWithNames() map[string]plugins.Plugin {
 	return h.plugins
 }
 
-func (h *fakeHandle) PodList(_ func(backendmetrics.PodMetrics) bool) []backendmetrics.PodMetrics {
-	return make([]backendmetrics.PodMetrics, 0)
+func (h *fakeHandle) PodList() []k8stypes.NamespacedName {
+	return make([]k8stypes.NamespacedName, 0)
 }
 
 type stubPlugin struct {
