@@ -45,7 +45,7 @@ func convertContentToPreprocessingFormat(content types.Content) interface{} {
 }
 
 func main() {
-	fmt.Println("=== End-to-End Multi-Modality Pipeline Test ===")
+	fmt.Println("=== Multi-Modality Conversion Logic Test ===")
 
 	// Test 1: Image URL format
 	testImageURL := map[string]any{
@@ -155,7 +155,7 @@ func main() {
 			if len(contentStr) > 150 {
 				contentStr = contentStr[:150] + "..."
 			}
-			fmt.Printf("   ✅ Content: %s\n", contentStr)
+			fmt.Printf("Content: %s\n", contentStr)
 		}
 	}
 
@@ -195,12 +195,12 @@ func main() {
 		fmt.Printf("   Message %d: Role=%s\n", i+1, msg.Role)
 		// For text-only, Content should be a string
 		if contentStr, ok := msg.Content.(string); ok {
-			fmt.Printf("   ✅ Content (string): %s\n", contentStr)
+			fmt.Printf("Content (string): %s\n", contentStr)
 		} else {
-			fmt.Printf("   ⚠️  Content is not a string: %T\n", msg.Content)
+			fmt.Printf("Content is not a string: %T\n", msg.Content)
 		}
 	}
 
 	fmt.Println("\n" + strings.Repeat("=", 42))
-	fmt.Println("All end-to-end tests passed!")
+	fmt.Println("All conversion logic tests passed!")
 }
