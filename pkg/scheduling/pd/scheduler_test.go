@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer" // Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
@@ -32,40 +32,40 @@ const (
 
 // Tests the scheduler expected behavior.
 func TestPDSchedule(t *testing.T) {
-	pod1 := &types.PodMetrics{
-		Pod: &backend.Pod{
+	pod1 := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
 			Address:        "1.2.3.4",
 			Labels:         map[string]string{filter.RoleLabel: filter.RolePrefill},
 		},
-		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 0},
+		Metrics: &datalayer.Metrics{WaitingQueueSize: 0},
 	}
-	pod2 := &types.PodMetrics{
-		Pod: &backend.Pod{
+	pod2 := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod2"},
 			Address:        "5.6.7.8",
 			Labels:         map[string]string{filter.RoleLabel: filter.RoleDecode},
 		},
-		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 0},
+		Metrics: &datalayer.Metrics{WaitingQueueSize: 0},
 	}
-	noRolePod1 := &types.PodMetrics{
-		Pod: &backend.Pod{
+	noRolePod1 := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "noRolePod1"},
 			Address:        "1.1.1.1",
 		},
-		MetricsState: &backendmetrics.MetricsState{WaitingQueueSize: 2},
+		Metrics: &datalayer.Metrics{WaitingQueueSize: 2},
 	}
 
 	prefillDecodeResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
-			decode: {TargetPods: []types.Pod{
+			decode: {TargetPods: []types.Endpoint{
 				&types.ScoredPod{
 					Pod: pod2,
 				},
 			},
 			},
 			prefill: {
-				TargetPods: []types.Pod{
+				TargetPods: []types.Endpoint{
 					&types.ScoredPod{
 						Pod: pod1,
 					},
@@ -79,7 +79,7 @@ func TestPDSchedule(t *testing.T) {
 	decodeResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
 			decode: {
-				TargetPods: []types.Pod{
+				TargetPods: []types.Endpoint{
 					&types.ScoredPod{
 						Pod: pod2,
 					},
@@ -92,7 +92,7 @@ func TestPDSchedule(t *testing.T) {
 	tests := []struct {
 		name     string
 		req      *types.LLMRequest
-		input    []types.Pod
+		input    []types.Endpoint
 		wantRes  *types.SchedulingResult
 		wantRes2 *types.SchedulingResult // a subsequent call to check prefix cache and how it affects PD
 		err      bool
@@ -108,7 +108,7 @@ func TestPDSchedule(t *testing.T) {
 					},
 				},
 			},
-			input: []types.Pod{},
+			input: []types.Endpoint{},
 			err:   true,
 		},
 		{
@@ -123,7 +123,7 @@ func TestPDSchedule(t *testing.T) {
 				},
 			},
 			// pod2 will be picked because it is the only pod with Decode role
-			input:   []types.Pod{pod2},
+			input:   []types.Endpoint{pod2},
 			wantRes: decodeResult,
 		},
 		{
@@ -138,7 +138,7 @@ func TestPDSchedule(t *testing.T) {
 				},
 			},
 			// no Decode pod
-			input: []types.Pod{pod1},
+			input: []types.Endpoint{pod1},
 			err:   true,
 		},
 		{
@@ -153,7 +153,7 @@ func TestPDSchedule(t *testing.T) {
 				},
 			},
 			// pod2 will be picked in the decode profile result, pod1 will be in the prefill profile result
-			input:    []types.Pod{pod1, pod2},
+			input:    []types.Endpoint{pod1, pod2},
 			wantRes:  prefillDecodeResult,
 			wantRes2: decodeResult,
 		},
@@ -170,7 +170,7 @@ func TestPDSchedule(t *testing.T) {
 			},
 			// pod2 will be picked because it is the decode pod, pod1 shouldn't be picked,
 			// because the prompt is too short
-			input:    []types.Pod{pod1, pod2},
+			input:    []types.Endpoint{pod1, pod2},
 			wantRes:  decodeResult,
 			wantRes2: decodeResult,
 		},
@@ -185,18 +185,18 @@ func TestPDSchedule(t *testing.T) {
 					},
 				},
 			},
-			input: []types.Pod{pod1, noRolePod1},
+			input: []types.Endpoint{pod1, noRolePod1},
 			wantRes: &types.SchedulingResult{
 				ProfileResults: map[string]*types.ProfileRunResult{
 					decode: {
-						TargetPods: []types.Pod{
+						TargetPods: []types.Endpoint{
 							&types.ScoredPod{
 								Pod: noRolePod1,
 							},
 						},
 					},
 					prefill: {
-						TargetPods: []types.Pod{
+						TargetPods: []types.Endpoint{
 							&types.ScoredPod{
 								Pod: pod1,
 							},
@@ -219,7 +219,7 @@ func TestPDSchedule(t *testing.T) {
 			},
 			// pod2 will be picked in the decode profile result cause it has higher score than noRolePod1
 			// pod1 will be in the prefill profile result
-			input:    []types.Pod{pod1, pod2, noRolePod1},
+			input:    []types.Endpoint{pod1, pod2, noRolePod1},
 			wantRes:  prefillDecodeResult,
 			wantRes2: decodeResult,
 		},

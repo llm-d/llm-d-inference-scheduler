@@ -23,7 +23,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	slo_aware_router "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/slo_aware_router"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
@@ -51,7 +51,7 @@ func (p *PDSLOAwareRouter) PreRequest(ctx context.Context, request *schedulingty
 
 // ResponseReceived adds P/D-specific logic to extract prefill timing headers
 // before delegating to the base router.
-func (p *PDSLOAwareRouter) ResponseReceived(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (p *PDSLOAwareRouter) ResponseReceived(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, targetMetadata *datalayer.EndpointMetadata) {
 	logger := log.FromContext(ctx)
 
 	// P/D-specific: Check for prefill timing headers from the decode sidecar
@@ -71,17 +71,17 @@ func (p *PDSLOAwareRouter) ResponseReceived(ctx context.Context, request *schedu
 	}
 
 	// Delegate to base router for decode prediction logic
-	p.SLOAwareRouter.ResponseReceived(ctx, request, response, targetPod)
+	p.SLOAwareRouter.ResponseReceived(ctx, request, response, targetMetadata)
 }
 
 // ResponseStreaming delegates to the base router
-func (p *PDSLOAwareRouter) ResponseStreaming(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, pod *backend.Pod) {
-	p.SLOAwareRouter.ResponseStreaming(ctx, request, response, pod)
+func (p *PDSLOAwareRouter) ResponseStreaming(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, targetMetadata *datalayer.EndpointMetadata) {
+	p.SLOAwareRouter.ResponseStreaming(ctx, request, response, targetMetadata)
 }
 
 // ResponseComplete delegates to the base router
-func (p *PDSLOAwareRouter) ResponseComplete(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, pod *backend.Pod) {
-	p.SLOAwareRouter.ResponseComplete(ctx, request, response, pod)
+func (p *PDSLOAwareRouter) ResponseComplete(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, targetMetadata *datalayer.EndpointMetadata) {
+	p.SLOAwareRouter.ResponseComplete(ctx, request, response, targetMetadata)
 }
 
 // recordPrefillTrainingData records training data for the prefill pod based on timing
@@ -107,12 +107,12 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 
 	// P/D-specific: Extract prefill pod from the "prefill" profile
 	prefillResult, exists := schedulingResult.ProfileResults["prefill"]
-	if !exists || prefillResult == nil || len(prefillResult.TargetPods) == 0 {
+	if !exists || prefillResult == nil || len(prefillResult.TargetEndpoints) == 0 {
 		logger.V(logutil.DEBUG).Info("No prefill pod in scheduling result, skipping prefill training")
 		return
 	}
 
-	prefillPod := prefillResult.TargetPods[0]
+	prefillPod := prefillResult.TargetEndpoints[0]
 
 	// Get metrics for the prefill pod
 	lastSeenMetrics, err := p.SLOAwareRouter.GetLastSeenMetricsForRequest(request)
@@ -133,7 +133,7 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 		logger.V(logutil.DEBUG).Error(err, "Failed to get prefix cache scores")
 		return
 	}
-	prefixCacheScore := prefixCacheScores[prefillPod.GetPod().String()]
+	prefixCacheScore := prefixCacheScores[prefillPod.GetMetadata().String()]
 
 	// Get prompt
 	prompt, err := p.SLOAwareRouter.GetRequestPrompt(request)
@@ -163,7 +163,7 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 		logger.V(logutil.DEBUG).Error(err, "Failed to record prefill training data")
 	} else {
 		logger.V(logutil.DEBUG).Info("Recorded prefill training data",
-			"pod", prefillPod.GetPod().String(),
+			"pod", prefillPod.GetMetadata().String(),
 			"ttft_ms", actualPrefillTTFT,
 			"pod_type", "prefill")
 	}

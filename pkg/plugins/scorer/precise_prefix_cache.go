@@ -38,6 +38,11 @@ type PrecisePrefixCachePluginConfig struct {
 // compile-time type assertion
 var _ framework.Scorer = &PrecisePrefixCacheScorer{}
 
+// Category returns the scorer category (Affinity - prefers KV-cache locality)
+func (s *PrecisePrefixCacheScorer) Category() framework.ScorerCategory {
+	return framework.Affinity
+}
+
 // PrecisePrefixCachePluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
 func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
@@ -126,7 +131,7 @@ func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScor
 
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
-func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Endpoint) map[types.Endpoint]float64 {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	debugLogger := logger.V(logutil.DEBUG)
 
@@ -142,8 +147,8 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.
 	}
 	debugLogger.Info("Got pod scores", "scores", scores)
 
-	podToKey := func(pod types.Pod) (string, bool) {
-		metricsPod := pod.GetPod()
+	podToKey := func(pod types.Endpoint) (string, bool) {
+		metricsPod := pod.GetMetadata()
 		if metricsPod == nil {
 			return "", false
 		}
@@ -160,7 +165,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.
 		if !ok {
 			continue
 		}
-		state.PrefixCacheServers[prefix.ServerID(pod.GetPod().NamespacedName)] = int(scores[key])
+		state.PrefixCacheServers[prefix.ServerID(pod.GetMetadata().NamespacedName)] = int(scores[key])
 	}
 	cycleState.Write(plugins.StateKey(s.typedName.String()), state)
 

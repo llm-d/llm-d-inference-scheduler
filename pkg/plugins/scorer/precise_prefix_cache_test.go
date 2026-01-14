@@ -13,8 +13,7 @@ import (
 	"github.com/llm-d/llm-d-kv-cache-manager/pkg/tokenization"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -37,16 +36,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 	testcases := []struct {
 		name                string
-		pods                []types.Pod
+		pods                []types.Endpoint
 		request             *types.LLMRequest
 		kvBlockData         func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry
 		wantScoresByAddress map[string]float64
 	}{
 		{
 			name: "nil request",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
@@ -56,9 +55,9 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "empty request body",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
@@ -73,31 +72,31 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "longest prefix scorer (default scorer)",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 1,
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 2,
 					},
 				},
@@ -161,22 +160,22 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "chat completions request",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 1,
 					},
 				},
@@ -256,31 +255,31 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "partial prefix",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 1,
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 2,
 					},
 				},
@@ -343,15 +342,15 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "different model names",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
@@ -399,13 +398,13 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "single pod",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					Metrics: &datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
 				},
@@ -450,21 +449,21 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "no cache hits (empty index)",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
@@ -489,21 +488,21 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "all pods have equal prefix length",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			pods: []types.Endpoint{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
 				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+				&types.EndpointMetrics{
+					EndpointMetadata: &datalayer.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
@@ -589,8 +588,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 			gotByAddress := make(map[string]float64)
 			for pod, score := range got {
-				if podMetrics, ok := pod.(*types.PodMetrics); ok && podMetrics.GetPod() != nil {
-					gotByAddress[podMetrics.GetPod().Address] = score
+				if podMetrics, ok := pod.(*types.EndpointMetrics); ok && podMetrics.GetMetadata() != nil {
+					gotByAddress[podMetrics.GetMetadata().Address] = score
 				}
 			}
 

@@ -153,9 +153,9 @@ func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
 			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
 				assert.Equal(t, "dp-profile", res.PrimaryProfileName)
 
-				pods := res.ProfileResults["dp-profile"].TargetPods
+				pods := res.ProfileResults["dp-profile"].TargetEndpoints
 				require.Len(t, pods, 1)
-				assert.Equal(t, "9000", pods[0].GetPod().Port)                     // overridden
+				assert.Equal(t, "9000", pods[0].GetMetadata().Port)                     // overridden
 				expectedHeader := net.JoinHostPort("10.0.0.1", DefaultTestPodPort) // original
 				assert.Equal(t, expectedHeader, headers[common.DataParallelPodHeader])
 			},
@@ -168,8 +168,8 @@ func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
-				pod := res.ProfileResults["dp"].TargetPods[0]
-				assert.Equal(t, "0", pod.GetPod().Port)
+				pod := res.ProfileResults["dp"].TargetEndpoints[0]
+				assert.Equal(t, "0", pod.GetMetadata().Port)
 				assert.Equal(t, "10.0.0.1:8080", headers[common.DataParallelPodHeader])
 			},
 		},
@@ -181,10 +181,10 @@ func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
-				pods := res.ProfileResults["dp-profile"].TargetPods
+				pods := res.ProfileResults["dp-profile"].TargetEndpoints
 				assert.Len(t, pods, 2)
 				for _, p := range pods {
-					assert.Equal(t, "8080", p.GetPod().Port)
+					assert.Equal(t, "8080", p.GetMetadata().Port)
 				}
 				assert.Equal(t, net.JoinHostPort("10.0.0.1", DefaultTestPodPort), headers[common.DataParallelPodHeader])
 			},

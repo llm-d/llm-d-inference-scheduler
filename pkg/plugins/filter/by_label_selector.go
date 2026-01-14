@@ -61,11 +61,11 @@ func (blf *ByLabelSelector) TypedName() plugins.TypedName {
 }
 
 // Filter filters out all pods that do not satisfy the label selector
-func (blf *ByLabelSelector) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) []types.Pod {
-	filtered := []types.Pod{}
+func (blf *ByLabelSelector) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Endpoint) []types.Endpoint {
+	filtered := []types.Endpoint{}
 
 	for _, pod := range pods {
-		labels := labels.Set(pod.GetPod().Labels)
+		labels := labels.Set(pod.GetMetadata().Labels)
 		if blf.selector.Matches(labels) {
 			filtered = append(filtered, pod)
 		}

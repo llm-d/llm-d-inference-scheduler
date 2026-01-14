@@ -27,6 +27,11 @@ const (
 var _ framework.Scorer = &NoHitLRU{}
 var _ requestcontrol.PreRequest = &NoHitLRU{}
 
+// Category returns the scorer category (Distribution - spreads cache growth evenly)
+func (s *NoHitLRU) Category() framework.ScorerCategory {
+	return framework.Distribution
+}
+
 // NoHitLRUParameters defines the parameters for the NoHitLRU scorer.
 type NoHitLRUParameters struct {
 	// PrefixPluginType defines the type of the prefix cache plugin to read state from.
@@ -143,8 +148,8 @@ func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *types.CycleSta
 
 // scoreNeutral returns neutral scores (0.5) for all pods.
 // Used when a request has cache hits and LRU optimization should not apply.
-func (s *NoHitLRU) scoreNeutral(pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64, len(pods))
+func (s *NoHitLRU) scoreNeutral(pods []types.Endpoint) map[types.Endpoint]float64 {
+	scoredPods := make(map[types.Endpoint]float64, len(pods))
 	for _, pod := range pods {
 		scoredPods[pod] = 0.5
 	}
@@ -167,9 +172,9 @@ func (s *NoHitLRU) getLRUPositions() map[string]int {
 
 // partitionPodsByUsage separates pods into those that have received cold requests
 // (usedPods) and those that have never received cold requests (neverUsedPods).
-func (s *NoHitLRU) partitionPodsByUsage(pods []types.Pod, lruPosition map[string]int) (usedPods, neverUsedPods []types.Pod) {
+func (s *NoHitLRU) partitionPodsByUsage(pods []types.Endpoint, lruPosition map[string]int) (usedPods, neverUsedPods []types.Endpoint) {
 	for _, pod := range pods {
-		podName := pod.GetPod().NamespacedName.String()
+		podName := pod.GetMetadata().NamespacedName.String()
 		if _, exists := lruPosition[podName]; exists {
 			usedPods = append(usedPods, pod)
 		} else {
@@ -182,7 +187,7 @@ func (s *NoHitLRU) partitionPodsByUsage(pods []types.Pod, lruPosition map[string
 // scoreNeverUsedPods assigns scores to pods that have never received a cold request.
 // The first never-used pod gets the highest score (1.0), with subsequent pods
 // receiving progressively lower scores.
-func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[types.Pod]float64, neverUsedPods []types.Pod, totalPods int) {
+func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[types.Endpoint]float64, neverUsedPods []types.Endpoint, totalPods int) {
 	// Avoid possibility of dividing by zero.
 	if totalPods <= 1 {
 		return
@@ -195,13 +200,13 @@ func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[types.Pod]float64, neverUse
 
 // scoreUsedPods assigns scores to pods based on their LRU position.
 // Pods that were least recently used for cold requests receive higher scores.
-func (s *NoHitLRU) scoreUsedPods(scoredPods map[types.Pod]float64, usedPods []types.Pod, lruPosition map[string]int, neverUsedCount, totalPods int) {
+func (s *NoHitLRU) scoreUsedPods(scoredPods map[types.Endpoint]float64, usedPods []types.Endpoint, lruPosition map[string]int, neverUsedCount, totalPods int) {
 	// Avoid possibility of dividing by zero.
 	if totalPods <= 1 {
 		return
 	}
 	for _, pod := range usedPods {
-		podName := pod.GetPod().NamespacedName.String()
+		podName := pod.GetMetadata().NamespacedName.String()
 		lruPos := lruPosition[podName]
 		// LRU keys are oldest to newest so rank 0 = oldest
 		// The never used pod count is added to the rank so that
@@ -218,8 +223,8 @@ func (s *NoHitLRU) scoreUsedPods(scoredPods map[types.Pod]float64, usedPods []ty
 // scoreColdRequestByLRU scores pods based on their LRU position for cold requests.
 // Pods that have never received a cold request get the highest scores.
 // Among previously used pods, least recently used ones get higher scores.
-func (s *NoHitLRU) scoreColdRequestByLRU(pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64, len(pods))
+func (s *NoHitLRU) scoreColdRequestByLRU(pods []types.Endpoint) map[types.Endpoint]float64 {
+	scoredPods := make(map[types.Endpoint]float64, len(pods))
 	totalPods := len(pods)
 
 	// Avoid possibility of dividing by zero.
@@ -243,7 +248,7 @@ func (s *NoHitLRU) scoreColdRequestByLRU(pods []types.Pod) map[types.Pod]float64
 // - LRU ordering is with respect to when a pod last received a cold request.
 // - Least recently used (or never used) pods get highest score (1.0)
 // - Most recently used pods get lowest score (approaching 0.0)
-func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Endpoint) map[types.Endpoint]float64 {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	isCold := s.isColdRequest(ctx, cycleState)
@@ -288,13 +293,13 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 
 	// Get the primary profile's target pod
 	primaryProfile := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
-	if primaryProfile == nil || len(primaryProfile.TargetPods) == 0 {
+	if primaryProfile == nil || len(primaryProfile.TargetEndpoints) == 0 {
 		logger.Info("No target pod in primary profile")
 		return
 	}
 
-	targetPod := primaryProfile.TargetPods[0]
-	podName := targetPod.GetPod().NamespacedName.String()
+	targetPod := primaryProfile.TargetEndpoints[0]
+	podName := targetPod.GetMetadata().NamespacedName.String()
 
 	// Move the pod to the front of the LRU.
 	var present struct{} // dummy value

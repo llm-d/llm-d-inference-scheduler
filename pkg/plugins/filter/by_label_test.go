@@ -8,8 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -139,19 +138,19 @@ func TestByLabelFactoryInvalidJSON(t *testing.T) {
 }
 
 // Helper functions
-func createPod(nsn k8stypes.NamespacedName, ipaddr string, labels map[string]string) types.Pod {
-	return &types.PodMetrics{
-		Pod: &backend.Pod{
+func createPod(nsn k8stypes.NamespacedName, ipaddr string, labels map[string]string) types.Endpoint {
+	return &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{
 			NamespacedName: nsn,
 			Address:        ipaddr,
 			Labels:         labels,
 		},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
 }
 
 func TestByLabelFiltering(t *testing.T) {
-	pods := []types.Pod{
+	pods := []types.Endpoint{
 		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-1"},
 			"10.0.0.1",
 			map[string]string{
@@ -251,7 +250,7 @@ func TestByLabelFiltering(t *testing.T) {
 
 			var actualPodNames []string
 			for _, pod := range filteredPods {
-				actualPodNames = append(actualPodNames, pod.GetPod().NamespacedName.Name)
+				actualPodNames = append(actualPodNames, pod.GetMetadata().NamespacedName.Name)
 			}
 
 			assert.ElementsMatch(t, tt.expectedPods, actualPodNames,

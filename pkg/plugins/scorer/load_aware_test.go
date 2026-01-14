@@ -7,8 +7,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer" // Import config for thresholds
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
@@ -17,21 +17,21 @@ import (
 )
 
 func TestLoadBasedScorer(t *testing.T) {
-	podA := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podA := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 2,
 		},
 	}
-	podB := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podB := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 0,
 		},
 	}
-	podC := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podC := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 15,
 		},
 	}
@@ -40,8 +40,8 @@ func TestLoadBasedScorer(t *testing.T) {
 		name       string
 		scorer     framework.Scorer
 		req        *types.LLMRequest
-		input      []types.Pod
-		wantScores map[types.Pod]float64
+		input      []types.Endpoint
+		wantScores map[types.Endpoint]float64
 	}{
 		{
 			name:   "load based scorer",
@@ -49,10 +49,10 @@ func TestLoadBasedScorer(t *testing.T) {
 			req: &types.LLMRequest{
 				TargetModel: "critical",
 			},
-			input: []types.Pod{
+			input: []types.Endpoint{
 				podA, podB, podC,
 			},
-			wantScores: map[types.Pod]float64{
+			wantScores: map[types.Endpoint]float64{
 				podA: 0.4,
 				podB: 0.5,
 				podC: 0,

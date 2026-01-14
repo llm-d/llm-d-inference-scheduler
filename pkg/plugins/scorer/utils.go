@@ -8,15 +8,15 @@ import (
 
 // podToKey is a function type that converts a Pod to a string key.
 // It returns the key and a boolean indicating success.
-type podToKeyFunc func(pod types.Pod) (string, bool)
+type podToKeyFunc func(pod types.Endpoint) (string, bool)
 
 // indexedScoresToNormalizedScoredPods converts a map of pod scores to a map of
 // normalized scores. The function takes a list of pods, a function to convert
 // a pod to a key, and a map of scores indexed by those keys. It returns a map
 // of pods to their normalized scores.
-func indexedScoresToNormalizedScoredPods(pods []types.Pod, podToKey podToKeyFunc,
-	scores map[string]float64) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64)
+func indexedScoresToNormalizedScoredPods(pods []types.Endpoint, podToKey podToKeyFunc,
+	scores map[string]float64) map[types.Endpoint]float64 {
+	scoredPods := make(map[types.Endpoint]float64)
 	minScore, maxScore := getMinMax(scores)
 
 	for _, pod := range pods {

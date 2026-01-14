@@ -9,8 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
@@ -147,7 +146,7 @@ func TestByLabelSelectorFactoryWithInvalidJSON(t *testing.T) {
 }
 
 func TestByLabelSelectorFiltering(t *testing.T) {
-	pods := []types.Pod{
+	pods := []types.Endpoint{
 		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-1"},
 			"10.0.0.1",
 			map[string]string{
@@ -305,7 +304,7 @@ func TestByLabelSelectorFiltering(t *testing.T) {
 
 			var actualPodNames []string
 			for _, pod := range filteredPods {
-				actualPodNames = append(actualPodNames, pod.GetPod().NamespacedName.Name)
+				actualPodNames = append(actualPodNames, pod.GetMetadata().NamespacedName.Name)
 			}
 
 			assert.ElementsMatch(t, tt.expectedPods, actualPodNames,
@@ -327,7 +326,7 @@ func TestByLabelSelectorFilterEdgeCases(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	t.Run("empty pods slice", func(t *testing.T) {
-		result := blf.Filter(ctx, nil, nil, []types.Pod{})
+		result := blf.Filter(ctx, nil, nil, []types.Endpoint{})
 		assert.Empty(t, result)
 	})
 
@@ -337,13 +336,13 @@ func TestByLabelSelectorFilterEdgeCases(t *testing.T) {
 	})
 
 	t.Run("pods with nil labels", func(t *testing.T) {
-		pods := []types.Pod{createPod(k8stypes.NamespacedName{Name: "pod-1"}, "10.0.0.1", nil)}
+		pods := []types.Endpoint{createPod(k8stypes.NamespacedName{Name: "pod-1"}, "10.0.0.1", nil)}
 		result := blf.Filter(ctx, nil, nil, pods)
 		assert.Empty(t, result, "pod with nil labels should not match")
 	})
 
 	t.Run("pods with empty labels", func(t *testing.T) {
-		pods := []types.Pod{createPod(k8stypes.NamespacedName{Name: "pod-1"}, "10.0.0.1", map[string]string{})}
+		pods := []types.Endpoint{createPod(k8stypes.NamespacedName{Name: "pod-1"}, "10.0.0.1", map[string]string{})}
 		result := blf.Filter(ctx, nil, nil, pods)
 		assert.Empty(t, result, "pod with empty labels should not match")
 	})
@@ -371,7 +370,7 @@ func ExamplePrefillDecodeRolesInLWS() {
 	plugin, _ = filter.ByLabelSelectorFactory("prefill-role", prefillWorkerJSON, nil)
 	prefillworker, _ := plugin.(*filter.ByLabelSelector)
 
-	pods := []types.Pod{createPod(k8stypes.NamespacedName{Namespace: "default", Name: "vllm"},
+	pods := []types.Endpoint{createPod(k8stypes.NamespacedName{Namespace: "default", Name: "vllm"},
 		"10.0.0.1",
 		map[string]string{
 			"app.kubernetes.io/component":              "vllm-worker",
@@ -395,17 +394,17 @@ func ExamplePrefillDecodeRolesInLWS() {
 }
 
 // Helper functions
-func createPod(nsn k8stypes.NamespacedName, ipaddr string, labels map[string]string) types.Pod {
-	return &types.PodMetrics{
-		Pod: &backend.Pod{
+func createPod(nsn k8stypes.NamespacedName, ipaddr string, labels map[string]string) types.Endpoint {
+	return &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{
 			NamespacedName: nsn,
 			Address:        ipaddr,
 			Labels:         labels,
 		},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
 }
 
-func PrefillDecodeRolesInLWS(blf *filter.ByLabelSelector, pods []types.Pod) []types.Pod {
+func PrefillDecodeRolesInLWS(blf *filter.ByLabelSelector, pods []types.Endpoint) []types.Endpoint {
 	return blf.Filter(context.Background(), nil, nil, pods)
 }

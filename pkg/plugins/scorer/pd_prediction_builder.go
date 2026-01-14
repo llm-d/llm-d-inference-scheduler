@@ -31,14 +31,14 @@ func NewPDPredictionRequestBuilder() *PDPredictionRequestBuilder {
 //   - "prefill" for pods with llm-d.ai/role=prefill
 //   - "decode" for pods with llm-d.ai/role=decode
 //   - "" (empty) for pods with llm-d.ai/role=both or no label (monolithic)
-func (b *PDPredictionRequestBuilder) extractPodType(pod schedulingtypes.Pod) string {
-	// Get pod labels from the underlying backend.Pod
-	backendPod := pod.GetPod()
-	if backendPod == nil {
-		return "" // No pod info, treat as monolithic
+func (b *PDPredictionRequestBuilder) extractPodType(pod schedulingtypes.Endpoint) string {
+	// Get pod metadata from the underlying endpoint
+	metadata := pod.GetMetadata()
+	if metadata == nil {
+		return "" // No metadata info, treat as monolithic
 	}
 
-	labels := backendPod.Labels
+	labels := metadata.Labels
 	if labels == nil {
 		return "" // No labels, treat as monolithic
 	}
@@ -67,7 +67,7 @@ func (b *PDPredictionRequestBuilder) extractPodType(pod schedulingtypes.Pod) str
 // Extends the default implementation by populating the PodType field based on the pod's role label.
 func (b *PDPredictionRequestBuilder) BuildPredictionRequest(
 	ctx context.Context,
-	pod schedulingtypes.Pod,
+	pod schedulingtypes.Endpoint,
 	metrics *backendmetrics.MetricsState,
 	prompt string,
 	generatedTokens int,
@@ -88,7 +88,7 @@ func (b *PDPredictionRequestBuilder) BuildPredictionRequest(
 // Extends the default implementation by populating the PodType field based on the pod's role label.
 func (b *PDPredictionRequestBuilder) BuildTrainingEntry(
 	ctx context.Context,
-	pod schedulingtypes.Pod,
+	pod schedulingtypes.Endpoint,
 	metrics *backendmetrics.MetricsState,
 	prompt string,
 	actualTTFT float64,

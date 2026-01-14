@@ -89,11 +89,11 @@ func (f *ByLabel) WithName(name string) *ByLabel {
 
 // Filter filters out all pods that are not marked with one of roles from the validRoles collection
 // or has no role label in case allowsNoRolesLabel is true
-func (f *ByLabel) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) []types.Pod {
-	filteredPods := []types.Pod{}
+func (f *ByLabel) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Endpoint) []types.Endpoint {
+	filteredPods := []types.Endpoint{}
 
 	for _, pod := range pods {
-		val, labelDefined := pod.GetPod().Labels[f.labelName]
+		val, labelDefined := pod.GetMetadata().Labels[f.labelName]
 		_, valueExists := f.validValues[val]
 
 		if (!labelDefined && f.allowsNoLabel) || valueExists {

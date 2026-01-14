@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -24,6 +24,11 @@ const (
 // compile-time type assertion
 var _ framework.Scorer = &SessionAffinity{}
 var _ requestcontrol.ResponseComplete = &SessionAffinity{}
+
+// Category returns the scorer category (Affinity - maintains session stickiness)
+func (s *SessionAffinity) Category() framework.ScorerCategory {
+	return framework.Affinity
+}
 
 // SessionAffinityFactory defines the factory function for SessionAffinity scorer.
 func SessionAffinityFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
@@ -57,8 +62,8 @@ func (s *SessionAffinity) WithName(name string) *SessionAffinity {
 }
 
 // Score assign a high score to the pod used in previous requests and zero to others
-func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64)
+func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Endpoint) map[types.Endpoint]float64 {
+	scoredPods := make(map[types.Endpoint]float64)
 	sessionToken := request.Headers[sessionTokenHeader]
 	podName := ""
 
@@ -72,7 +77,7 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, reques
 	}
 	for _, pod := range pods {
 		scoredPods[pod] = 0.0 // initial value
-		if pod.GetPod().NamespacedName.String() == podName {
+		if pod.GetMetadata().NamespacedName.String() == podName {
 			scoredPods[pod] = 1.0
 		}
 	}
@@ -84,13 +89,13 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, reques
 // TODO: this should be using a cookie and ensure not overriding any other
 // cookie values if present.
 // Tracked in https://github.com/llm-d/llm-d-inference-scheduler/issues/28
-func (s *SessionAffinity) ResponseComplete(ctx context.Context, _ *types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
-	if response == nil || targetPod == nil {
+func (s *SessionAffinity) ResponseComplete(ctx context.Context, _ *types.LLMRequest, response *requestcontrol.Response, targetMetadata *datalayer.EndpointMetadata) {
+	if response == nil || targetMetadata == nil {
 		reqID := "undefined"
 		if response != nil {
 			reqID = response.RequestId
 		}
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetPod is nil", "req id", reqID)
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetMetadata is nil", "req id", reqID)
 		return
 	}
 
@@ -98,5 +103,5 @@ func (s *SessionAffinity) ResponseComplete(ctx context.Context, _ *types.LLMRequ
 		response.Headers = make(map[string]string)
 	}
 
-	response.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(targetPod.NamespacedName.String()))
+	response.Headers[sessionTokenHeader] = base64.StdEncoding.EncodeToString([]byte(targetMetadata.NamespacedName.String()))
 }

@@ -77,7 +77,7 @@ func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMR
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	targetPod := prefillProfileRunResult.TargetPods[0].GetPod()
+	targetPod := prefillProfileRunResult.TargetEndpoints[0].GetMetadata()
 	prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
 	request.Headers[common.PrefillPodHeader] = prefillHostPort // in the form of <ip:port>
 }

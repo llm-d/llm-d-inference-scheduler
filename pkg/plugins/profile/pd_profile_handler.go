@@ -154,7 +154,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 		if err != nil {
 			log.FromContext(ctx).Error(err, "unable to read prefix state")
 		} else {
-			decodePod := profileResults[h.decodeProfile].TargetPods[0].GetPod().NamespacedName
+			decodePod := profileResults[h.decodeProfile].TargetEndpoints[0].GetMetadata().NamespacedName
 			hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodePod)]-1, 0) // The first hit is always the model name
 			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(userInput))
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
@@ -192,18 +192,18 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState
 	if h.primaryPort != "" {
 		// Data Parallel is active
 
-		targetPod := decodeRunResults.TargetPods[0].GetPod()
+		targetPod := decodeRunResults.TargetEndpoints[0].GetMetadata()
 		request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
 
 		updatedResult := types.ProfileRunResult{
-			TargetPods: []types.Pod{},
+			TargetEndpoints: []types.Endpoint{},
 		}
 
-		for _, target := range decodeRunResults.TargetPods {
-			updatedPodInfo := target.GetPod().Clone()
+		for _, target := range decodeRunResults.TargetEndpoints {
+			updatedPodInfo := target.GetMetadata().Clone()
 			updatedPodInfo.Port = h.primaryPort
-			targetPod := &types.PodMetrics{Pod: updatedPodInfo, MetricsState: target.GetMetrics().Clone()}
-			updatedResult.TargetPods = append(updatedResult.TargetPods, targetPod)
+			targetPod := &types.PodMetrics{EndpointMetadata: updatedPodInfo, Metrics: target.GetMetrics().Clone()}
+			updatedResult.TargetEndpoints = append(updatedResult.TargetEndpoints, targetPod)
 		}
 		updatedResults[h.decodeProfile] = &updatedResult
 	} else {

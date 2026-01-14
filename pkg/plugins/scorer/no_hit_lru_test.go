@@ -9,8 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
@@ -123,26 +122,26 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 }
 
 func TestNoHitLRUScorer(t *testing.T) {
-	podA := &types.PodMetrics{
+	podA := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	podB := &types.PodMetrics{
+	podB := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	podC := &types.PodMetrics{
+	podC := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
 
 	tests := []struct {
 		name        string
 		scorer      framework.Scorer
 		req         *types.LLMRequest
-		input       []types.Pod
+		input       []types.Endpoint
 		prefixState *prefix.SchedulingContextState
-		wantScores  map[types.Pod]float64
+		wantScores  map[types.Endpoint]float64
 		description string
 	}{
 		{
@@ -151,11 +150,11 @@ func TestNoHitLRUScorer(t *testing.T) {
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
-			input: []types.Pod{podA, podB, podC},
+			input: []types.Endpoint{podA, podB, podC},
 			prefixState: &prefix.SchedulingContextState{
 				PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 			},
-			wantScores: map[types.Pod]float64{
+			wantScores: map[types.Endpoint]float64{
 				podA: 1.0, // All never-used pods get high scores
 				podB: 0.5,
 				podC: 0.0,
@@ -168,13 +167,13 @@ func TestNoHitLRUScorer(t *testing.T) {
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
-			input: []types.Pod{podA, podB, podC},
+			input: []types.Endpoint{podA, podB, podC},
 			prefixState: &prefix.SchedulingContextState{
 				PrefixCacheServers: map[prefix.ServerID]int{
 					{Name: "server1", Namespace: "default"}: 5, // non-empty = cache hit
 				},
 			},
-			wantScores: map[types.Pod]float64{
+			wantScores: map[types.Endpoint]float64{
 				podA: 0.5, // All pods get neutral scores for cache hits
 				podB: 0.5,
 				podC: 0.5,
@@ -187,11 +186,11 @@ func TestNoHitLRUScorer(t *testing.T) {
 			req: &types.LLMRequest{
 				TargetModel: "test-model",
 			},
-			input: []types.Pod{podA},
+			input: []types.Endpoint{podA},
 			prefixState: &prefix.SchedulingContextState{
 				PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 			},
-			wantScores: map[types.Pod]float64{
+			wantScores: map[types.Endpoint]float64{
 				podA: 1.0, // Single pod gets max score
 			},
 			description: "Single pod should get maximum score",
@@ -221,16 +220,16 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
+	podA := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	podB := &types.PodMetrics{
+	podB := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
 
-	pods := []types.Pod{podA, podB}
+	pods := []types.Endpoint{podA, podB}
 
 	// Test basic scoring for cold request (no crashes, returns valid scores)
 	coldPrefixState := &prefix.SchedulingContextState{
@@ -250,7 +249,7 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 	// All scores should be valid (between 0 and 1)
 	for pod, score := range scores {
 		if score < 0 || score > 1 {
-			t.Errorf("Invalid score %f for pod %s", score, pod.GetPod().NamespacedName.String())
+			t.Errorf("Invalid score %f for pod %s", score, pod.GetMetadata().NamespacedName.String())
 		}
 	}
 
@@ -264,11 +263,11 @@ func TestNoPrefixCacheStateFound(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
+	podA := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	pods := []types.Pod{podA}
+	pods := []types.Endpoint{podA}
 	cycleState := &types.CycleState{}
 
 	scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, pods)
@@ -282,19 +281,19 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
+	podA := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	podB := &types.PodMetrics{
+	podB := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	podC := &types.PodMetrics{
+	podC := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-c", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	pods := []types.Pod{podA, podB, podC}
+	pods := []types.Endpoint{podA, podB, podC}
 
 	primaryProfile := "primary-profile"
 	toPrefixState := func(entries map[prefix.ServerID]int) *types.CycleState {
@@ -304,25 +303,25 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		return cycle
 	}
 
-	requestToPod := func(target types.Pod) *types.SchedulingResult {
+	requestToPod := func(target types.Endpoint) *types.SchedulingResult {
 		return &types.SchedulingResult{
 			PrimaryProfileName: primaryProfile,
 			ProfileResults: map[string]*types.ProfileRunResult{
 				primaryProfile: {
-					TargetPods: []types.Pod{target},
+					TargetPods: []types.Endpoint{target},
 				},
 			},
 		}
 	}
 
 	// Test LRU behavior indirectly through scoring rather than internal state
-	assertHighestScoredPod := func(expectedPod types.Pod, testName string) {
+	assertHighestScoredPod := func(expectedPod types.Endpoint, testName string) {
 		t.Helper()
 		coldReq := &types.LLMRequest{RequestId: testName + "-scoring-check"}
 		scores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReq, pods)
 
 		highestScore := -1.0
-		var highestPod types.Pod
+		var highestPod types.Endpoint
 		for pod, score := range scores {
 			if score > highestScore {
 				highestScore = score
@@ -330,10 +329,10 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 			}
 		}
 
-		if highestPod.GetPod().NamespacedName.String() != expectedPod.GetPod().NamespacedName.String() {
+		if highestPod.GetMetadata().NamespacedName.String() != expectedPod.GetMetadata().NamespacedName.String() {
 			t.Fatalf("expected %s to have highest score for LRU behavior, but %s had highest score (%f). All scores: %+v",
-				expectedPod.GetPod().NamespacedName.String(),
-				highestPod.GetPod().NamespacedName.String(),
+				expectedPod.GetMetadata().NamespacedName.String(),
+				highestPod.GetMetadata().NamespacedName.String(),
 				highestScore,
 				scores)
 		}
@@ -403,13 +402,13 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
+	podA := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
 
 	t.Run("empty pods list", func(t *testing.T) {
-		emptyPods := []types.Pod{}
+		emptyPods := []types.Endpoint{}
 		cycleState := &types.CycleState{}
 		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
 			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
@@ -441,7 +440,7 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	})
 
 	t.Run("single pod returns 1.0", func(t *testing.T) {
-		pods := []types.Pod{podA}
+		pods := []types.Endpoint{podA}
 		cycleState := &types.CycleState{}
 		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
 			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{

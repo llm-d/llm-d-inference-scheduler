@@ -9,7 +9,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -51,6 +51,11 @@ func (r *requestEntry) String() string {
 var _ framework.Scorer = &ActiveRequest{}
 var _ requestcontrol.PreRequest = &ActiveRequest{}
 var _ requestcontrol.ResponseComplete = &ActiveRequest{}
+
+// Category returns the scorer category (Distribution - spreads load evenly)
+func (s *ActiveRequest) Category() framework.ScorerCategory {
+	return framework.Distribution
+}
 
 // ActiveRequestFactory defines the factory function for the ActiveRequest scorer.
 func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
@@ -133,7 +138,7 @@ func (s *ActiveRequest) WithName(name string) *ActiveRequest {
 // Score scores the given pods based on the number of active requests
 // being served by each pod. The score is normalized to a range of 0-1.
 func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest,
-	pods []types.Pod) map[types.Pod]float64 {
+	pods []types.Endpoint) map[types.Endpoint]float64 {
 	scoredPods := make(map[string]int)
 	maxCount := 0
 	s.mutex.RLock()
@@ -145,9 +150,9 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types
 	}
 	s.mutex.RUnlock()
 
-	scoredPodsMap := make(map[types.Pod]float64, len(pods))
+	scoredPodsMap := make(map[types.Endpoint]float64, len(pods))
 	for _, pod := range pods {
-		podName := pod.GetPod().NamespacedName.String()
+		podName := pod.GetMetadata().NamespacedName.String()
 		if count, exists := scoredPods[podName]; exists {
 			if count == 0 || maxCount == 0 {
 				scoredPodsMap[pod] = 1.0 // no requests means highest score
@@ -171,13 +176,13 @@ func (s *ActiveRequest) PreRequest(ctx context.Context, request *types.LLMReques
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	for _, profileResult := range schedulingResult.ProfileResults { // schedulingResult guaranteed not to be nil
-		if profileResult == nil || profileResult.TargetPods == nil || len(profileResult.TargetPods) == 0 {
+		if profileResult == nil || profileResult.TargetEndpoints == nil || len(profileResult.TargetEndpoints) == 0 {
 			continue
 		}
 
 		// create request entry for first pod only. TODO: support fallback pods
 		entry := &requestEntry{
-			PodName:   profileResult.TargetPods[0].GetPod().NamespacedName.String(),
+			PodName:   profileResult.TargetEndpoints[0].GetMetadata().NamespacedName.String(),
 			RequestID: request.RequestId,
 		}
 
@@ -193,14 +198,14 @@ func (s *ActiveRequest) PreRequest(ctx context.Context, request *types.LLMReques
 // It removes the specific request entry from the cache and decrements
 // the pod count.
 func (s *ActiveRequest) ResponseComplete(ctx context.Context, request *types.LLMRequest,
-	_ *requestcontrol.Response, targetPod *backend.Pod) {
+	_ *requestcontrol.Response, targetMetadata *datalayer.EndpointMetadata) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.ResponseComplete")
-	if targetPod == nil {
-		debugLogger.Info("Skipping ResponseComplete because targetPod is nil")
+	if targetMetadata == nil {
+		debugLogger.Info("Skipping ResponseComplete because targetMetadata is nil")
 		return
 	}
 
-	entry := requestEntry{targetPod.NamespacedName.String(), request.RequestId}
+	entry := requestEntry{targetMetadata.NamespacedName.String(), request.RequestId}
 
 	if _, found := s.requestCache.GetAndDelete(entry.String()); found {
 		s.decrementPodCount(entry.PodName)

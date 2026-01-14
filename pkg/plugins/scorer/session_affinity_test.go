@@ -8,8 +8,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
@@ -18,27 +17,27 @@ import (
 )
 
 func TestSessionAffinity_Score(t *testing.T) {
-	podA := &types.PodMetrics{
+	podA := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
-	podB := &types.PodMetrics{
+	podB := &types.EndpointMetrics{
 		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
 
-	inputPods := []types.Pod{podA, podB}
+	inputPods := []types.Endpoint{podA, podB}
 
 	// valid session token for podB
-	validSessionTokenForPodB := base64.StdEncoding.EncodeToString([]byte(podB.GetPod().NamespacedName.String()))
+	validSessionTokenForPodB := base64.StdEncoding.EncodeToString([]byte(podB.GetMetadata().NamespacedName.String()))
 
 	sessionAffinityScorer := scorer.NewSessionAffinity()
 
 	tests := []struct {
 		name       string
 		req        *types.LLMRequest
-		input      []types.Pod
-		wantScores map[types.Pod]float64
+		input      []types.Endpoint
+		wantScores map[types.Endpoint]float64
 	}{
 		{
 			name: "selects correct pod : podB",
@@ -46,7 +45,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 				Headers: map[string]string{"x-session-token": validSessionTokenForPodB},
 			},
 			input: inputPods,
-			wantScores: map[types.Pod]float64{
+			wantScores: map[types.Endpoint]float64{
 				podA: 0.0,
 				podB: 1.0,
 			},
@@ -58,7 +57,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 			},
 			// both pods get score 0.0
 			input: inputPods,
-			wantScores: map[types.Pod]float64{
+			wantScores: map[types.Endpoint]float64{
 				podA: 0.0,
 				podB: 0.0,
 			},
@@ -70,7 +69,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 			},
 			// expect same behavior as no session token
 			input: inputPods,
-			wantScores: map[types.Pod]float64{
+			wantScores: map[types.Endpoint]float64{
 				podA: 0.0,
 				podB: 0.0,
 			},
@@ -78,9 +77,9 @@ func TestSessionAffinity_Score(t *testing.T) {
 		{
 			name:  "no pods available",
 			req:   &types.LLMRequest{},
-			input: []types.Pod{},
+			input: []types.Endpoint{},
 			// returns empty score map
-			wantScores: map[types.Pod]float64{},
+			wantScores: map[types.Endpoint]float64{},
 		},
 	}
 
@@ -108,7 +107,7 @@ func TestSessionAffinity_ResponseComplete(t *testing.T) {
 	tests := []struct {
 		name            string
 		initialResponse *requestcontrol.Response
-		targetPod       *backend.Pod
+		targetPod       *datalayer.EndpointMetadata
 		wantHeaders     map[string]string
 	}{
 		{

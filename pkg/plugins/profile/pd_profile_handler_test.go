@@ -8,8 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
@@ -181,21 +180,21 @@ func TestPdProfileHandlerFactoryInvalidJSON(t *testing.T) {
 const DefaultTestPodPort = "8000"
 
 // createPod creates a mock Pod with customizable IP and port.
-func createPod(nsn k8stypes.NamespacedName, ipaddr, port string, labels map[string]string) types.Pod {
-	return &types.PodMetrics{
-		Pod: &backend.Pod{
+func createPod(nsn k8stypes.NamespacedName, ipaddr, port string, labels map[string]string) types.Endpoint {
+	return &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{
 			NamespacedName: nsn,
 			Address:        ipaddr,
 			Port:           port,
 			Labels:         labels,
 		},
-		MetricsState: &backendmetrics.MetricsState{},
+		Metrics: &datalayer.Metrics{},
 	}
 }
 
 // newMockProfileRunResult creates a ProfileRunResult with Pods using the given port.
 func newMockProfileRunResult(port string, podNames ...string) *types.ProfileRunResult {
-	pods := make([]types.Pod, 0, len(podNames))
+	pods := make([]types.Endpoint, 0, len(podNames))
 	for i, name := range podNames {
 		ip := fmt.Sprintf("10.0.0.%d", i+1)
 		pods = append(pods, createPod(
@@ -368,7 +367,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				assert.Equal(t, "decode", res.PrimaryProfileName)
 				assert.Contains(t, res.ProfileResults, "decode")
 				assert.NotContains(t, res.ProfileResults, "prefill")
-				pod := res.ProfileResults["decode"].TargetPods[0].GetPod()
+				pod := res.ProfileResults["decode"].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, DefaultTestPodPort, pod.Port)
 				assert.Empty(t, headers[common.DataParallelPodHeader])
 			},
@@ -395,7 +394,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
-				pod := res.ProfileResults["decode"].TargetPods[0].GetPod()
+				pod := res.ProfileResults["decode"].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, "9000", pod.Port)
 
 				hostPort := headers[common.DataParallelPodHeader]

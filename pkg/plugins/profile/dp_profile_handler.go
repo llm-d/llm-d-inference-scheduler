@@ -105,18 +105,18 @@ func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *types.
 	}
 
 	newResult := types.ProfileRunResult{
-		TargetPods: []types.Pod{},
+		TargetEndpoints: []types.Endpoint{},
 	}
 
-	targetPod := profileResult.TargetPods[0].GetPod()
+	targetPod := profileResult.TargetEndpoints[0].GetMetadata()
 
 	request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
 
-	for _, target := range profileResult.TargetPods {
-		newPodInfo := target.GetPod().Clone()
+	for _, target := range profileResult.TargetEndpoints {
+		newPodInfo := target.GetMetadata().Clone()
 		newPodInfo.Port = h.primaryPort
-		targetPod := &types.PodMetrics{Pod: newPodInfo, MetricsState: target.GetMetrics().Clone()}
-		newResult.TargetPods = append(newResult.TargetPods, targetPod)
+		targetPod := &types.PodMetrics{EndpointMetadata: newPodInfo, Metrics: target.GetMetrics().Clone()}
+		newResult.TargetEndpoints = append(newResult.TargetEndpoints, targetPod)
 	}
 	modifiedResults := map[string]*types.ProfileRunResult{singleProfileName: &newResult}
 

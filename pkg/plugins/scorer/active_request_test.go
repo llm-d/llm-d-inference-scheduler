@@ -6,8 +6,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
@@ -15,21 +14,21 @@ import (
 )
 
 func TestActiveRequestScorer_Score(t *testing.T) {
-	podA := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podA := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 2,
 		},
 	}
-	podB := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podB := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b", Namespace: "default"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 0,
 		},
 	}
-	podC := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-c", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podC := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c", Namespace: "default"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 15,
 		},
 	}
@@ -37,16 +36,16 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 	tests := []struct {
 		name       string
 		setupCache func(*ActiveRequest)
-		input      []types.Pod
-		wantScores map[types.Pod]float64
+		input      []types.Endpoint
+		wantScores map[types.Endpoint]float64
 	}{
 		{
 			name: "no pods in cache",
 			setupCache: func(_ *ActiveRequest) {
 				// Cache is empty
 			},
-			input: []types.Pod{podA, podB, podC},
-			wantScores: map[types.Pod]float64{
+			input: []types.Endpoint{podA, podB, podC},
+			wantScores: map[types.Endpoint]float64{
 				podA: 1,
 				podB: 1,
 				podC: 1,
@@ -61,8 +60,8 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 				s.podCounts["default/pod-c"] = 6
 				s.mutex.Unlock()
 			},
-			input: []types.Pod{podA, podB, podC},
-			wantScores: map[types.Pod]float64{
+			input: []types.Endpoint{podA, podB, podC},
+			wantScores: map[types.Endpoint]float64{
 				podA: 0.5,
 				podB: 1.0,
 				podC: 0.0,
@@ -77,8 +76,8 @@ func TestActiveRequestScorer_Score(t *testing.T) {
 				// pod-b not in cache
 				s.mutex.Unlock()
 			},
-			input: []types.Pod{podA, podB, podC},
-			wantScores: map[types.Pod]float64{
+			input: []types.Endpoint{podA, podB, podC},
+			wantScores: map[types.Endpoint]float64{
 				podA: 0.0,
 				podB: 1.0,
 				podC: 0.75,
@@ -106,9 +105,9 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := NewActiveRequest(ctx, nil)
 
-	podA := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podA := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 2,
 		},
 	}
@@ -120,7 +119,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	schedulingResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
 			"test-profile": {
-				TargetPods: []types.Pod{podA},
+				TargetPods: []types.Endpoint{podA},
 			},
 		},
 	}
@@ -148,7 +147,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	schedulingResult2 := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
 			"test-profile": {
-				TargetPods: []types.Pod{podA},
+				TargetPods: []types.Endpoint{podA},
 			},
 		},
 	}
@@ -179,9 +178,9 @@ func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
 		RequestId: "test-request-1",
 	}
 
-	podA := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{
+	podA := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
+		Metrics: &datalayer.Metrics{
 			WaitingQueueSize: 2,
 		},
 	}
@@ -189,7 +188,7 @@ func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
 	schedulingResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
 			"test-profile": {
-				TargetPods: []types.Pod{podA},
+				TargetPods: []types.Endpoint{podA},
 			},
 		},
 	}
@@ -210,7 +209,7 @@ func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
 	}
 
 	// Call PostResponse
-	scorer.ResponseComplete(ctx, request, &requestcontrol.Response{}, podA.GetPod())
+	scorer.ResponseComplete(ctx, request, &requestcontrol.Response{}, podA.GetMetadata())
 
 	// Check request is removed from cache
 	if scorer.requestCache.Has(compositeKey) {
@@ -237,14 +236,14 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 		RequestId: "test-request-ttl",
 	}
 
-	podA := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
+	podA := &types.EndpointMetrics{
+		EndpointMetadata: &datalayer.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
 	}
 
 	schedulingResult := &types.SchedulingResult{
 		ProfileResults: map[string]*types.ProfileRunResult{
 			"test-profile": {
-				TargetPods: []types.Pod{podA},
+				TargetPods: []types.Endpoint{podA},
 			},
 		},
 	}

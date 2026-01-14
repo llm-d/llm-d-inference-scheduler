@@ -27,6 +27,11 @@ type loadAwareParameters struct {
 // compile-time type assertion
 var _ framework.Scorer = &LoadAware{}
 
+// Category returns the scorer category (Distribution - balances load evenly)
+func (s *LoadAware) Category() framework.ScorerCategory {
+	return framework.Distribution
+}
+
 // LoadAwareFactory defines the factory function for the LoadAware
 func LoadAwareFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
 	parameters := loadAwareParameters{Threshold: QueueThresholdDefault}
@@ -76,8 +81,8 @@ func (s *LoadAware) WithName(name string) *LoadAware {
 // Pod with requests in the queue will get score between 0.5 and 0.
 // Score 0 will get pod with number of requests in the queue equal to the threshold used in load-based filter
 // In the future, pods with additional capacity will get score higher than 0.5
-func (s *LoadAware) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64)
+func (s *LoadAware) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Endpoint) map[types.Endpoint]float64 {
+	scoredPods := make(map[types.Endpoint]float64)
 
 	for _, pod := range pods {
 		waitingRequests := float64(pod.GetMetrics().WaitingQueueSize)
