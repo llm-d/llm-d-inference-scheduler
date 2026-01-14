@@ -21,8 +21,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	sidecarmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/metrics/sidecar"
 )
 
 func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
@@ -56,7 +58,11 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	}
 	uuidStr := uuid.String()
 
+	// Timing: capture request start for end-to-end metrics
+	requestStart := time.Now()
+
 	// Prefill Stage
+	prefillStart := time.Now()
 
 	// 1. Prepare prefill request
 	ctx := r.Context()
@@ -107,6 +113,8 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
+	prefillDuration := time.Since(prefillStart)
+
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
 		s.logger.Error(err, "request failed", "code", pw.statusCode)
 		w.WriteHeader(pw.statusCode)
@@ -132,6 +140,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	s.logger.V(5).Info("received prefiller response", requestFieldKVTransferParams, pKVTransferParams)
 
 	// Decode Stage
+	decodeStart := time.Now()
 
 	// 1. Prepare decode request
 	dreq := r.Clone(ctx)
@@ -172,4 +181,16 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
 		s.decoderProxy.ServeHTTP(w, dreq)
 	}
+
+	decodeDuration := time.Since(decodeStart)
+
+	// Calculate and record P/D coordinator metrics
+	totalDuration := time.Since(requestStart)
+	coordinatorOverhead := decodeStart.Sub(prefillStart.Add(prefillDuration))
+
+	// Record Prometheus metrics for dashboard aggregation
+	sidecarmetrics.PDProxyCoordinatorOverheadMilliseconds.WithLabelValues("nixlv2").Observe(float64(coordinatorOverhead.Milliseconds()))
+	sidecarmetrics.PDProxyPrefillDurationMilliseconds.WithLabelValues("nixlv2").Observe(float64(prefillDuration.Milliseconds()))
+	sidecarmetrics.PDProxyDecodeDurationMilliseconds.WithLabelValues("nixlv2").Observe(float64(decodeDuration.Milliseconds()))
+	sidecarmetrics.PDProxyTotalDurationMilliseconds.WithLabelValues("nixlv2").Observe(float64(totalDuration.Milliseconds()))
 }

@@ -27,6 +27,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	sidecarmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/metrics/sidecar"
 )
 
 var (
@@ -47,6 +49,9 @@ func init() {
 
 func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.V(4).Info("running SGLang protocol", "url", prefillPodHostPort)
+
+	// Timing: capture request start for end-to-end metrics
+	requestStart := time.Now()
 
 	// Make Request
 	requestData, err := s.parseSGLangRequest(r)
@@ -72,10 +77,10 @@ func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefi
 	}
 
 	// Send concurrent prefill and decode requests
-	s.sendSGLangConcurrentRequests(w, r, body, prefillPodHostPort)
+	s.sendSGLangConcurrentRequests(w, r, body, prefillPodHostPort, requestStart)
 }
 
-func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string) {
+func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string, requestStart time.Time) {
 	// Create separate requests for prefill and decode
 	prefillReq := cloneWithJSONBody(r, body)
 	decodeReq := cloneWithJSONBody(r, body)
@@ -95,8 +100,21 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 		s.logger.V(5).Info("prefill request completed", "status", pw.statusCode)
 	}()
 
+	// Decode Stage (runs concurrently with prefill)
+	decodeStart := time.Now()
+
 	// Send decode request synchronously
 	s.decoderProxy.ServeHTTP(w, decodeReq)
+
+	decodeDuration := time.Since(decodeStart)
+
+	// Calculate and record P/D coordinator metrics
+	// Note: For SGLang, prefill runs concurrently, so we only measure decode and total
+	totalDuration := time.Since(requestStart)
+
+	// Record Prometheus metrics for dashboard aggregation
+	sidecarmetrics.PDProxyDecodeDurationMilliseconds.WithLabelValues("sglang").Observe(float64(decodeDuration.Milliseconds()))
+	sidecarmetrics.PDProxyTotalDurationMilliseconds.WithLabelValues("sglang").Observe(float64(totalDuration.Milliseconds()))
 }
 
 func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {
