@@ -45,7 +45,7 @@ func convertContentToPreprocessingFormat(content types.Content) interface{} {
 }
 
 func main() {
-	fmt.Println("=== End-to-End Multi-Modality Pipeline Test ===\n")
+	fmt.Println("=== End-to-End Multi-Modality Pipeline Test ===")
 
 	// Test 1: Image URL format
 	testImageURL := map[string]any{
