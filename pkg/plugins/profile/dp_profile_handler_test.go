@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -116,6 +117,75 @@ func TestDataParallelProfileHandlerFactoryInvalidJSON(t *testing.T) {
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
+		})
+	}
+}
+
+func Test_DataParallelProfileHandler_Pick(t *testing.T) {
+	tests := []struct {
+		name              string
+		profiles          map[string]*framework.SchedulerProfile
+		profileResults    map[string]*types.ProfileRunResult
+		expectEmptyResult bool
+		expectLogError    bool
+		description       string
+	}{
+		{
+			name: "success: single profile, first call",
+			profiles: map[string]*framework.SchedulerProfile{
+				"default": {},
+			},
+			profileResults:    map[string]*types.ProfileRunResult{},
+			expectEmptyResult: false,
+			expectLogError:    false,
+			description:       "Should return the single profile to run",
+		},
+		{
+			name: "success: single profile, second call (all already executed)",
+			profiles: map[string]*framework.SchedulerProfile{
+				"default": {},
+			},
+			profileResults: map[string]*types.ProfileRunResult{
+				"default": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+			},
+			expectEmptyResult: true,
+			expectLogError:    false,
+			description:       "Should return empty map since all profiles have been executed already in previous call",
+		},
+		{
+			name: "error: multiple profiles configured in EPP",
+			profiles: map[string]*framework.SchedulerProfile{
+				"profile1": {},
+				"profile2": {},
+			},
+			profileResults:    map[string]*types.ProfileRunResult{},
+			expectEmptyResult: true,
+			expectLogError:    true,
+			description:       "Should return empty map and log error for multiple profiles",
+		},
+		{
+			name:              "error: zero profiles configured in EPP",
+			profiles:          map[string]*framework.SchedulerProfile{},
+			profileResults:    map[string]*types.ProfileRunResult{},
+			expectEmptyResult: true,
+			expectLogError:    true,
+			description:       "Should return empty map and log error for zero profiles",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewDataParallelProfileHandler(8000).WithName("test-handler")
+			ctx := context.Background()
+
+			result := handler.Pick(ctx, &types.CycleState{}, &types.LLMRequest{}, tt.profiles, tt.profileResults)
+
+			if tt.expectEmptyResult {
+				assert.Empty(t, result, tt.description)
+			} else {
+				assert.NotEmpty(t, result, tt.description)
+				assert.Equal(t, len(tt.profiles), len(result), "Should return all profiles when valid")
+			}
 		})
 	}
 }
