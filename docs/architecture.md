@@ -10,7 +10,7 @@
 
 The design enables:
 
-- Support for **multiple base models** within a shared cluster (see [serving multiple gen AI models and LoRAs](https://gateway-api-inference-extension.sigs.k8s.io/guides/serve-multiple-genai-models/))
+- Support for **multiple base models** within a shared cluster (see [serving multiple inference pools](https://gateway-api-inference-extension.sigs.k8s.io/guides/serving-multiple-inference-pools-latest/))
 - Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
