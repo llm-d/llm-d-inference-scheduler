@@ -301,7 +301,6 @@ func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *types.LLMR
 
 	// Get the target profile's target pod
 	if targetProfile == nil || len(targetProfile.TargetPods) == 0 {
-		logger.Info("No target pod in profile", "profile", profileName)
 		return
 	}
 
