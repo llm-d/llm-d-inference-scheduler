@@ -167,6 +167,37 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.
 	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
 }
 
+// convertContentToPreprocessingFormat converts GAIE's Content structure to the format
+// expected by preprocessing.ChatMessage. It preserves structured content blocks for
+// multi-modality support while maintaining backward compatibility with text-only content.
+func convertContentToPreprocessingFormat(content types.Content) interface{} {
+	// If structured content blocks are present (multi-modality), convert them to
+	// the OpenAI API format expected by transformers library
+	if len(content.Structured) > 0 {
+		// Convert ContentBlock to the format expected by transformers
+		// This matches the OpenAI API format: [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]
+		blocks := make([]map[string]interface{}, 0, len(content.Structured))
+		for _, block := range content.Structured {
+			blockMap := make(map[string]interface{})
+			blockMap["type"] = block.Type
+			
+			if block.Type == "text" {
+				blockMap["text"] = block.Text
+			} else if block.Type == "image_url" {
+				blockMap["image_url"] = map[string]interface{}{
+					"url": block.ImageURL.Url,
+				}
+			}
+			
+			blocks = append(blocks, blockMap)
+		}
+		return blocks
+	}
+	
+	// For text-only content, return the raw string (backward compatible)
+	return content.Raw
+}
+
 // getScores retrieves the pod scores from the KV-cache indexer
 // based on the provided LLM request.
 // If the request contains chat completions, it processes them accordingly.
@@ -198,10 +229,12 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types
 		}
 
 		// Convert messages to the format expected by the renderer
+		// Preserve structured content blocks for multi-modality support
 		for _, msg := range request.Body.ChatCompletions.Messages {
+			content := convertContentToPreprocessingFormat(msg.Content)
 			renderReq.Conversations = append(renderReq.Conversations, preprocessing.ChatMessage{
 				Role:    msg.Role,
-				Content: msg.Content.Raw,
+				Content: content,
 			})
 		}
 
