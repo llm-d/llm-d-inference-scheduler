@@ -27,6 +27,8 @@ import (
 )
 
 const (
+	// kindClusterName is the name of the Kind cluster created for e2e tests.
+	kindClusterName = "e2e-tests"
 	// defaultReadyTimeout is the default timeout for a resource to report a ready state.
 	defaultReadyTimeout = 3 * time.Minute
 	// defaultInterval is the default interval to check if a resource exists or ready conditions.
@@ -108,8 +110,18 @@ var _ = ginkgo.BeforeSuite(func() {
 })
 
 var _ = ginkgo.AfterSuite(func() {
-	if k8sContext != "" {
-		// Used an existing Kubernetes context
+	if k8sContext == "" {
+		// delete kind cluster we created
+		ginkgo.By("Deleting kind cluster " + kindClusterName)
+		command := exec.Command("kind", "delete", "cluster", "--name", kindClusterName)
+		session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+		if err != nil {
+			ginkgo.GinkgoLogr.Error(err, "Failed to delete kind cluster")
+		} else {
+			gomega.Eventually(session).WithTimeout(60 * time.Second).Should(gexec.Exit())
+		}
+	} else {
+		// Used an existing Kubernetes context, clean up created resources
 		// Stop port-forward
 		if portForwardSession != nil {
 			portForwardSession.Terminate()
@@ -129,18 +141,12 @@ var _ = ginkgo.AfterSuite(func() {
 			err := testConfig.KubeCli.CoreV1().Namespaces().Delete(testConfig.Context, nsName, metav1.DeleteOptions{})
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		}
-		return
 	}
-
-	command := exec.Command("kind", "delete", "cluster", "--name", "e2e-tests")
-	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 })
 
 // Create the Kubernetes cluster for the E2E tests and load the local images
 func setupK8sCluster() {
-	command := exec.Command("kind", "create", "cluster", "--name", "e2e-tests", "--config", "-")
+	command := exec.Command("kind", "create", "cluster", "--name", kindClusterName, "--config", "-")
 	stdin, err := command.StdinPipe()
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	go func() {
@@ -165,7 +171,7 @@ func kindLoadImage(image string) {
 	tempDir := ginkgo.GinkgoT().TempDir()
 	target := tempDir + "/container.tar"
 
-	ginkgo.By(fmt.Sprintf("Loading %s into the cluster e2e-tests using %s", image, containerRuntime))
+	ginkgo.By(fmt.Sprintf("Loading %s into the cluster %s using %s", image, kindClusterName, containerRuntime))
 
 	_, err := exec.LookPath(containerRuntime)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", containerRuntime)
@@ -182,7 +188,7 @@ func kindLoadImage(image string) {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	command = exec.Command("kind", "--name", "e2e-tests", "load", "image-archive", target)
+	command = exec.Command("kind", "--name", kindClusterName, "load", "image-archive", target)
 	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
