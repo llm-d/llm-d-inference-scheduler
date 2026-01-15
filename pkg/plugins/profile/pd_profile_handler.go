@@ -28,7 +28,15 @@ const (
 	defaultDecodeProfile    = "decode"
 	defaultPrefillProfile   = "prefill"
 	defaultPrefixPluginType = prefix.PrefixCachePluginType
+
+	// ProximityStateKey is the CycleState key for storing decode pod proximity information
+	ProximityStateKey = "proximity-state"
 )
+
+// ProximityState stores the decode pod's node name for proximity scoring
+type ProximityState struct {
+	DecodeNodeName string
+}
 
 type pdProfileHandlerParameters struct {
 	Threshold        int    `json:"threshold"`
@@ -169,6 +177,21 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	}
 
 	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
+
+	// Extract decode pod's node name and store in CycleState for proximity scoring
+	decodePod := profileResults[h.decodeProfile].TargetPods[0]
+	decodePodMetadata := decodePod.GetPod()
+	nodeName := decodePodMetadata.NodeName
+
+	// Store decode pod node name in CycleState for proximity scorer
+	proximityState := &ProximityState{
+		DecodeNodeName: nodeName,
+	}
+	cycleState.Write(plugins.StateKey(ProximityStateKey), proximityState)
+
+	log.FromContext(ctx).V(logutil.DEBUG).Info("Stored decode pod node for proximity scoring",
+		"nodeName", nodeName)
+
 	// run the prefill profile
 	return map[string]*framework.SchedulerProfile{
 		h.prefillProfile: profiles[h.prefillProfile],
