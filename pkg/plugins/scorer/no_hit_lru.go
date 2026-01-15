@@ -22,7 +22,10 @@ const (
 	// defaultLRUSize is the maximum number of pods we'll consider in the cache
 	defaultLRUSize = 1024
 
-	// defaultPrefillProfile is the name of the prefill profile when not explicitly declared
+	// defaultPrefillProfile is the name of the prefill profile
+	//
+	// This is currently hardcoded until we have a defined proper config interface.
+	// (See also https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/2104/	)
 	defaultPrefillProfile = "prefill"
 )
 
@@ -38,10 +41,6 @@ type NoHitLRUParameters struct {
 	// PrefixPluginName defines the name of the prefix cache plugin to read state from.
 	// Defaults to "prefix-cache-scorer".
 	PrefixPluginName string `json:"prefixPluginName"`
-
-	// PrefillProfile defines the name of the prefill profile to track in LRU.
-	// Defaults to "prefill".
-	PrefillProfile string `json:"prefillProfile"`
 
 	// LRUSize defines the maximum number of pods to track in the LRU cache.
 	LRUSize int `json:"lruSize"`
@@ -82,7 +81,6 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 	prefixPluginType := prefix.PrefixCachePluginType
 	prefixPluginName := prefix.PrefixCachePluginType
 	lruSize := defaultLRUSize
-	prefillProfile := defaultPrefillProfile
 
 	if params != nil {
 		if params.PrefixPluginType != "" {
@@ -93,9 +91,6 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 		}
 		if params.LRUSize > 0 {
 			lruSize = params.LRUSize
-		}
-		if params.PrefillProfile != "" {
-			prefillProfile = params.PrefillProfile
 		}
 	}
 
@@ -109,7 +104,6 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 		typedName:             plugins.TypedName{Type: NoHitLRUType},
 		lruCache:              lruCache,
 		prefixPluginTypedName: plugins.TypedName{Type: prefixPluginType, Name: prefixPluginName},
-		prefillProfile:        prefillProfile,
 		pluginState:           plugins.NewPluginState(ctx),
 	}
 }
@@ -121,7 +115,6 @@ type NoHitLRU struct {
 	typedName             plugins.TypedName
 	lruCache              *lru.Cache[string, struct{}] // pod name -> dummy value (we only care about order)
 	prefixPluginTypedName plugins.TypedName
-	prefillProfile        string
 	pluginState           *plugins.PluginState
 }
 
@@ -300,7 +293,7 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 	}
 
 	s.moveTargetPodToFront(ctx, request, schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName], schedulingResult.PrimaryProfileName)
-	s.moveTargetPodToFront(ctx, request, schedulingResult.ProfileResults[s.prefillProfile], s.prefillProfile)
+	s.moveTargetPodToFront(ctx, request, schedulingResult.ProfileResults[defaultPrefillProfile], defaultPrefillProfile)
 }
 
 func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *types.LLMRequest, targetProfile *types.ProfileRunResult, profileName string) {
