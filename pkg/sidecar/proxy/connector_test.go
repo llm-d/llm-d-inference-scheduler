@@ -44,11 +44,11 @@ type sidecarTestInfo struct {
 	proxy          *Server
 }
 
-var connectors = []string{ConnectorSharedStorage, ConnectorNIXLV2}
+var connectorsArr = []string{ConnectorSharedStorage, ConnectorNIXLV2}
 
 var _ = Describe("Common Connector tests", func() {
 
-	for _, connector := range connectors {
+	for _, connector := range connectorsArr {
 		When(fmt.Sprintf("running with the %s connector", connector), func() {
 			// Regression test for commit bb181d6: Ensure that max_completion_tokens=1 in Prefill
 			It("should set max_completion_tokens=1 in prefill and restore original value in decode", func() {
