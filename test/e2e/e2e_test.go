@@ -2,8 +2,10 @@ package e2e
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -76,6 +78,13 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			epp := createEndPointPicker(pdConfig)
 
+			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
+
+			if k8sContext != "" {
+				// Use port-forward to access the EPP pod's metrics endpoint.
+				startEPPMetricsPortForward()
+			}
+
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
@@ -109,6 +118,16 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
+
+			// Metrics Validation
+			labelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, modelName)
+			prefillDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter)
+
+			labelFilter2 := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, modelName)
+			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter2)
+
+			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(6))
+			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(0))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -381,6 +400,33 @@ func runChatCompletion(prompt string) (string, string, string) {
 	podPort := httpResp.Header.Get("x-inference-port")
 
 	return namespaceHeader, podHeader, podPort
+}
+
+// getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+func getCounterMetric(metricsURL, metricName, labelMatch string) int {
+	resp, err := http.Get(metricsURL)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err = resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	body, err := io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	metricsText := string(body)
+	for _, line := range strings.Split(metricsText, "\n") {
+		if strings.HasPrefix(line, metricName) && strings.Contains(line, labelMatch) {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				valFloat, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+				return int(valFloat)
+			}
+		}
+	}
+	return 0
 }
 
 // Simple EPP configuration for running without P/D

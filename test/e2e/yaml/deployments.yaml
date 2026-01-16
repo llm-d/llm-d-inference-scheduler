@@ -35,6 +35,7 @@ spec:
         - "9003"
         - --config-file
         - "/etc/epp/epp-config.yaml"
+        - --metrics-endpoint-auth=false
         env:
         - name: PYTHONHASHSEED
           value: "42"
