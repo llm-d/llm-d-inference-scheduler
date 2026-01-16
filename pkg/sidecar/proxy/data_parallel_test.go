@@ -65,8 +65,8 @@ var _ = Describe("Data Parallel support", func() {
 			err = theProxy.startDataParallel(ctx, nil, grp)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(theProxy.dataParallelProxies).To(HaveLen(testDataParallelSize))
-			handler := theProxy.dataParallelProxies["127.0.0.1:"+strconv.Itoa(fakeProxyPort+1)]
+			Expect(theProxy.proxyManager.DataParallelProxies).To(HaveLen(testDataParallelSize))
+			handler := theProxy.proxyManager.DataParallelProxies["127.0.0.1:"+strconv.Itoa(fakeProxyPort+1)]
 			Expect(handler).ToNot(BeNil())
 
 			rank0Handler := sidecarmock.GenericHandler{}

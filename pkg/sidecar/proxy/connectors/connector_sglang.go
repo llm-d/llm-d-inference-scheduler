@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package proxy
+package connectors
 
 import (
 	"bytes"
@@ -27,6 +27,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-logr/logr"
+	httperrors "github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/http_errors"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/manager"
 )
 
 var (
@@ -45,15 +50,29 @@ func init() {
 	}
 }
 
-func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
-	s.logger.V(4).Info("running SGLang protocol", "url", prefillPodHostPort)
+// SGLangProtocolRunner is the protocol implementation for the SGLang connector.
+type SGLangProtocolRunner struct {
+	proxyManager *manager.ProxyManager
+}
+
+// NewSGLangProtocolRunner creates a new SGLang protocol runner.
+func NewSGLangProtocolRunner(proxyManager *manager.ProxyManager) ProtocolRunner {
+	return &SGLangProtocolRunner{
+		proxyManager: proxyManager,
+	}
+}
+
+// Run runs the SGLang protocol.
+func (s *SGLangProtocolRunner) Run(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, logger logr.Logger) {
+	logger = logger.WithValues("protocol", "SGLang", "url", prefillPodHostPort)
+	logger.V(4).Info("running protocol")
 
 	// Make Request
 	requestData, err := s.parseSGLangRequest(r)
 
 	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+		if err := httperrors.ErrorJSONInvalid(err, w); err != nil {
+			logger.Error(err, "failed to send error response to client")
 		}
 		return
 	}
@@ -61,29 +80,29 @@ func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefi
 	roomID := s.generateSGLangRoomID()
 
 	// Inject bootstrap info for both prefill and decode
-	bootstrapInfo := s.addSGLangBootstrapInfo(requestData, prefillPodHostPort, roomID)
+	bootstrapInfo := s.addSGLangBootstrapInfo(requestData, prefillPodHostPort, roomID, logger)
 
 	body, err := json.Marshal(bootstrapInfo)
 	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+		if err := httperrors.ErrorJSONInvalid(err, w); err != nil {
+			logger.Error(err, "failed to send error response to client")
 		}
 		return
 	}
 
 	// Send concurrent prefill and decode requests
-	s.sendSGLangConcurrentRequests(w, r, body, prefillPodHostPort)
+	s.sendSGLangConcurrentRequests(w, r, body, prefillPodHostPort, logger)
 }
 
-func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string) {
+func (s *SGLangProtocolRunner) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string, logger logr.Logger) {
 	// Create separate requests for prefill and decode
 	prefillReq := cloneWithJSONBody(r, body)
 	decodeReq := cloneWithJSONBody(r, body)
 
-	prefillHandler, err := s.prefillerProxyHandler(prefillHost)
+	prefillHandler, err := s.proxyManager.PrefillerProxyHandler(prefillHost, logger)
 	if err != nil {
-		if err := errorBadGateway(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
+		if err := httperrors.ErrorBadGateway(err, w); err != nil {
+			logger.Error(err, "failed to send error response to client")
 		}
 		return
 	}
@@ -92,11 +111,11 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	go func() {
 		pw := &bufferedResponseWriter{}
 		prefillHandler.ServeHTTP(pw, prefillReq)
-		s.logger.V(5).Info("prefill request completed", "status", pw.statusCode)
+		logger.V(5).Info("prefill request completed", "status", pw.statusCode)
 	}()
 
 	// Send decode request synchronously
-	s.decoderProxy.ServeHTTP(w, decodeReq)
+	s.proxyManager.DecoderProxy.ServeHTTP(w, decodeReq)
 }
 
 func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {
@@ -106,7 +125,7 @@ func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {
 	return req
 }
 
-func (s *Server) addSGLangBootstrapInfo(requestData map[string]interface{}, prefillHostPort string, roomID int64) map[string]interface{} {
+func (s *SGLangProtocolRunner) addSGLangBootstrapInfo(requestData map[string]interface{}, prefillHostPort string, roomID int64, logger logr.Logger) map[string]interface{} {
 	modifiedRequest := make(map[string]interface{})
 	for k, v := range requestData {
 		modifiedRequest[k] = v
@@ -116,11 +135,11 @@ func (s *Server) addSGLangBootstrapInfo(requestData map[string]interface{}, pref
 	bootstrapHost := s.getBootstrapHost(prefillHostPort)
 
 	// Add bootstrap information
-	modifiedRequest[requestFieldBootstrapHost] = bootstrapHost
-	modifiedRequest[requestFieldBootstrapPort] = sglangBootstrapPort
-	modifiedRequest[requestFieldBootstrapRoom] = roomID
+	modifiedRequest[keys.RequestFieldBootstrapHost] = bootstrapHost
+	modifiedRequest[keys.RequestFieldBootstrapPort] = sglangBootstrapPort
+	modifiedRequest[keys.RequestFieldBootstrapRoom] = roomID
 
-	s.logger.V(5).Info("bootstrap info added",
+	logger.V(5).Info("bootstrap info added",
 		"bootstrap_host", bootstrapHost,
 		"bootstrap_port", sglangBootstrapPort,
 		"bootstrap_room", roomID)
@@ -128,7 +147,7 @@ func (s *Server) addSGLangBootstrapInfo(requestData map[string]interface{}, pref
 	return modifiedRequest
 }
 
-func (s *Server) parseSGLangRequest(r *http.Request) (map[string]interface{}, error) {
+func (s *SGLangProtocolRunner) parseSGLangRequest(r *http.Request) (map[string]interface{}, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
@@ -142,11 +161,11 @@ func (s *Server) parseSGLangRequest(r *http.Request) (map[string]interface{}, er
 	return requestData, nil
 }
 
-func (s *Server) generateSGLangRoomID() int64 {
+func (s *SGLangProtocolRunner) generateSGLangRoomID() int64 {
 	return time.Now().UnixNano() + int64(rand.Intn(1000))
 }
 
-func (s *Server) getBootstrapHost(prefillHostPort string) string {
+func (s *SGLangProtocolRunner) getBootstrapHost(prefillHostPort string) string {
 	// Extract hostname from prefill host
 	parts := strings.Split(prefillHostPort, ":")
 	return parts[0]

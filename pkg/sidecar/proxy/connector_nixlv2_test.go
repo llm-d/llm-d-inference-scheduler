@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
 )
@@ -78,16 +79,16 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
 		prq1 := testInfo.prefillHandler.CompletionRequests[0]
 
-		Expect(prq1).To(HaveKey(requestFieldKVTransferParams))
-		kvTransferParams, ok := prq1[requestFieldKVTransferParams].(map[string]any)
+		Expect(prq1).To(HaveKey(keys.RequestFieldKVTransferParams))
+		kvTransferParams, ok := prq1[keys.RequestFieldKVTransferParams].(map[string]any)
 		Expect(ok).To(BeTrue())
 
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldDoRemoteDecode, true))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldDoRemotePrefill, false))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteBlockIDs, BeNil()))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteEngineID, BeNil()))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteHost, BeNil()))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemotePort, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldDoRemoteDecode, true))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldDoRemotePrefill, false))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemoteBlockIDs, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemoteEngineID, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemoteHost, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemotePort, BeNil()))
 
 		Expect(prq1).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
 		Expect(prq1).To(HaveKeyWithValue("stream", false))
@@ -95,7 +96,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		Expect(testInfo.prefillHandler.CompletionResponses).To(HaveLen(1))
 		prp1 := testInfo.prefillHandler.CompletionResponses[0]
-		Expect(prp1).To(HaveKey(requestFieldKVTransferParams))
+		Expect(prp1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))

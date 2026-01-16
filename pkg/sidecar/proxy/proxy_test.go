@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
@@ -210,36 +211,36 @@ var _ = Describe("Reverse Proxy", func() {
 				Expect(prefillHandler.CompletionRequests).To(HaveLen(1))
 				prq1 := prefillHandler.CompletionRequests[0]
 
-				Expect(prq1).ToNot(HaveKey(requestFieldDoRemoteDecode))
-				Expect(prq1).To(HaveKey(requestFieldKVTransferParams))
+				Expect(prq1).ToNot(HaveKey(keys.RequestFieldDoRemoteDecode))
+				Expect(prq1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
-				prq1kv, ok := prq1[requestFieldKVTransferParams].(map[string]any)
+				prq1kv, ok := prq1[keys.RequestFieldKVTransferParams].(map[string]any)
 				Expect(ok).To(BeTrue())
-				Expect(prq1kv).To(HaveKeyWithValue(requestFieldDoRemoteDecode, true))
+				Expect(prq1kv).To(HaveKeyWithValue(keys.RequestFieldDoRemoteDecode, true))
 
 				Expect(prq1).To(HaveKeyWithValue("stream", false))
 				Expect(prq1).ToNot(HaveKey("stream_options"))
 
 				Expect(prefillHandler.CompletionResponses).To(HaveLen(1))
 				prp1 := prefillHandler.CompletionResponses[0]
-				Expect(prp1).To(HaveKey(requestFieldKVTransferParams))
+				Expect(prp1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
-				prp1kv, ok := prp1[requestFieldKVTransferParams].(map[string]any)
+				prp1kv, ok := prp1[keys.RequestFieldKVTransferParams].(map[string]any)
 				Expect(ok).To(BeTrue())
 
-				Expect(prp1kv).To(HaveKey(requestFieldRemoteBlockIDs))
-				Expect(prp1kv).To(HaveKey(requestFieldRemoteEngineID))
+				Expect(prp1kv).To(HaveKey(keys.RequestFieldRemoteBlockIDs))
+				Expect(prp1kv).To(HaveKey(keys.RequestFieldRemoteEngineID))
 
 				Expect(decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 				Expect(decodeHandler.CompletionRequests).To(HaveLen(1))
 				drq1 := decodeHandler.CompletionRequests[0]
-				Expect(drq1).To(HaveKey(requestFieldKVTransferParams))
+				Expect(drq1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
-				drq1kv, ok := drq1[requestFieldKVTransferParams].(map[string]any)
+				drq1kv, ok := drq1[keys.RequestFieldKVTransferParams].(map[string]any)
 				Expect(ok).To(BeTrue())
 
-				Expect(drq1kv).To(HaveKey(requestFieldRemoteBlockIDs))
-				Expect(drq1kv).To(HaveKey(requestFieldRemoteEngineID))
+				Expect(drq1kv).To(HaveKey(keys.RequestFieldRemoteBlockIDs))
+				Expect(drq1kv).To(HaveKey(keys.RequestFieldRemoteEngineID))
 
 				cancelFn()
 				<-stoppedCh
@@ -284,36 +285,36 @@ var _ = Describe("Reverse Proxy", func() {
 				Expect(prefillHandler.CompletionRequests).To(HaveLen(1))
 				prq1 := prefillHandler.CompletionRequests[0]
 
-				Expect(prq1).ToNot(HaveKey(requestFieldDoRemoteDecode))
-				Expect(prq1).To(HaveKey(requestFieldKVTransferParams))
+				Expect(prq1).ToNot(HaveKey(keys.RequestFieldDoRemoteDecode))
+				Expect(prq1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
-				prq1kv, ok := prq1[requestFieldKVTransferParams].(map[string]any)
+				prq1kv, ok := prq1[keys.RequestFieldKVTransferParams].(map[string]any)
 				Expect(ok).To(BeTrue())
-				Expect(prq1kv).To(HaveKeyWithValue(requestFieldDoRemoteDecode, true))
+				Expect(prq1kv).To(HaveKeyWithValue(keys.RequestFieldDoRemoteDecode, true))
 
 				Expect(prq1).To(HaveKeyWithValue("stream", false))
 				Expect(prq1).ToNot(HaveKey("stream_options"))
 
 				Expect(prefillHandler.CompletionResponses).To(HaveLen(1))
 				prp1 := prefillHandler.CompletionResponses[0]
-				Expect(prp1).To(HaveKey(requestFieldKVTransferParams))
+				Expect(prp1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
-				prp1kv, ok := prp1[requestFieldKVTransferParams].(map[string]any)
+				prp1kv, ok := prp1[keys.RequestFieldKVTransferParams].(map[string]any)
 				Expect(ok).To(BeTrue())
 
-				Expect(prp1kv).To(HaveKey(requestFieldRemoteBlockIDs))
-				Expect(prp1kv).To(HaveKey(requestFieldRemoteEngineID))
+				Expect(prp1kv).To(HaveKey(keys.RequestFieldRemoteBlockIDs))
+				Expect(prp1kv).To(HaveKey(keys.RequestFieldRemoteEngineID))
 
 				Expect(decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 				Expect(decodeHandler.CompletionRequests).To(HaveLen(1))
 				drq1 := decodeHandler.CompletionRequests[0]
-				Expect(drq1).To(HaveKey(requestFieldKVTransferParams))
+				Expect(drq1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
-				drq1kv, ok := drq1[requestFieldKVTransferParams].(map[string]any)
+				drq1kv, ok := drq1[keys.RequestFieldKVTransferParams].(map[string]any)
 				Expect(ok).To(BeTrue())
 
-				Expect(drq1kv).To(HaveKey(requestFieldRemoteBlockIDs))
-				Expect(drq1kv).To(HaveKey(requestFieldRemoteEngineID))
+				Expect(drq1kv).To(HaveKey(keys.RequestFieldRemoteBlockIDs))
+				Expect(drq1kv).To(HaveKey(keys.RequestFieldRemoteEngineID))
 
 				cancelFn()
 				<-stoppedCh

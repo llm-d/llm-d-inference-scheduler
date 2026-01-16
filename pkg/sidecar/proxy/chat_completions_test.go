@@ -22,7 +22,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/connectors/mock"
 )
 
 func TestServer_chatCompletionsHandler(t *testing.T) {
@@ -119,12 +121,15 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.prefillSamplerFn = func(n int) int { return i % n }
 				// verify the hostPort value
 				var hostPort string
-				s.runConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string) { hostPort = selectedHostPort }
+				s.protocolRunner = &mock.ProtocolRunnerMock{
+					RunFunc: func(_ http.ResponseWriter, _ *http.Request, prefillPodHost string, _ logr.Logger) {
+						hostPort = prefillPodHost
+					},
+				}
 				var passthrough bool
-				s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				s.proxyManager.DecoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 					passthrough = true
 				})
-				s.dataParallelProxies = make(map[string]http.Handler)
 				recorder := httptest.NewRecorder()
 				recorder.Code = 0
 				s.chatCompletionsHandler(recorder, tt.r)
