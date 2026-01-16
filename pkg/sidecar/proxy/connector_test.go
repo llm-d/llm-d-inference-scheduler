@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
@@ -97,8 +98,8 @@ var _ = Describe("Common Connector tests", func() {
 				Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
 				prefillReq := testInfo.prefillHandler.CompletionRequests[0]
 
-				Expect(prefillReq).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
-				Expect(prefillReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxTokens, BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxCompletionTokens, BeNumerically("==", 1)))
 
 				By("verifying decode request has original max_completion_tokens=100")
 				Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
@@ -106,7 +107,7 @@ var _ = Describe("Common Connector tests", func() {
 				decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 
 				// The decode request should have the original max_completion_tokens value
-				Expect(decodeReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 100)))
+				Expect(decodeReq).To(HaveKeyWithValue(keys.RequestFieldMaxCompletionTokens, BeNumerically("==", 100)))
 
 				testInfo.cancelFn()
 				<-testInfo.stoppedCh
@@ -158,8 +159,8 @@ var _ = Describe("Common Connector tests", func() {
 				Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
 				prefillReq := testInfo.prefillHandler.CompletionRequests[0]
 
-				Expect(prefillReq).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
-				Expect(prefillReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxTokens, BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxCompletionTokens, BeNumerically("==", 1)))
 
 				By("verifying decode request does not have max_completion_tokens since it wasn't in original request")
 				Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
@@ -167,7 +168,7 @@ var _ = Describe("Common Connector tests", func() {
 				decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 
 				// The decode request should not have max_completion_tokens if it wasn't in the original request
-				Expect(decodeReq).ToNot(HaveKey("max_completion_tokens"))
+				Expect(decodeReq).ToNot(HaveKey(keys.RequestFieldMaxCompletionTokens))
 
 				testInfo.cancelFn()
 				<-testInfo.stoppedCh
