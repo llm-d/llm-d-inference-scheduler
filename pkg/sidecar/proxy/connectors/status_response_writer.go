@@ -88,12 +88,6 @@ func newResponseWriterWithBuffer(w flushableResponseWriter) *responseWriterWithB
 	return rw
 }
 
-// FirstChunkReady returns a channel that receives nil when the first chunk of
-// body data is available in the buffer, or an error if the write failed.
-func (w *responseWriterWithBuffer) FirstChunkReady() <-chan struct{} {
-	return w.ready
-}
-
 func (w *responseWriterWithBuffer) Header() http.Header {
 	return w.writerFlusher.Header()
 }
