@@ -33,7 +33,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/manager"
 )
 
-// DecodeFirstRunner a decode first protocol runner
+// DecodeFirstRunner is a decode first protocol runner
 type DecodeFirstRunner struct {
 	requestBuilder RequestBuilderFactory
 	labelName      string
@@ -153,9 +153,7 @@ func (dfr *DecodeFirstRunner) tryDecodeBuffered(w http.ResponseWriter, r *http.R
 		}
 
 		err := fmt.Errorf("decode request failed with status code: %d", dw.statusCode)
-		if err := httperrors.ErrorInternalServerError(err, w); err != nil {
-			logger.Error(err, "failed to send error response to client")
-		}
+		logger.Error(err, "decode request failed")
 
 		return false, err
 	}

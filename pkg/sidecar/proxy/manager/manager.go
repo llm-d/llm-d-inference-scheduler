@@ -36,7 +36,7 @@ type ProxyManager struct {
 	DecoderProxy        http.Handler                     // decoder proxy handler
 	PrefillerProxies    *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
 	DataParallelProxies map[string]http.Handler          // Proxies to other vLLM servers
-	ForwardDataParallel bool                             // Use special Data Parallel work around
+	ForwardDataParallel bool                             // Use special Data Parallel workaround
 }
 
 // PrefillerProxyHandler returns a prefiller proxy handler for the given host port
