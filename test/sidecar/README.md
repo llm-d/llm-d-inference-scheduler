@@ -8,7 +8,7 @@ a simple 1P1D sample application using the NIXL connector.
 To deploy this application in the `eval` cluster, run this command:
 
 ```
-$ kustomize build test/config/overlays/fmass/nixl | oc apply -f -
+$ kustomize build test/sidecar/config/overlays/llmd/nixl | oc apply -f -
 ```
 
 Wait a bit (up to 10mn) for the pods to be running.

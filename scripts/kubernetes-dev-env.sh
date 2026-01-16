@@ -71,11 +71,11 @@ export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 # Endpoint Picker (EPP) deployment name
 export EPP_NAME="${EPP_NAME:-${MODEL_NAME_SAFE}-endpoint-picker}"
 
-# EPP container image name
-export EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler}"
-
 # EPP image tag
 export EPP_TAG="${EPP_TAG:-v0.1.0}"
+
+# EPP container image (full reference including tag)
+export EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 
 # Whether P/D mode is enabled for this deployment
 export PD_ENABLED="\"${PD_ENABLED:-false}\""

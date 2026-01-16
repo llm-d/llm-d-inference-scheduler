@@ -6,16 +6,38 @@ Documentation for developing the inference scheduler.
 
 - [Make] `v4`+
 - [Golang] `v1.24`+
+- [Python] `v3.12`
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
 - [Kustomize]
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
+[Python]:https://www.python.org/
 [Docker]:https://www.docker.com/
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
 [Kustomize]:https://kubectl.docs.kubernetes.io/installation/kustomize/
+
+### Python Version Configuration
+
+The project uses Python 3.12 by default, but this can be configured:
+
+**For local development:**
+`PYTHON_VERSION` in the Makefile set which Python version is used.
+
+**For Docker builds:**
+The Python version is parameterized in the Dockerfile via the `PYTHON_VERSION` build argument, which defaults to 3.12. To build with a different Python version:
+
+```bash
+PYTHON_VERSION=3.13 make image-build
+
+# Or directly with Docker
+docker build --build-arg PYTHON_VERSION=3.13 -f Dockerfile.epp .
+```
+
+**For CI/CD:**
+Workflow uses Python 3.12 by default. The version can be set by modifying the `python-version` input in workflow file.
 
 ## Kind Development Environment
 
@@ -227,14 +249,17 @@ curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: applicati
 
 #### Environment Configurateion
 
-**1. Setting the EPP image and tag:**
+**1. Setting the EPP image registry and tag:**
 
-You can optionally set a custom EPP image (otherwise, the default will be used):
+You can optionally set a custom image registry and tag (otherwise, defaults will be used):
 
 ```bash
+export IMAGE_REGISTRY="<YOUR_REGISTRY>"
 export EPP_TAG="<YOUR_TAG>"
-export EPP_IMAGE="<YOUR_REGISTRY>/<YOUR_IMAGE>"
 ```
+
+> [!NOTE]
+> The full image reference will be constructed as `${EPP_IMAGE}`, where `EPP_IMAGE` defaults to `${IMAGE_REGISTRY}/llm-d-inference-scheduler:{EPP_TAG}`. For example, with `IMAGE_REGISTRY=quay.io/<my-id>` and `EPP_TAG=v1.0.0`, the final image will be `quay.io/<my-id>/llm-d-inference-scheduler:v1.0.0`.
 
 **2. Setting the vLLM replicas:**
 
