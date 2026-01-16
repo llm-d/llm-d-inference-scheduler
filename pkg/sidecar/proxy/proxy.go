@@ -28,8 +28,11 @@ import (
 
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	sidecarmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/metrics/sidecar"
 )
 
 const (
@@ -142,6 +145,15 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 
 	s.allowlistValidator = allowlistValidator
 
+	// Register Prometheus metrics
+	for _, collector := range sidecarmetrics.GetCollectors() {
+		if err := prometheus.Register(collector); err != nil {
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				s.logger.Error(err, "Failed to register Prometheus collector")
+			}
+		}
+	}
+
 	// Configure handlers
 	s.handler = s.createRoutes()
 
@@ -152,6 +164,11 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 
 	grp.Go(func() error {
 		return s.startHTTP(ctx, cert)
+	})
+
+	// Start metrics server on port 9090
+	grp.Go(func() error {
+		return s.startMetricsServer(ctx)
 	})
 
 	return grp.Wait()

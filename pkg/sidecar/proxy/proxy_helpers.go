@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // startHTTP starts the HTTP reverse proxy.
@@ -123,4 +125,37 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 		}
 	}
 	return decoderProxy
+}
+
+// startMetricsServer starts the Prometheus metrics HTTP server on port 9090.
+func (s *Server) startMetricsServer(ctx context.Context) error {
+	metricsPort := "9090"
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+
+	metricsServer := &http.Server{
+		Addr:              ":" + metricsPort,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
+	}
+
+	// Setup graceful termination
+	go func() {
+		<-ctx.Done()
+		s.logger.Info("shutting down metrics server")
+		ctx, cancelFn := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelFn()
+		if err := metricsServer.Shutdown(ctx); err != nil {
+			s.logger.Error(err, "failed to gracefully shutdown metrics server")
+		}
+	}()
+
+	s.logger.Info("starting metrics server", "port", metricsPort)
+	if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		s.logger.Error(err, "metrics server failed")
+		return err
+	}
+
+	return nil
 }

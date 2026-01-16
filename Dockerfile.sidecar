@@ -17,6 +17,7 @@ RUN go mod download
 COPY cmd/pd-sidecar/main.go cmd/cmd.go
 COPY pkg/sidecar pkg/sidecar
 COPY pkg/common pkg/common
+COPY pkg/metrics pkg/metrics
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -34,5 +35,7 @@ FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
 WORKDIR /
 COPY --from=builder /workspace/bin/pd-sidecar /app/pd-sidecar
 USER 65532:65532
+
+EXPOSE 8000 9090
 
 ENTRYPOINT ["/app/pd-sidecar"]

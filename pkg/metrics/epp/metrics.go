@@ -1,5 +1,5 @@
-// Package metrics provides metrics registration for the epp.
-package metrics
+// Package epp provides Prometheus metrics for the EPP (Endpoint Picker/Scheduler).
+package epp
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	// SchedulerSubsystem is the metric prefix of the package.
+	// SchedulerSubsystem is the metric prefix for EPP metrics.
 	SchedulerSubsystem = "llm_d_inference_scheduler"
 
 	// DecisionTypeDecodeOnly is for requests that are routed to decode instance only.
@@ -18,7 +18,7 @@ const (
 )
 
 var (
-	// SchedulerPDDecisionCount records request P/D decision.
+	// SchedulerPDDecisionCount records request P/D decision made by the EPP scheduler.
 	SchedulerPDDecisionCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: SchedulerSubsystem,
@@ -29,7 +29,7 @@ var (
 	)
 )
 
-// GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
+// GetCollectors returns all custom collectors for the EPP.
 func GetCollectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		SchedulerPDDecisionCount,

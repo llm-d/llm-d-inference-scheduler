@@ -21,10 +21,16 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+
+	sidecarmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/metrics/sidecar"
 )
 
 func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.Info("running LMCache protocol")
+
+	// Timing: capture request start for end-to-end metrics
+	requestStart := time.Now()
 
 	// Read and parse request body
 	defer r.Body.Close() //nolint:all
@@ -45,6 +51,8 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	}
 
 	// Create prefiller request. Set max_tokens to 1.
+	// Prefill Stage
+	prefillStart := time.Now()
 
 	ctx := r.Context()
 	preq := r.Clone(ctx)
@@ -75,17 +83,33 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
+	prefillDuration := time.Since(prefillStart)
+
 	if pw.statusCode < 200 || pw.statusCode >= 300 {
 		s.logger.Error(err, "request failed", "code", pw.statusCode)
 		w.WriteHeader(pw.statusCode)
 		return
 	}
 
-	// Forward original request to local decoder
+	// Decode Stage
+	decodeStart := time.Now()
 
+	// Forward original request to local decoder
 	r.Body = io.NopCloser(strings.NewReader(string(original)))
 	if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
 		s.decoderProxy.ServeHTTP(w, r)
 	}
+
+	decodeDuration := time.Since(decodeStart)
+
+	// Calculate and record P/D coordinator metrics
+	totalDuration := time.Since(requestStart)
+	coordinatorOverhead := decodeStart.Sub(prefillStart.Add(prefillDuration))
+
+	// Record Prometheus metrics for dashboard aggregation
+	sidecarmetrics.PDProxyCoordinatorOverheadMilliseconds.WithLabelValues("lmcache").Observe(float64(coordinatorOverhead.Milliseconds()))
+	sidecarmetrics.PDProxyPrefillDurationMilliseconds.WithLabelValues("lmcache").Observe(float64(prefillDuration.Milliseconds()))
+	sidecarmetrics.PDProxyDecodeDurationMilliseconds.WithLabelValues("lmcache").Observe(float64(decodeDuration.Milliseconds()))
+	sidecarmetrics.PDProxyTotalDurationMilliseconds.WithLabelValues("lmcache").Observe(float64(totalDuration.Milliseconds()))
 }
