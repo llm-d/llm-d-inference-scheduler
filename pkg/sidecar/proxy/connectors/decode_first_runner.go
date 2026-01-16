@@ -165,6 +165,7 @@ func (dfr *DecodeFirstRunner) tryDecodeBuffered(w http.ResponseWriter, r *http.R
 			logger.Error(err, "failed to unmarshal decode response", "response", dw.buffer.String())
 			return false, err
 		}
+		return false, err
 	}
 
 	// Check for cache_threshold finish reason
