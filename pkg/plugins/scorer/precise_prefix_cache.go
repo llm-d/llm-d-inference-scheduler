@@ -31,7 +31,7 @@ type PrecisePrefixCachePluginConfig struct {
 	IndexerConfig *kvcache.Config `json:"indexerConfig"`
 	// KVEventsConfig holds the configuration for the `kvevents.Pool` which is
 	// used to subscribe to KV-cache events and update the internal KV-cache
-	// index state.
+	// index st	ate.
 	KVEventsConfig *kvevents.Config `json:"kvEventsConfig"`
 }
 
