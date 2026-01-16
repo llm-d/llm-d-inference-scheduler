@@ -31,24 +31,21 @@ func (f *DefaultRequestBuilderFactory) New() RequestBuilder {
 }
 
 type defaultRequestBuilder struct {
-	stream              *bool
-	streamOptions       *map[string]any
-	maxTokens           *int
-	maxCompletionTokens *int
+	stream, streamOptions, maxTokens, maxCompletionTokens *any
 }
 
 func (c *defaultRequestBuilder) PreparePrefillRequest(completionRequest map[string]any) map[string]any {
 	prefillRequest := maps.Clone(completionRequest)
-	if stream, ok := prefillRequest[keys.RequestFieldStream].(bool); ok {
+	if stream, ok := prefillRequest[keys.RequestFieldStream]; ok {
 		c.stream = &stream
 	}
-	if streamOptions, ok := prefillRequest[keys.RequestFieldStreamOptions].(map[string]any); ok {
+	if streamOptions, ok := prefillRequest[keys.RequestFieldStreamOptions]; ok {
 		c.streamOptions = &streamOptions
 	}
-	if maxTokens, ok := prefillRequest[keys.RequestFieldMaxTokens].(int); ok {
+	if maxTokens, ok := prefillRequest[keys.RequestFieldMaxTokens]; ok {
 		c.maxTokens = &maxTokens
 	}
-	if maxCompletionTokens, ok := prefillRequest[keys.RequestFieldMaxCompletionTokens].(int); ok {
+	if maxCompletionTokens, ok := prefillRequest[keys.RequestFieldMaxCompletionTokens]; ok {
 		c.maxCompletionTokens = &maxCompletionTokens
 	}
 
