@@ -11,6 +11,9 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -19,6 +22,7 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 const (
@@ -124,8 +128,35 @@ func (h *PdProfileHandler) WithName(name string) *PdProfileHandler {
 // previously executed cycles along with their results.
 func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
 	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
+	// Start tracing span for profile picking operation
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(ctx, "llm_d.epp.profile_handler.pick",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	// Set initial attributes
+	span.SetAttributes(
+		attribute.Int("llm_d.profile_handler.total_profiles", len(profiles)),
+		attribute.Int("llm_d.profile_handler.executed_profiles", len(profileResults)),
+	)
+
+	// Set optional request attributes if request is not nil
+	if request != nil {
+		if request.TargetModel != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+		}
+		if request.RequestId != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+		}
+	}
+
 	if _, executed := profileResults[h.decodeProfile]; !executed {
 		// if decode profile was not executed yet, first let the scheduler run the decode profile
+		span.SetAttributes(
+			attribute.String("llm_d.profile_handler.decision", "run_decode"),
+			attribute.String("llm_d.profile_handler.selected_profile", h.decodeProfile),
+		)
 		return map[string]*framework.SchedulerProfile{
 			h.decodeProfile: profiles[h.decodeProfile],
 		}
@@ -135,6 +166,10 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 	// when a profile run fails its result value is nil. we need to check decode result before continuing to prefill
 	// check if all configured profiles have been executed, or if decode failed, no need to run more profiles.
 	if len(profiles) == len(profileResults) || profileResults[h.decodeProfile] == nil {
+		span.SetAttributes(
+			attribute.String("llm_d.profile_handler.decision", "complete"),
+			attribute.Bool("llm_d.profile_handler.decode_failed", profileResults[h.decodeProfile] == nil),
+		)
 		return map[string]*framework.SchedulerProfile{}
 	}
 
@@ -142,8 +177,14 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 		userInput, err := getUserInputBytes(request)
 		if err != nil {
 			log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input bytes")
+			span.SetStatus(codes.Error, err.Error())
 			return nil
 		}
+
+		span.SetAttributes(
+			attribute.Int("llm_d.profile_handler.pd_threshold", h.pdThreshold),
+			attribute.Int("llm_d.profile_handler.user_input_bytes", len(userInput)),
+		)
 
 		// if we're here that means decode profile ran successfully, and we have additional profile configured that didn't run yet,
 		// which means PD is enabled (otherwise, prefill profile is not configured at all and this profile handler is not used).
@@ -159,17 +200,33 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *types.CycleStat
 			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize) / float64(len(userInput))
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
 				"promptLength", len(userInput))
+
+			span.SetAttributes(
+				attribute.Float64("llm_d.profile_handler.cache_hit_ratio", hitPercentagePrefix),
+				attribute.Int("llm_d.profile_handler.cache_hits", hitPrefix),
+			)
 		}
 
-		if (1.0-hitPercentagePrefix)*float64(len(userInput)) < float64(h.pdThreshold) {
+		nonCachedBytes := (1.0 - hitPercentagePrefix) * float64(len(userInput))
+		span.SetAttributes(attribute.Float64("llm_d.profile_handler.non_cached_bytes", nonCachedBytes))
+
+		if nonCachedBytes < float64(h.pdThreshold) {
 			log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
 			metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
+			span.SetAttributes(
+				attribute.String("llm_d.profile_handler.decision", "decode_only"),
+				attribute.String("llm_d.profile_handler.reason", "below_threshold"),
+			)
 			return map[string]*framework.SchedulerProfile{} // do not run prefill
 		}
 	}
 
 	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
 	// run the prefill profile
+	span.SetAttributes(
+		attribute.String("llm_d.profile_handler.decision", "prefill_decode"),
+		attribute.String("llm_d.profile_handler.selected_profile", h.prefillProfile),
+	)
 	return map[string]*framework.SchedulerProfile{
 		h.prefillProfile: profiles[h.prefillProfile],
 	}

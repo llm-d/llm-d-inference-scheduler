@@ -29,6 +29,9 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 var (
@@ -70,6 +73,29 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 	log.IntoContext(ctx, logger)
 
+	// Initialize tracing before creating any spans
+	shutdownTracing, err := telemetry.InitTracing(ctx)
+	if err != nil {
+		// Log error but don't fail - tracing is optional
+		logger.Error(err, "Failed to initialize tracing")
+	}
+	if shutdownTracing != nil {
+		defer func() {
+			if err := shutdownTracing(ctx); err != nil {
+				logger.Error(err, "Failed to shutdown tracing")
+			}
+		}()
+	}
+
+	// Add startup span to verify tracing is working
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(ctx, "llm_d.pd_proxy.startup")
+	span.SetAttributes(
+		attribute.String("component", "llm-d-pd-proxy"),
+		attribute.String("operation", "startup"),
+	)
+	defer span.End()
+
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
 	// Validate connector
@@ -108,6 +134,7 @@ func main() {
 	targetURL, err := url.Parse(scheme + "://localhost:" + *vLLMPort)
 	if err != nil {
 		logger.Error(err, "failed to create targetURL")
+		span.SetStatus(codes.Error, "failed to create targetURL")
 		return
 	}
 
@@ -121,6 +148,7 @@ func main() {
 		}
 		if err != nil {
 			logger.Error(err, "failed to create TLS certificate")
+			span.SetStatus(codes.Error, "failed to create TLS certificate")
 			return
 		}
 		cert = &tempCert
@@ -139,6 +167,7 @@ func main() {
 	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *poolGroup, *inferencePoolNamespace, *inferencePoolName)
 	if err != nil {
 		logger.Error(err, "failed to create SSRF protection validator")
+		span.SetStatus(codes.Error, "failed to create SSRF protection validator")
 		return
 	}
 
