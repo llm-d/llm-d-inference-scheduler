@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,13 +39,13 @@ type ActiveRequestParameters struct {
 
 // requestEntry represents a single request in the cache
 type requestEntry struct {
-	PodName   string
+	PodNames  []string
 	RequestID string
 }
 
 // String returns a string representation of the request entry.
-func (r *requestEntry) String() string {
-	return fmt.Sprintf("%s.%s", r.PodName, r.RequestID)
+func (r requestEntry) String() string {
+	return fmt.Sprintf("%s:%s", r.RequestID, strings.Join(r.PodNames, "."))
 }
 
 // compile-time type assertion
@@ -97,7 +98,9 @@ func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *Act
 	requestCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
 		item *ttlcache.Item[string, *requestEntry]) {
 		if reason == ttlcache.EvictionReasonExpired {
-			scorer.decrementPodCount(item.Value().PodName)
+			for _, podName := range item.Value().PodNames {
+				scorer.decrementPodCount(podName)
+			}
 		}
 	})
 
@@ -166,47 +169,62 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types
 // PreRequest is called before a request is sent to the target pod.
 // It creates a new request entry in the cache with its own TTL and
 // increments the pod count for fast lookup.
-func (s *ActiveRequest) PreRequest(ctx context.Context, request *types.LLMRequest,
-	schedulingResult *types.SchedulingResult) {
+func (s *ActiveRequest) PreRequest(
+	ctx context.Context,
+	request *types.LLMRequest,
+	schedulingResult *types.SchedulingResult,
+) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	for _, profileResult := range schedulingResult.ProfileResults { // schedulingResult guaranteed not to be nil
-		if profileResult == nil || profileResult.TargetPods == nil || len(profileResult.TargetPods) == 0 {
+	targetProfiles := []string{schedulingResult.PrimaryProfileName}
+	if schedulingResult.PrimaryProfileName != "prefill" {
+		targetProfiles = append(targetProfiles, "prefill")
+	}
+
+	podNames := make([]string, 0, len(targetProfiles))
+	for _, profileName := range targetProfiles {
+		profileResult := schedulingResult.ProfileResults[profileName]
+		if profileResult == nil || len(profileResult.TargetPods) == 0 {
 			continue
 		}
 
-		// create request entry for first pod only. TODO: support fallback pods
-		entry := &requestEntry{
-			PodName:   profileResult.TargetPods[0].GetPod().NamespacedName.String(),
-			RequestID: request.RequestId,
-		}
-
-		// add to request cache with TTL
-		s.requestCache.Set(entry.String(), entry, 0) // Use default TTL
-		s.incrementPodCount(entry.PodName)
-
-		debugLogger.Info("Added request to cache", "requestEntry", entry.String())
+		podName := profileResult.TargetPods[0].GetPod().NamespacedName.String()
+		podNames = append(podNames, podName)
+		s.incrementPodCount(podName)
+		debugLogger.Info("Added request to cache", "requestId", request.RequestId, "podName", podName)
 	}
+
+	// add to request cache with TTL
+	s.requestCache.Set(request.RequestId, &requestEntry{PodNames: podNames, RequestID: request.RequestId}, 0) // Use default TTL
 }
 
 // ResponseComplete is called after a response is sent to the client.
 // It removes the specific request entry from the cache and decrements
 // the pod count.
-func (s *ActiveRequest) ResponseComplete(ctx context.Context, request *types.LLMRequest,
-	_ *requestcontrol.Response, targetPod *backend.Pod) {
+func (s *ActiveRequest) ResponseComplete(
+	ctx context.Context,
+	request *types.LLMRequest,
+	_ *requestcontrol.Response,
+	targetPod *backend.Pod,
+) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.ResponseComplete")
 	if targetPod == nil {
 		debugLogger.Info("Skipping ResponseComplete because targetPod is nil")
 		return
 	}
 
-	entry := requestEntry{targetPod.NamespacedName.String(), request.RequestId}
-
-	if _, found := s.requestCache.GetAndDelete(entry.String()); found {
-		s.decrementPodCount(entry.PodName)
-		debugLogger.Info("Removed request from cache", "requestEntry", entry.String())
+	if item, found := s.requestCache.GetAndDelete(request.RequestId); found {
+		entry := item.Value()
+		if entry != nil {
+			for _, podName := range entry.PodNames {
+				s.decrementPodCount(podName)
+			}
+			debugLogger.Info("Removed request from cache", "requestEntry", entry.String())
+		} else {
+			debugLogger.Info("Request entry value is nil", "requestId", request.RequestId)
+		}
 	} else {
-		debugLogger.Info("Request not found in cache", "requestEntry", entry.String())
+		debugLogger.Info("Request not found in cache", "requestId", request.RequestId)
 	}
 }
 
