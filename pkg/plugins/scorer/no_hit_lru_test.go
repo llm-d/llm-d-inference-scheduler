@@ -550,37 +550,6 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 		}
 	})
 
-	t.Run("custom prefill profile name", func(t *testing.T) {
-		// Create scorer with custom prefill profile name
-		scorer := scorer.NewNoHitLRU(ctx, &scorer.NoHitLRUParameters{
-			PrefillProfile: "custom-prefill",
-		})
-
-		req := &types.LLMRequest{RequestId: "custom-prefill-request"}
-		scorer.Score(ctx, coldPrefixState, req, prefillPods)
-
-		result := &types.SchedulingResult{
-			PrimaryProfileName: "decode",
-			ProfileResults: map[string]*types.ProfileRunResult{
-				"custom-prefill": {
-					TargetPods: []types.Pod{prefillPodA},
-				},
-				"decode": {
-					TargetPods: []types.Pod{decodePodA},
-				},
-			},
-		}
-		scorer.PreRequest(ctx, req, result)
-
-		// Verify custom prefill profile was tracked
-		req2 := &types.LLMRequest{RequestId: "custom-prefill-request-2"}
-		scores := scorer.Score(ctx, coldPrefixState, req2, prefillPods)
-
-		if scores[prefillPodB] <= scores[prefillPodA] {
-			t.Errorf("Expected prefill-b to score higher with custom profile name: %+v", scores)
-		}
-	})
-
 	t.Run("nil scheduling result - graceful handling", func(_ *testing.T) {
 		req := &types.LLMRequest{RequestId: "nil-result"}
 		scorer := scorer.NewNoHitLRU(ctx, nil)

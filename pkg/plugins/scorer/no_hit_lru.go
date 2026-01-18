@@ -292,17 +292,16 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 		return
 	}
 
-	s.moveTargetPodToFront(ctx, request, schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName], schedulingResult.PrimaryProfileName)
-	s.moveTargetPodToFront(ctx, request, schedulingResult.ProfileResults[defaultPrefillProfile], defaultPrefillProfile)
+	if targetProfile, ok := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]; ok && targetProfile != nil && len(targetProfile.TargetPods) != 0 {
+		s.moveTargetPodToFront(ctx, request, targetProfile, schedulingResult.PrimaryProfileName)
+	}
+	if targetProfile, ok := schedulingResult.ProfileResults[defaultPrefillProfile]; ok && targetProfile != nil && len(targetProfile.TargetPods) != 0 {
+		s.moveTargetPodToFront(ctx, request, targetProfile, defaultPrefillProfile)
+	}
 }
 
 func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *types.LLMRequest, targetProfile *types.ProfileRunResult, profileName string) {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
-
-	// Get the target profile's target pod
-	if targetProfile == nil || len(targetProfile.TargetPods) == 0 {
-		return
-	}
 
 	targetPod := targetProfile.TargetPods[0]
 	podName := targetPod.GetPod().NamespacedName.String()
