@@ -509,17 +509,14 @@ pods configured for specific context length ranges.
 - Optimize performance by matching workload characteristics to hardware capabilities
 - Support heterogeneous deployments with different GPU configurations
 
-**Operation Modes:**
-
-1. **Filter Mode**: Excludes pods that don't have a context length range matching the request
-   - Pods without the label are included (they accept any context length)
-   - Pods with matching ranges are included
-   
-2. **Score Mode** (Default): Scores all pods based on how well their ranges match the request
+The plugin scores all pods based on how well their ranges match the request
    - Higher scores for tighter/more specific ranges
    - Lower scores for very wide ranges
    - Zero score for non-matching ranges
    - Neutral score (0.5) for pods without labels
+
+If `enableFiltering` is set to true, the plugin filters out pods that do not match the request's context length.
+This is useful for strict routing scenarios where only compatible pods should be considered.
 
 **Configuration:**
 
@@ -527,8 +524,8 @@ pods configured for specific context length ranges.
 - **Parameters**:
   - `label` (optional): Pod label name containing context length range(s). 
     Default: `llm-d.ai/context-length-range`
-  - `mode` (optional): Operation mode - `filter` or `score`. 
-    Default: `score`
+  - `enableFiltering` (optional): If true, the plugin operates as a filter, excluding non-matching pods. 
+    Default: false
 
 **Label Format:**
 
@@ -570,7 +567,7 @@ schedulingProfiles:
 plugins:
   - type: context-length-aware
     parameters:
-      mode: filter
+      enableFiltering: true
       label: llm-d.ai/context-length-range
   - type: max-score-picker
 schedulingProfiles:

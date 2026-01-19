@@ -32,13 +32,14 @@ type contextLengthAwareParams struct {
 	// Multiple ranges can be specified with comma separation (e.g., "0-2048,8192-16384")
 	Label string `json:"label"`
 
-	// Mode determines the behavior: "filter" or "score"
-	// - "filter": filters out pods that don't match the request's context length
-	// - "score": scores all pods, giving higher scores to better matches
-	Mode string `json:"mode"`
+	// EnableFiltering determines whether the plugin also filters pods that don't match a
+	// request's context length.
+	// If false, the plugin only scores pods.
+	// Default is false.
+	EnableFiltering bool `json:"enableFiltering"`
 }
 
-// contextRange represents a single context length range
+// contextRange represents a single context length range.
 type contextRange struct {
 	min int
 	max int
@@ -49,13 +50,13 @@ var _ framework.Scorer = &ContextLengthAware{} // validate interface conformance
 
 // ContextLengthAwareFactory defines the factory function for the ContextLengthAware plugin.
 func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
-	parameters := contextLengthAwareParams{
-		Label: DefaultContextLengthLabel,
-		Mode:  "score", // default to scoring mode
+	parameters := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: false,
 	}
 
 	if rawParameters != nil {
-		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+		if err := json.Unmarshal(rawParameters, parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' plugin - %w", ContextLengthAwareType, err)
 		}
 	}
@@ -64,38 +65,30 @@ func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plu
 		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'label' must be specified", ContextLengthAwareType)
 	}
 
-	if parameters.Mode != "filter" && parameters.Mode != "score" {
-		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'mode' must be either 'filter' or 'score'", ContextLengthAwareType)
-	}
-
-	return NewContextLengthAware(name, parameters.Label, parameters.Mode), nil
+	return NewContextLengthAware(name, parameters), nil
 }
 
-// NewContextLengthAware creates and returns an instance of the ContextLengthAware plugin
-// name - the plugin name
-// labelName - the name of the label to check for context length ranges
-// mode - either "filter" or "score"
-func NewContextLengthAware(name string, labelName string, mode string) *ContextLengthAware {
+// NewContextLengthAware creates and returns an instance of the ContextLengthAware plugin.
+func NewContextLengthAware(name string, params *contextLengthAwareParams) *ContextLengthAware {
 	return &ContextLengthAware{
-		typedName: plugins.TypedName{Type: ContextLengthAwareType, Name: name},
-		labelName: labelName,
-		mode:      mode,
+		typedName:       plugins.TypedName{Type: ContextLengthAwareType, Name: name},
+		labelName:       params.Label,
+		enableFiltering: params.EnableFiltering,
 	}
 }
 
 // ContextLengthAware is a plugin that filters or scores pods based on their association
 // with input context length groups.
-// It checks for a specific label on pods and either:
-// - filters out pods from a group that does not match the input context length
-// - scores pods higher if they belong to a group that matches the input context length
-//   - if a pod belongs to multiple groups, the one with tighter boundaries to the input context length is preferred
+// It checks for a specific label on pods that defines the context length ranges they support.
+// If filtering is enabled, pods that don't support the request's context length are filtered out.
+// Additionally, it scores pods based on how well their context length ranges match the request.
 type ContextLengthAware struct {
 	// typedName defines the plugin typed name
 	typedName plugins.TypedName
 	// labelName defines the name of the label to be checked
 	labelName string
-	// mode determines whether to filter or score
-	mode string
+	// enableFiltering indicates whether filtering is enabled
+	enableFiltering bool
 }
 
 // TypedName returns the typed name of the plugin.
@@ -112,13 +105,13 @@ func (p *ContextLengthAware) WithName(name string) *ContextLengthAware {
 // Filter filters out pods that don't have a context length range matching the request
 // This is only active when mode is "filter".
 func (p *ContextLengthAware) Filter(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) []types.Pod {
-	if p.mode != "filter" {
+	if !p.enableFiltering {
 		return pods // pass through if not in filter mode
 	}
 
 	contextLength := estimateContextLength(request)
 	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware.Filter")
-	logger.Info("Filtering pods by context length", "estimatedContextLength", contextLength)
+	logger.V(logutil.TRACE).Info("Filtering pods by context length", "estimatedContextLength", contextLength)
 
 	filteredPods := []types.Pod{}
 
@@ -142,7 +135,8 @@ func (p *ContextLengthAware) Filter(ctx context.Context, _ *types.CycleState, re
 		}
 	}
 
-	logger.Info("Filtered pods", "originalCount", len(pods), "filteredCount", len(filteredPods))
+	logger.V(logutil.TRACE).Info("Filtered pods", "originalCount", len(pods),
+		"filteredCount", len(filteredPods))
 	return filteredPods
 }
 
@@ -151,7 +145,7 @@ func (p *ContextLengthAware) Filter(ctx context.Context, _ *types.CycleState, re
 func (p *ContextLengthAware) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
 	contextLength := estimateContextLength(request)
 	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware.Score")
-	logger.Info("Scoring pods by context length", "estimatedContextLength", contextLength)
+	logger.V(logutil.TRACE).Info("Scoring pods by context length", "estimatedContextLength", contextLength)
 
 	scoredPods := make(map[types.Pod]float64)
 
@@ -175,7 +169,7 @@ func (p *ContextLengthAware) Score(ctx context.Context, _ *types.CycleState, req
 		scoredPods[pod] = score
 	}
 
-	logger.Info("Scored pods", "scores", scoredPods)
+	logger.V(logutil.TRACE).Info("Scored pods", "scores", scoredPods)
 	return scoredPods
 }
 

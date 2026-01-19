@@ -141,7 +141,11 @@ func TestContextLengthAwareFilter(t *testing.T) {
 			map[string]string{}),
 	}
 
-	plugin := NewContextLengthAware("test-filter", DefaultContextLengthLabel, "filter")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: true,
+	}
+	plugin := NewContextLengthAware("test-filter", params)
 	request := createRequest()
 
 	// With empty request body, context length is 0, matches 0-100 range
@@ -174,7 +178,11 @@ func TestContextLengthAwareScore(t *testing.T) {
 			map[string]string{}),
 	}
 
-	plugin := NewContextLengthAware("test-scorer", DefaultContextLengthLabel, "score")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: false,
+	}
+	plugin := NewContextLengthAware("test-scorer", params)
 	request := createRequest()
 
 	scores := plugin.Score(ctx, nil, request, pods)
@@ -383,7 +391,11 @@ func TestCalculateRangeScore(t *testing.T) {
 
 func TestFilterPassthroughWhenNotInFilterMode(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	plugin := NewContextLengthAware("test-scorer", DefaultContextLengthLabel, "score")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: false,
+	}
+	plugin := NewContextLengthAware("test-scorer", params)
 
 	pods := []types.Pod{
 		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "pod1"}, "10.0.0.1",
@@ -401,7 +413,11 @@ func TestFilterPassthroughWhenNotInFilterMode(t *testing.T) {
 
 func TestInvalidRangeLabelsInFilter(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	plugin := NewContextLengthAware("test-filter", DefaultContextLengthLabel, "filter")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: true,
+	}
+	plugin := NewContextLengthAware("test-filter", params)
 
 	pods := []types.Pod{
 		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "invalid-range"},
@@ -422,7 +438,11 @@ func TestInvalidRangeLabelsInFilter(t *testing.T) {
 
 func TestInvalidRangeLabelsInScore(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	plugin := NewContextLengthAware("test-scorer", DefaultContextLengthLabel, "score")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: false,
+	}
+	plugin := NewContextLengthAware("test-scorer", params)
 
 	pods := []types.Pod{
 		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "invalid-range"},

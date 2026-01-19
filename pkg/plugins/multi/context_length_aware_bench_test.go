@@ -2,6 +2,7 @@ package multi
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -13,7 +14,11 @@ import (
 // BenchmarkContextLengthAwareFilter benchmarks the filter operation
 func BenchmarkContextLengthAwareFilter(b *testing.B) {
 	ctx := context.Background()
-	plugin := NewContextLengthAware("bench-filter", DefaultContextLengthLabel, "filter")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: true,
+	}
+	plugin := NewContextLengthAware("bench-filter", params)
 	request := &types.LLMRequest{RequestId: "bench-request"}
 
 	// Create a realistic set of pods with various range configurations
@@ -39,7 +44,11 @@ func BenchmarkContextLengthAwareFilter(b *testing.B) {
 // BenchmarkContextLengthAwareScore benchmarks the score operation
 func BenchmarkContextLengthAwareScore(b *testing.B) {
 	ctx := context.Background()
-	plugin := NewContextLengthAware("bench-scorer", DefaultContextLengthLabel, "score")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: false,
+	}
+	plugin := NewContextLengthAware("bench-scorer", params)
 	request := &types.LLMRequest{RequestId: "bench-request"}
 
 	pods := []types.Pod{
@@ -64,7 +73,11 @@ func BenchmarkContextLengthAwareScore(b *testing.B) {
 // BenchmarkContextLengthAwareScore_LargePodSet benchmarks scoring with many pods
 func BenchmarkContextLengthAwareScore_LargePodSet(b *testing.B) {
 	ctx := context.Background()
-	plugin := NewContextLengthAware("bench-scorer", DefaultContextLengthLabel, "score")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: false,
+	}
+	plugin := NewContextLengthAware("bench-scorer", params)
 	request := &types.LLMRequest{RequestId: "bench-request"}
 
 	// Create 100 pods with various configurations
@@ -188,7 +201,11 @@ func BenchmarkMatchesAnyRange(b *testing.B) {
 // BenchmarkFilterWithInvalidLabels benchmarks filtering with some invalid labels
 func BenchmarkFilterWithInvalidLabels(b *testing.B) {
 	ctx := context.Background()
-	plugin := NewContextLengthAware("bench-filter", DefaultContextLengthLabel, "filter")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: true,
+	}
+	plugin := NewContextLengthAware("bench-filter", params)
 	request := &types.LLMRequest{RequestId: "bench-request"}
 
 	pods := []types.Pod{
@@ -213,7 +230,11 @@ func BenchmarkFilterWithInvalidLabels(b *testing.B) {
 // BenchmarkScoreWithInvalidLabels benchmarks scoring with some invalid labels
 func BenchmarkScoreWithInvalidLabels(b *testing.B) {
 	ctx := context.Background()
-	plugin := NewContextLengthAware("bench-scorer", DefaultContextLengthLabel, "score")
+	params := &contextLengthAwareParams{
+		Label:           DefaultContextLengthLabel,
+		EnableFiltering: false,
+	}
+	plugin := NewContextLengthAware("bench-scorer", params)
 	request := &types.LLMRequest{RequestId: "bench-request"}
 
 	pods := []types.Pod{
