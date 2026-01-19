@@ -450,6 +450,7 @@ plugins:
         blockSize: 16                         # must match vLLM block size if not default (16)
         hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
       tokenizersPoolConfig:
+	  	modelName: Qwen/Qwen2.5-1.5B-Instruct
         hf:
           tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:

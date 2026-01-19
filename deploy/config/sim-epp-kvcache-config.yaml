@@ -15,6 +15,7 @@ plugins:
         blockSize: 16                         # must match vLLM block size if not default (16)
         hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
       tokenizersPoolConfig:
+        modelName: <model-name>            # specify the model name to use for tokenizer loading
         hf:
           tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:

@@ -330,6 +330,7 @@ plugins:
           blockSize: 64
           hashSeed: "12345"
       tokenizersPoolConfig:
+        modelName: hf-repo/model-name
         hf:
           huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
       kvBlockIndexConfig:

@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache"
-	"github.com/llm-d/llm-d-kv-cache-manager/pkg/kvcache/kvevents"
-	preprocessing "github.com/llm-d/llm-d-kv-cache-manager/pkg/preprocessing/chat_completions"
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvevents"
+	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
@@ -85,8 +86,10 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 // If the configuration is invalid or if the indexer fails to initialize,
 // an error is returned.
 func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePrefixCacheScorer, error) {
+	tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
+
 	// initialize the indexer
-	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig)
+	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig, tokenProcessor)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create `kvcache.Indexer`: %w", err)
 	}
@@ -94,7 +97,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	go kvCacheIndexer.Run(ctx)
 
 	// initialize the KV-events pool
-	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex())
+	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex(), tokenProcessor)
 	pool.Start(ctx)
 
 	return &PrecisePrefixCacheScorer{

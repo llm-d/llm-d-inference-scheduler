@@ -118,7 +118,7 @@ install-python-deps: ## Sets up Python virtual environment and installs dependen
 	fi
 	@echo "Upgrading pip and installing dependencies..."
 	@$(VENV_BIN)/pip install --upgrade pip --quiet
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null); \
+	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
 	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt" ]; then \
 		echo "Installing Python dependencies from kv-cache-manager..."; \
 		$(VENV_BIN)/pip install --quiet -r "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt"; \
@@ -185,7 +185,7 @@ test-unit: test-unit-epp test-unit-sidecar
 .PHONY: test-unit-%
 test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null || echo ""); \
+	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache 2>/dev/null || echo ""); \
 	PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
 	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
