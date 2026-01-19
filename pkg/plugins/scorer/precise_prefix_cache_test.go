@@ -209,21 +209,21 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to preprocessing format
-				var chatMessages []preprocessing.ChatMessage
+				var conversations []preprocessing.Conversation
 				for _, msg := range req.ChatCompletions.Messages {
-					chatMessages = append(chatMessages, preprocessing.ChatMessage{
+					conversations = append(conversations, preprocessing.Conversation{
 						Role:    msg.Role,
 						Content: msg.Content.Raw,
 					})
 				}
 
 				// render the chat template
-				renderReq := &preprocessing.RenderJinjaTemplateRequest{
-					Conversations: chatMessages,
-					ChatTemplate:  req.ChatCompletions.ChatTemplate,
+				renderReq := &preprocessing.ApplyChatTemplateRequest{
+					Conversation: [][]preprocessing.Conversation{conversations},
+					ChatTemplate: req.ChatCompletions.ChatTemplate,
 				}
 				processor := preprocessing.NewChatTemplatingProcessor()
-				rendered, err := processor.RenderChatTemplate(t.Context(), renderReq)
+				rendered, err := processor.ApplyChatTemplate(t.Context(), renderReq)
 				require.NoError(t, err)
 
 				// tokenize rendered prompt

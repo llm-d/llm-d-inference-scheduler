@@ -189,8 +189,17 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types
 			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
 		}
 
-		renderReq := &preprocessing.RenderJinjaTemplateRequest{
-			Conversations:             make([]preprocessing.ChatMessage, 0),
+		// Convert messages to conversation format
+		conversations := make([]preprocessing.Conversation, len(request.Body.ChatCompletions.Messages))
+		for i, msg := range request.Body.ChatCompletions.Messages {
+			conversations[i] = preprocessing.Conversation{
+				Role:    msg.Role,
+				Content: msg.Content.Raw,
+			}
+		}
+
+		renderReq := &preprocessing.ApplyChatTemplateRequest{
+			Conversation:              [][]preprocessing.Conversation{conversations},
 			Tools:                     request.Body.ChatCompletions.Tools,
 			Documents:                 request.Body.ChatCompletions.Documents,
 			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
@@ -200,16 +209,8 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types
 			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
 		}
 
-		// Convert messages to the format expected by the renderer
-		for _, msg := range request.Body.ChatCompletions.Messages {
-			renderReq.Conversations = append(renderReq.Conversations, preprocessing.ChatMessage{
-				Role:    msg.Role,
-				Content: msg.Content.Raw,
-			})
-		}
-
 		traceLogger.Info("Processing chat completion request",
-			"messagesCount", len(renderReq.Conversations),
+			"messagesCount", len(conversations),
 			"toolsCount", len(renderReq.Tools),
 			"documentsCount", len(renderReq.Documents))
 
