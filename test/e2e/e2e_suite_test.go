@@ -54,7 +54,8 @@ const (
 )
 
 var (
-	port string = env.GetEnvString("E2E_PORT", "30080", ginkgo.GinkgoLogr)
+	port        string = env.GetEnvString("E2E_PORT", "30080", ginkgo.GinkgoLogr)
+	metricsPort string = env.GetEnvString("E2E_METRICS_PORT", "32090", ginkgo.GinkgoLogr)
 
 	testConfig *testutils.TestConfig
 
@@ -80,7 +81,8 @@ var (
 	infPoolObjects        []string
 	createdNameSpace      bool
 
-	portForwardSession *gexec.Session
+	portForwardSession    *gexec.Session
+	eppPortForwardSession *gexec.Session
 )
 
 func TestEndToEnd(t *testing.T) {
@@ -113,6 +115,10 @@ var _ = ginkgo.AfterSuite(func() {
 		// Stop port-forward
 		if portForwardSession != nil {
 			portForwardSession.Terminate()
+		}
+
+		if eppPortForwardSession != nil {
+			eppPortForwardSession.Terminate()
 		}
 
 		// cleanup created objects
@@ -149,6 +155,7 @@ func setupK8sCluster() {
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		}()
 		clusterConfig := strings.ReplaceAll(kindClusterConfig, "${PORT}", port)
+		clusterConfig = strings.ReplaceAll(clusterConfig, "${METRICS_PORT}", metricsPort)
 		_, err := io.WriteString(stdin, clusterConfig)
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	}()
@@ -284,6 +291,22 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	return testutils.CreateObjsFromYaml(testConfig, infPoolYaml)
 }
 
+func startEPPMetricsPortForward() {
+	pods, err := testConfig.KubeCli.CoreV1().Pods(nsName).List(testConfig.Context, metav1.ListOptions{
+		LabelSelector: "app=e2e-epp",
+	})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(pods.Items).NotTo(gomega.BeEmpty())
+
+	eppPodName := pods.Items[0].Name
+	command := exec.Command("kubectl", "port-forward", "pod/"+eppPodName, metricsPort+":9090",
+		"--context="+k8sContext, "--namespace="+nsName)
+	eppPortForwardSession, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	// Give it a moment to establish
+	time.Sleep(3 * time.Second)
+}
+
 const kindClusterConfig = `
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -294,5 +317,8 @@ nodes:
     protocol: TCP
   - containerPort: 30081
     hostPort: 30081
+    protocol: TCP
+  - containerPort: 32090
+    hostPort: ${METRICS_PORT}
     protocol: TCP
 `

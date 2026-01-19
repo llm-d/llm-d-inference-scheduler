@@ -33,3 +33,18 @@ spec:
     nodePort: 30081
     appProtocol: http2
   type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-epp-metrics
+spec:
+  selector:
+    app: e2e-epp
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: 9090
+      targetPort: 9090
+      nodePort: 32090
+  type: NodePort

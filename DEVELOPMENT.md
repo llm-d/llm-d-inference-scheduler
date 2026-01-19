@@ -249,14 +249,17 @@ curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: applicati
 
 #### Environment Configurateion
 
-**1. Setting the EPP image and tag:**
+**1. Setting the EPP image registry and tag:**
 
-You can optionally set a custom EPP image (otherwise, the default will be used):
+You can optionally set a custom image registry and tag (otherwise, defaults will be used):
 
 ```bash
+export IMAGE_REGISTRY="<YOUR_REGISTRY>"
 export EPP_TAG="<YOUR_TAG>"
-export EPP_IMAGE="<YOUR_REGISTRY>/<YOUR_IMAGE>"
 ```
+
+> [!NOTE]
+> The full image reference will be constructed as `${EPP_IMAGE}`, where `EPP_IMAGE` defaults to `${IMAGE_REGISTRY}/llm-d-inference-scheduler:{EPP_TAG}`. For example, with `IMAGE_REGISTRY=quay.io/<my-id>` and `EPP_TAG=v1.0.0`, the final image will be `quay.io/<my-id>/llm-d-inference-scheduler:v1.0.0`.
 
 **2. Setting the vLLM replicas:**
 

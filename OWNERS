@@ -1,6 +1,5 @@
 approvers:
 - elevran
-- kfirtoledo
 - kfswain
 - nilig
 - nirrozenbaum
@@ -9,7 +8,6 @@ approvers:
 
 reviewers:
 - elevran
-- kfirtoledo
 - kfswain
 - nilig
 - nirrozenbaum
@@ -21,7 +19,6 @@ reviewers:
 # Implemented via a custom GitHub Action
 auto-assign:
   - elevran
-  - kfirtoledo
   - kfswain
   - nilig
   - nirrozenbaum
