@@ -31,13 +31,12 @@ RUN go mod download
 
 # Copy Python wrapper and requirements from llm-d-kv-cache dependency
 # Extract version dynamically and copy to a known location
-# We need to use the replacement module path in the cache
-RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Replace.Version}}' github.com/llm-d/llm-d-kv-cache) && \
-    KVCACHE_MANAGER_PATH=$(go list -m -f '{{.Replace.Path}}' github.com/llm-d/llm-d-kv-cache) && \
+# We need to keep llm-d-kv-cache as go module path is kept the old name
+RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Version}}' github.com/llm-d/llm-d-kv-cache) && \
     mkdir -p /workspace/kv-cache && \
-    cp /go/pkg/mod/${KVCACHE_MANAGER_PATH}@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
+    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
        /workspace/kv-cache/render_jinja_template_wrapper.py && \
-    cp /go/pkg/mod/${KVCACHE_MANAGER_PATH}@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
+    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
        /workspace/kv-cache/requirements.txt
 
 # HuggingFace tokenizer bindings (static lib)
