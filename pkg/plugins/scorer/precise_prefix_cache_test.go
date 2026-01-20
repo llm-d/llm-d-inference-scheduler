@@ -124,7 +124,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 				// compute chunk hashes using the default block size
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(tokens, model)
+				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
 
@@ -234,7 +234,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(tokens, model)
+				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
@@ -304,7 +304,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(tokens, model)
+				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
 
@@ -376,7 +376,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(tokens, model)
+				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 1, "Need at least 1 chunk for test")
 
@@ -429,7 +429,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(tokens, model)
+				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
@@ -528,7 +528,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(tokens, model)
+				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
