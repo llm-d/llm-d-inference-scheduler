@@ -134,12 +134,23 @@ type Content struct {
 }
 
 type ContentBlock struct {
-	Type     string     `json:"type"`
-	Text     string     `json:"text,omitempty"`
-	ImageURL ImageBlock `json:"image_url,omitempty"`
+	Type       string     `json:"type"`
+	Text       string     `json:"text,omitempty"`
+	ImageURL   ImageBlock `json:"image_url,omitempty"`
+	InputAudio AudioBlock `json:"input_audio,omitempty"`
+	VideoURL   VideoBlock `json:"video_url,omitempty"`
 }
 
 type ImageBlock struct {
+	Url string `json:"url,omitempty"`
+}
+
+type AudioBlock struct {
+	Data   string `json:"data,omitempty"`
+	Format string `json:"format,omitempty"`
+}
+
+type VideoBlock struct {
 	Url string `json:"url,omitempty"`
 }
 
