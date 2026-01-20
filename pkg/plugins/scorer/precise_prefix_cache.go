@@ -54,18 +54,24 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 		KVEventsConfig: kvevents.DefaultConfig(),
 	}
 
-	// read hugging face token from environment variable if set
-	if token := os.Getenv("HF_TOKEN"); token != "" &&
-		parameters.IndexerConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig != nil {
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken = token
-	}
-
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse %s plugin config: %w", PrecisePrefixCachePluginType, err)
 		}
+	}
+
+	// Apply HF token from environment if not already set
+	if token := os.Getenv("HF_TOKEN"); token != "" &&
+		parameters.IndexerConfig != nil &&
+		parameters.IndexerConfig.TokenizersPoolConfig != nil &&
+		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig != nil &&
+		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken == "" {
+		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken = token
+	}
+
+	// Validate model name is set
+	if parameters.IndexerConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
+		return nil, fmt.Errorf("modelName is required in indexerConfig.tokenizersPoolConfig")
 	}
 
 	scorer, err := New(handle.Context(), parameters)

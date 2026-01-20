@@ -562,6 +562,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 			kvcacheConfig, err := kvcache.NewDefaultConfig()
 			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
+				ModelName:             "test-model",
 				WorkersCount:          1,
 				MinPrefixOverlapRatio: 0.8,
 				LocalTokenizerConfig:  &localTokenizerConfig,
