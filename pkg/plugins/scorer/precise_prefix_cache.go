@@ -71,7 +71,7 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 
 	// Validate model name is set
 	if parameters.IndexerConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
-		return nil, fmt.Errorf("modelName is required in indexerConfig.tokenizersPoolConfig")
+		return nil, errors.New("modelName is required in indexerConfig.tokenizersPoolConfig")
 	}
 
 	scorer, err := New(handle.Context(), parameters)
