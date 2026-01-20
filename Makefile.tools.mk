@@ -169,14 +169,8 @@ install-python-deps: ## Sets up Python virtual environment and installs dependen
 	fi
 	@echo "Upgrading pip and installing dependencies..."
 	@$(VENV_BIN)/pip install --upgrade pip --quiet
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null); \
-	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt" ]; then \
-		echo "Installing Python dependencies from kv-cache-manager..."; \
-		$(VENV_BIN)/pip install --quiet -r "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt"; \
-	else \
-		echo "WARNING: Could not find kv-cache-manager requirements.txt, installing minimal deps..."; \
-		$(VENV_BIN)/pip install --quiet 'transformers>=4.53.0' 'jinja2>=2.11'; \
-	fi
+	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
+	chmod +x $$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh; $$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh;
 	@echo "✅ Python dependencies installed in venv"
 
 .PHONY: check-tools
