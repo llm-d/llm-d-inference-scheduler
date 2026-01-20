@@ -39,7 +39,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		name                string
 		pods                []types.Pod
 		request             *types.LLMRequest
-		kvBlockData         func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry
+		kvBlockData         func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
 		wantScoresByAddress map[string]float64
 	}{
 		{
@@ -111,7 +111,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
+			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 				prompt := req.Completions.Prompt
 
@@ -138,17 +138,17 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				//   pod-c: 1 chunk (0) -> score 1
 				// Normalized: (3-1)/(3-1) = 1.0, (2-1)/(3-1) = 0.5, (1-1)/(3-1) = 0.0
 
-				return map[kvblock.Key][]kvblock.PodEntry{
-					{ModelName: model, ChunkHash: chunkKeys[0].ChunkHash}: {
+				return map[kvblock.BlockHash][]kvblock.PodEntry{
+					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"},
 						{PodIdentifier: "10.0.0.3:8080"},
 					},
-					{ModelName: model, ChunkHash: chunkKeys[1].ChunkHash}: {
+					chunkKeys[1]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"},
 					},
-					{ModelName: model, ChunkHash: chunkKeys[2].ChunkHash}: {
+					chunkKeys[2]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 					},
 				}
@@ -205,7 +205,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
+			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to preprocessing format
@@ -239,12 +239,12 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
 				// pod-a has both chunks, pod-b has only the first
-				return map[kvblock.Key][]kvblock.PodEntry{
-					{ModelName: model, ChunkHash: chunkKeys[0].ChunkHash}: {
+				return map[kvblock.BlockHash][]kvblock.PodEntry{
+					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"},
 					},
-					{ModelName: model, ChunkHash: chunkKeys[1].ChunkHash}: {
+					chunkKeys[1]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 					},
 				}
@@ -294,7 +294,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
+			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
@@ -317,16 +317,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				//   pod-a: has chunks 0,1,2 contiguously -> score 3
 				//   pod-b: has chunks 0,2 (missing 1) -> prefix stops at chunk0 -> score 1
 				//   pod-c: has only chunk 0 -> score 1
-				return map[kvblock.Key][]kvblock.PodEntry{
-					{ModelName: model, ChunkHash: chunkKeys[0].ChunkHash}: {
+				return map[kvblock.BlockHash][]kvblock.PodEntry{
+					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"},
 						{PodIdentifier: "10.0.0.3:8080"},
 					},
-					{ModelName: model, ChunkHash: chunkKeys[1].ChunkHash}: {
+					chunkKeys[1]: {
 						{PodIdentifier: "10.0.0.1:8080"}, // only pod-a has chunk1
 					},
-					{ModelName: model, ChunkHash: chunkKeys[2].ChunkHash}: {
+					chunkKeys[2]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"}, // pod-b has chunk2 but missing chunk1
 					},
@@ -366,7 +366,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
+			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
@@ -383,8 +383,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				// Populate the index with blocks for model `different-model`
 				// The request will ask for "test-model" but the cache only has "different-model"
 				// This should result in no cache hits since models don't share cache
-				return map[kvblock.Key][]kvblock.PodEntry{
-					{ModelName: "different-model", ChunkHash: chunkKeys[0].ChunkHash}: {
+				return map[kvblock.BlockHash][]kvblock.PodEntry{
+					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"},
 					},
@@ -419,7 +419,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
+			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
@@ -434,11 +434,11 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
 				// Single pod has 2 chunks cached
-				return map[kvblock.Key][]kvblock.PodEntry{
-					{ModelName: model, ChunkHash: chunkKeys[0].ChunkHash}: {
+				return map[kvblock.BlockHash][]kvblock.PodEntry{
+					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 					},
-					{ModelName: model, ChunkHash: chunkKeys[1].ChunkHash}: {
+					chunkKeys[1]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 					},
 				}
@@ -518,7 +518,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.Key][]kvblock.PodEntry {
+			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(localTokenizerConfig)
@@ -533,13 +533,13 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
 				// all pods have the same 2 chunks cached
-				return map[kvblock.Key][]kvblock.PodEntry{
-					{ModelName: model, ChunkHash: chunkKeys[0].ChunkHash}: {
+				return map[kvblock.BlockHash][]kvblock.PodEntry{
+					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"},
 						{PodIdentifier: "10.0.0.3:8080"},
 					},
-					{ModelName: model, ChunkHash: chunkKeys[1].ChunkHash}: {
+					chunkKeys[1]: {
 						{PodIdentifier: "10.0.0.1:8080"},
 						{PodIdentifier: "10.0.0.2:8080"},
 						{PodIdentifier: "10.0.0.3:8080"},
