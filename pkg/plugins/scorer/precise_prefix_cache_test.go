@@ -119,7 +119,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NoError(t, err)
 
 				// use the actual tokenizer on the test prompt
-				tokens, _, err := testTokenizer.Encode(prompt, model)
+				tokens, _, err := testTokenizer.Encode(prompt, model, true)
 				require.NoError(t, err)
 
 				// compute chunk hashes using the default block size
@@ -230,7 +230,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Encode(rendered.RenderedChats[0], model)
+				tokens, _, err := testTokenizer.Encode(rendered, model, true)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -300,7 +300,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
+				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -372,7 +372,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
+				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -425,7 +425,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
+				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -524,7 +524,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model)
+				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -580,7 +580,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				kvBlockIndex := prefixCacheScorer.kvCacheIndexer.KVBlockIndex()
 				blockData := tt.kvBlockData(tt.request.Body, tt.request.TargetModel)
 				for key, entries := range blockData {
-					err := kvBlockIndex.Add(ctx, []kvblock.Key{key}, entries)
+					err := kvBlockIndex.Add(ctx, []kvblock.BlockHash{kvblock.EmptyBlockHash}, []kvblock.BlockHash{key}, entries)
 					require.NoError(t, err)
 				}
 			}
