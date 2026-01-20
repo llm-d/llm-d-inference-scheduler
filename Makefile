@@ -1,7 +1,15 @@
-# The Go and Python based tools are defined in Makefile.tools.mk.
-include Makefile.tools.mk
-
 SHELL := /usr/bin/env bash
+
+# Local directories
+LOCALBIN ?= $(shell pwd)/bin
+LOCALLIB ?= $(shell pwd)/lib
+
+# Build tools and dependencies are defined in Makefile.tools.mk.
+include Makefile.tools.mk
+# Cluster (Kubernetes/OpenShift) specific targets are defined in Makefile.cluster.mk.
+include Makefile.cluster.mk
+# Kind specific targets are defined in Makefile.kind.mk.
+include Makefile.kind.mk
 
 # Defaults
 TARGETOS ?= $(shell command -v go >/dev/null 2>&1 && go env GOOS || uname -s | tr '[:upper:]' '[:lower:]')
@@ -13,39 +21,42 @@ SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
-export EPP_TAG
 export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
-export SIDECAR_TAG
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
-NAMESPACE ?= hc4ai-operator
 VLLM_SIMULATOR_TAG ?= v0.6.1
-export VLLM_SIMULATOR_TAG
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
+NAMESPACE ?= hc4ai-operator
 
-# Map go arch to typos arch
-ifeq ($(TARGETARCH),amd64)
-TYPOS_TARGET_ARCH = x86_64
-else ifeq ($(TARGETARCH),arm64)
-TYPOS_TARGET_ARCH = aarch64
-else
-TYPOS_TARGET_ARCH = $(TARGETARCH)
-endif
-
+# Map go arch to platform-specific arch
 ifeq ($(TARGETOS),darwin)
-ifeq ($(TARGETARCH),amd64)
-TOKENIZER_ARCH = x86_64
+	ifeq ($(TARGETARCH),amd64)
+		TOKENIZER_ARCH = x86_64
+		TYPOS_TARGET_ARCH = x86_64
+	else ifeq ($(TARGETARCH),arm64)
+		TOKENIZER_ARCH = arm64
+		TYPOS_TARGET_ARCH = aarch64
+	else
+		TOKENIZER_ARCH = $(TARGETARCH)
+		TYPOS_TARGET_ARCH = $(TARGETARCH)
+	endif
+	TAR_OPTS = --strip-components 1
+	TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-apple-darwin
 else
-TOKENIZER_ARCH = $(TARGETARCH)
-endif
-TAR_OPTS = --strip-components 1
-TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-apple-darwin
-else
-TOKENIZER_ARCH = $(TARGETARCH)
-TAR_OPTS = --wildcards '*/typos'
-TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
+	ifeq ($(TARGETARCH),amd64)
+		TOKENIZER_ARCH = amd64
+		TYPOS_TARGET_ARCH = x86_64
+	else ifeq ($(TARGETARCH),arm64)
+		TOKENIZER_ARCH = arm64
+		TYPOS_TARGET_ARCH = aarch64
+	else
+		TOKENIZER_ARCH = $(TARGETARCH)
+		TYPOS_TARGET_ARCH = $(TARGETARCH)
+	endif
+	TAR_OPTS = --wildcards '*/typos'
+	TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
 endif
 
 CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
@@ -59,16 +70,9 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
-LDFLAGS ?= -extldflags '-L$(shell pwd)/lib'
-
-##@ Python Configuration
-
-PYTHON_VERSION := 3.12
-
-# Python executable for creating venv
-PYTHON_EXE := $(shell command -v python$(PYTHON_VERSION) || command -v python3)
-VENV_DIR := $(shell pwd)/build/venv
-VENV_BIN := $(VENV_DIR)/bin
+# Tokenizer & Linking
+LDFLAGS ?= -extldflags '-L$(LOCALLIB)'
+CGO_ENABLED=1
 
 # Unified Python configuration detection. This block runs once.
 PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
@@ -101,32 +105,6 @@ PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
 CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
 CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
 
-.PHONY: install-python-deps
-install-python-deps: ## Sets up Python virtual environment and installs dependencies
-	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
-	@if [ -z "$(PYTHON_EXE)" ]; then \
-		echo "ERROR: Python 3 not found in PATH."; \
-		exit 1; \
-	fi
-	@if [ ! -f "$(VENV_BIN)/pip" ]; then \
-		echo "Creating virtual environment..."; \
-		$(PYTHON_EXE) -m venv $(VENV_DIR) || { \
-			echo "ERROR: Failed to create virtual environment."; \
-			echo "Your Python installation may be missing the 'venv' module."; \
-			exit 1; \
-		}; \
-	fi
-	@echo "Upgrading pip and installing dependencies..."
-	@$(VENV_BIN)/pip install --upgrade pip --quiet
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null); \
-	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt" ]; then \
-		echo "Installing Python dependencies from kv-cache-manager..."; \
-		$(VENV_BIN)/pip install --quiet -r "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt"; \
-	else \
-		echo "WARNING: Could not find kv-cache-manager requirements.txt, installing minimal deps..."; \
-		$(VENV_BIN)/pip install --quiet 'transformers>=4.53.0' 'jinja2>=2.11'; \
-	fi
-	@echo "✅ Python dependencies installed in venv"
 
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
@@ -146,41 +124,35 @@ sidecar_TEST_FILES = go list ./pkg/sidecar/...
 help: ## Print help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-##@ Tokenizer & Linking
-
-CGO_ENABLED=1
-TOKENIZER_LIB = lib/libtokenizers.a
-# Extract RELEASE_VERSION from Dockerfile
-TOKENIZER_VERSION := $(shell grep '^ARG RELEASE_VERSION=' Dockerfile.epp | cut -d'=' -f2)
-
-.PHONY: download-tokenizer
-download-tokenizer: $(TOKENIZER_LIB)
-$(TOKENIZER_LIB):
-	## Download the HuggingFace tokenizer bindings.
-	@echo "Downloading HuggingFace tokenizer bindings for version $(TOKENIZER_VERSION)..."
-	mkdir -p lib
-	curl -L https://github.com/daulet/tokenizers/releases/download/$(TOKENIZER_VERSION)/libtokenizers.$(TARGETOS)-$(TOKENIZER_ARCH).tar.gz | tar -xz -C lib
-	ranlib lib/*.a
 
 ##@ Development
 
 .PHONY: clean
-clean:
+clean: ## Clean build artifacts, tools and caches
 	go clean -testcache -cache
-	rm -f $(TOKENIZER_LIB)
-	rm -rf build/
-	rmdir lib
+	rm -rf $(LOCALLIB) $(LOCALBIN) build
 
 .PHONY: format
-format: ## Format Go source files
-	@printf "\033[33;1m==== Running gofmt ====\033[0m\n"
+format: check-golangci-lint ## Format Go source files
+	@printf "\033[33;1m==== Running go fmt ====\033[0m\n"
 	@gofmt -l -w $(SRC)
+	$(GOLANGCI_LINT) fmt
+
+.PHONY: lint
+lint: check-golangci-lint check-typos ## Run lint
+	@printf "\033[33;1m==== Running linting ====\033[0m\n"
+	CGO_CFLAGS="${CGO_CFLAGS}" $(GOLANGCI_LINT) run
+	$(TYPOS)
+
+.PHONY: install-hooks
+install-hooks: ## Install git hooks
+	git config core.hooksPath hooks
 
 .PHONY: test
-test: test-unit test-e2e ## Run unit tests and e2e tests
+test: test-unit test-e2e ## Run all tests (unit and e2e)
 
 .PHONY: test-unit
-test-unit: test-unit-epp test-unit-sidecar
+test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
 .PHONY: test-unit-%
 test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
@@ -197,36 +169,31 @@ test-integration: download-tokenizer check-dependencies ## Run integration tests
 .PHONY: test-e2e
 test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
-	./test/scripts/run_e2e.sh
+	PATH=$(LOCALBIN):$$PATH ./test/scripts/run_e2e.sh
 
 .PHONY: post-deploy-test
 post-deploy-test: ## Run post deployment tests
 	echo Success!
 	@echo "Post-deployment tests passed."
 
-.PHONY: lint
-lint: check-golangci-lint check-typos ## Run lint
-	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	CGO_CFLAGS="${CGO_CFLAGS}" golangci-lint run
-	$(TYPOS)
 
 ##@ Build
 
 .PHONY: build
-build: build-epp build-sidecar ## Build the project
+build: build-epp build-sidecar ## Build the project for both epp and sidecar
 
 .PHONY: build-%
 build-%: check-go download-tokenizer ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
-##@ Container Build/Push
+##@ Container image Build/Push/Pull
 
 .PHONY:	image-build
-image-build: image-build-epp image-build-sidecar ## Build Docker image
+image-build: image-build-epp image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
 
 .PHONY: image-build-%
-image-build-%: check-container-tool ## Build Docker image ## Build Docker image using $(CONTAINER_RUNTIME)
+image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Building Docker image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_RUNTIME) build \
 		--platform linux/$(TARGETARCH) \
@@ -238,10 +205,10 @@ image-build-%: check-container-tool ## Build Docker image ## Build Docker image 
  		-t $($*_IMAGE) -f Dockerfile.$* .
 
 .PHONY: image-push
-image-push: image-push-epp image-push-sidecar ## Push container images to registry
+image-push: image-push-epp image-push-sidecar ## Push container images to registry using $(CONTAINER_RUNTIME)
 
 .PHONY: image-push-%
-image-push-%: check-container-tool ## Push container image to registry
+image-push-%: check-container-tool ## Push container image to registry using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Pushing Container image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_RUNTIME) push $($*_IMAGE)
 
@@ -250,197 +217,36 @@ image-pull: check-container-tool ## Pull all related images using $(CONTAINER_RU
 	@printf "\033[33;1m==== Pulling Container images ====\033[0m\n"
 	./scripts/pull_images.sh
 
-##@ Install/Uninstall Targets
+##@ Container Run
 
-# Default install/uninstall (Docker)
-install: install-docker ## Default install using Docker
-	@echo "Default Docker install complete."
-
-uninstall: uninstall-docker ## Default uninstall using Docker
-	@echo "Default Docker uninstall complete."
-
-### Docker Targets
-
-.PHONY: install-docker
-install-docker: check-container-tool ## Install app using $(CONTAINER_RUNTIME)
+.PHONY: run-container
+run-container: check-container-tool ## Run app in container using $(CONTAINER_RUNTIME)
 	@echo "Starting container with $(CONTAINER_RUNTIME)..."
 	$(CONTAINER_RUNTIME) run -d --name $(PROJECT_NAME)-container $(EPP_IMAGE)
-	@echo "$(CONTAINER_RUNTIME) installation complete."
+	@echo "$(CONTAINER_RUNTIME) started successfully."
 	@echo "To use $(PROJECT_NAME), run:"
 	@echo "alias $(PROJECT_NAME)='$(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"
 
-.PHONY: uninstall-docker
-uninstall-docker: check-container-tool ## Uninstall app from $(CONTAINER_RUNTIME)
-	@echo "Stopping and removing container in $(CONTAINER_RUNTIME)..."
+.PHONY: stop-container
+stop-container: check-container-tool ## Stop and remove container
+	@echo "Stopping and removing container..."
 	$(CONTAINER_RUNTIME) stop $(PROJECT_NAME)-container && $(CONTAINER_RUNTIME) rm $(PROJECT_NAME)-container
-	@echo "$(CONTAINER_RUNTIME) uninstallation complete. Remove alias if set: unalias $(PROJECT_NAME)"
-
-### Kubernetes Targets (kubectl)
-
-.PHONY: install-k8s
-install-k8s: check-kubectl check-kustomize check-envsubst ## Install on Kubernetes
-	export PROJECT_NAME=${PROJECT_NAME}
-	export NAMESPACE=${NAMESPACE}
-	@echo "Creating namespace (if needed) and setting context to $(NAMESPACE)..."
-	kubectl create namespace $(NAMESPACE) 2>/dev/null || true
-	kubectl config set-context --current --namespace=$(NAMESPACE)
-	@echo "Deploying resources from deploy/ ..."
-	# Build the kustomization from deploy, substitute variables, and apply the YAML
-	kustomize build deploy/environments/openshift-base | envsubst | kubectl apply -f -
-	@echo "Waiting for pod to become ready..."
-	sleep 5
-	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -o jsonpath='{.items[0].metadata.name}'); \
-	echo "Kubernetes installation complete."; \
-	echo "To use the app, run:"; \
-	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'"
-
-.PHONY: uninstall-k8s
-uninstall-k8s: check-kubectl check-kustomize check-envsubst ## Uninstall from Kubernetes
-	export PROJECT_NAME=${PROJECT_NAME}
-	export NAMESPACE=${NAMESPACE}
-	@echo "Removing resources from Kubernetes..."
-	kustomize build deploy/environments/openshift-base | envsubst | kubectl delete --force -f - || true
-	POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -o jsonpath='{.items[0].metadata.name}'); \
-	echo "Deleting pod: $$POD"; \
-	kubectl delete pod "$$POD" --force --grace-period=0 || true; \
-	echo "Kubernetes uninstallation complete. Remove alias if set: unalias $(PROJECT_NAME)"
-
-### OpenShift Targets (oc)
-
-.PHONY: install-openshift
-install-openshift: check-kubectl check-kustomize check-envsubst ## Install on OpenShift
-	@echo $$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE
-	@echo "Creating namespace $(NAMESPACE)..."
-	kubectl create namespace $(NAMESPACE) 2>/dev/null || true
-	@echo "Deploying common resources from deploy/ ..."
-	# Build and substitute the base manifests from deploy, then apply them
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl apply -n $(NAMESPACE) -f -
-	@echo "Waiting for pod to become ready..."
-	sleep 5
-	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
-	echo "OpenShift installation complete."; \
-	echo "To use the app, run:"; \
-	echo "alias $(PROJECT_NAME)='kubectl exec -n $(NAMESPACE) -it $$POD -- /app/$(PROJECT_NAME)'"
-
-.PHONY: uninstall-openshift
-uninstall-openshift: check-kubectl check-kustomize check-envsubst ## Uninstall from OpenShift
-	@echo "Removing resources from OpenShift..."
-	kustomize build deploy/environments/openshift-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' | kubectl delete --force -f - || true
-	# @if kubectl api-resources --api-group=route.openshift.io | grep -q Route; then \
-	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
-	# fi
-	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
-	echo "Deleting pod: $$POD"; \
-	kubectl delete pod "$$POD" --force --grace-period=0 || true; \
-	echo "OpenShift uninstallation complete. Remove alias if set: unalias $(PROJECT_NAME)"
-
-### RBAC Targets (using kustomize and envsubst)
-
-.PHONY: install-rbac
-install-rbac: check-kubectl check-kustomize check-envsubst ## Install RBAC
-	@echo "Applying RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME' | kubectl apply -f -
-
-.PHONY: uninstall-rbac
-uninstall-rbac: check-kubectl check-kustomize check-envsubst ## Uninstall RBAC
-	@echo "Removing RBAC configuration from deploy/rbac..."
-	kustomize build deploy/environments/openshift-base/rbac | envsubst '$$PROJECT_NAME' | kubectl delete -f - || true
+	@echo "$(CONTAINER_RUNTIME) stopped and removed. Remove alias if set: unalias $(PROJECT_NAME)"
 
 ##@ Environment
 .PHONY: env
 env: ## Print environment variables
-	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
-	@echo "EPP_IMAGE=$(EPP_IMAGE)"
+	@echo "TARGETOS=$(TARGETOS)"
+	@echo "TARGETARCH=$(TARGETARCH)"
+	@echo "PYTHON_VERSION=$(PYTHON_VERSION)"
 	@echo "CONTAINER_RUNTIME=$(CONTAINER_RUNTIME)"
-
-.PHONY: check-typos
-check-typos: $(TYPOS) ## Check for spelling errors using typos (exits with error if found)
-	@echo "🔍 Checking for spelling errors with typos..."
-	@TYPOS_OUTPUT=$$($(TYPOS) --format brief 2>&1); \
-	if [ $$? -eq 0 ]; then \
-		echo "✅ No spelling errors found!"; \
-		echo "🎉 Spelling check completed successfully!"; \
-	else \
-		echo "❌ Spelling errors found!"; \
-		echo "🔧 You can try 'make fix-typos' to automatically fix the spelling errors and run 'make check-typos' again"; \
-		echo "$$TYPOS_OUTPUT"; \
-		exit 1; \
-	fi
-	
-##@ Tools
-
-.PHONY: check-tools
-check-tools: \
-  check-go \
-  check-ginkgo \
-  check-golangci-lint \
-  check-kustomize \
-  check-envsubst \
-  check-container-tool \
-  check-kubectl \
-  check-buildah
-	@echo "✅ All required tools are installed."
-
-.PHONY: check-go
-check-go:
-	@command -v go >/dev/null 2>&1 || { \
-	  echo "❌ Go is not installed. Install it from https://golang.org/dl/"; exit 1; }
-
-.PHONY: check-ginkgo
-check-ginkgo:
-	@command -v ginkgo >/dev/null 2>&1 || { \
-	  echo "❌ ginkgo is not installed. Install with: go install github.com/onsi/ginkgo/v2/ginkgo@latest"; exit 1; }
-
-.PHONY: check-golangci-lint
-check-golangci-lint:
-	@command -v golangci-lint >/dev/null 2>&1 || { \
-	  echo "❌ golangci-lint is not installed. Install from https://golangci-lint.run/usage/install/"; exit 1; }
-
-.PHONY: check-kustomize
-check-kustomize:
-	@command -v kustomize >/dev/null 2>&1 || { \
-	  echo "❌ kustomize is not installed. Install it from https://kubectl.docs.kubernetes.io/installation/kustomize/"; exit 1; }
-
-.PHONY: check-envsubst
-check-envsubst:
-	@command -v envsubst >/dev/null 2>&1 || { \
-	  echo "❌ envsubst is not installed. It is part of gettext."; \
-	  echo "🔧 Try: sudo apt install gettext OR brew install gettext"; exit 1; }
-
-.PHONY: check-container-tool
-check-container-tool:
-	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \
-		echo "❌ Error: No container tool detected. Please install docker or podman."; \
-		exit 1; \
-	else \
-		echo "✅ Container tool '$(CONTAINER_RUNTIME)' found."; \
-	fi
-	  
-
-.PHONY: check-kubectl
-check-kubectl:
-	@command -v kubectl >/dev/null 2>&1 || { \
-	  echo "❌ kubectl is not installed. Install it from https://kubernetes.io/docs/tasks/tools/"; exit 1; }
-
-.PHONY: check-builder
-check-builder:
-	@if [ -z "$(BUILDER)" ]; then \
-		echo "❌ No container builder tool (buildah, docker, or podman) found."; \
-		exit 1; \
-	else \
-		echo "✅ Using builder: $(BUILDER)"; \
-	fi
-
-##@ Alias checking
-.PHONY: check-alias
-check-alias: check-container-tool
-	@echo "🔍 Checking alias functionality for container '$(PROJECT_NAME)-container'..."
-	@if ! $(CONTAINER_RUNTIME) exec $(PROJECT_NAME)-container /app/$(PROJECT_NAME) --help >/dev/null 2>&1; then \
-	  echo "⚠️  The container '$(PROJECT_NAME)-container' is running, but the alias might not work."; \
-	  echo "🔧 Try: $(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)"; \
-	else \
-	  echo "✅ Alias is likely to work: alias $(PROJECT_NAME)='$(CONTAINER_RUNTIME) exec -it $(PROJECT_NAME)-container /app/$(PROJECT_NAME)'"; \
-	fi
+	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
+	@echo "EPP_TAG=$(EPP_TAG)"
+	@echo "EPP_IMAGE=$(EPP_IMAGE)"
+	@echo "SIDECAR_TAG=$(SIDECAR_TAG)"
+	@echo "SIDECAR_IMAGE=$(SIDECAR_IMAGE)"
+	@echo "VLLM_SIMULATOR_TAG=$(VLLM_SIMULATOR_TAG)"
+	@echo "VLLM_SIMULATOR_IMAGE=$(VLLM_SIMULATOR_IMAGE)"
 
 .PHONY: print-namespace
 print-namespace: ## Print the current namespace
@@ -450,115 +256,23 @@ print-namespace: ## Print the current namespace
 print-project-name: ## Print the current project name
 	@echo "$(PROJECT_NAME)"
 
-.PHONY: install-hooks
-install-hooks: ## Install git hooks
-	git config core.hooksPath hooks
+##@ Deprecated aliases for backwards compatibility
+.PHONY: install-docker
+install-docker: ## DEPRECATED: Use 'make run-container' instead
+	@echo "WARNING: 'make install-docker' is deprecated. Use 'make run-container' instead."
+	@$(MAKE) run-container
 
-##@ Dev Environments
+.PHONY: uninstall-docker
+uninstall-docker: ## DEPRECATED: Use 'make stop-container' instead
+	@echo "WARNING: 'make uninstall-docker' is deprecated. Use 'make stop-container' instead."
+	@$(MAKE) stop-container
 
-KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
-KIND_GATEWAY_HOST_PORT ?= 30080
+.PHONY: install
+install: ## DEPRECATED: Use 'make run-container' instead
+	@echo "WARNING: 'make install' is deprecated. Use 'make run-container' instead."
+	@$(MAKE) run-container
 
-.PHONY: env-dev-kind
-env-dev-kind: ## Run under kind ($(KIND_CLUSTER_NAME))
-	@if [ "$$PD_ENABLED" = "true" ] && [ "$$KV_CACHE_ENABLED" = "true" ]; then \
-		echo "Error: Both PD_ENABLED and KV_CACHE_ENABLED are true. Skipping env-dev-kind."; \
-		exit 1; \
-	else \
-		$(MAKE) image-build && \
-		CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
-		GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
-		IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-		EPP_IMAGE=$(EPP_IMAGE) \
-		VLLM_SIMULATOR_IMAGE=${VLLM_SIMULATOR_IMAGE} \
-		SIDECAR_IMAGE=${SIDECAR_IMAGE} \
-		./scripts/kind-dev-env.sh; \
-	fi
-
-.PHONY: clean-env-dev-kind
-clean-env-dev-kind:      ## Cleanup kind setup (delete cluster $(KIND_CLUSTER_NAME))
-	@echo "INFO: cleaning up kind cluster $(KIND_CLUSTER_NAME)"
-	kind delete cluster --name $(KIND_CLUSTER_NAME)
-
-
-# Kubernetes Development Environment - Deploy
-# This target deploys the inference scheduler stack in a specific namespace for development and testing.
-.PHONY: env-dev-kubernetes
-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
-	IMAGE_REGISTRY=$(IMAGE_REGISTRY) ./scripts/kubernetes-dev-env.sh 2>&1
-
-# Kubernetes Development Environment - Teardown
-.PHONY: clean-env-dev-kubernetes
-clean-env-dev-kubernetes: check-kubectl check-kustomize check-envsubst
-	@CLEAN=true ./scripts/kubernetes-dev-env.sh 2>&1
-	@echo "INFO: Finished cleanup of development environment for namespace $(NAMESPACE)"
-
-##@ Dependencies
-
-.PHONY: check-dependencies
-check-dependencies: ## Check if development dependencies are installed
-	@if [ "$(TARGETOS)" = "linux" ]; then \
-	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  else \
-	    echo "WARNING: Unsupported Linux package manager. Cannot verify dependencies."; \
-	  fi; \
-	elif [ "$(TARGETOS)" = "darwin" ]; then \
-	  if [ -x "$$(command -v brew)" ]; then \
-	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  else \
-	    echo "ERROR: Homebrew is not installed and is required. Install it from https://brew.sh/"; \
-	    exit 1; \
-	  fi; \
-	fi
-	@echo "✅ All dependencies are installed."
-
-.PHONY: install-dependencies
-install-dependencies: ## Install development dependencies based on OS/ARCH
-	@echo "Checking and installing development dependencies..."
-	@if [ "$(TARGETOS)" = "linux" ]; then \
-	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1 || ! dpkg -s python$(PYTHON_VERSION)-dev >/dev/null 2>&1; then \
-	      echo "Installing dependencies with apt..."; \
-	      apt-get update && apt-get install -y libzmq3-dev g++ python$(PYTHON_VERSION)-dev; \
-	    else \
-	      echo "✅ ZMQ, g++, and Python dev headers are already installed."; \
-	    fi; \
-	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1 || ! rpm -q python$(PYTHON_VERSION)-devel >/dev/null 2>&1; then \
-	      echo "Installing dependencies with dnf..."; \
-	      dnf install -y zeromq-devel gcc-c++ python$(PYTHON_VERSION)-devel; \
-	    else \
-	      echo "✅ ZMQ, gcc-c++, and Python dev headers are already installed."; \
-	    fi; \
-	  else \
-	    echo "ERROR: Unsupported Linux package manager. Install libzmq, g++/gcc-c++, and python-devel manually."; \
-	    exit 1; \
-	  fi; \
-	elif [ "$(TARGETOS)" = "darwin" ]; then \
-	  if [ -x "$$(command -v brew)" ]; then \
-	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
-	      echo "Installing dependencies with brew..."; \
-	      brew install zeromq pkg-config; \
-	    else \
-	      echo "✅ ZeroMQ and pkgconf are already installed."; \
-	    fi; \
-	  else \
-	    echo "ERROR: Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
-	    exit 1; \
-	  fi; \
-	else \
-	  echo "ERROR: Unsupported OS: $(TARGETOS). Install development dependencies manually."; \
-	  exit 1; \
-	fi
+.PHONY: uninstall
+uninstall: ## DEPRECATED: Use 'make stop-container' instead
+	@echo "WARNING: 'make uninstall' is deprecated. Use 'make stop-container' instead."
+	@$(MAKE) stop-container
