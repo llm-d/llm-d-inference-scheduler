@@ -115,6 +115,50 @@ func TestExtractRequestData(t *testing.T) {
 			},
 		},
 		{
+			name: "chat completions request body with audio and video content",
+			body: map[string]any{
+				"model": "test",
+				"messages": []any{
+					map[string]any{
+						"role": "user",
+						"content": []map[string]any{
+							{
+								"type": "input_audio",
+								"input_audio": map[string]any{
+									"data":   "base64data",
+									"format": "wav",
+								},
+							},
+							{
+								"type": "video_url",
+								"video_url": map[string]any{
+									"url": "https://example.com/video.mp4",
+								},
+							},
+						},
+					},
+				},
+			},
+			want: &types.LLMRequestBody{
+				ChatCompletions: &types.ChatCompletionsRequest{
+					Messages: []types.Message{
+						{Role: "user", Content: types.Content{
+							Structured: []types.ContentBlock{
+								{
+									Type:       "input_audio",
+									InputAudio: types.AudioBlock{Data: "base64data", Format: "wav"},
+								},
+								{
+									Type:     "video_url",
+									VideoURL: types.VideoBlock{Url: "https://example.com/video.mp4"},
+								},
+							},
+						}},
+					},
+				},
+			},
+		},
+		{
 			name: "chat completions with all optional fields",
 			body: map[string]any{
 				"model": "test",
