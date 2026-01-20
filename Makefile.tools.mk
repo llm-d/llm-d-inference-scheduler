@@ -170,7 +170,15 @@ install-python-deps: ## Sets up Python virtual environment and installs dependen
 	@echo "Upgrading pip and installing dependencies..."
 	@$(VENV_BIN)/pip install --upgrade pip --quiet
 	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
-	chmod +x $$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh; $$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh;
+	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" ]; then \
+		echo "Running kv-cache setup script..."; \
+		cp "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" build/kv-cache-setup.sh; \
+		chmod +x build/kv-cache-setup.sh; \
+		cd build && ./kv-cache-setup.sh && cd ..; \
+	else \
+		echo "ERROR: kv-cache package not found or setup script missing."; \
+		exit 1; \
+	fi
 	@echo "✅ Python dependencies installed in venv"
 
 .PHONY: check-tools
