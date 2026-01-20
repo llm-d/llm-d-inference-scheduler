@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fetch-python-wrapper.sh
-# Fetches the Python wrapper file (render_jinja_template_wrapper.py) from llm-d-kv-cache-manager
+# Fetches the Python wrapper file (render_jinja_template_wrapper.py) from llm-d-kv-cache
 # for use in Docker builds and local development.
 # Version can be provided as CLI arg or via KVCACHE_MANAGER_VERSION env var (default v0.3.2).
 #
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 VERSION="${1:-${KVCACHE_MANAGER_VERSION:-v0.3.2}}"
-OUTPUT_DIR="${2:-llm-d-kv-cache-manager/pkg/preprocessing/chat_completions}"
+OUTPUT_DIR="${2:-llm-d-kv-cache/pkg/preprocessing/chat_completions}"
 
 REPO_URL="https://github.com/llm-d/llm-d-kv-cache.git"
 WRAPPER_FILE="pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py"

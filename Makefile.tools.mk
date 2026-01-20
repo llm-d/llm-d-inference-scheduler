@@ -151,22 +151,47 @@ $(TOKENIZER_LIB): | $(LOCALLIB)
 	@ranlib $(LOCALLIB)/*.a
 	@echo "Tokenizer bindings downloaded successfully."
 
-
-.PHONY: install-python-deps
-install-python-deps: ## Sets up Python virtual environment and installs dependencies
-	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
+.PHONY: detect-python
+detect-python: ## Detects Python and prints the configuration.
+	@printf "\033[33;1m==== Python Configuration ====\033[0m\n"
 	@if [ -z "$(PYTHON_EXE)" ]; then \
 		echo "ERROR: Python 3 not found in PATH."; \
 		exit 1; \
 	fi
+	@# Verify the version of the found python executable using its exit code
+	@if ! $(PYTHON_EXE) -c "import sys; sys.exit(0 if sys.version_info[:2] == ($(shell echo $(PYTHON_VERSION) | cut -d. -f1), $(shell echo $(PYTHON_VERSION) | cut -d. -f2)) else 1)"; then \
+		echo "ERROR: Found Python at '$(PYTHON_EXE)' but it is not version $(PYTHON_VERSION)."; \
+		echo "Please ensure 'python$(PYTHON_VERSION)' or a compatible 'python3' is in your PATH."; \
+		exit 1; \
+	fi
+	@echo "Python executable: $(PYTHON_EXE) ($$($(PYTHON_EXE) --version))"
+	@echo "Python CFLAGS:     $(PYTHON_CFLAGS)"
+	@echo "Python LDFLAGS:    $(PYTHON_LDFLAGS)"
+	@if [ -z "$(PYTHON_CFLAGS)" ]; then \
+		echo "ERROR: Python development headers not found. See installation instructions above."; \
+		exit 1; \
+	fi
+	@printf "\033[33;1m==============================\033[0m\n"
+
+.PHONY: setup-venv
+setup-venv: detect-python ## Sets up the Python virtual environment.
+	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
 	@if [ ! -f "$(VENV_BIN)/pip" ]; then \
 		echo "Creating virtual environment..."; \
 		$(PYTHON_EXE) -m venv $(VENV_DIR) || { \
 			echo "ERROR: Failed to create virtual environment."; \
 			echo "Your Python installation may be missing the 'venv' module."; \
+			echo "Try: 'sudo apt install python$(PYTHON_VERSION)-venv' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"; \
 			exit 1; \
 		}; \
 	fi
+	@echo "Upgrading pip..."
+	@$(VENV_BIN)/pip install --upgrade pip
+	@echo "Python virtual environment setup complete."
+
+.PHONY: install-python-deps
+install-python-deps: setup-venv ## installs dependencies.
+	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
 	@echo "Upgrading pip and installing dependencies..."
 	@$(VENV_BIN)/pip install --upgrade pip --quiet
 	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
@@ -174,12 +199,16 @@ install-python-deps: ## Sets up Python virtual environment and installs dependen
 		echo "Running kv-cache setup script..."; \
 		cp "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" build/kv-cache-setup.sh; \
 		chmod +x build/kv-cache-setup.sh; \
-		cd build && ./kv-cache-setup.sh && cd ..; \
+		cd build && PATH=$(VENV_BIN):$$PATH ./kv-cache-setup.sh && cd ..; \
 	else \
 		echo "ERROR: kv-cache package not found or setup script missing."; \
 		exit 1; \
 	fi
-	@echo "✅ Python dependencies installed in venv"
+	@echo "Verifying vllm installation..."
+	@$(VENV_BIN)/python -c "import vllm; print('✅ vllm version ' + vllm.__version__ + ' installed.')" || { \
+		echo "ERROR: vllm library not properly installed in venv."; \
+		exit 1; \
+	}
 
 .PHONY: check-tools
 check-tools: check-go check-ginkgo check-golangci-lint check-kustomize check-envsubst check-container-tool check-kubectl check-buildah check-typos ## Check that all required tools are installed

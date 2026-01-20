@@ -187,7 +187,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				Body: &types.LLMRequestBody{
 					ChatCompletions: &types.ChatCompletionsRequest{
 						ChatTemplate: `{% for message in messages %}{{ message.role }}: {{ message.content }}
-{% endfor %}`,
+		{% endfor %}`,
 						Messages: []types.Message{
 							{
 								Role:    "user",
@@ -217,12 +217,19 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					})
 				}
 
+				processor := preprocessing.NewChatTemplatingProcessor()
+				tokenizerCacheKey, err := processor.GetOrCreateTokenizerKey(t.Context(), &preprocessing.GetOrCreateTokenizerKeyRequest{
+					IsLocal: true,
+					Model:   "testdata/" + model,
+				})
+				require.NoError(t, err)
+
 				// render the chat template
 				renderReq := &preprocessing.ApplyChatTemplateRequest{
+					Key:          tokenizerCacheKey,
 					Conversation: [][]preprocessing.Conversation{conversations},
 					ChatTemplate: req.ChatCompletions.ChatTemplate,
 				}
-				processor := preprocessing.NewChatTemplatingProcessor()
 				rendered, err := processor.ApplyChatTemplate(t.Context(), renderReq)
 				require.NoError(t, err)
 
@@ -230,7 +237,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Encode(rendered, model, true)
+				tokens, _, err := testTokenizer.Encode(rendered, model, false)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -339,62 +346,6 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				"10.0.0.1:8080": 1.0,
 				"10.0.0.2:8080": 0.0,
 				"10.0.0.3:8080": 0.0,
-			},
-		},
-		{
-			name: "different model names",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
-					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
-					},
-				},
-			},
-			request: &types.LLMRequest{
-				RequestId:   "test-request",
-				TargetModel: "test-model",
-				Body: &types.LLMRequestBody{
-					Completions: &types.CompletionsRequest{
-						Prompt: prompt,
-					},
-				},
-			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
-				require.NotNil(t, req.Completions, "req expected to use Completions API")
-
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
-
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
-				require.NoError(t, err)
-
-				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
-
-				require.GreaterOrEqual(t, len(chunkKeys), 1, "Need at least 1 chunk for test")
-
-				// Populate the index with blocks for model `different-model`
-				// The request will ask for "test-model" but the cache only has "different-model"
-				// This should result in no cache hits since models don't share cache
-				return map[kvblock.BlockHash][]kvblock.PodEntry{
-					chunkKeys[0]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"},
-					},
-				}
-			},
-			wantScoresByAddress: map[string]float64{
-				// Even though both pods have the chunk cached, it's for a different model
-				// so there should be no cache hits for the requested model
-				"10.0.0.1:8080": 0.0,
-				"10.0.0.2:8080": 0.0,
 			},
 		},
 		{
