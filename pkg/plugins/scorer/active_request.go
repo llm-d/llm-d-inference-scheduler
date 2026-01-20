@@ -176,14 +176,8 @@ func (s *ActiveRequest) PreRequest(
 ) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	targetProfiles := []string{schedulingResult.PrimaryProfileName}
-	if schedulingResult.PrimaryProfileName != "prefill" {
-		targetProfiles = append(targetProfiles, "prefill")
-	}
-
-	podNames := make([]string, 0, len(targetProfiles))
-	for _, profileName := range targetProfiles {
-		profileResult := schedulingResult.ProfileResults[profileName]
+	podNames := make([]string, 0, len(schedulingResult.ProfileResults))
+	for profileName, profileResult := range schedulingResult.ProfileResults {
 		if profileResult == nil || len(profileResult.TargetPods) == 0 {
 			continue
 		}
@@ -191,10 +185,15 @@ func (s *ActiveRequest) PreRequest(
 		podName := profileResult.TargetPods[0].GetPod().NamespacedName.String()
 		podNames = append(podNames, podName)
 		s.incrementPodCount(podName)
-		debugLogger.Info("Added request to cache", "requestId", request.RequestId, "podName", podName)
+		debugLogger.Info(
+			"Added request to cache",
+			"requestId", request.RequestId,
+			"podName", podName,
+			"profileName", profileName,
+		)
 	}
 
-	// add to request cache with TTL
+	// add to request cache
 	s.requestCache.Set(request.RequestId, &requestEntry{PodNames: podNames, RequestID: request.RequestId}, 0) // Use default TTL
 }
 

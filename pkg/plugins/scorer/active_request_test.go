@@ -32,7 +32,7 @@ func newTestRequest(id string) *types.LLMRequest {
 	}
 }
 
-func newTestSchedulingResult(primaryProfile string, profilePods map[string]types.Pod) *types.SchedulingResult {
+func newTestSchedulingResult(profilePods map[string]types.Pod) *types.SchedulingResult {
 	profileResults := make(map[string]*types.ProfileRunResult)
 	for profile, pod := range profilePods {
 		profileResults[profile] = &types.ProfileRunResult{
@@ -40,8 +40,7 @@ func newTestSchedulingResult(primaryProfile string, profilePods map[string]types
 		}
 	}
 	return &types.SchedulingResult{
-		ProfileResults:     profileResults,
-		PrimaryProfileName: primaryProfile,
+		ProfileResults: profileResults,
 	}
 }
 
@@ -140,7 +139,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 
 	t.Run("First request", func(t *testing.T) {
 		request := newTestRequest("test-request-1")
-		schedulingResult := newTestSchedulingResult(testProfile, map[string]types.Pod{
+		schedulingResult := newTestSchedulingResult(map[string]types.Pod{
 			testProfile: podA,
 		})
 
@@ -152,7 +151,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 
 	t.Run("Second request to multiple pods", func(t *testing.T) {
 		request := newTestRequest("test-request-2")
-		schedulingResult := newTestSchedulingResult(testProfile, map[string]types.Pod{
+		schedulingResult := newTestSchedulingResult(map[string]types.Pod{
 			testProfile: podA,
 			"prefill":   podB,
 		})
@@ -171,11 +170,10 @@ func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
 
 	podA := newTestPod("pod-a", 2)
 	request := newTestRequest("test-request-1")
-	testProfile := "test-profile"
 
 	// Setup initial state: add request through PreRequest
-	schedulingResult := newTestSchedulingResult(testProfile, map[string]types.Pod{
-		testProfile: podA,
+	schedulingResult := newTestSchedulingResult(map[string]types.Pod{
+		"test-profile": podA,
 	})
 	scorer.PreRequest(ctx, request, schedulingResult)
 
@@ -196,7 +194,7 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 
 	podA := newTestPod("pod-a", 0)
 	request := newTestRequest("test-request-ttl")
-	schedulingResult := newTestSchedulingResult("test-profile", map[string]types.Pod{
+	schedulingResult := newTestSchedulingResult(map[string]types.Pod{
 		"test-profile": podA,
 	})
 
