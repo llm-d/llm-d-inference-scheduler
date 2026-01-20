@@ -12,7 +12,7 @@ jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
-      docs: ${{ steps.filter.outputs.docs }}
+      src: ${{ steps.filter.outputs.src }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
@@ -20,12 +20,12 @@ jobs:
         id: filter
         with:
           filters: |
-            docs:
-              - 'README.md'
-              - 'docs/**'
+            src:
+              - '**/*.go'
+              - '**/*.py'
   lint-and-test:
     needs: check-changes
-    if: ${{ needs.check-changes.outputs.docs == 'false' }}
+    if: ${{ needs.check-changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -63,7 +63,7 @@ jobs:
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v9
         with:
-          version: 'v2.1.6'
+          version: "v2.1.6"
           args: "--config=./.golangci.yml"
         env:
           CGO_ENABLED: ${{ env.CGO_ENABLED }}
