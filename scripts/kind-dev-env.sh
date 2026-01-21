@@ -37,7 +37,7 @@ EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
 # Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-food-review}"
+export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
 # Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
 export MODEL_FAMILY="${MODEL_NAME%%/*}"
 # Extract model ID (e.g., "Llama-3.1-8B-Instruct")
@@ -89,7 +89,7 @@ else
         PRIMARY_PORT="8000"
       fi
     else
-      DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
+      DEFAULT_EPP_CONFIG="deploy/config/sim-dp-epp-config.yaml"
     fi
   else
     echo "Invalid configuration: PD_ENABLED=true and KV_CACHE_ENABLED=true is not supported"
