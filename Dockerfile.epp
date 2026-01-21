@@ -18,17 +18,27 @@ RUN go mod download
 # Extract version dynamically and copy to a known location
 RUN KV_CACHE_PKG=$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache) && \
     mkdir -p /workspace/kv-cache && \
-    cp -r $KV_CACHE_PKG/* /workspace/kv-cache && \
-    chmod +x /workspace/kv-cache/pkg/preprocessing/chat_completions/setup.sh
+    cp -r $KV_CACHE_PKG/* /workspace/kv-cache
 
 FROM python:3.12-slim AS python-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential
+ARG TARGETARCH
 
 COPY --from=go-deps /workspace/kv-cache /workspace/kv-cache
 WORKDIR /workspace/kv-cache
-# llm-d-kv-cache's Makefile. not llm-d-inference-scheduler's
-RUN KV_CACHE_PKG=/workspace/kv-cache make install-python-deps
+
+# Create venv and install vLLM based on architecture using pre-built wheels
+RUN python3.12 -m venv /workspace/kv-cache/build/venv && \
+    . /workspace/kv-cache/build/venv/bin/activate && \
+    pip install --upgrade pip && \
+    VLLM_VERSION="0.14.0" && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        pip install https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_aarch64.whl; \
+    elif [ "$TARGETARCH" = "amd64" ]; then \
+        pip install https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_x86_64.whl --extra-index-url https://download.pytorch.org/whl/cpu; \
+    else \
+        echo "ERROR: Unsupported architecture: $TARGETARCH. Only arm64 and amd64 are supported." && exit 1; \
+    fi
 
 # Go build stage
 FROM quay.io/projectquay/golang:1.24 AS go-builder
