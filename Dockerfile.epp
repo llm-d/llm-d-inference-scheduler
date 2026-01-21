@@ -16,7 +16,6 @@ RUN go mod download
 
 # Copy Python wrapper and requirements from llm-d-kv-cache dependency
 # Extract version dynamically and copy to a known location
-# We need to keep llm-d-kv-cache as go module path is kept the old name
 RUN KV_CACHE_PKG=$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache) && \
     mkdir -p /workspace/kv-cache && \
     cp -r $KV_CACHE_PKG/* /workspace/kv-cache && \
