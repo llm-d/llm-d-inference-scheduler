@@ -339,6 +339,31 @@ plugins:
             huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
 ```
 
+Example configuration for automatic pod discovery in active-active multi-replica scheduler deployments:
+```yaml
+  - type: precise-prefix-cache-scorer
+    parameters:
+      tokenProcessorConfig:
+        blockSize: 64
+        hashSeed: "42"
+      indexerConfig:
+        tokenizersPoolConfig:
+          modelName: "Qwen/Qwen3-32B"
+          hf:
+            tokenizersCacheDir: "/tmp/tokenizers"
+      kvEventsConfig:
+        topicFilter: "kv@"
+        concurrency: 4 
+        discoverPods: true      # enables automatic pod discovery for active-active HA
+        podDiscoveryConfig:
+          socketPort: 5556
+```
+
+Where the vLLM engines are configured to emite KV-Events on port `5556` as follows:
+```yaml
+  --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://*:5556\",\"topic\":\"kv@${POD_IP}@Qwen/Qwen3-32B\"}"
+```
+
 Example configuration with all parameters set:
 
 ```yaml
@@ -349,9 +374,11 @@ plugins:
           blockSize: 16
           hashSeed: "12345"
         kvEventsConfig:
-          zmqEndpoint: tcp://*:5557
-          topicFilter: kv@
-          concurrency: 8
+          topicFilter: "kv@"
+          concurrency: 4
+          discoverPods: true    # enables automatic pod discovery for active-active HA
+          podDiscoveryConfig:
+            socketPort: 5556
         indexerConfig:
           prefixStoreConfig:
             cacheSize: 500000

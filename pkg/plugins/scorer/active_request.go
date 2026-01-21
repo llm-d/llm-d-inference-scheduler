@@ -250,7 +250,7 @@ func (s *ActiveRequest) decrementPodCount(podName string) {
 	}
 }
 
-func cleanCachePeriodically(ctx context.Context, cache *ttlcache.Cache[string, *requestEntry], requestTimeout time.Duration) {
+func cleanCachePeriodically[K comparable, V any](ctx context.Context, cache *ttlcache.Cache[K, V], requestTimeout time.Duration) {
 	ticker := time.NewTicker(requestTimeout)
 	defer ticker.Stop()
 
