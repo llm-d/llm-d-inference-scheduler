@@ -308,12 +308,14 @@ Configuration:
 
 - **Type**: `precise-prefix-cache-scorer`
 - **Parameters**:
+  - `tokenProcessorConfig`: Configuration for the `kvblock.TokenProcessor`.
   - `indexerConfig`: Configuration for the `kvcache.Indexer`.
   - `kvEventsConfig`: Configuration for the `kvevents.Pool`.
 
 See list of parameters at [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
 
 Note that in most cases you will only need to set:
+- Model name in the `tokenizersPoolConfig` to match the model used in the vLLM deployment.
 - HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
   - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
 - **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
@@ -325,16 +327,16 @@ Example configuration with the above parameters set:
 plugins:
   - type: precise-prefix-cache-scorer
     parameters:
+      tokenProcessorConfig:
+        blockSize: 64                    # must match vLLM block size
+        hashSeed: "12345"                # must match vLLM PYTHONHASHSEED env var
       indexerConfig:
-        tokenProcessorConfig:
-          blockSize: 64
-          hashSeed: "12345"
-      tokenizersPoolConfig:
-        modelName: hf-repo/model-name
-        hf:
-          huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
-      kvBlockIndexConfig:
-        enableMetrics: true
+        kvBlockIndexConfig:
+          enableMetrics: true    
+        tokenizersPoolConfig:
+          modelName: hf-repo/model-name
+          hf:
+            huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
 ```
 
 Example configuration with all parameters set:
@@ -343,23 +345,24 @@ Example configuration with all parameters set:
 plugins:
   - type: precise-prefix-cache-scorer
     parameters:
+        tokenProcessorConfig:
+          blockSize: 16
+          hashSeed: "12345"
         kvEventsConfig:
           zmqEndpoint: tcp://*:5557
           topicFilter: kv@
           concurrency: 8
-        kvCacheIndexerConfig:
+        indexerConfig:
           prefixStoreConfig:
             cacheSize: 500000
             blockSize: 256
-          tokenProcessorConfig:
-            blockSize: 16
-            hashSeed: "12345"
           kvBlockIndexConfig:
             inMemoryConfig:
               size: 100000000
               podCacheSize: 10
             enableMetrics: true
           tokenizersPoolConfig:
+            modelName: hf-repo/model-name
             workersCount: 8
             hf:
               huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
