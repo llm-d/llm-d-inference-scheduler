@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package requestcontrol contains helpers to decouple latency-predictor logic.
-package slo_aware_router
+package predicted_latency
 
 import schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
@@ -43,10 +43,10 @@ const (
 )
 
 const (
-	SLOAwareRouterPluginType = "predicted-latency-scorer"
-	eps                      = 1e-9
-	wMax                     = 100
-	minWeight                = 1
+	PredictedLatencyPluginType = "predicted-latency-scorer"
+	eps                        = 1e-9
+	wMax                       = 100
+	minWeight                  = 1
 )
 
 type podSelectionMode string

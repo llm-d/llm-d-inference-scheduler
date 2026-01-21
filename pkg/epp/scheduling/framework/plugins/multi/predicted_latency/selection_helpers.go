@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package slo_aware_router
+package predicted_latency
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 )
 
-func (s *SLOAwareRouter) calculateHeadroomRanges(candidates []endpointPredictionResult) (minTPOTH, maxTPOTH, minTTFTH, maxTTFTH float64) {
+func (s *PredictedLatency) calculateHeadroomRanges(candidates []endpointPredictionResult) (minTPOTH, maxTPOTH, minTTFTH, maxTTFTH float64) {
 	minTPOTH, maxTPOTH = math.MaxFloat64, -math.MaxFloat64
 	minTTFTH, maxTTFTH = math.MaxFloat64, -math.MaxFloat64
 
@@ -45,7 +45,7 @@ func (s *SLOAwareRouter) calculateHeadroomRanges(candidates []endpointPrediction
 	return
 }
 
-func (s *SLOAwareRouter) calculateWeightedChoices(
+func (s *PredictedLatency) calculateWeightedChoices(
 	ctx context.Context,
 	candidates []endpointPredictionResult,
 	minTPOTH, maxTPOTH, minTTFTH, maxTTFTH float64,

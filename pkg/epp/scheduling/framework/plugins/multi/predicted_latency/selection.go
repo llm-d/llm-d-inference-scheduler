@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package requestcontrol contains helpers to decouple latency-predictor logic.
-package slo_aware_router
+package predicted_latency
 
 import (
 	"context"
@@ -30,7 +30,7 @@ import (
 
 // selectFromPositiveHeadroomEndpoints selects a endpoint from positive headroom endpoints using headroom strategy
 // Updated to incorporate TTFTHeadroom with a configurable blend vs TPOT headroom.
-func (s *SLOAwareRouter) selectFromPositiveHeadroomEndpoints(ctx context.Context, posHeadroomEndpoints []endpointPredictionResult, r *rand.Rand) schedulingtypes.Endpoint {
+func (s *PredictedLatency) selectFromPositiveHeadroomEndpoints(ctx context.Context, posHeadroomEndpoints []endpointPredictionResult, r *rand.Rand) schedulingtypes.Endpoint {
 
 	if len(posHeadroomEndpoints) == 1 {
 		return posHeadroomEndpoints[0].Endpoint
@@ -61,7 +61,7 @@ func (s *SLOAwareRouter) selectFromPositiveHeadroomEndpoints(ctx context.Context
 
 // selectFromNegativeHeadroomEndpoints selects an endpoint from negative headroom endpoints using hierarchical TTFT/TPOT logic
 // Modified to strictly prefer endpoints with 0 running requests
-func (s *SLOAwareRouter) selectFromNegativeHeadroomEndpoints(ctx context.Context, negHeadroomEndpoints []endpointPredictionResult, r *rand.Rand) schedulingtypes.Endpoint {
+func (s *PredictedLatency) selectFromNegativeHeadroomEndpoints(ctx context.Context, negHeadroomEndpoints []endpointPredictionResult, r *rand.Rand) schedulingtypes.Endpoint {
 	logger := log.FromContext(ctx)
 
 	if len(negHeadroomEndpoints) == 1 {
@@ -96,7 +96,7 @@ func (s *SLOAwareRouter) selectFromNegativeHeadroomEndpoints(ctx context.Context
 }
 
 // selectFromNegativeHeadroomEndpointsInternal handles the actual selection logic for negative headroom endpoints
-func (s *SLOAwareRouter) selectFromNegativeHeadroomEndpointsInternal(ctx context.Context, negHeadroomEndpoints []endpointPredictionResult, r *rand.Rand) schedulingtypes.Endpoint {
+func (s *PredictedLatency) selectFromNegativeHeadroomEndpointsInternal(ctx context.Context, negHeadroomEndpoints []endpointPredictionResult, r *rand.Rand) schedulingtypes.Endpoint {
 	if len(negHeadroomEndpoints) == 1 {
 		return negHeadroomEndpoints[0].Endpoint
 	}
@@ -128,7 +128,7 @@ func (s *SLOAwareRouter) selectFromNegativeHeadroomEndpointsInternal(ctx context
 
 // weightEndpointsByBlendedDeficit applies blended weighting using TTFT and TPOT deficits.
 // Lower blended deficit => higher weight.
-func (ps *SLOAwareRouter) weightEndpointsByBlendedDeficit(
+func (ps *PredictedLatency) weightEndpointsByBlendedDeficit(
 	ctx context.Context,
 	endpoints []endpointPredictionResult,
 	choices *[]choice,
@@ -228,7 +228,7 @@ func (ps *SLOAwareRouter) weightEndpointsByBlendedDeficit(
 	}
 }
 
-func (s *SLOAwareRouter) handleNegativeHeadroomEndpointsHierarchical(
+func (s *PredictedLatency) handleNegativeHeadroomEndpointsHierarchical(
 	ctx context.Context,
 	negHeadroomEndpoints []endpointPredictionResult,
 	choices *[]choice,
@@ -291,7 +291,7 @@ func (s *SLOAwareRouter) handleNegativeHeadroomEndpointsHierarchical(
 	}
 }
 
-func (s *SLOAwareRouter) getEndpointMinTPOTSLO(endpoint schedulingtypes.Endpoint) float64 {
+func (s *PredictedLatency) getEndpointMinTPOTSLO(endpoint schedulingtypes.Endpoint) float64 {
 	endpointName := types.NamespacedName{
 		Name:      endpoint.GetMetadata().NamespacedName.Name,
 		Namespace: endpoint.GetMetadata().NamespacedName.Namespace,
@@ -304,7 +304,7 @@ func (s *SLOAwareRouter) getEndpointMinTPOTSLO(endpoint schedulingtypes.Endpoint
 	return 0 // no running requests or no TPOT SLOs
 }
 
-func (s *SLOAwareRouter) getEndpointRunningRequestCount(endpoint schedulingtypes.Endpoint) int {
+func (s *PredictedLatency) getEndpointRunningRequestCount(endpoint schedulingtypes.Endpoint) int {
 	endpointName := types.NamespacedName{
 		Name:      endpoint.GetMetadata().NamespacedName.Name,
 		Namespace: endpoint.GetMetadata().NamespacedName.Namespace,

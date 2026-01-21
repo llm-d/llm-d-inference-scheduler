@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package requestcontrol contains helpers to decouple latency-predictor logic.
-package slo_aware_router
+package predicted_latency
 
 import (
 	"context"
@@ -41,7 +41,7 @@ type endpointPredictionResult struct {
 }
 
 // generatePredictions creates prediction results for all candidate pods
-func (s *SLOAwareRouter) generatePredictions(ctx context.Context, request *schedulingtypes.LLMRequest, sloCtx *sloRequestContext, candidateEndpoints []schedulingtypes.Endpoint) ([]endpointPredictionResult, error) {
+func (s *PredictedLatency) generatePredictions(ctx context.Context, request *schedulingtypes.LLMRequest, predictedLatencyCtx *predictedLatencyCtx, candidateEndpoints []schedulingtypes.Endpoint) ([]endpointPredictionResult, error) {
 	logger := log.FromContext(ctx)
 	predictions := make([]endpointPredictionResult, 0, len(candidateEndpoints))
 
@@ -55,7 +55,7 @@ func (s *SLOAwareRouter) generatePredictions(ctx context.Context, request *sched
 		logger.V(logutil.TRACE).Info("Candidate pod for scheduling", "endpoint", endpoint.GetMetadata().String(), "metrics", endpoint.GetMetrics().String())
 
 		// Get prefix cache score for the pod
-		prefixCacheScore := sloCtx.prefixCacheScoresForEndpoints[endpoint.GetMetadata().NamespacedName.Name]
+		prefixCacheScore := predictedLatencyCtx.prefixCacheScoresForEndpoints[endpoint.GetMetadata().NamespacedName.Name]
 
 		logger.V(logutil.DEBUG).Info("Prefix cache score for pod", "pod", endpoint.GetMetadata().String(), "prefixCacheScore", prefixCacheScore)
 
@@ -82,7 +82,7 @@ func (s *SLOAwareRouter) generatePredictions(ctx context.Context, request *sched
 		predResult.TPOT = prediction.TPOT
 
 		podMinTPOTSLO := s.getEndpointMinTPOTSLO(endpoint)
-		predResult.TTFTValid, predResult.TPOTValid, predResult.IsValid, predResult.Headroom, predResult.TTFTHeadroom = s.validatePrediction(prediction, sloCtx, podMinTPOTSLO)
+		predResult.TTFTValid, predResult.TPOTValid, predResult.IsValid, predResult.Headroom, predResult.TTFTHeadroom = s.validatePrediction(prediction, predictedLatencyCtx, podMinTPOTSLO)
 
 		logger.V(logutil.DEBUG).Info("Prediction for scheduling",
 			"endpoint", endpoint.GetMetadata().String(),
@@ -91,8 +91,8 @@ func (s *SLOAwareRouter) generatePredictions(ctx context.Context, request *sched
 			"TPOT", prediction.TPOT,
 			"buffer", s.config.SLOBufferFactor,
 			"podMinTPOTSLO", podMinTPOTSLO,
-			"ttftSLO", sloCtx.ttftSLO,
-			"requestTPOTSLO", sloCtx.avgTPOTSLO,
+			"ttftSLO", predictedLatencyCtx.ttftSLO,
+			"requestTPOTSLO", predictedLatencyCtx.avgTPOTSLO,
 			"tpotHeadroom", predResult.Headroom,
 			"ttftHeadroom", predResult.TTFTHeadroom,
 			"tpotValid", predResult.TPOTValid,
@@ -106,28 +106,28 @@ func (s *SLOAwareRouter) generatePredictions(ctx context.Context, request *sched
 }
 
 // updateRequestContextWithPredictions updates the request context with prediction data
-func (s *SLOAwareRouter) updateRequestContextWithPredictions(sloCtx *sloRequestContext, predictions []endpointPredictionResult) {
-	sloCtx.predictionsForScheduling = predictions
+func (s *PredictedLatency) updateRequestContextWithPredictions(predictedLatencyCtx *predictedLatencyCtx, predictions []endpointPredictionResult) {
+	predictedLatencyCtx.predictionsForScheduling = predictions
 }
 
-func (s *SLOAwareRouter) validatePrediction(
+func (s *PredictedLatency) validatePrediction(
 	pred *latencypredictor.PredictionResponse,
-	sloCtx *sloRequestContext,
+	predictedLatencyCtx *predictedLatencyCtx,
 	podMinTPOTSLO float64,
 ) (ttftOk, tpotOk, isValid bool, headroom float64, ttftHeadroom float64) {
 
-	ttftOk = pred.TTFT < sloCtx.ttftSLO
-	ttftHeadroom = sloCtx.ttftSLO - pred.TTFT
+	ttftOk = pred.TTFT < predictedLatencyCtx.ttftSLO
+	ttftHeadroom = predictedLatencyCtx.ttftSLO - pred.TTFT
 
 	tpotOk = true
 	headroom = 0.0
 
 	if s.config.StreamingMode {
-		bufferedTPOT := sloCtx.avgTPOTSLO * s.config.SLOBufferFactor
+		bufferedTPOT := predictedLatencyCtx.avgTPOTSLO * s.config.SLOBufferFactor
 		// a podMinTPOTSLO of 0 means no either no requests, or no TPOT SLOs specified on running requests
 		if podMinTPOTSLO > 0 {
-			if podMinTPOTSLO < sloCtx.avgTPOTSLO {
-				log.FromContext(context.Background()).V(logutil.DEBUG).Info("Pod min TPOT SLO is less than the req SLO, adjusting", "podMinTPOTSLO", podMinTPOTSLO, "bufferedTPOT", sloCtx.avgTPOTSLO)
+			if podMinTPOTSLO < predictedLatencyCtx.avgTPOTSLO {
+				log.FromContext(context.Background()).V(logutil.DEBUG).Info("Pod min TPOT SLO is less than the req SLO, adjusting", "podMinTPOTSLO", podMinTPOTSLO, "bufferedTPOT", predictedLatencyCtx.avgTPOTSLO)
 			}
 			bufferedTPOT = min(bufferedTPOT, podMinTPOTSLO*s.config.SLOBufferFactor)
 		}
