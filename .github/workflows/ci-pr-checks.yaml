@@ -25,7 +25,7 @@ jobs:
               - '**/*.py'
   lint-and-test:
     needs: check-changes
-    if: ${{ needs.check-changes.outputs.src == 'true' }}
+    if: ${{ needs.check-changes.outputs.src == 'false' }}
     runs-on: ubuntu-latest
     steps:
       - name: Free Disk Space (Ubuntu)
