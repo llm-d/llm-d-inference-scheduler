@@ -118,7 +118,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	var subscribersCache *ttlcache.Cache[string, struct{}]
 
 	// initialize the subscribers cache only if pod discovery is enabled
-	if config.KVEventsConfig.DiscoverPods == true {
+	if config.KVEventsConfig.DiscoverPods {
 		// initialize the subscribers TTL cache
 		subscriptionTimeout := 10 * time.Minute
 		subscribersCache = ttlcache.New[string, struct{}](
@@ -186,7 +186,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	debugLogger := logger.V(logutil.DEBUG)
 
-	if s.kvEventsConfig.DiscoverPods == true {
+	if s.kvEventsConfig.DiscoverPods {
 		// update subscribers here temporarily
 		for _, pod := range pods {
 			podObj := pod.GetPod()
