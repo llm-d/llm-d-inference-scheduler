@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jellydator/ttlcache/v3 v3.4.0
-	github.com/llm-d/llm-d-kv-cache v0.4.1-0.20260120091923-2d261e30d383
+	github.com/llm-d/llm-d-kv-cache v0.4.1-0.20260121180456-e3fafddd09f4
 	github.com/onsi/ginkgo/v2 v2.27.5
 	github.com/onsi/gomega v1.39.0
 	github.com/openai/openai-go v1.12.0
