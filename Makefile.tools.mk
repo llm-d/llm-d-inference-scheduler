@@ -18,6 +18,7 @@ GINKGO_VERSION ?= v2.27.2
 GOLANGCI_LINT_VERSION ?= v2.1.6
 KUSTOMIZE_VERSION ?= v5.5.0
 TYPOS_VERSION ?= v1.34.0
+VLLM_VERSION ?= 0.14.0
 
 ## Python Configuration
 PYTHON_VERSION ?= 3.12
@@ -202,7 +203,7 @@ install-python-deps: setup-venv ## installs dependencies.
 		if [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" ]; then \
 			echo "Running kv-cache setup script for macOS..."; \
 			cp "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" build/kv-cache-setup.sh; \
-			chmod +x build/kv-cache-setup.sh; \
+			chmod +wx build/kv-cache-setup.sh; \
 			cd build && PATH=$(VENV_BIN):$$PATH ./kv-cache-setup.sh && cd ..; \
 		else \
 			echo "ERROR: setup script not found at $$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh"; \
@@ -210,11 +211,10 @@ install-python-deps: setup-venv ## installs dependencies.
 		fi; \
 	else \
 		echo "Installing vLLM for Linux $(TARGETARCH)..."; \
-		VLLM_VERSION="0.14.0"; \
 		if [ "$(TARGETARCH)" = "arm64" ]; then \
-			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$${VLLM_VERSION}/vllm-$${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_aarch64.whl; \
+			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$(VLLM_VERSION)/vllm-$(VLLM_VERSION)+cpu-cp38-abi3-manylinux_2_35_aarch64.whl; \
 		elif [ "$(TARGETARCH)" = "amd64" ]; then \
-			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$${VLLM_VERSION}/vllm-$${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_x86_64.whl --extra-index-url https://download.pytorch.org/whl/cpu; \
+			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$(VLLM_VERSION)/vllm-$(VLLM_VERSION)+cpu-cp38-abi3-manylinux_2_35_x86_64.whl --extra-index-url https://download.pytorch.org/whl/cpu; \
 		else \
 			echo "ERROR: Unsupported architecture: $(TARGETARCH). Only arm64 and amd64 are supported."; \
 			exit 1; \
