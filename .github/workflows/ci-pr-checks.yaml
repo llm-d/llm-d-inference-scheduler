@@ -65,8 +65,7 @@ jobs:
       - name: Install dependencies
         run: |
           go mod tidy
-          sudo -E env "PATH=$PATH" make install-dependencies
-          make install-python-deps
+          sudo -E env "PATH=$PATH" make install-dependencies install-python-deps
 
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v9
