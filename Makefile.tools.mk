@@ -194,14 +194,31 @@ install-python-deps: setup-venv ## installs dependencies.
 	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
 	@echo "install vllm..."
 	@KV_CACHE_PKG=$${KV_CACHE_PKG:-$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null)}; \
-	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" ]; then \
-		echo "Running kv-cache setup script..."; \
-		cp "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" build/kv-cache-setup.sh; \
-		chmod +x build/kv-cache-setup.sh; \
-		cd build && PATH=$(VENV_BIN):$$PATH ./kv-cache-setup.sh && cd ..; \
-	else \
-		echo "ERROR: kv-cache package not found or setup script missing."; \
+	if [ -z "$$KV_CACHE_PKG" ]; then \
+		echo "ERROR: kv-cache package not found."; \
 		exit 1; \
+	fi; \
+	if [ "$(TARGETOS)" = "darwin" ]; then \
+		if [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" ]; then \
+			echo "Running kv-cache setup script for macOS..."; \
+			cp "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" build/kv-cache-setup.sh; \
+			chmod +x build/kv-cache-setup.sh; \
+			cd build && PATH=$(VENV_BIN):$$PATH ./kv-cache-setup.sh && cd ..; \
+		else \
+			echo "ERROR: setup script not found at $$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Installing vLLM for Linux $(TARGETARCH)..."; \
+		VLLM_VERSION="0.14.0"; \
+		if [ "$(TARGETARCH)" = "arm64" ]; then \
+			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$${VLLM_VERSION}/vllm-$${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_aarch64.whl; \
+		elif [ "$(TARGETARCH)" = "amd64" ]; then \
+			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$${VLLM_VERSION}/vllm-$${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_x86_64.whl --extra-index-url https://download.pytorch.org/whl/cpu; \
+		else \
+			echo "ERROR: Unsupported architecture: $(TARGETARCH). Only arm64 and amd64 are supported."; \
+			exit 1; \
+		fi; \
 	fi
 	@echo "Verifying vllm installation..."
 	@$(VENV_BIN)/python -c "import vllm; print('✅ vllm version ' + vllm.__version__ + ' installed.')" || { \
