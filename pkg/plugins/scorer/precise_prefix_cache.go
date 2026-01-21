@@ -290,7 +290,6 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		)
 	}
 
-	span.SetAttributes(attribute.String("llm_d.scorer.result", "success"))
 	return normalizedScores
 }
 

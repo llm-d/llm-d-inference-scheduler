@@ -37,12 +37,9 @@ import (
 
 const (
 	defaultServiceName = "llm-d-inference-scheduler"
-)
 
-var (
-	// serviceName holds the service name for the tracer
-	// Set during InitTracing() from OTEL_SERVICE_NAME env var
-	serviceName = defaultServiceName
+	// instrumentationName identifies this instrumentation library in traces.
+	instrumentationName = "llm-d-inference-scheduler"
 )
 
 // InitTracing initializes OpenTelemetry tracing with OTLP exporter.
@@ -55,7 +52,7 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	logger := log.FromContext(ctx)
 
 	// Get service name from environment, fallback to default
-	serviceName = os.Getenv("OTEL_SERVICE_NAME")
+	serviceName := os.Getenv("OTEL_SERVICE_NAME")
 	if serviceName == "" {
 		serviceName = defaultServiceName
 	}
@@ -125,7 +122,9 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 	return tp.Shutdown, nil
 }
 
-// Tracer returns a tracer for the inference scheduler
+// Tracer returns a tracer for the inference scheduler.
+// The tracer is identified by the instrumentation library name, which is
+// distinct from the service name set during InitTracing().
 func Tracer() trace.Tracer {
-	return otel.Tracer(serviceName)
+	return otel.Tracer(instrumentationName)
 }
