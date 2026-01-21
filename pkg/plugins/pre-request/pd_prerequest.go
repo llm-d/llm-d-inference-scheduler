@@ -77,12 +77,6 @@ func (p *PrefillHeaderHandler) PreRequest(ctx context.Context, request *scheduli
 	)
 	defer span.End()
 
-	// Add component and request attributes
-	span.SetAttributes(
-		attribute.String("component", "llm-d-inference-scheduler"),
-		attribute.String("operation", "prefill_disaggregation"),
-	)
-
 	if request != nil && request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}

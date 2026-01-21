@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
@@ -194,7 +195,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 	inputTokens, err := getUserInputLenInTokens(request)
 	if err != nil {
 		log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input")
-		span.SetAttributes(attribute.String("error", err.Error()))
+		span.SetStatus(codes.Error, err.Error())
 		return nil
 	}
 

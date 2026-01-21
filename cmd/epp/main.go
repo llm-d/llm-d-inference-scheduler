@@ -27,8 +27,6 @@ package main
 import (
 	"os"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/cmd/epp/runner"
 
@@ -46,15 +44,13 @@ func main() {
 		// Log error but don't fail - tracing is optional
 		ctrl.Log.Error(err, "Failed to initialize tracing")
 	}
-
-	// Add startup span to verify tracing is working
-	tracer := telemetry.Tracer()
-	ctx, span := tracer.Start(ctx, "llm_d.epp.startup")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("component", "llm-d-inference-scheduler"),
-		attribute.String("operation", "startup"),
-	)
+	if shutdownTracing != nil {
+		defer func() {
+			if err := shutdownTracing(ctx); err != nil {
+				ctrl.Log.Error(err, "Failed to shutdown tracing")
+			}
+		}()
+	}
 
 	// Register llm-d-inference-scheduler plugins
 	plugins.RegisterAllPlugins()
@@ -65,17 +61,6 @@ func main() {
 	if err := runner.NewRunner().
 		WithCustomCollectors(metrics.GetCollectors()...).
 		Run(ctx); err != nil {
-		span.SetStatus(codes.Error, "startup failed")
-		if shutdownTracing != nil {
-			if err := shutdownTracing(ctx); err != nil {
-				ctrl.Log.Error(err, "Failed to shutdown tracing")
-			}
-		}
 		os.Exit(1)
-	}
-	if shutdownTracing != nil {
-		if err := shutdownTracing(ctx); err != nil {
-			ctrl.Log.Error(err, "Failed to shutdown tracing")
-		}
 	}
 }
