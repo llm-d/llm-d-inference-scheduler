@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package slo_aware_router
+package predicted_latency
 
 import (
 	"context"
@@ -27,23 +27,23 @@ import (
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 )
 
-func (s *SLOAwareRouter) parseSLOHeaders(ctx context.Context, request *schedulingtypes.LLMRequest, sloCtx *sloRequestContext) {
+func (s *PredictedLatency) parseSLOHeaders(ctx context.Context, request *schedulingtypes.LLMRequest, predictedLatencyCtx *predictedLatencyCtx) {
 	logger := log.FromContext(ctx)
 	var err error
 
 	// Get Request SLOs from request header
-	sloCtx.ttftSLO, err = parseFloatHeader(*request, ttftSLOHeaderKey)
+	predictedLatencyCtx.ttftSLO, err = parseFloatHeader(*request, ttftSLOHeaderKey)
 	if err != nil {
-		logger.V(logutil.DEBUG).Error(errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("%v must be a float: %v", ttftSLOHeaderKey, err)}, "SLOAwareRouter: Error parsing TTFT SLO from header")
+		logger.V(logutil.DEBUG).Error(errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("%v must be a float: %v", ttftSLOHeaderKey, err)}, "PredictedLatency: Error parsing TTFT SLO from header")
 	}
 
-	sloCtx.avgTPOTSLO, err = parseFloatHeader(*request, tpotSLOHeaderKey)
+	predictedLatencyCtx.avgTPOTSLO, err = parseFloatHeader(*request, tpotSLOHeaderKey)
 	if err != nil {
-		logger.V(logutil.DEBUG).Error(errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("%v must be a float: %v", tpotSLOHeaderKey, err)}, "SLOAwareRouter: Error parsing TPOT SLO from header")
+		logger.V(logutil.DEBUG).Error(errutil.Error{Code: errutil.BadRequest, Msg: fmt.Sprintf("%v must be a float: %v", tpotSLOHeaderKey, err)}, "PredictedLatency: Error parsing TPOT SLO from header")
 	}
 }
 
-func (s *SLOAwareRouter) classifyEndpointsByHeadroom(allPreds []endpointPredictionResult) (posHeadroomEndpoints, negHeadroomEndpoints []endpointPredictionResult) {
+func (s *PredictedLatency) classifyEndpointsByHeadroom(allPreds []endpointPredictionResult) (posHeadroomEndpoints, negHeadroomEndpoints []endpointPredictionResult) {
 	for _, p := range allPreds {
 		// An endpoint has positive headroom only if BOTH TTFT and TPOT have positive headroom
 		if (p.Headroom >= 0) && p.TTFTHeadroom >= 0 {
@@ -56,7 +56,7 @@ func (s *SLOAwareRouter) classifyEndpointsByHeadroom(allPreds []endpointPredicti
 	return
 }
 
-func (s *SLOAwareRouter) selectEndpointBasedOnStrategy(
+func (s *PredictedLatency) selectEndpointBasedOnStrategy(
 	ctx context.Context,
 	r *rand.Rand,
 	allPreds, posHeadroomEndpoints, negHeadroomEndpoints []endpointPredictionResult,

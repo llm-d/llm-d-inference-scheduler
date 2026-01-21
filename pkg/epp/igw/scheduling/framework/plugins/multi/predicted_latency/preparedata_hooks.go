@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package slo_aware_router
+package predicted_latency
 
 import (
 	"context"
@@ -28,9 +28,9 @@ import (
 )
 
 // PrepareRequestData prepares the SLO context for the request, including parsing SLO headers and gathering prefix cache scores abds generating predictions.
-func (s *SLOAwareRouter) PrepareRequestData(ctx context.Context, request *schedulingtypes.LLMRequest, endpoints []schedulingtypes.Endpoint) error {
+func (s *PredictedLatency) PrepareRequestData(ctx context.Context, request *schedulingtypes.LLMRequest, endpoints []schedulingtypes.Endpoint) error {
 	logger := log.FromContext(ctx)
-	sloCtx := s.getOrMakeSLORequestContext(request)
+	sloCtx := s.getOrMakePredictedLatencyContextForRequest(request)
 
 	s.parseSLOHeaders(ctx, request, sloCtx)
 	var prefixCacheScore float64
@@ -51,14 +51,14 @@ func (s *SLOAwareRouter) PrepareRequestData(ctx context.Context, request *schedu
 		}
 		sloCtx.prefixCacheScoresForEndpoints[endpoint.GetMetadata().NamespacedName.Name] = prefixCacheScore
 	}
-	s.setSLOContextForRequest(request, sloCtx)
+	s.setPredictedLatencyContextForRequest(request, sloCtx)
 	return nil
 }
 
-func (p *SLOAwareRouter) Produces() map[string]any {
+func (p *PredictedLatency) Produces() map[string]any {
 	return map[string]any{}
 }
 
-func (p *SLOAwareRouter) Consumes() map[string]any {
+func (p *PredictedLatency) Consumes() map[string]any {
 	return map[string]any{approximateprefix.PrefixCacheMatchInfoKey: approximateprefix.PrefixCacheMatchInfo{}}
 }

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package slo_aware_router
+package predicted_latency
 
 import (
 	"context"
@@ -37,7 +37,7 @@ import (
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 )
 
-type SLOAwareRouter struct {
+type PredictedLatency struct {
 	typedName           plugins.TypedName
 	latencypredictor    latencypredictor.PredictorInterface
 	runningRequestLists map[types.NamespacedName]*requestPriorityQueue
@@ -46,7 +46,7 @@ type SLOAwareRouter struct {
 	config              Config
 }
 
-var _ framework.Scorer = &SLOAwareRouter{}
+var _ framework.Scorer = &PredictedLatency{}
 
 type Config struct {
 	SamplingMean              float64 `json:"samplingMean,omitempty"`
@@ -88,16 +88,16 @@ var DefaultConfig = Config{
 	StreamingMode:             true,
 }
 
-func SLOAwareRouterFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+func PredictedLatencyFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
 	parameters := DefaultConfig
 	if len(rawParameters) > 0 {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal config for SLOAwareRouter: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal config for PredictedLatency: %w", err)
 		}
 	}
 
 	if err := parameters.validate(); err != nil {
-		return nil, fmt.Errorf("invalid SLOAwareRouter config: %w", err)
+		return nil, fmt.Errorf("invalid PredictedLatency config: %w", err)
 	}
 
 	predictor, err := startPredictor(handle)
@@ -105,7 +105,7 @@ func SLOAwareRouterFactory(name string, rawParameters json.RawMessage, handle pl
 		return nil, fmt.Errorf("failed to start latency predictor: %w", err)
 	}
 
-	return NewSLOAwareRouter(parameters, predictor).WithName(name), nil
+	return NewPredictedLatency(parameters, predictor).WithName(name), nil
 }
 
 func (c *Config) validate() error {
@@ -152,14 +152,14 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func NewSLOAwareRouter(config Config, predictor latencypredictor.PredictorInterface) *SLOAwareRouter {
+func NewPredictedLatency(config Config, predictor latencypredictor.PredictorInterface) *PredictedLatency {
 	strategy := headroomStrategy(config.HeadroomSelectionStrategy)
 	if strategy == "" {
 		strategy = headroomStrategyLeast
 	}
 
-	return &SLOAwareRouter{
-		typedName:           plugins.TypedName{Type: SLOAwareRouterPluginType, Name: SLOAwareRouterPluginType},
+	return &PredictedLatency{
+		typedName:           plugins.TypedName{Type: PredictedLatencyPluginType, Name: PredictedLatencyPluginType},
 		latencypredictor:    predictor,
 		runningRequestLists: make(map[types.NamespacedName]*requestPriorityQueue),
 		sloContextStore:     sync.Map{},
@@ -182,21 +182,21 @@ func startPredictor(handle plugins.Handle) (latencypredictor.PredictorInterface,
 	return predictor, nil
 }
 
-func (s *SLOAwareRouter) TypedName() plugins.TypedName {
+func (s *PredictedLatency) TypedName() plugins.TypedName {
 	return s.typedName
 }
 
 // Category returns the preference the scorer applies when scoring candidate endpoints.
-func (s *SLOAwareRouter) Category() framework.ScorerCategory {
+func (s *PredictedLatency) Category() framework.ScorerCategory {
 	return framework.Balance
 }
 
-func (s *SLOAwareRouter) WithName(name string) *SLOAwareRouter {
+func (s *PredictedLatency) WithName(name string) *PredictedLatency {
 	s.typedName.Name = name
 	return s
 }
 
-func (s *SLOAwareRouter) epsilonGreedyAffinityGate(
+func (s *PredictedLatency) epsilonGreedyAffinityGate(
 	ctx context.Context,
 	candidates []endpointPredictionResult,
 	r *rand.Rand,
@@ -235,9 +235,9 @@ func (s *SLOAwareRouter) epsilonGreedyAffinityGate(
 
 // scoreWithoutPredictions provides fallback scoring based only on prefix cache scores
 // when latency predictions are unavailable
-func (s *SLOAwareRouter) scoreWithoutPredictions(
+func (s *PredictedLatency) scoreWithoutPredictions(
 	ctx context.Context,
-	sloCtx *sloRequestContext,
+	sloCtx *predictedLatencyCtx,
 	endpoints []schedulingtypes.Endpoint,
 	r *rand.Rand,
 ) map[schedulingtypes.Endpoint]float64 {
@@ -275,21 +275,21 @@ func (s *SLOAwareRouter) scoreWithoutPredictions(
 	return scores
 }
 
-func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.CycleState, request *schedulingtypes.LLMRequest, endpoints []schedulingtypes.Endpoint) map[schedulingtypes.Endpoint]float64 {
+func (s *PredictedLatency) Score(ctx context.Context, state *schedulingtypes.CycleState, request *schedulingtypes.LLMRequest, endpoints []schedulingtypes.Endpoint) map[schedulingtypes.Endpoint]float64 {
 	logger := log.FromContext(ctx)
 	if s.latencypredictor == nil {
-		logger.V(logutil.DEBUG).Info("SLOAwareRouter: no predictor configured, returning nil scores")
+		logger.V(logutil.DEBUG).Info("PredictedLatency: no predictor configured, returning nil scores")
 		return nil
 	}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	sloCtx := s.getOrMakeSLORequestContext(request)
+	sloCtx := s.getOrMakePredictedLatencyContextForRequest(request)
 
 	predictions, err := s.generatePredictions(ctx, request, sloCtx, endpoints)
 	if err != nil || len(predictions) == 0 {
-		logger.V(logutil.DEBUG).Error(err, "SLOAwareRouter: Error generating predictions, falling back to composite-only scoring")
-		s.setSLOContextForRequest(request, sloCtx)
+		logger.V(logutil.DEBUG).Error(err, "PredictedLatency: Error generating predictions, falling back to composite-only scoring")
+		s.setPredictedLatencyContextForRequest(request, sloCtx)
 		return s.scoreWithoutPredictions(ctx, sloCtx, endpoints, rng)
 	}
 	s.updateRequestContextWithPredictions(sloCtx, predictions)
@@ -338,21 +338,21 @@ func (s *SLOAwareRouter) Score(ctx context.Context, state *schedulingtypes.Cycle
 		logger.V(logutil.DEBUG).Info("Selected endpoint for scheduling", "endpoint", selectedEndpoint.GetMetadata().String())
 	}
 
-	s.setSLOContextForRequest(request, sloCtx)
+	s.setPredictedLatencyContextForRequest(request, sloCtx)
 
 	return scores
 }
 
-func (t *SLOAwareRouter) getOrMakeSLORequestContext(request *schedulingtypes.LLMRequest) *sloRequestContext {
-	sloCtx, err := t.getSLOContextForRequest(request)
+func (t *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *schedulingtypes.LLMRequest) *predictedLatencyCtx {
+	sloCtx, err := t.getPredictedLatencyContextForRequest(request)
 	if err != nil {
-		sloCtx = newSLORequestContext(request)
+		sloCtx = newPredictedLatencyContext(request)
 	}
 
 	return sloCtx
 }
 
-func (s *SLOAwareRouter) getPrefixCacheScoreForPod(ctx context.Context, cycleState *schedulingtypes.CycleState, endpoint schedulingtypes.Endpoint) float64 {
+func (s *PredictedLatency) getPrefixCacheScoreForPod(ctx context.Context, cycleState *schedulingtypes.CycleState, endpoint schedulingtypes.Endpoint) float64 {
 	log.FromContext(ctx).V(logutil.DEBUG).Info("Running getPrefixCacheScoreForPod, getting prefix cache score for endpoint", "endpoint", endpoint.GetMetadata().String())
 	plugintype := prefix.PrefixCachePluginType
 	pluginname := prefix.PrefixCachePluginType
