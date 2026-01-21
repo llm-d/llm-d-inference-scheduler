@@ -27,6 +27,9 @@ const (
 // PrecisePrefixCachePluginConfig holds the configuration for the
 // PrecisePrefixCacheScorer plugin.
 type PrecisePrefixCachePluginConfig struct {
+	// TokenProcessorConfig holds the configuration for the `kvblock.TokenProcessor` which is
+	// used to process tokens into KV-block keys.
+	TokenProcessorConfig *kvblock.TokenProcessorConfig `json:"tokenProcessorConfig"`
 	// IndexerConfig holds the configuration for the `kvcache.Indexer` which is
 	// used to score pods based on the KV-cache index state.
 	IndexerConfig *kvcache.Config `json:"indexerConfig"`
@@ -92,7 +95,11 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 // If the configuration is invalid or if the indexer fails to initialize,
 // an error is returned.
 func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePrefixCacheScorer, error) {
-	tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
+	if config.TokenProcessorConfig == nil {
+		config.TokenProcessorConfig = kvblock.DefaultTokenProcessorConfig()
+	}
+
+	tokenProcessor := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
 
 	// initialize the indexer
 	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig, tokenProcessor)
