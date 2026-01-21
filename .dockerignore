@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+bin
+build
+
+# IDE and OS files
+.idea
+.vscode
+*.DS_Store
+
+# Local virtual environments
+venv
+
+# Python cache files
+__pycache__
+
+# Docker files
+Dockerfile

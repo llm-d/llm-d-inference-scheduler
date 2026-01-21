@@ -22,7 +22,7 @@ TYPOS_VERSION ?= v1.34.0
 ## Python Configuration
 PYTHON_VERSION ?= 3.12
 # Extract RELEASE_VERSION from Dockerfile
-TOKENIZER_VERSION := $(shell grep '^ARG RELEASE_VERSION=' Dockerfile.epp | cut -d'=' -f2)
+TOKENIZER_VERSION ?= $(shell grep '^ARG RELEASE_VERSION=' Dockerfile.epp | cut -d'=' -f2)
 
 # Python executable for creating venv
 PYTHON_EXE := $(shell command -v python$(PYTHON_VERSION) || command -v python3)
@@ -192,9 +192,8 @@ setup-venv: detect-python ## Sets up the Python virtual environment.
 .PHONY: install-python-deps
 install-python-deps: setup-venv ## installs dependencies.
 	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
-	@echo "Upgrading pip and installing dependencies..."
-	@$(VENV_BIN)/pip install --upgrade pip --quiet
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
+	@echo "install vllm..."
+	@KV_CACHE_PKG=$${KV_CACHE_PKG:-$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null)}; \
 	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" ]; then \
 		echo "Running kv-cache setup script..."; \
 		cp "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" build/kv-cache-setup.sh; \

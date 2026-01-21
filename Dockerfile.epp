@@ -28,7 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 
 COPY --from=go-deps /workspace/kv-cache /workspace/kv-cache
 WORKDIR /workspace/kv-cache
-RUN make install-python-deps
+# llm-d-kv-cache's Makefile. not llm-d-inference-scheduler's
+RUN KV_CACHE_PKG=/workspace/kv-cache make install-python-deps
 
 # Go build stage
 FROM quay.io/projectquay/golang:1.24 AS go-builder
@@ -50,31 +51,17 @@ COPY --from=go-deps /go/pkg/mod /go/pkg/mod
 
 WORKDIR /workspace
 
-COPY --from=python-builder /workspace/kv-cache /workspace/kv-cache
-ENV PYTHONPATH=/workspace/kv-cache/pkg/preprocessing/chat_completions:/workspace/kv-cache/build/venv/lib/python3.12/site-packages
+COPY Makefile* ./
+
+COPY --from=python-builder /workspace/kv-cache/pkg/preprocessing/chat_completions /workspace/kv-cache/pkg/preprocessing/chat_completions
+RUN make setup-venv
+COPY --from=python-builder /workspace/kv-cache/build/venv/lib/python3.12/site-packages /workspace/build/venv/lib/python3.12/site-packages
+
+ENV PYTHONPATH=/workspace/kv-cache/pkg/preprocessing/chat_completions:/workspace/build/venv/lib/python3.12/site-packages
 RUN python3.12 -c "import tokenizer_wrapper"  # verify tokenizer_wrapper is correctly installed
 
-# HuggingFace tokenizer bindings (static lib)
 ARG RELEASE_VERSION=v1.22.1
-RUN mkdir -p lib && \
-    curl -L https://github.com/daulet/tokenizers/releases/download/${RELEASE_VERSION}/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib && \
-    ranlib lib/*.a
-
-# Build
-# the GOARCH has not a default value to allow the binary be built according to the host where the command
-# was called. For example, if we call make image-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-ENV CGO_ENABLED=1
-ENV GOOS=${TARGETOS:-linux}
-ENV GOARCH=${TARGETARCH}
-
-ARG COMMIT_SHA=unknown
-ARG BUILD_REF
-RUN CGO_CFLAGS="$(${PYTHON}-config --cflags) -I/workspace/lib" && \
-    CGO_LDFLAGS="$(${PYTHON}-config --ldflags --embed) -L/workspace/lib -ltokenizers -ldl -lm" && \
-    export CGO_CFLAGS CGO_LDFLAGS && \
-    go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" cmd/epp/main.go
+RUN TOKENIZER_VERSION=${RELEASE_VERSION} make build-epp
 
 # Runtime stage
 # Use ubi9 as a minimal base image to package the manager binary
