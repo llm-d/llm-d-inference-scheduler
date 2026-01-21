@@ -23,9 +23,12 @@ jobs:
             src:
               - '**/*.go'
               - '**/*.py'
+              - Dockerfile.epp
+              - Dockerfile.sidecar
+              - Makefile*
   lint-and-test:
     needs: check-changes
-    if: ${{ needs.check-changes.outputs.src == 'false' }}
+    if: ${{ needs.check-changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Free Disk Space (Ubuntu)
