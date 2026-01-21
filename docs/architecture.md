@@ -359,7 +359,7 @@ Example configuration for automatic pod discovery in active-active multi-replica
           socketPort: 5556
 ```
 
-Where the vLLM engines are configured to emite KV-Events on port `5556` as follows:
+Where the vLLM engines are configured to emit KV-Events on port `5556` as follows:
 ```yaml
   --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://*:5556\",\"topic\":\"kv@${POD_IP}@Qwen/Qwen3-32B\"}"
 ```
