@@ -26,6 +26,7 @@ jobs:
               - Dockerfile.epp
               - Dockerfile.sidecar
               - Makefile*
+              - go.mod
   lint-and-test:
     needs: check-changes
     if: ${{ needs.check-changes.outputs.src == 'true' }}
