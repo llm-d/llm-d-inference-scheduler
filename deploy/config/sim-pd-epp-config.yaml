@@ -4,13 +4,11 @@ apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: prefill-header-handler
-- type: precise-prefix-cache-scorer
+- type: prefix-cache-scorer
   parameters:
-    indexerConfig:
-      tokenProcessorConfig:
-        blockSize: 5
-      kvBlockIndexConfig:
-        maxPrefixBlocksToMatch: 256
+    hashBlockSize: 5
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 31250
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
@@ -24,11 +22,11 @@ schedulingProfiles:
   plugins:
   - pluginRef: prefill-filter
   - pluginRef: max-score-picker
-  - pluginRef: precise-prefix-cache-scorer
+  - pluginRef: prefix-cache-scorer
     weight: 2
 - name: decode
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
-  - pluginRef: precise-prefix-cache-scorer
+  - pluginRef: prefix-cache-scorer
     weight: 2
