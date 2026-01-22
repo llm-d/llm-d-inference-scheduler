@@ -487,15 +487,16 @@ kind: EndpointPickerConfig
 plugins:
 - type: precise-prefix-cache-scorer
   parameters:
+    tokenProcessorConfig:
+      blockSize: 16 
+      hashSeed: "42"
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
       prefixStoreConfig:
         blockSize: 16 
-      tokenProcessorConfig:
-        blockSize: 16                         # must match vLLM block size if not default (16)
-        hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
       tokenizersPoolConfig:
+        modelName: Qwen/Qwen2.5-1.5B-Instruct
         hf:
           tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:

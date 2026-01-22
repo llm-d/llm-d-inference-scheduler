@@ -18,11 +18,12 @@ GINKGO_VERSION ?= v2.27.2
 GOLANGCI_LINT_VERSION ?= v2.1.6
 KUSTOMIZE_VERSION ?= v5.5.0
 TYPOS_VERSION ?= v1.34.0
+VLLM_VERSION ?= 0.14.0
 
 ## Python Configuration
 PYTHON_VERSION ?= 3.12
 # Extract RELEASE_VERSION from Dockerfile
-TOKENIZER_VERSION := $(shell grep '^ARG RELEASE_VERSION=' Dockerfile.epp | cut -d'=' -f2)
+TOKENIZER_VERSION ?= $(shell grep '^ARG RELEASE_VERSION=' Dockerfile.epp | cut -d'=' -f2)
 
 # Python executable for creating venv
 PYTHON_EXE := $(shell command -v python$(PYTHON_VERSION) || command -v python3)
@@ -151,33 +152,79 @@ $(TOKENIZER_LIB): | $(LOCALLIB)
 	@ranlib $(LOCALLIB)/*.a
 	@echo "Tokenizer bindings downloaded successfully."
 
-
-.PHONY: install-python-deps
-install-python-deps: ## Sets up Python virtual environment and installs dependencies
-	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
+.PHONY: detect-python
+detect-python: ## Detects Python and prints the configuration.
+	@printf "\033[33;1m==== Python Configuration ====\033[0m\n"
 	@if [ -z "$(PYTHON_EXE)" ]; then \
 		echo "ERROR: Python 3 not found in PATH."; \
 		exit 1; \
 	fi
+	@# Verify the version of the found python executable using its exit code
+	@if ! $(PYTHON_EXE) -c "import sys; sys.exit(0 if sys.version_info[:2] == ($(shell echo $(PYTHON_VERSION) | cut -d. -f1), $(shell echo $(PYTHON_VERSION) | cut -d. -f2)) else 1)"; then \
+		echo "ERROR: Found Python at '$(PYTHON_EXE)' but it is not version $(PYTHON_VERSION)."; \
+		echo "Please ensure 'python$(PYTHON_VERSION)' or a compatible 'python3' is in your PATH."; \
+		exit 1; \
+	fi
+	@echo "Python executable: $(PYTHON_EXE) ($$($(PYTHON_EXE) --version))"
+	@echo "Python CFLAGS:     $(PYTHON_CFLAGS)"
+	@echo "Python LDFLAGS:    $(PYTHON_LDFLAGS)"
+	@if [ -z "$(PYTHON_CFLAGS)" ]; then \
+		echo "ERROR: Python development headers not found. See installation instructions above."; \
+		exit 1; \
+	fi
+	@printf "\033[33;1m==============================\033[0m\n"
+
+.PHONY: setup-venv
+setup-venv: detect-python ## Sets up the Python virtual environment.
+	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
 	@if [ ! -f "$(VENV_BIN)/pip" ]; then \
 		echo "Creating virtual environment..."; \
 		$(PYTHON_EXE) -m venv $(VENV_DIR) || { \
 			echo "ERROR: Failed to create virtual environment."; \
 			echo "Your Python installation may be missing the 'venv' module."; \
+			echo "Try: 'sudo apt install python$(PYTHON_VERSION)-venv' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"; \
 			exit 1; \
 		}; \
 	fi
-	@echo "Upgrading pip and installing dependencies..."
-	@$(VENV_BIN)/pip install --upgrade pip --quiet
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null); \
-	if [ -n "$$KV_CACHE_PKG" ] && [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt" ]; then \
-		echo "Installing Python dependencies from kv-cache-manager..."; \
-		$(VENV_BIN)/pip install --quiet -r "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/requirements.txt"; \
+	@echo "Upgrading pip..."
+	@$(VENV_BIN)/pip install --upgrade pip
+	@echo "Python virtual environment setup complete."
+
+.PHONY: install-python-deps
+install-python-deps: setup-venv ## installs dependencies.
+	@printf "\033[33;1m==== Setting up Python virtual environment in $(VENV_DIR) ====\033[0m\n"
+	@echo "install vllm..."
+	@KV_CACHE_PKG=$${KV_CACHE_PKG:-$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null)}; \
+	if [ -z "$$KV_CACHE_PKG" ]; then \
+		echo "ERROR: kv-cache package not found."; \
+		exit 1; \
+	fi; \
+	if [ "$(TARGETOS)" = "darwin" ]; then \
+		if [ -f "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" ]; then \
+			echo "Running kv-cache setup script for macOS..."; \
+			cp "$$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh" build/kv-cache-setup.sh; \
+			chmod +wx build/kv-cache-setup.sh; \
+			cd build && PATH=$(VENV_BIN):$$PATH ./kv-cache-setup.sh && cd ..; \
+		else \
+			echo "ERROR: setup script not found at $$KV_CACHE_PKG/pkg/preprocessing/chat_completions/setup.sh"; \
+			exit 1; \
+		fi; \
 	else \
-		echo "WARNING: Could not find kv-cache-manager requirements.txt, installing minimal deps..."; \
-		$(VENV_BIN)/pip install --quiet 'transformers>=4.53.0' 'jinja2>=2.11'; \
+		echo "Installing vLLM for Linux $(TARGETARCH)..."; \
+		if [ "$(TARGETARCH)" = "arm64" ]; then \
+			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$(VLLM_VERSION)/vllm-$(VLLM_VERSION)+cpu-cp38-abi3-manylinux_2_35_aarch64.whl; \
+		elif [ "$(TARGETARCH)" = "amd64" ]; then \
+			$(VENV_BIN)/pip install https://github.com/vllm-project/vllm/releases/download/v$(VLLM_VERSION)/vllm-$(VLLM_VERSION)+cpu-cp38-abi3-manylinux_2_35_x86_64.whl --extra-index-url https://download.pytorch.org/whl/cpu; \
+		else \
+			echo "ERROR: Unsupported architecture: $(TARGETARCH). Only arm64 and amd64 are supported."; \
+			exit 1; \
+		fi; \
 	fi
-	@echo "✅ Python dependencies installed in venv"
+	@echo "Verifying vllm installation..."
+	@$(VENV_BIN)/python -c "import vllm; print('✅ vllm version ' + vllm.__version__ + ' installed.')" || { \
+		echo "ERROR: vllm library not properly installed in venv."; \
+		exit 1; \
+	}
 
 .PHONY: check-tools
 check-tools: check-go check-ginkgo check-golangci-lint check-kustomize check-envsubst check-container-tool check-kubectl check-buildah check-typos ## Check that all required tools are installed

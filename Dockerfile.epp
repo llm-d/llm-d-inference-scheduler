@@ -1,21 +1,6 @@
 ## Minimal runtime Dockerfile (microdnf-only, no torch, wrapper in site-packages)
-# Build Stage: using Go 1.24 image
-FROM quay.io/projectquay/golang:1.24 AS builder
-
-ARG TARGETOS
-ARG TARGETARCH
-ARG PYTHON_VERSION=3.12
-
-ENV PYTHON=python${PYTHON_VERSION}
-ENV PYTHONPATH=/usr/lib64/${PYTHON}/site-packages:/usr/lib/${PYTHON}/site-packages
-
-# Install build tools
-# The builder is based on UBI8, so we need epel-release-8.
-# ${PYTHON}-devel needed for CGO compilation (Python headers and ${PYTHON}-config for linker flags)
-RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
-    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig ${PYTHON}-devel ${PYTHON}-pip git && \
-    dnf clean all
-
+# Go dependencies stage: download go modules and extract kv-cache
+FROM quay.io/projectquay/golang:1.24 AS go-deps
 
 WORKDIR /workspace
 
@@ -29,39 +14,63 @@ COPY pkg/ pkg/
 
 RUN go mod download
 
-# Copy Python wrapper and requirements from llm-d-kv-cache-manager dependency
+# Copy Python wrapper and requirements from llm-d-kv-cache dependency
 # Extract version dynamically and copy to a known location
-# We need to keep llm-d-kv-cache-manager as go module path is kept the old name
-RUN KVCACHE_MANAGER_VERSION=$(go list -m -f '{{.Version}}' github.com/llm-d/llm-d-kv-cache-manager) && \
+RUN KV_CACHE_PKG=$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache) && \
     mkdir -p /workspace/kv-cache && \
-    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/render_jinja_template_wrapper.py \
-       /workspace/kv-cache/render_jinja_template_wrapper.py && \
-    cp /go/pkg/mod/github.com/llm-d/llm-d-kv-cache-manager@${KVCACHE_MANAGER_VERSION}/pkg/preprocessing/chat_completions/requirements.txt \
-       /workspace/kv-cache/requirements.txt
+    cp -r $KV_CACHE_PKG/* /workspace/kv-cache
 
-# HuggingFace tokenizer bindings (static lib)
-RUN mkdir -p lib
-# Ensure that the RELEASE_VERSION matches the one used in the imported llm-d-kv-cache-manager version
+FROM python:3.12-slim AS python-builder
+
+ARG TARGETARCH
+
+COPY --from=go-deps /workspace/kv-cache /workspace/kv-cache
+WORKDIR /workspace/kv-cache
+
+# Create venv and install vLLM based on architecture using pre-built wheels
+RUN python3.12 -m venv /workspace/kv-cache/build/venv && \
+    . /workspace/kv-cache/build/venv/bin/activate && \
+    pip install --upgrade pip && \
+    VLLM_VERSION="0.14.0" && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        pip install https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_aarch64.whl; \
+    elif [ "$TARGETARCH" = "amd64" ]; then \
+        pip install https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_x86_64.whl --extra-index-url https://download.pytorch.org/whl/cpu; \
+    else \
+        echo "ERROR: Unsupported architecture: $TARGETARCH. Only arm64 and amd64 are supported." && exit 1; \
+    fi
+
+# Go build stage
+FROM quay.io/projectquay/golang:1.24 AS go-builder
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG PYTHON_VERSION=3.12
+ENV PYTHON=python${PYTHON_VERSION}
+
+# Install build tools
+# The builder is based on UBI8, so we need epel-release-8.
+# ${PYTHON}-devel needed for CGO compilation (Python headers and ${PYTHON}-config for linker flags)
+RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
+    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig ${PYTHON}-devel ${PYTHON}-pip git && \
+    dnf clean all
+
+COPY --from=go-deps /workspace /workspace
+COPY --from=go-deps /go/pkg/mod /go/pkg/mod
+
+WORKDIR /workspace
+
+COPY Makefile* ./
+
+COPY --from=python-builder /workspace/kv-cache/pkg/preprocessing/chat_completions /workspace/kv-cache/pkg/preprocessing/chat_completions
+RUN make setup-venv
+COPY --from=python-builder /workspace/kv-cache/build/venv/lib/python3.12/site-packages /workspace/build/venv/lib/python3.12/site-packages
+
+ENV PYTHONPATH=/workspace/kv-cache/pkg/preprocessing/chat_completions:/workspace/build/venv/lib/python3.12/site-packages
+RUN python3.12 -c "import tokenizer_wrapper"  # verify tokenizer_wrapper is correctly installed
+
 ARG RELEASE_VERSION=v1.22.1
-RUN curl -L https://github.com/daulet/tokenizers/releases/download/${RELEASE_VERSION}/libtokenizers.${TARGETOS}-${TARGETARCH}.tar.gz | tar -xz -C lib
-RUN ranlib lib/*.a
-
-# Build
-# the GOARCH has not a default value to allow the binary be built according to the host where the command
-# was called. For example, if we call make image-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-ENV CGO_ENABLED=1
-ENV GOOS=${TARGETOS:-linux}
-ENV GOARCH=${TARGETARCH}
-
-
-ARG COMMIT_SHA=unknown
-ARG BUILD_REF
-RUN CGO_CFLAGS="$(${PYTHON}-config --cflags) -I/workspace/lib" && \
-    CGO_LDFLAGS="$(${PYTHON}-config --ldflags --embed) -L/workspace/lib -ltokenizers -ldl -lm" && \
-    export CGO_CFLAGS CGO_LDFLAGS && \
-    go build -a -o bin/epp -ldflags="-extldflags '-L$(pwd)/lib' -X sigs.k8s.io/gateway-api-inference-extension/version.CommitSHA=${COMMIT_SHA} -X sigs.k8s.io/gateway-api-inference-extension/version.BuildRef=${BUILD_REF}" cmd/epp/main.go
+RUN TOKENIZER_VERSION=${RELEASE_VERSION} make build-epp
 
 # Runtime stage
 # Use ubi9 as a minimal base image to package the manager binary
@@ -69,7 +78,7 @@ RUN CGO_CFLAGS="$(${PYTHON}-config --cflags) -I/workspace/lib" && \
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
 ARG PYTHON_VERSION=3.12
 WORKDIR /
-COPY --from=builder /workspace/bin/epp /app/epp
+COPY --from=go-builder /workspace/bin/epp /app/epp
 
 USER root
 
@@ -87,24 +96,11 @@ RUN curl -L -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-
     ln -sf /usr/bin/${PYTHON} /usr/bin/python3 && \
     ln -sf /usr/bin/${PYTHON} /usr/bin/python
 
+# Copy Python kv-cache package and site-packages from the python-builder stage
+COPY --from=python-builder /workspace/kv-cache /workspace/kv-cache
+ENV PYTHONPATH=/workspace/kv-cache/pkg/preprocessing/chat_completions:/workspace/kv-cache/build/venv/lib/python3.12/site-packages
+RUN ${PYTHON} -c "import tokenizer_wrapper"  # verify tokenizer_wrapper is correctly installed
 
-# Install wrapper as a module in site-packages
-RUN mkdir -p /usr/local/lib/${PYTHON}/site-packages/
-COPY --from=builder /workspace/kv-cache/render_jinja_template_wrapper.py /usr/local/lib/${PYTHON}/site-packages/
-
-# Python deps (no cache, single target) – filter out torch
-ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY --from=builder /workspace/kv-cache/requirements.txt /tmp/requirements.txt
-RUN sed '/^torch\b/d' /tmp/requirements.txt > /tmp/requirements.notorch.txt && \
-    ${PYTHON} -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    ${PYTHON} -m pip install --no-cache-dir --target /usr/local/lib/${PYTHON}/site-packages -r /tmp/requirements.notorch.txt && \
-    ${PYTHON} -m pip install --no-cache-dir --target /usr/local/lib/${PYTHON}/site-packages PyYAML && \
-    rm /tmp/requirements.txt /tmp/requirements.notorch.txt && \
-    rm -rf /root/.cache/pip
-
-# Python env
-ENV PYTHONPATH="/usr/local/lib/${PYTHON}/site-packages:/usr/lib/${PYTHON}/site-packages"
-ENV PATH=/usr/bin:/usr/local/bin:$PATH
 ENV HF_HOME="/tmp/.cache"
 
 USER 65532:65532

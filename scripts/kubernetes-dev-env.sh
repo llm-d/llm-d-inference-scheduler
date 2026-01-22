@@ -24,7 +24,7 @@ if [[ -z "${HF_TOKEN:-}" ]]; then
   exit 1
 fi
 
-export VLLM_CHART_DIR="${VLLM_CHART_DIR:-../llm-d-kv-cache-manager/vllm-setup-helm}"
+export VLLM_CHART_DIR="${VLLM_CHART_DIR:-../llm-d-kv-cache/vllm-setup-helm}"
 # Check that Chart.yaml exists
 if [[ ! -f "$VLLM_CHART_DIR/Chart.yaml" ]]; then
   echo "Chart.yaml not found in $VLLM_CHART_DIR"

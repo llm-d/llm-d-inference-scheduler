@@ -7,10 +7,10 @@ plugins:
   - type: decode-filter
   - type: precise-prefix-cache-scorer
     parameters:
+      tokenProcessorConfig:
+        blockSize: 64                 # must match vLLM block size
+        hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
       indexerConfig:
-        tokenProcessorConfig:
-          blockSize: 64                 # must match vLLM block size
-          hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
         kvBlockIndexConfig:
           enableMetrics: true           # enable kv-block index metrics (prometheus)
   - type: kv-cache-utilization-scorer
