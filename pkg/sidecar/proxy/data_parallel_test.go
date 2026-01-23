@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 	sidecarmock "github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -54,7 +55,7 @@ var _ = Describe("Data Parallel support", func() {
 			decodeURL, err := url.Parse("http://localhost:" + strconv.Itoa(fakeDecodePort))
 			Expect(err).ToNot(HaveOccurred())
 			cfg := Config{
-				Connector:                 ConnectorNIXLV2,
+				Connector:                 types.ConnectorNIXLV2,
 				DecoderInsecureSkipVerify: false,
 				DataParallelSize:          testDataParallelSize,
 			}

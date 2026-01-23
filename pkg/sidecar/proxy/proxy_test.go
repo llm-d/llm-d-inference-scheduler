@@ -31,6 +31,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
@@ -165,11 +166,11 @@ var _ = Describe("Reverse Proxy", func() {
 			var proxy *Server
 
 			BeforeEach(func() {
-				cfg := Config{Connector: ConnectorNIXLV2}
+				cfg := Config{Connector: types.ConnectorNIXLV2}
 				proxy = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
 
-				decodeHandler.Connector = ConnectorNIXLV2
-				prefillHandler.Connector = ConnectorNIXLV2
+				decodeHandler.Connector = types.ConnectorNIXLV2
+				prefillHandler.Connector = types.ConnectorNIXLV2
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields (backward compatible behavior)", func() {

@@ -24,7 +24,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/connectors/mock"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types/mock"
 )
 
 func TestServer_chatCompletionsHandler(t *testing.T) {

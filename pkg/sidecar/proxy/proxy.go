@@ -26,22 +26,14 @@ import (
 
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/connectors"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/manager"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
-	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
-	ConnectorNIXLV2 = "nixlv2"
-
-	// ConnectorSharedStorage enables (now deprecated) P/D Shared Storage protocol
-	ConnectorSharedStorage = "shared-storage"
-
-	// ConnectorSGLang enables SGLang P/D disaggregation protocol
-	ConnectorSGLang = "sglang"
-
 	// DefaultPoolGroup is the default pool group name
 	DefaultPoolGroup = "inference.networking.k8s.io"
 	// LegacyPoolGroup is the legacy pool group name
@@ -50,8 +42,8 @@ const (
 
 // Config represents the proxy server configuration
 type Config struct {
-	// Connector is the name of the P/D protocol the proxy must follow.
-	Connector string
+	// Connector is the P/D protocol the proxy must follow.
+	Connector types.Connector
 
 	// PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers.
 	PrefillerUseTLS bool
@@ -79,7 +71,7 @@ type Server struct {
 	handler            http.Handler // the handler function. either a Mux or a proxy
 	allowlistValidator *AllowlistValidator
 
-	protocolRunner connectors.ProtocolRunner // the handler for running the protocol
+	protocolRunner types.ProtocolRunner // the handler for running the protocol
 
 	proxyManager manager.ProxyManager
 
@@ -150,22 +142,27 @@ func (s *Server) Clone() *Server {
 	}
 }
 
+// Addr returns the server's TCP address
+func (s *Server) Addr() net.Addr {
+	return s.addr
+}
+
 func (s *Server) setConnector() {
 	switch s.config.Connector {
-	case ConnectorSharedStorage:
-		s.protocolRunner = connectors.NewDecodeFirstRunner(
-			&connectors.DefaultRequestBuilderFactory{},
-			ConnectorSharedStorage,
+	case types.ConnectorSharedStorage:
+		s.protocolRunner = runners.NewVLLMRunner(
+			&runners.DefaultRequestBuilderFactory{},
+			types.ConnectorSharedStorage,
 			&s.proxyManager,
 		)
-	case ConnectorSGLang:
-		s.protocolRunner = connectors.NewSGLangProtocolRunner(&s.proxyManager)
-	case ConnectorNIXLV2:
+	case types.ConnectorSGLang:
+		s.protocolRunner = runners.NewSGLangRunner(&s.proxyManager)
+	case types.ConnectorNIXLV2:
 		fallthrough
 	default:
-		s.protocolRunner = connectors.NewDecodeFirstRunner(
-			&connectors.NIXLV2RequestBuilderFactory{},
-			ConnectorNIXLV2,
+		s.protocolRunner = runners.NewVLLMRunner(
+			&runners.NIXLV2RequestBuilderFactory{},
+			types.ConnectorNIXLV2,
 			&s.proxyManager,
 		)
 	}
