@@ -21,6 +21,12 @@ const (
 
 	// defaultLRUSize is the maximum number of pods we'll consider in the cache
 	defaultLRUSize = 1024
+
+	// defaultPrefillProfile is the name of the prefill profile
+	//
+	// This is currently hardcoded until we have a defined proper config interface.
+	// (See also https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/2104/	)
+	defaultPrefillProfile = "prefill"
 )
 
 // compile-time type assertions
@@ -286,19 +292,23 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 		return
 	}
 
-	// Get the primary profile's target pod
-	primaryProfile := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
-	if primaryProfile == nil || len(primaryProfile.TargetPods) == 0 {
-		logger.Info("No target pod in primary profile")
-		return
+	if targetProfile, ok := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]; ok && targetProfile != nil && len(targetProfile.TargetPods) != 0 {
+		s.moveTargetPodToFront(ctx, request, targetProfile, schedulingResult.PrimaryProfileName)
 	}
+	if targetProfile, ok := schedulingResult.ProfileResults[defaultPrefillProfile]; ok && targetProfile != nil && len(targetProfile.TargetPods) != 0 {
+		s.moveTargetPodToFront(ctx, request, targetProfile, defaultPrefillProfile)
+	}
+}
 
-	targetPod := primaryProfile.TargetPods[0]
+func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *types.LLMRequest, targetProfile *types.ProfileRunResult, profileName string) {
+	logger := log.FromContext(ctx).V(logutil.DEBUG)
+
+	targetPod := targetProfile.TargetPods[0]
 	podName := targetPod.GetPod().NamespacedName.String()
 
 	// Move the pod to the front of the LRU.
 	var present struct{} // dummy value
 	s.lruCache.Add(podName, present)
 
-	logger.Info("Updated LRU cache for cold request", "pod", podName, "requestId", request.RequestId)
+	logger.Info("Updated LRU cache for cold request", "profile", profileName, "pod", podName, "requestId", request.RequestId)
 }

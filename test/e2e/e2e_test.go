@@ -2,8 +2,10 @@ package e2e
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -76,6 +78,13 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			epp := createEndPointPicker(pdConfig)
 
+			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
+
+			if k8sContext != "" {
+				// Use port-forward to access the EPP pod's metrics endpoint.
+				startEPPMetricsPortForward()
+			}
+
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
@@ -109,6 +118,16 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
+
+			// Metrics Validation
+			labelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, modelName)
+			prefillDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter)
+
+			labelFilter2 := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, modelName)
+			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter2)
+
+			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(6))
+			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(0))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -383,6 +402,33 @@ func runChatCompletion(prompt string) (string, string, string) {
 	return namespaceHeader, podHeader, podPort
 }
 
+// getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+func getCounterMetric(metricsURL, metricName, labelMatch string) int {
+	resp, err := http.Get(metricsURL)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err = resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	body, err := io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	metricsText := string(body)
+	for _, line := range strings.Split(metricsText, "\n") {
+		if strings.HasPrefix(line, metricName) && strings.Contains(line, labelMatch) {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				valFloat, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+				return int(valFloat)
+			}
+		}
+	}
+	return 0
+}
+
 // Simple EPP configuration for running without P/D
 const simpleConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
@@ -441,15 +487,16 @@ kind: EndpointPickerConfig
 plugins:
 - type: precise-prefix-cache-scorer
   parameters:
+    tokenProcessorConfig:
+      blockSize: 16 
+      hashSeed: "42"
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
       prefixStoreConfig:
         blockSize: 16 
-      tokenProcessorConfig:
-        blockSize: 16                         # must match vLLM block size if not default (16)
-        hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
       tokenizersPoolConfig:
+        modelName: Qwen/Qwen2.5-1.5B-Instruct
         hf:
           tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:
