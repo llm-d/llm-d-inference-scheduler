@@ -24,27 +24,40 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework"
 	frameworkmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/mocks"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/interflow"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/intraflow"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/queue"
-	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
-func newTestPluginsHandle(t *testing.T) fwkplugin.Handle {
+func newTestPluginsHandle(t *testing.T) plugin.Handle {
 	t.Helper()
 	handle := utils.NewTestHandle(t.Context())
 	handle.AddPlugin(interflow.GlobalStrictFairnessPolicyType, &frameworkmocks.MockFairnessPolicy{
-		TypedNameV: fwkplugin.TypedName{
+		TypedNameV: plugin.TypedName{
 			Type: interflow.GlobalStrictFairnessPolicyType,
 			Name: interflow.GlobalStrictFairnessPolicyType,
 		},
 	})
 	handle.AddPlugin(interflow.RoundRobinFairnessPolicyType, &frameworkmocks.MockFairnessPolicy{
-		TypedNameV: fwkplugin.TypedName{
+		TypedNameV: plugin.TypedName{
 			Type: interflow.RoundRobinFairnessPolicyType,
 			Name: interflow.RoundRobinFairnessPolicyType,
+		},
+	})
+	handle.AddPlugin(intraflow.FCFSOrderingPolicyType, &frameworkmocks.MockOrderingPolicy{
+		TypedNameV: plugin.TypedName{
+			Type: intraflow.FCFSOrderingPolicyType,
+			Name: intraflow.FCFSOrderingPolicyType,
+		},
+	})
+	handle.AddPlugin(intraflow.EDFOrderingPolicyType, &frameworkmocks.MockOrderingPolicy{
+		TypedNameV: plugin.TypedName{
+			Type: intraflow.EDFOrderingPolicyType,
+			Name: intraflow.EDFOrderingPolicyType,
 		},
 	})
 	return handle
@@ -52,10 +65,10 @@ func newTestPluginsHandle(t *testing.T) fwkplugin.Handle {
 
 // mockCapabilityChecker is a test double for verifying that NewConfig correctly delegates compatibility checks.
 type mockCapabilityChecker struct {
-	checkCompatibilityFunc func(intra intraflow.RegisteredPolicyName, q queue.RegisteredQueueName) error
+	checkCompatibilityFunc func(p framework.OrderingPolicy, q queue.RegisteredQueueName) error
 }
 
-func (m *mockCapabilityChecker) CheckCompatibility(p intraflow.RegisteredPolicyName, q queue.RegisteredQueueName) error {
+func (m *mockCapabilityChecker) CheckCompatibility(p framework.OrderingPolicy, q queue.RegisteredQueueName) error {
 	if m.checkCompatibilityFunc != nil {
 		return m.checkCompatibilityFunc(p, q)
 	}
@@ -77,7 +90,7 @@ func TestNewConfig(t *testing.T) {
 	testCases := []struct {
 		name          string
 		opts          []ConfigOption
-		handle        fwkplugin.Handle
+		handle        plugin.Handle
 		expectErr     bool
 		expectedErrIs error // Optional: check for specific wrapped error
 		assertion     func(*testing.T, *Config)
@@ -99,7 +112,7 @@ func TestNewConfig(t *testing.T) {
 				// Verify Band Defaults
 				require.Contains(t, cfg.PriorityBands, 1)
 				band := cfg.PriorityBands[1]
-				assert.Equal(t, defaultIntraFlowDispatchPolicy, band.IntraFlowDispatchPolicy)
+				assert.Equal(t, defaultOrderingPolicyRef, band.OrderingPolicy.TypedName().Name)
 				require.NotNil(t, band.FairnessPolicy)
 				assert.Equal(t, defaultFairnessPolicyRef, band.FairnessPolicy.TypedName().Name)
 				assert.Equal(t, defaultQueue, band.Queue)
@@ -136,7 +149,7 @@ func TestNewConfig(t *testing.T) {
 				assert.Equal(t, defaultQueue, band.Queue, "Queue should be defaulted even for raw struct inputs")
 				assert.NotNil(t, band.FairnessPolicy)
 				assert.Equal(t, defaultFairnessPolicyRef, band.FairnessPolicy.TypedName().Name)
-				assert.Equal(t, defaultIntraFlowDispatchPolicy, band.IntraFlowDispatchPolicy)
+				assert.Equal(t, defaultOrderingPolicyRef, band.OrderingPolicy.TypedName().Name)
 			},
 		},
 		{
@@ -163,7 +176,7 @@ func TestNewConfig(t *testing.T) {
 					Queue:        "CustomQueue",
 				}),
 				withCapabilityChecker(&mockCapabilityChecker{
-					checkCompatibilityFunc: func(_ intraflow.RegisteredPolicyName, _ queue.RegisteredQueueName) error { return nil },
+					checkCompatibilityFunc: func(framework.OrderingPolicy, queue.RegisteredQueueName) error { return nil },
 				}),
 			},
 			handle: newTestPluginsHandle(t),
@@ -173,7 +186,7 @@ func TestNewConfig(t *testing.T) {
 				assert.Equal(t, queue.RegisteredQueueName("CustomQueue"), cfg.DefaultPriorityBand.Queue)
 				assert.NotNil(t, cfg.DefaultPriorityBand.FairnessPolicy)
 				assert.Equal(t, defaultFairnessPolicyRef, cfg.DefaultPriorityBand.FairnessPolicy.TypedName().Name)
-				assert.Equal(t, defaultIntraFlowDispatchPolicy, cfg.DefaultPriorityBand.IntraFlowDispatchPolicy)
+				assert.Equal(t, defaultOrderingPolicyRef, cfg.DefaultPriorityBand.OrderingPolicy.TypedName().Name)
 			},
 		},
 
@@ -267,7 +280,7 @@ func TestNewConfig(t *testing.T) {
 		{
 			name:      "ShouldError_WhenDefaultPolicyMissingFromHandle",
 			opts:      []ConfigOption{WithPriorityBand(&PriorityBandConfig{Priority: 1, PriorityName: "A"})},
-			handle:    utils.NewTestHandle(t.Context()), // Handle has no plugins.
+			handle:    utils.NewTestHandle(t.Context()), // Handle has no plugin.
 			expectErr: true,
 		},
 
@@ -277,7 +290,7 @@ func TestNewConfig(t *testing.T) {
 			opts: []ConfigOption{
 				WithPriorityBand(mustBand(t, 1, "High")),
 				withCapabilityChecker(&mockCapabilityChecker{
-					checkCompatibilityFunc: func(p intraflow.RegisteredPolicyName, q queue.RegisteredQueueName) error {
+					checkCompatibilityFunc: func(framework.OrderingPolicy, queue.RegisteredQueueName) error {
 						return contracts.ErrPolicyQueueIncompatible
 					},
 				}),
@@ -287,20 +300,9 @@ func TestNewConfig(t *testing.T) {
 			expectedErrIs: contracts.ErrPolicyQueueIncompatible,
 		},
 		{
-			name: "ShouldError_WhenDefaultRuntimeCheckerDetectsUnknownPolicy",
-			opts: []ConfigOption{
-				WithPriorityBand(mustBand(t, 1, "BadBand", WithIntraFlowPolicy("non-existent-policy"))),
-			},
-			handle:    newTestPluginsHandle(t),
-			expectErr: true,
-		},
-		{
 			name: "ShouldError_WhenDefaultRuntimeCheckerDetectsUnknownQueue",
 			opts: []ConfigOption{
-				WithPriorityBand(mustBand(t, 1, "BadBand",
-					WithIntraFlowPolicy(intraflow.FCFSOrderingPolicyType),
-					WithQueue("non-existent-queue"),
-				)),
+				WithPriorityBand(mustBand(t, 1, "BadBand", WithQueue("non-existent-queue"))),
 			},
 			handle:    newTestPluginsHandle(t),
 			expectErr: true,
@@ -339,15 +341,16 @@ func TestNewPriorityBandConfig(t *testing.T) {
 		pb, err := NewPriorityBandConfig(handle, 1, "Custom",
 			WithQueue(queue.RegisteredQueueName("CustomQueue")),
 			WithBandMaxBytes(999),
-			WithIntraFlowPolicy("CustomPolicy"),
+			WithOrderingPolicy(intraflow.EDFOrderingPolicyType, handle),
 			WithFairnessPolicy(interflow.RoundRobinFairnessPolicyType, handle),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, queue.RegisteredQueueName("CustomQueue"), pb.Queue)
 		assert.Equal(t, uint64(999), pb.MaxBytes)
-		assert.Equal(t, intraflow.RegisteredPolicyName("CustomPolicy"), pb.IntraFlowDispatchPolicy)
+		require.NotNil(t, pb.OrderingPolicy)
+		assert.Equal(t, intraflow.EDFOrderingPolicyType, pb.OrderingPolicy.TypedName().Name)
 		require.NotNil(t, pb.FairnessPolicy)
-		assert.Equal(t, interflow.RoundRobinFairnessPolicyType, pb.FairnessPolicy.TypedName().Name) // Unchanged default
+		assert.Equal(t, interflow.RoundRobinFairnessPolicyType, pb.FairnessPolicy.TypedName().Name)
 	})
 
 	t.Run("ShouldError_OnInvalidOptions", func(t *testing.T) {
