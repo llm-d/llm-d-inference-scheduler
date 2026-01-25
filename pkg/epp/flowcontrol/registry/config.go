@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/interflow"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/intraflow"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/queue"
-	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
 // --- Defaults ---
@@ -37,8 +37,8 @@ const (
 	// defaultPriorityBandMaxBytes is the default global capacity for a priority band if not explicitly configured.
 	// It is set to 1 GB.
 	defaultPriorityBandMaxBytes uint64 = 1_000_000_000
-	// defaultIntraFlowDispatchPolicy is the default policy for selecting items within a single flow's queue.
-	defaultIntraFlowDispatchPolicy intraflow.RegisteredPolicyName = intraflow.FCFSOrderingPolicyType
+	// defaultOrderingPolicyRef is the default policy for selecting items within a single flow's queue.
+	defaultOrderingPolicyRef string = intraflow.FCFSOrderingPolicyType
 	// defaultFairnessPolicyRef is the default policy for selecting which flow's queue to service next.
 	defaultFairnessPolicyRef string = interflow.GlobalStrictFairnessPolicyType
 	// defaultQueue is the default queue implementation for flows.
@@ -59,20 +59,15 @@ const (
 
 // capabilityChecker abstracts the logic required to validate if a policy is compatible with a queue.
 type capabilityChecker interface {
-	CheckCompatibility(p intraflow.RegisteredPolicyName, q queue.RegisteredQueueName) error
+	CheckCompatibility(p framework.OrderingPolicy, q queue.RegisteredQueueName) error
 }
 
 // runtimeCapabilityChecker is the default implementation used in production.
 // It instantiates the actual plugins to inspect their required and provided capabilities.
 type runtimeCapabilityChecker struct{}
 
-func (r *runtimeCapabilityChecker) CheckCompatibility(p intraflow.RegisteredPolicyName, q queue.RegisteredQueueName) error {
-	tempPolicy, err := intraflow.NewPolicyFromName(p)
-	if err != nil {
-		return fmt.Errorf("failed to validate policy %q: %w", p, err)
-	}
-
-	requiredCapabilities := tempPolicy.RequiredQueueCapabilities()
+func (r *runtimeCapabilityChecker) CheckCompatibility(p framework.OrderingPolicy, q queue.RegisteredQueueName) error {
+	requiredCapabilities := p.RequiredQueueCapabilities()
 
 	// We pass nil for the comparator as we only need to inspect static capabilities here.
 	tempQueue, err := queue.NewQueueFromName(q, nil)
@@ -94,7 +89,7 @@ func (r *runtimeCapabilityChecker) CheckCompatibility(p intraflow.RegisteredPoli
 		if _, ok := capabilitySet[req]; !ok {
 			return fmt.Errorf(
 				"policy %q is not compatible with queue %q: missing capability %q: %w",
-				tempPolicy.Name(),
+				p.TypedName().Name,
 				tempQueue.Name(),
 				req,
 				contracts.ErrPolicyQueueIncompatible,
@@ -163,10 +158,11 @@ type PriorityBandConfig struct {
 	// Required.
 	PriorityName string
 
-	// IntraFlowDispatchPolicy specifies the default name of the policy used to select a request from within a single
-	// flow's queue in this band.
-	// Optional: Defaults to defaultIntraFlowDispatchPolicy ("FCFS").
-	IntraFlowDispatchPolicy intraflow.RegisteredPolicyName
+	// OrderingPolicy is the hydrated singleton instance of the policy.
+	// This policy governs which request *within this flow's queue* to select next (e.g., "fcfs").
+	// This field is populated either via WithOrderingPolicy (using a handle lookup) or via applyDefaults.
+	// Optional: Defaults to defaultOrderingPolicyRef ("fcfs-ordering-policy").
+	OrderingPolicy framework.OrderingPolicy
 
 	// FairnessPolicy is the hydrated singleton instance of the policy.
 	// This policy governs which Flow *within this band* to select next (e.g., "round-robin").
@@ -280,21 +276,36 @@ func withCapabilityChecker(checker capabilityChecker) ConfigOption {
 // PriorityBandConfigOption defines a functional option for configuring a single PriorityBandConfig.
 type PriorityBandConfigOption func(*PriorityBandConfig) error
 
-// WithIntraFlowPolicy sets the intraflow-flow dispatch policy (e.g., "FCFS").
-func WithIntraFlowPolicy(name intraflow.RegisteredPolicyName) PriorityBandConfigOption {
+// WithOrderingPolicy sets the name/reference of the inter-flow fairness policy (e.g., "fcfs-ordering-policy").
+// TODO(kubernetes-sigs/gateway-api-inference-extension#1794): This option is primarily used by the configuration
+// loader to wire up policies instantiated from the plugin registry.
+func WithOrderingPolicy(ref string, handle plugin.Handle) PriorityBandConfigOption {
 	return func(p *PriorityBandConfig) error {
-		if name == "" {
-			return errors.New("IntraFlowDispatchPolicy cannot be empty")
+		policy, err := orderingPolicy(ref, handle)
+		if err != nil {
+			return err
 		}
-		p.IntraFlowDispatchPolicy = name
+		p.OrderingPolicy = policy
 		return nil
 	}
 }
 
-// WithFairnessPolicy sets the name/reference of the inter-flow fairness policy (e.g., "RoundRobin").
+func orderingPolicy(ref string, handle plugin.Handle) (framework.OrderingPolicy, error) {
+	v := handle.Plugin(ref)
+	if v == nil {
+		return nil, fmt.Errorf("no ordering policy registered for name %q", ref)
+	}
+	policy, ok := v.(framework.OrderingPolicy)
+	if !ok {
+		return nil, fmt.Errorf("plugin %q is not a framework.OrderingPolicy (type: %T)", ref, v)
+	}
+	return policy, nil
+}
+
+// WithFairnessPolicy sets the name/reference of the inter-flow fairness policy (e.g., "round-robin-fairness-policy").
 // TODO(kubernetes-sigs/gateway-api-inference-extension#1794): This option is primarily used by the configuration
 // loader to wire up policies instantiated from the plugin registry.
-func WithFairnessPolicy(ref string, handle fwkplugin.Handle) PriorityBandConfigOption {
+func WithFairnessPolicy(ref string, handle plugin.Handle) PriorityBandConfigOption {
 	return func(p *PriorityBandConfig) error {
 		policy, err := fairnessPolicy(ref, handle)
 		if err != nil {
@@ -305,7 +316,7 @@ func WithFairnessPolicy(ref string, handle fwkplugin.Handle) PriorityBandConfigO
 	}
 }
 
-func fairnessPolicy(ref string, handle fwkplugin.Handle) (framework.FairnessPolicy, error) {
+func fairnessPolicy(ref string, handle plugin.Handle) (framework.FairnessPolicy, error) {
 	v := handle.Plugin(ref)
 	if v == nil {
 		return nil, fmt.Errorf("no fairness policy registered for name %q", ref)
@@ -342,9 +353,9 @@ func WithBandMaxBytes(maxBytes uint64) PriorityBandConfigOption {
 // validation.
 //
 // Arguments:
-//   - handle: A fwkplugin.Handle required to resolve the default policies.
+//   - handle: A plugin.Handle required to resolve the default policies.
 //   - opts: Optional configuration overrides.
-func NewConfig(handle fwkplugin.Handle, opts ...ConfigOption) (*Config, error) {
+func NewConfig(handle plugin.Handle, opts ...ConfigOption) (*Config, error) {
 	builder := &configBuilder{
 		config: &Config{
 			MaxBytes:               0, // no limit enforced
@@ -393,7 +404,7 @@ func NewConfig(handle fwkplugin.Handle, opts ...ConfigOption) (*Config, error) {
 // NewPriorityBandConfig creates a new band configuration with the required fields.
 // It applies system defaults first, then applies any provided options to override those defaults.
 func NewPriorityBandConfig(
-	handle fwkplugin.Handle,
+	handle plugin.Handle,
 	priority int,
 	name string,
 	opts ...PriorityBandConfigOption,
@@ -418,9 +429,13 @@ func NewPriorityBandConfig(
 
 // --- Validation, Defaults & Hydration ---
 
-func (p *PriorityBandConfig) applyDefaults(handle fwkplugin.Handle) error {
-	if p.IntraFlowDispatchPolicy == "" {
-		p.IntraFlowDispatchPolicy = defaultIntraFlowDispatchPolicy
+func (p *PriorityBandConfig) applyDefaults(handle plugin.Handle) error {
+	if p.OrderingPolicy == nil {
+		policy, err := orderingPolicy(defaultOrderingPolicyRef, handle)
+		if err != nil {
+			return err
+		}
+		p.OrderingPolicy = policy
 	}
 	if p.Queue == "" {
 		p.Queue = defaultQueue
@@ -443,8 +458,8 @@ func (p *PriorityBandConfig) validate(checker capabilityChecker) error {
 	if p.PriorityName == "" {
 		return fmt.Errorf("PriorityName is required for priority band %d", p.Priority)
 	}
-	if p.IntraFlowDispatchPolicy == "" {
-		return fmt.Errorf("IntraFlowDispatchPolicy required for priority band %d", p.Priority)
+	if p.OrderingPolicy == nil {
+		return fmt.Errorf("OrderingPolicy instance is missing for priority band %d", p.Priority)
 	}
 	if p.FairnessPolicy == nil {
 		return fmt.Errorf("FairnessPolicy instance is missing for priority band %d", p.Priority)
@@ -453,7 +468,7 @@ func (p *PriorityBandConfig) validate(checker capabilityChecker) error {
 		return fmt.Errorf("Queue required for priority band %d", p.Priority)
 	}
 	if checker != nil {
-		if err := checker.CheckCompatibility(p.IntraFlowDispatchPolicy, p.Queue); err != nil {
+		if err := checker.CheckCompatibility(p.OrderingPolicy, p.Queue); err != nil {
 			return fmt.Errorf("priority band %d (%s) configuration error: %w",
 				p.Priority, p.PriorityName, err)
 		}
@@ -521,12 +536,12 @@ func (c *Config) partition(shardIndex, totalShards int) *ShardConfig {
 
 	for _, template := range c.PriorityBands {
 		shardBand := &PriorityBandConfig{
-			Priority:                template.Priority,
-			PriorityName:            template.PriorityName,
-			IntraFlowDispatchPolicy: template.IntraFlowDispatchPolicy,
-			FairnessPolicy:          template.FairnessPolicy,
-			Queue:                   template.Queue,
-			MaxBytes:                partitionUint64(template.MaxBytes, shardIndex, totalShards),
+			Priority:       template.Priority,
+			PriorityName:   template.PriorityName,
+			OrderingPolicy: template.OrderingPolicy,
+			FairnessPolicy: template.FairnessPolicy,
+			Queue:          template.Queue,
+			MaxBytes:       partitionUint64(template.MaxBytes, shardIndex, totalShards),
 		}
 
 		shardCfg.PriorityBands[shardBand.Priority] = shardBand
