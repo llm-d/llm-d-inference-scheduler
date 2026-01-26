@@ -47,15 +47,17 @@ var _ framework.Scorer = &PrecisePrefixCacheScorer{}
 // PrecisePrefixCachePluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
 func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
-	handle plugins.Handle) (plugins.Plugin, error) {
+	handle plugins.Handle,
+) (plugins.Plugin, error) {
 	indexerConfig, err := kvcache.NewDefaultConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize indexer config: %w", err)
 	}
 
 	parameters := PrecisePrefixCachePluginConfig{
-		IndexerConfig:  indexerConfig,
-		KVEventsConfig: kvevents.DefaultConfig(),
+		IndexerConfig:        indexerConfig,
+		KVEventsConfig:       kvevents.DefaultConfig(),
+		TokenProcessorConfig: kvblock.DefaultTokenProcessorConfig(),
 	}
 
 	if rawParameters != nil {
@@ -96,10 +98,7 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 // If the configuration is invalid or if the indexer fails to initialize,
 // an error is returned.
 func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePrefixCacheScorer, error) {
-	if config.TokenProcessorConfig == nil {
-		config.TokenProcessorConfig = kvblock.DefaultTokenProcessorConfig()
-	}
-
+	// initialize the token processor
 	tokenProcessor := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
 
 	// initialize the indexer
@@ -110,7 +109,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 
 	go kvCacheIndexer.Run(ctx)
 
-	// initialize the KV-events pool
+	// initialize and start the KV-events pool
 	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex(), tokenProcessor)
 	pool.Start(ctx)
 
@@ -180,6 +179,59 @@ func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScor
 	return s
 }
 
+func (s *PrecisePrefixCacheScorer) buildPrompt(ctx context.Context, request *types.LLMRequest) (string, *preprocessing.ApplyChatTemplateRequest) {
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+	traceLogger := logger.V(logutil.TRACE)
+
+	traceLogger.Info("Getting scores",
+		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
+		"isCompletions", request.Body != nil && request.Body.Completions != nil)
+
+	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.
+	// If an unexpected dual payload slips through (parser regression/new client), log it and use chat semantics.
+	if request.Body != nil && request.Body.ChatCompletions != nil {
+		if request.Body.Completions != nil {
+			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
+		}
+
+		// Convert messages to the format expected by the renderer
+		conversation := make([]preprocessing.Conversation, len(request.Body.ChatCompletions.Messages))
+		for i, msg := range request.Body.ChatCompletions.Messages {
+			conversation[i] = preprocessing.Conversation{
+				Role:    msg.Role,
+				Content: msg.Content.Raw,
+			}
+		}
+
+		renderReq := &preprocessing.ApplyChatTemplateRequest{
+			Conversation:              [][]preprocessing.Conversation{conversation},
+			Tools:                     request.Body.ChatCompletions.Tools,
+			Documents:                 request.Body.ChatCompletions.Documents,
+			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
+			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
+			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
+			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
+			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
+		}
+
+		traceLogger.Info("Processing chat completion request",
+			"messagesCount", len(conversation),
+			"toolsCount", len(renderReq.Tools),
+			"documentsCount", len(renderReq.Documents))
+
+		return "", renderReq
+	}
+
+	// For regular completions, use the prompt directly
+	if request.Body != nil && request.Body.Completions != nil {
+		traceLogger.Info("Using completion prompt directly", "promptLength", len(request.Body.Completions.Prompt))
+		return request.Body.Completions.Prompt, nil
+	}
+
+	traceLogger.Error(fmt.Errorf("Both chat and completions are empty"), "error building prompt")
+	return "", nil
+}
+
 // Score scores the provided pod based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
 func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
@@ -211,11 +263,24 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.
 		return nil
 	}
 
-	scores, err := s.getScores(ctx, request)
+	prompt, renderReq := s.buildPrompt(ctx, request)
+	if prompt == "" && renderReq == nil {
+		logger.V(logutil.DEFAULT).Info("No valid prompt, skipping scoring")
+		return nil
+	}
+
+	tokens, err := s.kvCacheIndexer.Tokenize(renderReq, prompt)
+	if err != nil {
+		logger.Error(err, "Failed to tokenize prompt")
+		return nil
+	}
+
+	scores, err := s.kvCacheIndexer.GetPodScores(ctx, tokens, request.TargetModel, nil)
 	if err != nil {
 		logger.Error(err, "Failed to get pod scores")
 		return nil
 	}
+
 	debugLogger.Info("Got pod scores", "scores", scores)
 
 	podToKey := func(pod types.Pod) (string, bool) {
@@ -241,70 +306,4 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.
 	cycleState.Write(plugins.StateKey(s.typedName.String()), state)
 
 	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
-}
-
-// getScores retrieves the pod scores from the KV-cache indexer
-// based on the provided LLM request.
-// If the request contains chat completions, it processes them accordingly.
-// If the request contains regular completions, it uses the prompt directly.
-func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types.LLMRequest) (map[string]float64, error) {
-	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	traceLogger := logger.V(logutil.TRACE)
-
-	traceLogger.Info("Getting scores",
-		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
-		"isCompletions", request.Body != nil && request.Body.Completions != nil)
-
-	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.
-	// If an unexpected dual payload slips through (parser regression/new client), log it and use chat semantics.
-	if request.Body != nil && request.Body.ChatCompletions != nil {
-		if request.Body.Completions != nil {
-			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
-		}
-
-		// Convert messages to conversation format
-		conversations := make([]preprocessing.Conversation, len(request.Body.ChatCompletions.Messages))
-		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = preprocessing.Conversation{
-				Role:    msg.Role,
-				Content: msg.Content.Raw,
-			}
-		}
-
-		renderReq := &preprocessing.ApplyChatTemplateRequest{
-			Conversation:              [][]preprocessing.Conversation{conversations},
-			Tools:                     request.Body.ChatCompletions.Tools,
-			Documents:                 request.Body.ChatCompletions.Documents,
-			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
-		}
-
-		traceLogger.Info("Processing chat completion request",
-			"messagesCount", len(conversations),
-			"toolsCount", len(renderReq.Tools),
-			"documentsCount", len(renderReq.Documents))
-
-		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get pod scores for chat/completions: %w", err)
-		}
-		return scores, nil
-	}
-
-	// For regular completions, use the prompt directly
-	if request.Body != nil && request.Body.Completions != nil {
-		prompt := request.Body.Completions.Prompt
-		traceLogger.Info("Using completion prompt directly", "promptLength", len(prompt))
-
-		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get pod scores for completions: %w", err)
-		}
-		return scores, nil
-	}
-
-	return nil, errors.New("no valid input found in request")
 }

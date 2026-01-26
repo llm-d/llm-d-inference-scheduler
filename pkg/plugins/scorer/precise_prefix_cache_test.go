@@ -1,6 +1,7 @@
 package scorer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,12 +22,17 @@ import (
 )
 
 func TestPrefixCacheTracking_Score(t *testing.T) {
+	const modelName = "test-model"
+
 	d, err := os.Getwd()
 	require.NoError(t, err)
 	modelDir := filepath.Join(d, "testdata")
 	localTokenizerConfig := tokenization.LocalTokenizerConfig{
 		ModelTokenizerMap: map[string]string{
-			"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
+			modelName: filepath.Join(
+				modelDir,
+				fmt.Sprintf("%s/tokenizer.json", modelName),
+			),
 		},
 	}
 
@@ -66,7 +72,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 			request: &types.LLMRequest{
 				RequestId:   "test-request",
-				TargetModel: "test-model",
+				TargetModel: modelName,
 				Body:        nil,
 			},
 			wantScoresByAddress: map[string]float64{}, // empty map
@@ -104,7 +110,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 			request: &types.LLMRequest{
 				RequestId:   "test-request",
-				TargetModel: "test-model",
+				TargetModel: modelName,
 				Body: &types.LLMRequestBody{
 					Completions: &types.CompletionsRequest{
 						Prompt: prompt,
@@ -183,7 +189,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 			request: &types.LLMRequest{
 				RequestId:   "test-request",
-				TargetModel: "test-model",
+				TargetModel: modelName,
 				Body: &types.LLMRequestBody{
 					ChatCompletions: &types.ChatCompletionsRequest{
 						ChatTemplate: `{% for message in messages %}{{ message.role }}: {{ message.content }}
@@ -209,32 +215,22 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to preprocessing format
-				var conversations []preprocessing.Conversation
-				for _, msg := range req.ChatCompletions.Messages {
-					conversations = append(conversations, preprocessing.Conversation{
+				conversation := make([]preprocessing.Conversation, len(req.ChatCompletions.Messages))
+				for i, msg := range req.ChatCompletions.Messages {
+					conversation[i] = preprocessing.Conversation{
 						Role:    msg.Role,
 						Content: msg.Content.Raw,
-					})
+					}
 				}
 
-				processor := preprocessing.NewChatTemplatingProcessor()
-				tokenizerCacheKey, err := processor.GetOrCreateTokenizerKey(t.Context(), &preprocessing.GetOrCreateTokenizerKeyRequest{
-					IsLocal: true,
-					Model:   "testdata/" + model,
-				})
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				// render the chat template
 				renderReq := &preprocessing.ApplyChatTemplateRequest{
-					Key:          tokenizerCacheKey,
-					Conversation: [][]preprocessing.Conversation{conversations},
+					Conversation: [][]preprocessing.Conversation{conversation},
 					ChatTemplate: req.ChatCompletions.ChatTemplate,
 				}
-				rendered, err := processor.ApplyChatTemplate(t.Context(), renderReq)
-				require.NoError(t, err)
-
-				// tokenize rendered prompt
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
+				rendered, err := testTokenizer.ApplyChatTemplate(model, renderReq)
 				require.NoError(t, err)
 
 				tokens, _, err := testTokenizer.Encode(rendered, model, false)
@@ -294,7 +290,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 			request: &types.LLMRequest{
 				RequestId:   "test-request",
-				TargetModel: "test-model",
+				TargetModel: modelName,
 				Body: &types.LLMRequestBody{
 					Completions: &types.CompletionsRequest{
 						Prompt: prompt,
@@ -363,7 +359,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 			request: &types.LLMRequest{
 				RequestId:   "test-request",
-				TargetModel: "test-model",
+				TargetModel: modelName,
 				Body: &types.LLMRequestBody{
 					Completions: &types.CompletionsRequest{
 						Prompt: prompt,
@@ -423,7 +419,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 			request: &types.LLMRequest{
 				RequestId:   "test-request",
-				TargetModel: "test-model",
+				TargetModel: modelName,
 				Body: &types.LLMRequestBody{
 					Completions: &types.CompletionsRequest{
 						Prompt: "This prompt has never been cached before on any pod.",
@@ -462,7 +458,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 			request: &types.LLMRequest{
 				RequestId:   "test-request",
-				TargetModel: "test-model",
+				TargetModel: modelName,
 				Body: &types.LLMRequestBody{
 					Completions: &types.CompletionsRequest{
 						Prompt: prompt,
@@ -512,17 +508,18 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			ctx := utils.NewTestContext(t)
 
 			kvcacheConfig, err := kvcache.NewDefaultConfig()
+			require.NoError(t, err)
 			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
-				ModelName:             "test-model",
+				ModelName:             modelName,
 				WorkersCount:          1,
 				MinPrefixOverlapRatio: 0.8,
 				LocalTokenizerConfig:  &localTokenizerConfig,
 			}
-			require.NoError(t, err)
 
 			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
-				IndexerConfig:  kvcacheConfig,
-				KVEventsConfig: kvevents.DefaultConfig(),
+				IndexerConfig:        kvcacheConfig,
+				KVEventsConfig:       kvevents.DefaultConfig(),
+				TokenProcessorConfig: kvblock.DefaultTokenProcessorConfig(),
 			})
 			require.NoError(t, err)
 			require.NotNil(t, prefixCacheScorer)
