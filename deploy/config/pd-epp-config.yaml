@@ -4,6 +4,10 @@ kind: EndpointPickerConfig
 plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
+- type: proximity-scorer
+  parameters:
+    sameNodeScore: 1.0
+    defaultScore: 0.0
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
@@ -15,6 +19,8 @@ schedulingProfiles:
   - pluginRef: max-score-picker
   - pluginRef: prefix-cache-scorer
     weight: 2
+  - pluginRef: proximity-scorer
+    weight: 1
 - name: decode
   plugins:
   - pluginRef: decode-filter
