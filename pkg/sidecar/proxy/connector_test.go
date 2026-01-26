@@ -44,7 +44,7 @@ type sidecarTestInfo struct {
 	proxy          *Server
 }
 
-var connectors = []string{ConnectorLMCache, ConnectorNIXLV2}
+var connectors = []string{ConnectorSharedStorage, ConnectorNIXLV2}
 
 var _ = Describe("Common Connector tests", func() {
 

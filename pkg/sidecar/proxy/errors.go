@@ -50,6 +50,10 @@ func errorBadGateway(err error, w http.ResponseWriter) error {
 	return sendError(err, "BadGateway", http.StatusBadGateway, w)
 }
 
+func errorInternalServerError(err error, w http.ResponseWriter) error {
+	return sendError(err, "InternalServerError", http.StatusInternalServerError, w)
+}
+
 // sendError simulates vLLM errors
 //
 // Example:
