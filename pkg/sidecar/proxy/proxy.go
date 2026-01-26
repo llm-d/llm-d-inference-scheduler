@@ -151,7 +151,7 @@ func (s *Server) setConnector() {
 	switch s.config.Connector {
 	case types.ConnectorSharedStorage:
 		s.protocolRunner = runners.NewVLLMRunner(
-			&runners.DefaultRequestBuilderFactory{},
+			&runners.SharedStorageRequestBuilderFactory{},
 			types.ConnectorSharedStorage,
 			&s.proxyManager,
 		)

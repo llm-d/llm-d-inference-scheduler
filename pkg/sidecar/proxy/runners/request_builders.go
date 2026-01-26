@@ -23,32 +23,32 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 )
 
-// DefaultRequestBuilderFactory creates request builders for the shared-storage connector.
-// This is the legacy P/D protocol that uses shared storage for KV-cache transfer.
-type DefaultRequestBuilderFactory struct{}
+// SharedStorageRequestBuilderFactory creates request builders for the shared-storage connector.
+// This is the P/D protocol that uses shared storage for KV-cache transfer.
+type SharedStorageRequestBuilderFactory struct{}
 
 // New creates a new request builder for the shared-storage connector.
-func (f *DefaultRequestBuilderFactory) New() types.RequestBuilder {
-	return &defaultRequestBuilder{}
+func (f *SharedStorageRequestBuilderFactory) New() types.RequestBuilder {
+	return &sharedStorageRequestBuilder{}
 }
 
-type defaultRequestBuilder struct {
+type sharedStorageRequestBuilder struct {
 	stream, streamOptions, maxTokens, maxCompletionTokens *any
 }
 
-func (c *defaultRequestBuilder) PreparePrefillRequest(completionRequest map[string]any) map[string]any {
+func (b *sharedStorageRequestBuilder) PreparePrefillRequest(completionRequest map[string]any) map[string]any {
 	prefillRequest := maps.Clone(completionRequest)
 	if stream, ok := prefillRequest[keys.RequestFieldStream]; ok {
-		c.stream = &stream
+		b.stream = &stream
 	}
 	if streamOptions, ok := prefillRequest[keys.RequestFieldStreamOptions]; ok {
-		c.streamOptions = &streamOptions
+		b.streamOptions = &streamOptions
 	}
 	if maxTokens, ok := prefillRequest[keys.RequestFieldMaxTokens]; ok {
-		c.maxTokens = &maxTokens
+		b.maxTokens = &maxTokens
 	}
 	if maxCompletionTokens, ok := prefillRequest[keys.RequestFieldMaxCompletionTokens]; ok {
-		c.maxCompletionTokens = &maxCompletionTokens
+		b.maxCompletionTokens = &maxCompletionTokens
 	}
 
 	prefillRequest[keys.RequestFieldStream] = false
@@ -59,22 +59,22 @@ func (c *defaultRequestBuilder) PreparePrefillRequest(completionRequest map[stri
 	return prefillRequest
 }
 
-func (c *defaultRequestBuilder) PrepareDecodeRequest(completionRequest map[string]any, _ map[string]any) map[string]any {
+func (b *sharedStorageRequestBuilder) PrepareDecodeRequest(completionRequest map[string]any, _ map[string]any) map[string]any {
 	decodeRequest := maps.Clone(completionRequest)
 	delete(decodeRequest, keys.RequestFieldStream)
-	if c.stream != nil {
-		decodeRequest[keys.RequestFieldStream] = *c.stream
+	if b.stream != nil {
+		decodeRequest[keys.RequestFieldStream] = *b.stream
 	}
-	if c.streamOptions != nil {
-		decodeRequest[keys.RequestFieldStreamOptions] = *c.streamOptions
+	if b.streamOptions != nil {
+		decodeRequest[keys.RequestFieldStreamOptions] = *b.streamOptions
 	}
 	delete(decodeRequest, keys.RequestFieldMaxTokens)
-	if c.maxTokens != nil {
-		decodeRequest[keys.RequestFieldMaxTokens] = *c.maxTokens
+	if b.maxTokens != nil {
+		decodeRequest[keys.RequestFieldMaxTokens] = *b.maxTokens
 	}
 	delete(decodeRequest, keys.RequestFieldMaxCompletionTokens)
-	if c.maxCompletionTokens != nil {
-		decodeRequest[keys.RequestFieldMaxCompletionTokens] = *c.maxCompletionTokens
+	if b.maxCompletionTokens != nil {
+		decodeRequest[keys.RequestFieldMaxCompletionTokens] = *b.maxCompletionTokens
 	}
 	return decodeRequest
 }
@@ -89,11 +89,11 @@ func (f *NIXLV2RequestBuilderFactory) New() types.RequestBuilder {
 }
 
 type nixlV2RequestBuilder struct {
-	defaultRequestBuilder
+	sharedStorageRequestBuilder
 }
 
-func (c *nixlV2RequestBuilder) PreparePrefillRequest(completionRequest map[string]any) map[string]any {
-	prefillRequest := c.defaultRequestBuilder.PreparePrefillRequest(completionRequest)
+func (b *nixlV2RequestBuilder) PreparePrefillRequest(completionRequest map[string]any) map[string]any {
+	prefillRequest := b.sharedStorageRequestBuilder.PreparePrefillRequest(completionRequest)
 	prefillRequest[keys.RequestFieldKVTransferParams] = map[string]any{
 		keys.RequestFieldDoRemoteDecode:  true,
 		keys.RequestFieldDoRemotePrefill: false,
@@ -105,8 +105,8 @@ func (c *nixlV2RequestBuilder) PreparePrefillRequest(completionRequest map[strin
 	return prefillRequest
 }
 
-func (c *nixlV2RequestBuilder) PrepareDecodeRequest(completionRequest map[string]any, prefillResponse map[string]any) map[string]any {
-	decodeRequest := c.defaultRequestBuilder.PrepareDecodeRequest(completionRequest, prefillResponse)
+func (b *nixlV2RequestBuilder) PrepareDecodeRequest(completionRequest map[string]any, prefillResponse map[string]any) map[string]any {
+	decodeRequest := b.sharedStorageRequestBuilder.PrepareDecodeRequest(completionRequest, prefillResponse)
 	decodeRequest[keys.RequestFieldKVTransferParams] = prefillResponse[keys.RequestFieldKVTransferParams]
 	return decodeRequest
 }
