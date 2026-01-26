@@ -73,6 +73,7 @@ jobs:
         with:
           version: "v2.1.6"
           args: "--config=./.golangci.yml"
+          skip-cache: true
         env:
           CGO_ENABLED: ${{ env.CGO_ENABLED }}
           CGO_CFLAGS: ${{ env.CGO_CFLAGS }}

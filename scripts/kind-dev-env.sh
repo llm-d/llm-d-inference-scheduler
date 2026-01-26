@@ -37,7 +37,7 @@ EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
 # Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-food-review}"
+export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
 # Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
 export MODEL_FAMILY="${MODEL_NAME%%/*}"
 # Extract model ID (e.g., "Llama-3.1-8B-Instruct")
@@ -74,31 +74,40 @@ export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
-PRIMARY_PORT="0"
-if [ "${PD_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
-  if [ "${KV_CACHE_ENABLED}" != "true" ]; then
-    DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
-  else
-    DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
-  fi
-else
-  if [ "${KV_CACHE_ENABLED}" != "true" ]; then
-    if [ "${PD_ENABLED}" == "\"true\"" ]; then
-      DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-      if [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-        PRIMARY_PORT="8000"
-      fi
-    else
-      DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
-    fi
-  else
+# Validate configuration constraints
+if [ "${KV_CACHE_ENABLED}" == "true" ]; then
+  # KV cache requires simple mode: no PD and DP size must be 1
+  if [ "${PD_ENABLED}" == "\"true\"" ] || [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
     echo "Invalid configuration: PD_ENABLED=true and KV_CACHE_ENABLED=true is not supported"
     exit 1
   fi
 fi
 
-export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
+# Set PRIMARY_PORT based on PD mode with data parallelism
+if [ "${PD_ENABLED}" == "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
+  PRIMARY_PORT="8000"
+else
+  PRIMARY_PORT="0"
+fi
 export PRIMARY_PORT
+
+# Determine EPP config file based on feature flags
+if [ "${KV_CACHE_ENABLED}" == "true" ]; then
+  # KV cache mode (simple mode only)
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
+elif [ "${PD_ENABLED}" == "\"true\"" ]; then
+  # Prefill-Decode mode
+  DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
+  # Data Parallel mode (only needed for Istio pre-1.28.1)
+  # Not really called in kind(docker.io/istio/pilot:1.28.1) by "make env-dev-kind"
+  DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
+else
+  # Simple mode
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
+fi
+
+export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
 
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks

@@ -3,19 +3,16 @@
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefix-cache-scorer
+- type: precise-prefix-cache-scorer
   parameters:
-    mode: cache_tracking
-    tokenProcessorConfig:
-      blockSize: 16                         # must match vLLM block size if not default (16)
-      hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
-      prefixStoreConfig:
-        blockSize: 16 
+      tokenProcessorConfig:
+        blockSize: 16                         # must match vLLM block size if not default (16)
+        hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
       tokenizersPoolConfig:
-        modelName: <model-name>            # specify the model name to use for tokenizer loading
+        modelName: TinyLlama/TinyLlama-1.1B-Chat-v1.0  # replace value to use different model for tokenizer loading
         hf:
           tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:
@@ -29,5 +26,5 @@ schedulingProfiles:
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
-  - pluginRef: prefix-cache-scorer
+  - pluginRef: precise-prefix-cache-scorer
     weight: 10
