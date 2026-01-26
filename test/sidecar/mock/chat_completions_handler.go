@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 )
 
 // Role of the mocked handler
@@ -38,7 +40,7 @@ const (
 
 // ChatCompletionHandler is a simple chat completion mock handler
 type ChatCompletionHandler struct {
-	Connector           string
+	Connector           types.Connector
 	Role                Role
 	RequestCount        atomic.Int32
 	CompletionRequests  []map[string]any
@@ -132,8 +134,8 @@ func (cc *ChatCompletionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 		}
 
-	case "lmcache":
-		// LMCache protocol just returns empty response
+	case "shared-storage":
+		// Shared Storage protocol just returns empty response
 		rawResponse = `{}`
 
 	default:
