@@ -20,7 +20,7 @@ RUN KV_CACHE_PKG=$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache) && 
     mkdir -p /workspace/kv-cache && \
     cp -r $KV_CACHE_PKG/* /workspace/kv-cache
 
-FROM python:3.12-slim AS python-builder
+FROM python:3.14-slim AS python-builder
 
 ARG TARGETARCH
 
