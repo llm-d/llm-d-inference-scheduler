@@ -42,7 +42,7 @@ const (
 
 // Config represents the proxy server configuration
 type Config struct {
-	// Connector is the P/D protocol the proxy must follow.
+	// Connector is the P/D protocol the proxy and the inference engine must use.
 	Connector types.Connector
 
 	// PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers.
