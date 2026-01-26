@@ -43,7 +43,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			validator := proxy.NewDisabledAllowlistValidator()
+			validator := newDisabledAllowlistValidator()
 			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 

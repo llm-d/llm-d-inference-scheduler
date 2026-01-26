@@ -70,13 +70,6 @@ type AllowlistValidator struct {
 	stopCh         chan struct{}
 }
 
-// NewDisabledAllowlistValidator creates a disabled SSRF protection validator for testing
-func NewDisabledAllowlistValidator() *AllowlistValidator {
-	return &AllowlistValidator{
-		enabled: false,
-	}
-}
-
 // NewAllowlistValidator creates a new SSRF protection validator
 func NewAllowlistValidator(enabled bool, poolGroup, namespace, poolName string) (*AllowlistValidator, error) {
 	if !enabled {

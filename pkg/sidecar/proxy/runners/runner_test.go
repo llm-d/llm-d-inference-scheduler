@@ -75,7 +75,7 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := proxy.NewDisabledAllowlistValidator()
+					validator := newDisabledAllowlistValidator()
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 
@@ -137,7 +137,7 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := proxy.NewDisabledAllowlistValidator()
+					validator := newDisabledAllowlistValidator()
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 
