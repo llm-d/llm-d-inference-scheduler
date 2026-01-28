@@ -30,7 +30,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/queue"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
 )
 
@@ -48,7 +47,7 @@ type bandStats struct {
 // flowState tracks the lifecycle and usage of a specific flow instance.
 type flowState struct {
 	leasedState
-	key types.FlowKey
+	key flowcontrol.FlowKey
 
 	// initialized ensures that the heavy-weight infrastructure provisioning (creating queues on shards) happens exactly
 	// once per flowState instance.
@@ -186,7 +185,7 @@ func (fr *FlowRegistry) Run(ctx context.Context) {
 //
 // When a NEW flow is created, this method also increments the corresponding priority band's lease count,
 // establishing the invariant: bandState.leaseCount = number of active flows at this priority.
-func (fr *FlowRegistry) WithConnection(key types.FlowKey, fn func(conn contracts.ActiveFlowConnection) error) error {
+func (fr *FlowRegistry) WithConnection(key flowcontrol.FlowKey, fn func(conn contracts.ActiveFlowConnection) error) error {
 	if key.ID == "" {
 		return contracts.ErrFlowIDEmpty
 	}
@@ -243,7 +242,7 @@ func (fr *FlowRegistry) WithConnection(key types.FlowKey, fn func(conn contracts
 // all active shards.
 //
 // NOTE: The caller (WithConnection) must already hold a lease on the priority band to prevent GC during this operation.
-func (fr *FlowRegistry) ensureFlowInfrastructure(key types.FlowKey) error {
+func (fr *FlowRegistry) ensureFlowInfrastructure(key flowcontrol.FlowKey) error {
 	// 1. Ensure Priority Band exists.
 	fr.mu.RLock()
 	_, exists := fr.config.PriorityBands[key.Priority]
@@ -370,14 +369,14 @@ func (fr *FlowRegistry) executeGCCycle() {
 
 // gcFlows removes idle flows.
 func (fr *FlowRegistry) gcFlows() {
-	deletedFlows := collectLeasedResources[types.FlowKey, *flowState](
+	deletedFlows := collectLeasedResources[flowcontrol.FlowKey, *flowState](
 		&fr.flowStates,
 		fr.config.FlowGCTimeout,
 		fr.clock,
 	)
 
 	if len(deletedFlows) > 0 {
-		var keysToClean []types.FlowKey
+		var keysToClean []flowcontrol.FlowKey
 		for _, v := range deletedFlows {
 			fr.logger.V(logging.VERBOSE).Info("Garbage collecting flow", "flowKey", v.key, "becameIdleAt", v.becameIdleAt)
 			// Release the band lease.
@@ -393,7 +392,7 @@ func (fr *FlowRegistry) gcFlows() {
 }
 
 // cleanupFlowResources removes queue resources from the shards for the specified flows.
-func (fr *FlowRegistry) cleanupFlowResources(keys []types.FlowKey) {
+func (fr *FlowRegistry) cleanupFlowResources(keys []flowcontrol.FlowKey) {
 	fr.mu.Lock() // Exclusive lock to prevent race with ensureFlowInfrastructure.
 	defer fr.mu.Unlock()
 
@@ -520,10 +519,10 @@ func (fr *FlowRegistry) executeScaleUpLocked(newTotalActive int) error {
 	// Pre-build every component for every existing flow on every new shard.
 	// If any single component fails to build, the entire scale-up operation is aborted, and all prepared data is
 	// discarded, leaving the system state clean.
-	allComponents := make(map[types.FlowKey][]flowComponents)
+	allComponents := make(map[flowcontrol.FlowKey][]flowComponents)
 	var rangeErr error
 	fr.flowStates.Range(func(key, _ interface{}) bool {
-		flowKey := key.(types.FlowKey)
+		flowKey := key.(flowcontrol.FlowKey)
 		components, err := fr.buildFlowComponents(flowKey, len(newShards))
 		if err != nil {
 			rangeErr = fmt.Errorf("failed to prepare components for flow %s on new shards: %w", flowKey, err)
@@ -581,12 +580,12 @@ func (fr *FlowRegistry) repartitionShardConfigsLocked() {
 // flowComponents holds the plugin instances created for a single flow on a single shard.
 type flowComponents struct {
 	policy flowcontrol.OrderingPolicy
-	queue  flowcontrol.SafeQueue
+	queue  contracts.SafeQueue
 }
 
 // buildFlowComponents instantiates the necessary plugin components for a new flow instance.
 // It creates a distinct instance of each component for each shard to ensure state isolation.
-func (fr *FlowRegistry) buildFlowComponents(key types.FlowKey, numInstances int) ([]flowComponents, error) {
+func (fr *FlowRegistry) buildFlowComponents(key flowcontrol.FlowKey, numInstances int) ([]flowComponents, error) {
 	bandConfig, ok := fr.config.PriorityBands[key.Priority]
 	if !ok {
 		return nil, fmt.Errorf("priority band %d not found: %w", key.Priority, contracts.ErrPriorityBandNotFound)
