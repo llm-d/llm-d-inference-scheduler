@@ -7,7 +7,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	k8stypes "k8s.io/apimachinery/pkg/types" // Import config for thresholds
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
@@ -18,21 +17,21 @@ import (
 func TestLoadBasedScorer(t *testing.T) {
 	endpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		&datalayer.Metrics{
+		&fwkdl.Metrics{
 			WaitingQueueSize: 2,
 		},
 		nil,
 	)
 	endpointB := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		&datalayer.Metrics{
+		&fwkdl.Metrics{
 			WaitingQueueSize: 0,
 		},
 		nil,
 	)
 	endpointC := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
-		&datalayer.Metrics{
+		&fwkdl.Metrics{
 			WaitingQueueSize: 15,
 		},
 		nil,

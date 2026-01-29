@@ -9,11 +9,10 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -124,17 +123,17 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 func TestNoHitLRUScorer(t *testing.T) {
 	endpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpointB := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpointC := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 
@@ -225,12 +224,12 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 
 	endpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpointB := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 
@@ -270,7 +269,7 @@ func TestNoPrefixCacheStateFound(t *testing.T) {
 
 	endpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpoints := []scheduling.Endpoint{endpointA}
@@ -289,17 +288,17 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 
 	endpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpointB := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b", Namespace: "default"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpointC := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c", Namespace: "default"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpoints := []scheduling.Endpoint{endpointA, endpointB, endpointC}
@@ -413,7 +412,7 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 
 	endpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 
@@ -469,24 +468,24 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 	// Prefill worker endpoints
 	prefillEndpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "prefill-a", Namespace: "default"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	prefillEndpointB := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "prefill-b", Namespace: "default"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 
 	// Decode worker endpoints
 	decodeEndpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "decode-a", Namespace: "default"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	decodeEndpointB := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "decode-b", Namespace: "default"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 

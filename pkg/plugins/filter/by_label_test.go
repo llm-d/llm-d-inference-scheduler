@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
@@ -146,7 +145,7 @@ func createEndpoint(nsn k8stypes.NamespacedName, ipaddr string, labels map[strin
 			Address:        ipaddr,
 			Labels:         labels,
 		},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 }

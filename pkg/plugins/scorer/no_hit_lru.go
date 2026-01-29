@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 )
 
 const (
@@ -130,7 +130,7 @@ func (s *NoHitLRU) WithName(name string) *NoHitLRU {
 
 // Category returns the preference the scorer applies when scoring candidate endpoints.
 func (s *NoHitLRU) Category() scheduling.ScorerCategory {
-	return scheduling.Affinity
+	return scheduling.Distribution
 }
 
 // isColdRequest determines if a request is cold by reading the prefix cache state.

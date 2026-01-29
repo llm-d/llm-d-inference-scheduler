@@ -13,7 +13,6 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
@@ -83,7 +82,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
 					},
 					nil,
@@ -93,7 +92,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
 					},
 					nil,
@@ -103,7 +102,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 2,
 					},
 					nil,
@@ -174,7 +173,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
 					},
 					nil,
@@ -184,7 +183,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
 					},
 					nil,
@@ -278,7 +277,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
 					},
 					nil,
@@ -288,7 +287,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
 					},
 					nil,
@@ -298,7 +297,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 2,
 					},
 					nil,
@@ -368,7 +367,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					&datalayer.Metrics{
+					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
 					},
 					nil,

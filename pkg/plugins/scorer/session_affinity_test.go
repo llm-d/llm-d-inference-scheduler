@@ -8,7 +8,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
@@ -20,12 +19,12 @@ import (
 func TestSessionAffinity_Score(t *testing.T) {
 	endpointA := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 	endpointB := scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		&datalayer.Metrics{},
+		&fwkdl.Metrics{},
 		nil,
 	)
 

@@ -134,7 +134,7 @@ func (s *ActiveRequest) WithName(name string) *ActiveRequest {
 
 // Category returns the preference the scorer applies when scoring candidate endpoints.
 func (s *ActiveRequest) Category() scheduling.ScorerCategory {
-	return scheduling.Balance
+	return scheduling.Distribution
 }
 
 // Score scores the given endpoints based on the number of active requests
