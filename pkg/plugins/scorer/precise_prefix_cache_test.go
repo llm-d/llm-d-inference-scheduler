@@ -13,9 +13,9 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -37,34 +37,38 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 	testcases := []struct {
 		name                string
-		pods                []types.Pod
-		request             *types.LLMRequest
-		kvBlockData         func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
+		endpoints           []scheduling.Endpoint
+		request             *scheduling.LLMRequest
+		kvBlockData         func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
 		wantScoresByAddress map[string]float64
 	}{
 		{
 			name: "nil request",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-				},
+					nil,
+					nil,
+				),
 			},
 			wantScoresByAddress: map[string]float64{}, // empty map
 		},
 		{
 			name: "empty request body",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-				},
+					nil,
+					nil,
+				),
 			},
-			request: &types.LLMRequest{
+			request: &scheduling.LLMRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
 				Body:        nil,
@@ -73,45 +77,48 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "longest prefix scorer (default scorer)",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 1,
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 2,
 					},
-				},
+					nil,
+				),
 			},
-			request: &types.LLMRequest{
+			request: &scheduling.LLMRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &types.LLMRequestBody{
-					Completions: &types.CompletionsRequest{
+				Body: &scheduling.LLMRequestBody{
+					Completions: &scheduling.CompletionsRequest{
 						Prompt: prompt,
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 				prompt := req.Completions.Prompt
 
@@ -129,7 +136,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
 
 				// populate kvblock.Index to test longest prefix matching:
-				// - chunk0 (first chunk): all pods have it (common prefix start)
+				// - chunk0 (first chunk): all endpoints have it (common prefix start)
 				// - chunk1: pod-a and pod-b have it (pod-c drops off after chunk0)
 				// - chunk2: only pod-a has it (pod-b drops off after chunk1)
 				// LongestPrefixScorer uses intersection, so:
@@ -161,51 +168,53 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "chat completions request",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 1,
 					},
-				},
+					nil,
+				),
 			},
-			request: &types.LLMRequest{
+			request: &scheduling.LLMRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &types.LLMRequestBody{
-					ChatCompletions: &types.ChatCompletionsRequest{
+				Body: &scheduling.LLMRequestBody{
+					ChatCompletions: &scheduling.ChatCompletionsRequest{
 						ChatTemplate: `{% for message in messages %}{{ message.role }}: {{ message.content }}
 		{% endfor %}`,
-						Messages: []types.Message{
+						Messages: []scheduling.Message{
 							{
 								Role:    "user",
-								Content: types.Content{Raw: "Hello, how are you?"},
+								Content: scheduling.Content{Raw: "Hello, how are you?"},
 							},
 							{
 								Role:    "assistant",
-								Content: types.Content{Raw: "I'm doing well, thank you for asking!"},
+								Content: scheduling.Content{Raw: "I'm doing well, thank you for asking!"},
 							},
 							{
 								Role:    "user",
-								Content: types.Content{Raw: "Can you help me with a question about prefix caching in LLM inference?"},
+								Content: scheduling.Content{Raw: "Can you help me with a question about prefix caching in LLM inference?"},
 							},
 						},
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to preprocessing format
@@ -263,45 +272,48 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		},
 		{
 			name: "partial prefix",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 1,
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 2,
 					},
-				},
+					nil,
+				),
 			},
-			request: &types.LLMRequest{
+			request: &scheduling.LLMRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &types.LLMRequestBody{
-					Completions: &types.CompletionsRequest{
+				Body: &scheduling.LLMRequestBody{
+					Completions: &scheduling.CompletionsRequest{
 						Prompt: prompt,
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
@@ -316,7 +328,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
 
 				// Test partial prefix cache scenario:
-				// - chunk0: all pods (common prefix start)
+				// - chunk0: all endpoints (common prefix start)
 				// - chunk1: only pod-a (creates a gap for pod-b and pod-c)
 				// - chunk2: pod-a and pod-b (pod-b has this but missing chunk1)
 				//
@@ -349,28 +361,29 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 		},
 		{
-			name: "single pod",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			name: "single endpoint",
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-					MetricsState: &backendmetrics.MetricsState{
+					&datalayer.Metrics{
 						WaitingQueueSize: 0,
 					},
-				},
+					nil,
+				),
 			},
-			request: &types.LLMRequest{
+			request: &scheduling.LLMRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &types.LLMRequestBody{
-					Completions: &types.CompletionsRequest{
+				Body: &scheduling.LLMRequestBody{
+					Completions: &scheduling.CompletionsRequest{
 						Prompt: prompt,
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
@@ -384,7 +397,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
-				// Single pod has 2 chunks cached
+				// Single endpoint has 2 chunks cached
 				return map[kvblock.BlockHash][]kvblock.PodEntry{
 					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
@@ -395,81 +408,93 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				}
 			},
 			wantScoresByAddress: map[string]float64{
-				// with only one pod, minScore == maxScore, so normalization returns 1.0
+				// with only one endpoint, minScore == maxScore, so normalization returns 1.0
 				"10.0.0.1:8080": 1.0,
 			},
 		},
 		{
 			name: "no cache hits (empty index)",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-				},
+					nil,
+					nil,
+				),
 			},
-			request: &types.LLMRequest{
+			request: &scheduling.LLMRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &types.LLMRequestBody{
-					Completions: &types.CompletionsRequest{
-						Prompt: "This prompt has never been cached before on any pod.",
+				Body: &scheduling.LLMRequestBody{
+					Completions: &scheduling.CompletionsRequest{
+						Prompt: "This prompt has never been cached before on any endpoint.",
 					},
 				},
 			},
 			kvBlockData: nil, // no cached data
 			wantScoresByAddress: map[string]float64{
-				// when no pods have any cache hits, all should get equal scores (0.0)
+				// when no endpoints have any cache hits, all should get equal scores (0.0)
 				"10.0.0.1:8080": 0.0,
 				"10.0.0.2:8080": 0.0,
 				"10.0.0.3:8080": 0.0,
 			},
 		},
 		{
-			name: "all pods have equal prefix length",
-			pods: []types.Pod{
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+			name: "all endpoints have equal prefix length",
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
 						Address:        "10.0.0.1:8080",
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
 						Address:        "10.0.0.2:8080",
 					},
-				},
-				&types.PodMetrics{
-					Pod: &backend.Pod{
+					nil,
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
 						Address:        "10.0.0.3:8080",
 					},
-				},
+					nil,
+					nil,
+				),
 			},
-			request: &types.LLMRequest{
+			request: &scheduling.LLMRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &types.LLMRequestBody{
-					Completions: &types.CompletionsRequest{
+				Body: &scheduling.LLMRequestBody{
+					Completions: &scheduling.CompletionsRequest{
 						Prompt: prompt,
 					},
 				},
 			},
-			kvBlockData: func(req *types.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
@@ -483,7 +508,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
-				// all pods have the same 2 chunks cached
+				// all endpoints have the same 2 chunks cached
 				return map[kvblock.BlockHash][]kvblock.PodEntry{
 					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
@@ -498,8 +523,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				}
 			},
 			wantScoresByAddress: map[string]float64{
-				// when all pods have equal cache (minScore == maxScore), the implementation
-				// returns 1.0 for all pods to avoid division by zero
+				// when all endpoints have equal cache (minScore == maxScore), the implementation
+				// returns 1.0 for all endpoints to avoid division by zero
 				"10.0.0.1:8080": 1.0,
 				"10.0.0.2:8080": 1.0,
 				"10.0.0.3:8080": 1.0,
@@ -537,12 +562,12 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				}
 			}
 
-			got := prefixCacheScorer.Score(ctx, types.NewCycleState(), tt.request, tt.pods)
+			got := prefixCacheScorer.Score(ctx, scheduling.NewCycleState(), tt.request, tt.endpoints)
 
 			gotByAddress := make(map[string]float64)
-			for pod, score := range got {
-				if podMetrics, ok := pod.(*types.PodMetrics); ok && podMetrics.GetPod() != nil {
-					gotByAddress[podMetrics.GetPod().Address] = score
+			for endpoint, score := range got {
+				if endpoint.GetMetadata() != nil {
+					gotByAddress[endpoint.GetMetadata().Address] = score
 				}
 			}
 

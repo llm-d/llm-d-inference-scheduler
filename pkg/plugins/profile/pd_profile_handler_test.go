@@ -8,12 +8,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	scheduler "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -180,51 +180,52 @@ func TestPdProfileHandlerFactoryInvalidJSON(t *testing.T) {
 
 const DefaultTestPodPort = "8000"
 
-// createPod creates a mock Pod with customizable IP and port.
-func createPod(nsn k8stypes.NamespacedName, ipaddr, port string, labels map[string]string) types.Pod {
-	return &types.PodMetrics{
-		Pod: &backend.Pod{
+// createEndpoint creates a mock Pod with customizable IP and port.
+func createEndpoint(nsn k8stypes.NamespacedName, ipaddr, port string, labels map[string]string) scheduling.Endpoint {
+	return scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{
 			NamespacedName: nsn,
 			Address:        ipaddr,
 			Port:           port,
 			Labels:         labels,
 		},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
+		&datalayer.Metrics{},
+		nil,
+	)
 }
 
 // newMockProfileRunResult creates a ProfileRunResult with Pods using the given port.
-func newMockProfileRunResult(port string, podNames ...string) *types.ProfileRunResult {
-	pods := make([]types.Pod, 0, len(podNames))
-	for i, name := range podNames {
+func newMockProfileRunResult(port string, endpointNames ...string) *scheduling.ProfileRunResult {
+	endpoints := make([]scheduling.Endpoint, 0, len(endpointNames))
+	for i, name := range endpointNames {
 		ip := fmt.Sprintf("10.0.0.%d", i+1)
-		pods = append(pods, createPod(
+		endpoints = append(endpoints, createEndpoint(
 			k8stypes.NamespacedName{Namespace: "default", Name: name},
 			ip,
 			port,
 			map[string]string{},
 		))
 	}
-	return &types.ProfileRunResult{
-		TargetPods: pods,
+	return &scheduling.ProfileRunResult{
+		TargetEndpoints: endpoints,
 	}
 }
 
-func newMockSchedulerProfile() *framework.SchedulerProfile {
-	return &framework.SchedulerProfile{}
+func newMockSchedulerProfile() scheduling.SchedulerProfile {
+	return &scheduler.SchedulerProfile{}
 }
 
 func TestPdProfileHandler_Pick(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	request := &types.LLMRequest{
-		Body: &types.LLMRequestBody{
-			Completions: &types.CompletionsRequest{
+	request := &scheduling.LLMRequest{
+		Body: &scheduling.LLMRequestBody{
+			Completions: &scheduling.CompletionsRequest{
 				Prompt: "hello world",
 			},
 		},
 	}
 
-	profiles := map[string]*framework.SchedulerProfile{
+	profiles := map[string]scheduling.SchedulerProfile{
 		"decode":  newMockSchedulerProfile(),
 		"prefill": newMockSchedulerProfile(),
 	}
@@ -235,8 +236,8 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 		hashBlockSize    int
 		prefixPluginType string
 		prefixPluginName string
-		setupPrefixState func(*types.CycleState)
-		profileResults   map[string]*types.ProfileRunResult
+		setupPrefixState func(*scheduling.CycleState)
+		profileResults   map[string]*scheduling.ProfileRunResult
 		expectedProfiles []string
 	}{
 		{
@@ -245,7 +246,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			hashBlockSize:    16,
 			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
-			profileResults:   map[string]*types.ProfileRunResult{},
+			profileResults:   map[string]*scheduling.ProfileRunResult{},
 			expectedProfiles: []string{"decode"},
 		},
 		{
@@ -254,7 +255,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			hashBlockSize:    16,
 			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode": nil,
 			},
 			expectedProfiles: []string{},
@@ -265,7 +266,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			hashBlockSize:    16,
 			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode":  newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 				"prefill": newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
@@ -277,16 +278,16 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			hashBlockSize:    16,
 			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
-			setupPrefixState: func(cs *types.CycleState) {
+			setupPrefixState: func(cs *scheduling.CycleState) {
 				state := &prefix.SchedulingContextState{
 					PrefixCacheServers: map[prefix.ServerID]int{
 						prefix.ServerID(k8stypes.NamespacedName{Name: "pod1", Namespace: "default"}): 1,
 					},
 				}
-				key := plugins.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
+				key := plugin.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
 				cs.Write(key, state)
 			},
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
 			expectedProfiles: []string{"prefill"},
@@ -297,16 +298,16 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			hashBlockSize:    16,
 			prefixPluginType: prefix.PrefixCachePluginType,
 			prefixPluginName: prefix.PrefixCachePluginType,
-			setupPrefixState: func(cs *types.CycleState) {
+			setupPrefixState: func(cs *scheduling.CycleState) {
 				state := &prefix.SchedulingContextState{
 					PrefixCacheServers: map[prefix.ServerID]int{
 						prefix.ServerID(k8stypes.NamespacedName{Name: "pod1", Namespace: "default"}): 5,
 					},
 				}
-				key := plugins.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
+				key := plugin.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
 				cs.Write(key, state)
 			},
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
 			expectedProfiles: []string{},
@@ -325,7 +326,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 				0,
 			).WithName("test-handler")
 
-			cs := &types.CycleState{}
+			cs := &scheduling.CycleState{}
 			if tt.setupPrefixState != nil {
 				tt.setupPrefixState(cs)
 			}
@@ -346,13 +347,13 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 	tests := []struct {
 		name           string
 		primaryPort    int
-		profileResults map[string]*types.ProfileRunResult
+		profileResults map[string]*scheduling.ProfileRunResult
 		expectError    bool
-		checkResult    func(*testing.T, *types.SchedulingResult, map[string]string)
+		checkResult    func(*testing.T, *scheduling.SchedulingResult, map[string]string)
 	}{
 		{
 			name: "decode failed → error",
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode": nil,
 			},
 			expectError: true,
@@ -360,28 +361,28 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 		{
 			name:        "decode success, no prefill, no primaryPort",
 			primaryPort: 0,
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
 			expectError: false,
-			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
+			checkResult: func(t *testing.T, res *scheduling.SchedulingResult, headers map[string]string) {
 				assert.Equal(t, "decode", res.PrimaryProfileName)
 				assert.Contains(t, res.ProfileResults, "decode")
 				assert.NotContains(t, res.ProfileResults, "prefill")
-				pod := res.ProfileResults["decode"].TargetPods[0].GetPod()
-				assert.Equal(t, DefaultTestPodPort, pod.Port)
+				metadata := res.ProfileResults["decode"].TargetEndpoints[0].GetMetadata()
+				assert.Equal(t, DefaultTestPodPort, metadata.Port)
 				assert.Empty(t, headers[common.DataParallelPodHeader])
 			},
 		},
 		{
 			name:        "decode success, with prefill",
 			primaryPort: 0,
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode":  newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 				"prefill": newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectError: false,
-			checkResult: func(t *testing.T, res *types.SchedulingResult, _ map[string]string) {
+			checkResult: func(t *testing.T, res *scheduling.SchedulingResult, _ map[string]string) {
 				assert.Equal(t, "decode", res.PrimaryProfileName)
 				assert.Contains(t, res.ProfileResults, "decode")
 				assert.Contains(t, res.ProfileResults, "prefill")
@@ -390,13 +391,13 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 		{
 			name:        "with primaryPort → port updated and header set",
 			primaryPort: 9000,
-			profileResults: map[string]*types.ProfileRunResult{
+			profileResults: map[string]*scheduling.ProfileRunResult{
 				"decode": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
 			expectError: false,
-			checkResult: func(t *testing.T, res *types.SchedulingResult, headers map[string]string) {
-				pod := res.ProfileResults["decode"].TargetPods[0].GetPod()
-				assert.Equal(t, "9000", pod.Port)
+			checkResult: func(t *testing.T, res *scheduling.SchedulingResult, headers map[string]string) {
+				metadata := res.ProfileResults["decode"].TargetEndpoints[0].GetMetadata()
+				assert.Equal(t, "9000", metadata.Port)
 
 				hostPort := headers[common.DataParallelPodHeader]
 				assert.Equal(t, "10.0.0.1:8000", hostPort)
@@ -412,15 +413,15 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				prefix.PrefixCachePluginType,
 				prefix.PrefixCachePluginType,
 				0,
-				prefix.DefaultBlockSize,
+				prefix.DefaultBlockSizeTokens*averageCharactersPerToken,
 				tt.primaryPort,
 			).WithName("test-handler")
 
 			headers := make(map[string]string)
-			req := &types.LLMRequest{
+			req := &scheduling.LLMRequest{
 				Headers: headers,
 			}
-			result, err := handler.ProcessResults(context.Background(), &types.CycleState{}, req, tt.profileResults)
+			result, err := handler.ProcessResults(context.Background(), &scheduling.CycleState{}, req, tt.profileResults)
 
 			if tt.expectError {
 				assert.Error(t, err)

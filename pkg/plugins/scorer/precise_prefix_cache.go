@@ -14,11 +14,10 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
 	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
 )
 
 const (
@@ -33,7 +32,7 @@ type PrecisePrefixCachePluginConfig struct {
 	// used to process tokens into KV-block keys.
 	TokenProcessorConfig *kvblock.TokenProcessorConfig `json:"tokenProcessorConfig"`
 	// IndexerConfig holds the configuration for the `kvcache.Indexer` which is
-	// used to score pods based on the KV-cache index state.
+	// used to score endpoints based on the KV-cache index state.
 	IndexerConfig *kvcache.Config `json:"indexerConfig"`
 	// KVEventsConfig holds the configuration for the `kvevents.Pool` which is
 	// used to subscribe to KV-cache events and update the internal KV-cache
@@ -42,12 +41,12 @@ type PrecisePrefixCachePluginConfig struct {
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &PrecisePrefixCacheScorer{}
+var _ scheduling.Scorer = &PrecisePrefixCacheScorer{}
 
 // PrecisePrefixCachePluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
 func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
-	handle plugins.Handle) (plugins.Plugin, error) {
+	handle plugin.Handle) (plugin.Plugin, error) {
 	indexerConfig, err := kvcache.NewDefaultConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize indexer config: %w", err)
@@ -91,7 +90,7 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 // based on the provided configuration. The `kvevents.Pool` is started
 // in a goroutine to listen for KV-cache events and update the internal
 // KV-cache index state. The `kvcache.Indexer` is also started in a goroutine
-// to score pods based on the KV-cache index state.
+// to score endpoints based on the KV-cache index state.
 //
 // If the configuration is invalid or if the indexer fails to initialize,
 // an error is returned.
@@ -117,7 +116,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	subscribersManager := kvevents.NewSubscriberManager(pool)
 	var subscribersCache *ttlcache.Cache[string, struct{}]
 
-	// initialize the subscribers cache only if pod discovery is enabled
+	// initialize the subscribers cache only if endpoint discovery is enabled
 	if config.KVEventsConfig.DiscoverPods {
 		// initialize the subscribers TTL cache
 		subscriptionTimeout := 10 * time.Minute
@@ -142,7 +141,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	}
 
 	return &PrecisePrefixCacheScorer{
-		typedName:          plugins.TypedName{Type: PrecisePrefixCachePluginType},
+		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
 		subscribersCache:   subscribersCache,
 		subscribersManager: subscribersManager,
@@ -152,16 +151,16 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 
 // PrecisePrefixCacheScorer implements the framework.Scorer interface.
 // The scorer implements precise prefix-cache KV-block locality scoring.
-// It uses the `kvcache.Indexer` to score pods based on the KV-cache index
+// It uses the `kvcache.Indexer` to score endpoints based on the KV-cache index
 // state, and the `kvevents.Pool` to subscribe to KV-cache events
 // to keep the internal KV-cache index state up-to-date.
 type PrecisePrefixCacheScorer struct {
-	typedName      plugins.TypedName
+	typedName      plugin.TypedName
 	kvCacheIndexer *kvcache.Indexer
 
 	// until the IGW data-layer is ready to provide endpoint events,
-	// we maintain a TTL cache of known pods that are discovered through
-	// the scoring process. If a pod is not in the received endpoints list
+	// we maintain a TTL cache of known endpoints that are discovered through
+	// the scoring process. If a endpoint is not in the received endpoints list
 	// during scoring for a certain period, we consider it gone and
 	// stop its KV events subscription.
 	subscribersCache   *ttlcache.Cache[string, struct{}]
@@ -170,7 +169,7 @@ type PrecisePrefixCacheScorer struct {
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *PrecisePrefixCacheScorer) TypedName() plugins.TypedName {
+func (s *PrecisePrefixCacheScorer) TypedName() plugin.TypedName {
 	return s.typedName
 }
 
@@ -180,27 +179,32 @@ func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScor
 	return s
 }
 
-// Score scores the provided pod based on the KVCache index state.
+// Category returns the preference the scorer applies when scoring candidate endpoints.
+func (s *PrecisePrefixCacheScorer) Category() scheduling.ScorerCategory {
+	return scheduling.Affinity
+}
+
+// Score scores the provided endpoint based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
-func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	debugLogger := logger.V(logutil.DEBUG)
 
 	if s.kvEventsConfig.DiscoverPods {
 		// update subscribers here temporarily
-		for _, pod := range pods {
-			podObj := pod.GetPod()
-			if podObj == nil {
+		for _, endpoint := range endpoints {
+			endpointObj := endpoint.GetMetadata()
+			if endpointObj == nil {
 				continue
 			}
-			podKey := podObj.NamespacedName.String()
-			s.subscribersCache.Set(podKey, struct{}{}, 0) // use default TTL
+			endpointKey := endpointObj.NamespacedName.String()
+			s.subscribersCache.Set(endpointKey, struct{}{}, 0) // use default TTL
 
-			if err := s.subscribersManager.EnsureSubscriber(context.Background(), podKey, // dont use request ctx
-				fmt.Sprintf("tcp://%s:%d", podObj.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort),
+			if err := s.subscribersManager.EnsureSubscriber(context.Background(), endpointKey, // dont use request ctx
+				fmt.Sprintf("tcp://%s:%d", endpointObj.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort),
 				s.kvEventsConfig.TopicFilter, true); err != nil {
-				logger.Error(err, "Failed to ensure KV-events subscriber for pod", "pod", podKey,
-					"endpoint", podObj.Address)
+				logger.Error(err, "Failed to ensure KV-events subscriber for endpoint", "endpoint", endpointKey,
+					"endpoint", endpointObj.Address)
 				continue
 			}
 		}
@@ -213,41 +217,41 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *types.
 
 	scores, err := s.getScores(ctx, request)
 	if err != nil {
-		logger.Error(err, "Failed to get pod scores")
+		logger.Error(err, "Failed to get endpoint scores")
 		return nil
 	}
-	debugLogger.Info("Got pod scores", "scores", scores)
+	debugLogger.Info("Got endpoint scores", "scores", scores)
 
-	podToKey := func(pod types.Pod) (string, bool) {
-		metricsPod := pod.GetPod()
-		if metricsPod == nil {
+	endpointToKey := func(endpoint scheduling.Endpoint) (string, bool) {
+		metadata := endpoint.GetMetadata()
+		if metadata == nil {
 			return "", false
 		}
 
-		return metricsPod.Address, true
+		return metadata.Address, true
 	}
 
 	state := &prefix.SchedulingContextState{
 		PrefixHashes:       []prefix.BlockHash{},
 		PrefixCacheServers: map[prefix.ServerID]int{},
 	}
-	for _, pod := range pods {
-		key, ok := podToKey(pod)
+	for _, endpoint := range endpoints {
+		key, ok := endpointToKey(endpoint)
 		if !ok {
 			continue
 		}
-		state.PrefixCacheServers[prefix.ServerID(pod.GetPod().NamespacedName)] = int(scores[key])
+		state.PrefixCacheServers[prefix.ServerID(endpoint.GetMetadata().NamespacedName)] = int(scores[key])
 	}
-	cycleState.Write(plugins.StateKey(s.typedName.String()), state)
+	cycleState.Write(plugin.StateKey(s.typedName.String()), state)
 
-	return indexedScoresToNormalizedScoredPods(pods, podToKey, scores)
+	return indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
 }
 
-// getScores retrieves the pod scores from the KV-cache indexer
+// getScores retrieves the endpoint scores from the KV-cache indexer
 // based on the provided LLM request.
 // If the request contains chat completions, it processes them accordingly.
 // If the request contains regular completions, it uses the prompt directly.
-func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types.LLMRequest) (map[string]float64, error) {
+func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *scheduling.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 
@@ -289,7 +293,7 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types
 
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get pod scores for chat/completions: %w", err)
+			return nil, fmt.Errorf("failed to get endpoint scores for chat/completions: %w", err)
 		}
 		return scores, nil
 	}
@@ -301,7 +305,7 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *types
 
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get pod scores for completions: %w", err)
+			return nil, fmt.Errorf("failed to get endpoint scores for completions: %w", err)
 		}
 		return scores, nil
 	}

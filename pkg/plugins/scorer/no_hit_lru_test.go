@@ -9,49 +9,48 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-var _ plugins.Handle = &fakeHandle{}
+var _ plugin.Handle = &fakeHandle{}
 
 type fakeHandle struct {
 	ctx     context.Context
-	plugins map[string]plugins.Plugin
+	plugins map[string]plugin.Plugin
 }
 
 func newFakeHandle(ctx context.Context) *fakeHandle {
-	return &fakeHandle{ctx: ctx, plugins: map[string]plugins.Plugin{}}
+	return &fakeHandle{ctx: ctx, plugins: map[string]plugin.Plugin{}}
 }
 
 func (h *fakeHandle) Context() context.Context {
 	return h.ctx
 }
 
-func (h *fakeHandle) Plugin(name string) plugins.Plugin {
+func (h *fakeHandle) Plugin(name string) plugin.Plugin {
 	return h.plugins[name]
 }
 
-func (h *fakeHandle) AddPlugin(name string, plugin plugins.Plugin) {
+func (h *fakeHandle) AddPlugin(name string, plugin plugin.Plugin) {
 	h.plugins[name] = plugin
 }
 
-func (h *fakeHandle) GetAllPlugins() []plugins.Plugin {
-	result := make([]plugins.Plugin, 0, len(h.plugins))
+func (h *fakeHandle) GetAllPlugins() []plugin.Plugin {
+	result := make([]plugin.Plugin, 0, len(h.plugins))
 	for _, plugin := range h.plugins {
 		result = append(result, plugin)
 	}
 	return result
 }
 
-func (h *fakeHandle) GetAllPluginsWithNames() map[string]plugins.Plugin {
+func (h *fakeHandle) GetAllPluginsWithNames() map[string]plugin.Plugin {
 	return h.plugins
 }
 
@@ -60,10 +59,10 @@ func (h *fakeHandle) PodList() []k8stypes.NamespacedName {
 }
 
 type stubPlugin struct {
-	name plugins.TypedName
+	name plugin.TypedName
 }
 
-func (p *stubPlugin) TypedName() plugins.TypedName {
+func (p *stubPlugin) TypedName() plugin.TypedName {
 	return p.name
 }
 
@@ -84,7 +83,7 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 			name: "prefix plugin present - should work",
 			handle: func() *fakeHandle {
 				h := newFakeHandle(utils.NewTestContext(t))
-				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugins.TypedName{Type: prefix.PrefixCachePluginType, Name: prefix.PrefixCachePluginType}})
+				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugin.TypedName{Type: prefix.PrefixCachePluginType, Name: prefix.PrefixCachePluginType}})
 				return h
 			}(),
 			expectError: false,
@@ -123,87 +122,90 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 }
 
 func TestNoHitLRUScorer(t *testing.T) {
-	podA := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	podB := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	podC := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
+	endpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	endpointB := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	endpointC := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
+		&datalayer.Metrics{},
+		nil,
+	)
 
 	tests := []struct {
 		name        string
-		scorer      framework.Scorer
-		req         *types.LLMRequest
-		input       []types.Pod
+		scorer      scheduling.Scorer
+		req         *scheduling.LLMRequest
+		input       []scheduling.Endpoint
 		prefixState *prefix.SchedulingContextState
-		wantScores  map[types.Pod]float64
+		wantScores  map[scheduling.Endpoint]float64
 		description string
 	}{
 		{
-			name:   "cold request - all pods never used",
+			name:   "cold request - all endpoints never used",
 			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
-			req: &types.LLMRequest{
+			req: &scheduling.LLMRequest{
 				TargetModel: "test-model",
 			},
-			input: []types.Pod{podA, podB, podC},
+			input: []scheduling.Endpoint{endpointA, endpointB, endpointC},
 			prefixState: &prefix.SchedulingContextState{
 				PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 			},
-			wantScores: map[types.Pod]float64{
-				podA: 1.0, // All never-used pods get high scores
-				podB: 0.5,
-				podC: 0.0,
+			wantScores: map[scheduling.Endpoint]float64{
+				endpointA: 1.0, // All never-used endpoints get high scores
+				endpointB: 0.5,
+				endpointC: 0.0,
 			},
-			description: "Never-used pods should get high scores for cold requests",
+			description: "Never-used endpoints should get high scores for cold requests",
 		},
 		{
 			name:   "cache hit - neutral scores",
 			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
-			req: &types.LLMRequest{
+			req: &scheduling.LLMRequest{
 				TargetModel: "test-model",
 			},
-			input: []types.Pod{podA, podB, podC},
+			input: []scheduling.Endpoint{endpointA, endpointB, endpointC},
 			prefixState: &prefix.SchedulingContextState{
 				PrefixCacheServers: map[prefix.ServerID]int{
 					{Name: "server1", Namespace: "default"}: 5, // non-empty = cache hit
 				},
 			},
-			wantScores: map[types.Pod]float64{
-				podA: 0.5, // All pods get neutral scores for cache hits
-				podB: 0.5,
-				podC: 0.5,
+			wantScores: map[scheduling.Endpoint]float64{
+				endpointA: 0.5, // All endpoints get neutral scores for cache hits
+				endpointB: 0.5,
+				endpointC: 0.5,
 			},
 			description: "Cache hits should return neutral scores",
 		},
 		{
-			name:   "single pod - max score",
+			name:   "single endpoint - max score",
 			scorer: scorer.NewNoHitLRU(utils.NewTestContext(t), nil),
-			req: &types.LLMRequest{
+			req: &scheduling.LLMRequest{
 				TargetModel: "test-model",
 			},
-			input: []types.Pod{podA},
+			input: []scheduling.Endpoint{endpointA},
 			prefixState: &prefix.SchedulingContextState{
 				PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 			},
-			wantScores: map[types.Pod]float64{
-				podA: 1.0, // Single pod gets max score
+			wantScores: map[scheduling.Endpoint]float64{
+				endpointA: 1.0, // Single endpoint gets max score
 			},
-			description: "Single pod should get maximum score",
+			description: "Single endpoint should get maximum score",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Create cycle state and set prefix state
-			cycleState := &types.CycleState{}
+			cycleState := &scheduling.CycleState{}
 			if test.prefixState != nil {
-				cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+				cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
 					Name: prefix.PrefixCachePluginType}.String()), test.prefixState)
 			}
 
@@ -221,42 +223,44 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	podB := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
+	endpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	endpointB := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
+		&datalayer.Metrics{},
+		nil,
+	)
 
-	pods := []types.Pod{podA, podB}
+	endpoints := []scheduling.Endpoint{endpointA, endpointB}
 
 	// Test basic scoring for cold request (no crashes, returns valid scores)
 	coldPrefixState := &prefix.SchedulingContextState{
 		PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 	}
-	cycleState := &types.CycleState{}
-	cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+	cycleState := &scheduling.CycleState{}
+	cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
 		Name: prefix.PrefixCachePluginType}.String()), coldPrefixState)
 
-	scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, pods)
+	scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, endpoints)
 
-	// Should return scores for all pods
+	// Should return scores for all endpoints
 	if len(scores) != 2 {
 		t.Errorf("Expected 2 scores, got %d", len(scores))
 	}
 
 	// All scores should be valid (between 0 and 1)
-	for pod, score := range scores {
+	for endpoint, score := range scores {
 		if score < 0 || score > 1 {
-			t.Errorf("Invalid score %f for pod %s", score, pod.GetPod().NamespacedName.String())
+			t.Errorf("Invalid score %f for endpoint %s", score, endpoint.GetMetadata().NamespacedName.String())
 		}
 	}
 
-	// For never-used pods, should have different scores (to provide ordering)
-	if scores[podA] == scores[podB] {
-		t.Errorf("Expected different scores for different pods, both got %f", scores[podA])
+	// For never-used endpoints, should have different scores (to provide ordering)
+	if scores[endpointA] == scores[endpointB] {
+		t.Errorf("Expected different scores for different endpoints, both got %f", scores[endpointA])
 	}
 }
 
@@ -264,16 +268,17 @@ func TestNoPrefixCacheStateFound(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	pods := []types.Pod{podA}
-	cycleState := &types.CycleState{}
+	endpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	endpoints := []scheduling.Endpoint{endpointA}
+	cycleState := &scheduling.CycleState{}
 
-	scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, pods)
+	scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, endpoints)
 
-	if scores[podA] != 1.0 {
+	if scores[endpointA] != 1.0 {
 		t.Errorf("Failure to find a prefix cache should result in scoring as a cold request.")
 	}
 }
@@ -282,120 +287,123 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	podB := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	podC := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-c", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	pods := []types.Pod{podA, podB, podC}
+	endpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a", Namespace: "default"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	endpointB := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b", Namespace: "default"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	endpointC := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c", Namespace: "default"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	endpoints := []scheduling.Endpoint{endpointA, endpointB, endpointC}
 
 	primaryProfile := "primary-profile"
-	toPrefixState := func(entries map[prefix.ServerID]int) *types.CycleState {
-		cycle := &types.CycleState{}
-		cycle.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+	toPrefixState := func(entries map[prefix.ServerID]int) *scheduling.CycleState {
+		cycle := &scheduling.CycleState{}
+		cycle.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
 			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{PrefixCacheServers: entries})
 		return cycle
 	}
 
-	requestToPod := func(target types.Pod) *types.SchedulingResult {
-		return &types.SchedulingResult{
+	requestToEndpoint := func(target scheduling.Endpoint) *scheduling.SchedulingResult {
+		return &scheduling.SchedulingResult{
 			PrimaryProfileName: primaryProfile,
-			ProfileResults: map[string]*types.ProfileRunResult{
+			ProfileResults: map[string]*scheduling.ProfileRunResult{
 				primaryProfile: {
-					TargetPods: []types.Pod{target},
+					TargetEndpoints: []scheduling.Endpoint{target},
 				},
 			},
 		}
 	}
 
 	// Test LRU behavior indirectly through scoring rather than internal state
-	assertHighestScoredPod := func(expectedPod types.Pod, testName string) {
+	assertHighestScoredPod := func(expectedEndpoint scheduling.Endpoint, testName string) {
 		t.Helper()
-		coldReq := &types.LLMRequest{RequestId: testName + "-scoring-check"}
-		scores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReq, pods)
+		coldReq := &scheduling.LLMRequest{RequestId: testName + "-scoring-check"}
+		scores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReq, endpoints)
 
 		highestScore := -1.0
-		var highestPod types.Pod
-		for pod, score := range scores {
+		var highestEndpoint scheduling.Endpoint
+		for endpoint, score := range scores {
 			if score > highestScore {
 				highestScore = score
-				highestPod = pod
+				highestEndpoint = endpoint
 			}
 		}
 
-		if highestPod.GetPod().NamespacedName.String() != expectedPod.GetPod().NamespacedName.String() {
+		if highestEndpoint.GetMetadata().NamespacedName.String() != expectedEndpoint.GetMetadata().NamespacedName.String() {
 			t.Fatalf("expected %s to have highest score for LRU behavior, but %s had highest score (%f). All scores: %+v",
-				expectedPod.GetPod().NamespacedName.String(),
-				highestPod.GetPod().NamespacedName.String(),
+				expectedEndpoint.GetMetadata().NamespacedName.String(),
+				highestEndpoint.GetMetadata().NamespacedName.String(),
 				highestScore,
 				scores)
 		}
 	}
 
 	t.Run("initial cold request seeds cache", func(_ *testing.T) {
-		coldReqA := &types.LLMRequest{RequestId: "cold-1"}
-		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqA, pods)
-		scorer.PreRequest(ctx, coldReqA, requestToPod(podA))
-		// After podA handles a cold request, other pods should score higher for new cold requests
-		assertHighestScoredPod(podB, "after-podA-used")
+		coldReqA := &scheduling.LLMRequest{RequestId: "cold-1"}
+		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqA, endpoints)
+		scorer.PreRequest(ctx, coldReqA, requestToEndpoint(endpointA))
+		// After endpointA handles a cold request, other endpoints should score higher for new cold requests
+		assertHighestScoredPod(endpointB, "after-endpointA-used")
 	})
 
-	t.Run("unused pods rank above existing ones", func(t *testing.T) {
-		coldReqCheck := &types.LLMRequest{RequestId: "cold-check"}
-		coldScores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqCheck, pods)
-		if coldScores[podB] <= coldScores[podA] {
-			t.Fatalf("expected pod-b to outrank pod-a after pod-a handled previous cold request, scores=%+v", coldScores)
+	t.Run("unused endpoints rank above existing ones", func(t *testing.T) {
+		coldReqCheck := &scheduling.LLMRequest{RequestId: "cold-check"}
+		coldScores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqCheck, endpoints)
+		if coldScores[endpointB] <= coldScores[endpointA] {
+			t.Fatalf("expected endpoint-b to outrank endpoint-a after endpoint-a handled previous cold request, scores=%+v", coldScores)
 		}
-		if coldScores[podB] != 1.0 {
-			t.Fatalf("expected pod-b to score 1.0, scores=%+v", coldScores)
+		if coldScores[endpointB] != 1.0 {
+			t.Fatalf("expected endpoint-b to score 1.0, scores=%+v", coldScores)
 		}
-		if coldScores[podC] != 0.5 {
-			t.Fatalf("expected pod-c to score 0.5, scores=%+v", coldScores)
+		if coldScores[endpointC] != 0.5 {
+			t.Fatalf("expected endpoint-c to score 0.5, scores=%+v", coldScores)
 		}
 	})
 
 	t.Run("warm request leaves LRU untouched", func(t *testing.T) {
-		warmReq := &types.LLMRequest{RequestId: "warm-1"}
+		warmReq := &scheduling.LLMRequest{RequestId: "warm-1"}
 		warmState := map[prefix.ServerID]int{
 			{Name: "server1", Namespace: "default"}: 1,
 		}
-		warmScores := scorer.Score(ctx, toPrefixState(warmState), warmReq, pods)
+		warmScores := scorer.Score(ctx, toPrefixState(warmState), warmReq, endpoints)
 		for _, score := range warmScores {
 			if score != 0.5 {
 				t.Fatalf("expected neutral score for warm request, got %f", score)
 			}
 		}
-		scorer.PreRequest(ctx, warmReq, requestToPod(podB))
-		postWarmReq := &types.LLMRequest{RequestId: "cold-after-warm"}
-		postWarmScores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), postWarmReq, pods)
-		if postWarmScores[podB] <= postWarmScores[podA] {
+		scorer.PreRequest(ctx, warmReq, requestToEndpoint(endpointB))
+		postWarmReq := &scheduling.LLMRequest{RequestId: "cold-after-warm"}
+		postWarmScores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), postWarmReq, endpoints)
+		if postWarmScores[endpointB] <= postWarmScores[endpointA] {
 			t.Fatalf("expected warm request to leave ordering unchanged, scores=%+v", postWarmScores)
 		}
 	})
 
-	t.Run("second cold request rotates to podB", func(_ *testing.T) {
-		// Simulate podB handling a cold request
-		coldReqB := &types.LLMRequest{RequestId: "cold-2"}
-		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqB, pods)
-		scorer.PreRequest(ctx, coldReqB, requestToPod(podB))
-		// Now podC should score highest since both podA and podB have been used
-		assertHighestScoredPod(podC, "after-podB-used")
+	t.Run("second cold request rotates to endpointB", func(_ *testing.T) {
+		// Simulate endpointB handling a cold request
+		coldReqB := &scheduling.LLMRequest{RequestId: "cold-2"}
+		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqB, endpoints)
+		scorer.PreRequest(ctx, coldReqB, requestToEndpoint(endpointB))
+		// Now endpointC should score highest since both endpointA and endpointB have been used
+		assertHighestScoredPod(endpointC, "after-endpointB-used")
 	})
 
-	t.Run("third cold request rotates back to podA", func(_ *testing.T) {
-		// Simulate podC handling a cold request
-		coldReqC := &types.LLMRequest{RequestId: "cold-3"}
-		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqC, pods)
-		scorer.PreRequest(ctx, coldReqC, requestToPod(podC))
-		// Now podA should score highest again (LRU rotation)
-		assertHighestScoredPod(podA, "after-podC-used")
+	t.Run("third cold request rotates back to endpointA", func(_ *testing.T) {
+		// Simulate endpointC handling a cold request
+		coldReqC := &scheduling.LLMRequest{RequestId: "cold-3"}
+		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqC, endpoints)
+		scorer.PreRequest(ctx, coldReqC, requestToEndpoint(endpointC))
+		// Now endpointA should score highest again (LRU rotation)
+		assertHighestScoredPod(endpointA, "after-endpointC-used")
 	})
 }
 
@@ -403,85 +411,90 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := scorer.NewNoHitLRU(ctx, nil)
 
-	podA := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
+	endpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+		&datalayer.Metrics{},
+		nil,
+	)
 
-	t.Run("empty pods list", func(t *testing.T) {
-		emptyPods := []types.Pod{}
-		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+	t.Run("empty endpoints list", func(t *testing.T) {
+		emptyEndpoints := []scheduling.Endpoint{}
+		cycleState := &scheduling.CycleState{}
+		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
 			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
-		scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, emptyPods)
+		scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, emptyEndpoints)
 
 		if len(scores) != 0 {
-			t.Errorf("Expected empty scores for empty pods list, got %d scores", len(scores))
+			t.Errorf("Expected empty scores for empty endpoints list, got %d scores", len(scores))
 		}
 	})
 
-	t.Run("nil pods list", func(t *testing.T) {
-		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+	t.Run("nil endpoints list", func(t *testing.T) {
+		cycleState := &scheduling.CycleState{}
+		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
 			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
-		scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, nil)
+		scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, nil)
 
 		if scores == nil {
-			t.Errorf("Expected non-nil scores map for nil pods list")
+			t.Errorf("Expected non-nil scores map for nil endpoints list")
 		}
 		if len(scores) != 0 {
-			t.Errorf("Expected empty scores for nil pods list, got %d scores", len(scores))
+			t.Errorf("Expected empty scores for nil endpoints list, got %d scores", len(scores))
 		}
 	})
 
-	t.Run("single pod returns 1.0", func(t *testing.T) {
-		pods := []types.Pod{podA}
-		cycleState := &types.CycleState{}
-		cycleState.Write(plugins.StateKey(plugins.TypedName{Type: prefix.PrefixCachePluginType,
+	t.Run("single endpoint returns 1.0", func(t *testing.T) {
+		endpoints := []scheduling.Endpoint{endpointA}
+		cycleState := &scheduling.CycleState{}
+		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
 			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
 			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
 		})
 
-		scores := scorer.Score(ctx, cycleState, &types.LLMRequest{}, pods)
+		scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, endpoints)
 
-		if scores[podA] != 1.0 {
-			t.Errorf("Expected single pod to get score 1.0, got %f", scores[podA])
+		if scores[endpointA] != 1.0 {
+			t.Errorf("Expected single endpoint to get score 1.0, got %f", scores[endpointA])
 		}
 	})
 }
 
 func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
-	// Prefill worker pods
-	prefillPodA := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "prefill-a", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	prefillPodB := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "prefill-b", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
+	// Prefill worker endpoints
+	prefillEndpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "prefill-a", Namespace: "default"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	prefillEndpointB := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "prefill-b", Namespace: "default"}},
+		&datalayer.Metrics{},
+		nil,
+	)
 
-	// Decode worker pods
-	decodePodA := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "decode-a", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
-	decodePodB := &types.PodMetrics{
-		Pod:          &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "decode-b", Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
+	// Decode worker endpoints
+	decodeEndpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "decode-a", Namespace: "default"}},
+		&datalayer.Metrics{},
+		nil,
+	)
+	decodeEndpointB := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "decode-b", Namespace: "default"}},
+		&datalayer.Metrics{},
+		nil,
+	)
 
-	prefillPods := []types.Pod{prefillPodA, prefillPodB}
-	decodePods := []types.Pod{decodePodA, decodePodB}
+	prefillEndpoints := []scheduling.Endpoint{prefillEndpointA, prefillEndpointB}
+	decodeEndpoints := []scheduling.Endpoint{decodeEndpointA, decodeEndpointB}
 
-	coldPrefixState := &types.CycleState{}
-	coldPrefixState.Write(plugins.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
+	coldPrefixState := &scheduling.CycleState{}
+	coldPrefixState.Write(plugin.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
 		PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
 	})
 
@@ -491,18 +504,18 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 		scorer := scorer.NewNoHitLRU(ctx, nil)
 
 		// First cold request with P/D
-		req1 := &types.LLMRequest{RequestId: "pd-request-1"}
-		scorer.Score(ctx, coldPrefixState, req1, append(prefillPods, decodePods...))
+		req1 := &scheduling.LLMRequest{RequestId: "pd-request-1"}
+		scorer.Score(ctx, coldPrefixState, req1, append(prefillEndpoints, decodeEndpoints...))
 
 		// Simulate scheduling result with both prefill and decode profiles
-		pdResult := &types.SchedulingResult{
+		pdResult := &scheduling.SchedulingResult{
 			PrimaryProfileName: "decode",
-			ProfileResults: map[string]*types.ProfileRunResult{
+			ProfileResults: map[string]*scheduling.ProfileRunResult{
 				"prefill": {
-					TargetPods: []types.Pod{prefillPodA},
+					TargetEndpoints: []scheduling.Endpoint{prefillEndpointA},
 				},
 				"decode": {
-					TargetPods: []types.Pod{decodePodA},
+					TargetEndpoints: []scheduling.Endpoint{decodeEndpointA},
 				},
 			},
 		}
@@ -510,30 +523,30 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 
 		// Second cold request - both prefillPodB and decodePodB should score higher
 		// since prefillPodA and decodePodA were just used
-		req2 := &types.LLMRequest{RequestId: "pd-request-2"}
-		prefillScores := scorer.Score(ctx, coldPrefixState, req2, prefillPods)
-		decodeScores := scorer.Score(ctx, coldPrefixState, req2, decodePods)
+		req2 := &scheduling.LLMRequest{RequestId: "pd-request-2"}
+		prefillScores := scorer.Score(ctx, coldPrefixState, req2, prefillEndpoints)
+		decodeScores := scorer.Score(ctx, coldPrefixState, req2, decodeEndpoints)
 
-		if prefillScores[prefillPodB] <= prefillScores[prefillPodA] {
+		if prefillScores[prefillEndpointB] <= prefillScores[prefillEndpointA] {
 			t.Errorf("Expected prefill-b to score higher than prefill-a after prefill-a was used: %+v", prefillScores)
 		}
 
-		if decodeScores[decodePodB] <= decodeScores[decodePodA] {
+		if decodeScores[decodeEndpointB] <= decodeScores[decodeEndpointA] {
 			t.Errorf("Expected decode-b to score higher than decode-a after decode-a was used: %+v", decodeScores)
 		}
 	})
 
 	t.Run("non-P/D scenario - only primary profile exists", func(t *testing.T) {
-		req := &types.LLMRequest{RequestId: "non-pd-request"}
+		req := &scheduling.LLMRequest{RequestId: "non-pd-request"}
 		scorer := scorer.NewNoHitLRU(ctx, nil)
-		scorer.Score(ctx, coldPrefixState, req, decodePods)
+		scorer.Score(ctx, coldPrefixState, req, decodeEndpoints)
 
 		// Scheduling result with only decode profile (no prefill)
-		result := &types.SchedulingResult{
+		result := &scheduling.SchedulingResult{
 			PrimaryProfileName: "decode",
-			ProfileResults: map[string]*types.ProfileRunResult{
+			ProfileResults: map[string]*scheduling.ProfileRunResult{
 				"decode": {
-					TargetPods: []types.Pod{decodePodA},
+					TargetEndpoints: []scheduling.Endpoint{decodeEndpointA},
 				},
 				// No "prefill" profile in results
 			},
@@ -542,31 +555,31 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 		scorer.PreRequest(ctx, req, result)
 
 		// Verify decodePodA was tracked
-		req2 := &types.LLMRequest{RequestId: "non-pd-request-2"}
-		scores := scorer.Score(ctx, coldPrefixState, req2, decodePods)
+		req2 := &scheduling.LLMRequest{RequestId: "non-pd-request-2"}
+		scores := scorer.Score(ctx, coldPrefixState, req2, decodeEndpoints)
 
-		if scores[decodePodB] <= scores[decodePodA] {
+		if scores[decodeEndpointB] <= scores[decodeEndpointA] {
 			t.Errorf("Expected decode-b to score higher than decode-a: %+v", scores)
 		}
 	})
 
 	t.Run("nil scheduling result - graceful handling", func(_ *testing.T) {
-		req := &types.LLMRequest{RequestId: "nil-result"}
+		req := &scheduling.LLMRequest{RequestId: "nil-result"}
 		scorer := scorer.NewNoHitLRU(ctx, nil)
-		scorer.Score(ctx, coldPrefixState, req, decodePods)
+		scorer.Score(ctx, coldPrefixState, req, decodeEndpoints)
 
 		// Should not panic with nil result
 		scorer.PreRequest(ctx, req, nil)
 	})
 
 	t.Run("empty profile results - graceful handling", func(_ *testing.T) {
-		req := &types.LLMRequest{RequestId: "empty-results"}
+		req := &scheduling.LLMRequest{RequestId: "empty-results"}
 		scorer := scorer.NewNoHitLRU(ctx, nil)
-		scorer.Score(ctx, coldPrefixState, req, decodePods)
+		scorer.Score(ctx, coldPrefixState, req, decodeEndpoints)
 
-		result := &types.SchedulingResult{
+		result := &scheduling.SchedulingResult{
 			PrimaryProfileName: "decode",
-			ProfileResults:     map[string]*types.ProfileRunResult{},
+			ProfileResults:     map[string]*scheduling.ProfileRunResult{},
 		}
 		// Should not panic with empty profile results
 		scorer.PreRequest(ctx, req, result)

@@ -6,12 +6,11 @@ import (
 	"encoding/json"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -22,18 +21,18 @@ const (
 )
 
 // compile-time type assertion
-var _ framework.Scorer = &SessionAffinity{}
+var _ scheduling.Scorer = &SessionAffinity{}
 var _ requestcontrol.ResponseComplete = &SessionAffinity{}
 
 // SessionAffinityFactory defines the factory function for SessionAffinity scorer.
-func SessionAffinityFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func SessionAffinityFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	return NewSessionAffinity().WithName(name), nil
 }
 
 // NewSessionAffinity returns a scorer
 func NewSessionAffinity() *SessionAffinity {
 	return &SessionAffinity{
-		typedName: plugins.TypedName{Type: SessionAffinityType},
+		typedName: plugin.TypedName{Type: SessionAffinityType},
 	}
 }
 
@@ -42,11 +41,11 @@ func NewSessionAffinity() *SessionAffinity {
 // session was sent to, by giving that pod the specified weight and assigning
 // zero score to the rest of the targets
 type SessionAffinity struct {
-	typedName plugins.TypedName
+	typedName plugin.TypedName
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *SessionAffinity) TypedName() plugins.TypedName {
+func (s *SessionAffinity) TypedName() plugin.TypedName {
 	return s.typedName
 }
 
@@ -56,9 +55,14 @@ func (s *SessionAffinity) WithName(name string) *SessionAffinity {
 	return s
 }
 
+// Category returns the preference the scorer applies when scoring candidate endpoints.
+func (s *SessionAffinity) Category() scheduling.ScorerCategory {
+	return scheduling.Affinity
+}
+
 // Score assign a high score to the pod used in previous requests and zero to others
-func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64)
+func (s *SessionAffinity) Score(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+	scoredEndpoints := make(map[scheduling.Endpoint]float64)
 	sessionToken := request.Headers[sessionTokenHeader]
 	podName := ""
 
@@ -70,21 +74,21 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *types.CycleState, reques
 			podName = string(decodedBytes)
 		}
 	}
-	for _, pod := range pods {
-		scoredPods[pod] = 0.0 // initial value
-		if pod.GetPod().NamespacedName.String() == podName {
-			scoredPods[pod] = 1.0
+	for _, endpoint := range endpoints {
+		scoredEndpoints[endpoint] = 0.0 // initial value
+		if endpoint.GetMetadata().NamespacedName.String() == podName {
+			scoredEndpoints[endpoint] = 1.0
 		}
 	}
 
-	return scoredPods
+	return scoredEndpoints
 }
 
 // ResponseComplete sets the session header on the response sent to the client
 // TODO: this should be using a cookie and ensure not overriding any other
 // cookie values if present.
 // Tracked in https://github.com/llm-d/llm-d-inference-scheduler/issues/28
-func (s *SessionAffinity) ResponseComplete(ctx context.Context, _ *types.LLMRequest, response *requestcontrol.Response, targetPod *backend.Pod) {
+func (s *SessionAffinity) ResponseComplete(ctx context.Context, _ *scheduling.LLMRequest, response *requestcontrol.Response, targetPod *datalayer.EndpointMetadata) {
 	if response == nil || targetPod == nil {
 		reqID := "undefined"
 		if response != nil {

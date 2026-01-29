@@ -10,12 +10,11 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -49,12 +48,12 @@ func (r requestEntry) String() string {
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &ActiveRequest{}
+var _ scheduling.Scorer = &ActiveRequest{}
 var _ requestcontrol.PreRequest = &ActiveRequest{}
 var _ requestcontrol.ResponseComplete = &ActiveRequest{}
 
 // ActiveRequestFactory defines the factory function for the ActiveRequest scorer.
-func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := ActiveRequestParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -87,19 +86,19 @@ func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *Act
 	)
 
 	scorer := &ActiveRequest{
-		typedName:    plugins.TypedName{Type: ActiveRequestType},
-		requestCache: requestCache,
-		podCounts:    make(map[string]int),
-		mutex:        &sync.RWMutex{},
+		typedName:      plugin.TypedName{Type: ActiveRequestType},
+		requestCache:   requestCache,
+		endpointCounts: make(map[string]int),
+		mutex:          &sync.RWMutex{},
 	}
 	// callback to decrement count when requests expire
 	// most requests will be removed in ResponseComplete, but this ensures
-	// that we don't leak pod counts if ResponseComplete is not called
+	// that we don't leak endpoint counts if ResponseComplete is not called
 	requestCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
 		item *ttlcache.Item[string, *requestEntry]) {
 		if reason == ttlcache.EvictionReasonExpired {
-			for _, podName := range item.Value().PodNames {
-				scorer.decrementPodCount(podName)
+			for _, endpointName := range item.Value().PodNames {
+				scorer.decrementPodCount(endpointName)
 			}
 		}
 	})
@@ -110,20 +109,20 @@ func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *Act
 }
 
 // ActiveRequest keeps track of individual requests being served
-// per pod.
+// per endpoint.
 type ActiveRequest struct {
-	typedName plugins.TypedName
+	typedName plugin.TypedName
 
-	// requestCache stores individual request entries with unique composite keys (podName.requestID)
+	// requestCache stores individual request entries with unique composite keys (endpointName.requestID)
 	requestCache *ttlcache.Cache[string, *requestEntry]
 
-	// podCounts maintains fast lookup for request counts per pod
-	podCounts map[string]int
-	mutex     *sync.RWMutex
+	// endpointCounts maintains fast lookup for request counts per endpoint
+	endpointCounts map[string]int
+	mutex          *sync.RWMutex
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *ActiveRequest) TypedName() plugins.TypedName {
+func (s *ActiveRequest) TypedName() plugin.TypedName {
 	return s.typedName
 }
 
@@ -133,78 +132,83 @@ func (s *ActiveRequest) WithName(name string) *ActiveRequest {
 	return s
 }
 
-// Score scores the given pods based on the number of active requests
-// being served by each pod. The score is normalized to a range of 0-1.
-func (s *ActiveRequest) Score(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest,
-	pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[string]int)
+// Category returns the preference the scorer applies when scoring candidate endpoints.
+func (s *ActiveRequest) Category() scheduling.ScorerCategory {
+	return scheduling.Balance
+}
+
+// Score scores the given endpoints based on the number of active requests
+// being served by each endpoint. The score is normalized to a range of 0-1.
+func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest,
+	endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+	scoredEndpoints := make(map[string]int)
 	maxCount := 0
 	s.mutex.RLock()
-	for podName, count := range s.podCounts {
-		scoredPods[podName] = count
+	for endpointName, count := range s.endpointCounts {
+		scoredEndpoints[endpointName] = count
 		if count >= maxCount {
 			maxCount = count
 		}
 	}
 	s.mutex.RUnlock()
 
-	scoredPodsMap := make(map[types.Pod]float64, len(pods))
-	for _, pod := range pods {
-		podName := pod.GetPod().NamespacedName.String()
-		if count, exists := scoredPods[podName]; exists {
+	scoredEndpointsMap := make(map[scheduling.Endpoint]float64, len(endpoints))
+	for _, endpoint := range endpoints {
+		endpointName := endpoint.GetMetadata().NamespacedName.String()
+		if count, exists := scoredEndpoints[endpointName]; exists {
 			if count == 0 || maxCount == 0 {
-				scoredPodsMap[pod] = 1.0 // no requests means highest score
+				scoredEndpointsMap[endpoint] = 1.0 // no requests means highest score
 			} else {
-				scoredPodsMap[pod] = float64(maxCount-count) / float64(maxCount)
+				scoredEndpointsMap[endpoint] = float64(maxCount-count) / float64(maxCount)
 			}
 		} else {
-			scoredPodsMap[pod] = 1.0
+			scoredEndpointsMap[endpoint] = 1.0
 		}
 	}
 
-	log.FromContext(ctx).V(logutil.DEBUG).Info("Scored pods", "scores", scoredPodsMap)
-	return scoredPodsMap
+	log.FromContext(ctx).V(logutil.DEBUG).Info("Scored endpoints", "scores", scoredEndpointsMap)
+	return scoredEndpointsMap
 }
 
-// PreRequest is called before a request is sent to the target pod.
+// PreRequest is called before a request is sent to the target endpoint.
 // It creates a new request entry in the cache with its own TTL and
-// increments the pod count for fast lookup.
+// increments the endpoint count for fast lookup.
 func (s *ActiveRequest) PreRequest(
 	ctx context.Context,
-	request *types.LLMRequest,
-	schedulingResult *types.SchedulingResult,
+	request *scheduling.LLMRequest,
+	schedulingResult *scheduling.SchedulingResult,
 ) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	podNames := make([]string, 0, len(schedulingResult.ProfileResults))
+	endpointNames := make([]string, 0, len(schedulingResult.ProfileResults))
 	for profileName, profileResult := range schedulingResult.ProfileResults {
-		if profileResult == nil || len(profileResult.TargetPods) == 0 {
+		if profileResult == nil || len(profileResult.TargetEndpoints) == 0 {
 			continue
 		}
 
-		podName := profileResult.TargetPods[0].GetPod().NamespacedName.String()
-		podNames = append(podNames, podName)
-		s.incrementPodCount(podName)
+		endpointName := profileResult.TargetEndpoints[0].GetMetadata().NamespacedName.String()
+		endpointNames = append(endpointNames, endpointName)
+		s.incrementPodCount(endpointName)
 		debugLogger.Info(
 			"Added request to cache",
 			"requestId", request.RequestId,
-			"podName", podName,
+			"endpointName", endpointName,
 			"profileName", profileName,
 		)
 	}
 
 	// add to request cache
-	s.requestCache.Set(request.RequestId, &requestEntry{PodNames: podNames, RequestID: request.RequestId}, 0) // Use default TTL
+	s.requestCache.Set(request.RequestId, &requestEntry{PodNames: endpointNames, RequestID: request.RequestId}, 0) // Use default TTL
 }
 
 // ResponseComplete is called after a response is sent to the client.
 // It removes the specific request entry from the cache and decrements
-// the pod count.
+// the endpoint count.
 func (s *ActiveRequest) ResponseComplete(
 	ctx context.Context,
-	request *types.LLMRequest,
+	request *scheduling.LLMRequest,
 	_ *requestcontrol.Response,
-	targetPod *backend.Pod,
+	targetPod *datalayer.EndpointMetadata,
 ) {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.ResponseComplete")
 	if targetPod == nil {
@@ -215,8 +219,8 @@ func (s *ActiveRequest) ResponseComplete(
 	if item, found := s.requestCache.GetAndDelete(request.RequestId); found {
 		entry := item.Value()
 		if entry != nil {
-			for _, podName := range entry.PodNames {
-				s.decrementPodCount(podName)
+			for _, endpointName := range entry.PodNames {
+				s.decrementPodCount(endpointName)
 			}
 			debugLogger.Info("Removed request from cache", "requestEntry", entry.String())
 		} else {
@@ -227,25 +231,25 @@ func (s *ActiveRequest) ResponseComplete(
 	}
 }
 
-// incrementPodCount increments the request count for a pod.
-func (s *ActiveRequest) incrementPodCount(podName string) {
+// incrementPodCount increments the request count for a endpoint.
+func (s *ActiveRequest) incrementPodCount(endpointName string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.podCounts[podName]++
+	s.endpointCounts[endpointName]++
 }
 
-// decrementPodCount decrements the request count for a pod and removes
+// decrementPodCount decrements the request count for a endpoint and removes
 // the entry if count reaches zero.
-func (s *ActiveRequest) decrementPodCount(podName string) {
+func (s *ActiveRequest) decrementPodCount(endpointName string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if count, exists := s.podCounts[podName]; exists {
+	if count, exists := s.endpointCounts[endpointName]; exists {
 		if count <= 1 {
-			delete(s.podCounts, podName)
+			delete(s.endpointCounts, endpointName)
 		} else {
-			s.podCounts[podName] = count - 1
+			s.endpointCounts[endpointName] = count - 1
 		}
 	}
 }

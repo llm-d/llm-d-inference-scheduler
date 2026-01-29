@@ -8,9 +8,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -19,10 +18,10 @@ const (
 )
 
 // compile-time type assertion
-var _ framework.Filter = &ByLabelSelector{}
+var _ scheduling.Filter = &ByLabelSelector{}
 
 // ByLabelSelectorFactory defines the factory function for the ByLabelSelector filter
-func ByLabelSelectorFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func ByLabelSelectorFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := metav1.LabelSelector{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -44,30 +43,30 @@ func NewByLabelSelector(name string, selector *metav1.LabelSelector) (*ByLabelSe
 	}
 
 	return &ByLabelSelector{
-		typedName: plugins.TypedName{Type: ByLabelSelectorType, Name: name},
+		typedName: plugin.TypedName{Type: ByLabelSelectorType, Name: name},
 		selector:  labelSelector,
 	}, nil
 }
 
-// ByLabelSelector filters out pods that do not match its label selector criteria
+// ByLabelSelector filters out endpoints that do not match its label selector criteria
 type ByLabelSelector struct {
-	typedName plugins.TypedName
+	typedName plugin.TypedName
 	selector  labels.Selector
 }
 
 // TypedName returns the typed name of the plugin
-func (blf *ByLabelSelector) TypedName() plugins.TypedName {
+func (blf *ByLabelSelector) TypedName() plugin.TypedName {
 	return blf.typedName
 }
 
-// Filter filters out all pods that do not satisfy the label selector
-func (blf *ByLabelSelector) Filter(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) []types.Pod {
-	filtered := []types.Pod{}
+// Filter filters out all endpoints that do not satisfy the label selector
+func (blf *ByLabelSelector) Filter(_ context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+	filtered := []scheduling.Endpoint{}
 
-	for _, pod := range pods {
-		labels := labels.Set(pod.GetPod().Labels)
+	for _, endpoint := range endpoints {
+		labels := labels.Set(endpoint.GetMetadata().Labels)
 		if blf.selector.Matches(labels) {
-			filtered = append(filtered, pod)
+			filtered = append(filtered, endpoint)
 		}
 	}
 	return filtered
