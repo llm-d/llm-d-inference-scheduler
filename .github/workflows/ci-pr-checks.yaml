@@ -12,7 +12,7 @@ jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
-      docs: ${{ steps.filter.outputs.docs }}
+      src: ${{ steps.filter.outputs.src }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
@@ -20,14 +20,23 @@ jobs:
         id: filter
         with:
           filters: |
-            docs:
-              - 'README.md'
-              - 'docs/**'
+            src:
+              - '**/*.go'
+              - '**/*.py'
+              - Dockerfile.epp
+              - Dockerfile.sidecar
+              - Makefile*
+              - go.mod
   lint-and-test:
     needs: check-changes
-    if: ${{ needs.check-changes.outputs.docs == 'false' }}
+    if: ${{ needs.check-changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+
       - name: Checkout source
         uses: actions/checkout@v6
 
@@ -43,9 +52,6 @@ jobs:
           go-version: "${{ env.GO_VERSION }}"
           cache-dependency-path: ./go.sum
 
-      - name: Install dependencies
-        run: sudo make install-dependencies
-
       - name: Configure CGO for Python
         run: |
           PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))")
@@ -57,14 +63,17 @@ jobs:
       - name: Set PKG_CONFIG_PATH
         run: echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig" >> $GITHUB_ENV
 
-      - name: go mod tidy
-        run: go mod tidy
+      - name: Install dependencies
+        run: |
+          go mod tidy
+          sudo -E env "PATH=$PATH" make install-dependencies install-python-deps
 
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v9
         with:
-          version: 'v2.1.6'
+          version: "v2.1.6"
           args: "--config=./.golangci.yml"
+          skip-cache: true
         env:
           CGO_ENABLED: ${{ env.CGO_ENABLED }}
           CGO_CFLAGS: ${{ env.CGO_CFLAGS }}
@@ -74,10 +83,8 @@ jobs:
 
       - name: Run make build
         shell: bash
-        run: |
-          make build
+        run: make build
 
       - name: Run make test
         shell: bash
-        run: |
-          make test
+        run: make test

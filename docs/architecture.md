@@ -161,11 +161,13 @@ A complete configuration might look like this:
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefix-cache-scorer
+- type: precise-prefix-cache-scorer
   parameters:
-    hashBlockSize: 5
-    maxPrefixBlocksToMatch: 256
-    lruCapacityPerServer: 31250
+    indexerConfig:
+      tokenProcessorConfig:
+        blockSize: 5
+      kvBlockIndexConfig:
+        maxPrefixBlocksToMatch: 256
 - type: decode-filter
 - type: max-score-picker
 - type: single-profile-handler
@@ -174,7 +176,7 @@ schedulingProfiles:
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
-  - pluginRef: prefix-cache-scorer
+  - pluginRef: precise-prefix-cache-scorer
     weight: 50
 ```
 
@@ -308,12 +310,14 @@ Configuration:
 
 - **Type**: `precise-prefix-cache-scorer`
 - **Parameters**:
+  - `tokenProcessorConfig`: Configuration for the `kvblock.TokenProcessor`.
   - `indexerConfig`: Configuration for the `kvcache.Indexer`.
   - `kvEventsConfig`: Configuration for the `kvevents.Pool`.
 
 See list of parameters at [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
 
 Note that in most cases you will only need to set:
+- Model name in the `tokenizersPoolConfig` to match the model used in the vLLM deployment.
 - HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
   - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
 - **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
@@ -325,15 +329,41 @@ Example configuration with the above parameters set:
 plugins:
   - type: precise-prefix-cache-scorer
     parameters:
+      tokenProcessorConfig:
+        blockSize: 64                    # must match vLLM block size
+        hashSeed: "12345"                # must match vLLM PYTHONHASHSEED env var
       indexerConfig:
-        tokenProcessorConfig:
-          blockSize: 64
-          hashSeed: "12345"
-      tokenizersPoolConfig:
-        hf:
-          huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
-      kvBlockIndexConfig:
-        enableMetrics: true
+        kvBlockIndexConfig:
+          enableMetrics: true    
+        tokenizersPoolConfig:
+          modelName: hf-repo/model-name
+          hf:
+            huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
+```
+
+Example configuration for automatic pod discovery in active-active multi-replica scheduler deployments:
+```yaml
+  - type: precise-prefix-cache-scorer
+    parameters:
+      tokenProcessorConfig:
+        blockSize: 64
+        hashSeed: "42"
+      indexerConfig:
+        tokenizersPoolConfig:
+          modelName: "Qwen/Qwen3-32B"
+          hf:
+            tokenizersCacheDir: "/tmp/tokenizers"
+      kvEventsConfig:
+        topicFilter: "kv@"
+        concurrency: 4 
+        discoverPods: true      # enables automatic pod discovery for active-active HA
+        podDiscoveryConfig:
+          socketPort: 5556
+```
+
+Where the vLLM engines are configured to emit KV-Events on port `5556` as follows:
+```yaml
+  --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://*:5556\",\"topic\":\"kv@${POD_IP}@Qwen/Qwen3-32B\"}"
 ```
 
 Example configuration with all parameters set:
@@ -342,23 +372,26 @@ Example configuration with all parameters set:
 plugins:
   - type: precise-prefix-cache-scorer
     parameters:
+        tokenProcessorConfig:
+          blockSize: 16
+          hashSeed: "12345"
         kvEventsConfig:
-          zmqEndpoint: tcp://*:5557
-          topicFilter: kv@
-          concurrency: 8
-        kvCacheIndexerConfig:
+          topicFilter: "kv@"
+          concurrency: 4
+          discoverPods: true    # enables automatic pod discovery for active-active HA
+          podDiscoveryConfig:
+            socketPort: 5556
+        indexerConfig:
           prefixStoreConfig:
             cacheSize: 500000
             blockSize: 256
-          tokenProcessorConfig:
-            blockSize: 16
-            hashSeed: "12345"
           kvBlockIndexConfig:
             inMemoryConfig:
               size: 100000000
               podCacheSize: 10
             enableMetrics: true
           tokenizersPoolConfig:
+            modelName: hf-repo/model-name
             workersCount: 8
             hf:
               huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
@@ -434,11 +467,13 @@ Example configuration:
 
 ```yaml
 plugins:
-  - type: prefix-cache-scorer
+  - type: precise-prefix-cache-scorer
     parameters:
-      hashBlockSize: 5
-      maxPrefixBlocksToMatch: 256
-      lruCapacityPerServer: 31250
+      indexerConfig:
+        tokenProcessorConfig:
+          blockSize: 5
+        kvBlockIndexConfig:
+          maxPrefixBlocksToMatch: 256
   - type: no-hit-lru-scorer
     parameters:
       lruSize: 2048
@@ -450,7 +485,7 @@ schedulingProfiles:
     plugins:
       - pluginRef: decode-filter
       - pluginRef: max-score-picker
-      - pluginRef: prefix-cache-scorer
+      - pluginRef: precise-prefix-cache-scorer
         weight: 2
       - pluginRef: no-hit-lru-scorer
         weight: 1

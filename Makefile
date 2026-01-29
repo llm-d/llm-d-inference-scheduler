@@ -157,9 +157,28 @@ test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 .PHONY: test-unit-%
 test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache-manager 2>/dev/null || echo ""); \
+	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache 2>/dev/null || echo ""); \
 	PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
 	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
+
+.PHONY: test-filter
+test-filter: download-tokenizer install-python-deps check-dependencies ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
+	@if [ -z "$(PATTERN)" ]; then \
+		echo "ERROR: PATTERN is required. Usage: make test-filter PATTERN=TestName [TYPE=epp|sidecar]"; \
+		exit 1; \
+	fi
+	@TEST_TYPE="$(if $(TYPE),$(TYPE),epp)"; \
+	printf "\033[33;1m==== Running Filtered Tests (pattern: $(PATTERN), type: $$TEST_TYPE) ====\033[0m\n"; \
+	KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache 2>/dev/null || echo ""); \
+	if [ "$$TEST_TYPE" = "epp" ]; then \
+		PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
+		CGO_CFLAGS=$(epp_CGO_CFLAGS) CGO_LDFLAGS=$(epp_CGO_LDFLAGS) \
+		go test $(epp_LDFLAGS) -v -run "$(PATTERN)" $$($(epp_TEST_FILES) | tr '\n' ' '); \
+	else \
+		PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
+		CGO_CFLAGS=$(sidecar_CGO_CFLAGS) CGO_LDFLAGS=$(sidecar_CGO_LDFLAGS) \
+		go test $(sidecar_LDFLAGS) -v -run "$(PATTERN)" $$($(sidecar_TEST_FILES) | tr '\n' ' '); \
+	fi
 
 .PHONY: test-integration
 test-integration: download-tokenizer check-dependencies ## Run integration tests

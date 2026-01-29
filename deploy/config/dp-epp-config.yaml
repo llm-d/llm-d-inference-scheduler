@@ -3,7 +3,13 @@
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefix-cache-scorer
+- type: precise-prefix-cache-scorer
+  parameters:
+    indexerConfig:
+      tokenProcessorConfig:
+        blockSize: 5
+      kvBlockIndexConfig:
+        maxPrefixBlocksToMatch: 256
 - type: decode-filter
 - type: max-score-picker
 - type: data-parallel-profile-handler
@@ -14,5 +20,5 @@ schedulingProfiles:
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
-  - pluginRef: prefix-cache-scorer
+  - pluginRef: precise-prefix-cache-scorer
     weight: 2
