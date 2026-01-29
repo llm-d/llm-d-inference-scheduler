@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
-	scheduler "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -211,7 +210,13 @@ func newMockProfileRunResult(port string, endpointNames ...string) *scheduling.P
 }
 
 func newMockSchedulerProfile() scheduling.SchedulerProfile {
-	return &scheduler.SchedulerProfile{}
+	return &mockSchedulerProfile{}
+}
+
+type mockSchedulerProfile struct{}
+
+func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.LLMRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
+	return nil, nil
 }
 
 func TestPdProfileHandler_Pick(t *testing.T) {
