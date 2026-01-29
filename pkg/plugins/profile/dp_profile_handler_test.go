@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	scheduler "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
@@ -133,7 +132,7 @@ func Test_DataParallelProfileHandler_Pick(t *testing.T) {
 		{
 			name: "success: single profile, first call",
 			profiles: map[string]scheduling.SchedulerProfile{
-				"default": &scheduler.SchedulerProfile{},
+				"default": newMockSchedulerProfile(),
 			},
 			profileResults:    map[string]*scheduling.ProfileRunResult{},
 			expectEmptyResult: false,
@@ -143,7 +142,7 @@ func Test_DataParallelProfileHandler_Pick(t *testing.T) {
 		{
 			name: "success: single profile, second call (all already executed)",
 			profiles: map[string]scheduling.SchedulerProfile{
-				"default": &scheduler.SchedulerProfile{},
+				"default": newMockSchedulerProfile(),
 			},
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				"default": newMockProfileRunResult(DefaultTestPodPort, "pod1"),
@@ -155,8 +154,8 @@ func Test_DataParallelProfileHandler_Pick(t *testing.T) {
 		{
 			name: "error: multiple profiles configured in EPP",
 			profiles: map[string]scheduling.SchedulerProfile{
-				"profile1": &scheduler.SchedulerProfile{},
-				"profile2": &scheduler.SchedulerProfile{},
+				"profile1": newMockSchedulerProfile(),
+				"profile2": newMockSchedulerProfile(),
 			},
 			profileResults:    map[string]*scheduling.ProfileRunResult{},
 			expectEmptyResult: true,
