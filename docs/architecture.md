@@ -161,11 +161,13 @@ A complete configuration might look like this:
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefix-cache-scorer
+- type: precise-prefix-cache-scorer
   parameters:
-    hashBlockSize: 5
-    maxPrefixBlocksToMatch: 256
-    lruCapacityPerServer: 31250
+    indexerConfig:
+      tokenProcessorConfig:
+        blockSize: 5
+      kvBlockIndexConfig:
+        maxPrefixBlocksToMatch: 256
 - type: decode-filter
 - type: max-score-picker
 - type: single-profile-handler
@@ -174,7 +176,7 @@ schedulingProfiles:
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
-  - pluginRef: prefix-cache-scorer
+  - pluginRef: precise-prefix-cache-scorer
     weight: 50
 ```
 
@@ -465,11 +467,13 @@ Example configuration:
 
 ```yaml
 plugins:
-  - type: prefix-cache-scorer
+  - type: precise-prefix-cache-scorer
     parameters:
-      hashBlockSize: 5
-      maxPrefixBlocksToMatch: 256
-      lruCapacityPerServer: 31250
+      indexerConfig:
+        tokenProcessorConfig:
+          blockSize: 5
+        kvBlockIndexConfig:
+          maxPrefixBlocksToMatch: 256
   - type: no-hit-lru-scorer
     parameters:
       lruSize: 2048
@@ -481,7 +485,7 @@ schedulingProfiles:
     plugins:
       - pluginRef: decode-filter
       - pluginRef: max-score-picker
-      - pluginRef: prefix-cache-scorer
+      - pluginRef: precise-prefix-cache-scorer
         weight: 2
       - pluginRef: no-hit-lru-scorer
         weight: 1

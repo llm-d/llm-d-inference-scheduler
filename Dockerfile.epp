@@ -102,6 +102,10 @@ ENV PYTHONPATH=/workspace/kv-cache/pkg/preprocessing/chat_completions:/workspace
 RUN ${PYTHON} -c "import tokenizer_wrapper"  # verify tokenizer_wrapper is correctly installed
 
 ENV HF_HOME="/tmp/.cache"
+# used by kv-cache-manager
+ENV LOCAL_TOKENIZER_DIR="/tmp/.cache"
+# Create cache directory and set permissions for non-root user
+RUN mkdir -p /tmp/.cache && chown -R 65532:65532 ${HF_HOME}
 
 USER 65532:65532
 
@@ -113,4 +117,3 @@ EXPOSE 9090
 EXPOSE 5557
 
 ENTRYPOINT ["/app/epp"]
-

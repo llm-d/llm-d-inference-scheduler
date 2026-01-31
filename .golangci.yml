@@ -11,23 +11,54 @@ formatters:
 
 linters:
   enable:
+  - bodyclose
   - copyloopvar
   - dupword
   - durationcheck
+  - errcheck
   - fatcontext
   - ginkgolinter
+  - goconst
   - gocritic
   - govet
-  - loggercheck
-  - misspell
-  - perfsprint
-  - revive
-  - unconvert
-  - makezero
-  - errcheck
-  - goconst
   - ineffassign
+  - loggercheck
+  - makezero
+  - misspell
   - nakedret
+  - nilnil
+  - perfsprint
   - prealloc
+  - revive
+  - staticcheck
   - unparam
   - unused
+  - unconvert
+  settings:
+    revive: # see https://github.com/mgechev/revive#available-rules for all options
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+
+issues:
+  # do not limit the number of issues, ensure even identical are reported
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: true # run on new code only
