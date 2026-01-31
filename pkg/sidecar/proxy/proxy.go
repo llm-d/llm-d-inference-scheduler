@@ -46,6 +46,12 @@ const (
 	requestFieldRemotePort          = "remote_port"
 	requestFieldStream              = "stream"
 	requestFieldStreamOptions       = "stream_options"
+	requestFieldCacheHitThreshold   = "cache_hit_threshold"
+
+	responseFieldChoices      = "choices"
+	responseFieldFinishReason = "finish_reason"
+
+	finishReasonCacheThreshold = "cache_threshold"
 
 	// SGLang bootstrap fields
 	requestFieldBootstrapHost = "bootstrap_host"
@@ -55,8 +61,8 @@ const (
 	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
 	ConnectorNIXLV2 = "nixlv2"
 
-	// ConnectorLMCache enables (now deprecated) P/D LMCache protocol
-	ConnectorLMCache = "lmcache"
+	// ConnectorSharedStorage enables (now deprecated) P/D Shared Storage protocol
+	ConnectorSharedStorage = "shared-storage"
 
 	// ConnectorSGLang enables SGLang P/D disaggregation protocol
 	ConnectorSGLang = "sglang"
@@ -177,8 +183,8 @@ func (s *Server) Clone() *Server {
 func (s *Server) setConnector() {
 
 	switch s.config.Connector {
-	case ConnectorLMCache:
-		s.runConnectorProtocol = s.runLMCacheProtocol
+	case ConnectorSharedStorage:
+		s.runConnectorProtocol = s.runSharedStorageProtocol
 	case ConnectorSGLang:
 		s.runConnectorProtocol = s.runSGLangProtocol
 	case ConnectorNIXLV2:
