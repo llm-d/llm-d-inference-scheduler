@@ -217,7 +217,7 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 	}, nil
 }
 
-// returns lenght of user input in tokens
+// returns length of user input in tokens
 func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
 	if request.Body.Completions != nil { // assumed to be valid if not nil
 		return len([]byte(request.Body.Completions.Prompt)) / AverageCharactersPerToken, nil
