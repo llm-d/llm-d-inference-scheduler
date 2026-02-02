@@ -252,7 +252,7 @@ func TestPDSchedule(t *testing.T) {
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			profileHandle, err := profile.NewPdProfileHandler(prefill, decode, prefixScorer.TypedName().Type, prefixScorer.TypedName().Name,
-				0, profile.PrefixDeciderName, json.RawMessage("{\"nonCachedTokens\": 2}"))
+				0, profile.PrefixBasedDisaggregationName, json.RawMessage("{\"nonCachedTokens\": 2}"))
 			assert.NoError(t, err)
 
 			schedulerConfig := scheduling.NewSchedulerConfig(profileHandle, map[string]fwkschd.SchedulerProfile{

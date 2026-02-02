@@ -22,97 +22,109 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 	tests := []struct {
 		name       string
 		pluginName string
-		jsonParams string
+		params     map[string]any
 		expectErr  bool
 	}{
 		{
 			name:       "valid configuration with all defaults",
 			pluginName: "default-handler",
-			jsonParams: "{}",
+			params:     map[string]any{},
 			expectErr:  false,
 		},
 		{
 			name:       "valid configuration with custom values",
 			pluginName: "custom-handler",
-			jsonParams: fmt.Sprintf(`{
-				"decodeProfile": "my-decode",
-				"prefillProfile": "my-prefill",
+			params: map[string]any{
+				"decodeProfile":    "my-decode",
+				"prefillProfile":   "my-prefill",
 				"prefixPluginName": "my-prefix-cache",
-				"primaryPort": 8080,
-				"decider": {
-					"name": "%s",
-					"parameters": {
+				"primaryPort":      8080,
+				"decider": map[string]any{
+					"name": PrefixBasedDisaggregationName,
+					"parameters": map[string]any{
 						"nonCachedTokens": 100,
-						"pluginName": "my-prefix-cache"
-					}
-				}
-			}`, PrefixDeciderName),
+						"pluginName":      "my-prefix-cache",
+					},
+				},
+			},
 			expectErr: false,
 		},
 		{
 			name:       "zero primaryPort is allowed",
 			pluginName: "zero-port",
-			jsonParams: `{"primaryPort": 0}`,
-			expectErr:  false,
+			params: map[string]any{
+				"primaryPort": 0,
+			},
+			expectErr: false,
 		},
 		{
 			name:       "nonCachedTokens = 0 is allowed",
 			pluginName: "zero-non-cached-tokens",
-			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": 0}}}`,
-			expectErr:  false,
+			params: map[string]any{
+				"decider": map[string]any{
+					"name":       "prefix-based-disaggregation-decider",
+					"parameters": map[string]any{"nonCachedTokens": 0},
+				},
+			},
+			expectErr: false,
 		},
 		{
 			name:       "negative nonCachedTokens should error",
 			pluginName: "neg-non-cached-tokens",
-			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": -1}}}`,
-			expectErr:  true,
+			params: map[string]any{
+				"decider": map[string]any{
+					"name":       "prefix-based-disaggregation-decider",
+					"parameters": map[string]any{"nonCachedTokens": -1},
+				},
+			},
+			expectErr: true,
 		},
 		{
 			name:       "primaryPort below range should error",
 			pluginName: "port-too-low",
-			jsonParams: `{"primaryPort": 0}`, // OK
+			params:     map[string]any{"primaryPort": 0}, // OK
 			expectErr:  false,
 		},
 		{
 			name:       "primaryPort = 1 is valid",
 			pluginName: "port-min",
-			jsonParams: `{"primaryPort": 1}`,
+			params:     map[string]any{"primaryPort": 1},
 			expectErr:  false,
 		},
 		{
 			name:       "primaryPort = 65535 is valid",
 			pluginName: "port-max",
-			jsonParams: `{"primaryPort": 65535}`,
+			params:     map[string]any{"primaryPort": 65535},
 			expectErr:  false,
 		},
 		{
 			name:       "empty decodeProfile is valid",
 			pluginName: "empty-decode",
-			jsonParams: `{"decodeProfile": ""}`,
+			params:     map[string]any{"decodeProfile": ""},
 			expectErr:  false,
 		},
 		{
 			name:       "empty prefillProfile is valid",
 			pluginName: "empty-prefill",
-			jsonParams: `{"prefillProfile": ""}`,
+			params:     map[string]any{"prefillProfile": ""},
 			expectErr:  false,
 		},
 		{
 			name:       "empty prefixPluginName is valid",
 			pluginName: "empty-prefix-plugin",
-			jsonParams: `{"prefixPluginName": ""}`,
+			params:     map[string]any{"prefixPluginName": ""},
 			expectErr:  false,
 		},
 		{
 			name:       "primaryPort = 65536 should error",
 			pluginName: "port-too-high",
-			jsonParams: `{"primaryPort": 65536}`,
+			params:     map[string]any{"primaryPort": 65536},
 			expectErr:  true,
 		},
 		{
 			name:       "primaryPort = -10 should error",
 			pluginName: "port-negative",
-			jsonParams: `{"primaryPort": -10}`,
+			params:     map[string]any{"primaryPort": -10},
 			expectErr:  true,
 		},
 	}
@@ -120,8 +132,10 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var rawParams json.RawMessage
-			if tt.jsonParams != "" {
-				rawParams = json.RawMessage(tt.jsonParams)
+			if tt.params != nil {
+				bytes, err := json.Marshal(tt.params)
+				assert.Error(t, err)
+				rawParams = json.RawMessage(bytes)
 			}
 			plugin, err := PdProfileHandlerFactory(tt.pluginName, rawParams, nil)
 
@@ -143,15 +157,15 @@ func TestPdProfileHandlerFactoryInvalidJSON(t *testing.T) {
 	}{
 		{
 			name:       "malformed JSON",
-			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens":`, // incomplete
+			jsonParams: `{"decider": {"name": "prefix-based-disaggregation-decider", "parameters": {"nonCachedTokens":`, // incomplete
 		},
 		{
 			name:       "nonCachedTokens as string instead of int",
-			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": true}}}`,
+			jsonParams: `{"decider": {"name": "prefix-based-disaggregation-decider", "parameters": {"nonCachedTokens": "true"}}}`,
 		},
 		{
 			name:       "nonCachedTokens as boolean",
-			jsonParams: `{"decider": {"name": "prefix-disaggregation-decider", "parameters": {"nonCachedTokens": true}}}`,
+			jsonParams: `{"decider": {"name": "prefix-based-disaggregation-decider", "parameters": {"nonCachedTokens": true}}}`,
 		},
 		{
 			name:       "primaryPort as float",
@@ -336,7 +350,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 				tt.prefixPluginType,
 				tt.prefixPluginName,
 				0,
-				PrefixDeciderName,
+				PrefixBasedDisaggregationName,
 				getDeciderParamsRaw(tt.nonCachedTokensLimit),
 			)
 			assert.NoError(t, err)
@@ -437,7 +451,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 				prefix.PrefixCachePluginType,
 				prefix.PrefixCachePluginType,
 				0,
-				PrefixDeciderName,
+				PrefixBasedDisaggregationName,
 				getDeciderParamsRaw(tt.nonCachedTokensLimit),
 			)
 			assert.NoError(t, err)
@@ -536,7 +550,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				prefix.PrefixCachePluginType,
 				prefix.PrefixCachePluginType,
 				tt.primaryPort,
-				PrefixDeciderName,
+				PrefixBasedDisaggregationName,
 				getDeciderParamsRaw(0),
 			)
 			assert.NoError(t, err)

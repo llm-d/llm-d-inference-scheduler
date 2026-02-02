@@ -26,7 +26,7 @@ const (
 	defaultDecodeProfile    = "decode"
 	defaultPrefillProfile   = "prefill"
 	defaultPrefixPluginType = prefix.PrefixCachePluginType
-	defaultDeciderName      = alwaysDeciderName
+	defaultDeciderName      = alwaysDisaggregatedName
 
 	// AverageCharactersPerToken is an estimated average characters per token, used since the request we cached is not tokenized.
 	AverageCharactersPerToken = 4
@@ -87,10 +87,10 @@ func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefix
 	var err error
 
 	switch deciderName {
-	case alwaysDeciderName:
-		decider, err = newAlwaysDisaggregationDecider(deciderParams)
-	case PrefixDeciderName:
-		decider, err = newPrefixDisaggregationDecider(deciderParams)
+	case alwaysDisaggregatedName:
+		decider, err = newAlwaysDisaggregatedDecider(deciderParams)
+	case PrefixBasedDisaggregationName:
+		decider, err = newPrefixBasedDisaggregationDecider(deciderParams)
 	default:
 		return nil, fmt.Errorf("invalid decider type '%s'", deciderName)
 	}
@@ -158,7 +158,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		return nil
 	}
 
-	if h.decider != nil && h.decider.isDisaggregationRequired(ctx, inputTokens, profileResults[h.decodeProfile].TargetEndpoints[0]) {
+	if h.decider != nil && h.decider.shouldDisaggregate(ctx, inputTokens, profileResults[h.decodeProfile].TargetEndpoints[0]) {
 		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
 		// run the prefill profile
 		return map[string]scheduling.SchedulerProfile{

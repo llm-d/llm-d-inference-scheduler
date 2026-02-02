@@ -8,19 +8,19 @@ import (
 )
 
 // compile-time type assertion
-var _ pdDecider = &alwaysDisaggregationDecider{}
+var _ pdDecider = &alwaysDisaggregatedDecider{}
 
-const alwaysDeciderName = "always-disaggregation-decider"
+const alwaysDisaggregatedName = "always-disaggregated-decider"
 
-// newAlwaysDisaggregationDecider initializes a new AlwaysDisaggregationDecider and returns its pointer.
-func newAlwaysDisaggregationDecider(_ json.RawMessage) (*alwaysDisaggregationDecider, error) {
-	return &alwaysDisaggregationDecider{}, nil
+// newAlwaysDisaggregatedDecider initializes a new AlwaysDisaggregationDecider and returns its pointer.
+func newAlwaysDisaggregatedDecider(_ json.RawMessage) (*alwaysDisaggregatedDecider, error) {
+	return &alwaysDisaggregatedDecider{}, nil
 }
 
-// alwaysDisaggregationDecider is a PD decision that forces to always disaggregate.
-type alwaysDisaggregationDecider struct { }
+// alwaysDisaggregatedDecider is a PD decision that forces to always disaggregate.
+type alwaysDisaggregatedDecider struct{}
 
-// isDisaggregationRequired checks if disaggregated PD is required for the given request and pod.
-func (_ *alwaysDisaggregationDecider) isDisaggregationRequired(_ context.Context, _ int, _ scheduling.Endpoint) bool {
+// shouldDisaggregate checks if disaggregated PD is required for the given request and pod.
+func (_ *alwaysDisaggregatedDecider) shouldDisaggregate(_ context.Context, _ int, _ scheduling.Endpoint) bool {
 	return true
 }

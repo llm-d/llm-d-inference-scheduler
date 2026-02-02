@@ -15,24 +15,24 @@ import (
 )
 
 // compile-time type assertion
-var _ pdDecider = &prefixDisaggregationDecider{}
+var _ pdDecider = &prefixBasedDisaggregationDecider{}
 
-// PrefixDeciderName name of the prefix decider
-const PrefixDeciderName = "prefix-disaggregation-decider"
+// PrefixBasedDisaggregationName name of the prefix decider
+const PrefixBasedDisaggregationName = "prefix-based-disaggregation-decider"
 
-type prefixDisaggregationDeciderParameters struct {
-	// NonCachedTokens non cached tokens limit that triggers disaggregated PD
+type prefixBasedDisaggregationDeciderParameters struct {
+	// NonCachedTokens non cached minimum tokens that triggers disaggregated PD
 	NonCachedTokens int `json:"nonCachedTokens"`
 	// PluginName prefix plugin name, optional, should be defined if prefix plugin name is not a default
 	PluginName string `json:"pluginName"`
 }
 
-var defaultParams = prefixDisaggregationDeciderParameters{
+var defaultParams = prefixBasedDisaggregationDeciderParameters{
 	NonCachedTokens: 0,
 	PluginName:      prefix.PrefixCachePluginType,
 }
 
-func (p prefixDisaggregationDeciderParameters) validate() error {
+func (p prefixBasedDisaggregationDeciderParameters) validate() error {
 	if p.PluginName == "" {
 		return errors.New("pluginName parameter of prefix disaggregation decider cannot be empty string")
 	}
@@ -45,7 +45,7 @@ func (p prefixDisaggregationDeciderParameters) validate() error {
 }
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func newPrefixDisaggregationDecider(rawParameters json.RawMessage) (*prefixDisaggregationDecider, error) {
+func newPrefixBasedDisaggregationDecider(rawParameters json.RawMessage) (*prefixBasedDisaggregationDecider, error) {
 	parameters := defaultParams
 
 	if rawParameters != nil {
@@ -58,20 +58,20 @@ func newPrefixDisaggregationDecider(rawParameters json.RawMessage) (*prefixDisag
 		return nil, err
 	}
 
-	return &prefixDisaggregationDecider{
+	return &prefixBasedDisaggregationDecider{
 		prefixPluginTypedName: plugin.TypedName{Type: prefix.PrefixCachePluginType, Name: parameters.PluginName},
 		nonCachedTokens:       parameters.NonCachedTokens,
 	}, nil
 }
 
-// prefixDisaggregationDecider handles scheduler profiles for PD.
-type prefixDisaggregationDecider struct {
+// prefixBasedDisaggregationDecider handles scheduler profiles for PD.
+type prefixBasedDisaggregationDecider struct {
 	prefixPluginTypedName plugin.TypedName
 	nonCachedTokens       int
 }
 
-// isDisaggregationRequired checks if disaggregated PD is required for the given request and endpoint.
-func (d *prefixDisaggregationDecider) isDisaggregationRequired(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
+// shouldDisaggregate checks if disaggregated PD is required for the given request and endpoint.
+func (d *prefixBasedDisaggregationDecider) shouldDisaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 

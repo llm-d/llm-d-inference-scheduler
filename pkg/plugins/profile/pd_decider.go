@@ -9,8 +9,8 @@ import (
 
 // pdDecider interface for pd profile handler diceder
 type pdDecider interface {
-	// isDisaggregationRequired checks if disaggregated PD is required for the given request and pod.
-	isDisaggregationRequired(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool
+	// shouldDisaggregate checks if disaggregated PD is required for the given request and endpoint.
+	shouldDisaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool
 }
 
 // pdDeciderParams parameters for pdDecider creation

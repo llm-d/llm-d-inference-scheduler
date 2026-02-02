@@ -19,7 +19,7 @@ plugins:
   parameters:
     primaryPort: ${PRIMARY_PORT}
     decider: 
-      name: prefix-disaggregation-decider
+      name: prefix-based-disaggregation-decider
       parameters:
         nonCachedTokens: 8
 schedulingProfiles:
