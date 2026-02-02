@@ -75,8 +75,7 @@ func (d *prefixDisaggregationDecider) isDisaggregationRequired(ctx context.Conte
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	if d.nonCachedTokens <= 0 {
-		// always use disaggregation in case of non cached tokens number is 0
+	if d.nonCachedTokens <= 0 { // always use disaggregation in case of non cached tokens number is 0
 		return true
 	}
 	if endpoint == nil {
