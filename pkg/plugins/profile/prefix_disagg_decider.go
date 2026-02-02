@@ -83,7 +83,10 @@ func (d *prefixDisaggregationDecider) isDisaggregationRequired(ctx context.Conte
 		logger.Error(nil, "prefix decider: endpoint is nil")
 		return false
 	}
-
+	if inputTokens < d.nonCachedTokens {
+		debugLogger.Info("Input is shorter than the nonCachedToken, no disaggregated PD")
+		return false
+	}
 	// inspect the decode endpoint to decide if prefill should run or not.
 	// if the non-cached part is short enough - no disaggregation.
 	prefixInfoRaw, ok := endpoint.Get(approximateprefix.PrefixCacheMatchInfoKey)

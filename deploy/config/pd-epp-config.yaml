@@ -7,7 +7,8 @@ plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
   parameters:
-    hashBlockSize: 64
+    blockSizeTokens: 8
+    autoTune: false
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
 - type: queue-scorer
@@ -20,7 +21,7 @@ plugins:
     decider: 
       name: prefix-disaggregation-decider
       parameters:
-        nonCachedTokens: 32
+        nonCachedTokens: 8
 schedulingProfiles:
 - name: prefill
   plugins:
