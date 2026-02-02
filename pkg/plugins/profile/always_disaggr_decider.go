@@ -17,9 +17,8 @@ func newAlwaysDisaggregationDecider(_ json.RawMessage) (*alwaysDisaggregationDec
 	return &alwaysDisaggregationDecider{}, nil
 }
 
-// alwaysDisaggregationDecider handles scheduler profiles for PD.
-type alwaysDisaggregationDecider struct {
-}
+// alwaysDisaggregationDecider is a PD decision that forces to always disaggregate.
+type alwaysDisaggregationDecider struct { }
 
 // isDisaggregationRequired checks if disaggregated PD is required for the given request and pod.
 func (d *alwaysDisaggregationDecider) isDisaggregationRequired(_ context.Context, _ int, _ scheduling.Endpoint) bool {
