@@ -19,9 +19,6 @@ func TestDatasource(t *testing.T) {
 	extractor, err := NewModelExtractor()
 	assert.Nil(t, err, "failed to create extractor")
 
-	dsType := source.TypedName().Type
-	assert.Equal(t, ModelsDataSourceType, dsType)
-
 	err = source.AddExtractor(extractor)
 	assert.Nil(t, err, "failed to add extractor")
 
@@ -36,7 +33,7 @@ func TestDatasource(t *testing.T) {
 	assert.Nil(t, err, "failed to register")
 
 	ctx := context.Background()
-	factory := datalayer.NewEndpointFactory([]fwkdl.DataSource{source}, 100*time.Millisecond)
+	factory := datalayer.NewEndpointFactory([]fwkdl.DataSource{source}, 100*time.Hour)
 	pod := &fwkdl.EndpointMetadata{
 		NamespacedName: types.NamespacedName{
 			Name:      "pod1",

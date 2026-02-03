@@ -38,7 +38,7 @@ func (m ModelInfoCollection) Clone() fwkdl.Cloneable {
 
 func (m ModelInfoCollection) String() string {
 	if m == nil {
-		return ""
+		return "[]"
 	}
 	parts := make([]string, len(m))
 	for i, p := range m {
@@ -76,6 +76,12 @@ func NewModelExtractor() (*ModelExtractor, error) {
 // TypedName returns the type and name of the ModelExtractor.
 func (me *ModelExtractor) TypedName() fwkplugin.TypedName {
 	return me.typedName
+}
+
+// WithName sets the name of the extractor.
+func (me *ModelExtractor) WithName(name string) *ModelExtractor {
+	me.typedName.Name = name
+	return me
 }
 
 // ExpectedInputType defines the type expected by ModelExtractor.

@@ -48,8 +48,7 @@ func ModelServerExtractorFactory(name string, _ json.RawMessage, _ plugin.Handle
 	if err != nil {
 		return nil, err
 	}
-	extractor.typedName.Name = name
-	return extractor, nil
+	return extractor.WithName(name), nil
 }
 
 func defaultDataSourceConfigParams() *modelsDatasourceParams {
