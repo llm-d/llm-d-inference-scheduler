@@ -216,7 +216,7 @@ func newMockSchedulerProfile() scheduling.SchedulerProfile {
 type mockSchedulerProfile struct{}
 
 func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.LLMRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
-	return nil, nil
+	return &scheduling.ProfileRunResult{}, nil
 }
 
 func TestPdProfileHandler_Pick(t *testing.T) {
