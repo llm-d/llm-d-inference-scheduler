@@ -23,35 +23,42 @@ const (
 	// PdProfileHandlerType is the type of the PdProfileHandler
 	PdProfileHandlerType = "pd-profile-handler"
 
-	defaultDecodeProfile    = "decode"
-	defaultPrefillProfile   = "prefill"
-	defaultPrefixPluginType = prefix.PrefixCachePluginType
-	defaultDeciderName      = alwaysDisaggregatedName
+	defaultDecodeProfile     = "decode"
+	defaultPrefillProfile    = "prefill"
+	defaultPrefixPluginType  = prefix.PrefixCachePluginType
+	defaultDeciderPluginName = AlwaysDisaggrDeciderPluginType
 
 	// AverageCharactersPerToken is an estimated average characters per token, used since the request we cached is not tokenized.
 	AverageCharactersPerToken = 4
 )
 
+// pdDeciderPlugin interface for pd decider plugins
+type pdDeciderPlugin interface {
+	plugin.Plugin
+	// shouldDisaggregate checks if disaggregated PD is required for the given request and endpoint.
+	shouldDisaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool
+}
+
 type pdProfileHandlerParameters struct {
-	DecodeProfile    string           `json:"decodeProfile"`
-	PrefillProfile   string           `json:"prefillProfile"`
-	PrefixPluginType string           `json:"prefixPluginType"`
-	PrefixPluginName string           `json:"prefixPluginName"`
-	PrimaryPort      int              `json:"primaryPort"`
-	Decider          *pdDeciderParams `json:"decider"`
+	DecodeProfile     string `json:"decodeProfile"`
+	PrefillProfile    string `json:"prefillProfile"`
+	PrefixPluginType  string `json:"prefixPluginType"`
+	PrefixPluginName  string `json:"prefixPluginName"`
+	PrimaryPort       int    `json:"primaryPort"`
+	DeciderPluginName string `json:"deciderPluginName"`
 }
 
 // compile-time type assertion
 var _ scheduling.ProfileHandler = &PdProfileHandler{}
 
 // PdProfileHandlerFactory defines the factory function for the PdProfileHandler
-func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := pdProfileHandlerParameters{
-		DecodeProfile:    defaultDecodeProfile,
-		PrefillProfile:   defaultPrefillProfile,
-		PrefixPluginType: defaultPrefixPluginType,
-		PrimaryPort:      0,
-		Decider:          &pdDeciderParams{Name: defaultDeciderName},
+		DecodeProfile:     defaultDecodeProfile,
+		PrefillProfile:    defaultPrefillProfile,
+		PrefixPluginType:  defaultPrefixPluginType,
+		PrimaryPort:       0,
+		DeciderPluginName: defaultDeciderPluginName,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -69,8 +76,22 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		}
 	}
 
+	if parameters.DeciderPluginName == "" {
+		return nil, errors.New("decider plugin name is not defined")
+	}
+
+	plugin := handle.Plugin(parameters.DeciderPluginName)
+	if plugin == nil {
+		return nil, fmt.Errorf("invalid decider plugin type: %s", parameters.DeciderPluginName)
+	}
+
+	deciderPlugin, ok := plugin.(pdDeciderPlugin)
+	if !ok {
+		return nil, fmt.Errorf("decider plugin of type: %s does not implement pdDeciderPlugin", parameters.DeciderPluginName)
+	}
+
 	handler, err := NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginType, parameters.PrefixPluginName,
-		parameters.PrimaryPort, parameters.Decider.Name, parameters.Decider.Parameters)
+		parameters.PrimaryPort, deciderPlugin)
 
 	if err != nil {
 		return nil, err
@@ -82,29 +103,13 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string,
-	primaryPort int, deciderName string, deciderParams json.RawMessage) (*PdProfileHandler, error) {
-	var decider pdDecider
-	var err error
-
-	switch deciderName {
-	case alwaysDisaggregatedName:
-		decider, err = newAlwaysDisaggregatedDecider(deciderParams)
-	case PrefixBasedDisaggregationName:
-		decider, err = newPrefixBasedDisaggregationDecider(deciderParams)
-	default:
-		return nil, fmt.Errorf("invalid decider type '%s'", deciderName)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
+	primaryPort int, deciderPlugin pdDeciderPlugin) (*PdProfileHandler, error) {
 	result := &PdProfileHandler{
 		typedName:             plugin.TypedName{Type: PdProfileHandlerType},
 		prefixPluginTypedName: plugin.TypedName{Type: prefixPluginType, Name: prefixPluginName},
 		decodeProfile:         decodeProfile,
 		prefillProfile:        prefillProfile,
-		decider:               decider,
+		decider:               deciderPlugin,
 	}
 	if primaryPort != 0 {
 		result.primaryPort = strconv.Itoa(primaryPort)
@@ -120,7 +125,7 @@ type PdProfileHandler struct {
 	decodeProfile         string
 	prefillProfile        string
 	primaryPort           string
-	decider               pdDecider
+	decider               pdDeciderPlugin
 }
 
 // TypedName returns the typed name of the plugin.

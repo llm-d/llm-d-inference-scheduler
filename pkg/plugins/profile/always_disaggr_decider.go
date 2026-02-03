@@ -4,23 +4,45 @@ import (
 	"context"
 	"encoding/json"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
+const (
+	// AlwaysDisaggrDeciderPluginType is the type-name of the alwaysDisaggrPDDecider plugin.
+	AlwaysDisaggrDeciderPluginType = "always-disaggr-pd-decider"
+)
+
 // compile-time type assertion
-var _ pdDecider = &alwaysDisaggregatedDecider{}
+var _ pdDeciderPlugin = &AlwaysDisaggrPDDecider{}
 
-const alwaysDisaggregatedName = "always-disaggregated-decider"
-
-// newAlwaysDisaggregatedDecider initializes a new AlwaysDisaggregationDecider and returns its pointer.
-func newAlwaysDisaggregatedDecider(_ json.RawMessage) (*alwaysDisaggregatedDecider, error) {
-	return &alwaysDisaggregatedDecider{}, nil
+// AlwaysDisaggrPDDecider is a PD decider plugin which always decide to disaggregate PD
+type AlwaysDisaggrPDDecider struct {
+	typedName plugin.TypedName
 }
 
-// alwaysDisaggregatedDecider is a PD decision that forces to always disaggregate.
-type alwaysDisaggregatedDecider struct{}
+// AlwaysDisaggrPDDeciderPluginFactory defines the factory function for creating
+// a new instance of the AlwaysDisaggrPDDecider.
+func AlwaysDisaggrPDDeciderPluginFactory(name string, _ json.RawMessage,
+	_ plugin.Handle) (plugin.Plugin, error) {
+	return newAlwaysDisaggrPDDecider().WithName(name), nil
+}
 
-// shouldDisaggregate checks if disaggregated PD is required for the given request and pod.
-func (_ *alwaysDisaggregatedDecider) shouldDisaggregate(_ context.Context, _ int, _ scheduling.Endpoint) bool {
+func newAlwaysDisaggrPDDecider() *AlwaysDisaggrPDDecider {
+	return &AlwaysDisaggrPDDecider{}
+}
+
+// TypedName returns the typed name of the plugin.
+func (d *AlwaysDisaggrPDDecider) TypedName() plugin.TypedName {
+	return d.typedName
+}
+
+// WithName sets the name of the plugin.
+func (d *AlwaysDisaggrPDDecider) WithName(name string) *AlwaysDisaggrPDDecider {
+	d.typedName.Name = name
+	return d
+}
+
+func (d *AlwaysDisaggrPDDecider) shouldDisaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
 	return true
 }

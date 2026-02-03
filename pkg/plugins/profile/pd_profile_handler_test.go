@@ -19,6 +19,7 @@ import (
 )
 
 func TestPdProfileHandlerFactory(t *testing.T) {
+	ctx := utils.NewTestContext(t)
 	tests := []struct {
 		name       string
 		pluginName string
@@ -35,17 +36,11 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 			name:       "valid configuration with custom values",
 			pluginName: "custom-handler",
 			params: map[string]any{
-				"decodeProfile":    "my-decode",
-				"prefillProfile":   "my-prefill",
-				"prefixPluginName": "my-prefix-cache",
-				"primaryPort":      8080,
-				"decider": map[string]any{
-					"name": PrefixBasedDisaggregationName,
-					"parameters": map[string]any{
-						"nonCachedTokens": 100,
-						"pluginName":      "my-prefix-cache",
-					},
-				},
+				"decodeProfile":     "my-decode",
+				"prefillProfile":    "my-prefill",
+				"prefixPluginName":  "my-prefix-cache",
+				"primaryPort":       8080,
+				"deciderPluginName": PrefixBasedPDDeciderPluginType,
 			},
 			expectErr: false,
 		},
@@ -61,23 +56,9 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 			name:       "nonCachedTokens = 0 is allowed",
 			pluginName: "zero-non-cached-tokens",
 			params: map[string]any{
-				"decider": map[string]any{
-					"name":       "prefix-based-disaggregation-decider",
-					"parameters": map[string]any{"nonCachedTokens": 0},
-				},
+				"deciderPluginName": PrefixBasedPDDeciderPluginType,
 			},
 			expectErr: false,
-		},
-		{
-			name:       "negative nonCachedTokens should error",
-			pluginName: "neg-non-cached-tokens",
-			params: map[string]any{
-				"decider": map[string]any{
-					"name":       "prefix-based-disaggregation-decider",
-					"parameters": map[string]any{"nonCachedTokens": -1},
-				},
-			},
-			expectErr: true,
 		},
 		{
 			name:       "primaryPort below range should error",
@@ -129,6 +110,9 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 		},
 	}
 
+	handle, err := createHandleWithDeciderPlugins(ctx)
+	assert.NoError(t, err)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var rawParams json.RawMessage
@@ -137,7 +121,7 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 				assert.NoError(t, err)
 				rawParams = json.RawMessage(bytes)
 			}
-			plugin, err := PdProfileHandlerFactory(tt.pluginName, rawParams, nil)
+			plugin, err := PdProfileHandlerFactory(tt.pluginName, rawParams, handle)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -151,21 +135,19 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 }
 
 func TestPdProfileHandlerFactoryInvalidJSON(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+
 	invalidTests := []struct {
 		name       string
 		jsonParams string
 	}{
 		{
 			name:       "malformed JSON",
-			jsonParams: `{"decider": {"name": "prefix-based-disaggregation-decider", "parameters": {"nonCachedTokens":`, // incomplete
+			jsonParams: `{"deciderPluginName": `, // incomplete
 		},
 		{
-			name:       "nonCachedTokens as string instead of int",
-			jsonParams: `{"decider": {"name": "prefix-based-disaggregation-decider", "parameters": {"nonCachedTokens": "true"}}}`,
-		},
-		{
-			name:       "nonCachedTokens as boolean",
-			jsonParams: `{"decider": {"name": "prefix-based-disaggregation-decider", "parameters": {"nonCachedTokens": true}}}`,
+			name:       "invalid decider plugin type",
+			jsonParams: `{"deciderPluginName": "INVALID"}`,
 		},
 		{
 			name:       "primaryPort as float",
@@ -173,10 +155,13 @@ func TestPdProfileHandlerFactoryInvalidJSON(t *testing.T) {
 		},
 	}
 
+	handle, err := createHandleWithDeciderPlugins(ctx)
+	assert.NoError(t, err)
+
 	for _, tt := range invalidTests {
 		t.Run(tt.name, func(t *testing.T) {
 			rawParams := json.RawMessage(tt.jsonParams)
-			plugin, err := PdProfileHandlerFactory("test", rawParams, nil)
+			plugin, err := PdProfileHandlerFactory("test", rawParams, handle)
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
@@ -225,22 +210,6 @@ type mockSchedulerProfile struct{}
 
 func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.LLMRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
 	return &scheduling.ProfileRunResult{}, nil
-}
-
-// setups cycle state for the prefix plugin for the given cached tokens number
-func setupPrefixState(cs *scheduling.CycleState, cachedTokens int) {
-	prefixMap := map[prefix.ServerID]int{}
-	if cachedTokens > 0 {
-		prefixMap[prefix.ServerID(k8stypes.NamespacedName{Name: "pod1", Namespace: "default"})] = cachedTokens
-	}
-	state := &prefix.SchedulingContextState{PrefixCacheServers: prefixMap}
-	key := plugin.StateKey(fmt.Sprintf("%s/%s", prefix.PrefixCachePluginType, prefix.PrefixCachePluginType))
-	cs.Write(key, state)
-}
-
-// returns prefix decider parameters as raw json for the given number of non cached tokens limit
-func getDeciderParamsRaw(nonCachedTokensLimit int) json.RawMessage {
-	return json.RawMessage(fmt.Sprintf("{\"nonCachedTokens\": %d}", nonCachedTokensLimit))
 }
 
 // creates and returns llm completion request forthe given prompt
@@ -343,6 +312,9 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		deciderPlugin, err := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: tt.nonCachedTokensLimit})
+		assert.NoError(t, err)
+
 		t.Run(tt.name, func(t *testing.T) {
 			handler, err := NewPdProfileHandler(
 				defaultPrefillProfile,
@@ -350,13 +322,9 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 				tt.prefixPluginType,
 				tt.prefixPluginName,
 				0,
-				PrefixBasedDisaggregationName,
-				getDeciderParamsRaw(tt.nonCachedTokensLimit),
+				deciderPlugin,
 			)
 			assert.NoError(t, err)
-
-			cs := &scheduling.CycleState{}
-			setupPrefixState(cs, tt.cachedTokens)
 
 			// set prefix to the given cached tokens number for pod "pod1" in decode profile results
 			inputTokens := len(request.Body.Completions.Prompt) / AverageCharactersPerToken
@@ -369,7 +337,7 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 					}
 				}
 			}
-			result := handler.Pick(ctx, cs, request, profiles, tt.profileResults)
+			result := handler.Pick(ctx, nil, request, profiles, tt.profileResults)
 			assert.ElementsMatch(t, tt.expectedProfiles, getProfilesFromResult(result))
 		})
 	}
@@ -445,21 +413,22 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			deciderPlugin, err := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: tt.nonCachedTokensLimit})
+			assert.NoError(t, err)
+
 			handler, err := NewPdProfileHandler(
 				defaultPrefillProfile,
 				defaultDecodeProfile,
 				prefix.PrefixCachePluginType,
 				prefix.PrefixCachePluginType,
 				0,
-				PrefixBasedDisaggregationName,
-				getDeciderParamsRaw(tt.nonCachedTokensLimit),
+				deciderPlugin,
 			)
 			assert.NoError(t, err)
 
 			// run sequences of request
 			for _, innerTest := range tt.tests {
 				cs := &scheduling.CycleState{}
-				setupPrefixState(cs, innerTest.cachedTokens)
 
 				// set prefix to the given cached tokens number for pod "pod1" in decode profile results
 				inputTokens := len(innerTest.request.Body.Completions.Prompt) / AverageCharactersPerToken
@@ -543,6 +512,9 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		deciderPlugin, err := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: 0})
+		assert.NoError(t, err)
+
 		t.Run(tt.name, func(t *testing.T) {
 			handler, err := NewPdProfileHandler(
 				defaultPrefillProfile,
@@ -550,8 +522,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				prefix.PrefixCachePluginType,
 				prefix.PrefixCachePluginType,
 				tt.primaryPort,
-				PrefixBasedDisaggregationName,
-				getDeciderParamsRaw(0),
+				deciderPlugin,
 			)
 			assert.NoError(t, err)
 
@@ -571,4 +542,17 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 			tt.checkResult(t, result, headers)
 		})
 	}
+}
+
+func createHandleWithDeciderPlugins(ctx context.Context) (plugin.Handle, error) {
+	handle := plugin.NewEppHandle(ctx, nil)
+	plugin1, err := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: 4})
+	if err != nil {
+		return nil, err
+	}
+	handle.AddPlugin(PrefixBasedPDDeciderPluginType, plugin1)
+	plugin2 := newAlwaysDisaggrPDDecider()
+	handle.AddPlugin(AlwaysDisaggrDeciderPluginType, plugin2)
+
+	return handle, nil
 }
