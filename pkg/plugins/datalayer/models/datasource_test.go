@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
-
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/http"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 )
 
 func TestDatasource(t *testing.T) {
@@ -36,8 +36,8 @@ func TestDatasource(t *testing.T) {
 	assert.Nil(t, err, "failed to register")
 
 	ctx := context.Background()
-	factory := datalayer.NewEndpointFactory([]datalayer.DataSource{source}, 100*time.Millisecond)
-	pod := &datalayer.EndpointMetadata{
+	factory := datalayer.NewEndpointFactory([]fwkdl.DataSource{source}, 100*time.Millisecond)
+	pod := &fwkdl.EndpointMetadata{
 		NamespacedName: types.NamespacedName{
 			Name:      "pod1",
 			Namespace: "default",

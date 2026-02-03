@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/http"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
 const (
@@ -28,7 +28,7 @@ type modelsDatasourceParams struct {
 
 // ModelDataSourceFactory is a factory function used to instantiate data layer's
 // models data source plugins specified in a configuration.
-func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	cfg := defaultDataSourceConfigParams()
 	if parameters != nil { // overlay the defaults with configured values
 		if err := json.Unmarshal(parameters, cfg); err != nil {
@@ -43,7 +43,7 @@ func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugins.H
 
 // ModelServerExtractorFactory is a factory function used to instantiate data layer's models
 // Extractor plugins specified in a configuration.
-func ModelServerExtractorFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func ModelServerExtractorFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	extractor, err := NewModelExtractor()
 	if err != nil {
 		return nil, err

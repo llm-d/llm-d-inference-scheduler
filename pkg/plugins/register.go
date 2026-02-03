@@ -23,6 +23,6 @@ func RegisterAllPlugins() {
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugin.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
 	plugin.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
-    plugins.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
-	plugins.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
+	plugin.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
+	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
 }

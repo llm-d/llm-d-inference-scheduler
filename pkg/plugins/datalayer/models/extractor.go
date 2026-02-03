@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
 const modelsAttributeKey = "/v1/models"
@@ -27,7 +27,7 @@ func (m *ModelInfo) String() string {
 }
 
 // Clone returns a full copy of the object
-func (m ModelInfoCollection) Clone() datalayer.Cloneable {
+func (m ModelInfoCollection) Clone() fwkdl.Cloneable {
 	if m == nil {
 		return nil
 	}
@@ -60,13 +60,13 @@ var (
 
 // ModelExtractor implements the models extraction.
 type ModelExtractor struct {
-	typedName plugins.TypedName
+	typedName fwkplugin.TypedName
 }
 
 // NewModelExtractor returns a new model extractor.
 func NewModelExtractor() (*ModelExtractor, error) {
 	return &ModelExtractor{
-		typedName: plugins.TypedName{
+		typedName: fwkplugin.TypedName{
 			Type: ModelsExtractorType,
 			Name: ModelsExtractorType,
 		},
@@ -74,7 +74,7 @@ func NewModelExtractor() (*ModelExtractor, error) {
 }
 
 // TypedName returns the type and name of the ModelExtractor.
-func (me *ModelExtractor) TypedName() plugins.TypedName {
+func (me *ModelExtractor) TypedName() fwkplugin.TypedName {
 	return me.typedName
 }
 
@@ -85,12 +85,12 @@ func (me *ModelExtractor) ExpectedInputType() reflect.Type {
 
 // Extract transforms the data source output into a concrete attribute that
 // is stored on the given endpoint.
-func (me *ModelExtractor) Extract(_ context.Context, data any, ep datalayer.Endpoint) error {
+func (me *ModelExtractor) Extract(_ context.Context, data any, ep fwkdl.Endpoint) error {
 	models, ok := data.(*ModelResponse)
 	if !ok {
 		return fmt.Errorf("unexpected input in Extract: %T", data)
 	}
 
-	ep.Put(modelsAttributeKey, ModelInfoCollection(models.Data))
+	ep.GetAttributes().Put(modelsAttributeKey, ModelInfoCollection(models.Data))
 	return nil
 }

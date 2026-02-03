@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 )
 
 func TestExtractorExtract(t *testing.T) {
@@ -29,7 +29,7 @@ func TestExtractorExtract(t *testing.T) {
 		t.Errorf("incorrect expected input type: %v", inputType)
 	}
 
-	ep := datalayer.NewEndpoint(nil, nil)
+	ep := fwkdl.NewEndpoint(nil, nil)
 	if ep == nil {
 		t.Fatal("expected non-nil endpoint")
 	}
