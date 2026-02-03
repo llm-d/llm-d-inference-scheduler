@@ -134,7 +134,7 @@ func TestPdProfileHandlerFactory(t *testing.T) {
 			var rawParams json.RawMessage
 			if tt.params != nil {
 				bytes, err := json.Marshal(tt.params)
-				assert.Error(t, err)
+				assert.NoError(t, err)
 				rawParams = json.RawMessage(bytes)
 			}
 			plugin, err := PdProfileHandlerFactory(tt.pluginName, rawParams, nil)
