@@ -6,23 +6,23 @@ import (
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
 // RegisterAllPlugins registers the factory functions of all plugins in this repository.
 func RegisterAllPlugins() {
-	plugins.Register(filter.ByLabelType, filter.ByLabelFactory)
-	plugins.Register(filter.ByLabelSelectorType, filter.ByLabelSelectorFactory)
-	plugins.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
-	plugins.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
-	plugins.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
-	plugins.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
-	plugins.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
-	plugins.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
-	plugins.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
-	plugins.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
-	plugins.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
-	plugins.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
-	plugins.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
+	plugin.Register(filter.ByLabelType, filter.ByLabelFactory)
+	plugin.Register(filter.ByLabelSelectorType, filter.ByLabelSelectorFactory)
+	plugin.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
+	plugin.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
+	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
+	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
+	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
+	plugin.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
+	plugin.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
+	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
+	plugin.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
+	plugin.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
+  plugins.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
 	plugins.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
 }

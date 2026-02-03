@@ -9,9 +9,8 @@ import (
 	"strconv"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
@@ -26,10 +25,10 @@ type dataParallelProfileHandlerParameters struct {
 }
 
 // compile-time type assertion
-var _ framework.ProfileHandler = &DataParallelProfileHandler{}
+var _ scheduling.ProfileHandler = &DataParallelProfileHandler{}
 
 // DataParallelProfileHandlerFactory defines the factory function for the DataParallelProfileHandler
-func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := dataParallelProfileHandlerParameters{
 		PrimaryPort: 8000,
 	}
@@ -51,19 +50,19 @@ func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessag
 // NewDataParallelProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewDataParallelProfileHandler(primaryPort int) *DataParallelProfileHandler {
 	return &DataParallelProfileHandler{
-		typedName:   plugins.TypedName{Type: DataParallelProfileHandlerType},
+		typedName:   plugin.TypedName{Type: DataParallelProfileHandlerType},
 		primaryPort: strconv.Itoa(primaryPort),
 	}
 }
 
 // DataParallelProfileHandler handles scheduler profiles for Data Parallel.
 type DataParallelProfileHandler struct {
-	typedName   plugins.TypedName
+	typedName   plugin.TypedName
 	primaryPort string
 }
 
 // TypedName returns the typed name of the plugin.
-func (h *DataParallelProfileHandler) TypedName() plugins.TypedName {
+func (h *DataParallelProfileHandler) TypedName() plugin.TypedName {
 	return h.typedName
 }
 
@@ -75,17 +74,17 @@ func (h *DataParallelProfileHandler) WithName(name string) *DataParallelProfileH
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *DataParallelProfileHandler) Pick(ctx context.Context, _ *types.CycleState, _ *types.LLMRequest, profiles map[string]*framework.SchedulerProfile,
-	profileResults map[string]*types.ProfileRunResult) map[string]*framework.SchedulerProfile {
+func (h *DataParallelProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	if len(profiles) == len(profileResults) { // all profiles have been executed already in previous call
-		return map[string]*framework.SchedulerProfile{}
+		return map[string]scheduling.SchedulerProfile{}
 	}
 	// Validate that only one profile is configured for Data Parallel mode
 	if len(profiles) != 1 {
 		log.FromContext(ctx).Error(nil, "Data Parallel profile handler requires exactly one scheduling profile",
 			"profileCount", len(profiles),
 		)
-		return map[string]*framework.SchedulerProfile{} // return empty map for fast exit in later steps
+		return map[string]scheduling.SchedulerProfile{} // return empty map for fast exit in later steps
 	}
 	// return only one profile
 	return profiles
@@ -95,8 +94,8 @@ func (h *DataParallelProfileHandler) Pick(ctx context.Context, _ *types.CycleSta
 // It may aggregate results, log test profile outputs, or apply custom logic. It specifies in the SchedulingResult the
 // key of the primary profile that should be used to get the request selected destination.
 // When a profile run fails, its result in the profileResults map is nil.
-func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *types.CycleState, request *types.LLMRequest,
-	profileResults map[string]*types.ProfileRunResult) (*types.SchedulingResult, error) {
+func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
+	profileResults map[string]*scheduling.ProfileRunResult) (*scheduling.SchedulingResult, error) {
 	if len(profileResults) != 1 {
 		return nil, errors.New("data parallel profile handler is intended to be used with a single profile, failed to process multiple profiles")
 	}
@@ -112,23 +111,23 @@ func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *types.
 		return nil, fmt.Errorf("failed to run scheduler profile '%s'", singleProfileName)
 	}
 
-	newResult := types.ProfileRunResult{
-		TargetPods: []types.Pod{},
+	newResult := scheduling.ProfileRunResult{
+		TargetEndpoints: []scheduling.Endpoint{},
 	}
 
-	targetPod := profileResult.TargetPods[0].GetPod()
+	targetPod := profileResult.TargetEndpoints[0].GetMetadata()
 
 	request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
 
-	for _, target := range profileResult.TargetPods {
-		newPodInfo := target.GetPod().Clone()
-		newPodInfo.Port = h.primaryPort
-		targetPod := &types.PodMetrics{Pod: newPodInfo, MetricsState: target.GetMetrics().Clone()}
-		newResult.TargetPods = append(newResult.TargetPods, targetPod)
+	for _, target := range profileResult.TargetEndpoints {
+		newMetadata := target.GetMetadata().Clone()
+		newMetadata.Port = h.primaryPort
+		targetEndpoint := scheduling.NewEndpoint(newMetadata, target.GetMetrics().Clone(), nil)
+		newResult.TargetEndpoints = append(newResult.TargetEndpoints, targetEndpoint)
 	}
-	modifiedResults := map[string]*types.ProfileRunResult{singleProfileName: &newResult}
+	modifiedResults := map[string]*scheduling.ProfileRunResult{singleProfileName: &newResult}
 
-	return &types.SchedulingResult{
+	return &scheduling.SchedulingResult{
 		ProfileResults:     modifiedResults,
 		PrimaryProfileName: singleProfileName,
 	}, nil

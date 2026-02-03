@@ -2,13 +2,15 @@ module github.com/llm-d/llm-d-inference-scheduler
 
 go 1.24.9
 
+toolchain go1.24.12
+
 require (
 	github.com/go-logr/logr v1.4.3
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jellydator/ttlcache/v3 v3.4.0
-	github.com/llm-d/llm-d-kv-cache v0.5.0-RC1
+	github.com/llm-d/llm-d-kv-cache v0.5.0
 	github.com/onsi/ginkgo/v2 v2.27.5
 	github.com/onsi/gomega v1.39.0
 	github.com/openai/openai-go v1.12.0
@@ -21,10 +23,10 @@ require (
 	k8s.io/apimachinery v0.34.3
 	k8s.io/client-go v0.34.3
 	k8s.io/component-base v0.34.3
-	k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d
+	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	sigs.k8s.io/controller-runtime v0.22.5
 	sigs.k8s.io/gateway-api v1.4.1
-	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20260112081006-c49f26427640
+	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20260128235548-fd30cb97714a
 )
 
 require (
@@ -90,7 +92,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
-	github.com/prometheus/prometheus v0.309.0 // indirect
+	github.com/prometheus/prometheus v0.309.1 // indirect
 	github.com/redis/go-redis/v9 v9.11.0 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect

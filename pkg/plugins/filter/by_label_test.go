@@ -8,9 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -139,54 +138,55 @@ func TestByLabelFactoryInvalidJSON(t *testing.T) {
 }
 
 // Helper functions
-func createPod(nsn k8stypes.NamespacedName, ipaddr string, labels map[string]string) types.Pod {
-	return &types.PodMetrics{
-		Pod: &backend.Pod{
+func createEndpoint(nsn k8stypes.NamespacedName, ipaddr string, labels map[string]string) scheduling.Endpoint {
+	return scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{
 			NamespacedName: nsn,
 			Address:        ipaddr,
 			Labels:         labels,
 		},
-		MetricsState: &backendmetrics.MetricsState{},
-	}
+		&fwkdl.Metrics{},
+		nil,
+	)
 }
 
 func TestByLabelFiltering(t *testing.T) {
-	pods := []types.Pod{
-		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-1"},
+	endpoints := []scheduling.Endpoint{
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-1"},
 			"10.0.0.1",
 			map[string]string{
 				"app":     "nginx",
 				"version": "v1.0",
 				"tier":    "frontend",
 			}),
-		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-2"},
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "nginx-2"},
 			"10.0.0.2",
 			map[string]string{
 				"app":     "nginx",
 				"version": "v1.1",
 				"tier":    "frontend",
 			}),
-		createPod(k8stypes.NamespacedName{Namespace: "kube-system", Name: "coredns-1"},
+		createEndpoint(k8stypes.NamespacedName{Namespace: "kube-system", Name: "coredns-1"},
 			"10.0.0.3",
 			map[string]string{
 				"app":  "coredns",
 				"tier": "system",
 			}),
-		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "redis-1"},
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "redis-1"},
 			"10.0.0.4",
 			map[string]string{
 				"app":        "redis",
 				"tier":       "backend",
 				"deprecated": "true",
 			}),
-		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "web-1"},
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "web-1"},
 			"10.0.0.5",
 			map[string]string{
 				"app":         "web",
 				"tier":        "frontend",
 				"environment": "production",
 			}),
-		createPod(k8stypes.NamespacedName{Namespace: "default", Name: "no-tier-pod"},
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "no-tier-pod"},
 			"10.0.0.6",
 			map[string]string{
 				"app": "unknown",
@@ -247,17 +247,17 @@ func TestByLabelFiltering(t *testing.T) {
 
 			ctx := utils.NewTestContext(t)
 
-			filteredPods := blf.Filter(ctx, nil, nil, pods)
+			filteredEndpoints := blf.Filter(ctx, nil, nil, endpoints)
 
-			var actualPodNames []string
-			for _, pod := range filteredPods {
-				actualPodNames = append(actualPodNames, pod.GetPod().NamespacedName.Name)
+			var actualEndpointNames []string
+			for _, endpoint := range filteredEndpoints {
+				actualEndpointNames = append(actualEndpointNames, endpoint.GetMetadata().NamespacedName.Name)
 			}
 
-			assert.ElementsMatch(t, tt.expectedPods, actualPodNames,
-				"filtered pods should match expected pods")
-			assert.Len(t, filteredPods, len(tt.expectedPods),
-				"filtered pods count should match expected count")
+			assert.ElementsMatch(t, tt.expectedPods, actualEndpointNames,
+				"filtered endpoints should match expected endpoints")
+			assert.Len(t, filteredEndpoints, len(tt.expectedPods),
+				"filtered endpoints count should match expected count")
 		})
 	}
 }
