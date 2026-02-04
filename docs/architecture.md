@@ -208,27 +208,37 @@ Selects the profiles to use when running with disaggregated prefill/decode
 - **Parameters**:
   - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
   - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-  - `decider`: specifies the name of the decider, which determines whether disaggregated PD should be executed
-    - `name`: decider name, currently supported values are: "prefix-based-disaggregation-decider" and "always-disaggregated-decider"
-    - `parameters`: parameters for this specific decider type
+  - `deciderPluginName`: specifies the name of the decider plugin. Decider determines whether disaggregated PD should be executed
   - `primaryPort`: the base port number used for data parallel communication.
 
 **Note:** When using this plugin you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
 
-**Parameters for `prefix-based-disaggregation-decider`**
+---
+
+#### Prefix Based Decider Plugin
+
+Type: `prefix-based-pd-decider`
+
+**Parameters**
 - `nonCachedTokens`: length, in token, of the uncached part of the user input above which disaggregated PD is triggered.
-- `pluginName`: the prefix plugin name. Optional, required when overriding the default plugin name.
+
+Note: `prepareDataPlugins` feature gate should be enabled
 
 **Example**
 ```yaml
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 4
 - type: pd-profile-handler
   parameters:
     primaryPort: 8000
-    decider: 
-      name: prefix-based-disaggregation-decider
-      parameters:
-        nonCachedTokens: 10 
+    deciderPluginName: prefix-based-pd-decider
 ```
+
 ---
 
 #### ByLabelSelector
