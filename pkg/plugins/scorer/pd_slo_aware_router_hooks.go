@@ -53,6 +53,12 @@ func (p *PDSLOAwareRouter) PreRequest(ctx context.Context, request *schedulingty
 	// Delegate to base router (tracks decode pod - primary profile)
 	p.PredictedLatency.PreRequest(ctx, request, schedulingResult)
 
+	// Guard against nil request or schedulingResult - base will have returned early
+	if request == nil || schedulingResult == nil || len(schedulingResult.ProfileResults) == 0 {
+		logger.V(logutil.DEBUG).Info("PDSLOAwareRouter.PreRequest: request or schedulingResult is nil/empty after base delegation, skipping P/D tracking")
+		return
+	}
+
 	// P/D-specific: Also track prefill pod if it was selected
 	if prefillResult, exists := schedulingResult.ProfileResults["prefill"]; exists && prefillResult != nil {
 		if len(prefillResult.TargetEndpoints) > 0 {
@@ -85,6 +91,13 @@ func (p *PDSLOAwareRouter) PreRequest(ctx context.Context, request *schedulingty
 func (p *PDSLOAwareRouter) ResponseReceived(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, targetPod *datalayer.EndpointMetadata) {
 	logger := log.FromContext(ctx)
 
+	// Guard against nil request (can happen during early request failures)
+	if request == nil {
+		logger.V(logutil.DEBUG).Info("PDSLOAwareRouter.ResponseReceived: request is nil, delegating to base")
+		p.PredictedLatency.ResponseReceived(ctx, request, response, targetPod)
+		return
+	}
+
 	// P/D-specific: Check for prefill timing headers from the decode sidecar
 	if prefillTTFTStr, ok := response.Headers["x-prefill-ttft-ms"]; ok && prefillTTFTStr != "" {
 		logger.V(logutil.DEBUG).Info("Detected prefill timing header",
@@ -115,6 +128,14 @@ func (p *PDSLOAwareRouter) ResponseStreaming(ctx context.Context, request *sched
 // delegating to the base router, which removes the decode pod.
 func (p *PDSLOAwareRouter) ResponseComplete(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, pod *datalayer.EndpointMetadata) {
 	logger := log.FromContext(ctx)
+
+	// Guard against nil request (can happen during early request failures)
+	if request == nil {
+		logger.V(logutil.DEBUG).Info("PDSLOAwareRouter.ResponseComplete: request is nil, delegating to base")
+		p.PredictedLatency.ResponseComplete(ctx, request, response, pod)
+		return
+	}
+
 	requestID := request.Headers[requtil.RequestIdHeaderKey]
 
 	// P/D-specific: Remove prefill pod from tracking if it was used
@@ -152,6 +173,12 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 	actualPrefillTTFT float64,
 ) {
 	logger := log.FromContext(ctx)
+
+	// Guard against nil request (defensive, should not happen)
+	if request == nil {
+		logger.V(logutil.DEBUG).Info("recordPrefillTrainingData: request is nil, skipping")
+		return
+	}
 
 	// Get scheduling result for this request
 	schedulingResult, err := p.PredictedLatency.GetSchedulingResultForRequest(request)
@@ -212,8 +239,18 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 		prefixCacheScore,
 	)
 
-	// Record training data
-	latencyPredictor := p.PredictedLatency.GetLatencyPredictor().(latencypredictor.PredictorInterface)
+	// Record training data (use safe type assertion to avoid panic)
+	predictorInterface := p.PredictedLatency.GetLatencyPredictor()
+	if predictorInterface == nil {
+		logger.V(logutil.DEBUG).Info("Latency predictor is nil, skipping prefill training")
+		return
+	}
+
+	latencyPredictor, ok := predictorInterface.(latencypredictor.PredictorInterface)
+	if !ok {
+		logger.V(logutil.DEBUG).Info("Latency predictor type mismatch, skipping prefill training")
+		return
+	}
 	if err := latencyPredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to record prefill training data")
 	} else {
