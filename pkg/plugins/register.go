@@ -22,4 +22,7 @@ func RegisterAllPlugins() {
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugin.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
 	plugin.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
+	// pd decider plugins
+	plugin.Register(profile.PrefixBasedPDDeciderPluginType, profile.PrefixBasedPDDeciderPluginFactory)
+	plugin.Register(profile.AlwaysDisaggrDeciderPluginType, profile.AlwaysDisaggrPDDeciderPluginFactory)
 }

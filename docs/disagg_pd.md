@@ -155,6 +155,8 @@ Below is a minimal `EndpointPickerConfig` that enables integration with workload
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
 plugins:
   # Prefill selection: match Pods with label role=prefill
   - type: by-label
@@ -176,10 +178,12 @@ plugins:
       lruCapacityPerServer: 31250
   - type: max-score-picker
   - type: prefill-header-handler
-  - type: pd-profile-handler
+  - type: prefix-based-pd-decider
     parameters:
-      threshold: 0
-      hashBlockSize: 5
+      nonCachedTokens: 8
+  - type: pd-profile-handler
+    parameters:    
+      deciderPluginName: prefix-based-pd-decider
       primaryPort: 8000
 schedulingProfiles:
   - name: prefill
