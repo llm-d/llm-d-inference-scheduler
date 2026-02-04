@@ -23,8 +23,12 @@ import (
 	"strings"
 )
 
-func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
-	s.logger.Info("running LMCache protocol")
+// runLMCacheProtocol handles the LMCache protocol for all OpenAI API types.
+// The apiType parameter determines which token limit fields to use:
+// - Chat Completions: max_tokens, max_completion_tokens
+// - Responses/Conversations: max_output_tokens
+func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType APIType) {
+	s.logger.Info("running LMCache protocol", "apiType", apiType)
 
 	// Read and parse request body
 	defer r.Body.Close() //nolint:all
@@ -44,13 +48,16 @@ func (s *Server) runLMCacheProtocol(w http.ResponseWriter, r *http.Request, pref
 		return
 	}
 
-	// Create prefiller request. Set max_tokens to 1.
+	// Create prefiller request. Set token limits to 1 based on API type.
 
 	ctx := r.Context()
 	preq := r.Clone(ctx)
 
-	completionRequest[requestFieldMaxTokens] = 1
-	completionRequest[requestFieldMaxCompletionTokens] = 1
+	// Set token limits to 1 for prefill based on API type
+	tokenFields := apiType.TokenLimitFields()
+	for _, field := range tokenFields {
+		completionRequest[field] = 1
+	}
 
 	pbody, err := json.Marshal(completionRequest)
 	if err != nil {

@@ -38,6 +38,7 @@ const (
 	requestFieldKVTransferParams    = "kv_transfer_params"
 	requestFieldMaxTokens           = "max_tokens"
 	requestFieldMaxCompletionTokens = "max_completion_tokens"
+	requestFieldMaxOutputTokens     = "max_output_tokens" // Used by Responses/Conversations API
 	requestFieldDoRemotePrefill     = "do_remote_prefill"
 	requestFieldDoRemoteDecode      = "do_remote_decode"
 	requestFieldRemoteBlockIDs      = "remote_block_ids"
@@ -67,6 +68,28 @@ const (
 	LegacyPoolGroup = "inference.networking.x-k8s.io"
 )
 
+// APIType represents the type of OpenAI API being used
+type APIType int
+
+const (
+	// APITypeChatCompletions is the Chat Completions API (/v1/chat/completions, /v1/completions)
+	APITypeChatCompletions APIType = iota
+	// APITypeResponses is the Responses API (/v1/responses)
+	APITypeResponses
+	// APITypeConversations is the Conversations API (/v1/conversations)
+	APITypeConversations
+)
+
+// TokenLimitFields returns the field names used for token limits based on API type
+func (a APIType) TokenLimitFields() []string {
+	switch a {
+	case APITypeResponses, APITypeConversations:
+		return []string{requestFieldMaxOutputTokens}
+	default:
+		return []string{requestFieldMaxTokens, requestFieldMaxCompletionTokens}
+	}
+}
+
 // Config represents the proxy server configuration
 type Config struct {
 	// Connector is the name of the P/D protocol the proxy must follow.
@@ -89,7 +112,7 @@ type Config struct {
 	EnablePrefillerSampling bool
 }
 
-type protocolRunner func(http.ResponseWriter, *http.Request, string)
+type protocolRunner func(http.ResponseWriter, *http.Request, string, APIType)
 
 // Server is the reverse proxy server
 type Server struct {
@@ -99,7 +122,7 @@ type Server struct {
 	decoderURL           *url.URL     // the local decoder URL
 	handler              http.Handler // the handler function. either a Mux or a proxy
 	allowlistValidator   *AllowlistValidator
-	runConnectorProtocol protocolRunner // the handler for running the protocol
+	runConnectorProtocol protocolRunner // the handler for running the protocol (unified for all API types)
 	prefillerURLPrefix   string
 
 	decoderProxy        http.Handler                     // decoder proxy handler
@@ -198,6 +221,8 @@ func (s *Server) createRoutes() *http.ServeMux {
 	})
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
 	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
+	mux.HandleFunc("POST "+ResponsesPath, s.responsesHandler)             // /v1/responses (openai responses API)
+	mux.HandleFunc("POST "+ConversationsPath, s.conversationsHandler)     // /v1/conversations (openai conversations API)
 
 	s.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.DecoderInsecureSkipVerify)
 
