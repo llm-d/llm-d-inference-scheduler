@@ -35,6 +35,9 @@ func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugin.Ha
 			return nil, err
 		}
 	}
+	if cfg.Scheme != "http" && cfg.Scheme != "https" {
+		return nil, fmt.Errorf("unsupported scheme: %s", cfg.Scheme)
+	}
 
 	ds := http.NewHTTPDataSource(cfg.Scheme, cfg.Path, cfg.InsecureSkipVerify, ModelsDataSourceType,
 		name, parseModels, ModelsResponseType)
