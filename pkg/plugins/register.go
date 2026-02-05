@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/datalayer/models"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
@@ -22,4 +23,6 @@ func RegisterAllPlugins() {
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugin.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
 	plugin.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
+	plugin.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
+	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
 }
