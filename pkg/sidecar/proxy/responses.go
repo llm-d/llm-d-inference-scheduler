@@ -24,14 +24,14 @@ import (
 )
 
 var (
-	// ChatCompletionsPath is the OpenAI chat completions path
-	ChatCompletionsPath = "/v1/chat/completions"
+	// ResponsesPath is the OpenAI Responses API path
+	ResponsesPath = "/v1/responses"
 
-	// CompletionsPath is the legacy completions path
-	CompletionsPath = "/v1/completions"
+	// ConversationsPath is the OpenAI Conversations API path
+	ConversationsPath = "/v1/conversations"
 )
 
-func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) responsesHandler(w http.ResponseWriter, r *http.Request) {
 	var prefillHostPorts []string
 	prefillHostPorts = r.Header.Values(common.PrefillPodHeader)
 
@@ -55,7 +55,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if len(prefillHostPort) == 0 {
-		s.logger.V(4).Info("skip disaggregated prefill")
+		s.logger.V(4).Info("skip disaggregated prefill for responses API")
 
 		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
 			s.decoderProxy.ServeHTTP(w, r)
@@ -75,5 +75,52 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.logger.V(4).Info("SSRF protection: prefill target allowed", "target", prefillHostPort)
-	s.runConnectorProtocol(w, r, prefillHostPort, APITypeChatCompletions)
+	s.runConnectorProtocol(w, r, prefillHostPort, APITypeResponses)
+}
+
+func (s *Server) conversationsHandler(w http.ResponseWriter, r *http.Request) {
+	var prefillHostPorts []string
+	prefillHostPorts = r.Header.Values(common.PrefillPodHeader)
+
+	// https://datatracker.ietf.org/doc/html/rfc7230#section-3.2.2 specifies proxies
+	// may combine multiple header values with a comma. Accept either one host per
+	// header line OR one line with multiple header values.
+	if len(prefillHostPorts) == 1 {
+		prefillHostPorts = strings.Split(prefillHostPorts[0], ",")
+	}
+
+	numHosts := len(prefillHostPorts)
+	var prefillHostPort string
+	if numHosts > 0 {
+		if s.config.EnablePrefillerSampling {
+			// Sample a host value from the list
+			prefillHostPort = strings.TrimSpace(prefillHostPorts[s.prefillSamplerFn(numHosts)])
+		} else if numHosts > 0 {
+			// Select only the first header value, consistent with previous behavior
+			prefillHostPort = strings.TrimSpace(prefillHostPorts[0])
+		}
+	}
+
+	if len(prefillHostPort) == 0 {
+		s.logger.V(4).Info("skip disaggregated prefill for conversations API")
+
+		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
+			s.decoderProxy.ServeHTTP(w, r)
+		}
+		return
+	}
+
+	// SSRF Protection: Check if the prefill target is allowed
+	if !s.allowlistValidator.IsAllowed(prefillHostPort) {
+		s.logger.Error(nil, "SSRF protection: prefill target not in allowlist",
+			"target", prefillHostPort,
+			"clientIP", r.RemoteAddr,
+			"userAgent", r.Header.Get("User-Agent"),
+			"requestPath", r.URL.Path)
+		http.Error(w, "Forbidden: prefill target not allowed by SSRF protection", http.StatusForbidden)
+		return
+	}
+
+	s.logger.V(4).Info("SSRF protection: prefill target allowed", "target", prefillHostPort)
+	s.runConnectorProtocol(w, r, prefillHostPort, APITypeConversations)
 }
