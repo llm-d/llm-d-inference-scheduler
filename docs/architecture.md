@@ -542,7 +542,7 @@ When no tokenizer is configured, falls back to character-based estimation (chara
 
 **Label Format:**
 
-Pods should be labeled with context length ranges using the format `"min-max"`:
+Pods should be labeled with context length ranges using the format `"min-max"`, where _min_ and _max_ are both positive integers:
 
 ```yaml
 llm-d.ai/context-length-range: "0-2048"
