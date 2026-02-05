@@ -1,147 +1,323 @@
-package scorer_test
+package scorer
 
 import (
 	"context"
 	"encoding/base64"
+	"net/http"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func TestSessionAffinity_Score(t *testing.T) {
-	endpointA := scheduling.NewEndpoint(
-		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+func newTestEndpointForSession(name, namespace string) scheduling.Endpoint {
+	return scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{Name: name, Namespace: namespace},
+		},
 		&fwkdl.Metrics{},
 		nil,
 	)
-	endpointB := scheduling.NewEndpoint(
-		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		&fwkdl.Metrics{},
-		nil,
-	)
+}
 
-	inputEndpoints := []scheduling.Endpoint{endpointA, endpointB}
+func TestSessionAffinityWithCookies(t *testing.T) {
+	scorer := NewSessionAffinity(nil) // Use default config
+	ctx := context.Background()
 
-	// valid session token for endpointB
-	validSessionTokenForEndpointB := base64.StdEncoding.EncodeToString([]byte(endpointB.GetMetadata().NamespacedName.String()))
+	// Create mock endpoints
+	endpoint1 := newTestEndpointForSession("pod-1", "default")
+	endpoint2 := newTestEndpointForSession("pod-2", "default")
+	endpoints := []scheduling.Endpoint{endpoint1, endpoint2}
 
-	sessionAffinityScorer := scorer.NewSessionAffinity()
+	t.Run("No cookie - all endpoints get zero score", func(t *testing.T) {
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{},
+		}
 
+		scores := scorer.Score(ctx, nil, request, endpoints)
+		assert.Equal(t, 0.0, scores[endpoint1])
+		assert.Equal(t, 0.0, scores[endpoint2])
+	})
+
+	t.Run("Cookie with pod-1 - pod-1 gets high score", func(t *testing.T) {
+		sessionToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{
+				"cookie": sessionCookieName + "=" + sessionToken,
+			},
+		}
+
+		scores := scorer.Score(ctx, nil, request, endpoints)
+		assert.Equal(t, 1.0, scores[endpoint1])
+		assert.Equal(t, 0.0, scores[endpoint2])
+	})
+
+	t.Run("Cookie with pod-2 - pod-2 gets high score", func(t *testing.T) {
+		sessionToken := base64.StdEncoding.EncodeToString([]byte("default/pod-2"))
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{
+				"cookie": sessionCookieName + "=" + sessionToken,
+			},
+		}
+
+		scores := scorer.Score(ctx, nil, request, endpoints)
+		assert.Equal(t, 0.0, scores[endpoint1])
+		assert.Equal(t, 1.0, scores[endpoint2])
+	})
+
+	t.Run("Multiple cookies - session cookie is extracted", func(t *testing.T) {
+		sessionToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{
+				"cookie": "other-cookie=value; " + sessionCookieName + "=" + sessionToken + "; another=test",
+			},
+		}
+
+		scores := scorer.Score(ctx, nil, request, endpoints)
+		assert.Equal(t, 1.0, scores[endpoint1])
+		assert.Equal(t, 0.0, scores[endpoint2])
+	})
+
+	t.Run("Invalid base64 cookie - all endpoints get zero score", func(t *testing.T) {
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{
+				"cookie": sessionCookieName + "=invalid-base64!!!",
+			},
+		}
+
+		scores := scorer.Score(ctx, nil, request, endpoints)
+		assert.Equal(t, 0.0, scores[endpoint1])
+		assert.Equal(t, 0.0, scores[endpoint2])
+	})
+}
+
+func TestResponseReceivedSetsCookie(t *testing.T) {
+	scorer := NewSessionAffinity(nil) // Use default config
+	ctx := context.Background()
+
+	t.Run("Sets cookie in response", func(t *testing.T) {
+		response := &requestcontrol.Response{
+			RequestId: "test-req-1",
+			Headers:   make(map[string]string),
+		}
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-1",
+			},
+		}
+
+		scorer.ResponseReceived(ctx, nil, response, targetPod)
+
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.NotEmpty(t, setCookie)
+		assert.Contains(t, setCookie, sessionCookieName+"=")
+		assert.Contains(t, setCookie, "Path=/")
+		assert.Contains(t, setCookie, "HttpOnly")
+		assert.Contains(t, setCookie, "SameSite=Lax")
+
+		// Verify the cookie value is correctly encoded
+		expectedToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
+		assert.Contains(t, setCookie, expectedToken)
+	})
+
+	t.Run("Appends to existing Set-Cookie header", func(t *testing.T) {
+		response := &requestcontrol.Response{
+			RequestId: "test-req-2",
+			Headers: map[string]string{
+				setCookieHeaderName: "existing-cookie=value; Path=/",
+			},
+		}
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-2",
+			},
+		}
+
+		scorer.ResponseReceived(ctx, nil, response, targetPod)
+
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.Contains(t, setCookie, "existing-cookie=value")
+		assert.Contains(t, setCookie, sessionCookieName+"=")
+	})
+
+	t.Run("Handles nil response gracefully", func(t *testing.T) {
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-1",
+			},
+		}
+
+		// Should not panic
+		scorer.ResponseReceived(ctx, nil, nil, targetPod)
+	})
+
+	t.Run("Handles nil targetPod gracefully", func(t *testing.T) {
+		response := &requestcontrol.Response{
+			RequestId: "test-req-3",
+			Headers:   make(map[string]string),
+		}
+
+		// Should not panic
+		scorer.ResponseReceived(ctx, nil, response, nil)
+		assert.Empty(t, response.Headers[setCookieHeaderName])
+	})
+}
+
+func TestExtractCookieValue(t *testing.T) {
 	tests := []struct {
-		name       string
-		req        *scheduling.LLMRequest
-		input      []scheduling.Endpoint
-		wantScores map[scheduling.Endpoint]float64
+		name         string
+		cookieHeader string
+		cookieName   string
+		expected     string
 	}{
 		{
-			name: "selects correct endpoint : endpointB",
-			req: &scheduling.LLMRequest{
-				Headers: map[string]string{"x-session-token": validSessionTokenForEndpointB},
-			},
-			input: inputEndpoints,
-			wantScores: map[scheduling.Endpoint]float64{
-				endpointA: 0.0,
-				endpointB: 1.0,
-			},
+			name:         "Single cookie",
+			cookieHeader: "session=abc123",
+			cookieName:   "session",
+			expected:     "abc123",
 		},
 		{
-			name: "no session token",
-			req: &scheduling.LLMRequest{
-				Headers: map[string]string{},
-			},
-			// both endpoints get score 0.0
-			input: inputEndpoints,
-			wantScores: map[scheduling.Endpoint]float64{
-				endpointA: 0.0,
-				endpointB: 0.0,
-			},
+			name:         "Multiple cookies",
+			cookieHeader: "cookie1=value1; session=abc123; cookie2=value2",
+			cookieName:   "session",
+			expected:     "abc123",
 		},
 		{
-			name: "invalid session token",
-			req: &scheduling.LLMRequest{
-				Headers: map[string]string{"x-session-token": "garbage-token"},
-			},
-			// expect same behavior as no session token
-			input: inputEndpoints,
-			wantScores: map[scheduling.Endpoint]float64{
-				endpointA: 0.0,
-				endpointB: 0.0,
-			},
+			name:         "Cookie not found",
+			cookieHeader: "cookie1=value1; cookie2=value2",
+			cookieName:   "session",
+			expected:     "",
 		},
 		{
-			name:  "no endpoints available",
-			req:   &scheduling.LLMRequest{},
-			input: []scheduling.Endpoint{},
-			// returns empty score map
-			wantScores: map[scheduling.Endpoint]float64{},
+			name:         "Empty cookie header",
+			cookieHeader: "",
+			cookieName:   "session",
+			expected:     "",
+		},
+		{
+			name:         "Cookie with spaces",
+			cookieHeader: "cookie1=value1;  session=abc123  ; cookie2=value2",
+			cookieName:   "session",
+			expected:     "abc123",
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			gotScores := sessionAffinityScorer.Score(context.Background(), nil, test.req, test.input)
-
-			if diff := cmp.Diff(test.wantScores, gotScores); diff != "" {
-				t.Errorf("Unexpected output (-want +got): %v", diff)
-			}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractCookieValue(tt.cookieHeader, tt.cookieName)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestSessionAffinity_ResponseComplete(t *testing.T) {
+func TestSessionAffinityWithConfig(t *testing.T) {
+	ctx := context.Background()
 
-	targetEndpoint := &fwkdl.EndpointMetadata{
-		NamespacedName: k8stypes.NamespacedName{Name: "pod1"},
-		Address:        "1.2.3.4",
-	}
+	t.Run("Cookie with MaxAge set", func(t *testing.T) {
+		config := &SessionAffinityConfig{
+			MaxAge:   3600, // 1 hour
+			Secure:   true,
+			SameSite: "Strict",
+		}
+		scorer := NewSessionAffinity(config)
 
-	// expected token to be set in response header
-	wantToken := base64.StdEncoding.EncodeToString([]byte(targetEndpoint.NamespacedName.String()))
+		response := &requestcontrol.Response{
+			RequestId: "test-req-config",
+			Headers:   make(map[string]string),
+		}
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-1",
+			},
+		}
 
+		scorer.ResponseReceived(ctx, nil, response, targetPod)
+
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.NotEmpty(t, setCookie)
+		assert.Contains(t, setCookie, sessionCookieName+"=")
+		assert.Contains(t, setCookie, "Max-Age=3600")
+		assert.Contains(t, setCookie, "Secure")
+		assert.Contains(t, setCookie, "SameSite=Strict")
+	})
+
+	t.Run("Session cookie (no MaxAge)", func(t *testing.T) {
+		config := &SessionAffinityConfig{
+			MaxAge:   0, // Session cookie
+			Secure:   false,
+			SameSite: "Lax",
+		}
+		scorer := NewSessionAffinity(config)
+
+		response := &requestcontrol.Response{
+			RequestId: "test-req-session",
+			Headers:   make(map[string]string),
+		}
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-1",
+			},
+		}
+
+		scorer.ResponseReceived(ctx, nil, response, targetPod)
+
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.NotEmpty(t, setCookie)
+		assert.NotContains(t, setCookie, "Max-Age") // Session cookie has no Max-Age
+		assert.NotContains(t, setCookie, "Secure")  // Secure not set
+		assert.Contains(t, setCookie, "SameSite=Lax")
+	})
+
+	t.Run("Default config when nil", func(t *testing.T) {
+		scorer := NewSessionAffinity(nil)
+
+		response := &requestcontrol.Response{
+			RequestId: "test-req-default",
+			Headers:   make(map[string]string),
+		}
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-1",
+			},
+		}
+
+		scorer.ResponseReceived(ctx, nil, response, targetPod)
+
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.NotEmpty(t, setCookie)
+		assert.Contains(t, setCookie, "SameSite=Lax") // Default SameSite
+		assert.NotContains(t, setCookie, "Secure")    // Default not secure
+	})
+}
+
+func TestParseSameSite(t *testing.T) {
 	tests := []struct {
-		name            string
-		initialResponse *requestcontrol.Response
-		targetPod       *fwkdl.EndpointMetadata
-		wantHeaders     map[string]string
+		input    string
+		expected http.SameSite
 	}{
-		{
-			name:            "standard case with existing headers map",
-			initialResponse: &requestcontrol.Response{RequestId: "req-1", Headers: make(map[string]string)},
-			targetPod:       targetEndpoint,
-			wantHeaders:     map[string]string{"x-session-token": wantToken},
-		},
-		{
-			name:            "response with nil headers map",
-			initialResponse: &requestcontrol.Response{RequestId: "req-2", Headers: nil},
-			targetPod:       targetEndpoint,
-			wantHeaders:     map[string]string{"x-session-token": wantToken},
-		},
-		{
-			name:            "nil targetPod should do nothing",
-			initialResponse: &requestcontrol.Response{RequestId: "req-3", Headers: make(map[string]string)},
-			targetPod:       nil,
-			wantHeaders:     map[string]string{},
-		},
+		{"Strict", http.SameSiteStrictMode},
+		{"strict", http.SameSiteStrictMode},
+		{"Lax", http.SameSiteLaxMode},
+		{"lax", http.SameSiteLaxMode},
+		{"None", http.SameSiteNoneMode},
+		{"none", http.SameSiteNoneMode},
+		{"", http.SameSiteLaxMode},        // Default
+		{"invalid", http.SameSiteLaxMode}, // Default for invalid
 	}
 
-	s := scorer.NewSessionAffinity()
-	ctx := utils.NewTestContext(t)
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			s.ResponseComplete(ctx, nil, test.initialResponse, test.targetPod)
-
-			if diff := cmp.Diff(test.wantHeaders, test.initialResponse.Headers); diff != "" {
-				t.Errorf("Unexpected output (-want +got): %v", diff)
-			}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := parseSameSite(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
