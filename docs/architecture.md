@@ -499,8 +499,8 @@ When integrating with a prefix-cache scorer, the prefix-cache scorer should be d
 
 #### ContextLengthAware
 
-A multi-purpose plugin that can operate as both a **Filter** and a **Scorer** to route inference requests 
-based on the estimated context length. This enables optimized resource allocation by directing requests to 
+A multi-purpose plugin that can operate as both a **Filter** and a **Scorer** to route inference requests
+based on context length (token count). This enables optimized resource allocation by directing requests to
 pods configured for specific context length ranges.
 
 **Use Cases:**
@@ -509,23 +509,36 @@ pods configured for specific context length ranges.
 - Optimize performance by matching workload characteristics to hardware capabilities
 - Support heterogeneous deployments with different GPU configurations
 
-The plugin scores all pods based on how well their ranges match the request
-   - Higher scores for tighter/more specific ranges
-   - Lower scores for very wide ranges
-   - Zero score for non-matching ranges
-   - Neutral score (0.5) for pods without labels
+The plugin scores all pods based on how well their ranges match the request:
+- Higher scores for tighter/more specific ranges (specialized pods)
+- Lower scores for very wide ranges (generalist pods)
+- Zero score for non-matching ranges
+- Neutral score (0.5) for pods without labels
 
-If `enableFiltering` is set to true, the plugin filters out pods that do not match the request's context length.
-This is useful for strict routing scenarios where only compatible pods should be considered.
+If `enableFiltering` is set to true, the plugin also filters out pods that do not match the request's context length.
 
 **Configuration:**
 
 - **Type**: `context-length-aware`
 - **Parameters**:
-  - `label` (optional): Pod label name containing context length range(s). 
+  - `label` (optional): Pod label name containing context length range(s).
     Default: `llm-d.ai/context-length-range`
-  - `enableFiltering` (optional): If true, the plugin operates as a filter, excluding non-matching pods. 
+  - `enableFiltering` (optional): If true, the plugin operates as a filter, excluding non-matching pods.
     Default: false
+  - `modelName` (required when using tokenizer): The model name for tokenization.
+  - `localTokenizerConfig` (optional): Configuration for local tokenizer files.
+    - `modelTokenizerMap`: Map of model names to local tokenizer.json file paths.
+  - `hfTokenizerConfig` (optional): Configuration for HuggingFace tokenizers.
+    - `huggingFaceToken`: HuggingFace API token (can also use `HF_TOKEN` env var).
+    - `tokenizersCacheDir`: Directory to cache downloaded tokenizers.
+
+**Token Counting:**
+
+When a tokenizer is configured, the plugin uses precise tokenization:
+1. For chat completions: renders messages using the model's chat template, then tokenizes
+2. For regular completions: tokenizes the prompt directly
+
+When no tokenizer is configured, falls back to character-based estimation (characters × 0.25).
 
 **Label Format:**
 
@@ -541,14 +554,16 @@ Multiple ranges can be specified with comma separation:
 llm-d.ai/context-length-range: "0-2048,8192-16384"
 ```
 
-**Example - Scorer Configuration:**
+**Example - Scorer with Precise Tokenization:**
 
 ```yaml
 plugins:
   - type: context-length-aware
     parameters:
-      mode: score
       label: llm-d.ai/context-length-range
+      modelName: meta-llama/Llama-3.1-8B-Instruct
+      hfTokenizerConfig:
+        tokenizersCacheDir: /tmp/tokenizers
   - type: load-aware-scorer
   - type: max-score-picker
 schedulingProfiles:
@@ -561,7 +576,7 @@ schedulingProfiles:
       - pluginRef: max-score-picker
 ```
 
-**Example - Filter Configuration:**
+**Example - Filter with Estimation Fallback:**
 
 ```yaml
 plugins:
@@ -601,15 +616,6 @@ metadata:
   labels:
     llm-d.ai/context-length-range: "0-2048,4096-32768"
 ```
-
-**Context Length Estimation:**
-
-The plugin estimates context length by:
-1. For chat completions: counting characters across all messages
-2. For regular completions: counting characters in the prompt
-3. Converting characters to approximate token count (multiplier: 0.25)
-
-**Note:** This is a rough estimation. Actual token counts may vary depending on the tokenizer.
 
 ---
 
