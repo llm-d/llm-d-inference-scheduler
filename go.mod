@@ -29,7 +29,7 @@ require (
 	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20260128235548-fd30cb97714a
 )
 
-replace sigs.k8s.io/gateway-api-inference-extension => github.com/RishabhSaini/gateway-api-inference-extension v0.0.0-20260204235507-72269a7a00b2
+replace sigs.k8s.io/gateway-api-inference-extension => github.com/RishabhSaini/gateway-api-inference-extension v0.0.0-20260206224631-fc00d31c599c
 
 require (
 	cel.dev/expr v0.24.0 // indirect

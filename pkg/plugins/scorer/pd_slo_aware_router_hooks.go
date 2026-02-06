@@ -229,7 +229,7 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 	requestBuilder := p.PredictedLatency.GetRequestBuilder()
 	entry := requestBuilder.BuildTrainingEntry(
 		ctx,
-		prefillPod,
+		prefillPod.GetMetadata(),
 		prefillMetrics,
 		prompt,
 		actualPrefillTTFT, // Actual TTFT from sidecar

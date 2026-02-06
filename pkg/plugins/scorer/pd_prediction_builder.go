@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	predictedlatency "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/predictedlatency"
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 
@@ -26,19 +25,17 @@ func NewPDPredictionRequestBuilder() *PDPredictionRequestBuilder {
 	return &PDPredictionRequestBuilder{}
 }
 
-// extractPodType reads the llm-d.ai/role label from a pod and maps it to the predictor's pod_type field.
+// extractPodType reads the llm-d.ai/role label from pod metadata and maps it to the predictor's pod_type field.
 // Returns:
 //   - "prefill" for pods with llm-d.ai/role=prefill
 //   - "decode" for pods with llm-d.ai/role=decode
 //   - "" (empty) for pods with llm-d.ai/role=both or no label (monolithic)
-func (b *PDPredictionRequestBuilder) extractPodType(pod schedulingtypes.Endpoint) string {
-	// Get pod labels from the underlying endpoint metadata
-	backendPod := pod.GetMetadata()
-	if backendPod == nil {
-		return "" // No pod info, treat as monolithic
+func (b *PDPredictionRequestBuilder) extractPodType(metadata *datalayer.EndpointMetadata) string {
+	if metadata == nil {
+		return "" // No metadata, treat as monolithic
 	}
 
-	labels := backendPod.Labels
+	labels := metadata.Labels
 	if labels == nil {
 		return "" // No labels, treat as monolithic
 	}
@@ -67,7 +64,7 @@ func (b *PDPredictionRequestBuilder) extractPodType(pod schedulingtypes.Endpoint
 // Extends the default implementation by populating the PodType field based on the pod's role label.
 func (b *PDPredictionRequestBuilder) BuildPredictionRequest(
 	ctx context.Context,
-	pod schedulingtypes.Endpoint,
+	targetEndpointMetadata *datalayer.EndpointMetadata,
 	metrics *datalayer.Metrics,
 	prompt string,
 	generatedTokens int,
@@ -75,11 +72,11 @@ func (b *PDPredictionRequestBuilder) BuildPredictionRequest(
 ) latencypredictor.PredictionRequest {
 	// Get base request from parent implementation
 	req := b.DefaultPredictionRequestBuilder.BuildPredictionRequest(
-		ctx, pod, metrics, prompt, generatedTokens, prefixCacheScore,
+		ctx, targetEndpointMetadata, metrics, prompt, generatedTokens, prefixCacheScore,
 	)
 
 	// Customize with pod type from llm-d.ai/role label
-	req.PodType = b.extractPodType(pod)
+	req.PodType = b.extractPodType(targetEndpointMetadata)
 
 	return req
 }
@@ -88,7 +85,7 @@ func (b *PDPredictionRequestBuilder) BuildPredictionRequest(
 // Extends the default implementation by populating the PodType field based on the pod's role label.
 func (b *PDPredictionRequestBuilder) BuildTrainingEntry(
 	ctx context.Context,
-	pod schedulingtypes.Endpoint,
+	targetEndpointMetadata *datalayer.EndpointMetadata,
 	metrics *datalayer.Metrics,
 	prompt string,
 	actualTTFT float64,
@@ -99,11 +96,11 @@ func (b *PDPredictionRequestBuilder) BuildTrainingEntry(
 ) latencypredictor.TrainingEntry {
 	// Get base entry from parent implementation
 	entry := b.DefaultPredictionRequestBuilder.BuildTrainingEntry(
-		ctx, pod, metrics, prompt, actualTTFT, actualTPOT, timestamp, generatedTokens, prefixCacheScore,
+		ctx, targetEndpointMetadata, metrics, prompt, actualTTFT, actualTPOT, timestamp, generatedTokens, prefixCacheScore,
 	)
 
 	// Customize with pod type from llm-d.ai/role label
-	entry.PodType = b.extractPodType(pod)
+	entry.PodType = b.extractPodType(targetEndpointMetadata)
 
 	return entry
 }

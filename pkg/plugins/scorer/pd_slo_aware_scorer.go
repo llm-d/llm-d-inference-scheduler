@@ -65,10 +65,6 @@ func PDSLOAwareScorerFactory(name string, rawConfig json.RawMessage, handle plug
 		}
 	}
 
-	// Inject P/D-aware request builder
-	// This builder will populate the PodType field based on llm-d.ai/role labels
-	cfg.RequestBuilder = NewPDPredictionRequestBuilder()
-
 	// Validate the config
 	// Note: We can't call cfg.validate() directly as it's a method on Config, not exported
 	// The base factory will validate for us, but since we're not using it, we need to ensure
@@ -80,8 +76,10 @@ func PDSLOAwareScorerFactory(name string, rawConfig json.RawMessage, handle plug
 		return nil, fmt.Errorf("failed to start latency predictor: %w", err)
 	}
 
-	// Create the SLO aware router with our P/D-aware builder
+	// Create the SLO aware router and inject P/D-aware request builder
+	// This builder will populate the PodType field based on llm-d.ai/role labels
 	baseRouter := predictedlatency.NewPredictedLatency(cfg, predictor).WithName(name)
+	baseRouter.SetRequestBuilder(NewPDPredictionRequestBuilder())
 
 	// Wrap with PDSLOAwareRouter to add P/D-specific hook logic
 	// The wrapper delegates to the base router while adding P/D-specific header extraction
