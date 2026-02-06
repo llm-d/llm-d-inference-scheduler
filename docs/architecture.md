@@ -497,6 +497,128 @@ When integrating with a prefix-cache scorer, the prefix-cache scorer should be d
 
 ---
 
+#### ContextLengthAware
+
+A multi-purpose plugin that can operate as both a **Filter** and a **Scorer** to route inference requests
+based on context length (token count). This enables optimized resource allocation by directing requests to
+pods configured for specific context length ranges.
+
+**Use Cases:**
+- Route short prompts to pods with smaller GPU memory
+- Direct long-context requests to specialized high-memory pods
+- Optimize performance by matching workload characteristics to hardware capabilities
+- Support heterogeneous deployments with different GPU configurations
+
+The plugin scores all pods based on how well their ranges match the request:
+- Higher scores for tighter/more specific ranges (specialized pods)
+- Lower scores for very wide ranges (generalist pods)
+- Zero score for non-matching ranges
+- Neutral score (0.5) for pods without labels
+
+If `enableFiltering` is set to true, the plugin also filters out pods that do not match the request's context length.
+
+**Configuration:**
+
+- **Type**: `context-length-aware`
+- **Parameters**:
+  - `label` (optional): Pod label name containing context length range(s).
+    Default: `llm-d.ai/context-length-range`
+  - `enableFiltering` (optional): If true, the plugin operates as a filter, excluding non-matching pods.
+    Default: false
+  - `modelName` (required when using tokenizer): The model name for tokenization.
+  - `localTokenizerConfig` (optional): Configuration for local tokenizer files.
+    - `modelTokenizerMap`: Map of model names to local tokenizer.json file paths.
+  - `hfTokenizerConfig` (optional): Configuration for HuggingFace tokenizers.
+    - `huggingFaceToken`: HuggingFace API token (can also use `HF_TOKEN` env var).
+    - `tokenizersCacheDir`: Directory to cache downloaded tokenizers.
+
+**Token Counting:**
+
+When a tokenizer is configured, the plugin uses precise tokenization:
+1. For chat completions: renders messages using the model's chat template, then tokenizes
+2. For regular completions: tokenizes the prompt directly
+
+When no tokenizer is configured, falls back to character-based estimation (characters × 0.25).
+
+**Label Format:**
+
+Pods should be labeled with context length ranges using the format `"min-max"`, where _min_ and _max_ are both positive integers:
+
+```yaml
+llm-d.ai/context-length-range: "0-2048"
+```
+
+Multiple ranges can be specified with comma separation:
+
+```yaml
+llm-d.ai/context-length-range: "0-2048,8192-16384"
+```
+
+**Example - Scorer with Precise Tokenization:**
+
+```yaml
+plugins:
+  - type: context-length-aware
+    parameters:
+      label: llm-d.ai/context-length-range
+      modelName: meta-llama/Llama-3.1-8B-Instruct
+      hfTokenizerConfig:
+        tokenizersCacheDir: /tmp/tokenizers
+  - type: load-aware-scorer
+  - type: max-score-picker
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: context-length-aware
+        weight: 3
+      - pluginRef: load-aware-scorer
+        weight: 1
+      - pluginRef: max-score-picker
+```
+
+**Example - Filter with Estimation Fallback:**
+
+```yaml
+plugins:
+  - type: context-length-aware
+    parameters:
+      enableFiltering: true
+      label: llm-d.ai/context-length-range
+  - type: max-score-picker
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: context-length-aware
+      - pluginRef: max-score-picker
+```
+
+**Example Pod Labels:**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-short-context
+  labels:
+    llm-d.ai/context-length-range: "0-2048"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-long-context
+  labels:
+    llm-d.ai/context-length-range: "2048-8192"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-flexible
+  labels:
+    llm-d.ai/context-length-range: "0-2048,4096-32768"
+```
+
+---
+
 ### Sample Disaggregated Prefill/Decode Configuration
 
 The following is an example of what a configuration for disaggregated Prefill/Decode might look like:
