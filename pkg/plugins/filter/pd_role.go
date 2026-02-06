@@ -3,7 +3,7 @@ package filter
 import (
 	"encoding/json"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 )
 
 // PrefillRoleFactory defines the factory function for the Prefill filter.
-func PrefillRoleFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func PrefillRoleFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	return NewPrefillRole().WithName(name), nil
 }
 
@@ -33,7 +33,7 @@ func NewPrefillRole() *ByLabel {
 }
 
 // DecodeRoleFactory defines the factory function for the Decode filter.
-func DecodeRoleFactory(name string, _ json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func DecodeRoleFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	return NewDecodeRole().WithName(name), nil
 }
 

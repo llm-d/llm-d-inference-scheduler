@@ -7,19 +7,18 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework/plugins/multi/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 )
 
 const (
 	// NoHitLRUType is the type of the NoHitLRU scorer
 	NoHitLRUType = "no-hit-lru-scorer"
 
-	// defaultLRUSize is the maximum number of pods we'll consider in the cache
+	// defaultLRUSize is the maximum number of endpoints we'll consider in the cache
 	defaultLRUSize = 1024
 
 	// defaultPrefillProfile is the name of the prefill profile
@@ -30,7 +29,7 @@ const (
 )
 
 // compile-time type assertions
-var _ framework.Scorer = &NoHitLRU{}
+var _ scheduling.Scorer = &NoHitLRU{}
 var _ requestcontrol.PreRequest = &NoHitLRU{}
 
 // NoHitLRUParameters defines the parameters for the NoHitLRU scorer.
@@ -42,7 +41,7 @@ type NoHitLRUParameters struct {
 	// Defaults to "prefix-cache-scorer".
 	PrefixPluginName string `json:"prefixPluginName"`
 
-	// LRUSize defines the maximum number of pods to track in the LRU cache.
+	// LRUSize defines the maximum number of endpoints to track in the LRU cache.
 	LRUSize int `json:"lruSize"`
 }
 
@@ -52,13 +51,13 @@ type coldRequestState struct {
 	isCold bool
 }
 
-// Clone implements the plugins.StateData interface
-func (c *coldRequestState) Clone() plugins.StateData {
+// Clone implements the plugin.StateData interface
+func (c *coldRequestState) Clone() plugin.StateData {
 	return &coldRequestState{isCold: c.isCold}
 }
 
 // NoHitLRUFactory defines the factory function for the NoHitLRU
-func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := NoHitLRUParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -101,25 +100,25 @@ func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
 	}
 
 	return &NoHitLRU{
-		typedName:             plugins.TypedName{Type: NoHitLRUType},
+		typedName:             plugin.TypedName{Type: NoHitLRUType},
 		lruCache:              lruCache,
-		prefixPluginTypedName: plugins.TypedName{Type: prefixPluginType, Name: prefixPluginName},
-		pluginState:           plugins.NewPluginState(ctx),
+		prefixPluginTypedName: plugin.TypedName{Type: prefixPluginType, Name: prefixPluginName},
+		pluginState:           plugin.NewPluginState(ctx),
 	}
 }
 
-// NoHitLRU scorer that favors pods that were least recently used for cold requests.
+// NoHitLRU scorer that favors endpoints that were least recently used for cold requests.
 // This can help evenly distribute cache growth, since cold requests result in more
 // new KV blocks.
 type NoHitLRU struct {
-	typedName             plugins.TypedName
-	lruCache              *lru.Cache[string, struct{}] // pod name -> dummy value (we only care about order)
-	prefixPluginTypedName plugins.TypedName
-	pluginState           *plugins.PluginState
+	typedName             plugin.TypedName
+	lruCache              *lru.Cache[string, struct{}] // endpoint name -> dummy value (we only care about order)
+	prefixPluginTypedName plugin.TypedName
+	pluginState           *plugin.PluginState
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *NoHitLRU) TypedName() plugins.TypedName {
+func (s *NoHitLRU) TypedName() plugin.TypedName {
 	return s.typedName
 }
 
@@ -129,14 +128,19 @@ func (s *NoHitLRU) WithName(name string) *NoHitLRU {
 	return s
 }
 
+// Category returns the preference the scorer applies when scoring candidate endpoints.
+func (s *NoHitLRU) Category() scheduling.ScorerCategory {
+	return scheduling.Distribution
+}
+
 // isColdRequest determines if a request is cold by reading the prefix cache state.
 // Returns true if no prefix cache hits were found, or if prefix cache state is unavailable.
-func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *types.CycleState) bool {
+func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *scheduling.CycleState) bool {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	// Read prefix cache state to determine if this is a cold request
 	// This is treated as an optimization - if the state isn't available, we assume cold request
-	prefixState, err := types.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugins.StateKey(s.prefixPluginTypedName.String()))
+	prefixState, err := scheduling.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugin.StateKey(s.prefixPluginTypedName.String()))
 
 	if err != nil {
 		logger.Info("No prefix cache state found, treating as cold request for LRU optimization", "error", err)
@@ -147,17 +151,17 @@ func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *types.CycleSta
 	return len(prefixState.PrefixCacheServers) == 0
 }
 
-// scoreNeutral returns neutral scores (0.5) for all pods.
+// scoreNeutral returns neutral scores (0.5) for all endpoints.
 // Used when a request has cache hits and LRU optimization should not apply.
-func (s *NoHitLRU) scoreNeutral(pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64, len(pods))
-	for _, pod := range pods {
-		scoredPods[pod] = 0.5
+func (s *NoHitLRU) scoreNeutral(endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+	scoredEndpoints := make(map[scheduling.Endpoint]float64, len(endpoints))
+	for _, endpoint := range endpoints {
+		scoredEndpoints[endpoint] = 0.5
 	}
-	return scoredPods
+	return scoredEndpoints
 }
 
-// getLRUPositions returns a map of pod names to their LRU position.
+// getLRUPositions returns a map of endpoint names to their LRU position.
 // Position 0 represents the oldest (least recently used) entry.
 func (s *NoHitLRU) getLRUPositions() map[string]int {
 	// Get all keys from LRU cache in order (oldest first)
@@ -171,105 +175,105 @@ func (s *NoHitLRU) getLRUPositions() map[string]int {
 	return lruPosition
 }
 
-// partitionPodsByUsage separates pods into those that have received cold requests
+// partitionPodsByUsage separates endpoints into those that have received cold requests
 // (usedPods) and those that have never received cold requests (neverUsedPods).
-func (s *NoHitLRU) partitionPodsByUsage(pods []types.Pod, lruPosition map[string]int) (usedPods, neverUsedPods []types.Pod) {
-	for _, pod := range pods {
-		podName := pod.GetPod().NamespacedName.String()
-		if _, exists := lruPosition[podName]; exists {
-			usedPods = append(usedPods, pod)
+func (s *NoHitLRU) partitionPodsByUsage(endpoints []scheduling.Endpoint, lruPosition map[string]int) (usedEndpoints, neverUsedEndpoints []scheduling.Endpoint) {
+	for _, endpoint := range endpoints {
+		endpointName := endpoint.GetMetadata().NamespacedName.String()
+		if _, exists := lruPosition[endpointName]; exists {
+			usedEndpoints = append(usedEndpoints, endpoint)
 		} else {
-			neverUsedPods = append(neverUsedPods, pod)
+			neverUsedEndpoints = append(neverUsedEndpoints, endpoint)
 		}
 	}
-	return usedPods, neverUsedPods
+	return usedEndpoints, neverUsedEndpoints
 }
 
-// scoreNeverUsedPods assigns scores to pods that have never received a cold request.
-// The first never-used pod gets the highest score (1.0), with subsequent pods
+// scoreNeverUsedEndpoints assigns scores to endpoints that have never received a cold request.
+// The first never-used endpoint gets the highest score (1.0), with subsequent endpoints
 // receiving progressively lower scores.
-func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[types.Pod]float64, neverUsedPods []types.Pod, totalPods int) {
+func (s *NoHitLRU) scoreNeverUsedPods(scoredPods map[scheduling.Endpoint]float64, neverUsedPods []scheduling.Endpoint, totalEndpoints int) {
 	// Avoid possibility of dividing by zero.
-	if totalPods <= 1 {
+	if totalEndpoints <= 1 {
 		return
 	}
-	for i, pod := range neverUsedPods {
-		score := 1.0 - float64(i)/float64(totalPods-1)
-		scoredPods[pod] = score
+	for i, endpoint := range neverUsedPods {
+		score := 1.0 - float64(i)/float64(totalEndpoints-1)
+		scoredPods[endpoint] = score
 	}
 }
 
-// scoreUsedPods assigns scores to pods based on their LRU position.
+// scoreUsedPods assigns scores to endpoints based on their LRU position.
 // Pods that were least recently used for cold requests receive higher scores.
-func (s *NoHitLRU) scoreUsedPods(scoredPods map[types.Pod]float64, usedPods []types.Pod, lruPosition map[string]int, neverUsedCount, totalPods int) {
+func (s *NoHitLRU) scoreUsedPods(scoredEndpoints map[scheduling.Endpoint]float64, usedPods []scheduling.Endpoint, lruPosition map[string]int, neverUsedCount, totalEndpoints int) {
 	// Avoid possibility of dividing by zero.
-	if totalPods <= 1 {
+	if totalEndpoints <= 1 {
 		return
 	}
-	for _, pod := range usedPods {
-		podName := pod.GetPod().NamespacedName.String()
-		lruPos := lruPosition[podName]
+	for _, endpoint := range usedPods {
+		endpointName := endpoint.GetMetadata().NamespacedName.String()
+		lruPos := lruPosition[endpointName]
 		// LRU keys are oldest to newest so rank 0 = oldest
-		// The never used pod count is added to the rank so that
-		// a never-used pod will always have the highest score.
+		// The never used endpoint count is added to the rank so that
+		// a never-used endpoint will always have the highest score.
 		rank := neverUsedCount + lruPos
-		score := 1.0 - float64(rank)/float64(totalPods-1)
+		score := 1.0 - float64(rank)/float64(totalEndpoints-1)
 		if score < 0 {
 			score = 0
 		}
-		scoredPods[pod] = score
+		scoredEndpoints[endpoint] = score
 	}
 }
 
-// scoreColdRequestByLRU scores pods based on their LRU position for cold requests.
+// scoreColdRequestByLRU scores endpoints based on their LRU position for cold requests.
 // Pods that have never received a cold request get the highest scores.
-// Among previously used pods, least recently used ones get higher scores.
-func (s *NoHitLRU) scoreColdRequestByLRU(pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64, len(pods))
-	totalPods := len(pods)
+// Among previously used endpoints, least recently used ones get higher scores.
+func (s *NoHitLRU) scoreColdRequestByLRU(endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+	scoredEndpoints := make(map[scheduling.Endpoint]float64, len(endpoints))
+	totalEndpoints := len(endpoints)
 
 	// Avoid possibility of dividing by zero.
-	if totalPods == 1 {
-		scoredPods[pods[0]] = 1.0
-		return scoredPods
+	if totalEndpoints == 1 {
+		scoredEndpoints[endpoints[0]] = 1.0
+		return scoredEndpoints
 	}
 
 	lruPosition := s.getLRUPositions()
-	usedPods, neverUsedPods := s.partitionPodsByUsage(pods, lruPosition)
+	usedEndpoints, neverUsedEndpoints := s.partitionPodsByUsage(endpoints, lruPosition)
 
-	s.scoreNeverUsedPods(scoredPods, neverUsedPods, totalPods)
-	s.scoreUsedPods(scoredPods, usedPods, lruPosition, len(neverUsedPods), totalPods)
+	s.scoreNeverUsedPods(scoredEndpoints, neverUsedEndpoints, totalEndpoints)
+	s.scoreUsedPods(scoredEndpoints, usedEndpoints, lruPosition, len(neverUsedEndpoints), totalEndpoints)
 
-	return scoredPods
+	return scoredEndpoints
 }
 
-// Score scores the given pods based on LRU for cold requests.
-// For cache hits, returns neutral scores (0.5) for all pods.
-// For cache misses, ranks pods by their LRU order.
-// - LRU ordering is with respect to when a pod last received a cold request.
-// - Least recently used (or never used) pods get highest score (1.0)
-// - Most recently used pods get lowest score (approaching 0.0)
-func (s *NoHitLRU) Score(ctx context.Context, cycleState *types.CycleState, request *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
+// Score scores the given endpoints based on LRU for cold requests.
+// For cache hits, returns neutral scores (0.5) for all endpoints.
+// For cache misses, ranks endpoints by their LRU order.
+// - LRU ordering is with respect to when a endpoint last received a cold request.
+// - Least recently used (or never used) endpoints get highest score (1.0)
+// - Most recently used endpoints get lowest score (approaching 0.0)
+func (s *NoHitLRU) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	isCold := s.isColdRequest(ctx, cycleState)
 
 	// Store the cold request state in plugin state for PreRequest to use
 	coldState := &coldRequestState{isCold: isCold}
-	s.pluginState.Write(request.RequestId, plugins.StateKey(s.typedName.String()), coldState)
+	s.pluginState.Write(request.RequestId, plugin.StateKey(s.typedName.String()), coldState)
 
 	if !isCold {
 		logger.Info("Cache hit detected, returning neutral scores")
-		return s.scoreNeutral(pods)
+		return s.scoreNeutral(endpoints)
 	}
 
-	logger.Info("Cold request detected, scoring pods by LRU")
-	return s.scoreColdRequestByLRU(pods)
+	logger.Info("Cold request detected, scoring endpoints by LRU")
+	return s.scoreColdRequestByLRU(endpoints)
 }
 
-// PreRequest is called before a request is sent to the target pod.
-// For cold requests, it updates the LRU cache to track which pods have been used recently.
-func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult) {
+// PreRequest is called before a request is sent to the target endpoint.
+// For cold requests, it updates the LRU cache to track which endpoints have been used recently.
+func (s *NoHitLRU) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
 	if schedulingResult == nil || len(schedulingResult.ProfileResults) == 0 {
@@ -278,7 +282,7 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 	}
 
 	// Read the cold request state we stored in Score
-	coldState, err := plugins.ReadPluginStateKey[*coldRequestState](s.pluginState, request.RequestId, plugins.StateKey(s.typedName.String()))
+	coldState, err := plugin.ReadPluginStateKey[*coldRequestState](s.pluginState, request.RequestId, plugin.StateKey(s.typedName.String()))
 	// After fetching the cold state, drop it from the plugin state immediately (otherwise it will hang around until it becomes stale).
 	s.pluginState.Delete(request.RequestId)
 
@@ -292,23 +296,23 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *types.LLMRequest, sc
 		return
 	}
 
-	if targetProfile, ok := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]; ok && targetProfile != nil && len(targetProfile.TargetPods) != 0 {
+	if targetProfile, ok := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]; ok && targetProfile != nil && len(targetProfile.TargetEndpoints) != 0 {
 		s.moveTargetPodToFront(ctx, request, targetProfile, schedulingResult.PrimaryProfileName)
 	}
-	if targetProfile, ok := schedulingResult.ProfileResults[defaultPrefillProfile]; ok && targetProfile != nil && len(targetProfile.TargetPods) != 0 {
+	if targetProfile, ok := schedulingResult.ProfileResults[defaultPrefillProfile]; ok && targetProfile != nil && len(targetProfile.TargetEndpoints) != 0 {
 		s.moveTargetPodToFront(ctx, request, targetProfile, defaultPrefillProfile)
 	}
 }
 
-func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *types.LLMRequest, targetProfile *types.ProfileRunResult, profileName string) {
+func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *scheduling.LLMRequest, targetProfile *scheduling.ProfileRunResult, profileName string) {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	targetPod := targetProfile.TargetPods[0]
-	podName := targetPod.GetPod().NamespacedName.String()
+	targetPod := targetProfile.TargetEndpoints[0]
+	endpointName := targetPod.GetMetadata().NamespacedName.String()
 
-	// Move the pod to the front of the LRU.
+	// Move the endpoint to the front of the LRU.
 	var present struct{} // dummy value
-	s.lruCache.Add(podName, present)
+	s.lruCache.Add(endpointName, present)
 
-	logger.Info("Updated LRU cache for cold request", "profile", profileName, "pod", podName, "requestId", request.RequestId)
+	logger.Info("Updated LRU cache for cold request", "profile", profileName, "endpoint", endpointName, "requestId", request.RequestId)
 }

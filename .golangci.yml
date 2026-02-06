@@ -6,34 +6,34 @@ run:
 
 formatters:
   enable:
-  - goimports
-  - gofmt
+    - goimports
+    - gofmt
 
 linters:
   enable:
-  - bodyclose
-  - copyloopvar
-  - dupword
-  - durationcheck
-  - errcheck
-  - fatcontext
-  - ginkgolinter
-  - goconst
-  - gocritic
-  - govet
-  - ineffassign
-  - loggercheck
-  - makezero
-  - misspell
-  - nakedret
-  - nilnil
-  - perfsprint
-  - prealloc
-  - revive
-  - staticcheck
-  - unparam
-  - unused
-  - unconvert
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errcheck
+    - fatcontext
+    - ginkgolinter
+    - goconst
+    - gocritic
+    - govet
+    - ineffassign
+    - loggercheck
+    - makezero
+    - misspell
+    - nakedret
+    - nilnil
+    - perfsprint
+    - prealloc
+    - revive
+    - staticcheck
+    - unparam
+    - unused
+    - unconvert
   settings:
     revive: # see https://github.com/mgechev/revive#available-rules for all options
       rules:
@@ -61,4 +61,5 @@ issues:
   # do not limit the number of issues, ensure even identical are reported
   max-issues-per-linter: 0
   max-same-issues: 0
-  new: true # run on new code only
+  # Note: 'new' setting is controlled via Makefile LINT_NEW_ONLY variable
+  # Set to true to only check new code, false (default) to check all code

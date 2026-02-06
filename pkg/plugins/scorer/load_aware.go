@@ -6,10 +6,9 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -25,10 +24,10 @@ type loadAwareParameters struct {
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &LoadAware{}
+var _ scheduling.Scorer = &LoadAware{}
 
 // LoadAwareFactory defines the factory function for the LoadAware
-func LoadAwareFactory(name string, rawParameters json.RawMessage, handle plugins.Handle) (plugins.Plugin, error) {
+func LoadAwareFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := loadAwareParameters{Threshold: QueueThresholdDefault}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -47,19 +46,19 @@ func NewLoadAware(ctx context.Context, queueThreshold int) *LoadAware {
 	}
 
 	return &LoadAware{
-		typedName:      plugins.TypedName{Type: LoadAwareType},
+		typedName:      plugin.TypedName{Type: LoadAwareType},
 		queueThreshold: float64(queueThreshold),
 	}
 }
 
 // LoadAware scorer that is based on load
 type LoadAware struct {
-	typedName      plugins.TypedName
+	typedName      plugin.TypedName
 	queueThreshold float64
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *LoadAware) TypedName() plugins.TypedName {
+func (s *LoadAware) TypedName() plugin.TypedName {
 	return s.typedName
 }
 
@@ -69,6 +68,11 @@ func (s *LoadAware) WithName(name string) *LoadAware {
 	return s
 }
 
+// Category returns the preference the scorer applies when scoring candidate endpoints.
+func (s *LoadAware) Category() scheduling.ScorerCategory {
+	return scheduling.Distribution
+}
+
 // Score scores the given pod in range of 0-1
 // Currently metrics contains number of requests waiting in the queue, there is no information about number of requests
 // that can be processed in the given pod immediately.
@@ -76,20 +80,20 @@ func (s *LoadAware) WithName(name string) *LoadAware {
 // Pod with requests in the queue will get score between 0.5 and 0.
 // Score 0 will get pod with number of requests in the queue equal to the threshold used in load-based filter
 // In the future, pods with additional capacity will get score higher than 0.5
-func (s *LoadAware) Score(_ context.Context, _ *types.CycleState, _ *types.LLMRequest, pods []types.Pod) map[types.Pod]float64 {
-	scoredPods := make(map[types.Pod]float64)
+func (s *LoadAware) Score(_ context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+	scoredEndpoints := make(map[scheduling.Endpoint]float64)
 
-	for _, pod := range pods {
-		waitingRequests := float64(pod.GetMetrics().WaitingQueueSize)
+	for _, endpoint := range endpoints {
+		waitingRequests := float64(endpoint.GetMetrics().WaitingQueueSize)
 
 		if waitingRequests == 0 {
-			scoredPods[pod] = 0.5
+			scoredEndpoints[endpoint] = 0.5
 		} else {
 			if waitingRequests > s.queueThreshold {
 				waitingRequests = s.queueThreshold
 			}
-			scoredPods[pod] = 0.5 * (1.0 - (waitingRequests / s.queueThreshold))
+			scoredEndpoints[endpoint] = 0.5 * (1.0 - (waitingRequests / s.queueThreshold))
 		}
 	}
-	return scoredPods
+	return scoredEndpoints
 }
