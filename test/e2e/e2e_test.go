@@ -617,7 +617,10 @@ func runStreamingCompletion(prompt string, theModel openai.CompletionNewParamsMo
 
 	resp, err := http.DefaultClient.Do(req)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
 
 	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
 
@@ -644,7 +647,10 @@ func runStreamingChatCompletion(prompt string) (string, string) {
 
 	resp, err := http.DefaultClient.Do(req)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
 
 	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
 
@@ -678,7 +684,10 @@ func runCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, f
 
 	resp, err := http.DefaultClient.Do(req)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
 
 	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
 
@@ -712,7 +721,10 @@ func runStreamingCompletionWithCacheThreshold(prompt string, cacheHitThreshold f
 
 	resp, err := http.DefaultClient.Do(req)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer resp.Body.Close()
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
 
 	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
 
@@ -768,7 +780,7 @@ func extractFinishReasonFromStreaming(sseData string) string {
 // getPrefillRequestCount gets the total request count from a prefill pod's metrics endpoint.
 // This is used to verify whether a request was processed by the prefill pod.
 func getPrefillRequestCount(prefillPodName string) int {
-	ginkgo.By(fmt.Sprintf("Getting request count from prefill pod: %s", prefillPodName))
+	ginkgo.By("Getting request count from prefill pod: " + prefillPodName)
 
 	// Use Kubernetes API proxy to access the metrics endpoint
 	output, err := testConfig.KubeCli.CoreV1().RESTClient().
