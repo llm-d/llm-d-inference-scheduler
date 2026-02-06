@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	predictedlatency "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/predictedlatency"
-	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 )
 
 const (
@@ -70,8 +68,8 @@ func PDSLOAwareScorerFactory(name string, rawConfig json.RawMessage, handle plug
 	// The base factory will validate for us, but since we're not using it, we need to ensure
 	// the config is valid. For now, we'll rely on the base implementation's validation.
 
-	// Start the latency predictor (same as base factory does)
-	predictor, err := startPredictor(handle)
+	// Start the latency predictor using exported helper
+	predictor, err := predictedlatency.StartPredictor(handle)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start latency predictor: %w", err)
 	}
@@ -88,21 +86,4 @@ func PDSLOAwareScorerFactory(name string, rawConfig json.RawMessage, handle plug
 	}
 
 	return pdRouter, nil
-}
-
-// startPredictor initializes and starts the latency predictor.
-// This is a copy of the unexported function from slo_aware_router package.
-func startPredictor(handle plugin.Handle) (latencypredictor.PredictorInterface, error) {
-	// Initialize the latency predictor
-	predictor := latencypredictor.New(latencypredictor.ConfigFromEnv(), ctrl.Log.WithName("latency-predictor"))
-	if err := predictor.Start(handle.Context()); err != nil {
-		return nil, fmt.Errorf("failed to start latency predictor: %w", err)
-	}
-
-	go func() {
-		<-handle.Context().Done()
-		predictor.Stop()
-	}()
-
-	return predictor, nil
 }

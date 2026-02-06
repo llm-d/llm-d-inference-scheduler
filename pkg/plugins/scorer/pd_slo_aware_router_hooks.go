@@ -181,7 +181,7 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 	}
 
 	// Get scheduling result for this request
-	schedulingResult, err := p.PredictedLatency.GetSchedulingResultForRequest(request)
+	schedulingResult, err := p.PredictedLatency.GetSchedulingResult(request)
 	if err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to get scheduling result for prefill training")
 		return
