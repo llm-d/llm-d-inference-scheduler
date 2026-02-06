@@ -288,6 +288,16 @@ export VLLM_TENSOR_PARALLEL_SIZE=2
 export VLLM_GPU_COUNT_PER_INSTANCE=2
 ```
 
+**4. Enabling Session Affinity:**
+
+You can enable session affinity to route requests from the same client to the same pod:
+
+```bash
+export SESSION_AFFINITY_ENABLED=true
+```
+
+This will automatically use the session affinity configuration (`deploy/config/session-affinity-config.yaml`). See the [Session Affinity Guide](docs/session_affinity.md) for more details.
+
 **4. Additional environment settings:**
 
 More environment variable settings can be found in the `scripts/kubernetes-dev-env.sh`.
