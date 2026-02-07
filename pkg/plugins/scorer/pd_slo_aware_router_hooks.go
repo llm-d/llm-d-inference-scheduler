@@ -19,7 +19,6 @@ package scorer
 import (
 	"context"
 	"strconv"
-	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -29,7 +28,6 @@ import (
 	predictedlatency "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/predictedlatency"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
-	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 )
 
 // PDSLOAwareRouter wraps the base PredictedLatency to add P/D-specific hook logic.
@@ -165,8 +163,12 @@ func (p *PDSLOAwareRouter) ResponseComplete(ctx context.Context, request *schedu
 //
 // This method is P/D-specific and lives in llm-d-inference-scheduler because it:
 // - Assumes two-phase scheduling with "prefill" and "decode" profiles
-// - Knows about the llm-d.ai/role label structure
+// - Knows about the x-prefill-ttft-ms header convention
 // - Understands that prefill pods only handle TTFT (no TPOT)
+//
+// The actual training data assembly and recording is delegated to GAIE's RecordTrainingForProfile,
+// which handles the complexity of extracting pod metadata, metrics, and using the configured
+// PDPredictionRequestBuilder to add pod type labels.
 func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 	ctx context.Context,
 	request *schedulingtypes.LLMRequest,
@@ -180,83 +182,17 @@ func (p *PDSLOAwareRouter) recordPrefillTrainingData(
 		return
 	}
 
-	// Get scheduling result for this request
-	schedulingResult, err := p.PredictedLatency.GetSchedulingResult(request)
-	if err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Failed to get scheduling result for prefill training")
-		return
-	}
-
-	// P/D-specific: Extract prefill pod from the "prefill" profile
-	prefillResult, exists := schedulingResult.ProfileResults["prefill"]
-	if !exists || prefillResult == nil || len(prefillResult.TargetEndpoints) == 0 {
-		logger.V(logutil.DEBUG).Info("No prefill pod in scheduling result, skipping prefill training")
-		return
-	}
-
-	prefillPod := prefillResult.TargetEndpoints[0]
-
-	// Get metrics for the prefill pod
-	lastSeenMetrics, err := p.PredictedLatency.GetLastSeenMetricsForRequest(request)
-	if err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Failed to get metrics for prefill training")
-		return
-	}
-
-	prefillMetrics, exists := lastSeenMetrics["prefill"]
-	if !exists || prefillMetrics == nil {
-		logger.V(logutil.DEBUG).Info("No metrics available for prefill pod")
-		return
-	}
-
-	// Get prefix cache score
-	prefixCacheScores, err := p.PredictedLatency.GetPrefixCacheScoresForRequest(request)
-	if err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Failed to get prefix cache scores")
-		return
-	}
-	prefixCacheScore := prefixCacheScores[prefillPod.GetMetadata().String()]
-
-	// Get prompt
-	prompt, err := p.PredictedLatency.GetRequestPrompt(request)
-	if err != nil {
-		logger.V(logutil.DEBUG).Error(err, "Failed to get prompt for prefill training")
-		return
-	}
-
-	// Build training entry using the PDPredictionRequestBuilder
-	// This will automatically populate PodType="prefill" based on llm-d.ai/role label
-	requestBuilder := p.PredictedLatency.GetRequestBuilder()
-	entry := requestBuilder.BuildTrainingEntry(
+	// Use high-level API to record training data for prefill profile
+	// GAIE handles all the complexity: extracting profile data, building entry with
+	// PDPredictionRequestBuilder (which adds pod type labels), and sending to predictor
+	if err := p.PredictedLatency.RecordTrainingForProfile(
 		ctx,
-		prefillPod.GetMetadata(),
-		prefillMetrics,
-		prompt,
-		actualPrefillTTFT, // Actual TTFT from sidecar
-		0,                  // TPOT not applicable for prefill
-		time.Now(),
-		0, // No tokens generated yet for prefill
-		prefixCacheScore,
-	)
-
-	// Record training data (use safe type assertion to avoid panic)
-	predictorInterface := p.PredictedLatency.GetLatencyPredictor()
-	if predictorInterface == nil {
-		logger.V(logutil.DEBUG).Info("Latency predictor is nil, skipping prefill training")
-		return
-	}
-
-	latencyPredictor, ok := predictorInterface.(latencypredictor.PredictorInterface)
-	if !ok {
-		logger.V(logutil.DEBUG).Info("Latency predictor type mismatch, skipping prefill training")
-		return
-	}
-	if err := latencyPredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+		request,
+		"prefill",         // Profile name
+		actualPrefillTTFT, // Actual TTFT from decode sidecar header
+		0,                 // TPOT not applicable for prefill
+		0,                 // No tokens generated yet for prefill
+	); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Failed to record prefill training data")
-	} else {
-		logger.V(logutil.DEBUG).Info("Recorded prefill training data",
-			"pod", prefillPod.GetMetadata().String(),
-			"ttft_ms", actualPrefillTTFT,
-			"pod_type", "prefill")
 	}
 }
