@@ -164,6 +164,8 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *
 	}
 	s.mutex.RUnlock()
 
+	log.FromContext(ctx).V(logutil.DEBUG).Info("Active request counts", "endpointCounts", scoredEndpoints, "maxCount", maxCount)
+
 	scoredEndpointsMap := make(map[scheduling.Endpoint]float64, len(endpoints))
 	for _, endpoint := range endpoints {
 		endpointName := endpoint.GetMetadata().NamespacedName.String()
