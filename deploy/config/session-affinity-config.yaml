@@ -17,9 +17,8 @@ plugins:
     maxPrefixBlocksToMatch: 256
 - type: session-affinity-scorer  # Enables cookie-based session affinity
   parameters:
-    # maxAge: 86400      # Optional: Cookie lifetime in seconds (default: 0 = session cookie)
-    # secure: true       # Optional: Only send over HTTPS (default: false, set true in production)
-    # sameSite: "Lax"    # Optional: SameSite attribute (default: "Lax", options: "Strict", "None")
+    maxAge: 86400      # Optional: Cookie lifetime in seconds (default: 0 = session cookie)
+    # Fixed cookie attributes: Path=/, HttpOnly=true, Secure=false, SameSite=Lax
 - type: decode-filter
 - type: max-score-picker
 - type: single-profile-handler

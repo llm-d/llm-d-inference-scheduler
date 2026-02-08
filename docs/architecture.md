@@ -463,79 +463,10 @@ Scores are normalized to a range of 0-1, where pods with fewer active requests g
 #### SessionAffinity
 
 Scores the candidate pods by giving a higher score to the pods that were previously
-used for the same session. Session affinity is implemented using standard HTTP cookies,
-which are automatically handled by browsers and HTTP clients.
+used for the same session.
 
-When a request is routed to a pod, the scheduler sets a `llm-d-session` cookie in the
-response containing the pod identifier. Subsequent requests from the same client will
-include this cookie, and the session affinity scorer will give that specific pod a
-score of 1.0 while assigning 0.0 to all other pods, ensuring the request is routed
-to the same pod.
-
-This is particularly useful for:
-- Multi-turn conversations where maintaining context on the same pod improves performance
-- Maximizing KV cache hit rates for follow-up requests in a session
-- Reducing latency by keeping session state local to a single pod
-
-**Cookie Details:**
-- **Name**: `llm-d-session`
-- **Value**: Base64-encoded pod identifier (namespace/name)
-- **Path**: `/`
-- **HttpOnly**: `true` (prevents JavaScript access for security)
-- **SameSite**: `Lax` (provides CSRF protection while allowing normal navigation)
-
-**Configuration:**
 - **Type**: `session-affinity-scorer`
-- **Parameters**:
-  - `maxAge` (int, optional): Cookie's Max-Age in seconds. Default: 0 (session cookie that expires when browser closes)
-  - `secure` (bool, optional): Whether cookie should only be sent over HTTPS. Default: false. **Should be true in production**
-  - `sameSite` (string, optional): SameSite attribute. Valid values: "Lax" (default), "Strict", "None"
-
-**Example Configuration (Basic):**
-```yaml
-plugins:
-  - type: session-affinity-scorer
-  - type: prefix-cache-scorer
-  - type: max-score-picker
-schedulingProfiles:
-  - name: default
-    plugins:
-      - pluginRef: max-score-picker
-      - pluginRef: session-affinity-scorer
-        weight: 100  # High weight ensures session affinity takes precedence
-      - pluginRef: prefix-cache-scorer
-        weight: 50
-```
-
-**Example Configuration (Production with HTTPS):**
-```yaml
-plugins:
-  - type: session-affinity-scorer
-    parameters:
-      maxAge: 86400      # 24 hours
-      secure: true       # Only send over HTTPS
-      sameSite: "Strict" # Strict CSRF protection
-  - type: prefix-cache-scorer
-  - type: max-score-picker
-schedulingProfiles:
-  - name: default
-    plugins:
-      - pluginRef: max-score-picker
-      - pluginRef: session-affinity-scorer
-        weight: 100
-      - pluginRef: prefix-cache-scorer
-        weight: 50
-```
-
-**Client Behavior:**
-- First request: No cookie present, scheduler routes based on other scorers
-- Response: Includes `Set-Cookie: llm-d-session=<encoded-pod-id>; Path=/; HttpOnly; SameSite=Lax`
-- Subsequent requests: Browser/client automatically includes the cookie
-- Routing: Session affinity scorer ensures requests go to the same pod
-
-**Note:** The cookie does not have an expiration time by default, making it a session cookie
-that expires when the browser session ends. For production deployments with HTTPS, consider
-enabling the `Secure` flag in the cookie configuration.
+- **Parameters**: None
 
 ---
 

@@ -3,7 +3,6 @@ package scorer
 import (
 	"context"
 	"encoding/base64"
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +23,7 @@ func newTestEndpointForSession(name, namespace string) scheduling.Endpoint {
 }
 
 func TestSessionAffinityWithCookies(t *testing.T) {
-	scorer := NewSessionAffinity(nil) // Use default config
+	scorer := NewSessionAffinity(0) // Use default (session cookie)
 	ctx := context.Background()
 
 	// Create mock endpoints
@@ -95,7 +94,7 @@ func TestSessionAffinityWithCookies(t *testing.T) {
 }
 
 func TestResponseReceivedSetsCookie(t *testing.T) {
-	scorer := NewSessionAffinity(nil) // Use default config
+	scorer := NewSessionAffinity(0) // Use default (session cookie)
 	ctx := context.Background()
 
 	t.Run("Sets cookie in response", func(t *testing.T) {
@@ -167,6 +166,84 @@ func TestResponseReceivedSetsCookie(t *testing.T) {
 		scorer.ResponseReceived(ctx, nil, response, nil)
 		assert.Empty(t, response.Headers[setCookieHeaderName])
 	})
+
+	t.Run("Skips setting cookie when request already has correct cookie", func(t *testing.T) {
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-1",
+			},
+		}
+		expectedToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
+
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{
+				cookieHeaderName: sessionCookieName + "=" + expectedToken,
+			},
+		}
+		response := &requestcontrol.Response{
+			RequestId: "test-req-4",
+			Headers:   make(map[string]string),
+		}
+
+		scorer.ResponseReceived(ctx, request, response, targetPod)
+
+		// Should not set cookie since request already has correct value
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.Empty(t, setCookie, "Should not set cookie when request already has correct value")
+	})
+
+	t.Run("Sets cookie when request has different cookie value", func(t *testing.T) {
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-2",
+			},
+		}
+		wrongToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
+
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{
+				cookieHeaderName: sessionCookieName + "=" + wrongToken,
+			},
+		}
+		response := &requestcontrol.Response{
+			RequestId: "test-req-5",
+			Headers:   make(map[string]string),
+		}
+
+		scorer.ResponseReceived(ctx, request, response, targetPod)
+
+		// Should set cookie since request has different value
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.NotEmpty(t, setCookie, "Should set cookie when request has different value")
+
+		expectedToken := base64.StdEncoding.EncodeToString([]byte("default/pod-2"))
+		assert.Contains(t, setCookie, expectedToken)
+	})
+
+	t.Run("Sets cookie when request has no cookie", func(t *testing.T) {
+		targetPod := &fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{
+				Namespace: "default",
+				Name:      "pod-1",
+			},
+		}
+
+		request := &scheduling.LLMRequest{
+			Headers: map[string]string{},
+		}
+		response := &requestcontrol.Response{
+			RequestId: "test-req-6",
+			Headers:   make(map[string]string),
+		}
+
+		scorer.ResponseReceived(ctx, request, response, targetPod)
+
+		// Should set cookie since request has no cookie
+		setCookie := response.Headers[setCookieHeaderName]
+		assert.NotEmpty(t, setCookie, "Should set cookie when request has no cookie")
+	})
 }
 
 func TestExtractCookieValue(t *testing.T) {
@@ -220,12 +297,7 @@ func TestSessionAffinityWithConfig(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Cookie with MaxAge set", func(t *testing.T) {
-		config := &SessionAffinityConfig{
-			MaxAge:   3600, // 1 hour
-			Secure:   true,
-			SameSite: "Strict",
-		}
-		scorer := NewSessionAffinity(config)
+		scorer := NewSessionAffinity(3600) // 1 hour
 
 		response := &requestcontrol.Response{
 			RequestId: "test-req-config",
@@ -244,17 +316,12 @@ func TestSessionAffinityWithConfig(t *testing.T) {
 		assert.NotEmpty(t, setCookie)
 		assert.Contains(t, setCookie, sessionCookieName+"=")
 		assert.Contains(t, setCookie, "Max-Age=3600")
-		assert.Contains(t, setCookie, "Secure")
-		assert.Contains(t, setCookie, "SameSite=Strict")
+		assert.Contains(t, setCookie, "HttpOnly")
+		assert.Contains(t, setCookie, "SameSite=Lax")
 	})
 
 	t.Run("Session cookie (no MaxAge)", func(t *testing.T) {
-		config := &SessionAffinityConfig{
-			MaxAge:   0, // Session cookie
-			Secure:   false,
-			SameSite: "Lax",
-		}
-		scorer := NewSessionAffinity(config)
+		scorer := NewSessionAffinity(0) // Session cookie
 
 		response := &requestcontrol.Response{
 			RequestId: "test-req-session",
@@ -277,7 +344,7 @@ func TestSessionAffinityWithConfig(t *testing.T) {
 	})
 
 	t.Run("Default config when nil", func(t *testing.T) {
-		scorer := NewSessionAffinity(nil)
+		scorer := NewSessionAffinity(0)
 
 		response := &requestcontrol.Response{
 			RequestId: "test-req-default",
@@ -294,30 +361,9 @@ func TestSessionAffinityWithConfig(t *testing.T) {
 
 		setCookie := response.Headers[setCookieHeaderName]
 		assert.NotEmpty(t, setCookie)
-		assert.Contains(t, setCookie, "SameSite=Lax") // Default SameSite
-		assert.NotContains(t, setCookie, "Secure")    // Default not secure
+		assert.Contains(t, setCookie, "HttpOnly")
+		assert.Contains(t, setCookie, "SameSite=Lax")
+		assert.NotContains(t, setCookie, "Max-Age") // Session cookie has no Max-Age
+		assert.NotContains(t, setCookie, "Secure")  // Secure is false by default
 	})
-}
-
-func TestParseSameSite(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected http.SameSite
-	}{
-		{"Strict", http.SameSiteStrictMode},
-		{"strict", http.SameSiteStrictMode},
-		{"Lax", http.SameSiteLaxMode},
-		{"lax", http.SameSiteLaxMode},
-		{"None", http.SameSiteNoneMode},
-		{"none", http.SameSiteNoneMode},
-		{"", http.SameSiteLaxMode},        // Default
-		{"invalid", http.SameSiteLaxMode}, // Default for invalid
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := parseSameSite(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
 }

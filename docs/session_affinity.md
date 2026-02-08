@@ -23,26 +23,7 @@ The session affinity plugin is already compiled into the EPP binary. To enable i
      - name: default
        plugins:
          - pluginRef: session-affinity-scorer
-           weight: 100
-   ```
-
-2. **Deploy with the configuration:**
-   ```bash
-   # For KIND development (using environment variable)
-   export SESSION_AFFINITY_ENABLED=true
-   make env-dev-kind
-   
-   # Or specify config file directly
-   export EPP_CONFIG=deploy/config/session-affinity-config.yaml
-   make env-dev-kind
-   
-   # For Kubernetes
-   export SESSION_AFFINITY_ENABLED=true
-   ./scripts/kubernetes-dev-env.sh
-   
-   # Or with custom config
-   export EPP_CONFIG=deploy/config/session-affinity-config.yaml
-   ./scripts/kubernetes-dev-env.sh
+           weight: 50  # Adjust weight based on your requirements
    ```
 
 3. **Test it:**
@@ -73,85 +54,60 @@ For follow-up requests in the same session:
 3. All other pods receive a score of 0.0
 4. The request is routed to the same pod (assuming it's still available)
 
-## Cookie Details
-
-- **Name**: `llm-d-session`
-- **Value**: Base64-encoded pod identifier (format: `namespace/pod-name`)
-- **Path**: `/` (applies to all paths)
-- **HttpOnly**: `true` (prevents JavaScript access for security)
-- **SameSite**: `Lax` (provides CSRF protection)
-- **Secure**: Not set by default (should be enabled in production with HTTPS)
-- **Max-Age**: Not set (session cookie, expires when browser closes)
-
 ## Configuration
 
-### Basic Configuration
+### Basic Configuration (Session Cookie)
 
-Add the `session-affinity-scorer` plugin to your EPP configuration:
-## Deployment
+The simplest configuration uses a session cookie (expires when browser closes):
 
-### Step 1: Choose Configuration File
-
-You have several pre-built configuration files:
-
-- **`deploy/config/session-affinity-config.yaml`** - Basic configuration with comments
-- **`deploy/config/session-affinity-production-config.yaml`** - Production-ready with secure settings
-- **`deploy/config/epp-config.yaml`** - Minimal config (add session affinity to this)
-
-Or create your own based on the examples below.
-
-### Step 2: Create ConfigMap
-
-**Option A: Using kubectl**
-```bash
-kubectl create configmap epp-config \
-  --from-file=config.yaml=deploy/config/session-affinity-config.yaml \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-**Option B: Using kustomize**
-
-Add to your `kustomization.yaml`:
 ```yaml
-configMapGenerator:
-- name: epp-config
-  files:
-  - config.yaml=../../config/session-affinity-config.yaml
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: session-affinity-scorer
+  # No parameters needed for session cookie (default behavior)
+- type: prefix-cache-scorer
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: max-score-picker
+  - pluginRef: session-affinity-scorer
+    weight: 70  # Adjust based on how strongly you want session affinity
+  - pluginRef: prefix-cache-scorer
+    weight: 50
 ```
 
-### Step 3: Deploy
+### Configuration with Persistent Cookie (Optional)
 
-**For KIND Development Environment:**
-```bash
-# Set the config file
-export EPP_CONFIG=deploy/config/session-affinity-config.yaml
+To set a cookie expiration time, use the `maxAge` parameter (in seconds):
 
-# Deploy the stack
-make env-dev-kind
-
-# Access via NodePort (default: 30080)
-# Or port forward: kubectl port-forward service/inference-gateway 8080:80
+```yaml
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: session-affinity-scorer
+  parameters:
+    maxAge: 3600  # Cookie expires after 1 hour
+    # Other options:
+    # maxAge: 86400   # 24 hours
+    # maxAge: 604800  # 7 days
+- type: prefix-cache-scorer
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: max-score-picker
+  - pluginRef: session-affinity-scorer
+    weight: 70
+  - pluginRef: prefix-cache-scorer
+    weight: 50
 ```
 
-**For Production Kubernetes:**
-```bash
-# Apply your kustomization
-kubectl apply -k deploy/environments/dev/kind-istio/
 
-# Or apply components directly
-kubectl apply -f deploy/components/inference-gateway/
-```
-
-### Step 4: Verify Deployment
-
-Check that the EPP loaded the plugin:
-```bash
-# View EPP logs
-kubectl logs -l app=epp -f
-
-# Look for:
-# "Registered plugin" plugin="session-affinity-scorer"
-```
+## Verify Deployment
 
 Test session affinity:
 ```bash
@@ -170,48 +126,6 @@ curl -s -w '\n' http://localhost:30080/v1/completions \
   -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"how are you","max_tokens":10,"temperature":0}' | jq
 ```
 
-
-```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
-kind: EndpointPickerConfig
-plugins:
-- type: session-affinity-scorer
-- type: prefix-cache-scorer
-- type: max-score-picker
-- type: single-profile-handler
-schedulingProfiles:
-- name: default
-  plugins:
-  - pluginRef: max-score-picker
-  - pluginRef: session-affinity-scorer
-    weight: 100  # High weight ensures session affinity takes precedence
-  - pluginRef: prefix-cache-scorer
-    weight: 50
-```
-
-### Weight Recommendations
-
-- **High Weight (100+)**: Session affinity takes precedence over other factors
-- **Medium Weight (50-100)**: Balanced with other scorers like prefix cache
-- **Low Weight (1-50)**: Session affinity is a tiebreaker
-
-### Combined with Other Scorers
-
-Session affinity works well with other scorers:
-
-```yaml
-schedulingProfiles:
-- name: default
-  plugins:
-  - pluginRef: decode-filter
-  - pluginRef: max-score-picker
-  - pluginRef: session-affinity-scorer
-    weight: 100  # Highest priority for existing sessions
-  - pluginRef: precise-prefix-cache-scorer
-    weight: 50   # Cache locality for new sessions
-  - pluginRef: load-aware-scorer
-    weight: 25   # Load balancing
-```
 
 ## Client Usage
 
@@ -244,6 +158,9 @@ fetch('https://gateway/v1/chat/completions', {
   })
 });
 ```
+Note: modern browsers check CORS (Cross-Origin Resource Sharing) settings and can prevent cookies sending even if "Set-Cookie" exist. Please check your browser configuration.
+
+
 
 ### Manual (CLI/Scripts)
 
@@ -251,18 +168,19 @@ For CLI tools or scripts, you need to preserve cookies between requests:
 
 ```bash
 # Using curl with cookie jar
-curl -s -w '\n' http://localhost:30080/v1/completions \
+curl -v '\n' http://localhost:30080/v1/completions \
   -H 'Content-Type: application/json' \
   -c cookies.txt \
   -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 
 # Subsequent request with cookie
-curl -s -w '\n' http://localhost:30080/v1/completions \
+curl -v '\n' http://localhost:30080/v1/completions \
   -H 'Content-Type: application/json' \
   -b cookies.txt \
   -c cookies.txt \
   -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"how are you","max_tokens":10,"temperature":0}' | jq
 ```
+Check the request and response headers to see the cookie being sent.
 
 ### Python Example
 
@@ -318,84 +236,4 @@ plugins:
     weight: 20   # But consider load
 ```
 
-This allows the scheduler to route to a different pod if the session pod is overloaded.
-
-## Security Considerations
-
-### Production Deployment
-
-For production deployments with HTTPS, consider:
-
-1. **Enable Secure Flag**: Modify the code to set `Secure: true` in the cookie
-2. **Set Max-Age**: Add expiration time to limit cookie lifetime
-3. **Use SameSite=Strict**: For stricter CSRF protection if appropriate
-
-### Privacy
-
-The session cookie contains:
-- Pod namespace and name (base64-encoded)
-- No user data or sensitive information
-- No personally identifiable information (PII)
-
-## Monitoring
-
-### Metrics
-
-Monitor session affinity effectiveness:
-- Cache hit rates per pod
-- Request distribution across pods
-- Session duration and request counts
-
-### Debugging
-
-To inspect the session cookie:
-
-```bash
-# Decode the cookie value
-echo "ZGVmYXVsdC9wb2QtMQ==" | base64 -d
-# Output: default/pod-1
-```
-
-## Troubleshooting
-
-### Cookie Not Being Set
-
-Check:
-1. Response headers include `Set-Cookie`
-2. EPP configuration includes `session-affinity-scorer`
-3. Plugin is in the scheduling profile with appropriate weight
-
-### Cookie Not Being Sent
-
-Check:
-1. Client is configured to send cookies
-2. Cookie path matches request path
-3. SameSite policy allows the request
-
-### Requests Not Sticky
-
-Check:
-1. Session affinity scorer weight is high enough
-2. Target pod is available and healthy
-3. Cookie value is valid and not corrupted
-
-## Migration from Custom Headers
-
-If you were using the old `x-session-token` header approach:
-
-1. Update to the latest version with cookie support
-2. No client changes needed - cookies are handled automatically
-3. Old header-based sessions will naturally expire
-4. New sessions will use cookies
-
-## Related Features
-
-- **Prefix Cache Scorer**: Works well with session affinity for cache locality
-- **Load Aware Scorer**: Can be balanced with session affinity
-- **P/D Disaggregation**: Session affinity applies to decode pods
-
-## References
-
-- [Architecture Documentation](./architecture.md)
-- [Plugin Configuration](./architecture.md#plugin-configuration)
-- [HTTP Cookie Specification (RFC 6265)](https://tools.ietf.org/html/rfc6265)
+This allows the scheduler to route to a different pod if the session pod is overloaded. The weight can be adjusted based on your specific requirements - you don't need to use 100, even moderate weights like 50-60 provide strong session affinity.

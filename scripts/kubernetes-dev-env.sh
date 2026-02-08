@@ -83,17 +83,7 @@ export PD_ENABLED="\"${PD_ENABLED:-false}\""
 # Token length threshold to trigger P/D logic
 export PD_PROMPT_LEN_THRESHOLD="\"${PD_PROMPT_LEN_THRESHOLD:-10}\""
 
-# By default session affinity is disabled
-export SESSION_AFFINITY_ENABLED="${SESSION_AFFINITY_ENABLED:-false}"
-
-# Determine EPP config file based on feature flags
-if [ "${SESSION_AFFINITY_ENABLED}" == "true" ]; then
-  DEFAULT_EPP_CONFIG="deploy/config/session-affinity-config.yaml"
-else
-  DEFAULT_EPP_CONFIG="deploy/config/epp-prefix-cache-tracking-config.yaml"
-fi
-
-export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
+export EPP_CONFIG="${EPP_CONFIG:-deploy/config/epp-prefix-cache-tracking-config.yaml}"
 
 # Redis deployment name
 export REDIS_DEPLOYMENT_NAME="${REDIS_DEPLOYMENT_NAME:-lookup-server}"

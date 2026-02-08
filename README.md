@@ -14,15 +14,7 @@ This provides an "Endpoint Picker (EPP)" component to the llm-d inference
 framework which schedules incoming inference requests to the platform via a
 [Kubernetes] Gateway according to scheduler plugins. For more details on the
 llm-d inference scheduler architecture, routing logic, and different plugins
-(filters and scorers), including plugin configuration, see the [Architecture Documentation].
-
-### Key Features
-
-- **Session Affinity**: Cookie-based session routing for multi-turn conversations ([Session Affinity Guide])
-- **KV Cache Optimization**: Precise prefix cache scoring for improved cache hit rates
-- **P/D Disaggregation**: Separate prefill and decode scheduling ([P/D Disaggregation])
-- **Load Balancing**: Dynamic load-aware routing across inference pods
-- **Pluggable Architecture**: Extensible filters, scorers, and scrapers
+(filters and scorers), including plugin configuration, see the [Architecture Documentation]).
 
 ### Relation to GIE (IGW)
 
@@ -52,7 +44,6 @@ workloads currently.
 
 [Kubernetes]:https://kubernetes.io
 [Architecture Documentation]:docs/architecture.md
-[Session Affinity Guide]:docs/session_affinity.md
 [Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
 [P/D Disaggregation]:docs/disagg_pd.md
 [Gateway API]:https://github.com/kubernetes-sigs/gateway-api

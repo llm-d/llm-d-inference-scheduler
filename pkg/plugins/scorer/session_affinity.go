@@ -20,55 +20,44 @@ const (
 	SessionAffinityType = "session-affinity-scorer"
 
 	sessionCookieName   = "llm-d-session" // name of the session cookie
-	setCookieHeaderName = "Set-Cookie"    // HTTP Set-Cookie header name (canonical case)
+	cookieHeaderName    = "cookie"        // HTTP Cookie header name (lowercase for request headers)
+	setCookieHeaderName = "set-cookie"    // HTTP Set-Cookie header name (canonical case)
+
+	// defaultMaxAge is the default cookie Max-Age in seconds.
+	// 0 means session cookie (expires when browser closes).
+	defaultMaxAge = 0
 )
 
 // compile-time type assertion
 var _ scheduling.Scorer = &SessionAffinity{}
 var _ requestcontrol.ResponseReceived = &SessionAffinity{}
 
-// SessionAffinityConfig holds configuration for the SessionAffinity scorer.
-type SessionAffinityConfig struct {
-	// MaxAge specifies the cookie's Max-Age attribute in seconds.
-	// If 0 (default), the cookie is a session cookie (expires when browser closes).
-	// If negative, the cookie is deleted immediately.
-	MaxAge int `json:"maxAge,omitempty"`
-
-	// Secure specifies whether the cookie should only be sent over HTTPS.
-	// Should be true in production environments with HTTPS.
-	Secure bool `json:"secure,omitempty"`
-
-	// SameSite specifies the SameSite attribute for the cookie.
-	// Valid values: "Lax" (default), "Strict", "None"
-	// "Lax" provides good CSRF protection while allowing normal navigation.
-	SameSite string `json:"sameSite,omitempty"`
-}
-
 // SessionAffinityFactory defines the factory function for SessionAffinity scorer.
 func SessionAffinityFactory(name string, rawConfig json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	config := &SessionAffinityConfig{
-		SameSite: "Lax", // default
-	}
+	maxAge := defaultMaxAge
 
 	if len(rawConfig) > 0 {
-		if err := json.Unmarshal(rawConfig, config); err != nil {
+		var config map[string]interface{}
+		if err := json.Unmarshal(rawConfig, &config); err != nil {
 			return nil, err
 		}
-	}
-
-	return NewSessionAffinity(config).WithName(name), nil
-}
-
-// NewSessionAffinity returns a scorer with the given configuration
-func NewSessionAffinity(config *SessionAffinityConfig) *SessionAffinity {
-	if config == nil {
-		config = &SessionAffinityConfig{
-			SameSite: "Lax",
+		if val, ok := config["maxAge"]; ok {
+			if intVal, ok := val.(float64); ok { // JSON numbers are float64
+				maxAge = int(intVal)
+			}
 		}
 	}
+
+	return NewSessionAffinity(maxAge).WithName(name), nil
+}
+
+// NewSessionAffinity returns a scorer with the given maxAge configuration.
+// maxAge specifies the cookie's Max-Age attribute in seconds.
+// If 0 (default), the cookie is a session cookie (expires when browser closes).
+func NewSessionAffinity(maxAge int) *SessionAffinity {
 	return &SessionAffinity{
 		typedName: plugin.TypedName{Type: SessionAffinityType},
-		config:    config,
+		maxAge:    maxAge,
 	}
 }
 
@@ -78,7 +67,7 @@ func NewSessionAffinity(config *SessionAffinityConfig) *SessionAffinity {
 // zero score to the rest of the targets
 type SessionAffinity struct {
 	typedName plugin.TypedName
-	config    *SessionAffinityConfig
+	maxAge    int
 }
 
 // TypedName returns the typed name of the plugin.
@@ -100,10 +89,10 @@ func (s *SessionAffinity) Category() scheduling.ScorerCategory {
 // Score assign a high score to the pod used in previous requests and zero to others
 func (s *SessionAffinity) Score(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	scoredEndpoints := make(map[scheduling.Endpoint]float64)
-	podName := ""
+	target := ""
 
 	// Extract session cookie from Cookie header
-	cookieHeader := request.Headers["cookie"]
+	cookieHeader := request.Headers[cookieHeaderName]
 	if cookieHeader != "" {
 		sessionToken := extractCookieValue(cookieHeader, sessionCookieName)
 		if sessionToken != "" {
@@ -118,7 +107,7 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *scheduling.CycleState, r
 
 	for _, endpoint := range endpoints {
 		scoredEndpoints[endpoint] = 0.0 // initial value
-		if endpoint.GetMetadata().NamespacedName.String() == podName {
+		if endpoint.GetMetadata().NamespacedName.String() == target {
 			scoredEndpoints[endpoint] = 1.0
 		}
 	}
@@ -127,37 +116,56 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *scheduling.CycleState, r
 }
 
 // ResponseReceived sets the session cookie on the response sent to the client
-func (s *SessionAffinity) ResponseReceived(ctx context.Context, _ *scheduling.LLMRequest, response *requestcontrol.Response, targetPod *datalayer.EndpointMetadata) {
+// only if the cookie doesn't exist or its value is different
+func (s *SessionAffinity) ResponseReceived(ctx context.Context, request *scheduling.LLMRequest, response *requestcontrol.Response, targetEndpoint *datalayer.EndpointMetadata) {
+	logger := log.FromContext(ctx)
 
-	if response == nil || targetPod == nil {
+	if response == nil || targetEndpoint == nil {
 		reqID := "undefined"
 		if response != nil {
 			reqID = response.RequestId
 		}
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetPod is nil", "req id", reqID)
+		logger.V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetEndpoint is nil", "req id", reqID)
 		return
 	}
 
+	// Create session token for the target endpoint
+	expectedSessionToken := base64.StdEncoding.EncodeToString([]byte(targetEndpoint.NamespacedName.String()))
+
+	// Check if client already has the correct cookie
+	if request != nil && request.Headers != nil {
+		cookieHeader := request.Headers[cookieHeaderName]
+		if cookieHeader != "" {
+			existingSessionToken := extractCookieValue(cookieHeader, sessionCookieName)
+			if existingSessionToken == expectedSessionToken {
+				// Cookie already exists with correct value, no need to set it again
+				logger.V(logutil.DEBUG).Info("Session cookie already exists with correct value, skipping Set-Cookie",
+					"expectedSessionToken", expectedSessionToken,
+					"existingSessionToken", existingSessionToken)
+				return
+			}
+		}
+	}
+
+	// Cookie doesn't exist or has different value, set it
 	if response.Headers == nil {
 		response.Headers = make(map[string]string)
 	}
 
-	// Create session cookie with encoded pod name
-	sessionToken := base64.StdEncoding.EncodeToString([]byte(targetPod.NamespacedName.String()))
 	cookie := &http.Cookie{
 		Name:     sessionCookieName,
-		Value:    sessionToken,
+		Value:    expectedSessionToken,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   s.config.Secure,
-		SameSite: parseSameSite(s.config.SameSite),
-	}
-
-	// Set MaxAge if configured (0 means session cookie)
-	if s.config.MaxAge != 0 {
-		cookie.MaxAge = s.config.MaxAge
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   s.maxAge, // 0 means session cookie
 	}
 	cookieStr := cookie.String()
+
+	logger.V(logutil.DEBUG).Info("Setting session cookie",
+		"sessionToken", expectedSessionToken,
+		"targetPod", targetEndpoint.NamespacedName.String())
 
 	// Append to existing Set-Cookie headers if any
 	existingSetCookie := response.Headers[setCookieHeaderName]
@@ -165,20 +173,6 @@ func (s *SessionAffinity) ResponseReceived(ctx context.Context, _ *scheduling.LL
 		response.Headers[setCookieHeaderName] = existingSetCookie + "\n" + cookieStr
 	} else {
 		response.Headers[setCookieHeaderName] = cookieStr
-	}
-}
-
-// parseSameSite converts string to http.SameSite value
-func parseSameSite(sameSite string) http.SameSite {
-	switch strings.ToLower(sameSite) {
-	case "strict":
-		return http.SameSiteStrictMode
-	case "none":
-		return http.SameSiteNoneMode
-	case "lax", "":
-		return http.SameSiteLaxMode
-	default:
-		return http.SameSiteLaxMode
 	}
 }
 

@@ -67,9 +67,6 @@ export PD_ENABLED="\"${PD_ENABLED:-false}\""
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 
-# By default session affinity is disabled
-export SESSION_AFFINITY_ENABLED="${SESSION_AFFINITY_ENABLED:-false}"
-
 # Replica counts for P and D
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
 export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
@@ -95,10 +92,7 @@ fi
 export PRIMARY_PORT
 
 # Determine EPP config file based on feature flags
-if [ "${SESSION_AFFINITY_ENABLED}" == "true" ]; then
-  # Session affinity mode
-  DEFAULT_EPP_CONFIG="deploy/config/session-affinity-config.yaml"
-elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
+if [ "${KV_CACHE_ENABLED}" == "true" ]; then
   # KV cache mode (simple mode only)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
