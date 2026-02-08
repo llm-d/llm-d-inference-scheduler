@@ -11,6 +11,14 @@ Session Affinity ensures that subsequent requests from the same client are route
 - **Better Resource Utilization**: Concentrates session state on specific pods
 - **Transparent to Clients**: Uses standard HTTP cookies that browsers handle automatically
 
+### Pod Availability
+
+If the pod specified in the session cookie is not available (e.g., scaled down, crashed):
+- The session affinity scorer gives it a score of 0.0 (same as other unavailable pods)
+- The request is routed based on other scoring criteria
+- A new session cookie is set with the newly selected pod
+
+
 ## Quick Start
 
 The session affinity plugin is already compiled into the EPP binary. To enable it:
@@ -23,7 +31,7 @@ The session affinity plugin is already compiled into the EPP binary. To enable i
      - name: default
        plugins:
          - pluginRef: session-affinity-scorer
-           weight: 50  # Adjust weight based on your requirements
+           weight: 70  # Adjust weight based on your requirements
    ```
 
 3. **Test it:**
@@ -92,7 +100,6 @@ plugins:
     maxAge: 3600  # Cookie expires after 1 hour
     # Other options:
     # maxAge: 86400   # 24 hours
-    # maxAge: 604800  # 7 days
 - type: prefix-cache-scorer
 - type: max-score-picker
 - type: single-profile-handler
@@ -215,25 +222,3 @@ response = session.post(
 print(response.json())
 ```
 
-## Behavior
-
-### Pod Availability
-
-If the pod specified in the session cookie is not available (e.g., scaled down, crashed):
-- The session affinity scorer gives it a score of 0.0 (same as other unavailable pods)
-- The request is routed based on other scoring criteria
-- A new session cookie is set with the newly selected pod
-
-### Load Balancing
-
-Session affinity can be balanced with load-aware scoring:
-
-```yaml
-plugins:
-  - pluginRef: session-affinity-scorer
-    weight: 80   # Strong preference for session pod
-  - pluginRef: load-aware-scorer
-    weight: 20   # But consider load
-```
-
-This allows the scheduler to route to a different pod if the session pod is overloaded. The weight can be adjusted based on your specific requirements - you don't need to use 100, even moderate weights like 50-60 provide strong session affinity.

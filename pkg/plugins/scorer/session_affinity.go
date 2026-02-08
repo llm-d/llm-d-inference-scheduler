@@ -165,7 +165,7 @@ func (s *SessionAffinity) ResponseReceived(ctx context.Context, request *schedul
 
 	logger.V(logutil.DEBUG).Info("Setting session cookie",
 		"sessionToken", expectedSessionToken,
-		"targetPod", targetEndpoint.NamespacedName.String())
+		"targetEndpoint", targetEndpoint.NamespacedName.String())
 
 	// Append to existing Set-Cookie headers if any
 	existingSetCookie := response.Headers[setCookieHeaderName]
