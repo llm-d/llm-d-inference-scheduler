@@ -1,15 +1,19 @@
-package scorer
+package scorer_test
 
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 )
 
 func newTestEndpointForSession(name, namespace string) scheduling.Endpoint {
@@ -23,7 +27,7 @@ func newTestEndpointForSession(name, namespace string) scheduling.Endpoint {
 }
 
 func TestSessionAffinityWithCookies(t *testing.T) {
-	scorer := NewSessionAffinity(0) // Use default (session cookie)
+	s := scorer.NewSessionAffinity(0) // Use default (session cookie)
 	ctx := context.Background()
 
 	// Create mock endpoints
@@ -31,219 +35,248 @@ func TestSessionAffinityWithCookies(t *testing.T) {
 	endpoint2 := newTestEndpointForSession("pod-2", "default")
 	endpoints := []scheduling.Endpoint{endpoint1, endpoint2}
 
-	t.Run("No cookie - all endpoints get zero score", func(t *testing.T) {
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{},
-		}
-
-		scores := scorer.Score(ctx, nil, request, endpoints)
-		assert.Equal(t, 0.0, scores[endpoint1])
-		assert.Equal(t, 0.0, scores[endpoint2])
-	})
-
-	t.Run("Cookie with pod-1 - pod-1 gets high score", func(t *testing.T) {
-		sessionToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{
-				"cookie": sessionCookieName + "=" + sessionToken,
+	tests := []struct {
+		name           string
+		cookieHeader   string
+		expectedScores map[string]float64 // endpoint name -> score
+	}{
+		{
+			name:         "No cookie - all endpoints get zero score",
+			cookieHeader: "",
+			expectedScores: map[string]float64{
+				"pod-1": 0.0,
+				"pod-2": 0.0,
 			},
-		}
-
-		scores := scorer.Score(ctx, nil, request, endpoints)
-		assert.Equal(t, 1.0, scores[endpoint1])
-		assert.Equal(t, 0.0, scores[endpoint2])
-	})
-
-	t.Run("Cookie with pod-2 - pod-2 gets high score", func(t *testing.T) {
-		sessionToken := base64.StdEncoding.EncodeToString([]byte("default/pod-2"))
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{
-				"cookie": sessionCookieName + "=" + sessionToken,
+		},
+		{
+			name:         "Cookie with pod-1 - pod-1 gets high score",
+			cookieHeader: scorer.SessionCookieName + "=" + base64.StdEncoding.EncodeToString([]byte("default/pod-1")),
+			expectedScores: map[string]float64{
+				"pod-1": 1.0,
+				"pod-2": 0.0,
 			},
-		}
-
-		scores := scorer.Score(ctx, nil, request, endpoints)
-		assert.Equal(t, 0.0, scores[endpoint1])
-		assert.Equal(t, 1.0, scores[endpoint2])
-	})
-
-	t.Run("Multiple cookies - session cookie is extracted", func(t *testing.T) {
-		sessionToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{
-				"cookie": "other-cookie=value; " + sessionCookieName + "=" + sessionToken + "; another=test",
+		},
+		{
+			name:         "Cookie with pod-2 - pod-2 gets high score",
+			cookieHeader: scorer.SessionCookieName + "=" + base64.StdEncoding.EncodeToString([]byte("default/pod-2")),
+			expectedScores: map[string]float64{
+				"pod-1": 0.0,
+				"pod-2": 1.0,
 			},
-		}
-
-		scores := scorer.Score(ctx, nil, request, endpoints)
-		assert.Equal(t, 1.0, scores[endpoint1])
-		assert.Equal(t, 0.0, scores[endpoint2])
-	})
-
-	t.Run("Invalid base64 cookie - all endpoints get zero score", func(t *testing.T) {
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{
-				"cookie": sessionCookieName + "=invalid-base64!!!",
+		},
+		{
+			name:         "Multiple cookies - session cookie is extracted",
+			cookieHeader: "other-cookie=value; " + scorer.SessionCookieName + "=" + base64.StdEncoding.EncodeToString([]byte("default/pod-1")) + "; another=test",
+			expectedScores: map[string]float64{
+				"pod-1": 1.0,
+				"pod-2": 0.0,
 			},
-		}
+		},
+		{
+			name:         "Invalid base64 cookie - all endpoints get zero score",
+			cookieHeader: scorer.SessionCookieName + "=invalid-base64!!!",
+			expectedScores: map[string]float64{
+				"pod-1": 0.0,
+				"pod-2": 0.0,
+			},
+		},
+	}
 
-		scores := scorer.Score(ctx, nil, request, endpoints)
-		assert.Equal(t, 0.0, scores[endpoint1])
-		assert.Equal(t, 0.0, scores[endpoint2])
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := &scheduling.LLMRequest{
+				Headers: map[string]string{},
+			}
+			if tt.cookieHeader != "" {
+				request.Headers[scorer.CookieHeaderName] = tt.cookieHeader
+			}
+
+			scores := s.Score(ctx, nil, request, endpoints)
+
+			assert.Equal(t, tt.expectedScores["pod-1"], scores[endpoint1], "pod-1 score mismatch")
+			assert.Equal(t, tt.expectedScores["pod-2"], scores[endpoint2], "pod-2 score mismatch")
+		})
+	}
 }
 
 func TestResponseReceivedSetsCookie(t *testing.T) {
-	scorer := NewSessionAffinity(0) // Use default (session cookie)
+	s := scorer.NewSessionAffinity(0) // Use default (session cookie)
 	ctx := context.Background()
 
-	t.Run("Sets cookie in response", func(t *testing.T) {
-		response := &requestcontrol.Response{
-			RequestId: "test-req-1",
-			Headers:   make(map[string]string),
-		}
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-1",
+	tests := []struct {
+		name                string
+		request             *scheduling.LLMRequest
+		response            *requestcontrol.Response
+		targetPod           *fwkdl.EndpointMetadata
+		expectCookieSet     bool
+		expectedContains    []string
+		expectedNotContains []string
+		expectEmpty         bool
+	}{
+		{
+			name:    "Sets cookie in response",
+			request: nil,
+			response: &requestcontrol.Response{
+				RequestId: "test-req-1",
+				Headers:   make(map[string]string),
 			},
-		}
-
-		scorer.ResponseReceived(ctx, nil, response, targetPod)
-
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.NotEmpty(t, setCookie)
-		assert.Contains(t, setCookie, sessionCookieName+"=")
-		assert.Contains(t, setCookie, "Path=/")
-		assert.Contains(t, setCookie, "HttpOnly")
-		assert.Contains(t, setCookie, "SameSite=Lax")
-
-		// Verify the cookie value is correctly encoded
-		expectedToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
-		assert.Contains(t, setCookie, expectedToken)
-	})
-
-	t.Run("Appends to existing Set-Cookie header", func(t *testing.T) {
-		response := &requestcontrol.Response{
-			RequestId: "test-req-2",
-			Headers: map[string]string{
-				setCookieHeaderName: "existing-cookie=value; Path=/",
+			targetPod: &fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{
+					Namespace: "default",
+					Name:      "pod-1",
+				},
 			},
-		}
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-2",
+			expectCookieSet: true,
+			expectedContains: []string{
+				scorer.SessionCookieName + "=",
+				"Path=/",
+				"HttpOnly",
+				"SameSite=Lax",
+				base64.StdEncoding.EncodeToString([]byte("default/pod-1")),
 			},
-		}
-
-		scorer.ResponseReceived(ctx, nil, response, targetPod)
-
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.Contains(t, setCookie, "existing-cookie=value")
-		assert.Contains(t, setCookie, sessionCookieName+"=")
-	})
-
-	t.Run("Handles nil response gracefully", func(t *testing.T) {
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-1",
+		},
+		{
+			name:    "Appends to existing Set-Cookie header",
+			request: nil,
+			response: &requestcontrol.Response{
+				RequestId: "test-req-2",
+				Headers: map[string]string{
+					scorer.SetCookieHeaderName: "existing-cookie=value; Path=/",
+				},
 			},
-		}
-
-		// Should not panic
-		scorer.ResponseReceived(ctx, nil, nil, targetPod)
-	})
-
-	t.Run("Handles nil targetPod gracefully", func(t *testing.T) {
-		response := &requestcontrol.Response{
-			RequestId: "test-req-3",
-			Headers:   make(map[string]string),
-		}
-
-		// Should not panic
-		scorer.ResponseReceived(ctx, nil, response, nil)
-		assert.Empty(t, response.Headers[setCookieHeaderName])
-	})
-
-	t.Run("Skips setting cookie when request already has correct cookie", func(t *testing.T) {
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-1",
+			targetPod: &fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{
+					Namespace: "default",
+					Name:      "pod-2",
+				},
 			},
-		}
-		expectedToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
-
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{
-				cookieHeaderName: sessionCookieName + "=" + expectedToken,
+			expectCookieSet: true,
+			expectedContains: []string{
+				"existing-cookie=value",
+				scorer.SessionCookieName + "=",
 			},
-		}
-		response := &requestcontrol.Response{
-			RequestId: "test-req-4",
-			Headers:   make(map[string]string),
-		}
-
-		scorer.ResponseReceived(ctx, request, response, targetPod)
-
-		// Should not set cookie since request already has correct value
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.Empty(t, setCookie, "Should not set cookie when request already has correct value")
-	})
-
-	t.Run("Sets cookie when request has different cookie value", func(t *testing.T) {
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-2",
+		},
+		{
+			name:     "Handles nil response gracefully",
+			request:  nil,
+			response: nil,
+			targetPod: &fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{
+					Namespace: "default",
+					Name:      "pod-1",
+				},
 			},
-		}
-		wrongToken := base64.StdEncoding.EncodeToString([]byte("default/pod-1"))
-
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{
-				cookieHeaderName: sessionCookieName + "=" + wrongToken,
+			expectCookieSet: false,
+		},
+		{
+			name:    "Handles nil targetPod gracefully",
+			request: nil,
+			response: &requestcontrol.Response{
+				RequestId: "test-req-3",
+				Headers:   make(map[string]string),
 			},
-		}
-		response := &requestcontrol.Response{
-			RequestId: "test-req-5",
-			Headers:   make(map[string]string),
-		}
-
-		scorer.ResponseReceived(ctx, request, response, targetPod)
-
-		// Should set cookie since request has different value
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.NotEmpty(t, setCookie, "Should set cookie when request has different value")
-
-		expectedToken := base64.StdEncoding.EncodeToString([]byte("default/pod-2"))
-		assert.Contains(t, setCookie, expectedToken)
-	})
-
-	t.Run("Sets cookie when request has no cookie", func(t *testing.T) {
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-1",
+			targetPod:       nil,
+			expectCookieSet: false,
+			expectEmpty:     true,
+		},
+		{
+			name: "Skips setting cookie when request already has correct cookie",
+			request: &scheduling.LLMRequest{
+				Headers: map[string]string{
+					scorer.CookieHeaderName: scorer.SessionCookieName + "=" + base64.StdEncoding.EncodeToString([]byte("default/pod-1")),
+				},
 			},
-		}
+			response: &requestcontrol.Response{
+				RequestId: "test-req-4",
+				Headers:   make(map[string]string),
+			},
+			targetPod: &fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{
+					Namespace: "default",
+					Name:      "pod-1",
+				},
+			},
+			expectCookieSet: false,
+			expectEmpty:     true,
+		},
+		{
+			name: "Sets cookie when request has different cookie value",
+			request: &scheduling.LLMRequest{
+				Headers: map[string]string{
+					scorer.CookieHeaderName: scorer.SessionCookieName + "=" + base64.StdEncoding.EncodeToString([]byte("default/pod-1")),
+				},
+			},
+			response: &requestcontrol.Response{
+				RequestId: "test-req-5",
+				Headers:   make(map[string]string),
+			},
+			targetPod: &fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{
+					Namespace: "default",
+					Name:      "pod-2",
+				},
+			},
+			expectCookieSet: true,
+			expectedContains: []string{
+				base64.StdEncoding.EncodeToString([]byte("default/pod-2")),
+			},
+		},
+		{
+			name: "Sets cookie when request has no cookie",
+			request: &scheduling.LLMRequest{
+				Headers: map[string]string{},
+			},
+			response: &requestcontrol.Response{
+				RequestId: "test-req-6",
+				Headers:   make(map[string]string),
+			},
+			targetPod: &fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{
+					Namespace: "default",
+					Name:      "pod-1",
+				},
+			},
+			expectCookieSet: true,
+		},
+	}
 
-		request := &scheduling.LLMRequest{
-			Headers: map[string]string{},
-		}
-		response := &requestcontrol.Response{
-			RequestId: "test-req-6",
-			Headers:   make(map[string]string),
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Should not panic
+			s.ResponseReceived(ctx, tt.request, tt.response, tt.targetPod)
 
-		scorer.ResponseReceived(ctx, request, response, targetPod)
+			if tt.response != nil {
+				setCookie := tt.response.Headers[scorer.SetCookieHeaderName]
 
-		// Should set cookie since request has no cookie
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.NotEmpty(t, setCookie, "Should set cookie when request has no cookie")
-	})
+				if tt.expectEmpty {
+					assert.Empty(t, setCookie)
+				} else if tt.expectCookieSet {
+					assert.NotEmpty(t, setCookie)
+				}
+
+				for _, expected := range tt.expectedContains {
+					assert.Contains(t, setCookie, expected)
+				}
+
+				for _, notExpected := range tt.expectedNotContains {
+					assert.NotContains(t, setCookie, notExpected)
+				}
+			}
+		})
+	}
+}
+
+// extractCookieValue is a test helper that mirrors the private function in session_affinity.go
+func extractCookieValue(cookieHeader, cookieName string) string {
+	cookies := strings.Split(cookieHeader, ";")
+	for _, cookie := range cookies {
+		cookie = strings.TrimSpace(cookie)
+		parts := strings.SplitN(cookie, "=", 2)
+		if len(parts) == 2 && parts[0] == cookieName {
+			return parts[1]
+		}
+	}
+	return ""
 }
 
 func TestExtractCookieValue(t *testing.T) {
@@ -296,74 +329,77 @@ func TestExtractCookieValue(t *testing.T) {
 func TestSessionAffinityWithConfig(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("Cookie with MaxAge set", func(t *testing.T) {
-		scorer := NewSessionAffinity(3600) // 1 hour
-
-		response := &requestcontrol.Response{
-			RequestId: "test-req-config",
-			Headers:   make(map[string]string),
-		}
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-1",
+	tests := []struct {
+		name                string
+		maxAge              int
+		expectedContains    []string
+		expectedNotContains []string
+	}{
+		{
+			name:   "Cookie with MaxAge set",
+			maxAge: 3600,
+			expectedContains: []string{
+				scorer.SessionCookieName + "=",
+				"Max-Age=3600",
+				"HttpOnly",
+				"SameSite=Lax",
 			},
-		}
-
-		scorer.ResponseReceived(ctx, nil, response, targetPod)
-
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.NotEmpty(t, setCookie)
-		assert.Contains(t, setCookie, sessionCookieName+"=")
-		assert.Contains(t, setCookie, "Max-Age=3600")
-		assert.Contains(t, setCookie, "HttpOnly")
-		assert.Contains(t, setCookie, "SameSite=Lax")
-	})
-
-	t.Run("Session cookie (no MaxAge)", func(t *testing.T) {
-		scorer := NewSessionAffinity(0) // Session cookie
-
-		response := &requestcontrol.Response{
-			RequestId: "test-req-session",
-			Headers:   make(map[string]string),
-		}
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-1",
+		},
+		{
+			name:   "Session cookie (no MaxAge)",
+			maxAge: 0,
+			expectedContains: []string{
+				"HttpOnly",
+				"SameSite=Lax",
 			},
-		}
-
-		scorer.ResponseReceived(ctx, nil, response, targetPod)
-
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.NotEmpty(t, setCookie)
-		assert.NotContains(t, setCookie, "Max-Age") // Session cookie has no Max-Age
-		assert.NotContains(t, setCookie, "Secure")  // Secure not set
-		assert.Contains(t, setCookie, "SameSite=Lax")
-	})
-
-	t.Run("Default config when nil", func(t *testing.T) {
-		scorer := NewSessionAffinity(0)
-
-		response := &requestcontrol.Response{
-			RequestId: "test-req-default",
-			Headers:   make(map[string]string),
-		}
-		targetPod := &fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{
-				Namespace: "default",
-				Name:      "pod-1",
+			expectedNotContains: []string{
+				"Max-Age",
+				"Secure",
 			},
-		}
+		},
+		{
+			name:   "Default config when nil",
+			maxAge: 0,
+			expectedContains: []string{
+				"HttpOnly",
+				"SameSite=Lax",
+			},
+			expectedNotContains: []string{
+				"Max-Age",
+				"Secure",
+			},
+		},
+	}
 
-		scorer.ResponseReceived(ctx, nil, response, targetPod)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := scorer.NewSessionAffinity(tt.maxAge)
 
-		setCookie := response.Headers[setCookieHeaderName]
-		assert.NotEmpty(t, setCookie)
-		assert.Contains(t, setCookie, "HttpOnly")
-		assert.Contains(t, setCookie, "SameSite=Lax")
-		assert.NotContains(t, setCookie, "Max-Age") // Session cookie has no Max-Age
-		assert.NotContains(t, setCookie, "Secure")  // Secure is false by default
-	})
+			response := &requestcontrol.Response{
+				RequestId: "test-req-" + tt.name,
+				Headers:   make(map[string]string),
+			}
+			targetPod := &fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{
+					Namespace: "default",
+					Name:      "pod-1",
+				},
+			}
+
+			s.ResponseReceived(ctx, nil, response, targetPod)
+
+			setCookie := response.Headers[scorer.SetCookieHeaderName]
+			require.NotEmpty(t, setCookie)
+
+			for _, expected := range tt.expectedContains {
+				assert.Contains(t, setCookie, expected)
+			}
+
+			for _, notExpected := range tt.expectedNotContains {
+				assert.NotContains(t, setCookie, notExpected)
+			}
+		})
+	}
 }
+
+// Made with Bob

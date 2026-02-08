@@ -1,9 +1,11 @@
 package scorer
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -19,9 +21,12 @@ const (
 	// SessionAffinityType is the type of the SessionAffinity scorer.
 	SessionAffinityType = "session-affinity-scorer"
 
-	sessionCookieName   = "llm-d-session" // name of the session cookie
-	cookieHeaderName    = "cookie"        // HTTP Cookie header name (lowercase for request headers)
-	setCookieHeaderName = "set-cookie"    // HTTP Set-Cookie header name (canonical case)
+	// SessionCookieName - the name of the session cookie
+	SessionCookieName = "llm-d-session"
+	// CookieHeaderName - the HTTP Cookie header name
+	CookieHeaderName = "cookie"
+	// SetCookieHeaderName - the HTTP Set-Cookie header name
+	SetCookieHeaderName = "set-cookie"
 
 	// defaultMaxAge is the default cookie Max-Age in seconds.
 	// 0 means session cookie (expires when browser closes).
@@ -32,23 +37,25 @@ const (
 var _ scheduling.Scorer = &SessionAffinity{}
 var _ requestcontrol.ResponseReceived = &SessionAffinity{}
 
+type sessionAffinityConfig struct {
+	MaxAge int `json:"maxAge"` // Cookie Max-Age in seconds (0 = session cookie)
+}
+
 // SessionAffinityFactory defines the factory function for SessionAffinity scorer.
 func SessionAffinityFactory(name string, rawConfig json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	maxAge := defaultMaxAge
+	config := sessionAffinityConfig{
+		MaxAge: defaultMaxAge, // Set default
+	}
 
 	if len(rawConfig) > 0 {
-		var config map[string]interface{}
-		if err := json.Unmarshal(rawConfig, &config); err != nil {
-			return nil, err
-		}
-		if val, ok := config["maxAge"]; ok {
-			if intVal, ok := val.(float64); ok { // JSON numbers are float64
-				maxAge = int(intVal)
-			}
+		decoder := json.NewDecoder(bytes.NewReader(rawConfig))
+		decoder.DisallowUnknownFields() // Reject unknown fields
+		if err := decoder.Decode(&config); err != nil {
+			return nil, fmt.Errorf("invalid session affinity config: %w", err)
 		}
 	}
 
-	return NewSessionAffinity(maxAge).WithName(name), nil
+	return NewSessionAffinity(config.MaxAge).WithName(name), nil
 }
 
 // NewSessionAffinity returns a scorer with the given maxAge configuration.
@@ -92,9 +99,9 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *scheduling.CycleState, r
 	target := ""
 
 	// Extract session cookie from Cookie header
-	cookieHeader := request.Headers[cookieHeaderName]
+	cookieHeader := request.Headers[CookieHeaderName]
 	if cookieHeader != "" {
-		sessionToken := extractCookieValue(cookieHeader, sessionCookieName)
+		sessionToken := extractCookieValue(cookieHeader, SessionCookieName)
 		if sessionToken != "" {
 			decodedBytes, err := base64.StdEncoding.DecodeString(sessionToken)
 			if err != nil {
@@ -134,14 +141,11 @@ func (s *SessionAffinity) ResponseReceived(ctx context.Context, request *schedul
 
 	// Check if client already has the correct cookie
 	if request != nil && request.Headers != nil {
-		cookieHeader := request.Headers[cookieHeaderName]
+		cookieHeader := request.Headers[CookieHeaderName]
 		if cookieHeader != "" {
-			existingSessionToken := extractCookieValue(cookieHeader, sessionCookieName)
+			existingSessionToken := extractCookieValue(cookieHeader, SessionCookieName)
 			if existingSessionToken == expectedSessionToken {
 				// Cookie already exists with correct value, no need to set it again
-				logger.V(logutil.DEBUG).Info("Session cookie already exists with correct value, skipping Set-Cookie",
-					"expectedSessionToken", expectedSessionToken,
-					"existingSessionToken", existingSessionToken)
 				return
 			}
 		}
@@ -153,7 +157,7 @@ func (s *SessionAffinity) ResponseReceived(ctx context.Context, request *schedul
 	}
 
 	cookie := &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     SessionCookieName,
 		Value:    expectedSessionToken,
 		Path:     "/",
 		HttpOnly: true,
@@ -168,11 +172,11 @@ func (s *SessionAffinity) ResponseReceived(ctx context.Context, request *schedul
 		"targetEndpoint", targetEndpoint.NamespacedName.String())
 
 	// Append to existing Set-Cookie headers if any
-	existingSetCookie := response.Headers[setCookieHeaderName]
+	existingSetCookie := response.Headers[SetCookieHeaderName]
 	if existingSetCookie != "" {
-		response.Headers[setCookieHeaderName] = existingSetCookie + "\n" + cookieStr
+		response.Headers[SetCookieHeaderName] = existingSetCookie + "\n" + cookieStr
 	} else {
-		response.Headers[setCookieHeaderName] = cookieStr
+		response.Headers[SetCookieHeaderName] = cookieStr
 	}
 }
 
