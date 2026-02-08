@@ -111,7 +111,7 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *scheduling.CycleState, r
 			if err != nil {
 				log.FromContext(ctx).Error(err, "Error decoding session cookie")
 			} else {
-				podName = string(decodedBytes)
+				target = string(decodedBytes)
 			}
 		}
 	}
