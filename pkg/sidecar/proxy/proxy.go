@@ -26,7 +26,6 @@ import (
 
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/manager"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 	"golang.org/x/sync/errgroup"
@@ -73,9 +72,12 @@ type Server struct {
 
 	protocolRunner types.ProtocolRunner // the handler for running the protocol
 
-	proxyManager manager.ProxyManager
+	pdProxyManager pdProxyManager
 
-	prefillSamplerFn func(n int) int // allow test override
+	// data-parallel routing state (Server-owned; not part of ProxyHandler)
+	dataParallelProxies map[string]http.Handler
+	forwardDataParallel bool
+	prefillSamplerFn    func(n int) int // allow test override
 
 	config Config
 }
@@ -87,22 +89,21 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 	server := &Server{
 		port:       port,
 		decoderURL: decodeURL,
-		proxyManager: manager.ProxyManager{
-			PrefillerURLPrefix:          "http://",
-			PrefillerInsecureSkipVerify: config.PrefillerInsecureSkipVerify,
-
-			PrefillerProxies:    cache,
-			DataParallelProxies: map[string]http.Handler{},
-			ForwardDataParallel: true,
+		pdProxyManager: pdProxyManager{
+			prefillerURLPrefix:          "http://",
+			prefillerInsecureSkipVerify: config.PrefillerInsecureSkipVerify,
+			prefillerProxies:            cache,
 		},
-		config:           config,
-		prefillSamplerFn: rand.Intn,
+		dataParallelProxies: map[string]http.Handler{},
+		forwardDataParallel: true,
+		config:              config,
+		prefillSamplerFn:    rand.Intn,
 	}
 
 	server.setConnector()
 
 	if config.PrefillerUseTLS {
-		server.proxyManager.PrefillerURLPrefix = "https://"
+		server.pdProxyManager.prefillerURLPrefix = "https://"
 	}
 
 	return server
@@ -129,16 +130,21 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 	return grp.Wait()
 }
 
-// Clone returns a clone of the current Server struct
+// Clone returns a shallow clone of the Server for data parallel workers.
+// The proxyHandler is intentionally shared so all workers use the same
+// prefiller proxy LRU cache and decoder proxy. The dataParallelProxies map
+// is shared by reference; clones set forwardDataParallel = false in startDataParallel.
 func (s *Server) Clone() *Server {
 	return &Server{
-		addr:               s.addr,
-		port:               s.port,
-		decoderURL:         s.decoderURL,
-		handler:            s.handler,
-		allowlistValidator: s.allowlistValidator,
-		protocolRunner:     s.protocolRunner,
-		proxyManager:       s.proxyManager,
+		addr:                s.addr,
+		port:                s.port,
+		decoderURL:          s.decoderURL,
+		handler:             s.handler,
+		allowlistValidator:  s.allowlistValidator,
+		protocolRunner:      s.protocolRunner,
+		pdProxyManager:      s.pdProxyManager,
+		dataParallelProxies: s.dataParallelProxies,
+		forwardDataParallel: s.forwardDataParallel,
 	}
 }
 
@@ -153,17 +159,17 @@ func (s *Server) setConnector() {
 		s.protocolRunner = runners.NewVLLMRunner(
 			&runners.SharedStorageRequestBuilderFactory{},
 			types.ConnectorSharedStorage,
-			&s.proxyManager,
+			&s.pdProxyManager,
 		)
 	case types.ConnectorSGLang:
-		s.protocolRunner = runners.NewSGLangRunner(&s.proxyManager)
+		s.protocolRunner = runners.NewSGLangRunner(&s.pdProxyManager)
 	case types.ConnectorNIXLV2:
 		fallthrough
 	default:
 		s.protocolRunner = runners.NewVLLMRunner(
 			&runners.NIXLV2RequestBuilderFactory{},
 			types.ConnectorNIXLV2,
-			&s.proxyManager,
+			&s.pdProxyManager,
 		)
 	}
 }
@@ -179,9 +185,9 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
 	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
 
-	s.proxyManager.DecoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.DecoderInsecureSkipVerify)
+	s.pdProxyManager.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.DecoderInsecureSkipVerify)
 
-	mux.Handle("/", s.proxyManager.DecoderProxy)
+	mux.Handle("/", s.pdProxyManager.decoderProxy)
 
 	return mux
 }

@@ -309,7 +309,7 @@ func (av *AllowlistValidator) createPodInformer(poolName string, selector labels
 				Group:    "",
 				Version:  "v1",
 				Resource: "pods",
-			}).Namespace(av.namespace).List(context.TODO(), options)
+			}).Namespace(av.namespace).List(context.TODO(), options) // FIXME: use stored context from Start() to respect shutdown
 		},
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 			options.LabelSelector = selector.String()
@@ -317,7 +317,7 @@ func (av *AllowlistValidator) createPodInformer(poolName string, selector labels
 				Group:    "",
 				Version:  "v1",
 				Resource: "pods",
-			}).Namespace(av.namespace).Watch(context.TODO(), options)
+			}).Namespace(av.namespace).Watch(context.TODO(), options) // FIXME: use stored context from Start() to respect shutdown
 		},
 	}
 
@@ -363,7 +363,12 @@ func (av *AllowlistValidator) onPodDelete(obj interface{}) {
 	av.rebuildAllowlist()
 }
 
-// rebuildAllowlist rebuilds the entire allowlist from current pod state
+// rebuildAllowlist rebuilds the entire allowlist from current pod state.
+// NOTE: This method acquires allowedTargetsMu then podInformersMu (RLock).
+// There is a brief window where allowedTargets may be inconsistent with
+// podInformers if a pod informer is being added/removed concurrently.
+// This is acceptable because the allowlist is rebuilt on every pod event
+// and will converge quickly.
 func (av *AllowlistValidator) rebuildAllowlist() {
 	av.allowedTargetsMu.Lock()
 	defer av.allowedTargetsMu.Unlock()
