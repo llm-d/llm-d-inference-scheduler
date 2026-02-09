@@ -127,7 +127,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 					},
 				}
 				var passthrough bool
-				s.proxyManager.DecoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				s.pdProxyManager.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 					passthrough = true
 				})
 				recorder := httptest.NewRecorder()

@@ -57,8 +57,8 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
 
-		if !s.proxyManager.ForwardDataParallel || !s.dataParallelHandler(w, r) {
-			s.proxyManager.DecoderProxy.ServeHTTP(w, r)
+		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
+			s.pdProxyManager.decoderProxy.ServeHTTP(w, r)
 		}
 		return
 	}

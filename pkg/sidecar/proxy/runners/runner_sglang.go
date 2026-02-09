@@ -29,9 +29,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+
 	httperrors "github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/http_errors"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/manager"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 )
 
@@ -55,13 +55,13 @@ func init() {
 // Unlike VLLMRunner, SGLangRunner sends prefill and decode requests concurrently
 // and uses SGLang's built-in bootstrap coordination mechanism.
 type SGLangRunner struct {
-	proxyManager *manager.ProxyManager
+	proxyHandler types.PDProxyManager
 }
 
 // NewSGLangRunner creates a new SGLangRunner for SGLang backends.
-func NewSGLangRunner(proxyManager *manager.ProxyManager) types.ProtocolRunner {
+func NewSGLangRunner(proxyHandler types.PDProxyManager) types.ProtocolRunner {
 	return &SGLangRunner{
-		proxyManager: proxyManager,
+		proxyHandler: proxyHandler,
 	}
 }
 
@@ -102,7 +102,7 @@ func (sr *SGLangRunner) sendSGLangConcurrentRequests(w http.ResponseWriter, r *h
 	prefillReq := cloneWithJSONBody(r, body)
 	decodeReq := cloneWithJSONBody(r, body)
 
-	prefillHandler, err := sr.proxyManager.PrefillerProxyHandler(prefillHost, logger)
+	prefillHandler, err := sr.proxyHandler.PrefillerProxyHandler(prefillHost, logger)
 	if err != nil {
 		if err := httperrors.ErrorBadGateway(err, w); err != nil {
 			logger.Error(err, "failed to send error response to client")
@@ -112,13 +112,13 @@ func (sr *SGLangRunner) sendSGLangConcurrentRequests(w http.ResponseWriter, r *h
 
 	// Send prefill request asynchronously
 	go func() {
-		pw := &bufferedResponseWriter{}
+		pw := &BufferedResponseWriter{}
 		prefillHandler.ServeHTTP(pw, prefillReq)
 		logger.V(5).Info("prefill request completed", "status", pw.statusCode)
 	}()
 
 	// Send decode request synchronously
-	sr.proxyManager.DecoderProxy.ServeHTTP(w, decodeReq)
+	sr.proxyHandler.GetDecoderProxy().ServeHTTP(w, decodeReq)
 }
 
 func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {

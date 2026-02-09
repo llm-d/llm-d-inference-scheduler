@@ -28,9 +28,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+
 	httperrors "github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/http_errors"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/manager"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 )
 
@@ -41,16 +41,16 @@ import (
 type VLLMRunner struct {
 	requestBuilder types.RequestBuilderFactory
 	connector      types.Connector
-	proxyManager   *manager.ProxyManager
+	proxyHandler   types.PDProxyManager
 }
 
 // NewVLLMRunner creates a new VLLMRunner with the specified connector protocol.
 // The connector is used for logging to identify which protocol is being used.
-func NewVLLMRunner(requestBuilder types.RequestBuilderFactory, connector types.Connector, proxyManager *manager.ProxyManager) types.ProtocolRunner {
+func NewVLLMRunner(requestBuilder types.RequestBuilderFactory, connector types.Connector, proxyHandler types.PDProxyManager) types.ProtocolRunner {
 	return &VLLMRunner{
 		requestBuilder: requestBuilder,
 		connector:      connector,
-		proxyManager:   proxyManager,
+		proxyHandler:   proxyHandler,
 	}
 }
 
@@ -128,14 +128,14 @@ func (vr *VLLMRunner) Run(w http.ResponseWriter, r *http.Request, prefillPodHost
 	}
 
 	decodeReq := cloneRequestWithBody(r, decodeRequestBody)
-	vr.proxyManager.DecoderProxy.ServeHTTP(w, decodeReq)
+	vr.proxyHandler.GetDecoderProxy().ServeHTTP(w, decodeReq)
 }
 
 // tryDecode attempts to decode and returns whether prefill is needed.
 func (vr *VLLMRunner) tryDecode(w http.ResponseWriter, r *http.Request, completionRequest map[string]any, logger logr.Logger) (bool, error) {
 	if isStreaming, _ := completionRequest[keys.RequestFieldStream].(bool); isStreaming {
 		if flusher, ok := w.(flushableResponseWriter); ok {
-			bw := newResponseWriterWithBuffer(flusher)
+			bw := NewResponseWriterWithBuffer(flusher)
 			return vr.tryDecodeStreaming(bw, r, logger)
 		}
 
@@ -147,8 +147,8 @@ func (vr *VLLMRunner) tryDecode(w http.ResponseWriter, r *http.Request, completi
 // tryDecodeBuffered handles non-streaming decode attempts.
 // It buffers the entire response before inspecting it.
 func (vr *VLLMRunner) tryDecodeBuffered(w http.ResponseWriter, r *http.Request, logger logr.Logger) (bool, error) {
-	dw := &bufferedResponseWriter{}
-	vr.proxyManager.DecoderProxy.ServeHTTP(dw, r)
+	dw := &BufferedResponseWriter{}
+	vr.proxyHandler.GetDecoderProxy().ServeHTTP(dw, r)
 
 	if isHTTPError(dw.statusCode) {
 
@@ -188,26 +188,26 @@ func (vr *VLLMRunner) tryDecodeBuffered(w http.ResponseWriter, r *http.Request, 
 // tryDecodeStreaming handles streaming decode attempts.
 // It buffers the initial response to check for cache_threshold, then switches
 // to direct streaming mode if decode succeeds.
-func (vr *VLLMRunner) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request, logger logr.Logger) (bool, error) {
+func (vr *VLLMRunner) tryDecodeStreaming(w *ResponseWriterWithBuffer, r *http.Request, logger logr.Logger) (bool, error) {
 	// Run ServeHTTP in a goroutine so we can inspect the initial choice to determine if we need to prefill.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		vr.proxyManager.DecoderProxy.ServeHTTP(w, r)
+		vr.proxyHandler.GetDecoderProxy().ServeHTTP(w, r)
 	}()
 
 	// Wait for either:
 	// - firstChunkReady(): first body data is available in buffer
 	// - done: request completed (possibly with no body, e.g., error response)
 	select {
-	case <-w.firstChunkReady():
+	case <-w.FirstChunkReady():
 	case <-done:
 		logger.V(4).Info("request completed without body data")
 	}
 
-	statusCode := w.getStatusCode()
+	statusCode := w.GetStatusCode()
 	if isHTTPError(statusCode) {
-		if err := w.flushBufferAndGoDirect(); err != nil {
+		if err := w.FlushBufferAndGoDirect(); err != nil {
 			logger.Error(err, "failed to flush buffer to client")
 			return false, err
 		}
@@ -215,7 +215,7 @@ func (vr *VLLMRunner) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Re
 	}
 
 	// Check buffered SSE content for cache_threshold finish reason.
-	if vr.checkBufferedResponseForCacheThreshold(w.buffered(), logger) {
+	if vr.checkBufferedResponseForCacheThreshold(w.Buffered(), logger) {
 		logger.V(4).Info("finish reason cache_threshold detected, needs prefill")
 		return true, nil
 	}
@@ -223,7 +223,7 @@ func (vr *VLLMRunner) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Re
 	// No cache_threshold finish reason found, flush buffer and switch to direct mode
 	// to let the rest of the response stream through.
 	logger.V(4).Info("first response for request shows success without cache_threshold finish reason")
-	if err := w.flushBufferAndGoDirect(); err != nil {
+	if err := w.FlushBufferAndGoDirect(); err != nil {
 		logger.Error(err, "failed to flush buffer to client and switch to direct mode")
 		return false, err
 	}
@@ -282,7 +282,7 @@ func (vr *VLLMRunner) prefill(w http.ResponseWriter, r *http.Request, prefillPod
 	}
 	preq := cloneRequestWithBody(r, pbody)
 
-	prefillHandler, err := vr.proxyManager.PrefillerProxyHandler(prefillPodHostPort, logger)
+	prefillHandler, err := vr.proxyHandler.PrefillerProxyHandler(prefillPodHostPort, logger)
 	if err != nil {
 		if err := httperrors.ErrorBadGateway(err, w); err != nil {
 			logger.Error(err, "failed to send Bad Gateway error response to client")
@@ -292,7 +292,7 @@ func (vr *VLLMRunner) prefill(w http.ResponseWriter, r *http.Request, prefillPod
 
 	// send prefill request
 	logger.V(4).Info("sending prefill request", "to", prefillPodHostPort)
-	pw := &bufferedResponseWriter{}
+	pw := &BufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
 	if isHTTPError(pw.statusCode) {

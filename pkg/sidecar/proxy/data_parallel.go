@@ -19,7 +19,7 @@ import (
 func (s *Server) dataParallelHandler(w http.ResponseWriter, r *http.Request) bool {
 	dataParallelPodHostPort := r.Header.Get(common.DataParallelPodHeader)
 	if dataParallelPodHostPort != "" {
-		handler := s.proxyManager.DataParallelProxies[dataParallelPodHostPort]
+		handler := s.dataParallelProxies[dataParallelPodHostPort]
 		if handler != nil {
 			s.logger.V(4).Info("Data parallel routing", "to", dataParallelPodHostPort)
 			handler.ServeHTTP(w, r)
@@ -46,7 +46,7 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 		return err
 	}
 
-	s.proxyManager.DataParallelProxies[net.JoinHostPort(podIP, s.port)] = s.proxyManager.DecoderProxy
+	s.dataParallelProxies[net.JoinHostPort(podIP, s.port)] = s.pdProxyManager.decoderProxy
 
 	// Fill in map of proxies, thus avoiding locks
 	for idx := range s.config.DataParallelSize - 1 {
@@ -58,7 +58,7 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 			return err
 		}
 		handler := s.createDecoderProxyHandler(decoderURL, s.config.DecoderInsecureSkipVerify)
-		s.proxyManager.DataParallelProxies[hostPort] = handler
+		s.dataParallelProxies[hostPort] = handler
 	}
 
 	for idx := range s.config.DataParallelSize - 1 {
@@ -74,7 +74,7 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 			clone.logger = log.FromContext(ctx).WithName("proxy server on port " + rankPort)
 			clone.port = rankPort
 			clone.decoderURL = decoderURL
-			clone.proxyManager.ForwardDataParallel = false
+			clone.forwardDataParallel = false
 			// Configure handlers
 			clone.handler = clone.createRoutes()
 			clone.setConnector()
