@@ -93,3 +93,119 @@ func (mock *ProtocolRunnerMock) RunCalls() []struct {
 	mock.lockRun.RUnlock()
 	return calls
 }
+
+// Ensure, that PDProxyManagerMock does implement types.PDProxyManager.
+// If this is not the case, regenerate this file with moq.
+var _ types.PDProxyManager = &PDProxyManagerMock{}
+
+// PDProxyManagerMock is a mock implementation of types.PDProxyManager.
+//
+//	func TestSomethingThatUsesPDProxyManager(t *testing.T) {
+//
+//		// make and configure a mocked types.PDProxyManager
+//		mockedPDProxyManager := &PDProxyManagerMock{
+//			GetDecoderProxyFunc: func() http.Handler {
+//				panic("mock out the GetDecoderProxy method")
+//			},
+//			PrefillerProxyHandlerFunc: func(hostPort string, logger logr.Logger) (http.Handler, error) {
+//				panic("mock out the PrefillerProxyHandler method")
+//			},
+//		}
+//
+//		// use mockedPDProxyManager in code that requires types.PDProxyManager
+//		// and then make assertions.
+//
+//	}
+type PDProxyManagerMock struct {
+	// GetDecoderProxyFunc mocks the GetDecoderProxy method.
+	GetDecoderProxyFunc func() http.Handler
+
+	// PrefillerProxyHandlerFunc mocks the PrefillerProxyHandler method.
+	PrefillerProxyHandlerFunc func(hostPort string, logger logr.Logger) (http.Handler, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// GetDecoderProxy holds details about calls to the GetDecoderProxy method.
+		GetDecoderProxy []struct {
+		}
+		// PrefillerProxyHandler holds details about calls to the PrefillerProxyHandler method.
+		PrefillerProxyHandler []struct {
+			// HostPort is the hostPort argument value.
+			HostPort string
+			// Logger is the logger argument value.
+			Logger logr.Logger
+		}
+	}
+	lockGetDecoderProxy       sync.RWMutex
+	lockPrefillerProxyHandler sync.RWMutex
+}
+
+// GetDecoderProxy calls GetDecoderProxyFunc.
+func (mock *PDProxyManagerMock) GetDecoderProxy() http.Handler {
+	callInfo := struct {
+	}{}
+	mock.lockGetDecoderProxy.Lock()
+	mock.calls.GetDecoderProxy = append(mock.calls.GetDecoderProxy, callInfo)
+	mock.lockGetDecoderProxy.Unlock()
+	if mock.GetDecoderProxyFunc == nil {
+		var (
+			handlerOut http.Handler
+		)
+		return handlerOut
+	}
+	return mock.GetDecoderProxyFunc()
+}
+
+// GetDecoderProxyCalls gets all the calls that were made to GetDecoderProxy.
+// Check the length with:
+//
+//	len(mockedPDProxyManager.GetDecoderProxyCalls())
+func (mock *PDProxyManagerMock) GetDecoderProxyCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockGetDecoderProxy.RLock()
+	calls = mock.calls.GetDecoderProxy
+	mock.lockGetDecoderProxy.RUnlock()
+	return calls
+}
+
+// PrefillerProxyHandler calls PrefillerProxyHandlerFunc.
+func (mock *PDProxyManagerMock) PrefillerProxyHandler(hostPort string, logger logr.Logger) (http.Handler, error) {
+	callInfo := struct {
+		HostPort string
+		Logger   logr.Logger
+	}{
+		HostPort: hostPort,
+		Logger:   logger,
+	}
+	mock.lockPrefillerProxyHandler.Lock()
+	mock.calls.PrefillerProxyHandler = append(mock.calls.PrefillerProxyHandler, callInfo)
+	mock.lockPrefillerProxyHandler.Unlock()
+	if mock.PrefillerProxyHandlerFunc == nil {
+		var (
+			handlerOut http.Handler
+			errOut     error
+		)
+		return handlerOut, errOut
+	}
+	return mock.PrefillerProxyHandlerFunc(hostPort, logger)
+}
+
+// PrefillerProxyHandlerCalls gets all the calls that were made to PrefillerProxyHandler.
+// Check the length with:
+//
+//	len(mockedPDProxyManager.PrefillerProxyHandlerCalls())
+func (mock *PDProxyManagerMock) PrefillerProxyHandlerCalls() []struct {
+	HostPort string
+	Logger   logr.Logger
+} {
+	var calls []struct {
+		HostPort string
+		Logger   logr.Logger
+	}
+	mock.lockPrefillerProxyHandler.RLock()
+	calls = mock.calls.PrefillerProxyHandler
+	mock.lockPrefillerProxyHandler.RUnlock()
+	return calls
+}
