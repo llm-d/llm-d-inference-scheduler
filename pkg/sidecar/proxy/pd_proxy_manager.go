@@ -14,8 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package manager manages the proxy handlers for the prefillers and the decoder
-package manager
+package proxy
 
 import (
 	"crypto/tls"
@@ -28,20 +27,23 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-// ProxyManager manages the proxy handlers for the prefillers and the decoder
-type ProxyManager struct {
-	PrefillerURLPrefix          string
-	PrefillerInsecureSkipVerify bool
+// pdProxyManager manages the proxy handlers for the prefillers and the decoder.
+type pdProxyManager struct {
+	prefillerURLPrefix          string
+	prefillerInsecureSkipVerify bool
 
-	DecoderProxy        http.Handler                     // decoder proxy handler
-	PrefillerProxies    *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
-	DataParallelProxies map[string]http.Handler          // Proxies to other vLLM servers
-	ForwardDataParallel bool                             // Use special Data Parallel workaround
+	decoderProxy     http.Handler                     // decoder proxy handler
+	prefillerProxies *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
+}
+
+// GetDecoderProxy returns the decoder proxy handler.
+func (m *pdProxyManager) GetDecoderProxy() http.Handler {
+	return m.decoderProxy
 }
 
 // PrefillerProxyHandler returns a prefiller proxy handler for the given host port
-func (m *ProxyManager) PrefillerProxyHandler(hostPort string, logger logr.Logger) (http.Handler, error) {
-	proxy, exists := m.PrefillerProxies.Get(hostPort)
+func (m *pdProxyManager) PrefillerProxyHandler(hostPort string, logger logr.Logger) (http.Handler, error) {
+	proxy, exists := m.prefillerProxies.Get(hostPort)
 	if exists {
 		return proxy, nil
 	}
@@ -49,7 +51,7 @@ func (m *ProxyManager) PrefillerProxyHandler(hostPort string, logger logr.Logger
 	// Backward compatible behavior: trim `http:` prefix
 	hostPort, _ = strings.CutPrefix(hostPort, "http://")
 
-	u, err := url.Parse(m.PrefillerURLPrefix + hostPort)
+	u, err := url.Parse(m.prefillerURLPrefix + hostPort)
 	if err != nil {
 		logger.Error(err, "failed to parse URL", "hostPort", hostPort)
 		return nil, err
@@ -59,7 +61,7 @@ func (m *ProxyManager) PrefillerProxyHandler(hostPort string, logger logr.Logger
 	if u.Scheme == "https" {
 		newProxy.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: m.PrefillerInsecureSkipVerify,
+				InsecureSkipVerify: m.prefillerInsecureSkipVerify,
 				MinVersion:         tls.VersionTLS12,
 				CipherSuites: []uint16{
 					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
@@ -72,7 +74,7 @@ func (m *ProxyManager) PrefillerProxyHandler(hostPort string, logger logr.Logger
 			},
 		}
 	}
-	m.PrefillerProxies.Add(hostPort, newProxy)
+	m.prefillerProxies.Add(hostPort, newProxy)
 
 	return newProxy, nil
 }

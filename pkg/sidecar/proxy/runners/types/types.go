@@ -76,9 +76,15 @@ func AllConnectorStrings() string {
 	return strings.Join(strs, ", ")
 }
 
-//go:generate moq -stub -out mock/types.go  -pkg mock . ProtocolRunner
+//go:generate moq -stub -out mock/types.go  -pkg mock . ProtocolRunner PDProxyManager
 
 type (
+	// PDProxyManager provides access to proxy handlers needed by protocol runners.
+	PDProxyManager interface {
+		GetDecoderProxy() http.Handler
+		PrefillerProxyHandler(hostPort string, logger logr.Logger) (http.Handler, error)
+	}
+
 	// ProtocolRunner executes the P/D disaggregation workflow for inference requests.
 	// Different implementations handle different backend types (vLLM, SGLang, etc.).
 	ProtocolRunner interface {
