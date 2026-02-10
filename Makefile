@@ -25,10 +25,11 @@ export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 SIDECAR_TAG ?= dev
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
-VLLM_SIMULATOR_TAG ?= v0.6.1
+VLLM_SIMULATOR_TAG ?= latest
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
 NAMESPACE ?= hc4ai-operator
+LINT_NEW_ONLY ?= false # Set to true to only lint new code, false to lint all code (default matches CI behavior)
 
 # Map go arch to platform-specific arch
 ifeq ($(TARGETOS),darwin)
@@ -139,9 +140,15 @@ format: check-golangci-lint ## Format Go source files
 	$(GOLANGCI_LINT) fmt
 
 .PHONY: lint
-lint: check-golangci-lint check-typos ## Run lint
+lint: check-golangci-lint check-typos ## Run lint (use LINT_NEW_ONLY=true to only check new code)
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	CGO_CFLAGS="${CGO_CFLAGS}" $(GOLANGCI_LINT) run
+	@if [ "$(LINT_NEW_ONLY)" = "true" ]; then \
+		printf "\033[33mChecking new code only (LINT_NEW_ONLY=true)\033[0m\n"; \
+		CGO_CFLAGS="${CGO_CFLAGS}" $(GOLANGCI_LINT) run --new; \
+	else \
+		printf "\033[33mChecking all code (LINT_NEW_ONLY=false, default)\033[0m\n"; \
+		CGO_CFLAGS="${CGO_CFLAGS}" $(GOLANGCI_LINT) run; \
+	fi
 	$(TYPOS)
 
 .PHONY: install-hooks

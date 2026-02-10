@@ -29,6 +29,7 @@ go.work.sum
 # Environment Files
 .DS_Store
 .env
+CLAUDE.md
 
 # IDE files
 .idea

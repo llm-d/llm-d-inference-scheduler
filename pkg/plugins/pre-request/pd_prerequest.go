@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"net"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/plugins"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
@@ -29,7 +29,7 @@ type prefillHeaderHandlerParameters struct {
 var _ requestcontrol.PreRequest = &PrefillHeaderHandler{}
 
 // PrefillHeaderHandlerFactory  defines the factory function for the PrefillHeaderHandler
-func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ plugins.Handle) (plugins.Plugin, error) {
+func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := prefillHeaderHandlerParameters{
 		PrefillProfile: defaultPrefillProfile,
 	}
@@ -44,19 +44,19 @@ func PrefillHeaderHandlerFactory(name string, rawParameters json.RawMessage, _ p
 // NewPrefillHeaderHandler initializes a new PrefillHeaderHandler and returns its pointer.
 func NewPrefillHeaderHandler(prefillProfile string) *PrefillHeaderHandler {
 	return &PrefillHeaderHandler{
-		typedName:      plugins.TypedName{Type: PrefillHeaderHandlerType},
+		typedName:      plugin.TypedName{Type: PrefillHeaderHandlerType},
 		prefillProfile: prefillProfile,
 	}
 }
 
 // PrefillHeaderHandler PreRequest plugin
 type PrefillHeaderHandler struct {
-	typedName      plugins.TypedName
+	typedName      plugin.TypedName
 	prefillProfile string
 }
 
 // TypedName returns the typed name of the plugin.
-func (p *PrefillHeaderHandler) TypedName() plugins.TypedName {
+func (p *PrefillHeaderHandler) TypedName() plugin.TypedName {
 	return p.typedName
 }
 
@@ -67,7 +67,7 @@ func (p *PrefillHeaderHandler) WithName(name string) *PrefillHeaderHandler {
 }
 
 // PreRequest wires prefill SchedulerProfile result into a header to indicate prefill worker
-func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMRequest, schedulingResult *types.SchedulingResult) {
+func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
 	if _, found := request.Headers[common.PrefillPodHeader]; found {
 		request.Headers[common.PrefillPodHeader] = "" // clear header, if already set
 	}
@@ -77,7 +77,7 @@ func (p *PrefillHeaderHandler) PreRequest(_ context.Context, request *types.LLMR
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	targetPod := prefillProfileRunResult.TargetPods[0].GetPod()
+	targetPod := prefillProfileRunResult.TargetEndpoints[0].GetMetadata()
 	prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
 	request.Headers[common.PrefillPodHeader] = prefillHostPort // in the form of <ip:port>
 }

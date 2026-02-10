@@ -7,109 +7,109 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 // Test helper functions
 
-func newTestPod(name string, queueSize int) *types.PodMetrics {
-	return &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: name, Namespace: "default"}},
-		MetricsState: &backendmetrics.MetricsState{
+func newTestEndpoint(name string, queueSize int) scheduling.Endpoint {
+	return scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: name, Namespace: "default"}},
+		&fwkdl.Metrics{
 			WaitingQueueSize: queueSize,
 		},
-	}
+		nil,
+	)
 }
 
-func newTestRequest(id string) *types.LLMRequest {
-	return &types.LLMRequest{
+func newTestRequest(id string) *scheduling.LLMRequest {
+	return &scheduling.LLMRequest{
 		RequestId: id,
 	}
 }
 
-func newTestSchedulingResult(profilePods map[string]types.Pod) *types.SchedulingResult {
-	profileResults := make(map[string]*types.ProfileRunResult)
-	for profile, pod := range profilePods {
-		profileResults[profile] = &types.ProfileRunResult{
-			TargetPods: []types.Pod{pod},
+func newTestSchedulingResult(profileEndpoints map[string]scheduling.Endpoint) *scheduling.SchedulingResult {
+	profileResults := make(map[string]*scheduling.ProfileRunResult)
+	for profile, endpoint := range profileEndpoints {
+		profileResults[profile] = &scheduling.ProfileRunResult{
+			TargetEndpoints: []scheduling.Endpoint{endpoint},
 		}
 	}
-	return &types.SchedulingResult{
+	return &scheduling.SchedulingResult{
 		ProfileResults: profileResults,
 	}
 }
 
-func (s *ActiveRequest) getPodCount(podName string) int {
+func (s *ActiveRequest) getPodCount(endpointName string) int {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	return s.podCounts[podName]
+	return s.endpointCounts[endpointName]
 }
 
-func (s *ActiveRequest) hasPodCount(podName string) bool {
+func (s *ActiveRequest) hasPodCount(endpointName string) bool {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	_, exists := s.podCounts[podName]
+	_, exists := s.endpointCounts[endpointName]
 	return exists
 }
 
 func TestActiveRequestScorer_Score(t *testing.T) {
-	podA := newTestPod("pod-a", 2)
-	podB := newTestPod("pod-b", 0)
-	podC := newTestPod("pod-c", 15)
+	endpointA := newTestEndpoint("pod-a", 2)
+	endpointB := newTestEndpoint("pod-b", 0)
+	endpointC := newTestEndpoint("pod-c", 15)
 
 	tests := []struct {
 		name       string
 		setupCache func(*ActiveRequest)
-		input      []types.Pod
-		wantScores map[types.Pod]float64
+		input      []scheduling.Endpoint
+		wantScores map[scheduling.Endpoint]float64
 	}{
 		{
-			name: "no pods in cache",
+			name: "no endpoints in cache",
 			setupCache: func(_ *ActiveRequest) {
 				// Cache is empty
 			},
-			input: []types.Pod{podA, podB, podC},
-			wantScores: map[types.Pod]float64{
-				podA: 1,
-				podB: 1,
-				podC: 1,
+			input: []scheduling.Endpoint{endpointA, endpointB, endpointC},
+			wantScores: map[scheduling.Endpoint]float64{
+				endpointA: 1,
+				endpointB: 1,
+				endpointC: 1,
 			},
 		},
 		{
-			name: "all pods in cache with different request counts",
+			name: "all endpoints in cache with different request counts",
 			setupCache: func(s *ActiveRequest) {
 				s.mutex.Lock()
-				s.podCounts["default/pod-a"] = 3
-				s.podCounts["default/pod-b"] = 0
-				s.podCounts["default/pod-c"] = 6
+				s.endpointCounts["default/pod-a"] = 3
+				s.endpointCounts["default/pod-b"] = 0
+				s.endpointCounts["default/pod-c"] = 6
 				s.mutex.Unlock()
 			},
-			input: []types.Pod{podA, podB, podC},
-			wantScores: map[types.Pod]float64{
-				podA: 0.5,
-				podB: 1.0,
-				podC: 0.0,
+			input: []scheduling.Endpoint{endpointA, endpointB, endpointC},
+			wantScores: map[scheduling.Endpoint]float64{
+				endpointA: 0.5,
+				endpointB: 1.0,
+				endpointC: 0.0,
 			},
 		},
 		{
-			name: "some pods in cache",
+			name: "some endpoints in cache",
 			setupCache: func(s *ActiveRequest) {
 				s.mutex.Lock()
-				s.podCounts["default/pod-a"] = 4
-				s.podCounts["default/pod-c"] = 1
+				s.endpointCounts["default/pod-a"] = 4
+				s.endpointCounts["default/pod-c"] = 1
 				// pod-b not in cache
 				s.mutex.Unlock()
 			},
-			input: []types.Pod{podA, podB, podC},
-			wantScores: map[types.Pod]float64{
-				podA: 0.0,
-				podB: 1.0,
-				podC: 0.75,
+			input: []scheduling.Endpoint{endpointA, endpointB, endpointC},
+			wantScores: map[scheduling.Endpoint]float64{
+				endpointA: 0.0,
+				endpointB: 1.0,
+				endpointC: 0.75,
 			},
 		},
 	}
@@ -132,35 +132,35 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := NewActiveRequest(ctx, nil)
 
-	podA := newTestPod("pod-a", 2)
-	podB := newTestPod("pod-b", 0)
+	endpointA := newTestEndpoint("pod-a", 2)
+	endpointB := newTestEndpoint("pod-b", 0)
 
 	testProfile := "test-profile"
 
 	t.Run("First request", func(t *testing.T) {
 		request := newTestRequest("test-request-1")
-		schedulingResult := newTestSchedulingResult(map[string]types.Pod{
-			testProfile: podA,
+		schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
+			testProfile: endpointA,
 		})
 
 		scorer.PreRequest(ctx, request, schedulingResult)
 
 		assert.True(t, scorer.requestCache.Has(request.RequestId), "Expected request to be in cache")
-		assert.Equal(t, 1, scorer.getPodCount(podA.GetPod().NamespacedName.String()))
+		assert.Equal(t, 1, scorer.getPodCount(endpointA.GetMetadata().NamespacedName.String()))
 	})
 
-	t.Run("Second request to multiple pods", func(t *testing.T) {
+	t.Run("Second request to multiple endpoints", func(t *testing.T) {
 		request := newTestRequest("test-request-2")
-		schedulingResult := newTestSchedulingResult(map[string]types.Pod{
-			testProfile: podA,
-			"prefill":   podB,
+		schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
+			testProfile: endpointA,
+			"prefill":   endpointB,
 		})
 
 		scorer.PreRequest(ctx, request, schedulingResult)
 
 		assert.True(t, scorer.requestCache.Has(request.RequestId), "Expected request to be in cache")
-		assert.Equal(t, 2, scorer.getPodCount(podA.GetPod().NamespacedName.String()))
-		assert.Equal(t, 1, scorer.getPodCount(podB.GetPod().NamespacedName.String()))
+		assert.Equal(t, 2, scorer.getPodCount(endpointA.GetMetadata().NamespacedName.String()))
+		assert.Equal(t, 1, scorer.getPodCount(endpointB.GetMetadata().NamespacedName.String()))
 	})
 }
 
@@ -168,20 +168,20 @@ func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := NewActiveRequest(ctx, nil)
 
-	podA := newTestPod("pod-a", 2)
+	endpointA := newTestEndpoint("pod-a", 2)
 	request := newTestRequest("test-request-1")
 
 	// Setup initial state: add request through PreRequest
-	schedulingResult := newTestSchedulingResult(map[string]types.Pod{
-		"test-profile": podA,
+	schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
+		"test-profile": endpointA,
 	})
 	scorer.PreRequest(ctx, request, schedulingResult)
 
 	// Call ResponseComplete
-	scorer.ResponseComplete(ctx, request, &requestcontrol.Response{}, podA.GetPod())
+	scorer.ResponseComplete(ctx, request, &requestcontrol.Response{}, endpointA.GetMetadata())
 
 	assert.False(t, scorer.requestCache.Has(request.RequestId))
-	assert.False(t, scorer.hasPodCount(podA.GetPod().NamespacedName.String()),
+	assert.False(t, scorer.hasPodCount(endpointA.GetMetadata().NamespacedName.String()),
 		"Pod count should be removed after decrement to zero")
 }
 
@@ -192,10 +192,10 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 	params := &ActiveRequestParameters{RequestTimeout: "1s"}
 	scorer := NewActiveRequest(ctx, params)
 
-	podA := newTestPod("pod-a", 0)
+	endpointA := newTestEndpoint("pod-a", 0)
 	request := newTestRequest("test-request-ttl")
-	schedulingResult := newTestSchedulingResult(map[string]types.Pod{
-		"test-profile": podA,
+	schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
+		"test-profile": endpointA,
 	})
 
 	// Add request
@@ -210,9 +210,9 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 	// Trigger cleanup
 	scorer.requestCache.DeleteExpired()
 
-	// Check that pod count is decremented due to TTL expiration
+	// Check that endpoint count is decremented due to TTL expiration
 	assert.False(t, scorer.hasPodCount("default/pod-a"),
-		"Pod should be removed from podCounts after TTL expiration")
+		"Pod should be removed from endpointCounts after TTL expiration")
 }
 
 func TestNewActiveRequestScorer_InvalidTimeout(t *testing.T) {

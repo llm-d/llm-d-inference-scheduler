@@ -6,56 +6,57 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics" // Import config for thresholds
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/framework"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling/types"
+	k8stypes "k8s.io/apimachinery/pkg/types" // Import config for thresholds
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestLoadBasedScorer(t *testing.T) {
-	podA := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
-		MetricsState: &backendmetrics.MetricsState{
+	endpointA := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-a"}},
+		&fwkdl.Metrics{
 			WaitingQueueSize: 2,
 		},
-	}
-	podB := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
-		MetricsState: &backendmetrics.MetricsState{
+		nil,
+	)
+	endpointB := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-b"}},
+		&fwkdl.Metrics{
 			WaitingQueueSize: 0,
 		},
-	}
-	podC := &types.PodMetrics{
-		Pod: &backend.Pod{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
-		MetricsState: &backendmetrics.MetricsState{
+		nil,
+	)
+	endpointC := scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod-c"}},
+		&fwkdl.Metrics{
 			WaitingQueueSize: 15,
 		},
-	}
+		nil,
+	)
 
 	tests := []struct {
 		name       string
-		scorer     framework.Scorer
-		req        *types.LLMRequest
-		input      []types.Pod
-		wantScores map[types.Pod]float64
+		scorer     scheduling.Scorer
+		req        *scheduling.LLMRequest
+		input      []scheduling.Endpoint
+		wantScores map[scheduling.Endpoint]float64
 	}{
 		{
 			name:   "load based scorer",
 			scorer: scorer.NewLoadAware(utils.NewTestContext(t), 10),
-			req: &types.LLMRequest{
+			req: &scheduling.LLMRequest{
 				TargetModel: "critical",
 			},
-			input: []types.Pod{
-				podA, podB, podC,
+			input: []scheduling.Endpoint{
+				endpointA, endpointB, endpointC,
 			},
-			wantScores: map[types.Pod]float64{
-				podA: 0.4,
-				podB: 0.5,
-				podC: 0,
+			wantScores: map[scheduling.Endpoint]float64{
+				endpointA: 0.4,
+				endpointB: 0.5,
+				endpointC: 0,
 			},
 		},
 	}

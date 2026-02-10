@@ -107,7 +107,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
-	if pw.statusCode < 200 || pw.statusCode >= 300 {
+	if isHTTPError(pw.statusCode) {
 		s.logger.Error(err, "request failed", "code", pw.statusCode)
 		w.WriteHeader(pw.statusCode)
 		return

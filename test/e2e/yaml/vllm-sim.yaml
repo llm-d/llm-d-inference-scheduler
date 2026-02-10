@@ -15,41 +15,45 @@ spec:
         app: ${POOL_NAME}
     spec:
       containers:
-      - name: vllm
-        image: ${VLLM_SIMULATOR_IMAGE}
-        imagePullPolicy: IfNotPresent
-        args:
-        - "--mode=echo"
-        - "--enable-kvcache=${KV_CACHE_ENABLED}"
-        - "--port=8000"
-        - "--model=${MODEL_NAME}"
-        - "--kv-cache-size=1024"
-        - "--block-size=16"
-        - "--zmq-endpoint=tcp://e2e-epp.default.svc.cluster.local:5557"
-        - "--event-batch-size=16"
-        - "--tokenizers-cache-dir=/tokenizer-cache"
-        ports:
-        - name: http
-          containerPort: 8000
-          protocol: TCP
-        env:
-        - name: PORT
-          value: "8000"
-        - name: PYTHONHASHSEED
-          value: "42"
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.name
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.namespace
-        volumeMounts:
-        - name: tokenizer-cache
-          mountPath: /tokenizer-cache
+        - name: vllm
+          image: ${VLLM_SIMULATOR_IMAGE}
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--mode=echo"
+            - "--enable-kvcache=${KV_CACHE_ENABLED}"
+            - "--port=8000"
+            - "--model=${MODEL_NAME}"
+            - "--kv-cache-size=1024"
+            - "--block-size=16"
+            - "--zmq-endpoint=tcp://e2e-epp.default.svc.cluster.local:5557"
+            - "--event-batch-size=16"
+            - "--tokenizers-cache-dir=/tokenizer-cache"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: PORT
+              value: "8000"
+            - name: PYTHONHASHSEED
+              value: "42"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            - name: tokenizer-cache
+              mountPath: /tokenizer-cache
       volumes:
-      - name: tokenizer-cache
-        emptyDir: {}
+        - name: tokenizer-cache
+          emptyDir: {}
