@@ -126,8 +126,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			labelFilter2 := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, modelName)
 			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter2)
 
-			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(6))
-			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(0))
+			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(4))
+			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(2))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -843,20 +843,24 @@ schedulingProfiles:
 // EPP configuration for running with P/D
 const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
 plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
   parameters:
-    blockSizeTokens: 10
+    blockSizeTokens: 16
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 256
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
 - type: pd-profile-handler
   parameters:
-    hashBlockSize: 10
-    threshold: 40
+    deciderPluginName: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill
   plugins:
