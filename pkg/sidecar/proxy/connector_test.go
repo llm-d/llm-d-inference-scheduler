@@ -59,7 +59,7 @@ var _ = Describe("Common Connector tests", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+					err := testInfo.proxy.Start(testInfo.ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
@@ -121,7 +121,7 @@ var _ = Describe("Common Connector tests", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+					err := testInfo.proxy.Start(testInfo.ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
