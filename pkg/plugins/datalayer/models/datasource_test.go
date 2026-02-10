@@ -9,13 +9,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/http"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/http"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 )
 
 func TestDatasource(t *testing.T) {
-	source := http.NewHTTPDataSource("https", "/models", true, ModelsDataSourceType,
+	source, err := http.NewHTTPDataSource("https", "/models", true, ModelsDataSourceType,
 		"models-data-source", parseModels, ModelsResponseType)
+	assert.Nil(t, err, "failed to create HTTP data source")
+
 	extractor, err := NewModelExtractor()
 	assert.Nil(t, err, "failed to create extractor")
 

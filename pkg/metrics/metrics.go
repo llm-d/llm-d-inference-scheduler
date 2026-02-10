@@ -4,7 +4,7 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	compbasemetrics "k8s.io/component-base/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/metrics"
+	metricsutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/metrics"
 )
 
 const (
@@ -23,7 +23,7 @@ var (
 		prometheus.CounterOpts{
 			Subsystem: SchedulerSubsystem,
 			Name:      "pd_decision_total",
-			Help:      metrics.HelpMsgWithStability("Total number of P/D disaggregation decisions made", compbasemetrics.ALPHA),
+			Help:      metricsutil.HelpMsgWithStability("Total number of P/D disaggregation decisions made", compbasemetrics.ALPHA),
 		},
 		[]string{"model_name", "decision_type"}, // "decode-only" or "prefill-decode"
 	)
