@@ -53,12 +53,6 @@ var _ = Describe("Reverse Proxy", func() {
 			func(path string, secureProxy bool) {
 
 				ctx := newTestContext()
-				var cert *tls.Certificate
-				if secureProxy {
-					tempCert, err := CreateSelfSignedTLSCertificate()
-					Expect(err).ToNot(HaveOccurred())
-					cert = &tempCert
-				}
 
 				ackHandlerFn := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(200)
@@ -70,7 +64,9 @@ var _ = Describe("Reverse Proxy", func() {
 				targetURL, err := url.Parse(decodeBackend.URL)
 				Expect(err).ToNot(HaveOccurred())
 
-				cfg := Config{}
+				cfg := Config{
+					SecureServing: secureProxy,
+				}
 				proxy := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
 
 				ctx, cancelFn := context.WithCancel(ctx)
@@ -80,7 +76,7 @@ var _ = Describe("Reverse Proxy", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := proxy.Start(ctx, cert, validator)
+					err := proxy.Start(ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 					stoppedCh <- struct{}{}
 				}()
@@ -180,7 +176,7 @@ var _ = Describe("Reverse Proxy", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := proxy.Start(ctx, nil, validator)
+					err := proxy.Start(ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 					stoppedCh <- struct{}{}
 				}()
@@ -254,7 +250,7 @@ var _ = Describe("Reverse Proxy", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := proxy.Start(ctx, nil, validator)
+					err := proxy.Start(ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 					stoppedCh <- struct{}{}
 				}()

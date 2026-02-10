@@ -16,7 +16,6 @@ limitations under the License.
 package main
 
 import (
-	"crypto/tls"
 	"flag"
 	"net/url"
 	"os"
@@ -111,21 +110,6 @@ func main() {
 		return
 	}
 
-	var cert *tls.Certificate
-	if *secureProxy {
-		var tempCert tls.Certificate
-		if *certPath != "" {
-			tempCert, err = tls.LoadX509KeyPair(*certPath+"/tls.crt", *certPath+"/tls.key")
-		} else {
-			tempCert, err = proxy.CreateSelfSignedTLSCertificate()
-		}
-		if err != nil {
-			logger.Error(err, "failed to create TLS certificate")
-			return
-		}
-		cert = &tempCert
-	}
-
 	config := proxy.Config{
 		Connector:                   *connector,
 		PrefillerUseTLS:             *prefillerUseTLS,
@@ -133,6 +117,8 @@ func main() {
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
 		DataParallelSize:            *vLLMDataParallelSize,
 		EnablePrefillerSampling:     *enablePrefillerSampling,
+		SecureServing:               *secureProxy,
+		CertPath:                    *certPath,
 	}
 
 	// Create SSRF protection validator
@@ -144,7 +130,7 @@ func main() {
 
 	proxyServer := proxy.NewProxy(*port, targetURL, config)
 
-	if err := proxyServer.Start(ctx, cert, validator); err != nil {
+	if err := proxyServer.Start(ctx, validator); err != nil {
 		logger.Error(err, "failed to start proxy server")
 	}
 }

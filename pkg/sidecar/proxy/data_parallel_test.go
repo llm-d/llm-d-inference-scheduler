@@ -62,7 +62,7 @@ var _ = Describe("Data Parallel support", func() {
 			theProxy.allowlistValidator, err = NewAllowlistValidator(false, DefaultPoolGroup, "", "")
 			Expect(err).ToNot(HaveOccurred())
 
-			err = theProxy.startDataParallel(ctx, nil, grp)
+			err = theProxy.startDataParallel(ctx, grp)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(theProxy.dataParallelProxies).To(HaveLen(testDataParallelSize))
