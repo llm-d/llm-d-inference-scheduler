@@ -37,52 +37,7 @@ type PDSLOAwareRouter struct {
 	*predictedlatency.PredictedLatency
 }
 
-var _ requestcontrol.PreRequest = &PDSLOAwareRouter{}
 var _ requestcontrol.ResponseReceived = &PDSLOAwareRouter{}
-var _ requestcontrol.ResponseStreaming = &PDSLOAwareRouter{}
-var _ requestcontrol.ResponseComplete = &PDSLOAwareRouter{}
-
-// PreRequest tracks both prefill and decode pods in running request lists.
-// The base router tracks the decode pod (primary profile), and we additionally
-// track the prefill pod to ensure accurate load visibility during scoring.
-func (p *PDSLOAwareRouter) PreRequest(ctx context.Context, request *schedulingtypes.LLMRequest, schedulingResult *schedulingtypes.SchedulingResult) {
-	logger := log.FromContext(ctx)
-
-	// Delegate to base router (tracks decode pod - primary profile)
-	p.PredictedLatency.PreRequest(ctx, request, schedulingResult)
-
-	// Guard against nil request or schedulingResult - base will have returned early
-	if request == nil || schedulingResult == nil || len(schedulingResult.ProfileResults) == 0 {
-		logger.V(logutil.DEBUG).Info("PDSLOAwareRouter.PreRequest: request or schedulingResult is nil/empty after base delegation, skipping P/D tracking")
-		return
-	}
-
-	// P/D-specific: Also track prefill pod if it was selected
-	if prefillResult, exists := schedulingResult.ProfileResults["prefill"]; exists && prefillResult != nil {
-		if len(prefillResult.TargetEndpoints) > 0 {
-			prefillPod := prefillResult.TargetEndpoints[0]
-			requestID := request.Headers[requtil.RequestIdHeaderKey]
-
-			// Get average TPOT SLO to determine priority
-			avgTPOTSLO, err := p.PredictedLatency.GetAvgTPOTSLO(request)
-			if err != nil {
-				logger.V(logutil.DEBUG).Info("Could not get SLO context for prefill tracking", "error", err)
-				return
-			}
-
-			// Track prefill pod in running requests
-			p.PredictedLatency.AddToRunningRequests(
-				prefillPod.GetMetadata().NamespacedName,
-				requestID,
-				avgTPOTSLO,
-			)
-
-			logger.V(logutil.DEBUG).Info("Tracked prefill pod in running requests",
-				"prefillPod", prefillPod.GetMetadata().NamespacedName.Name,
-				"requestID", requestID)
-		}
-	}
-}
 
 // ResponseReceived adds P/D-specific logic to extract prefill timing headers
 // before delegating to the base router.
@@ -114,48 +69,6 @@ func (p *PDSLOAwareRouter) ResponseReceived(ctx context.Context, request *schedu
 
 	// Delegate to base router for decode prediction logic
 	p.PredictedLatency.ResponseReceived(ctx, request, response, targetPod)
-}
-
-// ResponseStreaming delegates to the base router
-func (p *PDSLOAwareRouter) ResponseStreaming(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, pod *datalayer.EndpointMetadata) {
-	p.PredictedLatency.ResponseStreaming(ctx, request, response, pod)
-}
-
-// ResponseComplete cleans up both prefill and decode pod tracking.
-// We remove the prefill pod from running requests (if it was used) before
-// delegating to the base router, which removes the decode pod.
-func (p *PDSLOAwareRouter) ResponseComplete(ctx context.Context, request *schedulingtypes.LLMRequest, response *requestcontrol.Response, pod *datalayer.EndpointMetadata) {
-	logger := log.FromContext(ctx)
-
-	// Guard against nil request (can happen during early request failures)
-	if request == nil {
-		logger.V(logutil.DEBUG).Info("PDSLOAwareRouter.ResponseComplete: request is nil, delegating to base")
-		p.PredictedLatency.ResponseComplete(ctx, request, response, pod)
-		return
-	}
-
-	requestID := request.Headers[requtil.RequestIdHeaderKey]
-
-	// P/D-specific: Remove prefill pod from tracking if it was used
-	schedulingResult, err := p.PredictedLatency.GetSchedulingResult(request)
-	if err == nil && schedulingResult != nil {
-		if prefillResult, exists := schedulingResult.ProfileResults["prefill"]; exists && prefillResult != nil {
-			if len(prefillResult.TargetEndpoints) > 0 {
-				prefillPod := prefillResult.TargetEndpoints[0]
-				p.PredictedLatency.RemoveFromRunningRequests(
-					prefillPod.GetMetadata().NamespacedName,
-					requestID,
-				)
-
-				logger.V(logutil.DEBUG).Info("Removed prefill pod from running requests",
-					"prefillPod", prefillPod.GetMetadata().NamespacedName.Name,
-					"requestID", requestID)
-			}
-		}
-	}
-
-	// Delegate to base router (removes decode pod)
-	p.PredictedLatency.ResponseComplete(ctx, request, response, pod)
 }
 
 // recordPrefillTrainingData records training data for the prefill pod based on timing

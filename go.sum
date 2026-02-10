@@ -16,8 +16,8 @@ github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 h1:XRzhVemXdgv
 github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0/go.mod h1:HKpQxkWaGLJ+D/5H8QRpyQXA1eKjxkFlOMwck5+33Jk=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/RishabhSaini/gateway-api-inference-extension v0.0.0-20260207000953-9673d5868f24 h1:5u4yzRMgQI3He5tGALvD/9qQyARkcehau5Bv3MYKVSs=
-github.com/RishabhSaini/gateway-api-inference-extension v0.0.0-20260207000953-9673d5868f24/go.mod h1:UHneAkUyL0licvMEHrmHFnYkezifY1psm+iXZs3Yi60=
+github.com/RishabhSaini/gateway-api-inference-extension v0.0.0-20260210201145-b288a2baf4fe h1:js71vcGj+w5IsMMoeQrzj1HhXlk8m2/zJLlM5KVSOig=
+github.com/RishabhSaini/gateway-api-inference-extension v0.0.0-20260210201145-b288a2baf4fe/go.mod h1:UHneAkUyL0licvMEHrmHFnYkezifY1psm+iXZs3Yi60=
 github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b h1:mimo19zliBX/vSQ6PWWSL9lK8qwHozUj03+zLoEB8O0=
 github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b/go.mod h1:fvzegU4vN3H1qMT+8wDmzjAcDONcgo2/SZ/TyfdUOFs=
 github.com/alicebob/miniredis/v2 v2.35.0 h1:QwLphYqCEAo1eu1TqPRN2jgVMPBweeQcR21jeqDCONI=
