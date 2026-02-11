@@ -7,8 +7,10 @@ plugins:
 - type: prefix-cache-scorer
   parameters:
     blockSize: 5
-- type: pd-slo-aware-scorer
+- type: predicted-latency-scorer
+  name: pd-slo-scorer
   parameters:
+    endpointRoleLabel: "llm-d.ai/role"
     sloBufferFactor: 1.0
     headroomSelectionStrategy: "least"
 - type: max-score-picker
