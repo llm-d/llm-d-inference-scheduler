@@ -25,4 +25,7 @@ func RegisterAllPlugins() {
 	plugin.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
 	plugin.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
 	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
+	// pd decider plugins
+	plugin.Register(profile.PrefixBasedPDDeciderPluginType, profile.PrefixBasedPDDeciderPluginFactory)
+	plugin.Register(profile.AlwaysDisaggDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
 }

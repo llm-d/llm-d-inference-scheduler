@@ -293,10 +293,11 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	}
 
 	infPoolYaml := testutils.ReadYaml(inferExtManifest)
-	targetPorts := ""
+	var b strings.Builder
 	for idx := range numTargetPorts {
-		targetPorts += fmt.Sprintf("\n  - number: %d", 8000+idx)
+		fmt.Fprintf(&b, "\n  - number: %d", 8000+idx)
 	}
+	targetPorts := b.String()
 	infPoolYaml = substituteMany(infPoolYaml,
 		map[string]string{
 			"${POOL_NAME}":    poolName,
