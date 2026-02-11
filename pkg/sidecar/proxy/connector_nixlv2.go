@@ -21,7 +21,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -102,19 +101,11 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		return
 	}
 
-	// 2. Forward request to prefiller with timing measurement
+	// 2. Forward request to prefiller
 	s.logger.V(4).Info("sending prefill request", "to", prefillPodHostPort)
 	s.logger.V(5).Info("Prefill request", "body", string(pbody))
 	pw := &bufferedResponseWriter{}
-
-	// Measure prefill latency for EPP training data
-	prefillStart := time.Now()
 	prefillHandler.ServeHTTP(pw, preq)
-	prefillLatency := time.Since(prefillStart)
-
-	s.logger.V(4).Info("prefill completed",
-		"latency_ms", prefillLatency.Milliseconds(),
-		"pod", prefillPodHostPort)
 
 	if isHTTPError(pw.statusCode) {
 		s.logger.Error(err, "request failed", "code", pw.statusCode)
@@ -174,19 +165,11 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	dreq.Body = io.NopCloser(strings.NewReader(string(dbody)))
 	dreq.ContentLength = int64(len(dbody))
 
-	// 2. Forward to local decoder with prefill timing headers
+	// 2. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-
-	// Wrap response writer to inject prefill timing headers for EPP training
-	timingWriter := &timingResponseWriter{
-		ResponseWriter:   w,
-		prefillLatencyMs: float64(prefillLatency.Milliseconds()),
-		prefillPodHost:   prefillPodHostPort,
-	}
-
-	if !s.forwardDataParallel || !s.dataParallelHandler(timingWriter, dreq) {
+	if !s.forwardDataParallel || !s.dataParallelHandler(w, dreq) {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
-		s.decoderProxy.ServeHTTP(timingWriter, dreq)
+		s.decoderProxy.ServeHTTP(w, dreq)
 	}
 }
