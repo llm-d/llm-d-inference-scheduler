@@ -96,7 +96,7 @@ jobs:
       - name: Apply Label & Merge
         if: steps.check.outputs.authorized == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
           PR_NUMBER: ${{ github.event.client_payload.github.payload.issue.number }}
           PR_URL: ${{ github.event.client_payload.github.payload.issue.html_url }}
         run: |

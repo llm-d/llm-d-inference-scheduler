@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: jpmcb/prow-github-actions@v2.0.0
         with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          github-token: "${{ secrets.BOT_TOKEN }}"
           prow-commands: "/assign
             /unassign
             /approve
