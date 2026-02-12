@@ -685,6 +685,53 @@ func TestSchedulerE2ELatency(t *testing.T) {
 	}
 }
 
+func TestFlowControlDispatchCycleLengthMetric(t *testing.T) {
+	Reset()
+	scenarios := []struct {
+		name      string
+		durations []time.Duration
+	}{
+		{
+			name: "multiple scheduling latencies",
+			durations: []time.Duration{
+				50 * time.Microsecond,
+				150 * time.Microsecond,
+				300 * time.Microsecond,
+				800 * time.Microsecond,
+				1500 * time.Microsecond,
+				4 * time.Millisecond,
+				8 * time.Millisecond,
+				15 * time.Millisecond,
+				30 * time.Millisecond,
+				80 * time.Millisecond,
+				200 * time.Millisecond,
+			},
+		},
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			for _, duration := range scenario.durations {
+				RecordFlowControlDispatchCycleDuration(duration)
+			}
+
+			wantDispatchCycleLatency, err := os.Open("testdata/flow_control_dispatch_cycle_duration_seconds_metric")
+			defer func() {
+				if err := wantDispatchCycleLatency.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := testutil.GatherAndCompare(metrics.Registry, wantDispatchCycleLatency, "inference_extension_flow_control_dispatch_cycle_duration_seconds"); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+// TODO (7028): Research histogram bins using real-world data to ensure they are optimal.
+
 func TestSchedulerAttemptsTotal(t *testing.T) {
 
 	scenarios := []struct {

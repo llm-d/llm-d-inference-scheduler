@@ -390,6 +390,18 @@ var (
 		append([]string{"fairness_id", "priority", "outcome", "inference_pool"}, ModelLabels...),
 	)
 
+	flowControlDispatchCycleDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Subsystem: InferenceExtension,
+			Name:      "flow_control_dispatch_cycle_duration_seconds",
+			Help:      metricsutil.HelpMsgWithStability("Distribution of the time taken for each dispatch cycle in the EPP flow control layer.", compbasemetrics.ALPHA),
+			Buckets: []float64{
+				0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1,
+			},
+		},
+		[]string{},
+	)
+
 	flowControlQueueSize = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: InferenceExtension,
@@ -460,6 +472,7 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(PrefixCacheHitRatio)
 		metrics.Registry.MustRegister(PrefixCacheHitLength)
 		metrics.Registry.MustRegister(flowControlRequestQueueDuration)
+		metrics.Registry.MustRegister(flowControlDispatchCycleDuration)
 		metrics.Registry.MustRegister(flowControlQueueSize)
 		metrics.Registry.MustRegister(flowControlQueueBytes)
 		metrics.Registry.MustRegister(inferenceModelRewriteDecisionsTotal)
@@ -787,6 +800,11 @@ func RecordFlowControlRequestQueueDuration(
 		inferencePool,
 		modelName, targetModelName,
 	).Observe(duration.Seconds())
+}
+
+// RecordFlowControlDispatchCycleDuration records the duration of a dispatch cycle in the Flow Control layer.
+func RecordFlowControlDispatchCycleDuration(duration time.Duration) {
+	flowControlDispatchCycleDuration.WithLabelValues().Observe(duration.Seconds())
 }
 
 // IncFlowControlQueueSize increments the Flow Control queue size gauge.
