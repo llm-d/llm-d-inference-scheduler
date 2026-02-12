@@ -80,7 +80,8 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
-# Tokenizer & Linking
+# DEPRECATED: Tokenizer & Linking flags (only used for legacy embedded tokenizer builds)
+# UDS builds don't need these flags - ZMQ linking is handled automatically via pkg-config
 LDFLAGS ?= -extldflags '-L$(LOCALLIB)'
 CGO_ENABLED=1
 
@@ -111,7 +112,8 @@ endif
 PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
 PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
 
-# CGO flags with all dependencies
+# DEPRECATED: CGO flags with Python and tokenizers (only used for legacy embedded tokenizer builds)
+# The default UDS build only needs ZMQ
 CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
 CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
 
@@ -121,11 +123,12 @@ epp_IMAGE = $(EPP_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
-epp_LDFLAGS = -ldflags="$(LDFLAGS)"
+# Empty flags for UDS-only builds (ZMQ linking handled via pkg-config)
+epp_LDFLAGS =
 sidecar_LDFLAGS =
-epp_CGO_CFLAGS = "${CGO_CFLAGS}"
+epp_CGO_CFLAGS =
 sidecar_CGO_CFLAGS =
-epp_CGO_LDFLAGS = "${CGO_LDFLAGS}"
+epp_CGO_LDFLAGS =
 sidecar_CGO_LDFLAGS =
 epp_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/
 sidecar_TEST_FILES = go list ./pkg/sidecar/...
@@ -171,14 +174,14 @@ test: test-unit test-e2e ## Run all tests (unit and e2e)
 test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
 .PHONY: test-unit-%
-test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
+test-unit-%: check-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache 2>/dev/null || echo ""); \
 	PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
 	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-filter
-test-filter: download-tokenizer install-python-deps check-dependencies ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
+test-filter: check-dependencies ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
 	@if [ -z "$(PATTERN)" ]; then \
 		echo "ERROR: PATTERN is required. Usage: make test-filter PATTERN=TestName [TYPE=epp|sidecar]"; \
 		exit 1; \
@@ -197,9 +200,9 @@ test-filter: download-tokenizer install-python-deps check-dependencies ## Run fi
 	fi
 
 .PHONY: test-integration
-test-integration: download-tokenizer check-dependencies ## Run integration tests
+test-integration: check-dependencies ## Run integration tests
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
-	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
+	go test -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
 test-e2e: image-build image-build-uds-tokenizer image-pull ## Run end-to-end tests against a new kind cluster
@@ -218,7 +221,7 @@ post-deploy-test: ## Run post deployment tests
 build: build-epp build-sidecar ## Build the project for both epp and sidecar
 
 .PHONY: build-%
-build-%: check-go download-tokenizer ## Build the project
+build-%: check-go ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
 	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
