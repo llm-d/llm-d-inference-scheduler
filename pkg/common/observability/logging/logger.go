@@ -27,6 +27,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
+func InitSetupLogging() {
+	logger := zap.New(zap.RawZapOpts(uberzap.AddCaller()))
+	ctrl.SetLogger(logger)
+}
+
 func InitLogging(opts *zap.Options) {
 	logger := zap.New(zap.UseFlagOptions(opts), zap.RawZapOpts(uberzap.AddCaller()))
 	ctrl.SetLogger(logger)
