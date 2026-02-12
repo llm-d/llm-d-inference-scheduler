@@ -28,6 +28,12 @@ export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
 VLLM_SIMULATOR_TAG ?= latest
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
+# TODO: need kv-cache setup image first
+UDS_TOKENIZER_IMAGE_NAME ?= llm-d-uds-tokenizer
+# TODO: double check tag name: latest or dev
+UDS_TOKENIZER_TAG ?= dev
+UDS_TOKENIZER_TAG_BASE ?= $(IMAGE_REGISTRY)/$(UDS_TOKENIZER_IMAGE_NAME)
+export UDS_TOKENIZER_IMAGE ?= $(UDS_TOKENIZER_TAG_BASE):$(UDS_TOKENIZER_TAG)
 NAMESPACE ?= hc4ai-operator
 LINT_NEW_ONLY ?= false # Set to true to only lint new code, false to lint all code (default matches CI behavior)
 
@@ -193,7 +199,7 @@ test-integration: download-tokenizer check-dependencies ## Run integration tests
 	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
-test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
+test-e2e: image-build image-build-uds-tokenizer image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	PATH=$(LOCALBIN):$$PATH ./test/scripts/run_e2e.sh
 
@@ -217,6 +223,22 @@ build-%: check-go download-tokenizer ## Build the project
 
 .PHONY:	image-build
 image-build: image-build-epp image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
+
+# Path to kv-cache repo for UDS tokenizer image build (can be overridden)
+KV_CACHE_PATH ?= $(shell go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null)
+
+.PHONY: image-build-uds-tokenizer
+image-build-uds-tokenizer: check-container-tool ## Build UDS tokenizer image from kv-cache
+	@printf "\033[33;1m==== Building UDS Tokenizer image $(UDS_TOKENIZER_IMAGE) ====\033[0m\n"
+	@if [ -z "$(KV_CACHE_PATH)" ]; then \
+		echo "Error: Could not find kv-cache module. Run 'go mod download' first."; \
+		exit 1; \
+	fi
+	$(CONTAINER_RUNTIME) build \
+		--platform linux/$(TARGETARCH) \
+		-t $(UDS_TOKENIZER_IMAGE) \
+		-f $(KV_CACHE_PATH)/services/uds_tokenizer/Dockerfile \
+		$(KV_CACHE_PATH)/services/uds_tokenizer
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)
@@ -273,6 +295,8 @@ env: ## Print environment variables
 	@echo "SIDECAR_IMAGE=$(SIDECAR_IMAGE)"
 	@echo "VLLM_SIMULATOR_TAG=$(VLLM_SIMULATOR_TAG)"
 	@echo "VLLM_SIMULATOR_IMAGE=$(VLLM_SIMULATOR_IMAGE)"
+	@echo "UDS_TOKENIZER_TAG=$(UDS_TOKENIZER_TAG)"
+	@echo "UDS_TOKENIZER_IMAGE=$(UDS_TOKENIZER_IMAGE)"
 
 .PHONY: print-namespace
 print-namespace: ## Print the current namespace
