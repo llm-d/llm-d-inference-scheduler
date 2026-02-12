@@ -1,8 +1,23 @@
 ## Minimal runtime Dockerfile (microdnf-only, no torch, wrapper in site-packages)
-# Go dependencies stage: download go modules and extract kv-cache
+## Simplified EPP Dockerfile - UDS tokenizer only (no vLLM, no embedded tokenizer)
+## This build uses the default kv-cache pool (UDS-only, no embedded_tokenizers build tag)
+## Tokenization is handled by a separate UDS tokenizer sidecar container
+##
+## CGO is still required for ZMQ (kvevents) but Python/vLLM dependencies are removed
+# Go dependencies stage: download go modules
+# Go build stage
 FROM quay.io/projectquay/golang:1.25 AS go-deps
 
+ARG TARGETOS
+ARG TARGETARCH
+
 WORKDIR /workspace
+
+# Install ZMQ development libraries (required for CGO)
+# The builder is based on UBI8, so we need epel-release-8
+RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
+    dnf install -y zeromq-devel pkgconfig && \
+    dnf clean all
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -14,98 +29,26 @@ COPY pkg/ pkg/
 
 RUN go mod download
 
-# Copy Python wrapper and requirements from llm-d-kv-cache dependency
-# Extract version dynamically and copy to a known location
-RUN KV_CACHE_PKG=$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache) && \
-    mkdir -p /workspace/kv-cache && \
-    cp -r $KV_CACHE_PKG/* /workspace/kv-cache
-
-FROM python:3.12-slim AS python-builder
-
-ARG TARGETARCH
-
-COPY --from=go-deps /workspace/kv-cache /workspace/kv-cache
-WORKDIR /workspace/kv-cache
-
-# Create venv and install vLLM based on architecture using pre-built wheels
-RUN python3.12 -m venv /workspace/kv-cache/build/venv && \
-    . /workspace/kv-cache/build/venv/bin/activate && \
-    pip install --upgrade pip && \
-    VLLM_VERSION="0.14.0" && \
-    if [ "$TARGETARCH" = "arm64" ]; then \
-        pip install https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_aarch64.whl; \
-    elif [ "$TARGETARCH" = "amd64" ]; then \
-        pip install https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cpu-cp38-abi3-manylinux_2_35_x86_64.whl --extra-index-url https://download.pytorch.org/whl/cpu; \
-    else \
-        echo "ERROR: Unsupported architecture: $TARGETARCH. Only arm64 and amd64 are supported." && exit 1; \
-    fi
-
-# Go build stage
-FROM quay.io/projectquay/golang:1.25 AS go-builder
-
-ARG TARGETOS
-ARG TARGETARCH
-ARG PYTHON_VERSION=3.12
-ENV PYTHON=python${PYTHON_VERSION}
-
-# Install build tools
-# The builder is based on UBI8, so we need epel-release-8.
-# ${PYTHON}-devel needed for CGO compilation (Python headers and ${PYTHON}-config for linker flags)
-RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
-    dnf install -y gcc-c++ libstdc++ libstdc++-devel clang zeromq-devel pkgconfig ${PYTHON}-devel ${PYTHON}-pip git && \
-    dnf clean all
-
-COPY --from=go-deps /workspace /workspace
-COPY --from=go-deps /go/pkg/mod /go/pkg/mod
-
-WORKDIR /workspace
-
-COPY Makefile* ./
-
-COPY --from=python-builder /workspace/kv-cache/pkg/preprocessing/chat_completions /workspace/kv-cache/pkg/preprocessing/chat_completions
-RUN make setup-venv
-COPY --from=python-builder /workspace/kv-cache/build/venv/lib/python3.12/site-packages /workspace/build/venv/lib/python3.12/site-packages
-
-ENV PYTHONPATH=/workspace/kv-cache/pkg/preprocessing/chat_completions:/workspace/build/venv/lib/python3.12/site-packages
-RUN python3.12 -c "import tokenizer_wrapper"  # verify tokenizer_wrapper is correctly installed
-
-ARG RELEASE_VERSION=v1.22.1
-RUN TOKENIZER_VERSION=${RELEASE_VERSION} make build-epp
+# Build EPP with CGO for ZMQ only (no Python, no embedded tokenizer)
+# The default kv-cache build uses UDS tokenizer (//go:build !embedded_tokenizers)
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o bin/epp cmd/epp/main.go
 
 # Runtime stage
 # Use ubi9 as a minimal base image to package the manager binary
 # Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
-ARG PYTHON_VERSION=3.12
+
 WORKDIR /
-COPY --from=go-builder /workspace/bin/epp /app/epp
 
-USER root
-
-ENV PYTHON=python${PYTHON_VERSION}
-# Install zeromq runtime library and Python runtime needed by the manager.
-# The final image is UBI9, so we need epel-release-9.
-# Using microdnf for minimal image size
+# Install ZMQ runtime library only (no Python needed)
 RUN curl -L -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     rpm -i /tmp/epel-release.rpm && \
     rm /tmp/epel-release.rpm && \
-    microdnf install -y --setopt=install_weak_deps=0 zeromq ${PYTHON} ${PYTHON}-libs ${PYTHON}-pip && \
+    microdnf install -y --setopt=install_weak_deps=0 zeromq && \
     microdnf clean all && \
-    rm -rf /var/cache/yum /var/lib/yum && \
-    # Note: ${PYTHON} package does not automatically create python3/python symlinks - they must be created manually
-    ln -sf /usr/bin/${PYTHON} /usr/bin/python3 && \
-    ln -sf /usr/bin/${PYTHON} /usr/bin/python
+    rm -rf /var/cache/yum /var/lib/yum
 
-# Copy Python kv-cache package and site-packages from the python-builder stage
-COPY --from=python-builder /workspace/kv-cache /workspace/kv-cache
-ENV PYTHONPATH=/workspace/kv-cache/pkg/preprocessing/chat_completions:/workspace/kv-cache/build/venv/lib/python3.12/site-packages
-RUN ${PYTHON} -c "import tokenizer_wrapper"  # verify tokenizer_wrapper is correctly installed
-
-ENV HF_HOME="/tmp/.cache"
-# used by kv-cache-manager
-ENV LOCAL_TOKENIZER_DIR="/tmp/.cache"
-# Create cache directory and set permissions for non-root user
-RUN mkdir -p /tmp/.cache && chown -R 65532:65532 ${HF_HOME}
+COPY --from=go-builder /workspace/bin/epp /app/epp
 
 USER 65532:65532
 

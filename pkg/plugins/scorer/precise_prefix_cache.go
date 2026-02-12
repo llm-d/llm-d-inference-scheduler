@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
-	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
@@ -61,15 +60,6 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse %s plugin config: %w", PrecisePrefixCachePluginType, err)
 		}
-	}
-
-	// Apply HF token from environment if not already set
-	if token := os.Getenv("HF_TOKEN"); token != "" &&
-		parameters.IndexerConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken == "" {
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken = token
 	}
 
 	// Validate model name is set
@@ -267,16 +257,16 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 		}
 
 		// Convert messages to conversation format
-		conversations := make([]preprocessing.Conversation, len(request.Body.ChatCompletions.Messages))
+		conversations := make([]types.Conversation, len(request.Body.ChatCompletions.Messages))
 		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = preprocessing.Conversation{
+			conversations[i] = types.Conversation{
 				Role:    msg.Role,
 				Content: msg.Content.Raw,
 			}
 		}
 
-		renderReq := &preprocessing.ApplyChatTemplateRequest{
-			Conversation:              [][]preprocessing.Conversation{conversations},
+		renderReq := &types.RenderChatRequest{
+			Conversation:              conversations,
 			Tools:                     request.Body.ChatCompletions.Tools,
 			Documents:                 request.Body.ChatCompletions.Documents,
 			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,

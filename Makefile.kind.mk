@@ -15,6 +15,7 @@ env-dev-kind: image-build ## Run under kind ($(KIND_CLUSTER_NAME))
 		EPP_IMAGE=$(EPP_IMAGE) \
 		VLLM_SIMULATOR_IMAGE=${VLLM_SIMULATOR_IMAGE} \
 		SIDECAR_IMAGE=$(SIDECAR_IMAGE) \
+		UDS_TOKENIZER_IMAGE=$(UDS_TOKENIZER_IMAGE) \
 		./scripts/kind-dev-env.sh; \
 	fi
 

@@ -1,18 +1,16 @@
-//go:build embedded_tokenizers
-
 package scorer
 
 import (
+	"context"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
-	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
@@ -21,15 +19,27 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func TestPrefixCacheTracking_Score(t *testing.T) {
-	d, err := os.Getwd()
-	require.NoError(t, err)
-	modelDir := filepath.Join(d, "testdata")
-	localTokenizerConfig := tokenization.LocalTokenizerConfig{
-		ModelTokenizerMap: map[string]string{
-			"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-		},
+const udsSocketPath = "/tmp/tokenizer/tokenizer-uds.socket"
+
+// skipIfNoUDSTokenizer skips the test if UDS tokenizer socket is not available.
+func skipIfNoUDSTokenizer(t *testing.T) {
+	if _, err := os.Stat(udsSocketPath); os.IsNotExist(err) {
+		t.Skipf("UDS tokenizer socket not available at %s, skipping test", udsSocketPath)
 	}
+}
+
+// createUDSTokenizer creates a UDS tokenizer for testing.
+func createUDSTokenizer(t *testing.T, model string) *tokenization.UdsTokenizer {
+	udsTokenizer, err := tokenization.NewUdsTokenizer(context.Background(),
+		&tokenization.UdsTokenizerConfig{SocketFile: udsSocketPath}, model)
+	require.NoError(t, err)
+	return udsTokenizer
+}
+
+// TestPrefixCacheTracking_Score_UDS tests the prefix cache scoring with UDS tokenizer.
+// This test requires a running UDS tokenizer sidecar.
+func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
+	skipIfNoUDSTokenizer(t)
 
 	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
 		"he found himself transformed in his bed into a horrible vermin. " +
@@ -40,7 +50,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 		name                string
 		endpoints           []scheduling.Endpoint
 		request             *scheduling.LLMRequest
-		kvBlockData         func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
+		kvBlockData         func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
 		wantScoresByAddress map[string]float64
 	}{
 		{
@@ -119,32 +129,22 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
-				prompt := req.Completions.Prompt
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
+				udsTokenizer := createUDSTokenizer(t, model)
+				defer func() {
+					err := udsTokenizer.Close()
+					require.NoError(t, err)
+				}()
+
+				tokens, _, err := udsTokenizer.Render(req.Completions.Prompt)
 				require.NoError(t, err)
 
-				// use the actual tokenizer on the test prompt
-				tokens, _, err := testTokenizer.Encode(prompt, model, true)
-				require.NoError(t, err)
-
-				// compute chunk hashes using the default block size
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
 				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
-
-				// populate kvblock.Index to test longest prefix matching:
-				// - chunk0 (first chunk): all endpoints have it (common prefix start)
-				// - chunk1: pod-a and pod-b have it (pod-c drops off after chunk0)
-				// - chunk2: only pod-a has it (pod-b drops off after chunk1)
-				// LongestPrefixScorer uses intersection, so:
-				//   pod-a: 3 chunks (0,1,2) -> score 3
-				//   pod-b: 2 chunks (0,1) -> score 2
-				//   pod-c: 1 chunk (0) -> score 1
-				// Normalized: (3-1)/(3-1) = 1.0, (2-1)/(3-1) = 0.5, (1-1)/(3-1) = 0.0
 
 				return map[kvblock.BlockHash][]kvblock.PodEntry{
 					chunkKeys[0]: {
@@ -215,39 +215,30 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
-				// convert to preprocessing format
-				conversations := make([]preprocessing.Conversation, len(req.ChatCompletions.Messages))
-				for idx, msg := range req.ChatCompletions.Messages {
-					conversations[idx] = preprocessing.Conversation{
+				// convert to types format
+				var conversations []types.Conversation
+				for _, msg := range req.ChatCompletions.Messages {
+					conversations = append(conversations, types.Conversation{
 						Role:    msg.Role,
 						Content: msg.Content.Raw,
-					}
+					})
 				}
 
-				processor := preprocessing.NewChatTemplatingProcessor()
-				tokenizerCacheKey, err := processor.GetOrCreateTokenizerKey(t.Context(), &preprocessing.GetOrCreateTokenizerKeyRequest{
-					IsLocal: true,
-					Model:   "testdata/" + model,
-				})
-				require.NoError(t, err)
+				udsTokenizer := createUDSTokenizer(t, model)
+				defer func() {
+					err := udsTokenizer.Close()
+					require.NoError(t, err)
+				}()
 
-				// render the chat template
-				renderReq := &preprocessing.ApplyChatTemplateRequest{
-					Key:          tokenizerCacheKey,
-					Conversation: [][]preprocessing.Conversation{conversations},
+				// render the chat template using UDS tokenizer
+				renderReq := &types.RenderChatRequest{
+					Conversation: conversations,
 					ChatTemplate: req.ChatCompletions.ChatTemplate,
 				}
-				rendered, err := processor.ApplyChatTemplate(t.Context(), renderReq)
-				require.NoError(t, err)
-
-				// tokenize rendered prompt
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
-
-				tokens, _, err := testTokenizer.Encode(rendered, model, false)
+				tokens, _, err := udsTokenizer.RenderChat(renderReq)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -314,13 +305,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
+				udsTokenizer := createUDSTokenizer(t, model)
+				defer func() {
+					err := udsTokenizer.Close()
+					require.NoError(t, err)
+				}()
 
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
+				tokens, _, err := udsTokenizer.Render(req.Completions.Prompt)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -332,11 +326,6 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				// - chunk0: all endpoints (common prefix start)
 				// - chunk1: only pod-a (creates a gap for pod-b and pod-c)
 				// - chunk2: pod-a and pod-b (pod-b has this but missing chunk1)
-				//
-				// Expected behavior (prefix matching stops at gaps):
-				//   pod-a: has chunks 0,1,2 contiguously -> score 3
-				//   pod-b: has chunks 0,2 (missing 1) -> prefix stops at chunk0 -> score 1
-				//   pod-c: has only chunk 0 -> score 1
 				return map[kvblock.BlockHash][]kvblock.PodEntry{
 					chunkKeys[0]: {
 						{PodIdentifier: "10.0.0.1:8080"},
@@ -384,13 +373,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
+				udsTokenizer := createUDSTokenizer(t, model)
+				defer func() {
+					err := udsTokenizer.Close()
+					require.NoError(t, err)
+				}()
 
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
+				tokens, _, err := udsTokenizer.Render(req.Completions.Prompt)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -495,13 +487,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
+				udsTokenizer := createUDSTokenizer(t, model)
+				defer func() {
+					err := udsTokenizer.Close()
+					require.NoError(t, err)
+				}()
 
-				tokens, _, err := testTokenizer.Encode(req.Completions.Prompt, model, true)
+				tokens, _, err := udsTokenizer.Render(req.Completions.Prompt)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -538,13 +533,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			ctx := utils.NewTestContext(t)
 
 			kvcacheConfig, err := kvcache.NewDefaultConfig()
-			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
-				ModelName:             "test-model",
-				WorkersCount:          1,
-				MinPrefixOverlapRatio: 0.8,
-				LocalTokenizerConfig:  &localTokenizerConfig,
-			}
 			require.NoError(t, err)
+
+			// Configure UDS tokenizer
+			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
+				ModelName:    "test-model",
+				WorkersCount: 1,
+				UdsTokenizerConfig: &tokenization.UdsTokenizerConfig{
+					SocketFile: udsSocketPath,
+				},
+			}
 
 			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
 				IndexerConfig:  kvcacheConfig,
@@ -556,7 +554,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			// populate the kvblock.Index with test data
 			if tt.kvBlockData != nil && tt.request != nil && tt.request.Body != nil {
 				kvBlockIndex := prefixCacheScorer.kvCacheIndexer.KVBlockIndex()
-				blockData := tt.kvBlockData(tt.request.Body, tt.request.TargetModel)
+				blockData := tt.kvBlockData(t, tt.request.Body, tt.request.TargetModel)
 				for key, entries := range blockData {
 					err := kvBlockIndex.Add(ctx, []kvblock.BlockHash{kvblock.EmptyBlockHash}, []kvblock.BlockHash{key}, entries)
 					require.NoError(t, err)
