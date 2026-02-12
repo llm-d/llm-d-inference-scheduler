@@ -58,6 +58,10 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		s.logger.V(4).Info("skip disaggregated prefill")
 
 		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
+			if s.config.EnableChunkedDecode {
+				s.sendChunkedDecodeRequest(w, r, nil) // currently supported for vLLM only
+				return
+			}
 			s.decoderProxy.ServeHTTP(w, r)
 		}
 		return

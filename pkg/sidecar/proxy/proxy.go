@@ -93,6 +93,12 @@ type Config struct {
 	// EnablePrefillerSampling configures the proxy to randomly choose from the set
 	// of provided prefill hosts instead of always using the first one.
 	EnablePrefillerSampling bool
+
+	// EnableChunkedDecode if set to true, will enable chunked decode requests.
+	EnableChunkedDecode bool
+
+	// DecodeChunkSize is the size of the decode chunk when chunked decode is enabled.
+	DecodeChunkSize int
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)

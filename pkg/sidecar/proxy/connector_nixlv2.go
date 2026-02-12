@@ -39,7 +39,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// Parse completion request
 	var completionRequest map[string]any
-	if err := json.Unmarshal(original, &completionRequest); err != nil {
+	if err := json.Unmarshal(original, &completionRequest); err != nil { // TODO: use openai-go?
 		if err := errorJSONInvalid(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -155,21 +155,6 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	}
 	completionRequest[requestFieldKVTransferParams] = pKVTransferParams
 
-	dbody, err := json.Marshal(completionRequest)
-	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
-		}
-		return
-	}
-	dreq.Body = io.NopCloser(strings.NewReader(string(dbody)))
-	dreq.ContentLength = int64(len(dbody))
-
 	// 2. Forward to local decoder.
-
-	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	if !s.forwardDataParallel || !s.dataParallelHandler(w, dreq) {
-		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
-		s.decoderProxy.ServeHTTP(w, dreq)
-	}
+	s.sendDecodeRequest(w, dreq, completionRequest)
 }

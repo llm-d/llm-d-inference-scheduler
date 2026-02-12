@@ -60,6 +60,9 @@ func main() {
 	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 	poolGroup := flag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 
+	enableChunkedDecode := flag.Bool("enable-chunked-decode", false, "enable chunked decode output. Defaults to false.")
+	decodeChunkSize := flag.Int("decode-chunk-size", 512, "the decode output chunk size in token. Only when enable-chunked-decode is true.") //TODO: maybe use KV cache block-size instead of tokens
+
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
 	flag.Parse()
@@ -133,6 +136,8 @@ func main() {
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
 		DataParallelSize:            *vLLMDataParallelSize,
 		EnablePrefillerSampling:     *enablePrefillerSampling,
+		EnableChunkedDecode:         *enableChunkedDecode,
+		DecodeChunkSize:             *decodeChunkSize,
 	}
 
 	// Create SSRF protection validator
