@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The llm-d Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -73,6 +73,21 @@ func TestStripScheme(t *testing.T) {
 			name:     "ip address without scheme",
 			input:    "10.0.0.1:4317",
 			expected: "10.0.0.1:4317",
+		},
+		{
+			name:     "schemeless with double slash",
+			input:    "//192.168.1.1:80",
+			expected: "192.168.1.1:80",
+		},
+		{
+			name:     "uppercase scheme",
+			input:    "HTTP://localhost:4317",
+			expected: "localhost:4317",
+		},
+		{
+			name:     "port only",
+			input:    ":9090",
+			expected: ":9090",
 		},
 	}
 
