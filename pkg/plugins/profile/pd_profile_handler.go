@@ -149,7 +149,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	// Start tracing span for profile picking operation
 	tracer := telemetry.Tracer()
-	ctx, span := tracer.Start(ctx, "llm_d.epp.profile_handler.pick",
+	ctx, span := tracer.Start(ctx, "llm_d.epp.pd.profile_handler.pick",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	defer span.End()

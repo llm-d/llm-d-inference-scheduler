@@ -90,7 +90,7 @@ func (p *PrefillHeaderHandler) PreRequest(ctx context.Context, request *scheduli
 	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
 	if !exists {
 		span.SetAttributes(
-			attribute.Bool("llm_d.epp.pd.disaggregation_enabled", false),
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
 			attribute.String("llm_d.epp.pd.reason", "no_prefill_profile_result"),
 		)
 		return // prefill profile failed to run or we chose not to run it, no-op in this case
@@ -101,7 +101,7 @@ func (p *PrefillHeaderHandler) PreRequest(ctx context.Context, request *scheduli
 	request.Headers[common.PrefillPodHeader] = prefillHostPort // in the form of <ip:port>
 
 	span.SetAttributes(
-		attribute.Bool("llm_d.epp.pd.disaggregation_enabled", true),
+		attribute.Bool("llm_d.epp.pd.disaggregation_used", true),
 		attribute.String("llm_d.epp.pd.prefill_pod_address", targetPod.Address),
 		attribute.String("llm_d.epp.pd.prefill_pod_port", targetPod.Port),
 	)
