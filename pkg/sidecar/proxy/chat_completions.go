@@ -58,7 +58,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		s.logger.V(4).Info("skip disaggregated prefill")
 
 		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
-			s.decoderProxy.ServeHTTP(w, r)
+			s.pdProxyManager.decoderProxy.ServeHTTP(w, r)
 		}
 		return
 	}
@@ -75,5 +75,5 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.logger.V(4).Info("SSRF protection: prefill target allowed", "target", prefillHostPort)
-	s.runConnectorProtocol(w, r, prefillHostPort)
+	s.protocolRunner.Run(w, r, prefillHostPort, s.logger)
 }

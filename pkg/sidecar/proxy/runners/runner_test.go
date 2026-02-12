@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The llm-d Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package proxy
+package runners_test
 
 import (
 	"context"
@@ -27,9 +27,15 @@ import (
 	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
+
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 type sidecarTestInfo struct {
@@ -41,15 +47,26 @@ type sidecarTestInfo struct {
 	prefillBackend *httptest.Server
 	prefillHandler *mock.ChatCompletionHandler
 	decodeURL      *url.URL
-	proxy          *Server
+	proxy          *proxy.Server
 }
 
-var connectors = []string{ConnectorSharedStorage, ConnectorNIXLV2}
+func newTestContext() context.Context {
+	logger := zap.New(
+		zap.WriteTo(GinkgoWriter),
+		zap.UseDevMode(true),
+	)
+	log.SetLogger(logger)
+	ctx := context.Background()
+	log.IntoContext(ctx, logger) // not strictly needed since we called SetLogger to set default
+	return ctx
+}
+
+var connectorsArr = []types.Connector{types.ConnectorSharedStorage, types.ConnectorNIXLV2}
 
 var _ = Describe("Common Connector tests", func() {
 
-	for _, connector := range connectors {
-		When(fmt.Sprintf("running with the %s connector", connector), func() {
+	for _, connector := range connectorsArr {
+		When(fmt.Sprintf("running with the %s connector", connector.String()), func() {
 			// Regression test for commit bb181d6: Ensure that max_completion_tokens=1 in Prefill
 			It("should set max_completion_tokens=1 in prefill and restore original value in decode", func() {
 				testInfo := sidecarConnectionTestSetup(connector)
@@ -58,7 +75,7 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
+					validator := newDisabledAllowlistValidator()
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 
@@ -66,8 +83,8 @@ var _ = Describe("Common Connector tests", func() {
 				}()
 
 				time.Sleep(1 * time.Second)
-				Expect(testInfo.proxy.addr).ToNot(BeNil())
-				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
+				Expect(testInfo.proxy.Addr()).ToNot(BeNil())
+				proxyBaseAddr := "http://" + testInfo.proxy.Addr().String()
 
 				By("sending a /v1/chat/completions request with max_completion_tokens set")
 				//nolint:goconst
@@ -80,7 +97,7 @@ var _ = Describe("Common Connector tests", func() {
 				"max_completion_tokens": 100
 			}`
 
-				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+proxy.ChatCompletionsPath, strings.NewReader(body))
 				Expect(err).ToNot(HaveOccurred())
 				req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
 
@@ -97,8 +114,8 @@ var _ = Describe("Common Connector tests", func() {
 				Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
 				prefillReq := testInfo.prefillHandler.CompletionRequests[0]
 
-				Expect(prefillReq).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
-				Expect(prefillReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxTokens, BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxCompletionTokens, BeNumerically("==", 1)))
 
 				By("verifying decode request has original max_completion_tokens=100")
 				Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
@@ -106,7 +123,7 @@ var _ = Describe("Common Connector tests", func() {
 				decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 
 				// The decode request should have the original max_completion_tokens value
-				Expect(decodeReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 100)))
+				Expect(decodeReq).To(HaveKeyWithValue(keys.RequestFieldMaxCompletionTokens, BeNumerically("==", 100)))
 
 				testInfo.cancelFn()
 				<-testInfo.stoppedCh
@@ -120,7 +137,7 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
+					validator := newDisabledAllowlistValidator()
 					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 					Expect(err).ToNot(HaveOccurred())
 
@@ -128,8 +145,8 @@ var _ = Describe("Common Connector tests", func() {
 				}()
 
 				time.Sleep(1 * time.Second)
-				Expect(testInfo.proxy.addr).ToNot(BeNil())
-				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
+				Expect(testInfo.proxy.Addr()).ToNot(BeNil())
+				proxyBaseAddr := "http://" + testInfo.proxy.Addr().String()
 
 				By("sending a /v1/chat/completions request without max_completion_tokens")
 				//nolint:goconst
@@ -141,7 +158,7 @@ var _ = Describe("Common Connector tests", func() {
 				    "max_tokens": 50
 			    }`
 
-				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+proxy.ChatCompletionsPath, strings.NewReader(body))
 				Expect(err).ToNot(HaveOccurred())
 				req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
 
@@ -158,8 +175,8 @@ var _ = Describe("Common Connector tests", func() {
 				Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
 				prefillReq := testInfo.prefillHandler.CompletionRequests[0]
 
-				Expect(prefillReq).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
-				Expect(prefillReq).To(HaveKeyWithValue("max_completion_tokens", BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxTokens, BeNumerically("==", 1)))
+				Expect(prefillReq).To(HaveKeyWithValue(keys.RequestFieldMaxCompletionTokens, BeNumerically("==", 1)))
 
 				By("verifying decode request does not have max_completion_tokens since it wasn't in original request")
 				Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
@@ -167,7 +184,7 @@ var _ = Describe("Common Connector tests", func() {
 				decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 
 				// The decode request should not have max_completion_tokens if it wasn't in the original request
-				Expect(decodeReq).ToNot(HaveKey("max_completion_tokens"))
+				Expect(decodeReq).ToNot(HaveKey(keys.RequestFieldMaxCompletionTokens))
 
 				testInfo.cancelFn()
 				<-testInfo.stoppedCh
@@ -176,7 +193,7 @@ var _ = Describe("Common Connector tests", func() {
 	}
 })
 
-func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
+func sidecarConnectionTestSetup(connector types.Connector) *sidecarTestInfo {
 	testInfo := sidecarTestInfo{}
 
 	testInfo.ctx = newTestContext()
@@ -203,8 +220,8 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	url, err := url.Parse(testInfo.decodeBackend.URL)
 	Expect(err).ToNot(HaveOccurred())
 	testInfo.decodeURL = url
-	cfg := Config{Connector: connector}
-	testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg) // port 0 to automatically choose one that's available.
+	cfg := proxy.Config{Connector: connector}
+	testInfo.proxy = proxy.NewProxy("0", testInfo.decodeURL, cfg) // port 0 to automatically choose one that's available.
 
 	return &testInfo
 }
