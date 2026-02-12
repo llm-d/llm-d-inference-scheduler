@@ -126,7 +126,8 @@ Modern LLM workloads increasingly involve **multimodal inputs** (images, audio, 
        - Aggregate metadata in order
      - **Stage 2 (Prefill)**: If `x-prefiller-host-port` exists:
        - Send text + aggregated embedding metadata to Prefill Worker
-       - Prefill Worker reads embeddings from Encode Workers' memory (parallel reads)
+       - Prefill Worker loads MM embeddings from shared storage via EC Connector
+       - Prefill Worker calculates KV cache
        - Receive KV cache metadata
      - **Stage 3 (Decode)**:
        - Run decode locally with KV cache reference
@@ -143,6 +144,7 @@ sequenceDiagram
     participant I as Inference Gateway (EPP)
     participant DS as Decode Sidecar
     participant E as Encode Worker
+    participant EC as EC Connector<br/>(Shared Storage)
     participant P as Prefill Worker
     participant D as Decode Worker (vLLM)
 
@@ -151,13 +153,16 @@ sequenceDiagram
     
     alt Multimodal Content Present
         DS->>E: Encode Request (image/audio/video)
-        E-->>E: Run vision/audio encoder<br/>(store embeddings in memory)
-        E->>DS: Embedding metadata (memory refs)
+        E-->>E: Compute embeddings
+        E->>EC: Store embeddings via EC Connector
+        EC-->>EC: Persist to shared storage
+        E->>DS: Embedding metadata (storage refs)
     end
     
     DS->>P: Prefill Request (text + embedding metadata)
-    P-->>E: Read embeddings from Encode Worker
-    P-->>P: Generate KV cache
+    P->>EC: Load MM embeddings via EC Connector
+    EC->>P: Return embeddings
+    P-->>P: Calculate KV cache
     P->>DS: KV cache metadata (block IDs)
     
     DS->>D: Decode Request (with KV cache metadata)
@@ -180,6 +185,7 @@ sequenceDiagram
     participant E1 as Encode Worker 1
     participant E2 as Encode Worker 2
     participant E3 as Encode Worker 3
+    participant EC as EC Connector<br/>(Shared Storage)
     participant P as Prefill Worker
     participant D as Decode Worker (vLLM)
 
@@ -191,24 +197,24 @@ sequenceDiagram
         DS->>E1: Encode Request (image 1)
         DS->>E2: Encode Request (image 2)
         DS->>E3: Encode Request (image 3)
-        E1-->>E1: Encode image 1
-        E2-->>E2: Encode image 2
-        E3-->>E3: Encode image 3
-        E1->>DS: Embedding metadata 1
-        E2->>DS: Embedding metadata 2
-        E3->>DS: Embedding metadata 3
+        E1-->>E1: Compute embeddings (image 1)
+        E2-->>E2: Compute embeddings (image 2)
+        E3-->>E3: Compute embeddings (image 3)
+        E1->>EC: Store embeddings 1 via EC Connector
+        E2->>EC: Store embeddings 2 via EC Connector
+        E3->>EC: Store embeddings 3 via EC Connector
+        E1->>DS: Embedding metadata 1 (storage refs)
+        E2->>DS: Embedding metadata 2 (storage refs)
+        E3->>DS: Embedding metadata 3 (storage refs)
     end
     
     DS->>DS: Aggregate embedding metadata
     DS->>P: Prefill Request (text + all embedding metadata)
     
-    par Read Embeddings
-        P-->>E1: Read embeddings 1
-        P-->>E2: Read embeddings 2
-        P-->>E3: Read embeddings 3
-    end
+    P->>EC: Load all MM embeddings via EC Connector
+    EC->>P: Return embeddings (1, 2, 3)
     
-    P-->>P: Generate KV cache
+    P-->>P: Calculate KV cache
     P->>DS: KV cache metadata (block IDs)
     
     DS->>D: Decode Request (with KV cache metadata)
@@ -224,15 +230,21 @@ sequenceDiagram
    - Number of images in request
    - Encoder load and availability
    - Hardware capabilities
-   - Network locality
+   - Network locality to shared storage
 
 2. **Parallel Execution**: Sidecar sends encoding requests concurrently to all selected workers
 
-3. **Metadata Aggregation**: Sidecar collects all embedding metadata and forwards as a batch to Prefill Worker
+3. **EC Connector (Shared Storage)**:
+   - Encode Workers store embeddings via EC Connector to shared storage
+   - Storage can be: distributed object store, shared memory fabric, NVMe-oF, etc.
+   - Prefill Worker loads embeddings via EC Connector in a single batch operation
+   - Decouples encoder and prefill workers (no direct memory access needed)
 
-4. **Prefill Reads**: Prefill Worker reads embeddings from multiple Encode Workers in parallel (when supported by memory fabric)
+4. **Metadata Aggregation**: Sidecar collects all embedding metadata (storage references) and forwards as a batch to Prefill Worker
 
-5. **Failure Handling**: If one encoder fails, sidecar can:
+5. **Prefill Loads**: Prefill Worker uses EC Connector to load all embeddings efficiently from shared storage
+
+6. **Failure Handling**: If one encoder fails, sidecar can:
    - Retry on another encoder
    - Fall back to sequential encoding
    - Return partial results (if model supports it)
