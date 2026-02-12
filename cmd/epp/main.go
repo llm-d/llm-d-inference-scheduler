@@ -36,6 +36,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	ctx := ctrl.SetupSignalHandler()
 
 	// Initialize tracing before creating any spans
@@ -61,6 +65,7 @@ func main() {
 	if err := runner.NewRunner().
 		WithCustomCollectors(metrics.GetCollectors()...).
 		Run(ctx); err != nil {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
