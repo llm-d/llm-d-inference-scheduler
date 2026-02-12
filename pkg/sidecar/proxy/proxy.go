@@ -93,6 +93,11 @@ type Config struct {
 	// EnablePrefillerSampling configures the proxy to randomly choose from the set
 	// of provided prefill hosts instead of always using the first one.
 	EnablePrefillerSampling bool
+
+	// CertPath is the path to TLS certificates for the sidecar server.
+	CertPath string
+	// SecureServing enables TLS for the sidecar server.
+	SecureServing bool
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
@@ -143,7 +148,7 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 }
 
 // Start the HTTP reverse proxy.
-func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistValidator *AllowlistValidator) error {
+func (s *Server) Start(ctx context.Context, allowlistValidator *AllowlistValidator) error {
 	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
 
 	s.allowlistValidator = allowlistValidator
@@ -152,12 +157,12 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 	s.handler = s.createRoutes()
 
 	grp, ctx := errgroup.WithContext(ctx)
-	if err := s.startDataParallel(ctx, cert, grp); err != nil {
+	if err := s.startDataParallel(ctx, grp); err != nil {
 		return err
 	}
 
 	grp.Go(func() error {
-		return s.startHTTP(ctx, cert)
+		return s.startHTTP(ctx)
 	})
 
 	return grp.Wait()
