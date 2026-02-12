@@ -103,22 +103,30 @@ Modern LLM workloads increasingly involve **multimodal inputs** (images, audio, 
 
 1. **Client Request** → Envoy with multimodal payload (text + image URLs/data)
 2. **EPP Scheduling**:
-   - Analyzes request (modality types, prompt length, cache hits)
+   - Analyzes request (modality types, prompt length, cache hits, number of images)
    - Selects optimal pods for each stage:
-     - **Encode Worker** (if multimodal content present)
+     - **Encode Workers** (one or more, if multimodal content present)
+       - For single image: select 1 encoder
+       - For multiple images: select N encoders for parallel processing
      - **Prefill Worker** (for KV cache generation)
      - **Decode Worker** (for token generation)
-   - Returns routing headers: `x-encoder-host-port`, `x-prefiller-host-port`
+   - Returns routing headers:
+     - `x-encoder-host-ports`: Comma-separated list of encoder endpoints
+     - `x-encoder-image-mapping`: JSON mapping of image index to encoder
+     - `x-prefiller-host-port`: Prefill worker endpoint
 
 3. **Execution Flow**:
    - Request lands on **Decode Worker Sidecar**
    - Sidecar orchestrates:
-     - **Stage 1 (Encode)**: If `x-encoder-host-port` exists:
-       - Send multimodal content to Encode Worker
-       - Receive **embedding metadata** (storage location, tensor IDs, memory block references)
+     - **Stage 1 (Encode)**: If `x-encoder-host-ports` exists:
+       - **Single Image**: Send to one Encode Worker
+       - **Multiple Images**: Send each image to assigned Encode Worker in parallel
+       - Wait for all encoding to complete (with timeout)
+       - Receive **embedding metadata** from each encoder
+       - Aggregate metadata in order
      - **Stage 2 (Prefill)**: If `x-prefiller-host-port` exists:
-       - Send text + embedding metadata to Prefill Worker
-       - Prefill Worker reads embeddings from Encode Worker's memory
+       - Send text + aggregated embedding metadata to Prefill Worker
+       - Prefill Worker reads embeddings from Encode Workers' memory (parallel reads)
        - Receive KV cache metadata
      - **Stage 3 (Decode)**:
        - Run decode locally with KV cache reference
@@ -127,7 +135,7 @@ Modern LLM workloads increasingly involve **multimodal inputs** (images, audio, 
 
 4. **Response** → Decode Sidecar → Envoy → Client
 
-### Sequence Diagram
+### Sequence Diagram: Single Image
 
 ```mermaid
 sequenceDiagram
@@ -159,6 +167,75 @@ sequenceDiagram
     DS->>I: Response
     I->>C: Final response
 ```
+
+### Sequence Diagram: Multiple Images (Parallel Encoding)
+
+For requests with multiple images, the EPP scheduler selects multiple encode workers and the sidecar orchestrates parallel encoding:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant I as Inference Gateway (EPP)
+    participant DS as Decode Sidecar
+    participant E1 as Encode Worker 1
+    participant E2 as Encode Worker 2
+    participant E3 as Encode Worker 3
+    participant P as Prefill Worker
+    participant D as Decode Worker (vLLM)
+
+    C->>I: Multimodal Request (text + 3 images)
+    I->>I: Schedule encode workers<br/>(load balancing, availability)
+    I->>DS: Route to Decode Sidecar<br/>(headers: encoder1, encoder2, encoder3, prefiller)
+    
+    par Parallel Encoding
+        DS->>E1: Encode Request (image 1)
+        DS->>E2: Encode Request (image 2)
+        DS->>E3: Encode Request (image 3)
+        E1-->>E1: Encode image 1
+        E2-->>E2: Encode image 2
+        E3-->>E3: Encode image 3
+        E1->>DS: Embedding metadata 1
+        E2->>DS: Embedding metadata 2
+        E3->>DS: Embedding metadata 3
+    end
+    
+    DS->>DS: Aggregate embedding metadata
+    DS->>P: Prefill Request (text + all embedding metadata)
+    
+    par Read Embeddings
+        P-->>E1: Read embeddings 1
+        P-->>E2: Read embeddings 2
+        P-->>E3: Read embeddings 3
+    end
+    
+    P-->>P: Generate KV cache
+    P->>DS: KV cache metadata (block IDs)
+    
+    DS->>D: Decode Request (with KV cache metadata)
+    D-->>P: Read KV cache from Prefill Worker
+    D-->>D: Generate tokens
+    D->>DS: Streaming response
+    DS->>I: Response
+    I->>C: Final response
+```
+
+**Key Points for Multi-Image Encoding:**
+1. **EPP Scheduling**: Selects N encode workers based on:
+   - Number of images in request
+   - Encoder load and availability
+   - Hardware capabilities
+   - Network locality
+
+2. **Parallel Execution**: Sidecar sends encoding requests concurrently to all selected workers
+
+3. **Metadata Aggregation**: Sidecar collects all embedding metadata and forwards as a batch to Prefill Worker
+
+4. **Prefill Reads**: Prefill Worker reads embeddings from multiple Encode Workers in parallel (when supported by memory fabric)
+
+5. **Failure Handling**: If one encoder fails, sidecar can:
+   - Retry on another encoder
+   - Fall back to sequential encoding
+   - Return partial results (if model supports it)
 
 ---
 
@@ -274,8 +351,13 @@ schedulingProfiles:
 **New Responsibilities:**
 - Parse multimodal request payloads (OpenAI vision API format)
 - Extract images/audio/video from request
-- Send encoding requests to Encode Worker
-- Receive and forward **embedding metadata** (not embeddings themselves)
+- **Parallel Encoding Orchestration**:
+  - Distribute images across multiple Encode Workers
+  - Send encoding requests concurrently
+  - Wait for all encoders to complete (with timeout)
+  - Handle partial failures and retries
+- Receive and aggregate **embedding metadata** from multiple encoders
+- Maintain ordering of embeddings to match image positions
 - Coordinate memory references between stages
 - Handle encoding failures and retries
 
@@ -288,17 +370,29 @@ type MultimodalRequest struct {
     Video    []VideoInput
 }
 
+type EncodingRequest struct {
+    ImageIndex int        // Position in original request
+    ImageData  ImageInput
+    RequestID  string     // For tracking
+}
+
 type EncodingResponse struct {
-    // Metadata about where embeddings are stored
-    EmbeddingRefs []EmbeddingReference
+    ImageIndex    int                  // Position in original request
+    EmbeddingRefs []EmbeddingReference // Metadata about where embeddings are stored
     Metadata      EncodingMetadata
 }
 
 type EmbeddingReference struct {
     TensorID     string  // Unique identifier for the embedding tensor
+    EncoderHost  string  // Host where embeddings are stored
     MemoryBlocks []int   // Memory block IDs on Encode Worker
     Shape        []int   // Tensor dimensions
     Dtype        string  // Data type (float16, bfloat16, etc.)
+}
+
+type AggregatedEmbeddings struct {
+    Embeddings []EncodingResponse // Ordered by ImageIndex
+    TotalCount int
 }
 ```
 
@@ -337,9 +431,10 @@ metadata:
 ### 5. Protocol Extensions
 
 **HTTP Headers:**
-- `x-encoder-host-port`: Encode worker endpoint (e.g., `10.0.1.5:8000`)
+- `x-encoder-host-ports`: Comma-separated list of encoder endpoints (e.g., `10.0.1.5:8000,10.0.1.6:8000`)
+- `x-encoder-image-mapping`: JSON mapping of image index to encoder (e.g., `{"0":"10.0.1.5:8000","1":"10.0.1.6:8000"}`)
 - `x-encoder-model`: Encoder model identifier (e.g., `clip-vit-large-patch14`)
-- `x-embedding-refs`: JSON-encoded embedding metadata (tensor IDs, memory blocks)
+- `x-embedding-refs`: JSON-encoded array of embedding metadata (tensor IDs, memory blocks)
 - `x-prefiller-host-port`: Prefill worker endpoint (existing)
 - `x-encoding-cache-key`: Optional cache key for embedding metadata
 
@@ -365,8 +460,11 @@ metadata:
 - `llmd_encode_requests_total`: Total encoding requests
 - `llmd_encode_duration_seconds`: Encoding latency histogram
 - `llmd_encode_queue_depth`: Current encoding queue size
+- `llmd_encode_parallel_workers`: Number of encoders used per request
+- `llmd_encode_images_per_request`: Distribution of image counts
 - `llmd_epd_requests_total{stage="encode|prefill|decode"}`: Per-stage request counts
 - `llmd_epd_stage_selection{decision="local|remote"}`: Stage routing decisions
+- `llmd_encode_failures_total{reason="timeout|error|retry"}`: Encoding failure tracking
 
 ### 7. vLLM Integration
 
