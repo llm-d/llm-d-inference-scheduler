@@ -4,7 +4,7 @@
 //revive:disable:var-naming
 package common
 
-import "strings"
+import "net/url"
 
 const (
 	// PrefillPodHeader is the header name used to indicate Prefill worker <ip:port>
@@ -14,10 +14,12 @@ const (
 	DataParallelPodHeader = "x-data-parallel-host-port"
 )
 
-// StripScheme removes http:// or https:// prefix from endpoint URL
-// This is useful for gRPC clients that expect host:port format only
+// StripScheme removes the scheme from an endpoint URL, returning host:port.
+// This is useful for gRPC clients that expect host:port format only.
 func StripScheme(endpoint string) string {
-	endpoint = strings.TrimPrefix(endpoint, "http://")
-	endpoint = strings.TrimPrefix(endpoint, "https://")
-	return endpoint
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return endpoint // not a valid URL, return as-is
+	}
+	return u.Host
 }
