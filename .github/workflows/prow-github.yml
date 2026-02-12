@@ -27,7 +27,6 @@ jobs:
             /kind
             /priority
             /remove
-            /lgtm
             /close
             /reopen
             /lock

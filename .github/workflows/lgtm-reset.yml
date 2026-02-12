@@ -1,0 +1,39 @@
+# ============================================================================
+# LGTM Reset - Auto-Remove LGTM on New Commits
+# ============================================================================
+# Kubernetes Prow behavior: When new commits are pushed, approval is invalidated
+#
+# What It Does:
+# 1. Detects when new commits are pushed to a PR
+# 2. Removes the "lgtm" label (if present)
+# 3. Disables auto-merge (safety net)
+# 4. Posts a comment explaining why
+# ============================================================================
+
+name: LGTM Reset
+on:
+  pull_request:
+    types: [synchronize] # Triggers instantly on new commits
+
+jobs:
+  reset-lgtm:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Invalidate LGTM
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "🚨 New code pushed. Resetting LGTM status..."
+
+          # 1. Remove the label (This triggers the Gatekeeper to run again)
+          gh pr edit $PR_NUMBER --repo "$REPO" --remove-label "lgtm" || true
+
+          # 2. Disable Auto-Merge (Safety net)
+          gh pr merge --disable-auto $PR_NUMBER --repo "$REPO" || true
+
+          # 3. Notify user
+          gh issue comment $PR_NUMBER --repo "$REPO" --body "🔄 **Reset**: New commits pushed. LGTM removed."
