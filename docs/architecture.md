@@ -462,12 +462,20 @@ Scores are normalized to a range of 0-1, where pods with fewer active requests g
 
 #### SessionAffinity
 
-Scores the candidate pods by giving a higher score to the pods that were previously
-used for the same session.
+Scores the candidate pods by giving a higher score to the pods that were previously used for the same session.
 
 - **Type**: `session-affinity-scorer`
-- **Parameters**: None
+- **Parameters**: 
+  - `maxAge`: the cookie expiration time, in seconds. The default value is 0, which denotes a session cookie (expires when the browser is closed)."
 
+Example configuration with the above parameter set:
+
+```yaml
+plugins:
+  - type: session-affinity-scorer
+    parameters:
+      maxAge: 3600  # Cookie expires after 1 hour
+```
 ---
 
 #### NoHitLRUScorer
