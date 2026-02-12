@@ -89,7 +89,8 @@ Modern LLM workloads increasingly involve **multimodal inputs** (images, audio, 
          │          │  │          │  │ +Sidecar │
          └────┬─────┘  └────┬─────┘  └────┬─────┘
               │             │             │
-              │  Embeddings │  KV Cache   │
+              │  Embedding  │  KV Cache   │
+              │  Metadata   │  Metadata   │
               └─────────────┴─────────────┘
                             │
                             ▼
@@ -114,12 +115,14 @@ Modern LLM workloads increasingly involve **multimodal inputs** (images, audio, 
    - Sidecar orchestrates:
      - **Stage 1 (Encode)**: If `x-encoder-host-port` exists:
        - Send multimodal content to Encode Worker
-       - Receive encoded embeddings
+       - Receive **embedding metadata** (storage location, tensor IDs, memory block references)
      - **Stage 2 (Prefill)**: If `x-prefiller-host-port` exists:
-       - Send text + embeddings to Prefill Worker
+       - Send text + embedding metadata to Prefill Worker
+       - Prefill Worker reads embeddings from Encode Worker's memory
        - Receive KV cache metadata
-     - **Stage 3 (Decode)**: 
-       - Run decode locally with KV cache
+     - **Stage 3 (Decode)**:
+       - Run decode locally with KV cache reference
+       - Decode Worker reads KV cache from Prefill Worker's memory
        - Stream tokens back to client
 
 4. **Response** → Decode Sidecar → Envoy → Client
@@ -140,16 +143,17 @@ sequenceDiagram
     
     alt Multimodal Content Present
         DS->>E: Encode Request (image/audio/video)
-        E-->>E: Run vision/audio encoder
-        E->>DS: Encoded embeddings
+        E-->>E: Run vision/audio encoder<br/>(store embeddings in memory)
+        E->>DS: Embedding metadata (memory refs)
     end
     
-    DS->>P: Prefill Request (text + embeddings)
+    DS->>P: Prefill Request (text + embedding metadata)
+    P-->>E: Read embeddings from Encode Worker
     P-->>P: Generate KV cache
     P->>DS: KV cache metadata (block IDs)
     
-    DS->>D: Decode Request (with KV cache ref)
-    D-->>P: Read KV cache (if needed)
+    DS->>D: Decode Request (with KV cache metadata)
+    D-->>P: Read KV cache from Prefill Worker
     D-->>D: Generate tokens
     D->>DS: Streaming response
     DS->>I: Response
@@ -271,7 +275,8 @@ schedulingProfiles:
 - Parse multimodal request payloads (OpenAI vision API format)
 - Extract images/audio/video from request
 - Send encoding requests to Encode Worker
-- Merge encoded embeddings with text tokens
+- Receive and forward **embedding metadata** (not embeddings themselves)
+- Coordinate memory references between stages
 - Handle encoding failures and retries
 
 **API Extensions:**
@@ -284,8 +289,16 @@ type MultimodalRequest struct {
 }
 
 type EncodingResponse struct {
-    Embeddings []float32
-    Metadata   EncodingMetadata
+    // Metadata about where embeddings are stored
+    EmbeddingRefs []EmbeddingReference
+    Metadata      EncodingMetadata
+}
+
+type EmbeddingReference struct {
+    TensorID     string  // Unique identifier for the embedding tensor
+    MemoryBlocks []int   // Memory block IDs on Encode Worker
+    Shape        []int   // Tensor dimensions
+    Dtype        string  // Data type (float16, bfloat16, etc.)
 }
 ```
 
@@ -326,8 +339,9 @@ metadata:
 **HTTP Headers:**
 - `x-encoder-host-port`: Encode worker endpoint (e.g., `10.0.1.5:8000`)
 - `x-encoder-model`: Encoder model identifier (e.g., `clip-vit-large-patch14`)
+- `x-embedding-refs`: JSON-encoded embedding metadata (tensor IDs, memory blocks)
 - `x-prefiller-host-port`: Prefill worker endpoint (existing)
-- `x-encoding-cache-key`: Optional cache key for encoded embeddings
+- `x-encoding-cache-key`: Optional cache key for embedding metadata
 
 **Request Format (OpenAI-compatible):**
 ```json
@@ -359,15 +373,19 @@ metadata:
 **Encode Worker (vLLM):**
 - Run vLLM with `--enable-encoder-only` flag (when available)
 - Expose encoding endpoint: `POST /v1/encode`
-- Return embeddings in standardized format
+- Store embeddings in GPU memory
+- Return **embedding metadata** (memory block IDs, tensor references)
+- Support remote memory reads via RPC/RDMA
 
 **Prefill Worker (vLLM):**
-- Accept encoded embeddings via `image_embeddings` parameter
+- Accept embedding metadata via `embedding_refs` parameter
+- Read embeddings directly from Encode Worker's memory (zero-copy when possible)
 - Process combined text + embeddings
 - Return KV cache metadata
 
 **Decode Worker (vLLM):**
 - Standard decode with KV cache reference
+- Read KV cache from Prefill Worker's memory
 - No changes needed (handled by sidecar)
 
 ---
@@ -384,22 +402,26 @@ metadata:
 ### Phase 2: Sidecar & Protocol (Weeks 4-6)
 - [ ] Enhance sidecar to parse multimodal requests
 - [ ] Implement encoding request/response handling
-- [ ] Add HTTP header support (`x-encoder-host-port`)
-- [ ] Implement embedding merging logic
+- [ ] Add HTTP header support (`x-encoder-host-port`, `x-embedding-refs`)
+- [ ] Implement embedding metadata forwarding logic
 - [ ] Add retry and timeout handling
+- [ ] Support remote memory read coordination
 
 ### Phase 3: Worker Integration (Weeks 7-9)
 - [ ] Create encode worker deployment templates
 - [ ] Integrate with vLLM encoding API
+- [ ] Implement embedding storage and memory management
+- [ ] Test remote memory reads (RPC/RDMA)
 - [ ] Test with CLIP, SigLIP encoders
-- [ ] Validate embedding format compatibility
-- [ ] Performance benchmarking
+- [ ] Validate embedding metadata format
+- [ ] Performance benchmarking (zero-copy vs. transfer)
 
 ### Phase 4: Advanced Features (Weeks 10-12)
 - [ ] Implement `encode-load-scorer`
-- [ ] Add embedding caching support
+- [ ] Add embedding metadata caching support
 - [ ] Implement encoder model routing
 - [ ] Add support for audio/video encoders
+- [ ] Optimize memory transfer protocols
 - [ ] Comprehensive E2E testing
 
 ### Phase 5: Production Readiness (Weeks 13-14)
@@ -460,7 +482,8 @@ metadata:
 | Encoding worker failures | High | Implement retries, fallback to local encoding |
 | Complexity in debugging | Medium | Enhanced logging, distributed tracing |
 | vLLM API instability | Medium | Abstract encoding interface, support multiple backends |
-| Memory overhead (embeddings) | Medium | Streaming embeddings, compression |
+| Memory transfer overhead | Medium | Use zero-copy techniques (RDMA, GPU Direct), optimize metadata size |
+| Embedding metadata loss | Medium | Implement metadata persistence, retry logic |
 
 ---
 
