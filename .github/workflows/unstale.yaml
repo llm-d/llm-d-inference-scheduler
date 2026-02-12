@@ -1,27 +1,12 @@
-name: 'Unstale Issue'
-
+name: Unstale Issues
 on:
   issues:
-    types: [ reopened ]
+    types: [reopened]
   issue_comment:
-    types: [ created ]
+    types: [created]
 
 jobs:
-  remove-stale:
-    runs-on: ubuntu-latest
+  unstale:
+    uses: llm-d/llm-d-infra/.github/workflows/reusable-unstale.yml@main
     permissions:
       issues: write
-    if: >-
-      github.event.issue.state == 'open' &&
-      (contains(github.event.issue.labels.*.name, 'lifecycle/stale') || 
-       contains(github.event.issue.labels.*.name, 'lifecycle/rotten'))
-    steps:
-      - name: 'Checkout repository'
-        uses: actions/checkout@v6
-
-      - name: 'Remove stale labels'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Removing 'stale' label from issue #${{ github.event.issue.number }}"
-          gh issue edit ${{ github.event.issue.number }} --remove-label "lifecycle/stale,lifecycle/rotten"
