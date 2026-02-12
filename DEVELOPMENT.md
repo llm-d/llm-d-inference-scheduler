@@ -39,6 +39,22 @@ docker build --build-arg PYTHON_VERSION=3.13 -f Dockerfile.epp .
 **For CI/CD:**
 Workflow uses Python 3.12 by default. The version can be set by modifying the `python-version` input in workflow file.
 
+## Tokenization Architecture
+
+The project uses **UDS (Unix Domain Socket)** tokenization. Tokenization is handled by a separate UDS tokenizer sidecar container, not by the EPP container itself. Previous embedded tokenizer approaches (daulet/tokenizers, direct Python/vLLM linking) are deprecated and no longer used.
+
+**Building the UDS tokenizer image:**
+
+```bash
+make image-build-uds-tokenizer
+```
+
+The image is tagged as `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` by default. Override with:
+
+```bash
+UDS_TOKENIZER_TAG=v1.0.0 make image-build-uds-tokenizer
+```
+
 ## Kind Development Environment
 
 The following deployment creates a [Kubernetes in Docker (KIND)] cluster with an inference scheduler using a Gateway API implementation, connected to the vLLM simulator.

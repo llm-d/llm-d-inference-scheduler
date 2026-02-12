@@ -18,22 +18,25 @@ PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
 SIDECAR_NAME ?= pd-sidecar
+UDS_TOKENIZER_IMAGE_NAME ?= llm-d-uds-tokenizer
 IMAGE_REGISTRY ?= ghcr.io/llm-d
+
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
+
 SIDECAR_TAG ?= dev
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
+
 VLLM_SIMULATOR_TAG ?= latest
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
-# TODO: need kv-cache setup image first
-UDS_TOKENIZER_IMAGE_NAME ?= llm-d-uds-tokenizer
-# TODO: double check tag name: latest or dev
+
 UDS_TOKENIZER_TAG ?= dev
 UDS_TOKENIZER_TAG_BASE ?= $(IMAGE_REGISTRY)/$(UDS_TOKENIZER_IMAGE_NAME)
 export UDS_TOKENIZER_IMAGE ?= $(UDS_TOKENIZER_TAG_BASE):$(UDS_TOKENIZER_TAG)
+
 NAMESPACE ?= hc4ai-operator
 LINT_NEW_ONLY ?= false # Set to true to only lint new code, false to lint all code (default matches CI behavior)
 
@@ -231,7 +234,12 @@ KV_CACHE_PATH ?= $(shell go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cach
 image-build-uds-tokenizer: check-container-tool ## Build UDS tokenizer image from kv-cache
 	@printf "\033[33;1m==== Building UDS Tokenizer image $(UDS_TOKENIZER_IMAGE) ====\033[0m\n"
 	@if [ -z "$(KV_CACHE_PATH)" ]; then \
-		echo "Error: Could not find kv-cache module. Run 'go mod download' first."; \
+		echo "kv-cache module not found, downloading Go modules..."; \
+		go mod download; \
+	fi
+	@KV_CACHE_PATH_CHECK=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
+	if [ -z "$$KV_CACHE_PATH_CHECK" ]; then \
+		echo "Error: Could not find kv-cache module even after download."; \
 		exit 1; \
 	fi
 	$(CONTAINER_RUNTIME) build \
