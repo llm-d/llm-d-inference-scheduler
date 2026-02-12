@@ -262,11 +262,121 @@ sequenceDiagram
 - type: encode-filter
   parameters:
     label: "llm-d.ai/role"
-    validValues: ["encode", "both"]
+    validValues: ["encode", "encode-prefill", "encode-prefill-decode", "all"]
     allowsNoLabel: false
 ```
 - Filters pods capable of running encoding workloads
 - Similar to existing `prefill-filter` and `decode-filter`
+- **Supported Role Values** (for backward compatibility and flexible deployments):
+  - `encode` or `e`: Encode-only pods (E/P/D disaggregation)
+  - `prefill` or `p`: Prefill-only pods (existing P/D)
+  - `decode` or `d`: Decode-only pods (existing P/D)
+  - `encode-prefill` or `ep`: Combined encode+prefill pods (EP/D disaggregation)
+  - `encode-decode` or `ed`: Combined encode+decode pods (E/PD disaggregation - rare)
+  - `prefill-decode` or `pd`: Combined prefill+decode pods (existing, backward compatible)
+  - `encode-prefill-decode` or `epd`: All-in-one pods (EPD monolithic)
+  - `all`: Pods that can handle any stage (maximum flexibility)
+
+**Deployment Configuration Examples:**
+
+1. **Full E/P/D Disaggregation** (3 separate pod types):
+```yaml
+# Encode pods
+labels:
+  llm-d.ai/role: encode
+
+# Prefill pods
+labels:
+  llm-d.ai/role: prefill
+
+# Decode pods
+labels:
+  llm-d.ai/role: decode
+```
+
+2. **EP/D Disaggregation** (encode+prefill combined):
+```yaml
+# Encode+Prefill pods
+labels:
+  llm-d.ai/role: encode-prefill
+
+# Decode pods
+labels:
+  llm-d.ai/role: decode
+```
+
+3. **E/PD Disaggregation** (prefill+decode combined):
+```yaml
+# Encode pods
+labels:
+  llm-d.ai/role: encode
+
+# Prefill+Decode pods
+labels:
+  llm-d.ai/role: prefill-decode
+```
+
+4. **EPD Monolithic** (all stages in one pod):
+```yaml
+# All-in-one pods
+labels:
+  llm-d.ai/role: encode-prefill-decode
+  # or
+  llm-d.ai/role: all
+```
+
+5. **Backward Compatible P/D** (no encoding):
+```yaml
+# Prefill pods
+labels:
+  llm-d.ai/role: prefill
+
+# Decode pods
+labels:
+  llm-d.ai/role: decode
+```
+
+**Filter Configuration for Different Profiles:**
+```yaml
+plugins:
+  # Encode stage filter
+  - type: by-label
+    name: encode-stage-filter
+    parameters:
+      label: "llm-d.ai/role"
+      validValues: ["encode", "encode-prefill", "encode-prefill-decode", "all"]
+      allowsNoLabel: false
+  
+  # Prefill stage filter
+  - type: by-label
+    name: prefill-stage-filter
+    parameters:
+      label: "llm-d.ai/role"
+      validValues: ["prefill", "encode-prefill", "prefill-decode", "encode-prefill-decode", "all"]
+      allowsNoLabel: true  # Backward compatible with unlabeled pods
+  
+  # Decode stage filter
+  - type: by-label
+    name: decode-stage-filter
+    parameters:
+      label: "llm-d.ai/role"
+      validValues: ["decode", "prefill-decode", "encode-prefill-decode", "all"]
+      allowsNoLabel: true  # Backward compatible with unlabeled pods
+
+schedulingProfiles:
+  - name: encode
+    plugins:
+      - pluginRef: encode-stage-filter
+      # ... other plugins
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-stage-filter
+      # ... other plugins
+  - name: decode
+    plugins:
+      - pluginRef: decode-stage-filter
+      # ... other plugins
+```
 
 **b) Multimodal Decider (`multimodal-epd-decider`)**
 ```yaml
