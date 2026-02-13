@@ -1,23 +1,11 @@
-name: Markdown Link Checker
-
+name: Markdown Link Check
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  lychee:
-    name: Check Markdown Links
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Run lychee link checker
-        uses: lycheeverse/lychee-action@v2.7.0
-        with:
-          args: '--config .lychee.toml --verbose --no-progress **/*.md'
-          fail: true
+  links:
+    uses: llm-d/llm-d-infra/.github/workflows/reusable-md-link-check.yml@main

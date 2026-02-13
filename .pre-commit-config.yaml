@@ -1,0 +1,60 @@
+# Pre-commit configuration for llm-d-inference-scheduler
+# Based on canonical config from llm-d/llm-d-infra
+#
+# Install: pip install pre-commit && pre-commit install
+# Run all: pre-commit run --all-files
+
+repos:
+  # General file hygiene hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]  # allows custom YAML tags used in k8s
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+      - id: check-case-conflict
+
+  # Shell script linting (requires shellcheck installed)
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        language: system
+        entry: shellcheck
+        args: [-x, --severity=warning]
+        types: [shell]
+
+  # Dockerfile linting (requires hadolint installed)
+  - repo: local
+    hooks:
+      - id: hadolint-docker
+        name: hadolint
+        language: system
+        entry: hadolint
+        args: [--failure-threshold, error]
+        files: Dockerfile(\..*)?$
+        types: [file]
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.47.0
+    hooks:
+      - id: markdownlint
+        args: [--fix]
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        args:
+          - -d
+          - >-
+            {extends: default, rules: {line-length: {max: 250},
+            document-start: disable, truthy: {check-keys: false}}}

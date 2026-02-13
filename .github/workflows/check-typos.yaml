@@ -1,17 +1,8 @@
 name: Check Typos
-
 on:
   pull_request:
   push:
 
 jobs:
   typos:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Check typos
-        uses: crate-ci/typos@v1.43.0
-
+    uses: llm-d/llm-d-infra/.github/workflows/reusable-typos.yml@main
