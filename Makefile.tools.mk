@@ -22,8 +22,9 @@ VLLM_VERSION ?= 0.14.0
 
 ## Python Configuration
 PYTHON_VERSION ?= 3.12
-# Extract RELEASE_VERSION from Dockerfile
-TOKENIZER_VERSION ?= $(shell grep '^ARG RELEASE_VERSION=' Dockerfile.epp | cut -d'=' -f2)
+# DEPRECATED: Hardcoded tokenizer version for legacy embedded tokenizer support
+# Embedded tokenizers are deprecated. Use UDS tokenizer instead (see DEVELOPMENT.md)
+TOKENIZER_VERSION ?= v1.22.1
 
 # Python executable for creating venv
 PYTHON_EXE := $(shell command -v python$(PYTHON_VERSION) || command -v python3)
@@ -143,14 +144,18 @@ install-dependencies: ## Install development dependencies based on OS/ARCH
 	  exit 1; \
 	fi
 
+## DEPRECATED: download-tokenizer target
+## This target downloads embedded tokenizer bindings (daulet/tokenizers) which are deprecated.
+## The project now uses UDS (Unix Domain Socket) tokenizers via a separate sidecar container.
 .PHONY: download-tokenizer
 download-tokenizer: $(TOKENIZER_LIB)
 $(TOKENIZER_LIB): | $(LOCALLIB)
-	## Download the HuggingFace tokenizer bindings.
-	@echo "Downloading HuggingFace tokenizer bindings for version $(TOKENIZER_VERSION)..."
+	## Download the HuggingFace tokenizer bindings (DEPRECATED - use UDS tokenizer instead).
+	@echo "WARNING: Downloading deprecated embedded tokenizer bindings for version $(TOKENIZER_VERSION)..."
+	@echo "WARNING: Embedded tokenizers are deprecated. Use UDS tokenizer instead (see DEVELOPMENT.md)"
 	@curl -L https://github.com/daulet/tokenizers/releases/download/$(TOKENIZER_VERSION)/libtokenizers.$(TARGETOS)-$(TOKENIZER_ARCH).tar.gz | tar -xz -C $(LOCALLIB)
 	@ranlib $(LOCALLIB)/*.a
-	@echo "Tokenizer bindings downloaded successfully."
+	@echo "Tokenizer bindings downloaded successfully (DEPRECATED)."
 
 .PHONY: detect-python
 detect-python: ## Detects Python and prints the configuration.
