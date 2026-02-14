@@ -48,14 +48,404 @@ Modern LLM workloads increasingly involve **multimodal inputs** (images, audio, 
    - Parallel encoding of multiple images while prefill/decode continues
    - Better batching strategies per stage
    - Reduced head-of-line blocking
+   - **URL-based content handling**: When multimodal content is provided as URLs (e.g., `image_url`):
+     - Encode workers can download content in parallel without blocking prefill/decode
+     - Dedicated encode pods can be co-located with content sources (CDN, object storage)
+     - Network bandwidth for downloads doesn't compete with LLM inference traffic
+     - Failed downloads can be retried on different encode workers without affecting decode pods
 
 3. **Cost Efficiency**
    - Right-size hardware for each stage (e.g., cheaper GPUs for encoding)
    - Reduce idle time on expensive decode accelerators
+   - Optimize network egress costs by placing encode workers near content sources
 
 4. **Flexibility**
    - Support multiple encoder types (vision, audio, video) without coupling to LLM pods
    - Enable encoder model updates without redeploying LLM workers
+   - Handle different content delivery methods (URLs, base64, binary) efficiently
+
+5. **Latency Considerations**
+   - **URL downloads add latency**: When content is provided as URLs, additional time is required to:
+     - Download images/videos from external sources
+     - Validate and preprocess content
+     - Handle network failures and retries
+   - **Mitigation strategies**:
+     - Use encode workers with high-bandwidth network connections
+     - Implement aggressive caching of downloaded content
+     - Support content pre-fetching for known URLs
+     - Parallel downloads for multi-image requests
+     - Consider base64-encoded content for latency-sensitive applications
+
+---
+
+## Sidecar Architecture Options
+
+This section compares different architectural approaches for implementing E/P/D disaggregation, with special focus on where to place the orchestration logic and how it affects EP/D (Encode+Prefill combined) deployments.
+
+### Option 1: Extended Decode Sidecar
+
+In this approach, the existing sidecar on the Decode Worker is extended to orchestrate all stages.
+
+**Architecture for E/P/D (3 separate pods):**
+```
+Request → Decode Sidecar → Encode Worker(s) → Prefill Worker → Decode Worker
+          (orchestrates     (parallel)
+           E, P, D)
+```
+
+**Architecture for EP/D (Encode+Prefill combined):**
+```
+Request → Decode Sidecar → EP Worker(s) → Decode Worker
+          (orchestrates     (encode +
+           encoding +        prefill)
+           prefill)
+```
+
+**How it works for EP/D:**
+1. Decode Sidecar parses request, extracts images
+2. Distributes images to multiple EP workers (parallel encoding)
+3. Each EP worker encodes its assigned image, stores embedding
+4. Decode Sidecar collects embedding metadata from all EP workers
+5. Decode Sidecar sends text + all metadata to ONE EP worker for prefill
+6. That EP worker loads all embeddings and runs prefill
+7. Decode Worker receives KV cache and generates tokens
+
+**Pros:**
+1. **Single Point of Orchestration**: One sidecar manages the entire request lifecycle
+2. **Simpler Deployment**: No need to deploy additional sidecars on EP nodes
+3. **Consistent with Current P/D Pattern**: Natural extension of existing architecture
+4. **Better End-to-End Visibility**: Single component tracks entire request flow
+5. **Reduced Network Hops**: Direct communication path from Decode Sidecar
+6. **Easier State Management**: Request context, timeouts, and retries in one place
+7. **Lower Operational Complexity**: Single sidecar version to maintain
+8. **Optimal for E/P/D**: Works equally well for full 3-stage disaggregation
+9. **Lower Latency**: Parallel encoding starts immediately from Decode Sidecar
+
+**Cons:**
+1. **Decode Sidecar Complexity**: Sidecar becomes more complex with encoding orchestration logic
+2. **Potential Bottleneck**: All requests flow through Decode Sidecar
+3. **Resource Usage on Decode Pods**: Decode pods need more CPU/memory for sidecar operations
+4. **Coupling**: Decode deployment coupled with encoding logic
+5. **Request Parsing Required**: Must parse multimodal requests to extract and distribute images
+6. **EP/D Specific**: For EP/D, must coordinate which EP worker does prefill after encoding
+
+---
+
+### Option 2: EP Sidecar for Encoding (EP/D Only)
+
+In this approach, a new sidecar is deployed on EP (Encode+Prefill) Workers to handle encoding orchestration. **This option only applies to EP/D disaggregation.**
+
+**Architecture for EP/D:**
+```
+Request → Decode Sidecar → EP Sidecar → EP Worker(s) → Decode Worker
+          (unchanged)      (orchestrates  (encode +
+                            encoding +     prefill)
+                            prefill)
+```
+
+**How it works:**
+1. Decode Sidecar forwards full request to EP Sidecar (unchanged behavior)
+2. EP Sidecar parses request, extracts images
+3. EP Sidecar distributes images to multiple EP workers (parallel encoding)
+4. Each EP worker encodes its assigned image
+5. EP Sidecar collects embedding metadata from all EP workers
+6. EP Sidecar runs prefill locally with all embeddings
+7. Returns KV cache metadata to Decode Worker
+
+**Pros:**
+1. **Decode Sidecar Unchanged**: Existing Decode Sidecar code remains untouched - MAJOR benefit
+2. **Separation of Concerns**: Encoding logic isolated to EP tier
+3. **Better Resource Allocation**: Encoding orchestration overhead on EP pods
+4. **Decode Pods Stay Lightweight**: Decode pods focus purely on token generation
+5. **Natural Staging**: EP worker is the consumer of embeddings
+6. **Independent Scaling**: Can scale EP sidecars independently
+7. **Lower Risk**: New functionality in new component, doesn't affect existing P/D deployments
+8. **Easier Migration**: Existing deployments can adopt EP/D without touching Decode tier
+9. **EP-Optimized**: Sidecar co-located with encoding and prefill operations
+
+**Cons:**
+1. **Additional Deployment Complexity**: Need to deploy sidecars on EP tier
+2. **More Network Hops**: Decode Sidecar → EP Sidecar → EP Workers (extra hop)
+3. **Complex Error Handling**: Failures must propagate through EP Sidecar to Decode Sidecar
+4. **State Synchronization**: Both sidecars need to coordinate on request state
+5. **Harder Debugging**: Request flow spans multiple components
+6. **Version Skew Risk**: Two sidecar versions to keep in sync
+7. **EP/D Only**: Doesn't work for full E/P/D disaggregation (3 separate pod types)
+8. **Higher Latency**: Extra network hop adds latency vs Option 1
+
+---
+
+### Option 3: Prefill Sidecar for Encoding (E/P/D Only)
+
+In this approach, a new sidecar is deployed on Prefill Workers to handle encoding orchestration. **This option only applies to full E/P/D disaggregation (3 separate pod types).**
+
+**Architecture for E/P/D:**
+```
+Request → Decode Sidecar → Prefill Sidecar → Encode Worker(s) → Prefill Worker → Decode Worker
+          (unchanged)      (orchestrates E)   (parallel)
+```
+
+**How it works:**
+1. Decode Sidecar forwards full request to Prefill Sidecar
+2. Prefill Sidecar parses request, extracts images
+3. Prefill Sidecar distributes images to Encode workers (parallel)
+4. Encode workers return embedding metadata
+5. Prefill Sidecar runs prefill with embeddings
+6. Returns KV cache metadata to Decode Worker
+
+**Pros:**
+1. **Decode Sidecar Unchanged**: Existing code remains untouched
+2. **Separation of Concerns**: Encoding logic isolated to Prefill tier
+3. **Natural Staging**: Prefill is the consumer of embeddings
+4. **Lower Risk**: New functionality doesn't affect existing P/D deployments
+5. **E/P/D Optimized**: Works for full 3-stage disaggregation
+
+**Cons:**
+1. **Additional Deployment Complexity**: Need sidecars on both Prefill and Decode tiers
+2. **More Network Hops**: Extra hop through Prefill Sidecar
+3. **Complex Error Handling**: Multi-component error propagation
+4. **E/P/D Only**: Doesn't work for EP/D (combined Encode+Prefill)
+5. **Higher Latency**: Extra network hop vs Option 1
+
+---
+
+### Comparison Matrix
+
+| Aspect | Option 1: Decode Sidecar | Option 2: EP Sidecar (EP/D) | Option 3: Prefill Sidecar (E/P/D) |
+|--------|-------------------------|----------------------------|----------------------------------|
+| **Deployment Complexity** | ✅ Low (single sidecar) | ⚠️ Medium (two sidecars) | ❌ High (two sidecars) |
+| **Operational Overhead** | ✅ Low | ⚠️ Medium | ❌ High |
+| **Request Latency** | ✅ Lowest (direct) | ⚠️ Medium (+1 hop) | ❌ Higher (+1 hop) |
+| **Decode Sidecar Changes** | ❌ Significant | ✅ None | ✅ None |
+| **Decode Pod Resources** | ❌ Higher | ✅ Lower | ✅ Lower |
+| **Separation of Concerns** | ❌ Lower | ✅ Higher | ✅ Higher |
+| **Error Handling** | ✅ Simpler | ⚠️ Medium | ❌ Complex |
+| **Debugging/Tracing** | ✅ Easier | ⚠️ Medium | ❌ Harder |
+| **Backward Compatibility** | ✅ Natural extension | ✅ No changes to existing | ✅ No changes to existing |
+| **Works for E/P/D** | ✅ Yes | ❌ No | ✅ Yes |
+| **Works for EP/D** | ✅ Yes | ✅ Yes | ❌ No |
+| **Migration Risk** | ⚠️ Medium | ✅ Low | ⚠️ Medium |
+| **Code Complexity** | ⚠️ One complex sidecar | ⚠️ Two medium sidecars | ❌ Two complex sidecars |
+
+---
+
+### Recommendations
+
+#### For E/P/D (3 separate pod types): Option 1 (Extended Decode Sidecar)
+
+**Rationale:**
+
+---
+
+### Option 4: EPP-Designated Coordinator (Hybrid Approach)
+
+In this approach, the **EPP scheduler** (not a new component) selects both the Encoder pods and the Prefill/EP pod. The Prefill/EP pod that EPP selects naturally becomes the coordinator, and its sidecar orchestrates the encoding stage. **This works for both E/P/D and EP/D configurations.**
+
+**Key Insight:** EPP already chooses the Prefill pod in the current P/D design. For E/P/D, EPP simply adds encoder selection to its existing logic, and the chosen Prefill pod coordinates them.
+
+**Architecture for E/P/D:**
+```
+Request → Decode Sidecar → Coordinator Prefill Sidecar → Encode Worker(s) → Prefill Workers → Decode Worker
+          (unchanged)      (orchestrates E,              (parallel)         (coordinator
+                            coordinates P)                                   + others)
+```
+
+**Architecture for EP/D:**
+```
+Request → Decode Sidecar → Coordinator EP Sidecar → EP Worker(s) → Decode Worker
+          (unchanged)      (orchestrates E,         (encode +      
+                            runs P locally)          prefill)
+```
+
+**How it works:**
+1. **EPP Scheduler** (existing component, enhanced):
+   - Analyzes request for multimodal content
+   - Selects multiple Encode/EP workers for parallel encoding
+   - Selects ONE Prefill/EP worker (using existing prefill selection logic)
+   - The selected Prefill/EP worker automatically becomes the coordinator
+   - Sets headers: `x-encoder-host-ports` (list) and `x-prefiller-host-port` (coordinator)
+
+2. **Decode Sidecar** (unchanged):
+   - Forwards full request to the Prefill/EP pod specified in `x-prefiller-host-port`
+   - No awareness of encoding coordination
+
+3. **Coordinator Prefill/EP Sidecar** (new logic added):
+   - Receives request from Decode Sidecar
+   - Checks if `x-encoder-host-ports` header exists
+   - If yes, acts as coordinator:
+     - Parses request, extracts images
+     - Distributes images to other Encode/EP workers (parallel)
+     - Encodes its own assigned image locally
+     - Collects embedding metadata from all workers
+     - Runs prefill locally with all embeddings
+   - If no, runs normal prefill (backward compatible)
+   - Returns KV cache metadata to Decode Worker
+
+**EPP Header Example:**
+```
+x-encoder-host-ports: ep1:8000,ep2:8000,ep3:8000
+x-prefiller-host-port: ep1:8000  # EPP selected ep1 for prefill, so it's the coordinator
+```
+
+**Key Insight:**
+- **EPP already selects the Prefill pod** in current P/D design
+- For E/P/D, EPP just adds encoder selection to its existing scheduling logic
+- The Prefill pod EPP selects naturally becomes the coordinator
+- No new "coordinator selection" logic needed - it's the same Prefill selection EPP already does!
+
+**Pros:**
+1. **Decode Sidecar Unchanged**: Zero changes to existing Decode Sidecar - MAJOR benefit
+2. **EPP-Driven Coordination**: EPP intelligence determines optimal coordinator
+3. **Works for Both E/P/D and EP/D**: Unified approach for all configurations
+4. **Natural Load Balancing**: EPP can rotate coordinator selection
+5. **Optimal Resource Usage**: Coordinator does useful work (encoding + prefill)
+6. **Simpler Than Option 2/3**: Single pattern for both E/P/D and EP/D
+7. **Lower Risk**: New functionality isolated to Prefill/EP tier
+8. **Easier Migration**: Existing deployments unaffected
+9. **Coordinator Co-location**: Coordinator has local access to its own embeddings
+10. **Flexible Scaling**: Can scale coordinators independently
+
+**Cons:**
+1. **Coordinator Sidecar Complexity**: Selected Prefill/EP sidecar becomes more complex
+2. **More Network Hops**: Decode → Coordinator → Other Encoders (extra hop)
+3. **Coordinator Selection Logic**: EPP must implement coordinator selection
+4. **Asymmetric Workers**: Coordinator worker has different responsibilities than others
+5. **Coordinator Bottleneck**: If coordinator fails, entire request fails
+6. **State Management**: Coordinator must track multiple parallel encoding operations
+
+**Implementation Details:**
+
+**EPP Scheduling Logic (Enhanced):**
+```yaml
+# EPP's existing prefill selection logic is reused:
+1. Analyze request for multimodal content
+2. If multimodal:
+   a. Select N Encode/EP workers (new: encoder selection)
+   b. Select 1 Prefill/EP worker (existing: prefill selection logic)
+      - Best prefix cache hit
+      - Lowest load
+      - Network locality
+   c. The selected Prefill/EP worker IS the coordinator (no separate selection)
+3. If text-only:
+   - Use existing P/D logic (backward compatible)
+```
+
+**No New Coordinator Selection Logic Needed:**
+- EPP already has sophisticated logic to select the best Prefill pod
+- That same pod naturally coordinates encoding
+- Reuses existing scheduling intelligence (cache hits, load, locality)
+
+**Coordinator Sidecar Logic:**
+```go
+func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
+    encoderHosts := r.Header.Values("x-encoder-host-ports")
+    myHost := r.Header.Get("x-prefiller-host-port")
+    
+    // Am I the coordinator?
+    isCoordinator := contains(encoderHosts, myHost)
+    
+    if isCoordinator && len(encoderHosts) > 1 {
+        // Parse request, extract images
+        images := parseMultimodalRequest(r)
+        
+        // Distribute images to other encoders (parallel)
+        embeddings := distributeAndCollect(images, encoderHosts, myHost)
+        
+        // Add my own encoding to embeddings
+        myEmbedding := encodeLocally(myImage)
+        embeddings = append(embeddings, myEmbedding)
+        
+        // Run prefill with all embeddings
+        runPrefill(r, embeddings)
+    } else {
+        // Not coordinator, just forward to local vLLM
+        s.decoderProxy.ServeHTTP(w, r)
+    }
+}
+```
+
+**Comparison with Other Options:**
+
+| Aspect | Option 4: Coordinator | Option 1: Decode | Option 2: EP | Option 3: Prefill |
+|--------|----------------------|------------------|--------------|-------------------|
+| **Decode Sidecar Changes** | ✅ None | ❌ Significant | ✅ None | ✅ None |
+| **Works for E/P/D** | ✅ Yes | ✅ Yes | ❌ No | ✅ Yes |
+| **Works for EP/D** | ✅ Yes | ✅ Yes | ✅ Yes | ❌ No |
+| **Operational Complexity** | ⚠️ Medium | ✅ Low | ⚠️ Medium | ❌ High |
+| **Request Latency** | ⚠️ Medium (+1 hop) | ✅ Lowest | ⚠️ Medium (+1 hop) | ❌ Higher (+1 hop) |
+| **EPP Intelligence** | ✅ High (selects coordinator) | ⚠️ Medium | ⚠️ Medium | ⚠️ Medium |
+| **Load Balancing** | ✅ EPP-driven | ⚠️ Manual | ⚠️ Manual | ⚠️ Manual |
+| **Migration Risk** | ✅ Low | ⚠️ Medium | ✅ Low | ⚠️ Medium |
+
+---
+
+### Recommendations
+
+#### Primary Recommendation: Option 4 (Unified Coordinator Sidecar)
+
+**Best overall choice for most deployments.**
+
+**Rationale:**
+1. **Zero Risk to Decode**: Existing Decode Sidecar completely unchanged
+2. **Universal**: Works for both E/P/D and EP/D configurations
+3. **EPP-Driven Intelligence**: Leverages EPP's scheduling intelligence for coordinator selection
+4. **Natural Load Balancing**: EPP can rotate coordinator selection based on load
+5. **Optimal Resource Usage**: Coordinator does useful work (encoding + prefill)
+6. **Easier Migration**: Existing P/D deployments unaffected
+7. **Flexible**: Can adapt to different deployment patterns
+
+**Trade-offs:**
+- One extra network hop vs Option 1 (acceptable for stability benefit)
+- Coordinator sidecar more complex (but isolated to Prefill/EP tier)
+
+**When to Use:**
+- ✅ Existing P/D deployments migrating to E/P/D or EP/D
+- ✅ Risk-averse production environments
+- ✅ Need flexibility between E/P/D and EP/D configurations
+- ✅ Want EPP-driven intelligent coordination
+
+---
+
+#### Alternative: Option 1 (Extended Decode Sidecar)
+
+**Best for new deployments prioritizing performance.**
+
+**Rationale:**
+1. **Lowest Latency**: No extra network hops, parallel encoding starts immediately
+2. **Operational Simplicity**: Single sidecar to manage
+3. **Natural Evolution**: Extends existing P/D pattern
+4. **Industry Alignment**: Most disaggregated systems use single orchestrator
+
+**Trade-offs:**
+- Requires changes to Decode Sidecar (higher risk)
+- More complex Decode Sidecar code
+
+**When to Use:**
+- ✅ New deployments (greenfield)
+- ✅ Performance-critical applications
+- ✅ Teams comfortable with Decode Sidecar changes
+- ✅ Simpler operational model preferred
+
+---
+
+#### Decision Matrix
+
+| Scenario | Recommended Option | Reason |
+|----------|-------------------|---------|
+| **Existing P/D deployment** | **Option 4** | Zero risk to Decode tier, universal |
+| **New deployment** | Option 1 or 4 | Option 1 for performance, Option 4 for flexibility |
+| **Performance-critical** | Option 1 | Lowest latency |
+| **Risk-averse** | **Option 4** | Decode Sidecar unchanged, isolated changes |
+| **EP/D configuration** | **Option 4** or Option 2 | Option 4 preferred for universality |
+| **E/P/D configuration** | **Option 4** or Option 1 | Option 4 for safety, Option 1 for performance |
+| **Need flexibility** | **Option 4** | Works for both E/P/D and EP/D |
+| **Simple operations** | Option 1 | Single sidecar to manage |
+| **EPP-driven intelligence** | **Option 4** | Leverages EPP coordinator selection |
+
+**Summary:**
+- **Option 4** is recommended for most production deployments, especially existing P/D systems
+- **Option 1** is recommended for new deployments where performance is critical and team is comfortable with Decode Sidecar changes
+- **Options 2 & 3** are specialized variants that Option 4 supersedes
 
 ---
 
@@ -255,19 +645,13 @@ sequenceDiagram
 
 ### 1. EPP Scheduler Enhancements
 
-#### New Plugins
+#### Enhanced "by-label" Filter
 
-**a) Encode Filter (`encode-filter`)**
-```yaml
-- type: encode-filter
-  parameters:
-    label: "llm-d.ai/role"
-    validValues: ["encode", "encode-prefill", "encode-prefill-decode", "all"]
-    allowsNoLabel: false
-```
-- Filters pods capable of running encoding workloads
-- Similar to existing `prefill-filter` and `decode-filter`
-- **Supported Role Values** (for backward compatibility and flexible deployments):
+The existing [`by-label` filter](https://github.com/llm-d/llm-d-inference-scheduler/blob/main/docs/disagg_pd.md) will be extended to support additional role values for E/P/D disaggregation. This maintains backward compatibility with existing P/D deployments while enabling new encoding capabilities.
+
+**Extended Role Values for `llm-d.ai/role` Label:**
+
+The `by-label` filter will now accept the following values (in addition to existing P/D values):
   - `encode` or `e`: Encode-only pods (E/P/D disaggregation)
   - `prefill` or `p`: Prefill-only pods (existing P/D)
   - `decode` or `d`: Decode-only pods (existing P/D)
@@ -336,10 +720,10 @@ labels:
   llm-d.ai/role: decode
 ```
 
-**Filter Configuration for Different Profiles:**
+**Example Filter Configuration for E/P/D Profiles:**
 ```yaml
 plugins:
-  # Encode stage filter
+  # Encode stage filter (using existing by-label filter)
   - type: by-label
     name: encode-stage-filter
     parameters:
@@ -347,7 +731,7 @@ plugins:
       validValues: ["encode", "encode-prefill", "encode-prefill-decode", "all"]
       allowsNoLabel: false
   
-  # Prefill stage filter
+  # Prefill stage filter (using existing by-label filter)
   - type: by-label
     name: prefill-stage-filter
     parameters:
@@ -355,7 +739,7 @@ plugins:
       validValues: ["prefill", "encode-prefill", "prefill-decode", "encode-prefill-decode", "all"]
       allowsNoLabel: true  # Backward compatible with unlabeled pods
   
-  # Decode stage filter
+  # Decode stage filter (using existing by-label filter)
   - type: by-label
     name: decode-stage-filter
     parameters:
@@ -378,7 +762,11 @@ schedulingProfiles:
       # ... other plugins
 ```
 
-**b) Multimodal Decider (`multimodal-epd-decider`)**
+#### New Plugins
+
+In addition to extending the existing `by-label` filter, the following new plugins will be introduced:
+
+**a) Multimodal Decider (`multimodal-epd-decider`)**
 ```yaml
 - type: multimodal-epd-decider
   parameters:
@@ -390,7 +778,7 @@ schedulingProfiles:
 - Checks for presence of image/audio/video in request
 - Can skip encoding for cached embeddings
 
-**c) Encode-Aware Scorer (`encode-load-scorer`)**
+**b) Encode-Aware Scorer (`encode-load-scorer`)**
 ```yaml
 - type: encode-load-scorer
   parameters:
@@ -613,8 +1001,9 @@ metadata:
 ## Implementation Phases
 
 ### Phase 1: Foundation (Weeks 1-3)
-- [ ] Implement `encode-filter` plugin
+- [ ] Extend existing `by-label` filter to support new E/P/D role values
 - [ ] Implement `multimodal-epd-decider` plugin
+- [ ] Implement `encode-load-scorer` plugin
 - [ ] Extend `PdProfileHandler` → `EpdProfileHandler`
 - [ ] Add E/P/D scheduling profile support
 - [ ] Update configuration schema
