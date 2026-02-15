@@ -9,9 +9,8 @@
 # 3. This workflow:
 #    - Verifies user is in OWNERS file
 #    - Checks if PR is draft
-#    - Checks for blocking labels (hold/wip/do-not-merge)
+#    - Checks for blocking labels (hold)
 #    - Adds lgtm label
-#    - Waits 5 minutes (allows gatekeeper to run)
 #    - Enables auto-merge
 # ============================================================================
 
@@ -19,6 +18,9 @@ name: LGTM Command Worker
 on:
   repository_dispatch:
     types: [lgtm-command]
+
+env:
+  BLOCKING_LABELS: "hold"
 
 jobs:
   apply-lgtm:
@@ -29,6 +31,12 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
+      - uses: tibdex/github-app-token@v1
+        id: generate-token
+        with:
+          app_id: ${{ secrets.VLLMD_BOT_APP_ID }}
+          private_key: ${{ secrets.VLLMD_BOT_APP_PRIVATE_KEY }}
+          repository: ${{ github.repository }}
 
       # -----------------------------------------------------------------------
       # STEP 1: AUTHORIZATION - Verify user is in OWNERS file
@@ -36,14 +44,15 @@ jobs:
       # Only users listed as approvers in OWNERS can use /lgtm
       # This prevents unauthorized users from approving PRs
       - name: Check Permissions
-        id: check
         env:
           ACTOR: ${{ github.event.client_payload.github.actor }}
         run: |
-          if grep -q "^\s*-\s*$ACTOR\s*$" OWNERS; then
-            echo "authorized=true" >> $GITHUB_OUTPUT
+          # Extract only the approvers section and check if ACTOR is listed
+          APPROVERS=$(sed -n '/^approvers:/,/^[^ -]/p' OWNERS | grep -v '^approvers:')
+          if echo "$APPROVERS" | grep -q "^\s*-\s*$ACTOR\s*$"; then
+            echo "User $ACTOR is authorized"
           else
-            echo "::error::User $ACTOR is not an approver."
+            echo "::error:: User $ACTOR is not an approver."
             exit 1
           fi
 
@@ -53,7 +62,6 @@ jobs:
       # Draft PRs cannot be approved - they must be marked ready for review
       # This prevents accidental approval of incomplete work
       - name: Check Draft Status
-        if: steps.check.outputs.authorized == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.client_payload.github.payload.issue.number }}
@@ -61,26 +69,25 @@ jobs:
         run: |
           IS_DRAFT=$(gh pr view $PR_NUMBER --repo "$REPO" --json isDraft --jq '.isDraft')
           if [ "$IS_DRAFT" = "true" ]; then
-            echo "::error::Cannot LGTM a Draft PR."
+            echo "::error:: Cannot LGTM a Draft PR."
             gh issue comment $PR_NUMBER --repo "$REPO" --body "⚠️ **LGTM Failed**: PR is a Draft."
             exit 1
           fi
 
       # -----------------------------------------------------------------------
-      # STEP 3: BLOCKING LABELS - Check for hold/wip/do-not-merge
+      # STEP 3: BLOCKING LABELS - Check for hold
       # -----------------------------------------------------------------------
       # If any blocking label exists, fail immediately
       # This prevents approving PRs that are explicitly marked as not ready
       - name: Check for Blocking Labels
-        if: steps.check.outputs.authorized == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.client_payload.github.payload.issue.html_url }}
         run: |
           LABELS=$(gh pr view "$PR_URL" --json labels --jq '.labels[].name')
-          if echo "$LABELS" | grep -Eiq "^(hold|wip|do-not-merge)$"; then
-            echo "::error::PR is blocked by label."
-            gh issue comment "$PR_URL" --body "  **Merge Blocked**: Please remove the \`hold\`, \`wip\`, or \`do-not-merge\` label before merging."
+          if echo "$LABELS" | grep -Eiq "^($BLOCKING_LABELS)$"; then
+            echo "::error:: PR is blocked by label."
+            gh issue comment "$PR_URL" --body "  **Merge Blocked**: Please remove the \`hold\` label before merging."
             exit 1
           fi
 
@@ -88,62 +95,40 @@ jobs:
       # STEP 4: APPLY LGTM - Add label, wait, then enable auto-merge
       # -----------------------------------------------------------------------
       # 1. Add lgtm label (triggers gatekeeper to validate)
-      # 2. Wait 5 minutes (gives time for:
-      #    - Gatekeeper to run and validate
-      #    - CI checks to start
-      #    - Early failure detection)
-      # 3. Enable auto-merge (PR will merge when all checks pass)
-      - name: Apply Label & Merge
-        if: steps.check.outputs.authorized == 'true'
+      # 2. Enable auto-merge (PR will merge when all checks pass)
+      - name: Apply or Cancel LGTM
         env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           PR_NUMBER: ${{ github.event.client_payload.github.payload.issue.number }}
           PR_URL: ${{ github.event.client_payload.github.payload.issue.html_url }}
+          # Extract the full comment body from the dispatcher payload
+          COMMENT_BODY: ${{ github.event.client_payload.github.payload.comment.body }}
         run: |
-          # Apply lgtm label
-          if ! gh issue edit "$PR_NUMBER" --add-label "lgtm"; then
-            echo "::error::Failed to add lgtm label"
-            gh issue comment "$PR_URL" --body "  **Error**: Failed to add lgtm label to the PR."
-            exit 1
+          # Check if the command is a cancellation
+          if echo "$COMMENT_BODY" | grep -q "/lgtm cancel"; then
+            echo "🚨 Retracting LGTM status..."
+
+            # 1. Remove lgtm label
+            gh issue edit "$PR_NUMBER" --remove-label "lgtm" || echo "Label already gone"
+
+            # 2. Disable Auto-Merge
+            gh pr merge --disable-auto "$PR_URL" || echo "Auto-merge was not enabled"
+
+            # 3. Notify user
+            gh issue comment "$PR_URL" --body "Retracted: **LGTM** label removed and auto-merge disabled by @$ACTOR."
+          
+          else
+            echo "✅ Applying LGTM status..."
+
+            # 1. Add lgtm label
+            gh issue edit "$PR_NUMBER" --add-label "lgtm"
+
+            # 2. Enable auto-merge (Squash)
+            if ! gh pr merge --auto --squash "$PR_URL" 2>&1 | tee merge_output.txt; then
+              ERROR_MSG=$(cat merge_output.txt)
+              gh issue comment "$PR_URL" --body "⚠️ **Auto-merge failed**: $ERROR_MSG"
+              exit 1
+            fi
+
+            gh issue comment "$PR_URL" --body "✅ **LGTM**: Approval recorded and auto-merge enabled."
           fi
-
-          echo "Waiting 5 minutes before setting auto-merge..."
-          echo "Current time: $(date)"
-          sleep 300
-          echo "Wait completed at: $(date)"
-
-          # Enable auto-merge with error handling
-          if ! gh pr merge --auto --squash "$PR_URL" 2>&1 | tee merge_output.txt; then
-            echo "::error::Failed to enable auto-merge"
-            ERROR_MSG=$(cat merge_output.txt)
-            gh issue comment "$PR_URL" --body "  **Auto-merge failed**: Could not enable auto-merge on this PR.
-
-          **Error details:**
-          \`\`\`
-          $ERROR_MSG
-          \`\`\`
-
-          **Common reasons:**
-          - Branch protection rules not satisfied
-          - Required status checks not passing
-          - Merge conflicts present
-          - Auto-merge not enabled for this repository
-
-          Please check the PR status and try again, or merge manually."
-            exit 1
-          fi
-
-          echo "✅ Auto-merge enabled successfully"
-          gh issue comment "$PR_URL" --body "✅ **LGTM**: Auto-merge has been enabled. The PR will merge automatically once all checks pass."
-
-
-      # -----------------------------------------------------------------------
-      # STEP 5: FEEDBACK - Add reaction to comment
-      # -----------------------------------------------------------------------
-      # Visual confirmation that the command was processed successfully
-      - name: React Rocket
-        if: success()
-        uses: peter-evans/create-or-update-comment@v3
-        with:
-          comment-id: ${{ github.event.client_payload.github.payload.comment.id }}
-          reactions: rocket

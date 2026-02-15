@@ -356,3 +356,20 @@ helm uninstall kgateway-crds -n kgateway-system
 ```
 
 For more details, see the Gateway API inference Extension [getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/)
+
+## PR Approval Process
+
+The project uses a Prow-inspired ChatOps system to manage PR approvals via comment commands.
+
+### Available Commands
+
+| Command | Policy | Description |
+|---------|--------|-------------|
+| `/lgtm` | OWNERS approvers | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once all checks pass. |
+| `/lgtm cancel` | OWNERS approvers | Removes the `lgtm` label and disables auto-merge. |
+| `/hold` | Anyone with write access | Adds the `hold` label to prevent the PR from merging. |
+| `/hold cancel` | Anyone with write access | Removes the `hold` label. |
+
+### Approval Reset on New Commits
+
+When new commits are pushed to an approved PR, the `lgtm` label is automatically removed and auto-merge is disabled. This ensures approvals always reflect the latest code. The author must request a new `/lgtm` after pushing changes.

@@ -21,9 +21,15 @@ jobs:
     permissions:
       pull-requests: write
     steps:
+      - uses: tibdex/github-app-token@v1
+        id: generate-token
+        with:
+          app_id: ${{ secrets.VLLMD_BOT_APP_ID }}
+          private_key: ${{ secrets.VLLMD_BOT_APP_PRIVATE_KEY }}
+          repository: ${{ github.repository }}
       - name: Invalidate LGTM
         env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
@@ -37,3 +43,4 @@ jobs:
 
           # 3. Notify user
           gh issue comment $PR_NUMBER --repo "$REPO" --body "🔄 **Reset**: New commits pushed. LGTM removed."
+          

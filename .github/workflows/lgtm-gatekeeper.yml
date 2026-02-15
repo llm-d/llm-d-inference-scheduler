@@ -3,7 +3,7 @@
 # ============================================================================
 # Rules Enforced:
 # 1. PR MUST have "lgtm" label
-# 2. PR MUST NOT have blocking labels (hold, wip, do-not-merge)
+# 2. PR MUST NOT have blocking labels (hold)
 # ============================================================================
 
 name: LGTM Gatekeeper
@@ -12,6 +12,9 @@ on:
     # Run on PR open/reopen and label changes
     # NOT on synchronize (handled by lgtm-reset.yml)
     types: [opened, labeled, unlabeled, reopened]
+
+env:
+  BLOCKING_LABELS: "hold"
 
 jobs:
   validate-pr:
@@ -27,15 +30,15 @@ jobs:
           LABELS=$(gh pr view $PR_NUMBER --repo "$REPO" --json labels --jq '.labels[].name')
           
           # Check 1: IS IT BLOCKED?
-          if echo "$LABELS" | grep -Eiq "^(hold|wip|do-not-merge)$"; then
-            echo "::error::⛔ FAILED: PR is blocked by a 'hold', 'wip', or 'do-not-merge' label."
+          if echo "$LABELS" | grep -Eiq "^($BLOCKING_LABELS)$"; then
+            echo "::error:: ⛔ FAILED: PR is blocked by a 'hold' label."
             exit 1
           fi
 
           # Check 2: IS IT APPROVED?
           # If Reset workflow removed the label, this check fails immediately.
           if ! echo "$LABELS" | grep -Fqx "lgtm"; then
-            echo "::error::⛔ FAILED: PR is missing the 'lgtm' label."
+            echo "::error:: ⛔ FAILED: PR is missing the 'lgtm' label."
             exit 1
           fi
           
