@@ -241,7 +241,7 @@ And making requests with `curl`:
 
 ```bash
 curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: application/json' \
-  -d '{"model":"meta-llama/Llama-3.1-8B-Instruct","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 > [!NOTE]
