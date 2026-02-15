@@ -369,8 +369,8 @@ The project uses a Prow-inspired ChatOps system to manage PR approvals via comme
 | `/approve cancel` | [OWNERS](./OWNERS) approvers | Removes your approval on this pull-request. Removes the `approve` label. |
 | `/lgtm` | [OWNERS](./OWNERS) approvers | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once requiremnets below are met. |
 | `/lgtm cancel` | [OWNERS](./OWNERS) approvers | Removes the `lgtm` label and disables auto-merge. |
-| `/hold` | Anyone with write access | Adds the `hold` label to prevent the PR from merging. |
-| `/hold cancel` | Anyone with write access | Removes the `hold` label. |
+| `/hold` | Anyone | Adds the `hold` label to prevent the PR from merging. |
+| `/hold cancel` | Anyone | Removes the `hold` label. |
 
 ### Merge Requirements
 
