@@ -35,11 +35,23 @@ jobs:
             exit 1
           fi
 
-          # Check 2: IS IT APPROVED?
-          # If Reset workflow removed the label, this check fails immediately.
-          if ! echo "$LABELS" | grep -Fqx "lgtm"; then
-            echo "::error:: ⛔ FAILED: PR is missing the 'lgtm' label."
+          # Check 2: IS IT APPROVED? (both lgtm and approve required)
+          HAS_LGTM=false
+          HAS_APPROVE=false
+
+          if echo "$LABELS" | grep -Fqx "lgtm"; then
+            HAS_LGTM=true
+          fi
+
+          if echo "$LABELS" | grep -Fqx "approve"; then
+            HAS_APPROVE=true
+          fi
+
+          if [ "$HAS_LGTM" = false ] || [ "$HAS_APPROVE" = false ]; then
+            echo "::error:: ⛔ FAILED: PR requires both 'lgtm' and 'approve' labels."
+            echo "  - lgtm: $HAS_LGTM"
+            echo "  - approve: $HAS_APPROVE"
             exit 1
           fi
           
-          echo "✅ PASSED: LGTM present and no blockers."
+          echo "✅ PASSED: Both lgtm and approve labels present, no blockers."

@@ -365,11 +365,24 @@ The project uses a Prow-inspired ChatOps system to manage PR approvals via comme
 
 | Command | Policy | Description |
 |---------|--------|-------------|
-| `/lgtm` | OWNERS approvers | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once all checks pass. |
-| `/lgtm cancel` | OWNERS approvers | Removes the `lgtm` label and disables auto-merge. |
+| `/approve` | [OWNERS](./OWNERS) approvers | Approve all the files for the current PR. Adds the `approve` label. |
+| `/approve cancel` | [OWNERS](./OWNERS) approvers | Removes your approval on this pull-request. Removes the `approve` label. |
+| `/lgtm` | [OWNERS](./OWNERS) approvers | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once requiremnets below are met. |
+| `/lgtm cancel` | [OWNERS](./OWNERS) approvers | Removes the `lgtm` label and disables auto-merge. |
 | `/hold` | Anyone with write access | Adds the `hold` label to prevent the PR from merging. |
 | `/hold cancel` | Anyone with write access | Removes the `hold` label. |
+
+### Merge Requirements
+
+For a PR to be merged, it must have:
+- ✅ **Both `lgtm` and `approve` labels** - Required for merge approval
+- ✅ **No blocking labels** - The `hold` label must not be present
+- ✅ **All required status checks passing** - CI/CD checks must succeed
+
+The gatekeeper workflow enforces these requirements as a required status check.
 
 ### Approval Reset on New Commits
 
 When new commits are pushed to an approved PR, the `lgtm` label is automatically removed and auto-merge is disabled. This ensures approvals always reflect the latest code. The author must request a new `/lgtm` after pushing changes.
+
+**Note:** The `approve` label is NOT automatically removed on new commits. If significant changes are made, reviewers should use `/approve cancel` to remove their approval.

@@ -130,5 +130,5 @@ jobs:
               exit 1
             fi
 
-            gh issue comment "$PR_URL" --body "✅ **LGTM**: Approval recorded and auto-merge enabled."
+            gh issue comment "$PR_URL" --body "✅ **LGTM**: auto-merge enabled."
           fi
