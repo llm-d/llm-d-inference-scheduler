@@ -129,13 +129,13 @@ func runKustomize(kustomizeDir string) []string {
 }
 
 func substituteMany(inputs []string, substitutions map[string]string) []string {
-	outputs := []string{}
-	for _, input := range inputs {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
 		output := input
 		for key, value := range substitutions {
 			output = strings.ReplaceAll(output, key, value)
 		}
-		outputs = append(outputs, output)
+		outputs[idx] = output
 	}
 	return outputs
 }

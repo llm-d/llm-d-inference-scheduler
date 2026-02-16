@@ -217,12 +217,12 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to preprocessing format
-				var conversations []preprocessing.Conversation
-				for _, msg := range req.ChatCompletions.Messages {
-					conversations = append(conversations, preprocessing.Conversation{
+				conversations := make([]preprocessing.Conversation, len(req.ChatCompletions.Messages))
+				for idx, msg := range req.ChatCompletions.Messages {
+					conversations[idx] = preprocessing.Conversation{
 						Role:    msg.Role,
 						Content: msg.Content.Raw,
-					})
+					}
 				}
 
 				processor := preprocessing.NewChatTemplatingProcessor()
