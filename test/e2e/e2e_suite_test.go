@@ -182,15 +182,6 @@ func kindLoadImage(image string) {
 	_, err := exec.LookPath(containerRuntime)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", containerRuntime)
 
-	// Pull the image first to ensure it's available locally
-	ginkgo.By(fmt.Sprintf("Pulling image %s if not available locally", image))
-	pullCommand := exec.Command(containerRuntime, "pull", image)
-	pullSession, pullErr := gexec.Start(pullCommand, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	if pullErr == nil {
-		// Wait for pull to complete, but don't fail if image already exists or can't be pulled
-		gomega.Eventually(pullSession).WithTimeout(600 * time.Second).Should(gexec.Exit())
-	}
-
 	saveArgs := []string{"save", "--output", target}
 	if containerRuntime == "docker" {
 		// The platform flag is required for docker save to work but it is an unsupported flag for podman
