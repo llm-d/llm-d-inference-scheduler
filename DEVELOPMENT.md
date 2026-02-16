@@ -365,10 +365,10 @@ The project uses a Prow-inspired ChatOps system to manage PR approvals via comme
 
 | Command | Policy | Description |
 |---------|--------|-------------|
-| `/approve` | [OWNERS](./OWNERS) approvers | Approve all the files for the current PR. Adds the `approve` label. |
-| `/approve cancel` | [OWNERS](./OWNERS) approvers | Removes your approval on this pull-request. Removes the `approve` label. |
-| `/lgtm` | [OWNERS](./OWNERS) approvers | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once requiremnets below are met. |
-| `/lgtm cancel` | [OWNERS](./OWNERS) approvers | Removes the `lgtm` label and disables auto-merge. |
+| `/approve` | [OWNERS](./OWNERS)  | Approve all the files for the current PR. Adds the `approve` label. |
+| `/approve cancel` | [OWNERS](./OWNERS) | Removes your approval on this pull-request. Removes the `approve` label. |
+| `/lgtm` | [OWNERS](./OWNERS) | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once requiremnets below are met. |
+| `/lgtm cancel` | [OWNERS](./OWNERS) | Removes the `lgtm` label and disables auto-merge. |
 | `/hold` | Anyone | Adds the `hold` label to prevent the PR from merging. |
 | `/hold cancel` | Anyone | Removes the `hold` label. |
 
@@ -386,3 +386,28 @@ The gatekeeper workflow enforces these requirements as a required status check.
 When new commits are pushed to an approved PR, the `lgtm` label is automatically removed and auto-merge is disabled. This ensures approvals always reflect the latest code. The author must request a new `/lgtm` after pushing changes.
 
 **Note:** The `approve` label is NOT automatically removed on new commits. If significant changes are made, reviewers should use `/approve cancel` to remove their approval.
+
+## OWNERS
+
+A simplified version of [Prow's OWNERS](https://go.k8s.io/owners) file is supported. When an OWNERS file is present at the root of the repository, it is used to authorize the /lgtm and /approve commands.
+
+The `reviewers` role grants access to the /lgtm command and the approvers role grants access to the /approve command.
+
+The `approvers` role does not grant the reviewers role, a user must be in both roles to use /lgtm and /approve.
+
+The OWNERS file must be in YAML format. All entries are expected to be GitHub usernames; teams are not supported.
+
+```yaml
+# List of usernames who may use /lgtm
+reviewers:
+  - user1
+  - user2
+  - user3
+
+# List of usernames who may use /approve
+approvers:
+  - user1
+  - user2
+  - admin1
+```
+

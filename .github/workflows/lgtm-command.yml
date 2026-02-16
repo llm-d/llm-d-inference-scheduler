@@ -7,7 +7,7 @@
 # 1. User comments /lgtm on PR
 # 2. chatops-dispatcher catches it and dispatches here
 # 3. This workflow:
-#    - Verifies user is in OWNERS file
+#    - Verifies user is listed under 'reviewers' in OWNERS file
 #    - Checks if PR is draft
 #    - Checks for blocking labels (hold)
 #    - Adds lgtm label
@@ -41,18 +41,18 @@ jobs:
       # -----------------------------------------------------------------------
       # STEP 1: AUTHORIZATION - Verify user is in OWNERS file
       # -----------------------------------------------------------------------
-      # Only users listed as approvers in OWNERS can use /lgtm
-      # This prevents unauthorized users from approving PRs
+      # Only users listed as reviewers in OWNERS can use /lgtm
+      # This prevents unauthorized users from applying the lgtm label
       - name: Check Permissions
         env:
           ACTOR: ${{ github.event.client_payload.github.actor }}
         run: |
-          # Extract only the approvers section and check if ACTOR is listed
-          APPROVERS=$(sed -n '/^approvers:/,/^[^ -]/p' OWNERS | grep -v '^approvers:')
-          if echo "$APPROVERS" | grep -q "^\s*-\s*$ACTOR\s*$"; then
+          # Extract only the reviewers section and check if ACTOR is listed
+          REVIEWERS=$(sed -n '/^reviewers:/,/^[^ -]/p' OWNERS | grep -v '^reviewers:')
+          if echo "$REVIEWERS" | grep -q "^\s*-\s*$ACTOR\s*$"; then
             echo "User $ACTOR is authorized"
           else
-            echo "::error:: User $ACTOR is not an approver."
+            echo "::error:: User $ACTOR is not a reviewer."
             exit 1
           fi
 

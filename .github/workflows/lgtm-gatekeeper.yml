@@ -2,7 +2,7 @@
 # LGTM Gatekeeper - Required Status Check
 # ============================================================================
 # Rules Enforced:
-# 1. PR MUST have "lgtm" label
+# 1. PR MUST have "lgtm" and "approve" labels
 # 2. PR MUST NOT have blocking labels (hold)
 # ============================================================================
 
