@@ -1,0 +1,203 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-sim-p
+  labels:
+    app: ${POOL_NAME}
+spec:
+  replicas: ${VLLM_REPLICA_COUNT_P}
+  selector:
+    matchLabels:
+      app: ${POOL_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${POOL_NAME}
+        llm-d.ai/role: prefill
+    spec:
+      containers:
+      - name: vllm
+        image: ${VLLM_SIMULATOR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--port=8000"
+        - "--model=${MODEL_NAME}"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        ports:
+        - name: prefill-http
+          containerPort: 8000
+          protocol: TCP
+        - name: prefill-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: prefill-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: prefill-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: prefill-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: prefill-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: prefill-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: prefill-rank7
+          containerPort: 8007
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-sim-d
+  labels:
+    app: ${POOL_NAME}
+spec:
+  replicas: ${VLLM_REPLICA_COUNT_D}
+  selector:
+    matchLabels:
+      app: ${POOL_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${POOL_NAME}
+        llm-d.ai/role: decode
+    spec:
+      initContainers:
+      - name: routing-sidecar
+        image: ${SIDECAR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--port=8000"
+        - "--vllm-port=8200"
+        - "--connector=nixlv2"
+        - "--secure-proxy=false"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        ports:
+        - name: sidecar-http
+          containerPort: 8000
+          protocol: TCP
+        - name: sidecar-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: sidecar-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: sidecar-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: sidecar-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: sidecar-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: sidecar-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: sidecar-rank7
+          containerPort: 8007
+          protocol: TCP
+        restartPolicy: Always
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      containers:
+      - name: vllm
+        image: ${VLLM_SIMULATOR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--port=8200"
+        - "--model=${MODEL_NAME}"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        ports:
+        - name: http
+          containerPort: 8200
+          protocol: TCP
+        - name: rank1
+          containerPort: 8201
+          protocol: TCP
+        - name: rank2
+          containerPort: 8202
+          protocol: TCP
+        - name: rank3
+          containerPort: 8203
+          protocol: TCP
+        - name: rank4
+          containerPort: 8204
+          protocol: TCP
+        - name: rank5
+          containerPort: 8205
+          protocol: TCP
+        - name: rank6
+          containerPort: 8206
+          protocol: TCP
+        - name: rank7
+          containerPort: 8207
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8200"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-sim-e
+  labels:
+    app: ${POOL_NAME}
+spec:
+  replicas: ${VLLM_REPLICA_COUNT_E}
+  selector:
+    matchLabels:
+      app: ${POOL_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${POOL_NAME}
+        llm-d.ai/role: encode
+    spec:
+      containers:
+      - name: vllm
+        image: ${VLLM_SIMULATOR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--port=8000"
+        - "--model=${MODEL_NAME}"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        ports:
+        - name: encode-http
+          containerPort: 8000
+          protocol: TCP
+        - name: encode-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: encode-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: encode-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: encode-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: encode-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: encode-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: encode-rank7
+          containerPort: 8007
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8000"

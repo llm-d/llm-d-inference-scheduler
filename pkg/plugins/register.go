@@ -13,6 +13,7 @@ import (
 func RegisterAllPlugins() {
 	plugin.Register(filter.ByLabelType, filter.ByLabelFactory)
 	plugin.Register(filter.ByLabelSelectorType, filter.ByLabelSelectorFactory)
+	plugin.Register(filter.EncodeRoleType, filter.EncodeRoleFactory)
 	plugin.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
 	plugin.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
 	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)

@@ -1,0 +1,30 @@
+# Sample EPP configuration for tunning with E/P/D
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefill-header-handler
+- type: prefix-cache-scorer
+- type: encode-filter
+- type: prefill-filter
+- type: decode-filter
+- type: max-score-picker
+- type: pd-profile-handler
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
