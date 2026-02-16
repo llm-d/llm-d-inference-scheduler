@@ -171,7 +171,6 @@ func setupK8sCluster() {
 	kindLoadImage(vllmSimImage)
 	kindLoadImage(eppImage)
 	kindLoadImage(sideCarImage)
-	kindLoadImage(vllmSimImage)
 }
 
 func kindLoadImage(image string) {
