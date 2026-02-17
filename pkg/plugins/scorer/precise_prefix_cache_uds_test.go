@@ -219,7 +219,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to types format
-				var conversations []types.Conversation
+				conversations := make([]types.Conversation, 0, len(req.ChatCompletions.Messages))
 				for _, msg := range req.ChatCompletions.Messages {
 					conversations = append(conversations, types.Conversation{
 						Role:    msg.Role,
