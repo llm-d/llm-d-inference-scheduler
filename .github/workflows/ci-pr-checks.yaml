@@ -40,8 +40,13 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v6
 
-      - name: Sanity check repo contents
-        run: ls -la
+      - name: Set up Python (for pre-commit and CGO)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run pre-commit checks
+        uses: pre-commit/action@v3.0.1
 
       - name: Extract Go version from go.mod
         run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
@@ -71,7 +76,7 @@ jobs:
       - name: Run lint checks
         uses: golangci/golangci-lint-action@v9
         with:
-          version: "v2.8.0"
+          version: "v2.1.6"
           args: "--config=./.golangci.yml"
           skip-cache: true
         env:

@@ -1,17 +1,8 @@
-name: Label non-main PRs
-
+name: Non-Main Gatekeeper
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
 
 jobs:
-  add-label:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Add labels when base branch is not main
-        if: github.event.pull_request.base.ref != 'main'
-        uses: actions-ecosystem/action-add-labels@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          labels: |
-            do-not-merge/hold
+  gatekeeper:
+    uses: llm-d/llm-d-infra/.github/workflows/reusable-non-main-gatekeeper.yml@main

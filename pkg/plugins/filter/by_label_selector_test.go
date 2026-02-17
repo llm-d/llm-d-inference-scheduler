@@ -302,9 +302,9 @@ func TestByLabelSelectorFiltering(t *testing.T) {
 
 			filteredEndpoints := blf.Filter(ctx, nil, nil, endpoints)
 
-			actualEndpointNames := make([]string, len(filteredEndpoints))
-			for idx, endpoint := range filteredEndpoints {
-				actualEndpointNames[idx] = endpoint.GetMetadata().NamespacedName.Name
+			var actualEndpointNames []string
+			for _, endpoint := range filteredEndpoints {
+				actualEndpointNames = append(actualEndpointNames, endpoint.GetMetadata().NamespacedName.Name)
 			}
 
 			assert.ElementsMatch(t, tt.expectedPods, actualEndpointNames,

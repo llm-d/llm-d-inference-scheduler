@@ -1,6 +1,6 @@
 ## Minimal runtime Dockerfile (microdnf-only, no torch, wrapper in site-packages)
 # Go dependencies stage: download go modules and extract kv-cache
-FROM quay.io/projectquay/golang:1.25 AS go-deps
+FROM quay.io/projectquay/golang:1.24 AS go-deps
 
 WORKDIR /workspace
 
@@ -41,7 +41,7 @@ RUN python3.12 -m venv /workspace/kv-cache/build/venv && \
     fi
 
 # Go build stage
-FROM quay.io/projectquay/golang:1.25 AS go-builder
+FROM quay.io/projectquay/golang:1.24 AS go-builder
 
 ARG TARGETOS
 ARG TARGETARCH
