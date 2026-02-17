@@ -18,6 +18,7 @@ package datalayer
 
 import (
 	"context"
+	"reflect"
 	"sync/atomic"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -46,6 +47,15 @@ func (fds *FakeDataSource) TypedName() plugin.TypedName {
 		Name: fakeSource,
 	}
 }
+
+func (fds *FakeDataSource) OutputType() reflect.Type {
+	return reflect.TypeOf(fwkdl.Metrics{})
+}
+
+func (fds *FakeDataSource) ExtractorType() reflect.Type {
+	return reflect.TypeOf((*fwkdl.Extractor)(nil)).Elem()
+}
+
 func (fds *FakeDataSource) Extractors() []string                 { return []string{} }
 func (fds *FakeDataSource) AddExtractor(_ fwkdl.Extractor) error { return nil }
 
@@ -67,6 +77,14 @@ type FakeNotificationSource struct {
 
 func (m *FakeNotificationSource) TypedName() plugin.TypedName {
 	return m.typedName
+}
+
+func (m *FakeNotificationSource) OutputType() reflect.Type {
+	return reflect.TypeOf(fwkdl.NotificationEvent{})
+}
+
+func (m *FakeNotificationSource) ExtractorType() reflect.Type {
+	return reflect.TypeOf((*fwkdl.NotificationExtractor)(nil)).Elem()
 }
 
 func (m *FakeNotificationSource) GVK() schema.GroupVersionKind {
