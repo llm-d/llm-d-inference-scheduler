@@ -491,8 +491,7 @@ func createEndPointPicker(eppConfig string) []string {
 	err := testConfig.K8sClient.Create(testConfig.Context, configMap)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	objects := make([]string, 1, 10)
-	objects[0] = "ConfigMap/epp-config"
+	objects := []string{"ConfigMap/epp-config"}
 
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
