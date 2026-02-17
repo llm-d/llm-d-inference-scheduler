@@ -35,6 +35,14 @@ import (
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 )
 
+const (
+	// Experimental_DefaultPrefillProfile is the default profile name for prefill pods in disaggregated serving.
+	// This constant identifies prefill endpoints for load tracking and training data collection.
+	// This is hardcoded for now until we land on a canonical approach for plugins to identify
+	// prefill and decode endpoints (See https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2080)
+	Experimental_DefaultPrefillProfile = "prefill"
+)
+
 var _ requestcontrol.PreRequest = &PredictedLatency{}
 var _ requestcontrol.ResponseReceived = &PredictedLatency{}
 var _ requestcontrol.ResponseStreaming = &PredictedLatency{}
@@ -131,11 +139,10 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 	}
 
 	id := request.Headers[requtil.RequestIdHeaderKey]
-	endpointRequestList, ok := t.runningRequestLists[endpointName]
-	if !ok {
-		endpointRequestList = newRequestPriorityQueue()
-		t.runningRequestLists[endpointName] = endpointRequestList
-	}
+
+	// Get or create queue for this endpoint using sync.Map
+	actual, _ := t.runningRequestLists.LoadOrStore(endpointName, newRequestPriorityQueue())
+	endpointRequestList := actual.(*requestPriorityQueue)
 
 	predictedLatencyCtx, err := t.getPredictedLatencyContextForRequest(request)
 	if err != nil {
@@ -156,7 +163,7 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 	refreshLastSeenMetrics(ctx, predictedLatencyCtx)
 	t.setPredictedLatencyContextForRequest(request, predictedLatencyCtx)
 
-	if err := processPreRequestForLatencyPrediction(ctx, t.latencypredictor, predictedLatencyCtx); err != nil {
+	if err := processPreRequestForLatencyPrediction(ctx, t.latencypredictor, t.config.EndpointRoleLabel, predictedLatencyCtx); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Process PreRequest in latencypredictor failed")
 	}
 }
@@ -189,9 +196,9 @@ func (t *PredictedLatency) ResponseStreaming(ctx context.Context, request *sched
 	}
 
 	if predictedLatencyCtx.ttft == 0 {
-		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
+		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, t.config.EndpointRoleLabel, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
 	} else {
-		processTokenForLatencyPrediction(ctx, t.latencypredictor, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
+		processTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.EndpointRoleLabel, predictedLatencyCtx, targetMetadata, now, t.config.SamplingMean, t.config.MaxSampledTokens)
 	}
 
 }
@@ -215,7 +222,7 @@ func (t *PredictedLatency) ResponseComplete(ctx context.Context, request *schedu
 	}
 	now := time.Now()
 	if !t.config.StreamingMode {
-		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
+		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, t.config.EndpointRoleLabel, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
 	}
 
 	if predictedLatencyCtx.ttft > 0 {
