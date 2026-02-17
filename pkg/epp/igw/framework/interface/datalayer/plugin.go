@@ -23,11 +23,24 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
 
+var (
+	ExtractorType             = reflect.TypeOf((*Extractor)(nil)).Elem()
+	NotificationExtractorType = reflect.TypeOf((*NotificationExtractor)(nil)).Elem()
+	NotificationEventType     = reflect.TypeOf(NotificationEvent{})
+)
+
 // DataSource provides raw data to registered Extractors.
 type DataSource interface {
 	plugin.Plugin
 	// Extractors returns a list of registered Extractor names.
 	Extractors() []string
+	// OutputType returns the type of data this DataSource produces.
+	// Used for validating extractor compatibility.
+	OutputType() reflect.Type
+	// ExtractorType returns the type of Extractor this DataSource expects.
+	// For poll-based sources, this is the base Extractor interface.
+	// For notification sources, this is the NotificationExtractor interface.
+	ExtractorType() reflect.Type
 	// AddExtractor adds an extractor to the data source. Multiple
 	// Extractors can be registered.
 	// The extractor will be called whenever the DataSource might
@@ -49,4 +62,12 @@ type Extractor interface {
 	// Extract transforms the raw data source output into a concrete structured
 	// attribute, stored on the given endpoint.
 	Extract(ctx context.Context, data any, ep Endpoint) error
+}
+
+// ValidatingDataSource is an optional interface that DataSources can implement
+// to perform additional custom validation when adding extractors.
+type ValidatingDataSource interface {
+	// ValidateExtractor allows the DataSource to perform additional validation
+	// beyond the standard type compatibility checks. Return an error if validation fails.
+	ValidateExtractor(extractor Extractor) error
 }

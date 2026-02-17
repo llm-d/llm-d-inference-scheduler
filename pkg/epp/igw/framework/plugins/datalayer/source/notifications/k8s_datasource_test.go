@@ -19,7 +19,6 @@ package notifications
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,21 +34,6 @@ import (
 var (
 	testGVK = schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}
 )
-
-// plainExtractor implements Extractor but NOT NotificationExtractor.
-type plainExtractor struct{}
-
-func (p *plainExtractor) TypedName() fwkplugin.TypedName {
-	return fwkplugin.TypedName{Type: "plain", Name: "plain"}
-}
-
-func (p *plainExtractor) ExpectedInputType() reflect.Type {
-	return nil
-}
-
-func (p *plainExtractor) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
-	return nil
-}
 
 func TestNewK8sNotificationSource(t *testing.T) {
 	src := NewK8sNotificationSource("test-type", "test-name", testGVK)
@@ -71,18 +55,8 @@ func TestAddExtractor(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate")
 
-	err = src.AddExtractor(nil) // error on nil
-	assert.Error(t, err)
-
 	names := src.Extractors()
 	assert.Len(t, names, 2)
-}
-
-func TestAddExtractorWrongType(t *testing.T) {
-	src := NewK8sNotificationSource(NotificationSourceType, "test", testGVK)
-	err := src.AddExtractor(&plainExtractor{})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "NotificationExtractor")
 }
 
 func TestNotify(t *testing.T) {

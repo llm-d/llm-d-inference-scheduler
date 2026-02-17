@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -61,6 +62,16 @@ func (s *K8sNotificationSource) GVK() schema.GroupVersionKind {
 	return s.gvk
 }
 
+// OutputType returns the type of data this DataSource produces (NotificationEvent).
+func (s *K8sNotificationSource) OutputType() reflect.Type {
+	return fwkdl.NotificationEventType
+}
+
+// ExtractorType returns the type of Extractor this DataSource expects (NotificationExtractor).
+func (s *K8sNotificationSource) ExtractorType() reflect.Type {
+	return fwkdl.NotificationExtractorType
+}
+
 // Extractors returns names of registered extractors.
 func (s *K8sNotificationSource) Extractors() []string {
 	var names []string
@@ -73,19 +84,12 @@ func (s *K8sNotificationSource) Extractors() []string {
 	return names
 }
 
-// AddExtractor registers an extractor. The extractor must implement
-// NotificationExtractor; regular Extractors are rejected.
+// AddExtractor registers an extractor.
+// Validation of extractor compatibility is done by the runtime via datalayer.WithConfig.
 func (s *K8sNotificationSource) AddExtractor(ext fwkdl.Extractor) error {
-	if ext == nil {
-		return errors.New("cannot add nil extractor")
-	}
-	notifyExt, ok := ext.(fwkdl.NotificationExtractor)
-	if !ok {
-		return fmt.Errorf("extractor %s does not implement NotificationExtractor", ext.TypedName())
-	}
-	if _, loaded := s.extractors.LoadOrStore(notifyExt.TypedName().Name, notifyExt); loaded {
+	if _, loaded := s.extractors.LoadOrStore(ext.TypedName().Name, ext); loaded {
 		return fmt.Errorf("duplicate extractor %s on notification source %s",
-			notifyExt.TypedName(), s.TypedName())
+			ext.TypedName(), s.TypedName())
 	}
 	return nil
 }
@@ -102,7 +106,11 @@ func (s *K8sNotificationSource) Notify(ctx context.Context, event fwkdl.Notifica
 
 	var errs []error
 	s.extractors.Range(func(_, val any) bool {
-		ext := val.(fwkdl.NotificationExtractor) // safe, was verified on AddExtractor
+		ext, ok := val.(fwkdl.NotificationExtractor)
+		if !ok {
+			errs = append(errs, fmt.Errorf("extractor %s does not implement NotificationExtractor", ext.TypedName()))
+			return true
+		}
 		if err := ext.ExtractNotification(ctx, event); err != nil {
 			errs = append(errs, fmt.Errorf("extractor %s: %w", ext.TypedName(), err))
 		}

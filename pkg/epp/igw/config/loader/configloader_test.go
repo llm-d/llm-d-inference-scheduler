@@ -609,6 +609,14 @@ func (m *mockSource) Extractors() []string {
 	return []string{}
 }
 
+func (m *mockSource) OutputType() reflect.Type {
+	return fwkdl.NotificationEventType
+}
+
+func (m *mockSource) ExtractorType() reflect.Type {
+	return fwkdl.ExtractorType
+}
+
 // Mock Extractor
 type mockExtractor struct{ mockPlugin }
 
