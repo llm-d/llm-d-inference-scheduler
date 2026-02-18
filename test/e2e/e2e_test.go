@@ -126,8 +126,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			labelFilter2 := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, modelName)
 			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter2)
 
-			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(6))
-			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(0))
+			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(4))
+			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(2))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -491,14 +491,16 @@ func createEndPointPicker(eppConfig string) []string {
 	err := testConfig.K8sClient.Create(testConfig.Context, configMap)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	objects := []string{"ConfigMap/epp-config"}
+	objects := make([]string, 1, 10)
+	objects[0] = "ConfigMap/epp-config"
 
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_IMAGE}": eppImage,
-			"${NAMESPACE}": nsName,
-			"${POOL_NAME}": modelName + "-inference-pool",
+			"${EPP_IMAGE}":           eppImage,
+			"${UDS_TOKENIZER_IMAGE}": udsTokenizerImage,
+			"${NAMESPACE}":           nsName,
+			"${POOL_NAME}":           modelName + "-inference-pool",
 		})
 
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)
@@ -843,20 +845,24 @@ schedulingProfiles:
 // EPP configuration for running with P/D
 const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
 plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
   parameters:
-    blockSizeTokens: 10
+    blockSizeTokens: 16
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 256
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
 - type: pd-profile-handler
   parameters:
-    hashBlockSize: 10
-    threshold: 40
+    deciderPluginName: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill
   plugins:
@@ -873,23 +879,24 @@ schedulingProfiles:
 `
 
 // EPP config for running with precise prefix scoring (i.e. KV events)
+// Uses UDS tokenizer sidecar for tokenization
 const kvConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: precise-prefix-cache-scorer
   parameters:
     tokenProcessorConfig:
-      blockSize: 16 
+      blockSize: 16
       hashSeed: "42"
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
       prefixStoreConfig:
-        blockSize: 16 
+        blockSize: 16
       tokenizersPoolConfig:
         modelName: Qwen/Qwen2.5-1.5B-Instruct
-        hf:
-          tokenizersCacheDir: "/cache/tokenizers"
+        uds:
+          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
       kvBlockIndexConfig:
         enableMetrics: false                  # enable kv-block index metrics (prometheus)
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)

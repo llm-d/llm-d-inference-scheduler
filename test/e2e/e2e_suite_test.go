@@ -61,10 +61,11 @@ var (
 
 	testConfig *testutils.TestConfig
 
-	containerRuntime = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
-	eppImage         = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
-	vllmSimImage     = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:latest", ginkgo.GinkgoLogr)
-	sideCarImage     = env.GetEnvString("SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:dev", ginkgo.GinkgoLogr)
+	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
+	eppImage          = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
+	vllmSimImage      = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:latest", ginkgo.GinkgoLogr)
+	sideCarImage      = env.GetEnvString("SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:dev", ginkgo.GinkgoLogr)
+	udsTokenizerImage = env.GetEnvString("UDS_TOKENIZER_IMAGE", "ghcr.io/llm-d/llm-d-uds-tokenizer:dev", ginkgo.GinkgoLogr)
 	// nsName is the namespace in which the K8S objects will be created
 	nsName = env.GetEnvString("NAMESPACE", "default", ginkgo.GinkgoLogr)
 
@@ -171,7 +172,7 @@ func setupK8sCluster() {
 	kindLoadImage(vllmSimImage)
 	kindLoadImage(eppImage)
 	kindLoadImage(sideCarImage)
-	kindLoadImage(vllmSimImage)
+	kindLoadImage(udsTokenizerImage)
 }
 
 func kindLoadImage(image string) {
@@ -182,15 +183,6 @@ func kindLoadImage(image string) {
 
 	_, err := exec.LookPath(containerRuntime)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", containerRuntime)
-
-	// Pull the image first to ensure it's available locally
-	ginkgo.By(fmt.Sprintf("Pulling image %s if not available locally", image))
-	pullCommand := exec.Command(containerRuntime, "pull", image)
-	pullSession, pullErr := gexec.Start(pullCommand, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	if pullErr == nil {
-		// Wait for pull to complete, but don't fail if image already exists or can't be pulled
-		gomega.Eventually(pullSession).WithTimeout(600 * time.Second).Should(gexec.Exit())
-	}
 
 	saveArgs := []string{"save", "--output", target}
 	if containerRuntime == "docker" {
@@ -293,10 +285,11 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	}
 
 	infPoolYaml := testutils.ReadYaml(inferExtManifest)
-	targetPorts := ""
+	var b strings.Builder
 	for idx := range numTargetPorts {
-		targetPorts += fmt.Sprintf("\n  - number: %d", 8000+idx)
+		fmt.Fprintf(&b, "\n  - number: %d", 8000+idx)
 	}
+	targetPorts := b.String()
 	infPoolYaml = substituteMany(infPoolYaml,
 		map[string]string{
 			"${POOL_NAME}":    poolName,

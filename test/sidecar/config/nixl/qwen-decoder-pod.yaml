@@ -58,13 +58,13 @@ spec:
             fieldRef:
               fieldPath: status.podIP
         - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-          value: "5557"
+          value: "5600"
         - name: HF_HUB_CACHE
           value: /vllm-workspace/models
         - name: VLLM_LOGGING_LEVEL
           value: DEBUG
       ports:
-        - containerPort: 5557
+        - containerPort: 5600
           protocol: TCP
       volumeMounts:
         - name: model-cache
