@@ -19,6 +19,8 @@ package proxy
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"time"
 
@@ -108,6 +110,66 @@ var _ = Describe("SGLang Connector", func() {
 		Expect(drq1[requestFieldBootstrapHost]).To(Equal(expectedHost))
 		Expect(drq1[requestFieldBootstrapPort]).To(Equal(float64(sglangBootstrapPort)))
 		Expect(drq1[requestFieldBootstrapRoom]).To(Equal(prq1[requestFieldBootstrapRoom])) // Room ID must match
+
+		testInfo.cancelFn()
+		<-testInfo.stoppedCh
+	})
+
+	It("should not panic when prefill response is slower than decode response", func() {
+		// Stop previously injected servers
+		testInfo.decodeBackend.Close()
+		testInfo.prefillBackend.Close()
+
+		var prefillFinished bool
+
+		slowPrefill := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testInfo.prefillHandler.ServeHTTP(w, r)
+			time.Sleep(300 * time.Millisecond) // Simulated load delay on KV Cache
+			prefillFinished = true
+		})
+		testInfo.prefillBackend = httptest.NewServer(slowPrefill)
+
+		fastDecode := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testInfo.decodeHandler.ServeHTTP(w, r)
+		})
+		testInfo.decodeBackend = httptest.NewServer(fastDecode)
+		testInfo.decodeURL, _ = url.Parse(testInfo.decodeBackend.URL)
+
+		// Re-initialize proxy to fetch the new mock addresses
+		cfg := Config{
+			Connector: ConnectorSGLang,
+		}
+		testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg)
+
+		go func() {
+			defer GinkgoRecover()
+			validator := &AllowlistValidator{enabled: false}
+			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+			Expect(err).ToNot(HaveOccurred())
+			testInfo.stoppedCh <- struct{}{}
+		}()
+
+		time.Sleep(1 * time.Second)
+		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
+
+		body := `{"model": "Qwen", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 50}`
+		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+		Expect(err).ToNot(HaveOccurred())
+
+		prefillHostPort := testInfo.prefillBackend.URL[len("http://"):]
+		req.Header.Add(common.PrefillPodHeader, prefillHostPort)
+
+		// Submit request. This will complete as soon as fastDecode completes.
+		rp, err := http.DefaultClient.Do(req)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rp.StatusCode).To(Equal(200))
+
+		// The original panicking goroutine takes 300ms total. Give it time to attempt finishing up!
+		time.Sleep(500 * time.Millisecond)
+
+		Expect(prefillFinished).To(BeTrue())
+		Expect(testInfo.prefillHandler.RequestCount.Load()).To(BeNumerically("==", 1))
+		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 
 		testInfo.cancelFn()
 		<-testInfo.stoppedCh
