@@ -118,8 +118,7 @@ spec:
     metadata:
       labels:
         app: ${POOL_NAME}
-        llm-d.ai/role: decode
-        llm-d.ai/role: prefill
+        llm-d.ai/role: prefill-decode
     spec:
       initContainers:
       - name: routing-sidecar
