@@ -15,6 +15,8 @@ const (
 	DecisionTypeDecodeOnly = "decode-only"
 	// DecisionTypePrefillDecode is for requests that are gone through P/D.
 	DecisionTypePrefillDecode = "prefill-decode"
+	// DecisionTypeEncodeDecode is for requests that are gone through E/D.
+	DecisionTypeEncodeDecode = "encode-decode"
 )
 
 var (
