@@ -33,10 +33,9 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	metricextractor "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/extractor/metrics"
 	sourcemetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/server"
 )
 
 // vLLM metric names based on Model Server Protocol
@@ -277,7 +276,7 @@ type MetricMock struct {
 func parseWithBackendPodMetrics(t *testing.T, ctx context.Context, urlStr string) (*fwkdl.Metrics, error) {
 	t.Helper()
 
-	mapping, err := backendmetrics.NewMetricMapping(
+	mapping, err := NewMetricMapping(
 		WaitingMetric,
 		RunningMetric,
 		KVCacheMetric,
@@ -293,7 +292,7 @@ func parseWithBackendPodMetrics(t *testing.T, ctx context.Context, urlStr string
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
-	client := &backendmetrics.PodMetricsClientImpl{
+	client := &PodMetricsClientImpl{
 		MetricMapping:            mapping,
 		ModelServerMetricsPath:   "",
 		ModelServerMetricsScheme: parsedURL.Scheme,
@@ -328,7 +327,7 @@ func parseWithDatalayerMetrics(t *testing.T, ctx context.Context, urlStr string)
 		return nil, fmt.Errorf("failed to set path flag: %w", err)
 	}
 
-	mapping, err := NewMapping(
+	mapping, err := metricextractor.NewMapping(
 		WaitingMetric,
 		RunningMetric,
 		KVCacheMetric,
@@ -339,12 +338,12 @@ func parseWithDatalayerMetrics(t *testing.T, ctx context.Context, urlStr string)
 		return nil, fmt.Errorf("failed to create mapping: %w", err)
 	}
 
-	registry := NewMappingRegistry()
-	if err := registry.Register(DefaultEngineType, mapping); err != nil {
+	registry := metricextractor.NewMappingRegistry()
+	if err := registry.Register(metricextractor.DefaultEngineType, mapping); err != nil {
 		return nil, fmt.Errorf("failed to register mapping: %w", err)
 	}
 
-	extractor, err := NewModelServerExtractor(registry, DefaultEngineTypeLabelKey)
+	extractor, err := metricextractor.NewModelServerExtractor(registry, metricextractor.DefaultEngineTypeLabelKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create extractor: %w", err)
 	}
@@ -370,7 +369,7 @@ func parseWithDatalayerMetrics(t *testing.T, ctx context.Context, urlStr string)
 	metadata := &fwkdl.EndpointMetadata{
 		MetricsHost: parsedURL.Host,
 		Labels: map[string]string{
-			DefaultEngineTypeLabelKey: DefaultEngineType,
+			metricextractor.DefaultEngineTypeLabelKey: metricextractor.DefaultEngineType,
 		},
 	}
 	endpoint := fwkdl.NewEndpoint(metadata, fwkdl.NewMetrics())
@@ -389,8 +388,9 @@ func setupTestFlags(t *testing.T) func() {
 	testFlags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	pflag.CommandLine = testFlags
 
-	opts := server.NewOptions()
-	opts.AddFlags(testFlags)
+	testFlags.String("model-server-metrics-scheme", "http", "Protocol scheme used in scraping metrics from endpoints")
+	testFlags.String("model-server-metrics-path", "/metrics", "URL path used in scraping metrics from endpoints")
+	testFlags.Bool("model-server-metrics-https-insecure-skip-verify", false, "Skip TLS verification for HTTPS metrics endpoints")
 
 	return func() {
 		pflag.CommandLine = originalFlags
