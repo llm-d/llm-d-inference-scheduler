@@ -65,8 +65,11 @@ export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 # By default we are not setting up for PD (Prefill/Decode)
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
-# By default we are not setting up for EPD (Encode/Prefill/Decode)
+# By default we are not setting up for EPD (Encode/Prefill/Decode) with simulator
 export EPD_ENABLED="\"${EPD_ENABLED:-false}\""
+
+# By default we are not setting up for EPD (Encode/Prefill/Decode) with real vLLM
+export EPD_REAL_VLLM_ENABLED="\"${EPD_REAL_VLLM_ENABLED:-false}\""
 
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
@@ -82,7 +85,7 @@ export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
 PRIMARY_PORT="0"
-if [ "${PD_ENABLED}" != "\"true\"" ] && [ "${EPD_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
+if [ "${PD_ENABLED}" != "\"true\"" ] && [ "${EPD_ENABLED}" != "\"true\"" ] && [ "${EPD_REAL_VLLM_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
   # Simple mode: no disaggregation
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
     DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
@@ -91,8 +94,14 @@ if [ "${PD_ENABLED}" != "\"true\"" ] && [ "${EPD_ENABLED}" != "\"true\"" ] && [ 
   fi
 else
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
-    if [ "${EPD_ENABLED}" == "\"true\"" ]; then
-      # Encode/Prefill/Decode mode (3-stage)
+    if [ "${EPD_REAL_VLLM_ENABLED}" == "\"true\"" ]; then
+      # Encode/Prefill/Decode mode with real vLLM (2-stage: encode + prefill/decode)
+      DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
+      if [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
+        PRIMARY_PORT="8000"
+      fi
+    elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
+      # Encode/Prefill/Decode mode with simulator (2-stage: encode + prefill/decode)
       DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
       if [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
         PRIMARY_PORT="8000"
@@ -239,7 +248,9 @@ kustomize build --enable-helm deploy/components/crds-istio |
 # ------------------------------------------------------------------------------
 
 # Deploy the environment to the "default" namespace
-if [ "${EPD_ENABLED}" == "\"true\"" ]; then
+if [ "${EPD_REAL_VLLM_ENABLED}" == "\"true\"" ]; then
+  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-epd-real-vllm"
+elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-epd"
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
