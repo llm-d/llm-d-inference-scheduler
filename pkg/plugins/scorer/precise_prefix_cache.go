@@ -299,8 +299,10 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
 // based on the provided LLM request.
-// If the request contains chat completions, it processes them accordingly.
-// If the request contains regular completions, it uses the prompt directly.
+// If the request already has TokenizedPrompt set (e.g. by an external tokenizer
+// PrepareData plugin), it calls GetPodScoresFromTokens directly, bypassing
+// prompt/chat tokenization.
+// Otherwise, chat completions and regular completions are tokenized internally.
 func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *scheduling.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
@@ -308,6 +310,16 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 	traceLogger.Info("Getting scores",
 		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"isCompletions", request.Body != nil && request.Body.Completions != nil)
+
+	if request.TokenizedPrompt != nil && len(request.TokenizedPrompt.TokenIDs) > 0 {
+		traceLogger.Info("tokens already in the request, skipping tokenization")
+
+		scores, err := s.kvCacheIndexer.GetPodScoresFromTokens(ctx, request.TokenizedPrompt.TokenIDs, request.TargetModel, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
+		}
+		return scores, nil
+	}
 
 	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.
 	// If an unexpected dual payload slips through (parser regression/new client), log it and use chat semantics.
