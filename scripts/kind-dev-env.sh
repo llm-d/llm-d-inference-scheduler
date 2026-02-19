@@ -79,7 +79,7 @@ export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 export VLLM_REPLICA_COUNT_E="${VLLM_REPLICA_COUNT_E:-1}"
 # Used for both PD_ENABLED and EPD_ENABLED
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
-export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
+export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
 
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
@@ -219,15 +219,15 @@ fi
 # Load the ext_proc endpoint-picker image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 	podman save ${EPP_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${EPP_IMAGE}
+#else
+	#kind --name ${CLUSTER_NAME} load docker-image ${EPP_IMAGE}
 fi
 
 # Load the sidecar image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 	podman save ${SIDECAR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
+#else
+#	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
 fi
 
 # ------------------------------------------------------------------------------
