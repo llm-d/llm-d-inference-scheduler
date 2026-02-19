@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log" // Import config for thresholds
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	fwkschd "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/picker"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
@@ -60,11 +60,12 @@ func TestPDSchedule(t *testing.T) {
 
 	prefillDecodeResult := &fwkschd.SchedulingResult{
 		ProfileResults: map[string]*fwkschd.ProfileRunResult{
-			decode: {TargetEndpoints: []fwkschd.Endpoint{
-				&fwkschd.ScoredEndpoint{
-					Endpoint: endpoint2,
+			decode: {
+				TargetEndpoints: []fwkschd.Endpoint{
+					&fwkschd.ScoredEndpoint{
+						Endpoint: endpoint2,
+					},
 				},
-			},
 			},
 			prefill: {
 				TargetEndpoints: []fwkschd.Endpoint{
@@ -265,7 +266,7 @@ func TestPDSchedule(t *testing.T) {
 
 			inputTokens := len(test.req.Body.Completions.Prompt) / profile.AverageCharactersPerToken
 			for _, pod := range test.input {
-				pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(0, inputTokens, 1))
+				pod.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(0, inputTokens, 1))
 			}
 			got, err := scheduler.Schedule(ctx, test.req, test.input)
 
@@ -283,7 +284,7 @@ func TestPDSchedule(t *testing.T) {
 
 				// update number of cached tokens "stored" in the first schedule execution
 				for _, pod := range test.input {
-					pod.Put(approximateprefix.PrefixCacheMatchInfoKey, approximateprefix.NewPrefixCacheMatchInfo(inputTokens, inputTokens, 1))
+					pod.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(inputTokens, inputTokens, 1))
 				}
 
 				got, err = scheduler.Schedule(ctx, test.req, test.input)
