@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The llm-d Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package proxy
+package runners
 
 import (
 	"net/http"
@@ -25,28 +25,30 @@ import (
 
 const sseEventDelimiter = "\n\n"
 
-// bufferedResponseWriter receives responses from prefillers
-type bufferedResponseWriter struct {
+// BufferedResponseWriter receives responses from prefillers
+type BufferedResponseWriter struct {
 	headers    http.Header
 	buffer     strings.Builder
 	statusCode int
 }
 
-func (w *bufferedResponseWriter) Header() http.Header {
+// Header returns the HTTP headers for the response.
+func (w *BufferedResponseWriter) Header() http.Header {
 	if w.headers == nil {
 		w.headers = make(http.Header)
 	}
 	return w.headers
 }
 
-func (w *bufferedResponseWriter) Write(b []byte) (int, error) {
+func (w *BufferedResponseWriter) Write(b []byte) (int, error) {
 	if w.statusCode == 0 {
 		w.statusCode = http.StatusOK
 	}
 	return w.buffer.Write(b)
 }
 
-func (w *bufferedResponseWriter) WriteHeader(statusCode int) {
+// WriteHeader writes the HTTP status code.
+func (w *BufferedResponseWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 }
 
@@ -55,10 +57,10 @@ type flushableResponseWriter interface {
 	http.Flusher
 }
 
-// responseWriterWithBuffer wraps an http.ResponseWriter to buffer initial writes.
-// Start in buffer mode to inspect the first chunk, then call flushBufferAndGoDirect()
+// ResponseWriterWithBuffer wraps an http.ResponseWriter to buffer initial writes.
+// Start in buffer mode to inspect the first chunk, then call FlushBufferAndGoDirect()
 // to write buffered content and switch to direct pass-through mode.
-type responseWriterWithBuffer struct {
+type ResponseWriterWithBuffer struct {
 	writerFlusher flushableResponseWriter
 
 	// buffering is checked atomically to allow lock-free fast paths
@@ -78,9 +80,9 @@ type responseWriterWithBuffer struct {
 	readyOnce sync.Once
 }
 
-// newResponseWriterWithBuffer creates a new writer starting in buffer mode.
-func newResponseWriterWithBuffer(w flushableResponseWriter) *responseWriterWithBuffer {
-	rw := &responseWriterWithBuffer{
+// NewResponseWriterWithBuffer creates a new writer starting in buffer mode.
+func NewResponseWriterWithBuffer(w flushableResponseWriter) *ResponseWriterWithBuffer {
+	rw := &ResponseWriterWithBuffer{
 		writerFlusher: w,
 		ready:         make(chan struct{}, 1), // buffered to avoid blocking sender
 	}
@@ -88,11 +90,12 @@ func newResponseWriterWithBuffer(w flushableResponseWriter) *responseWriterWithB
 	return rw
 }
 
-func (w *responseWriterWithBuffer) Header() http.Header {
+// Header returns the HTTP headers for the response.
+func (w *ResponseWriterWithBuffer) Header() http.Header {
 	return w.writerFlusher.Header()
 }
 
-func (w *responseWriterWithBuffer) Write(b []byte) (int, error) {
+func (w *ResponseWriterWithBuffer) Write(b []byte) (int, error) {
 	if !w.buffering.Load() {
 		return w.writerFlusher.Write(b)
 	}
@@ -117,14 +120,15 @@ func (w *responseWriterWithBuffer) Write(b []byte) (int, error) {
 	// For SSE streaming, the first chunk is just the role announcement with
 	// finish_reason:null. We need the second chunk to see if cache_threshold
 	// was returned (early abort) or if decode is proceeding normally.
-	if shouldSignal(w.buffer.String()) {
+	if ShouldSignal(w.buffer.String()) {
 		w.signalReady()
 	}
 
 	return n, nil
 }
 
-func (w *responseWriterWithBuffer) WriteHeader(statusCode int) {
+// WriteHeader writes the HTTP status code.
+func (w *ResponseWriterWithBuffer) WriteHeader(statusCode int) {
 	if !w.buffering.Load() {
 		w.writerFlusher.WriteHeader(statusCode)
 		return
@@ -143,11 +147,12 @@ func (w *responseWriterWithBuffer) WriteHeader(statusCode int) {
 	}
 }
 
-func (w *responseWriterWithBuffer) Flush() {
+// Flush flushes the underlying writer if in direct mode, or signals ready if buffering.
+func (w *ResponseWriterWithBuffer) Flush() {
 	if w.buffering.Load() {
 		// Apply same logic as Write(): only signal when we have at least 2 SSE events.
 		w.mu.Lock()
-		shouldSignal := shouldSignal(w.buffer.String())
+		shouldSignal := ShouldSignal(w.buffer.String())
 		w.mu.Unlock()
 		if shouldSignal {
 			w.signalReady()
@@ -157,22 +162,22 @@ func (w *responseWriterWithBuffer) Flush() {
 	w.writerFlusher.Flush()
 }
 
-// firstChunkReady returns a channel that receives nil when the first complete
+// FirstChunkReady returns a channel that receives nil when the first complete
 // chunk of body data is available in the buffer. For SSE streaming responses,
 // this is signaled when the buffer contains "\n\n" (complete SSE event).
 // As a fallback, Flush() also signals readiness.
-func (w *responseWriterWithBuffer) firstChunkReady() <-chan struct{} {
+func (w *ResponseWriterWithBuffer) FirstChunkReady() <-chan struct{} {
 	return w.ready
 }
 
-func (w *responseWriterWithBuffer) signalReady() {
+func (w *ResponseWriterWithBuffer) signalReady() {
 	w.readyOnce.Do(func() {
 		w.ready <- struct{}{}
 		close(w.ready)
 	})
 }
 
-func (w *responseWriterWithBuffer) writeHeaderOnce() {
+func (w *ResponseWriterWithBuffer) writeHeaderOnce() {
 	if w.wroteHeader {
 		return
 	}
@@ -182,23 +187,23 @@ func (w *responseWriterWithBuffer) writeHeaderOnce() {
 	}
 }
 
-// buffered returns the currently buffered content for inspection.
-func (w *responseWriterWithBuffer) buffered() string {
+// Buffered returns the currently buffered content for inspection.
+func (w *ResponseWriterWithBuffer) Buffered() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buffer.String()
 }
 
-// getStatusCode returns the status code that was set (0 if not set).
-func (w *responseWriterWithBuffer) getStatusCode() int {
+// GetStatusCode returns the status code that was set (0 if not set).
+func (w *ResponseWriterWithBuffer) GetStatusCode() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.statusCode
 }
 
-// flushBufferAndGoDirect writes any buffered content to the underlying writer
+// FlushBufferAndGoDirect writes any buffered content to the underlying writer
 // and switches to direct mode for all subsequent writes.
-func (w *responseWriterWithBuffer) flushBufferAndGoDirect() error {
+func (w *ResponseWriterWithBuffer) FlushBufferAndGoDirect() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -228,6 +233,7 @@ func (w *responseWriterWithBuffer) flushBufferAndGoDirect() error {
 	return nil
 }
 
-func shouldSignal(data string) bool {
+// ShouldSignal returns true if data contains at least 2 SSE event delimiters.
+func ShouldSignal(data string) bool {
 	return strings.Count(data, sseEventDelimiter) >= 2
 }

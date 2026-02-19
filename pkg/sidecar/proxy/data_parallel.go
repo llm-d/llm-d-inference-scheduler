@@ -46,7 +46,7 @@ func (s *Server) startDataParallel(ctx context.Context, cert *tls.Certificate, g
 		return err
 	}
 
-	s.dataParallelProxies[net.JoinHostPort(podIP, s.port)] = s.decoderProxy
+	s.dataParallelProxies[net.JoinHostPort(podIP, s.port)] = s.pdProxyManager.decoderProxy
 
 	// Fill in map of proxies, thus avoiding locks
 	for idx := range s.config.DataParallelSize - 1 {

@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 )
 
 // Role of the mocked handler
@@ -38,7 +40,7 @@ const (
 
 // ChatCompletionHandler is a simple chat completion mock handler
 type ChatCompletionHandler struct {
-	Connector           string
+	Connector           types.Connector
 	Role                Role
 	RequestCount        atomic.Int32
 	CompletionRequests  []map[string]any
@@ -59,8 +61,8 @@ func (cc *ChatCompletionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 	var completionRequest map[string]any
 	if err := json.Unmarshal(b, &completionRequest); err != nil {
-		w.Write([]byte(err.Error())) //nolint:all
 		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error())) //nolint:all
 		return
 	}
 

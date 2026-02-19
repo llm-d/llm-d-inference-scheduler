@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The llm-d Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package proxy
+package runners_test
 
 import (
 	"io"
@@ -23,6 +23,9 @@ import (
 	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/keys"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
 )
@@ -32,7 +35,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 	var testInfo *sidecarTestInfo
 
 	BeforeEach(func() {
-		testInfo = sidecarConnectionTestSetup(ConnectorNIXLV2)
+		testInfo = sidecarConnectionTestSetup(types.ConnectorNIXLV2)
 	})
 
 	It("should successfully send request to 1. prefill 2. decode with the correct fields", func() {
@@ -40,7 +43,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			validator := &AllowlistValidator{enabled: false}
+			validator := newDisabledAllowlistValidator()
 			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -48,8 +51,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		}()
 
 		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
-		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
+		Expect(testInfo.proxy.Addr()).ToNot(BeNil())
+		proxyBaseAddr := "http://" + testInfo.proxy.Addr().String()
 
 		By("sending a /v1/chat/completions request with prefill header")
 		//nolint:goconst
@@ -61,7 +64,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 				"max_tokens": 50
 			}`
 
-		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+proxy.ChatCompletionsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
 		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
 
@@ -78,16 +81,16 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
 		prq1 := testInfo.prefillHandler.CompletionRequests[0]
 
-		Expect(prq1).To(HaveKey(requestFieldKVTransferParams))
-		kvTransferParams, ok := prq1[requestFieldKVTransferParams].(map[string]any)
+		Expect(prq1).To(HaveKey(keys.RequestFieldKVTransferParams))
+		kvTransferParams, ok := prq1[keys.RequestFieldKVTransferParams].(map[string]any)
 		Expect(ok).To(BeTrue())
 
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldDoRemoteDecode, true))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldDoRemotePrefill, false))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteBlockIDs, BeNil()))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteEngineID, BeNil()))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteHost, BeNil()))
-		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemotePort, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldDoRemoteDecode, true))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldDoRemotePrefill, false))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemoteBlockIDs, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemoteEngineID, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemoteHost, BeNil()))
+		Expect(kvTransferParams).To(HaveKeyWithValue(keys.RequestFieldRemotePort, BeNil()))
 
 		Expect(prq1).To(HaveKeyWithValue("max_tokens", BeNumerically("==", 1)))
 		Expect(prq1).To(HaveKeyWithValue("stream", false))
@@ -95,7 +98,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		Expect(testInfo.prefillHandler.CompletionResponses).To(HaveLen(1))
 		prp1 := testInfo.prefillHandler.CompletionResponses[0]
-		Expect(prp1).To(HaveKey(requestFieldKVTransferParams))
+		Expect(prp1).To(HaveKey(keys.RequestFieldKVTransferParams))
 
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))

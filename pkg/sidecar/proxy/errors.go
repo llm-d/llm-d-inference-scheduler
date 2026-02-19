@@ -19,66 +19,18 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
-)
 
-// vLLM error response
-type errorResponse struct {
-	Object  string `json:"object"`
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Param   string `json:"param"`
-	Code    int    `json:"code"`
-}
+	httperrors "github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/http_errors"
+)
 
 var decoderServiceUnavailableResponseJSON []byte
 
 func init() {
-	response := errorResponse{
+	response := httperrors.ErrorResponse{
 		Object:  "error",
 		Message: "The decode node is not ready. Please check that the vLLM service is running and the port configuration is correct.",
 		Type:    "ServiceUnavailable",
 		Code:    http.StatusServiceUnavailable,
 	}
 	decoderServiceUnavailableResponseJSON, _ = json.Marshal(response)
-}
-
-func errorJSONInvalid(err error, w http.ResponseWriter) error {
-	return sendError(err, "BadRequestError", http.StatusBadRequest, w)
-}
-
-func errorBadGateway(err error, w http.ResponseWriter) error {
-	return sendError(err, "BadGateway", http.StatusBadGateway, w)
-}
-
-func errorInternalServerError(err error, w http.ResponseWriter) error {
-	return sendError(err, "InternalServerError", http.StatusInternalServerError, w)
-}
-
-// sendError simulates vLLM errors
-//
-// Example:
-//
-//	 {
-//		  "object": "error",
-//		  "message": "[{'type': 'json_invalid', 'loc': ('body', 167), 'msg': 'JSON decode error', 'input': {}, 'ctx': {'error': 'Invalid control character at'}}]",
-//		  "type": "BadRequestError",
-//		  "param": null,
-//		  "code": 400
-//	 }
-func sendError(err error, errorType string, code int, w http.ResponseWriter) error {
-	er := errorResponse{
-		Object:  "error",
-		Message: err.Error(),
-		Type:    errorType,
-		Code:    code,
-	}
-
-	b, err := json.Marshal(er)
-	if err != nil {
-		return err
-	}
-
-	w.WriteHeader(code)
-	_, err = w.Write(b)
-	return err
 }

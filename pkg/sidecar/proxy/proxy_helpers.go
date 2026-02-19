@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"syscall"
 	"time"
+
+	httperrors "github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/http_errors"
 )
 
 // startHTTP starts the HTTP reverse proxy.
@@ -116,16 +118,11 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 		default:
 			s.logger.Error(err, "http: proxy error",
 				"decoderURL", s.decoderURL.String())
-			writeError = errorBadGateway(err, res)
+			writeError = httperrors.ErrorBadGateway(err, res)
 		}
 		if writeError != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
 	}
 	return decoderProxy
-}
-
-// isHTTPError returns true if the status code indicates an error (not in the 2xx range).
-func isHTTPError(statusCode int) bool {
-	return statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices
 }

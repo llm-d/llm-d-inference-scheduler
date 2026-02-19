@@ -21,30 +21,21 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy/runners/types"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
-)
-
-var (
-	// supportedConnectors defines all valid P/D connector types
-	supportedConnectors = []string{
-		proxy.ConnectorNIXLV2,
-		proxy.ConnectorSharedStorage,
-		proxy.ConnectorSGLang,
-	}
 )
 
 func main() {
 	port := flag.String("port", "8000", "the port the sidecar is listening on")
 	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
 	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
-	connector := flag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
+	connectorStr := flag.String("connector", types.ConnectorNIXLV2.String(), "the P/D connector being used. Supported: "+types.AllConnectorStrings())
 	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
 	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
 	prefillerInsecureSkipVerify := flag.Bool("prefiller-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to prefiller")
@@ -72,16 +63,9 @@ func main() {
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
-	// Validate connector
-	isValidConnector := false
-	for _, validConnector := range supportedConnectors {
-		if *connector == validConnector {
-			isValidConnector = true
-			break
-		}
-	}
-	if !isValidConnector {
-		logger.Info("Error: --connector must be one of: " + strings.Join(supportedConnectors, ", "))
+	connector := types.Connector(*connectorStr)
+	if err := connector.Validate(); err != nil {
+		logger.Error(err, "invalid connector")
 		return
 	}
 	logger.Info("p/d connector validated", "connector", connector)
@@ -127,7 +111,7 @@ func main() {
 	}
 
 	config := proxy.Config{
-		Connector:                   *connector,
+		Connector:                   connector,
 		PrefillerUseTLS:             *prefillerUseTLS,
 		PrefillerInsecureSkipVerify: *prefillerInsecureSkipVerify,
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
