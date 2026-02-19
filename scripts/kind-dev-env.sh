@@ -74,6 +74,9 @@ export PD_ENABLED="\"${PD_ENABLED:-false}\""
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 
+# By default we are not setting up for external tokenizer
+export EXTERNAL_TOKENIZER_ENABLED="${EXTERNAL_TOKENIZER_ENABLED:-false}"
+
 # Replica counts for P and D
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
 export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
@@ -99,7 +102,10 @@ fi
 export PRIMARY_PORT
 
 # Determine EPP config file based on feature flags
-if [ "${KV_CACHE_ENABLED}" == "true" ]; then
+if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
+  # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
+elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
   # KV cache mode (simple mode only)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
@@ -257,7 +263,7 @@ TEMP_FILE=$(mktemp)
 trap "rm -f \"${TEMP_FILE}\"" EXIT
 
 kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
-envsubst '$PRIMARY_PORT' < ${EPP_CONFIG} > ${TEMP_FILE}
+envsubst '$PRIMARY_PORT $MODEL_NAME' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
 kubectl kustomize --enable-helm  ${KUSTOMIZE_DIR} \
