@@ -18,42 +18,45 @@ PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
 SIDECAR_NAME ?= pd-sidecar
+UDS_TOKENIZER_IMAGE_NAME ?= llm-d-uds-tokenizer
 IMAGE_REGISTRY ?= ghcr.io/llm-d
+
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
+
 SIDECAR_TAG ?= dev
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
+
 VLLM_SIMULATOR_TAG ?= latest
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_SIMULATOR_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
+
+UDS_TOKENIZER_TAG ?= dev
+UDS_TOKENIZER_TAG_BASE ?= $(IMAGE_REGISTRY)/$(UDS_TOKENIZER_IMAGE_NAME)
+export UDS_TOKENIZER_IMAGE ?= $(UDS_TOKENIZER_TAG_BASE):$(UDS_TOKENIZER_TAG)
+
 NAMESPACE ?= hc4ai-operator
 LINT_NEW_ONLY ?= false # Set to true to only lint new code, false to lint all code (default matches CI behavior)
 
-# Map go arch to platform-specific arch
+# Map go arch to platform-specific arch for typos tool
 ifeq ($(TARGETOS),darwin)
 	ifeq ($(TARGETARCH),amd64)
-		TOKENIZER_ARCH = x86_64
 		TYPOS_TARGET_ARCH = x86_64
 	else ifeq ($(TARGETARCH),arm64)
-		TOKENIZER_ARCH = arm64
 		TYPOS_TARGET_ARCH = aarch64
 	else
-		TOKENIZER_ARCH = $(TARGETARCH)
 		TYPOS_TARGET_ARCH = $(TARGETARCH)
 	endif
 	TAR_OPTS = --strip-components 1
 	TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-apple-darwin
 else
 	ifeq ($(TARGETARCH),amd64)
-		TOKENIZER_ARCH = amd64
 		TYPOS_TARGET_ARCH = x86_64
 	else ifeq ($(TARGETARCH),arm64)
-		TOKENIZER_ARCH = arm64
 		TYPOS_TARGET_ARCH = aarch64
 	else
-		TOKENIZER_ARCH = $(TARGETARCH)
 		TYPOS_TARGET_ARCH = $(TARGETARCH)
 	endif
 	TAR_OPTS = --wildcards '*/typos'
@@ -71,40 +74,8 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
-# Tokenizer & Linking
-LDFLAGS ?= -extldflags '-L$(LOCALLIB)'
+# CGO_ENABLED=1 is required for ZMQ (linking handled via pkg-config)
 CGO_ENABLED=1
-
-# Unified Python configuration detection. This block runs once.
-PYTHON_CONFIG ?= $(shell command -v python$(PYTHON_VERSION)-config || command -v python3-config)
-ifeq ($(PYTHON_CONFIG),)
-	ifeq ($(TARGETOS),darwin)
-        # macOS: Find Homebrew's python-config script for the most reliable flags.
-        BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix python@$(PYTHON_VERSION) 2>/dev/null)
-        PYTHON_CONFIG ?= $(BREW_PREFIX)/bin/python$(PYTHON_VERSION)-config
-        PYTHON_ERROR := "Could not execute 'python$(PYTHON_VERSION)-config'. Please ensure Python is installed correctly with: 'brew install python@$(PYTHON_VERSION)' or install python3.12 manually."
-	else ifeq ($(TARGETOS),linux)
-        # Linux: Use standard system tools to find flags.
-        PYTHON_ERROR := "Python $(PYTHON_VERSION) development headers not found. Please install with: 'sudo apt install python$(PYTHON_VERSION)-dev' or 'sudo dnf install python$(PYTHON_VERSION)-devel'"
-	else
-        PYTHON_ERROR := "you should set up PYTHON_CONFIG variable manually"
-	endif
-endif
-
-ifeq ($(PYTHON_CONFIG),)
-    $(error ${PYTHON_ERROR})
-endif
-
-ifeq ($(shell $(PYTHON_CONFIG) --cflags 2>/dev/null),)
-    $(error Python configuration tool cannot provide cflags)
-endif
-
-PYTHON_CFLAGS := $(shell $(PYTHON_CONFIG) --cflags)
-PYTHON_LDFLAGS := $(shell $(PYTHON_CONFIG) --ldflags --embed)
-
-# CGO flags with all dependencies
-CGO_CFLAGS := $(PYTHON_CFLAGS) '-I$(shell pwd)/lib'
-CGO_LDFLAGS := $(PYTHON_LDFLAGS) $(PYTHON_LIBS) '-L$(shell pwd)/lib' -ltokenizers -ldl -lm
 
 
 # Internal variables for generic targets
@@ -112,12 +83,6 @@ epp_IMAGE = $(EPP_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
 sidecar_NAME = $(SIDECAR_NAME)
-epp_LDFLAGS = -ldflags="$(LDFLAGS)"
-sidecar_LDFLAGS =
-epp_CGO_CFLAGS = "${CGO_CFLAGS}"
-sidecar_CGO_CFLAGS =
-epp_CGO_LDFLAGS = "${CGO_LDFLAGS}"
-sidecar_CGO_LDFLAGS =
 epp_TEST_FILES = go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/
 sidecar_TEST_FILES = go list ./pkg/sidecar/...
 
@@ -144,10 +109,10 @@ lint: check-golangci-lint check-typos ## Run lint (use LINT_NEW_ONLY=true to onl
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
 	@if [ "$(LINT_NEW_ONLY)" = "true" ]; then \
 		printf "\033[33mChecking new code only (LINT_NEW_ONLY=true)\033[0m\n"; \
-		CGO_CFLAGS="${CGO_CFLAGS}" $(GOLANGCI_LINT) run --new; \
+		$(GOLANGCI_LINT) run --new; \
 	else \
 		printf "\033[33mChecking all code (LINT_NEW_ONLY=false, default)\033[0m\n"; \
-		CGO_CFLAGS="${CGO_CFLAGS}" $(GOLANGCI_LINT) run; \
+		$(GOLANGCI_LINT) run; \
 	fi
 	$(TYPOS)
 
@@ -162,38 +127,31 @@ test: test-unit test-e2e ## Run all tests (unit and e2e)
 test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
 .PHONY: test-unit-%
-test-unit-%: download-tokenizer install-python-deps check-dependencies ## Run unit tests
+test-unit-%: check-dependencies ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache 2>/dev/null || echo ""); \
-	PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
-	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go test $($*_LDFLAGS) -v $$($($*_TEST_FILES) | tr '\n' ' ')
+	@go test -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-filter
-test-filter: download-tokenizer install-python-deps check-dependencies ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
+test-filter: check-dependencies ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
 	@if [ -z "$(PATTERN)" ]; then \
 		echo "ERROR: PATTERN is required. Usage: make test-filter PATTERN=TestName [TYPE=epp|sidecar]"; \
 		exit 1; \
 	fi
 	@TEST_TYPE="$(if $(TYPE),$(TYPE),epp)"; \
 	printf "\033[33;1m==== Running Filtered Tests (pattern: $(PATTERN), type: $$TEST_TYPE) ====\033[0m\n"; \
-	KV_CACHE_PKG=$$(go list -m -f '{{.Dir}}/pkg/preprocessing/chat_completions' github.com/llm-d/llm-d-kv-cache 2>/dev/null || echo ""); \
 	if [ "$$TEST_TYPE" = "epp" ]; then \
-		PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
-		CGO_CFLAGS=$(epp_CGO_CFLAGS) CGO_LDFLAGS=$(epp_CGO_LDFLAGS) \
-		go test $(epp_LDFLAGS) -v -run "$(PATTERN)" $$($(epp_TEST_FILES) | tr '\n' ' '); \
+		go test -v -run "$(PATTERN)" $$($(epp_TEST_FILES) | tr '\n' ' '); \
 	else \
-		PYTHONPATH="$$KV_CACHE_PKG:$(VENV_DIR)/lib/python$(PYTHON_VERSION)/site-packages" \
-		CGO_CFLAGS=$(sidecar_CGO_CFLAGS) CGO_LDFLAGS=$(sidecar_CGO_LDFLAGS) \
-		go test $(sidecar_LDFLAGS) -v -run "$(PATTERN)" $$($(sidecar_TEST_FILES) | tr '\n' ' '); \
+		go test -v -run "$(PATTERN)" $$($(sidecar_TEST_FILES) | tr '\n' ' '); \
 	fi
 
 .PHONY: test-integration
-test-integration: download-tokenizer check-dependencies ## Run integration tests
+test-integration: check-dependencies ## Run integration tests
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
-	go test -ldflags="$(LDFLAGS)" -v -tags=integration_tests ./test/integration/
+	go test -v -tags=integration_tests ./test/integration/
 
 .PHONY: test-e2e
-test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
+test-e2e: image-build image-build-uds-tokenizer image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	PATH=$(LOCALBIN):$$PATH ./test/scripts/run_e2e.sh
 
@@ -209,14 +167,35 @@ post-deploy-test: ## Run post deployment tests
 build: build-epp build-sidecar ## Build the project for both epp and sidecar
 
 .PHONY: build-%
-build-%: check-go download-tokenizer ## Build the project
+build-%: check-go ## Build the project
 	@printf "\033[33;1m==== Building ====\033[0m\n"
-	CGO_CFLAGS=${$*_CGO_CFLAGS} CGO_LDFLAGS=${$*_CGO_LDFLAGS} go build $($*_LDFLAGS) -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
+	@go build -o bin/$($*_NAME) cmd/$($*_NAME)/main.go
 
 ##@ Container image Build/Push/Pull
 
 .PHONY:	image-build
 image-build: image-build-epp image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
+
+# Path to kv-cache repo for UDS tokenizer image build (can be overridden)
+KV_CACHE_PATH ?= $(shell go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null)
+
+.PHONY: image-build-uds-tokenizer
+image-build-uds-tokenizer: check-container-tool ## Build UDS tokenizer image from kv-cache
+	@printf "\033[33;1m==== Building UDS Tokenizer image $(UDS_TOKENIZER_IMAGE) ====\033[0m\n"
+	@if [ -z "$(KV_CACHE_PATH)" ]; then \
+		echo "kv-cache module not found, downloading Go modules..."; \
+		go mod download; \
+	fi
+	@KV_CACHE_PATH_CHECK=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
+	if [ -z "$$KV_CACHE_PATH_CHECK" ]; then \
+		echo "Error: Could not find kv-cache module even after download."; \
+		exit 1; \
+	fi
+	$(CONTAINER_RUNTIME) build \
+		--platform linux/$(TARGETARCH) \
+		-t $(UDS_TOKENIZER_IMAGE) \
+		-f $(KV_CACHE_PATH)/services/uds_tokenizer/Dockerfile \
+		$(KV_CACHE_PATH)/services/uds_tokenizer
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)
@@ -225,7 +204,6 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 		--platform linux/$(TARGETARCH) \
  		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
-		--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
  		-t $($*_IMAGE) -f Dockerfile.$* .
@@ -264,7 +242,6 @@ stop-container: check-container-tool ## Stop and remove container
 env: ## Print environment variables
 	@echo "TARGETOS=$(TARGETOS)"
 	@echo "TARGETARCH=$(TARGETARCH)"
-	@echo "PYTHON_VERSION=$(PYTHON_VERSION)"
 	@echo "CONTAINER_RUNTIME=$(CONTAINER_RUNTIME)"
 	@echo "IMAGE_TAG_BASE=$(IMAGE_TAG_BASE)"
 	@echo "EPP_TAG=$(EPP_TAG)"
@@ -273,6 +250,8 @@ env: ## Print environment variables
 	@echo "SIDECAR_IMAGE=$(SIDECAR_IMAGE)"
 	@echo "VLLM_SIMULATOR_TAG=$(VLLM_SIMULATOR_TAG)"
 	@echo "VLLM_SIMULATOR_IMAGE=$(VLLM_SIMULATOR_IMAGE)"
+	@echo "UDS_TOKENIZER_TAG=$(UDS_TOKENIZER_TAG)"
+	@echo "UDS_TOKENIZER_IMAGE=$(UDS_TOKENIZER_IMAGE)"
 
 .PHONY: print-namespace
 print-namespace: ## Print the current namespace

@@ -491,14 +491,16 @@ func createEndPointPicker(eppConfig string) []string {
 	err := testConfig.K8sClient.Create(testConfig.Context, configMap)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 
-	objects := []string{"ConfigMap/epp-config"}
+	objects := make([]string, 1, 10)
+	objects[0] = "ConfigMap/epp-config"
 
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_IMAGE}": eppImage,
-			"${NAMESPACE}": nsName,
-			"${POOL_NAME}": modelName + "-inference-pool",
+			"${EPP_IMAGE}":           eppImage,
+			"${UDS_TOKENIZER_IMAGE}": udsTokenizerImage,
+			"${NAMESPACE}":           nsName,
+			"${POOL_NAME}":           modelName + "-inference-pool",
 		})
 
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)
@@ -877,23 +879,24 @@ schedulingProfiles:
 `
 
 // EPP config for running with precise prefix scoring (i.e. KV events)
+// Uses UDS tokenizer sidecar for tokenization
 const kvConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: precise-prefix-cache-scorer
   parameters:
     tokenProcessorConfig:
-      blockSize: 16 
+      blockSize: 16
       hashSeed: "42"
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
       prefixStoreConfig:
-        blockSize: 16 
+        blockSize: 16
       tokenizersPoolConfig:
         modelName: Qwen/Qwen2.5-1.5B-Instruct
-        hf:
-          tokenizersCacheDir: "/cache/tokenizers"
+        uds:
+          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
       kvBlockIndexConfig:
         enableMetrics: false                  # enable kv-block index metrics (prometheus)
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)
