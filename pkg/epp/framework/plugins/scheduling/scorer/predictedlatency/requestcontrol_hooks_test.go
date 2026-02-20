@@ -690,15 +690,15 @@ func TestPredictedLatencyContext_PredictionData(t *testing.T) {
 	request := createTestLLMRequest("test", 100, 50)
 	ctx := newPredictedLatencyContext(request)
 
-	ctx.predictionsForScheduling = make([]endpointPredictionResult, 0)
+	ctx.predictionsForScheduling = make(map[string]endpointPredictionResult)
 
 	// Set prediction data
-	ctx.predictionsForScheduling = append(ctx.predictionsForScheduling, endpointPredictionResult{Endpoint: createTestEndpoint("pod1", 0, 0, 0), TTFT: 80.0, TPOT: 25.0})
-	ctx.predictionsForScheduling = append(ctx.predictionsForScheduling, endpointPredictionResult{Endpoint: createTestEndpoint("pod1", 0, 0, 0), TPOT: 30.0, TTFT: 85.0})
+	ctx.predictionsForScheduling["pod1"] = endpointPredictionResult{Endpoint: createTestEndpoint("pod1", 0, 0, 0), TTFT: 80.0, TPOT: 25.0}
+	ctx.predictionsForScheduling["pod2"] = endpointPredictionResult{Endpoint: createTestEndpoint("pod2", 0, 0, 0), TPOT: 30.0, TTFT: 85.0}
 
 	assert.Len(t, ctx.predictionsForScheduling, 2)
-	assert.Equal(t, 80.0, ctx.predictionsForScheduling[0].TTFT)
-	assert.Equal(t, 30.0, ctx.predictionsForScheduling[1].TPOT)
+	assert.Equal(t, 80.0, ctx.predictionsForScheduling["pod1"].TTFT)
+	assert.Equal(t, 30.0, ctx.predictionsForScheduling["pod2"].TPOT)
 }
 
 func TestPredictedLatencyContext_PrefixCacheScores(t *testing.T) {

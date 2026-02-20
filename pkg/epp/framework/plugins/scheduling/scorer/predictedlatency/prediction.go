@@ -69,7 +69,7 @@ func (s *PredictedLatency) generatePredictions(ctx context.Context, request *sch
 	}
 
 	// Bulk predict
-	bulkPredictions, err := bulkPredictWithMetrics(ctx, s.latencypredictor, metricsStates, s.config.EndpointRoleLabel, targetEndpointsMetadatas, prompts, generatedTokenCounts, prefixCacheScores)
+	bulkPredictions, err := bulkPredictWithMetrics(ctx, predictedLatencyCtx, s.latencypredictor, metricsStates, s.config.EndpointRoleLabel, targetEndpointsMetadatas, prompts, generatedTokenCounts, prefixCacheScores)
 	if err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Bulk prediction failed")
 		return nil, err
@@ -110,7 +110,13 @@ func (s *PredictedLatency) generatePredictions(ctx context.Context, request *sch
 
 // updateRequestContextWithPredictions updates the request context with prediction data
 func (s *PredictedLatency) updateRequestContextWithPredictions(predictedLatencyCtx *predictedLatencyCtx, predictions []endpointPredictionResult) {
-	predictedLatencyCtx.predictionsForScheduling = predictions
+	predMap := make(map[string]endpointPredictionResult, len(predictions))
+	for _, pred := range predictions {
+		if pred.Endpoint != nil && pred.Endpoint.GetMetadata() != nil {
+			predMap[pred.Endpoint.GetMetadata().NamespacedName.Name] = pred
+		}
+	}
+	predictedLatencyCtx.predictionsForScheduling = predMap
 }
 
 func (s *PredictedLatency) validatePrediction(

@@ -72,7 +72,7 @@ type Config struct {
 
 var DefaultConfig = Config{
 	SamplingMean:              1000,
-	MaxSampledTokens:          5,
+	MaxSampledTokens:          0,
 	SLOBufferFactor:           1,
 	NegHeadroomTTFTWeight:     0.8,
 	NegHeadroomTPOTWeight:     0.2,
@@ -118,8 +118,8 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Errorf("samplingMean must be > 0, got %f", c.SamplingMean))
 	}
 
-	if c.MaxSampledTokens <= 0 {
-		errs = append(errs, fmt.Errorf("maxSampledTokens must be > 0, got %d", c.MaxSampledTokens))
+	if c.MaxSampledTokens < 0 {
+		errs = append(errs, fmt.Errorf("maxSampledTokens must be >= 0, got %d", c.MaxSampledTokens))
 	}
 
 	if c.SLOBufferFactor <= 0 {
@@ -320,7 +320,10 @@ func (s *PredictedLatency) Score(ctx context.Context, state *framework.CycleStat
 	for _, endpoint := range endpoints {
 		scores[endpoint] = 0
 	}
-	allPreds := append([]endpointPredictionResult(nil), predictions...)
+	allPreds := make([]endpointPredictionResult, 0, len(predictions))
+	for _, pred := range predictions {
+		allPreds = append(allPreds, pred)
+	}
 	allPreds, _ = s.epsilonGreedyAffinityGate(ctx, allPreds, rng, "overall", s.config.AffinityGateTauGlobal)
 
 	// 2) Tiered selection: positive headroom pods get 99% probability, negative get 1%
