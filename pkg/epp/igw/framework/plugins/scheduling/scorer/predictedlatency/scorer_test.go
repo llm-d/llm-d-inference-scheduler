@@ -154,7 +154,7 @@ func setupPredictionContext(router *PredictedLatency, request *fwksched.LLMReque
 
 	// If we have a predictor, generate predictions for each endpoint
 	if predictor != nil && predictor.err == nil {
-		predictions := make([]endpointPredictionResult, 0, len(endpoints))
+		predictions := make(map[string]endpointPredictionResult, len(endpoints))
 		for _, endpoint := range endpoints {
 			predReq := latencypredictor.PredictionRequest{
 				KVCachePercentage: endpoint.GetMetrics().KVCacheUsagePercent,
@@ -162,13 +162,13 @@ func setupPredictionContext(router *PredictedLatency, request *fwksched.LLMReque
 
 			predResp, err := predictor.Predict(ctx, predReq)
 			if err == nil {
-				predictions = append(predictions, endpointPredictionResult{
+				predictions[endpoint.GetMetadata().NamespacedName.Name] = endpointPredictionResult{
 					Endpoint:         endpoint,
 					TTFT:             predResp.TTFT,
 					TPOT:             predResp.TPOT,
 					PrefixCacheScore: 0.0,
 					IsValid:          true,
-				})
+				}
 			}
 		}
 		predictedLatencyCtx.predictionsForScheduling = predictions
@@ -625,9 +625,9 @@ func TestPredictedLatencyFactory(t *testing.T) {
 			expectErr:  true,
 		},
 		{
-			name:       "invalid maxSampledTokens <= 0",
+			name:       "invalid maxSampledTokens < 0",
 			pluginName: "bad-max-tokens",
-			jsonParams: `{"maxSampledTokens": 0}`,
+			jsonParams: `{"maxSampledTokens": -1}`,
 			expectErr:  true,
 		},
 		{
