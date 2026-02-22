@@ -107,6 +107,7 @@ func (h *EdProfileHandler) WithName(name string) *EdProfileHandler {
 func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
 	profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
+	log.FromContext(ctx).V(logutil.DEBUG).Info("in Pick")
 
 	if _, executed := profileResults[h.decodeProfile]; !executed {
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Pick: decode is added")
@@ -127,12 +128,22 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	if h.decider != nil && h.decider.disaggregateEncode(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
-		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeEncodeDecode)
+	if _, executed := profileResults[h.encodeProfile]; !executed {
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Pick: encode is added")
 		return map[string]scheduling.SchedulerProfile{
 			h.encodeProfile: profiles[h.encodeProfile],
 		}
+	}
+	// when a profile run fails its result value is nil. we need to check encode result before continuing
+	// check if all configured profiles have been executed, or if encode failed, no need to run more profiles.
+	if len(profiles) == len(profileResults) || profileResults[h.encodeProfile] == nil {
+		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
+		return map[string]scheduling.SchedulerProfile{}
+	}
+
+	if h.decider != nil && h.decider.disaggregateEncode(ctx, request, profileResults[h.encodeProfile].TargetEndpoints[0]) {
+		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeEncodeDecode)
+		return map[string]scheduling.SchedulerProfile{}
 	}
 
 	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
@@ -144,6 +155,7 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 // an error while running the profile.
 func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest,
 	profileResults map[string]*scheduling.ProfileRunResult) (*scheduling.SchedulingResult, error) {
+	log.FromContext(ctx).V(logutil.DEBUG).Info("in ProcessResults")
 
 	decodeRunResults := profileResults[h.decodeProfile]
 	if decodeRunResults == nil {
@@ -159,6 +171,8 @@ func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.Cyc
 		log.FromContext(ctx).V(logutil.DEBUG).Info("ED: encode worker result added")
 		updatedResults[h.encodeProfile] = encodeRunResult
 	}
+
+	log.FromContext(ctx).V(logutil.DEBUG).Info("ED: ProcessResults", "updatedResults", updatedResults)
 
 	return &scheduling.SchedulingResult{
 		PrimaryProfileName: h.decodeProfile,
