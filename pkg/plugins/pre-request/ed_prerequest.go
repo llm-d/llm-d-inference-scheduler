@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
@@ -78,8 +79,17 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 		return // encode profile failed to run or we chose not to run it, no-op in this case
 	}
 
-	targetPod := encodeProfileRunResult.TargetEndpoints[0].GetMetadata()
-	encodeHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
-	request.Headers[common.EncoderHostsPortsHeader] = encodeHostPort // in the form of <ip:port>
+	// Collect all target endpoints as comma-separated host:port pairs
+	var encodeHostPorts []string
+	for _, endpoint := range encodeProfileRunResult.TargetEndpoints {
+		targetPod := endpoint.GetMetadata()
+		encodeHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
+		encodeHostPorts = append(encodeHostPorts, encodeHostPort)
+	}
+	
+	// Join all host:port pairs with commas
+	if len(encodeHostPorts) > 0 {
+		request.Headers[common.EncoderHostsPortsHeader] = strings.Join(encodeHostPorts, ",")
+	}
 	log.FromContext(ctx).V(logutil.DEBUG).Info("ED: PreRequest", "request", request)
 }
