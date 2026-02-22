@@ -54,7 +54,7 @@ var _ = Describe("Data Parallel support", func() {
 			decodeURL, err := url.Parse("http://localhost:" + strconv.Itoa(fakeDecodePort))
 			Expect(err).ToNot(HaveOccurred())
 			cfg := Config{
-				Connector:                 ConnectorNIXLV2,
+				KVConnector:               KVConnectorNIXLV2,
 				DecoderInsecureSkipVerify: false,
 				DataParallelSize:          testDataParallelSize,
 			}

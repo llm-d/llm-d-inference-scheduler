@@ -9,18 +9,17 @@ import (
 const (
 	// RoleLabel name
 	RoleLabel = "llm-d.ai/role"
-	
+
 	// Single role values
 	// Execution order: Encode → Prefill → Decode
-	
+
 	// RoleEncode set for designated encode workers (first stage in pipeline)
 	RoleEncode = "encode"
 	// RolePrefill set for designated prefill workers (second stage in pipeline)
 	RolePrefill = "prefill"
 	// RoleDecode set for designated decode workers (third stage in pipeline)
 	RoleDecode = "decode"
-	
-	// Combined role values for workers that can handle multiple stages
+
 	// RoleBoth set for workers that can act as both prefill and decode (legacy, equivalent to prefill-decode)
 	RoleBoth = "both"
 	// RoleEncodePrefill set for workers that can handle encode and prefill stages
@@ -32,7 +31,6 @@ const (
 	// RoleAll set for workers that can handle all stages (encode, prefill, and decode)
 	RoleAll = "all"
 
-	// Filter type constants
 	// EncodeRoleType is the type of the EncodeFilter
 	EncodeRoleType = "encode-filter"
 	// PrefillRoleType is the type of the PrefillFilter

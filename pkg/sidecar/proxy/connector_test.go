@@ -44,7 +44,7 @@ type sidecarTestInfo struct {
 	proxy          *Server
 }
 
-var connectors = []string{ConnectorSharedStorage, ConnectorNIXLV2}
+var connectors = []string{KVConnectorSharedStorage, KVConnectorNIXLV2}
 
 var _ = Describe("Common Connector tests", func() {
 
@@ -203,7 +203,7 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	url, err := url.Parse(testInfo.decodeBackend.URL)
 	Expect(err).ToNot(HaveOccurred())
 	testInfo.decodeURL = url
-	cfg := Config{Connector: connector}
+	cfg := Config{KVConnector: connector}
 	testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg) // port 0 to automatically choose one that's available.
 
 	return &testInfo
