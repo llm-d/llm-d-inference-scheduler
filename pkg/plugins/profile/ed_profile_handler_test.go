@@ -6,60 +6,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
-
-// mockEpdDecider is a controllable epdDeciderPlugin for testing.
-type mockEpdDecider struct {
-	typedName    plugin.TypedName
-	shouldEncode bool
-}
-
-func (m *mockEpdDecider) TypedName() plugin.TypedName { return m.typedName }
-func (m *mockEpdDecider) disaggregateEncode(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
-	return m.shouldEncode
-}
-
-func newMockEpdDecider(shouldEncode bool) *mockEpdDecider {
-	return &mockEpdDecider{
-		typedName:    plugin.TypedName{Type: AlwaysEncodeDeciderPluginType, Name: AlwaysEncodeDeciderPluginType},
-		shouldEncode: shouldEncode,
-	}
-}
-
-func createHandleWithAlwaysEncodeDecider(ctx context.Context) plugin.Handle {
-	handle := plugin.NewEppHandle(ctx, nil)
-	decider := newAlwaysEncodeDecider().WithName(AlwaysEncodeDeciderPluginType)
-	handle.AddPlugin(AlwaysEncodeDeciderPluginType, decider)
-	return handle
-}
-
-func TestAlwaysEncodeDecider(t *testing.T) {
-	ctx := utils.NewTestContext(t)
-	decider := newAlwaysEncodeDecider().WithName(AlwaysEncodeDeciderPluginType)
-
-	assert.Equal(t, AlwaysEncodeDeciderPluginType, decider.TypedName().Type)
-	assert.Equal(t, AlwaysEncodeDeciderPluginType, decider.TypedName().Name)
-
-	request := createRequest("hello world")
-	endpoint := newMockProfileRunResult(DefaultTestPodPort, "pod1").TargetEndpoints[0]
-
-	assert.True(t, decider.disaggregateEncode(ctx, request, endpoint), "AlwaysEncodeDecider should always return true")
-}
-
-func TestAlwaysEncodeDeciderFactory(t *testing.T) {
-	ctx := utils.NewTestContext(t)
-	handle := plugin.NewEppHandle(ctx, nil)
-
-	p, err := AlwaysEncodeDeciderPluginFactory("my-decider", nil, handle)
-	assert.NoError(t, err)
-	assert.NotNil(t, p)
-	assert.Equal(t, AlwaysEncodeDeciderPluginType, p.TypedName().Type)
-	assert.Equal(t, "my-decider", p.TypedName().Name)
-}
 
 func TestEdProfileHandlerFactory(t *testing.T) {
 	ctx := utils.NewTestContext(t)
@@ -71,77 +24,130 @@ func TestEdProfileHandlerFactory(t *testing.T) {
 	}{
 		{
 			name:       "valid configuration with all defaults",
-			pluginName: "default-ed-handler",
+			pluginName: "default-handler",
 			params:     map[string]any{},
 			expectErr:  false,
 		},
 		{
-			name:       "valid configuration with always-encode-decider",
-			pluginName: "custom-ed-handler",
+			name:       "valid configuration with custom values",
+			pluginName: "custom-handler",
 			params: map[string]any{
 				"decodeProfile":     "my-decode",
 				"encodeProfile":     "my-encode",
-				"deciderPluginName": AlwaysEncodeDeciderPluginType,
+				"deciderPluginName": AlwaysDisaggDeciderPluginType,
 			},
 			expectErr: false,
 		},
 		{
-			name:       "invalid decider plugin type should error",
-			pluginName: "bad-decider",
-			params:     map[string]any{"deciderPluginName": "INVALID"},
-			expectErr:  true,
+			name:       "empty decodeProfile is valid",
+			pluginName: "empty-decode",
+			params:     map[string]any{"decodeProfile": ""},
+			expectErr:  false,
 		},
 		{
-			name:       "empty decider plugin name → nil decider, no error",
-			pluginName: "no-decider",
-			params:     map[string]any{"deciderPluginName": ""},
+			name:       "empty encodeProfile is valid",
+			pluginName: "empty-encode",
+			params:     map[string]any{"encodeProfile": ""},
 			expectErr:  false,
 		},
 	}
 
-	handle := createHandleWithAlwaysEncodeDecider(ctx)
+	handle, err := createHandleWithDeciderPlugins(ctx)
+	assert.NoError(t, err)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bytes, err := json.Marshal(tt.params)
-			assert.NoError(t, err)
-			rawParams := json.RawMessage(bytes)
+			var rawParams json.RawMessage
+			if tt.params != nil {
+				bytes, err := json.Marshal(tt.params)
+				assert.NoError(t, err)
+				rawParams = json.RawMessage(bytes)
+			}
+			plugin, err := EdProfileHandlerFactory(tt.pluginName, rawParams, handle)
 
-			p, err := EdProfileHandlerFactory(tt.pluginName, rawParams, handle)
 			if tt.expectErr {
 				assert.Error(t, err)
-				assert.Nil(t, p)
+				assert.Nil(t, plugin)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, p)
+				assert.NotNil(t, plugin)
 			}
 		})
 	}
 }
 
-func TestEdProfileHandlerFactory_InvalidJSON(t *testing.T) {
+func TestEdProfileHandlerFactoryInvalidJSON(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handle := createHandleWithAlwaysEncodeDecider(ctx)
 
-	p, err := EdProfileHandlerFactory("test", json.RawMessage(`{"deciderPluginName": `), handle)
-	assert.Error(t, err)
-	assert.Nil(t, p)
+	invalidTests := []struct {
+		name       string
+		jsonParams string
+	}{
+		{
+			name:       "malformed JSON",
+			jsonParams: `{"deciderPluginName": `, // incomplete
+		},
+		{
+			name:       "invalid decider plugin type",
+			jsonParams: `{"deciderPluginName": "INVALID"}`,
+		},
+	}
+
+	handle, err := createHandleWithDeciderPlugins(ctx)
+	assert.NoError(t, err)
+
+	for _, tt := range invalidTests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawParams := json.RawMessage(tt.jsonParams)
+			plugin, err := EdProfileHandlerFactory("test", rawParams, handle)
+
+			assert.Error(t, err)
+			assert.Nil(t, plugin)
+		})
+	}
 }
 
-func createMultimodalRequest(contentType string) *scheduling.LLMRequest {
+// createChatRequest creates a chat completion request with optional multimodal content
+func createChatRequest(hasImage, hasVideo, hasAudio bool) *scheduling.LLMRequest {
+	messages := []scheduling.ChatMessage{
+		{
+			Role: "user",
+			Content: scheduling.ChatContent{
+				Structured: []scheduling.ContentBlock{
+					{
+						Type: "text",
+						Text: "Hello, describe this content",
+					},
+				},
+			},
+		},
+	}
+
+	if hasImage {
+		messages[0].Content.Structured = append(messages[0].Content.Structured, scheduling.ContentBlock{
+			Type: "image_url",
+			ImageURL: &scheduling.ImageURL{
+				URL: "https://example.com/image.jpg",
+			},
+		})
+	}
+
+	if hasVideo {
+		messages[0].Content.Structured = append(messages[0].Content.Structured, scheduling.ContentBlock{
+			Type: "video_url",
+		})
+	}
+
+	if hasAudio {
+		messages[0].Content.Structured = append(messages[0].Content.Structured, scheduling.ContentBlock{
+			Type: "input_audio",
+		})
+	}
+
 	return &scheduling.LLMRequest{
 		Body: &scheduling.LLMRequestBody{
 			ChatCompletions: &scheduling.ChatCompletionsRequest{
-				Messages: []scheduling.Message{
-					{
-						Role: "user",
-						Content: scheduling.Content{
-							Structured: []scheduling.ContentBlock{
-								{Type: contentType},
-							},
-						},
-					},
-				},
+				Messages: messages,
 			},
 		},
 	}
@@ -149,13 +155,112 @@ func createMultimodalRequest(contentType string) *scheduling.LLMRequest {
 
 func TestEdProfileHandler_Pick(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	textRequest := createRequest("hello world")
-	imageRequest := createMultimodalRequest("image_url")
-	videoRequest := createMultimodalRequest("video_url")
 
 	profiles := map[string]scheduling.SchedulerProfile{
-		defaultDecodeProfile:   newMockSchedulerProfile(),
-		defaultEdEncodeProfile: newMockSchedulerProfile(),
+		"decode": newMockSchedulerProfile(),
+		"encode": newMockSchedulerProfile(),
+	}
+
+	tests := []struct {
+		name             string
+		request          *scheduling.LLMRequest
+		profileResults   map[string]*scheduling.ProfileRunResult
+		expectedProfiles []string
+	}{
+		{
+			name:             "decode not executed yet → run decode",
+			request:          createChatRequest(true, false, false),
+			profileResults:   map[string]*scheduling.ProfileRunResult{},
+			expectedProfiles: []string{defaultDecodeProfile},
+		},
+		{
+			name:    "decode failed (nil result) → run nothing",
+			request: createChatRequest(true, false, false),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile: nil,
+			},
+			expectedProfiles: []string{},
+		},
+		{
+			name:    "all profiles already executed → run nothing",
+			request: createChatRequest(true, false, false),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
+			},
+			expectedProfiles: []string{},
+		},
+		{
+			name:    "decode done, no multimodal content → skip encode",
+			request: createChatRequest(false, false, false),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+			},
+			expectedProfiles: []string{},
+		},
+		{
+			name:    "decode done, has image → run encode",
+			request: createChatRequest(true, false, false),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+			},
+			expectedProfiles: []string{defaultEdEncodeProfile},
+		},
+		{
+			name:    "decode done, has video → run encode",
+			request: createChatRequest(false, true, false),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+			},
+			expectedProfiles: []string{defaultEdEncodeProfile},
+		},
+		{
+			name:    "decode done, has audio → run encode",
+			request: createChatRequest(false, false, true),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+			},
+			expectedProfiles: []string{defaultEdEncodeProfile},
+		},
+		{
+			name:    "decode done, has multiple multimodal types → run encode",
+			request: createChatRequest(true, true, true),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+			},
+			expectedProfiles: []string{defaultEdEncodeProfile},
+		},
+		{
+			name:    "encode failed (nil result) → run nothing",
+			request: createChatRequest(true, false, false),
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile:   newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEdEncodeProfile: nil,
+			},
+			expectedProfiles: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewEdProfileHandler(
+				defaultDecodeProfile,
+				defaultEdEncodeProfile,
+				nil, // no decider plugin
+			)
+
+			result := handler.Pick(ctx, nil, tt.request, profiles, tt.profileResults)
+			assert.ElementsMatch(t, tt.expectedProfiles, getProfilesFromResult(result))
+		})
+	}
+}
+
+func TestEdProfileHandler_PickWithDecider(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+
+	profiles := map[string]scheduling.SchedulerProfile{
+		"decode": newMockSchedulerProfile(),
+		"encode": newMockSchedulerProfile(),
 	}
 
 	tests := []struct {
@@ -166,25 +271,9 @@ func TestEdProfileHandler_Pick(t *testing.T) {
 		expectedProfiles []string
 	}{
 		{
-			name:             "decode not yet executed → run decode",
-			request:          imageRequest,
-			decider:          newMockEpdDecider(true),
-			profileResults:   map[string]*scheduling.ProfileRunResult{},
-			expectedProfiles: []string{defaultDecodeProfile},
-		},
-		{
-			name:    "decode failed (nil result) → run nothing",
-			request: imageRequest,
-			decider: newMockEpdDecider(true),
-			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile: nil,
-			},
-			expectedProfiles: []string{},
-		},
-		{
-			name:    "all profiles already executed → run nothing",
-			request: imageRequest,
-			decider: newMockEpdDecider(true),
+			name:    "decider says disaggregate → encode runs",
+			request: createChatRequest(true, false, false),
+			decider: &mockEpdDecider{shouldDisaggregate: true},
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile:   newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 				defaultEdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
@@ -192,47 +281,12 @@ func TestEdProfileHandler_Pick(t *testing.T) {
 			expectedProfiles: []string{},
 		},
 		{
-			name:    "image request, decider approves → run encode",
-			request: imageRequest,
-			decider: newAlwaysEncodeDecider().WithName(AlwaysEncodeDeciderPluginType),
+			name:    "decider says no disaggregate → skip encode",
+			request: createChatRequest(true, false, false),
+			decider: &mockEpdDecider{shouldDisaggregate: false},
 			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-			},
-			expectedProfiles: []string{defaultEdEncodeProfile},
-		},
-		{
-			name:    "video request, decider approves → run encode",
-			request: videoRequest,
-			decider: newAlwaysEncodeDecider().WithName(AlwaysEncodeDeciderPluginType),
-			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-			},
-			expectedProfiles: []string{defaultEdEncodeProfile},
-		},
-		{
-			name:    "text-only request, decider approves → decode only (no multimedia)",
-			request: textRequest,
-			decider: newAlwaysEncodeDecider().WithName(AlwaysEncodeDeciderPluginType),
-			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-			},
-			expectedProfiles: []string{},
-		},
-		{
-			name:    "image request, mock decider rejects → decode only",
-			request: imageRequest,
-			decider: newMockEpdDecider(false),
-			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-			},
-			expectedProfiles: []string{},
-		},
-		{
-			name:    "image request, nil decider → decode only",
-			request: imageRequest,
-			decider: nil,
-			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultDecodeProfile:   newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectedProfiles: []string{},
 		},
@@ -245,6 +299,7 @@ func TestEdProfileHandler_Pick(t *testing.T) {
 				defaultEdEncodeProfile,
 				tt.decider,
 			)
+
 			result := handler.Pick(ctx, nil, tt.request, profiles, tt.profileResults)
 			assert.ElementsMatch(t, tt.expectedProfiles, getProfilesFromResult(result))
 		})
@@ -266,7 +321,7 @@ func TestEdProfileHandler_ProcessResults(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "decode only, no encode",
+			name: "decode success, no encode",
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
@@ -278,7 +333,7 @@ func TestEdProfileHandler_ProcessResults(t *testing.T) {
 			},
 		},
 		{
-			name: "decode and encode → both results included",
+			name: "decode success, with encode",
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile:   newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 				defaultEdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
@@ -290,6 +345,19 @@ func TestEdProfileHandler_ProcessResults(t *testing.T) {
 				assert.Contains(t, res.ProfileResults, defaultEdEncodeProfile)
 			},
 		},
+		{
+			name: "decode success, encode failed (nil) → only decode in results",
+			profileResults: map[string]*scheduling.ProfileRunResult{
+				defaultDecodeProfile:   newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEdEncodeProfile: nil,
+			},
+			expectError: false,
+			checkResult: func(t *testing.T, res *scheduling.SchedulingResult) {
+				assert.Equal(t, defaultDecodeProfile, res.PrimaryProfileName)
+				assert.Contains(t, res.ProfileResults, defaultDecodeProfile)
+				assert.NotContains(t, res.ProfileResults, defaultEdEncodeProfile)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -297,10 +365,10 @@ func TestEdProfileHandler_ProcessResults(t *testing.T) {
 			handler := NewEdProfileHandler(
 				defaultDecodeProfile,
 				defaultEdEncodeProfile,
-				newMockEpdDecider(true),
+				nil,
 			)
 
-			result, err := handler.ProcessResults(context.Background(), &scheduling.CycleState{}, nil, tt.profileResults)
+			result, err := handler.ProcessResults(context.Background(), &scheduling.CycleState{}, &scheduling.LLMRequest{}, tt.profileResults)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -312,4 +380,80 @@ func TestEdProfileHandler_ProcessResults(t *testing.T) {
 			tt.checkResult(t, result)
 		})
 	}
+}
+
+func TestHasMultimodalContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		request  *scheduling.LLMRequest
+		expected bool
+	}{
+		{
+			name:     "nil request",
+			request:  nil,
+			expected: false,
+		},
+		{
+			name: "nil body",
+			request: &scheduling.LLMRequest{
+				Body: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "nil chat completions",
+			request: &scheduling.LLMRequest{
+				Body: &scheduling.LLMRequestBody{
+					ChatCompletions: nil,
+				},
+			},
+			expected: false,
+		},
+		{
+			name:     "text only",
+			request:  createChatRequest(false, false, false),
+			expected: false,
+		},
+		{
+			name:     "has image",
+			request:  createChatRequest(true, false, false),
+			expected: true,
+		},
+		{
+			name:     "has video",
+			request:  createChatRequest(false, true, false),
+			expected: true,
+		},
+		{
+			name:     "has audio",
+			request:  createChatRequest(false, false, true),
+			expected: true,
+		},
+		{
+			name:     "has all multimodal types",
+			request:  createChatRequest(true, true, true),
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasMultimodalContent(tt.request)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// mockEpdDecider is a mock implementation of epdDeciderPlugin for testing
+type mockEpdDecider struct {
+	typedName          plugin.TypedName
+	shouldDisaggregate bool
+}
+
+func (m *mockEpdDecider) TypedName() plugin.TypedName {
+	return m.typedName
+}
+
+func (m *mockEpdDecider) disaggregateEncode(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
+	return m.shouldDisaggregate
 }

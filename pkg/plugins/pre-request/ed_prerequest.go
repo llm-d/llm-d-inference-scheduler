@@ -11,6 +11,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 )
 
 const (
@@ -66,7 +68,7 @@ func (p *EncodeHeaderHandler) WithName(name string) *EncodeHeaderHandler {
 }
 
 // PreRequest wires encode SchedulerProfile result into a header to indicate encode worker
-func (p *EncodeHeaderHandler) PreRequest(_ context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
 	if _, found := request.Headers[common.EncoderHostsPortsHeader]; found {
 		request.Headers[common.EncoderHostsPortsHeader] = "" // clear header, if already set
 	}
@@ -79,4 +81,5 @@ func (p *EncodeHeaderHandler) PreRequest(_ context.Context, request *scheduling.
 	targetPod := encodeProfileRunResult.TargetEndpoints[0].GetMetadata()
 	encodeHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
 	request.Headers[common.EncoderHostsPortsHeader] = encodeHostPort // in the form of <ip:port>
+	log.FromContext(ctx).V(logutil.DEBUG).Info("ED: PreRequest", "request", request)
 }

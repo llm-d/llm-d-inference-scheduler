@@ -248,5 +248,3 @@ func (s *Server) runEPDProtocol(w http.ResponseWriter, r *http.Request, prefillE
 		}
 	}
 }
-
-// Made with Bob
