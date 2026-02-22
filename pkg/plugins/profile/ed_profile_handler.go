@@ -5,15 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 )
 
@@ -35,7 +32,6 @@ type epdDeciderPlugin interface {
 type edProfileHandlerParameters struct {
 	DecodeProfile     string `json:"decodeProfile"`
 	EncodeProfile     string `json:"encodeProfile"`
-	PrimaryPort       int    `json:"primaryPort"`
 	DeciderPluginName string `json:"deciderPluginName"`
 }
 
@@ -47,17 +43,10 @@ func EdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 	parameters := edProfileHandlerParameters{
 		DecodeProfile: defaultDecodeProfile,
 		EncodeProfile: defaultEdEncodeProfile,
-		PrimaryPort:   0,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", EdProfileHandlerType, err)
-		}
-	}
-
-	if parameters.PrimaryPort != 0 {
-		if parameters.PrimaryPort < 1 || parameters.PrimaryPort > 65535 {
-			return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
 		}
 	}
 
@@ -77,7 +66,6 @@ func EdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 	handler := NewEdProfileHandler(
 		parameters.DecodeProfile,
 		parameters.EncodeProfile,
-		parameters.PrimaryPort,
 		deciderPlugin,
 	)
 
@@ -85,17 +73,13 @@ func EdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 }
 
 // NewEdProfileHandler initializes a new EdProfileHandler and returns its pointer.
-func NewEdProfileHandler(decodeProfile, encodeProfile string, primaryPort int, deciderPlugin epdDeciderPlugin) *EdProfileHandler {
-	result := &EdProfileHandler{
+func NewEdProfileHandler(decodeProfile, encodeProfile string, deciderPlugin epdDeciderPlugin) *EdProfileHandler {
+	return &EdProfileHandler{
 		typedName:     plugin.TypedName{Type: EdProfileHandlerType},
 		decodeProfile: decodeProfile,
 		encodeProfile: encodeProfile,
 		decider:       deciderPlugin,
 	}
-	if primaryPort != 0 {
-		result.primaryPort = strconv.Itoa(primaryPort)
-	}
-	return result
 }
 
 // EdProfileHandler handles scheduler profiles for ED (Encode → Decode).
@@ -105,7 +89,6 @@ type EdProfileHandler struct {
 	typedName     plugin.TypedName
 	decodeProfile string
 	encodeProfile string
-	primaryPort   string
 	decider       epdDeciderPlugin
 }
 
@@ -126,6 +109,7 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 
 	if _, executed := profileResults[h.decodeProfile]; !executed {
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Pick: decode is added")
 		return map[string]scheduling.SchedulerProfile{
 			h.decodeProfile: profiles[h.decodeProfile],
 		}
@@ -137,20 +121,15 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	mmCount, err := getMultimodalItemCount(request)
-	if err != nil {
-		log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input")
-		return nil
-	}
-	// no MultimodalItem items, no need to continue
-	if mmCount == 0 {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("no MultimodalItem items, skip encoder")
+	if !hasMultimodalContent(request) {
+		log.FromContext(ctx).V(logutil.DEBUG).Info("no multimodal content, skip encoder")
+		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
 	if h.decider != nil && h.decider.disaggregateEncode(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
 		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeEncodeDecode)
-		log.FromContext(ctx).V(logutil.DEBUG).Info("ED: encode is required")
+		log.FromContext(ctx).V(logutil.DEBUG).Info("Pick: encode is added")
 		return map[string]scheduling.SchedulerProfile{
 			h.encodeProfile: profiles[h.encodeProfile],
 		}
@@ -160,9 +139,10 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 	return map[string]scheduling.SchedulerProfile{}
 }
 
-// ProcessResults handles the outcome of the profile runs.
-// Decode is always the primary profile. If encode ran, its pod address is injected as a header.
-func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
+// ProcessResults handles the outcome of the profile runs after the selected profiles ran.
+// In case of an error in any of the profiles, the matching entry in the profileResults will contain nil, to indicate there was
+// an error while running the profile.
+func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest,
 	profileResults map[string]*scheduling.ProfileRunResult) (*scheduling.SchedulingResult, error) {
 
 	decodeRunResults := profileResults[h.decodeProfile]
@@ -170,32 +150,13 @@ func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.Cyc
 		return nil, errors.New("failed to find available decode workers")
 	}
 
-	updatedResults := map[string]*scheduling.ProfileRunResult{}
-
-	if h.primaryPort != "" {
-		// TODO: check Data Parallel
-
-		targetEndpoint := decodeRunResults.TargetEndpoints[0].GetMetadata()
-		request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
-
-		updatedResult := scheduling.ProfileRunResult{
-			TargetEndpoints: []scheduling.Endpoint{},
-		}
-		for _, target := range decodeRunResults.TargetEndpoints {
-			updatedEndpointInfo := target.GetMetadata().Clone()
-			updatedEndpointInfo.Port = h.primaryPort
-			targetEndpoint := scheduling.NewEndpoint(updatedEndpointInfo, target.GetMetrics().Clone(), nil)
-			updatedResult.TargetEndpoints = append(updatedResult.TargetEndpoints, targetEndpoint)
-		}
-		updatedResults[h.decodeProfile] = &updatedResult
-	} else {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("adding decode")
-		updatedResults[h.decodeProfile] = decodeRunResults
+	// TODO: handle Data Parallel
+	updatedResults := map[string]*scheduling.ProfileRunResult{
+		h.decodeProfile: decodeRunResults,
 	}
 
-	// Add encode result if it ran successfully, and inject the encode pod header.
 	if encodeRunResult, exists := profileResults[h.encodeProfile]; exists && encodeRunResult != nil {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("adding encode")
+		log.FromContext(ctx).V(logutil.DEBUG).Info("ED: encode worker result added")
 		updatedResults[h.encodeProfile] = encodeRunResult
 	}
 
@@ -205,51 +166,17 @@ func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.Cyc
 	}, nil
 }
 
-// returns the total number of multimodal items (images, audio) in the request
-func getMultimodalItemCount(request *scheduling.LLMRequest) (int, error) {
-	if request.Body.Completions != nil {
-		return 0, nil
+// hasMultimodalContent returns true if the request contains any image, video, or audio content blocks.
+func hasMultimodalContent(request *scheduling.LLMRequest) bool {
+	if request == nil || request.Body == nil || request.Body.ChatCompletions == nil {
+		return false
 	}
-
-	messagesBytes, err := json.Marshal(request.Body.ChatCompletions.Messages)
-	if err != nil {
-		return 0, err
-	}
-
-	// Define a lightweight anonymous struct just to extract the 'content' field
-	var messages []struct {
-		Content json.RawMessage `json:"content"`
-	}
-
-	if err := json.Unmarshal(messagesBytes, &messages); err != nil {
-		return 0, err
-	}
-
-	multimodalCount := 0
-
-	for _, msg := range messages {
-		// Skip empty messages or standard text messages (which start with a quote)
-		if len(msg.Content) == 0 || msg.Content[0] == '"' {
-			continue
-		}
-
-		// Multimodal content is represented as a JSON array (starts with a bracket)
-		if msg.Content[0] == '[' {
-			// Lightweight struct to pull out just the "type" field
-			var parts []struct {
-				Type string `json:"type"`
-			}
-			
-			// Unmarshal the array and count the media items
-			if err := json.Unmarshal(msg.Content, &parts); err == nil {
-				for _, part := range parts {
-					if part.Type == "image_url" || part.Type == "input_audio" {
-						multimodalCount++
-					}
-				}
+	for _, msg := range request.Body.ChatCompletions.Messages {
+		for _, block := range msg.Content.Structured {
+			if block.Type == "image_url" || block.Type == "video_url" || block.Type == "input_audio" {
+				return true
 			}
 		}
 	}
-
-	return multimodalCount, nil
+	return false
 }

@@ -46,6 +46,6 @@ func (d *AlwaysEncodeDecider) WithName(name string) *AlwaysEncodeDecider {
 }
 
 func (d *AlwaysEncodeDecider) disaggregateEncode(ctx context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
-	log.FromContext(ctx).V(logutil.DEBUG).Info("in disaggregateEncode!")
+	log.FromContext(ctx).V(logutil.DEBUG).Info("AlwaysEncodeDecider: encode is always required")
 	return true
 }

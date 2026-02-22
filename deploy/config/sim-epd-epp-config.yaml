@@ -12,7 +12,6 @@ plugins:
 - type: always-encode-decider
 - type: ed-profile-handler
   parameters:
-    primaryPort: ${PRIMARY_PORT}
     deciderPluginName: always-encode-decider
 schedulingProfiles:
 - name: encode
