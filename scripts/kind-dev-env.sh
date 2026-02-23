@@ -56,6 +56,13 @@ export SIDECAR_TAG="${SIDECAR_TAG:-dev}"
 SIDECAR_IMAGE="${SIDECAR_IMAGE:-${IMAGE_REGISTRY}/llm-d-routing-sidecar:${SIDECAR_TAG}}"
 export SIDECAR_IMAGE
 
+# Set the default UDS tokenizer image tag
+export UDS_TOKENIZER_TAG="${UDS_TOKENIZER_TAG:-dev}"
+
+# Set a default UDS_TOKENIZER_IMAGE if not provided
+UDS_TOKENIZER_IMAGE="${UDS_TOKENIZER_IMAGE:-${IMAGE_REGISTRY}/llm-d-uds-tokenizer:${UDS_TOKENIZER_TAG}}"
+export UDS_TOKENIZER_IMAGE
+
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 
@@ -230,6 +237,13 @@ if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 #	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
 fi
 
+# Load the UDS tokenizer image into the cluster
+if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+	podman save ${UDS_TOKENIZER_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+else
+	kind --name ${CLUSTER_NAME} load docker-image ${UDS_TOKENIZER_IMAGE}
+fi
+
 # ------------------------------------------------------------------------------
 # CRD Deployment (Gateway API + GIE)
 # ------------------------------------------------------------------------------
@@ -268,7 +282,7 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
-  ${PD_ENABLED} ${EPD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${TARGET_PORTS} \
+  ${PD_ENABLED} ${EPD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
