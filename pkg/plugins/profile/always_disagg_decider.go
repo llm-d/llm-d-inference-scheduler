@@ -40,6 +40,7 @@ func (d *AlwaysDisaggPDDecider) TypedName() plugin.TypedName {
 // WithName sets the name of the plugin.
 func (d *AlwaysDisaggPDDecider) WithName(name string) *AlwaysDisaggPDDecider {
 	d.typedName.Name = name
+	d.typedName.Type = AlwaysDisaggDeciderPluginType
 	return d
 }
 

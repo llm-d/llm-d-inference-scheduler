@@ -14,11 +14,14 @@ import (
 func RegisterAllPlugins() {
 	plugin.Register(filter.ByLabelType, filter.ByLabelFactory)
 	plugin.Register(filter.ByLabelSelectorType, filter.ByLabelSelectorFactory)
+	plugin.Register(filter.EncodeRoleType, filter.EncodeRoleFactory)
 	plugin.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
 	plugin.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
 	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
+	plugin.Register(prerequest.EncodeHeaderHandlerType, prerequest.EncodeHeaderHandlerFactory)
 	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
 	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
+	plugin.Register(profile.EdProfileHandlerType, profile.EdProfileHandlerFactory)
 	plugin.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
 	plugin.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
@@ -30,4 +33,6 @@ func RegisterAllPlugins() {
 	plugin.Register(profile.PrefixBasedPDDeciderPluginType, profile.PrefixBasedPDDeciderPluginFactory)
 	plugin.Register(profile.AlwaysDisaggDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(preparedata.TokenizerPluginType, preparedata.TokenizerPluginFactory)
+	// ep decider plugins
+	plugin.Register(profile.AlwaysEncodeDeciderPluginType, profile.AlwaysEncodeDeciderPluginFactory)
 }
