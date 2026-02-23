@@ -37,8 +37,7 @@ EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
 # Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-food-review}"
-#export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
+export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
 # Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
 export MODEL_FAMILY="${MODEL_NAME%%/*}"
 # Extract model ID (e.g., "Llama-3.1-8B-Instruct")
@@ -72,9 +71,6 @@ export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 # By default we are not setting up for PD (Prefill/Decode)
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
-# By default we are not setting up for EPD (Encode/Prefill/Decode) with simulator
-export EPD_ENABLED="\"${EPD_ENABLED:-false}\""
-
 # By default we are not setting up for EPD (Encode/Prefill/Decode) with real vLLM
 export EPD_REAL_VLLM_ENABLED="\"${EPD_REAL_VLLM_ENABLED:-false}\""
 
@@ -82,17 +78,21 @@ export EPD_REAL_VLLM_ENABLED="\"${EPD_REAL_VLLM_ENABLED:-false}\""
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 
 # Replica counts for E (Encode), P (Prefill), and D (Decode)
-# Only used when EPD_ENABLED=true
 export VLLM_REPLICA_COUNT_E="${VLLM_REPLICA_COUNT_E:-1}"
-# Used for both PD_ENABLED and EPD_ENABLED
+# Used for both PD_ENABLED
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
-export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
+# D replica count: 1 if EPD_REAL_VLLM_ENABLED, otherwise 2
+if [ "${EPD_REAL_VLLM_ENABLED}" == "\"true\"" ]; then
+  export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
+else
+  export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
+fi
 
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
 PRIMARY_PORT="0"
-if [ "${PD_ENABLED}" != "\"true\"" ] && [ "${EPD_ENABLED}" != "\"true\"" ] && [ "${EPD_REAL_VLLM_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
+if [ "${PD_ENABLED}" != "\"true\"" ] && [ "${EPD_REAL_VLLM_ENABLED}" != "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -eq 1 ]; then
   # Simple mode: no disaggregation
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
     DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
@@ -103,12 +103,6 @@ else
   if [ "${KV_CACHE_ENABLED}" != "true" ]; then
     if [ "${EPD_REAL_VLLM_ENABLED}" == "\"true\"" ]; then
       # Encode/Prefill/Decode mode with real vLLM (2-stage: encode + prefill/decode)
-      DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
-      if [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-        PRIMARY_PORT="8000"
-      fi
-    elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
-      # Encode/Prefill/Decode mode with simulator (2-stage: encode + prefill/decode)
       DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
       if [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
         PRIMARY_PORT="8000"
@@ -226,15 +220,15 @@ fi
 # Load the ext_proc endpoint-picker image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 	podman save ${EPP_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-#else
-	#kind --name ${CLUSTER_NAME} load docker-image ${EPP_IMAGE}
+else
+	kind --name ${CLUSTER_NAME} load docker-image ${EPP_IMAGE}
 fi
 
 # Load the sidecar image into the cluster
 if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 	podman save ${SIDECAR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-#else
-#	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
+else
+	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
 fi
 
 # Load the UDS tokenizer image into the cluster
@@ -271,8 +265,6 @@ kustomize build --enable-helm deploy/components/crds-istio |
 # Deploy the environment to the "default" namespace
 if [ "${EPD_REAL_VLLM_ENABLED}" == "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-epd-real-vllm"
-elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
-  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-epd"
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
 else
@@ -289,7 +281,7 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 
 kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
-  ${PD_ENABLED} ${EPD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
+  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
