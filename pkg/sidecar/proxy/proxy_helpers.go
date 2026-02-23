@@ -57,7 +57,7 @@ func (s *Server) startHTTP(ctx context.Context) error {
 			return cert, nil
 		}
 		if s.config.CertPath != "" {
-			reloader, err := common.NewCertReloader(ctx, "", cert)
+			reloader, err := common.NewCertReloader(ctx, s.config.CertPath, cert)
 			if err != nil {
 				return fmt.Errorf("failed to start reloader: %w", err)
 			}
