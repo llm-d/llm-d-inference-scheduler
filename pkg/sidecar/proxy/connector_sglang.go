@@ -155,35 +155,23 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 		attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host),
 	)
 
-	// Calculate end-to-end P/D metrics and add to decode span
-	// Note: SGLang runs prefill and decode concurrently, so timing is different from sequential P/D
-	// Note: After tracer.Start() above, ctx contains the decode span, so SpanFromContext returns it
+	// Calculate end-to-end P/D timing metrics for concurrent P/D.
+	// True TTFT captures time from gateway request start to decode start.
+	// In SGLang's concurrent mode, prefill duration is tracked in the async prefill span.
 	if currentSpan := trace.SpanFromContext(ctx); currentSpan.SpanContext().IsValid() {
-		// Get request start time from context
 		var totalDuration time.Duration
 		var trueTTFT time.Duration
 		if requestStartValue := ctx.Value(requestStartTimeKey); requestStartValue != nil {
 			if requestStart, ok := requestStartValue.(time.Time); ok {
 				totalDuration = time.Since(requestStart)
-
-				// For SGLang, prefill and decode run concurrently, but True TTFT still needs to capture
-				// the full coordinator overhead from gateway start to when decode can begin generating.
-				// This includes: gateway routing + scheduling overhead + time to start decode request
-				// Note: In concurrent mode, this is different from sequential P/D where we wait for prefill
 				trueTTFT = decodeStart.Sub(requestStart)
 			}
 		}
 
 		currentSpan.SetAttributes(
-			// End-to-end P/D timing metrics for concurrent P/D
 			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
 			attribute.Float64("llm_d.pd_proxy.true_ttft_ms", float64(trueTTFT.Milliseconds())),
-
-			// Component breakdown (note: prefill runs concurrently)
 			attribute.Float64("llm_d.pd_proxy.decode_duration_ms", float64(decodeDuration.Milliseconds())),
-
-			// Note: prefill_duration_ms is tracked in the async prefill span
-			// SGLang-specific: prefill and decode overlap in time
 			attribute.Bool("llm_d.pd_proxy.concurrent_pd", true),
 		)
 	}

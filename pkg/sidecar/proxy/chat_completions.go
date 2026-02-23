@@ -84,7 +84,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
 		span.SetAttributes(
-			attribute.Bool("llm_d.pd_proxy.disaggregation_enabled", false),
+			attribute.Bool("llm_d.pd_proxy.disaggregation_used", false),
 			attribute.String("llm_d.pd_proxy.reason", "no_prefill_header"),
 		)
 
@@ -95,7 +95,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	span.SetAttributes(
-		attribute.Bool("llm_d.pd_proxy.disaggregation_enabled", true),
+		attribute.Bool("llm_d.pd_proxy.disaggregation_used", true),
 		attribute.String("llm_d.pd_proxy.prefill_target", prefillHostPort),
 		attribute.Int("llm_d.pd_proxy.prefill_candidates", numHosts),
 	)
