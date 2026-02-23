@@ -146,7 +146,7 @@ func (s *Server) fanoutEncoderPrimer(originalRequest map[string]any, encoderHost
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set(requestHeaderRequestID, fmt.Sprintf("%s-enc-%d", requestID, itemIdx))
 
-			s.logger.Info("sending encoder request", "item", itemIdx, "to", hostPort, "requestID", requestID)
+			s.logger.V(4).Info("sending encoder request", "item", itemIdx, "to", hostPort, "requestID", requestID)
 
 			pw := &bufferedResponseWriter{}
 			encoderHandler.ServeHTTP(pw, req)
@@ -156,7 +156,7 @@ func (s *Server) fanoutEncoderPrimer(originalRequest map[string]any, encoderHost
 				return
 			}
 
-			s.logger.Info("encoder request completed", "item", itemIdx, "requestID", requestID)
+			s.logger.V(4).Info("encoder request completed", "item", itemIdx, "requestID", requestID)
 		}(mmItem, encoderHostPort, idx)
 	}
 
