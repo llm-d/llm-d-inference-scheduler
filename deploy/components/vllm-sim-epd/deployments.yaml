@@ -1,0 +1,238 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ec-cache-pv
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: manual
+  hostPath:
+    path: /tmp/vllm-ec-cache
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ec-cache-pvc
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-encoder
+  labels:
+    app: ${POOL_NAME}
+spec:
+  replicas: ${VLLM_REPLICA_COUNT_E}
+  selector:
+    matchLabels:
+      app: ${POOL_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${POOL_NAME}
+        llm-d.ai/role: encode
+    spec:
+      containers:
+      - name: vllm
+        image: ${VLLM_SIMULATOR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+        args:
+        - "--model=${MODEL_NAME}"
+        - "--port=8000"
+        - "--gpu-memory-utilization=0.7"
+        - "--mm-processor-kwargs"
+        - '{"max_pixels": 313600}'
+        - "--enforce-eager"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "--no-enable-prefix-caching"
+        - "--max-num-batched-tokens=114688"
+        - "--mm-encoder-only"
+        - "--ec-transfer-config"
+        - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8000"
+        - name: HUGGINGFACE_HUB_CACHE
+          value: "/data"
+        - name: TRITON_CACHE_DIR
+          value: "/.triton-cache"
+        volumeMounts:
+        - mountPath: /shared-ec-cache
+          name: ec-cache
+        - mountPath: /data
+          name: data
+        - mountPath: /dev/shm
+          name: shm
+        - name: metrics-volume
+          mountPath: /.config
+        - name: torch-compile-cache
+          mountPath: /.cache
+        - name: triton-cache
+          mountPath: /.triton-cache
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: ec-cache
+        persistentVolumeClaim:
+          claimName: ec-cache-pvc
+      - name: data
+        emptyDir: {}
+      - name: shm
+        emptyDir:
+          medium: Memory
+      - name: metrics-volume
+        emptyDir: {}
+      - name: torch-compile-cache
+        emptyDir: {}
+      - name: triton-cache
+        emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-pd
+  labels:
+    app: ${POOL_NAME}
+spec:
+  replicas: ${VLLM_REPLICA_COUNT_D}
+  selector:
+    matchLabels:
+      app: ${POOL_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${POOL_NAME}
+        llm-d.ai/role: prefill-decode
+    spec:
+      initContainers:
+      - name: routing-sidecar
+        image: ${SIDECAR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--port=8000"
+        - "--vllm-port=8200"
+        - "--secure-proxy=false"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        ports:
+        - name: sidecar-http
+          containerPort: 8000
+          protocol: TCP
+        - name: sidecar-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: sidecar-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: sidecar-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: sidecar-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: sidecar-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: sidecar-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: sidecar-rank7
+          containerPort: 8007
+          protocol: TCP
+        restartPolicy: Always
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      containers:
+      - name: vllm
+        image: ${VLLM_SIMULATOR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+        args:
+        - "--model=${MODEL_NAME}"
+        - "--port=8200"
+        - "--gpu-memory-utilization=0.7"
+        - "--max-model-len=32768"
+        - "--mm-processor-kwargs"
+        - '{"max_pixels": 313600}'
+        - "--enforce-eager"
+        - "--max-num-seqs=1"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "--ec-transfer-config"
+        - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_consumer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
+        ports:
+        - name: http
+          containerPort: 8200
+          protocol: TCP
+        - name: rank1
+          containerPort: 8201
+          protocol: TCP
+        - name: rank2
+          containerPort: 8202
+          protocol: TCP
+        - name: rank3
+          containerPort: 8203
+          protocol: TCP
+        - name: rank4
+          containerPort: 8204
+          protocol: TCP
+        - name: rank5
+          containerPort: 8205
+          protocol: TCP
+        - name: rank6
+          containerPort: 8206
+          protocol: TCP
+        - name: rank7
+          containerPort: 8207
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8200"
+        - name: HUGGINGFACE_HUB_CACHE
+          value: "/data"
+        - name: TRITON_CACHE_DIR
+          value: "/.triton-cache"
+        volumeMounts:
+        - mountPath: /shared-ec-cache
+          name: ec-cache
+        - mountPath: /data
+          name: data
+        - mountPath: /dev/shm
+          name: shm
+        - name: metrics-volume
+          mountPath: /.config
+        - name: torch-compile-cache
+          mountPath: /.cache
+        - name: triton-cache
+          mountPath: /.triton-cache
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: ec-cache
+        persistentVolumeClaim:
+          claimName: ec-cache-pvc
+      - name: data
+        emptyDir: {}
+      - name: shm
+        emptyDir:
+          medium: Memory
+      - name: metrics-volume
+        emptyDir: {}
+      - name: torch-compile-cache
+        emptyDir: {}
+      - name: triton-cache
+        emptyDir: {}
