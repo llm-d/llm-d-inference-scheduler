@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,8 +78,10 @@ func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefi
 
 func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string) {
 	// Create separate requests for prefill and decode
-	prefillReq := cloneWithJSONBody(r, body)
-	decodeReq := cloneWithJSONBody(r, body)
+	// Use context.WithoutCancel for prefillReq to prevent it from being aborted
+	// if the main HTTP handler (which serves decodeReq) finishes first.
+	prefillReq := cloneWithJSONBody(context.WithoutCancel(r.Context()), r, body)
+	decodeReq := cloneWithJSONBody(r.Context(), r, body)
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillHost)
 	if err != nil {
@@ -90,6 +93,11 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 
 	// Send prefill request asynchronously
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil && rec != http.ErrAbortHandler {
+				s.logger.Error(fmt.Errorf("panic: %v", rec), "panic in prefill request")
+			}
+		}()
 		pw := &bufferedResponseWriter{}
 		prefillHandler.ServeHTTP(pw, prefillReq)
 		s.logger.V(5).Info("prefill request completed", "status", pw.statusCode)
@@ -99,8 +107,8 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	s.decoderProxy.ServeHTTP(w, decodeReq)
 }
 
-func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {
-	req := r.Clone(r.Context())
+func cloneWithJSONBody(ctx context.Context, r *http.Request, body []byte) *http.Request {
+	req := r.Clone(ctx)
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	return req

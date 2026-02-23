@@ -244,6 +244,13 @@ else
 	kind --name ${CLUSTER_NAME} load docker-image ${UDS_TOKENIZER_IMAGE}
 fi
 
+# Load the UDS tokenizer image into the cluster
+if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+	podman save ${UDS_TOKENIZER_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
+else
+	kind --name ${CLUSTER_NAME} load docker-image ${UDS_TOKENIZER_IMAGE}
+fi
+
 # ------------------------------------------------------------------------------
 # CRD Deployment (Gateway API + GIE)
 # ------------------------------------------------------------------------------

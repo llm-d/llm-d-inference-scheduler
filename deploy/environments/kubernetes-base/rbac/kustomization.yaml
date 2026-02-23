@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ${NAMESPACE}
+
+namePrefix: ${PROJECT_NAME}-
+
+resources:
+- exec-rbac-role.yaml
+- exec-rbac-rolebinding.yaml
+
+patches:
+- path: patch-rbac-role.yaml
+- path: patch-rbac-rolebinding.yaml
