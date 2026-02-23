@@ -20,6 +20,8 @@ const (
 	DecodeRoleType = "decode-filter"
 	// PrefillRoleType is the type of the PrefillFilter
 	PrefillRoleType = "prefill-filter"
+	// RolePrefillDecode set for workers that can handle prefill and decode stages
+	RolePrefillDecode = "prefill-decode"
 )
 
 // PrefillRoleFactory defines the factory function for the Prefill filter.
@@ -29,7 +31,7 @@ func PrefillRoleFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin
 
 // NewPrefillRole creates and returns an instance of the Filter configured for prefill role
 func NewPrefillRole() *ByLabel {
-	return NewByLabel(PrefillRoleType, RoleLabel, false, RolePrefill)
+	return NewByLabel(PrefillRoleType, RoleLabel, false, RolePrefill, RolePrefillDecode, RoleBoth)
 }
 
 // DecodeRoleFactory defines the factory function for the Decode filter.
@@ -39,5 +41,5 @@ func DecodeRoleFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.
 
 // NewDecodeRole creates and returns an instance of the Filter configured for decode role
 func NewDecodeRole() *ByLabel {
-	return NewByLabel(DecodeRoleType, RoleLabel, true, RoleDecode, RoleBoth)
+	return NewByLabel(DecodeRoleType, RoleLabel, true, RoleDecode, 	RolePrefillDecode, RoleBoth)
 }
