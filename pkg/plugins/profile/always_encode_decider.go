@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
@@ -46,6 +44,5 @@ func (d *AlwaysEncodeDecider) WithName(name string) *AlwaysEncodeDecider {
 }
 
 func (d *AlwaysEncodeDecider) disaggregateEncode(ctx context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
-	log.FromContext(ctx).V(logutil.DEBUG).Info("AlwaysEncodeDecider: encode is always required")
 	return true
 }

@@ -12,8 +12,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 )
 
 const (
@@ -91,5 +89,4 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 	if len(encodeHostPorts) > 0 {
 		request.Headers[common.EncoderHostsPortsHeader] = strings.Join(encodeHostPorts, ",")
 	}
-	log.FromContext(ctx).V(logutil.DEBUG).Info("ED: PreRequest", "request", request)
 }

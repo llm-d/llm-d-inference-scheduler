@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
@@ -107,10 +105,8 @@ func (h *EdProfileHandler) WithName(name string) *EdProfileHandler {
 func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
 	profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
-	log.FromContext(ctx).V(logutil.DEBUG).Info("in Pick")
 
 	if _, executed := profileResults[h.decodeProfile]; !executed {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Pick: decode is added")
 		return map[string]scheduling.SchedulerProfile{
 			h.decodeProfile: profiles[h.decodeProfile],
 		}
@@ -123,13 +119,11 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 	}
 
 	if !hasMultimodalContent(request) {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("no multimodal content, skip encoder")
 		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
 	if _, executed := profileResults[h.encodeProfile]; !executed {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("Pick: encode is added")
 		return map[string]scheduling.SchedulerProfile{
 			h.encodeProfile: profiles[h.encodeProfile],
 		}
@@ -155,7 +149,6 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 // an error while running the profile.
 func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest,
 	profileResults map[string]*scheduling.ProfileRunResult) (*scheduling.SchedulingResult, error) {
-	log.FromContext(ctx).V(logutil.DEBUG).Info("in ProcessResults")
 
 	decodeRunResults := profileResults[h.decodeProfile]
 	if decodeRunResults == nil {
@@ -168,11 +161,8 @@ func (h *EdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.Cyc
 	}
 
 	if encodeRunResult, exists := profileResults[h.encodeProfile]; exists && encodeRunResult != nil {
-		log.FromContext(ctx).V(logutil.DEBUG).Info("ED: encode worker result added")
 		updatedResults[h.encodeProfile] = encodeRunResult
 	}
-
-	log.FromContext(ctx).V(logutil.DEBUG).Info("ED: ProcessResults", "updatedResults", updatedResults)
 
 	return &scheduling.SchedulingResult{
 		PrimaryProfileName: h.decodeProfile,
@@ -186,6 +176,7 @@ func hasMultimodalContent(request *scheduling.LLMRequest) bool {
 		return false
 	}
 	for _, msg := range request.Body.ChatCompletions.Messages {
+		// https://github.com/vllm-project/vllm/blob/main/docs/features/multimodal_inputs.md#online-serving
 		for _, block := range msg.Content.Structured {
 			if block.Type == "image_url" || block.Type == "video_url" || block.Type == "input_audio" {
 				return true
