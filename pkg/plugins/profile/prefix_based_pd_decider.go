@@ -83,6 +83,7 @@ func (d *PrefixBasedPDDecider) TypedName() plugin.TypedName {
 // WithName sets the name of the plugin.
 func (d *PrefixBasedPDDecider) WithName(name string) *PrefixBasedPDDecider {
 	d.typedName.Name = name
+	d.typedName.Type = PrefixBasedPDDeciderPluginType
 	return d
 }
 
