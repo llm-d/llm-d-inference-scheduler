@@ -119,7 +119,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.prefillSamplerFn = func(n int) int { return i % n }
 				// verify the hostPort value
 				var hostPort string
-				s.runConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string) { hostPort = selectedHostPort }
+				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string) { hostPort = selectedHostPort }
 				var passthrough bool
 				s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 					passthrough = true
