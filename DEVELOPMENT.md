@@ -359,24 +359,38 @@ For more details, see the Gateway API inference Extension [getting started guide
 
 ## PR Approval Process
 
-The project uses a Prow-inspired ChatOps system to manage PR approvals via comment commands.
+The project uses a Prow-inspired ChatOps system to manage PR review process via comment commands.
 
 ### Available Commands
 
 | Command | Policy | Description |
 |---------|--------|-------------|
-| `/approve` | [OWNERS](./OWNERS)  | Approve all the files for the current PR. Adds the `approve` label. |
-| `/approve cancel` | [OWNERS](./OWNERS) | Removes your approval on this pull-request. Removes the `approve` label. |
-| `/lgtm` | [OWNERS](./OWNERS) | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once requiremnets below are met. |
-| `/lgtm cancel` | [OWNERS](./OWNERS) | Removes the `lgtm` label and disables auto-merge. |
-| `/hold` | Anyone | Adds the `hold` label to prevent the PR from merging. |
-| `/hold cancel` | Anyone | Removes the `hold` label. |
+| `/approve` | [OWNERS](./OWNERS) | Approve all the files for the current PR |
+| `/approve cancel` | [OWNERS](./OWNERS) | Removes your approval on this pull-request |
+| `/lgtm` | [OWNERS](./OWNERS) | Adds the `lgtm` label and enables auto-merge (squash). The PR merges automatically once requirements below are met |
+| `/lgtm cancel` | [OWNERS](./OWNERS) | Removes the `lgtm` label and disables auto-merge |
+| `/assign [@userA @userB @etc]` | Anyone | Assign other users (or yourself if no one is specified). Target user must be Org Member, Collaborator, or have previously commented |
+| `/unassign [@userA @userB @etc]` | Anyone | Unassigns specified people (or yourself if no one is specified). Target must have been already assigned |
+| `/cc [@userA @userB @etc]` | Anyone | Request review from specified people (or yourself if no one is specified). Target be an Org Member, Collaborator, or have previously commented |
+| `/uncc [@userA @userB @etc]` | Anyone | Dismiss review request for specified people (or yourself if no one is specified). Target must already have had a review requested |
+| `/close` | Collaborators | Closes the issue / PR |
+| `/reopen` | Collaborators | Reopens a closed issue / PR |
+| `/lock [resolved / off-topic / too-heated / spam]` | Collaborators | Locks the issue / PR with the specified reason |
+| `/milestone milestone-name` | Collaborators | Adds issue / PR to an existing milestone |
+| `/retitle some new title` | Collaborators | Renames the issue / PR |
+| `/hold` | Anyone | Adds the `hold` label to prevent the PR from merging |
+| `/hold cancel` | Anyone | Removes the `hold` label |
+| `/area [label1 label2 ...]` | Anyone | Adds an area/<> label(s) if it's defined in the `.prowlabels.yaml` file |
+| `/kind [label1 label2 ...]` | Anyone | Adds a kind/<> label(s) if it's defined in the `.prowlabels.yaml` file |
+| `/priority [label1 label2 ...]` | Anyone | Adds a priority/<> label(s) if it's defined in the `.prowlabels.yaml` file |
+| `/remove [label1 label2 ...]` | Collaborators | Removes a specified label(s) on an issue / PR |
 
 ### Merge Requirements
 
 For a PR to be merged, it must have:
 - ✅ **Both `lgtm` and `approve` labels** - Required for merge approval
 - ✅ **No blocking labels** - The `hold` label must not be present
+- ✅ **Signed and verified commits** - All commits must include a DCO sign-off
 - ✅ **All required status checks passing** - CI/CD checks must succeed
 
 The gatekeeper workflow enforces these requirements as a required status check.
