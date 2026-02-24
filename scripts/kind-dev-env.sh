@@ -71,7 +71,7 @@ export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 # By default we are not setting up for PD (Prefill/Decode)
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
-# By default we are not setting up for EPD (Encode/Prefill/Decode)
+# By default we are not setting up for EPD (Encode/PD)
 export EPD_ENABLED="\"${EPD_ENABLED:-false}\""
 
 # By default we are not setting up for KV cache
