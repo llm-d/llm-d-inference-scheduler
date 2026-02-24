@@ -54,9 +54,14 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	ctx = context.WithValue(ctx, requestStartTimeKey, requestStart)
 	r = r.WithContext(ctx)
 
+	// Set span attributes with safe defaults for nil values
+	requestPath := ""
+	if r.URL != nil {
+		requestPath = r.URL.Path
+	}
 	span.SetAttributes(
 		attribute.String("llm_d.pd_proxy.connector", s.config.Connector),
-		attribute.String("llm_d.pd_proxy.request_path", r.URL.Path),
+		attribute.String("llm_d.pd_proxy.request_path", requestPath),
 	)
 
 	var prefillHostPorts []string
