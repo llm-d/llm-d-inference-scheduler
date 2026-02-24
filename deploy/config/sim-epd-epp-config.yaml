@@ -16,7 +16,6 @@ schedulingProfiles:
 - name: encode
   plugins:
   - pluginRef: encode-filter
-    weight: 2
 - name: decode
   plugins:
   - pluginRef: decode-filter
