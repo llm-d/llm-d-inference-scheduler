@@ -32,7 +32,11 @@ func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
 	// Wrap handler with OpenTelemetry middleware to extract trace context from incoming requests
 	handler := otelhttp.NewHandler(s.handler, "llm-d-pd-proxy",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
-			return "llm_d.pd_proxy." + r.Method + " " + r.URL.Path
+			path := ""
+			if r.URL != nil {
+				path = r.URL.Path
+			}
+			return "llm_d.pd_proxy." + r.Method + " " + path
 		}),
 	)
 
