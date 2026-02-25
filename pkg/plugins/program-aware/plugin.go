@@ -101,6 +101,15 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 		return true
 	})
 
+	// Record the selected item's enqueue time so PreRequest can compute
+	// the actual flow control queue wait time (enqueue → dispatch).
+	if bestQueue != nil {
+		if head := bestQueue.PeekHead(); head != nil {
+			reqID := head.OriginalRequest().ID()
+			p.requestTimestamps.Store(reqID, head.EnqueueTime())
+		}
+	}
+
 	return bestQueue, nil
 }
 

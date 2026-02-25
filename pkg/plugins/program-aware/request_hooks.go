@@ -23,8 +23,10 @@ func (p *ProgramAwarePlugin) Consumes() map[string]any {
 	return map[string]any{}
 }
 
-// PrepareRequestData reads the program ID from the fairness header, increments the
-// program's total request count, and records a timestamp for wait time calculation.
+// PrepareRequestData reads the program ID from the fairness header and increments
+// the program's total request count. The enqueue timestamp for wait time calculation
+// is recorded by Pick() (in flow control), not here, since PrepareData runs after
+// the request has already left the flow control queue.
 func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, _ []scheduling.Endpoint) error {
 	programID := request.Headers[fairnessIDHeader]
 	if programID == "" {
@@ -36,8 +38,6 @@ func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *sc
 	metrics := p.getOrCreateMetrics(programID)
 	metrics.IncrementRequests()
 
-	p.requestTimestamps.Store(request.RequestId, time.Now())
-
 	log.FromContext(ctx).V(logutil.TRACE).Info("PrepareData: recorded program request",
 		"requestId", request.RequestId, "programId", programID,
 		"totalRequests", metrics.TotalRequests())
@@ -48,7 +48,8 @@ func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *sc
 // --- PreRequest interface ---
 
 // PreRequest is called after scheduling and before the request is sent to the model server.
-// It calculates the wait time and updates the program's EWMA.
+// It calculates the wait time (enqueue → now) and updates the program's EWMA.
+// The enqueue timestamp was recorded by Pick() during flow control dispatch.
 func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling.LLMRequest, _ *scheduling.SchedulingResult) {
 	programID := request.Headers[fairnessIDHeader]
 	if programID == "" {
@@ -58,9 +59,9 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 	metrics := p.getOrCreateMetrics(programID)
 	metrics.IncrementDispatched()
 
-	if tsRaw, ok := p.requestTimestamps.Load(request.RequestId); ok {
-		ts := tsRaw.(time.Time)
-		waitMs := float64(time.Since(ts).Milliseconds())
+	if enqueueTimeRaw, ok := p.requestTimestamps.Load(request.RequestId); ok {
+		enqueueTime := enqueueTimeRaw.(time.Time)
+		waitMs := float64(time.Since(enqueueTime).Milliseconds())
 		metrics.RecordWaitTime(waitMs)
 
 		log.FromContext(ctx).V(logutil.TRACE).Info("PreRequest: recorded wait time",

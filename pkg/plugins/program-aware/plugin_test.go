@@ -105,6 +105,38 @@ func TestPick_SingleNonEmptyQueue(t *testing.T) {
 	assert.Equal(t, queueA, queue)
 }
 
+func TestPick_RecordsEnqueueTime(t *testing.T) {
+	p := &ProgramAwarePlugin{}
+
+	enqueueTime := time.Now().Add(-500 * time.Millisecond)
+	queueA := &fcmocks.MockFlowQueueAccessor{
+		LenV:     1,
+		FlowKeyV: flowcontrol.FlowKey{ID: "prog-a"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{
+			EnqueueTimeV: enqueueTime,
+			OriginalRequestV: &fcmocks.MockFlowControlRequest{
+				IDV: "req-123",
+			},
+		},
+	}
+
+	band := &fcmocks.MockPriorityBandAccessor{
+		IterateQueuesFunc: func(cb func(flowcontrol.FlowQueueAccessor) bool) {
+			cb(queueA)
+		},
+	}
+
+	queue, err := p.Pick(context.Background(), band)
+	assert.NoError(t, err)
+	assert.Equal(t, queueA, queue)
+
+	// Verify Pick() stored the enqueue time for the dispatched request.
+	storedTimeRaw, ok := p.requestTimestamps.Load("req-123")
+	require.True(t, ok, "Pick should store enqueue time for selected request")
+	storedTime := storedTimeRaw.(time.Time)
+	assert.Equal(t, enqueueTime, storedTime, "stored time should be the item's enqueue time")
+}
+
 func TestPick_PrefersLongerWaitingHead(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
@@ -195,9 +227,9 @@ func TestPrepareRequestData_UpdatesMetrics(t *testing.T) {
 	metrics := metricsRaw.(*ProgramMetrics)
 	assert.Equal(t, int64(1), metrics.TotalRequests())
 
-	// Check timestamp was stored.
+	// PrepareData does NOT store timestamps — Pick() does that.
 	_, ok = p.requestTimestamps.Load("req-1")
-	assert.True(t, ok)
+	assert.False(t, ok)
 }
 
 func TestPrepareRequestData_NoFairnessHeader(t *testing.T) {
@@ -225,7 +257,7 @@ func TestPrepareRequestData_NoFairnessHeader(t *testing.T) {
 func TestPreRequest_RecordsWaitTime(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	// Simulate PrepareData having stored a timestamp 50ms ago.
+	// Simulate Pick() having stored the enqueue time 50ms ago.
 	p.requestTimestamps.Store("req-1", time.Now().Add(-50*time.Millisecond))
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
 
@@ -347,7 +379,12 @@ func TestFullLifecycle(t *testing.T) {
 		Headers:   map[string]string{fairnessIDHeader: programID},
 	}
 
-	// 1. PrepareData
+	// 0. Simulate Pick() recording the enqueue time (flow control layer).
+	//    In production, this happens when the request is dispatched from the queue.
+	enqueueTime := time.Now().Add(-20 * time.Millisecond) // enqueued 20ms ago
+	p.requestTimestamps.Store(request.RequestId, enqueueTime)
+
+	// 1. PrepareData (runs after flow control dispatch)
 	err := p.PrepareRequestData(context.Background(), request, nil)
 	require.NoError(t, err)
 
@@ -358,13 +395,10 @@ func TestFullLifecycle(t *testing.T) {
 	assert.Equal(t, int64(1), metrics.TotalRequests())
 	assert.Equal(t, int64(0), metrics.DispatchedCount())
 
-	// Small delay to get measurable wait time.
-	time.Sleep(5 * time.Millisecond)
-
-	// 2. PreRequest
+	// 2. PreRequest — computes wait time from enqueue time
 	p.PreRequest(context.Background(), request, nil)
 	assert.Equal(t, int64(1), metrics.DispatchedCount())
-	assert.Greater(t, metrics.AverageWaitTime(), 0.0)
+	assert.Greater(t, metrics.AverageWaitTime(), 0.0, "wait time should reflect queue residence time")
 
 	// 3. ResponseReceived
 	response := &requestcontrol.Response{Headers: map[string]string{}}
