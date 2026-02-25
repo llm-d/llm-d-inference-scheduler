@@ -157,7 +157,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	}
 
 	var body []byte
-	var responseBody map[string]any
 
 	// Create error handling var as each request should only report once for
 	// error metrics. This doesn't cover the error "Cannot receive stream request" because
@@ -289,65 +288,45 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			reqCtx.respHeaderResp = s.generateResponseHeaderResponse(reqCtx)
 
 		case *extProcPb.ProcessingRequest_ResponseBody:
+			reqCtx.ResponseComplete = v.ResponseBody.EndOfStream
+			if reqCtx.ResponseComplete {
+				loggerTrace.Info("stream completed")
+				reqCtx.ResponseCompleteTimestamp = time.Now()
+			}
 			if reqCtx.modelServerStreaming {
 				// Currently we punt on response parsing if the modelServer is streaming, and we just passthrough.
-
-				responseText := string(v.ResponseBody.Body)
-				s.HandleResponseBodyModelStreaming(ctx, reqCtx, responseText)
+				s.HandleResponseBodyModelStreaming(ctx, reqCtx, v.ResponseBody.Body)
 				if v.ResponseBody.EndOfStream {
-					loggerTrace.Info("stream completed")
-					reqCtx.ResponseComplete = true
 					if _, err := s.director.HandleResponseBodyComplete(ctx, reqCtx); err != nil {
 						logger.Error(err, "error in HandleResponseBodyComplete")
 					}
-
-					reqCtx.ResponseCompleteTimestamp = time.Now()
 					metrics.RecordRequestLatencies(ctx, reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestReceivedTimestamp, reqCtx.ResponseCompleteTimestamp)
 					metrics.RecordResponseSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseSize)
 					metrics.RecordNormalizedTimePerOutputToken(ctx, reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestReceivedTimestamp, reqCtx.ResponseCompleteTimestamp, reqCtx.Usage.CompletionTokens)
 				}
-
 				reqCtx.respBodyResp = generateResponseBodyResponses(v.ResponseBody.Body, v.ResponseBody.EndOfStream)
 			} else {
 				body = append(body, v.ResponseBody.Body...)
 
 				// Message is buffered, we can read and decode.
 				if v.ResponseBody.EndOfStream {
-					loggerTrace.Info("stream completed")
-					// Don't send a 500 on a response error. Just let the message passthrough and log our error for debugging purposes.
-					// We assume the body is valid JSON, err messages are not guaranteed to be json, and so capturing and sending a 500 obfuscates the response message.
-					// Using the standard 'err' var will send an immediate error response back to the caller.
+					reqCtx.ResponseSize = len(body)
+					reqCtx.respBodyResp = generateResponseBodyResponses(body, true)
+
 					var responseErr error
-					responseErr = json.Unmarshal(body, &responseBody)
+					reqCtx, responseErr = s.HandleResponseBody(ctx, reqCtx, body)
 					if responseErr != nil {
-						if logger.V(logutil.DEBUG).Enabled() {
-							logger.V(logutil.DEBUG).Error(responseErr, "Error unmarshalling request body", "body", string(body))
-						} else {
-							logger.V(logutil.DEFAULT).Error(responseErr, "Error unmarshalling request body", "body", string(body))
-						}
-						reqCtx.respBodyResp = generateResponseBodyResponses(body, true)
 						break
 					}
-
-					reqCtx, responseErr = s.HandleResponseBody(ctx, reqCtx, responseBody)
-					if responseErr != nil {
-						if logger.V(logutil.DEBUG).Enabled() {
-							logger.V(logutil.DEBUG).Error(responseErr, "Failed to process response body", "request", req)
-						} else {
-							logger.V(1).Error(responseErr, "Failed to process response body")
-						}
-					} else if reqCtx.ResponseComplete {
-						reqCtx.ResponseCompleteTimestamp = time.Now()
-						metrics.RecordRequestLatencies(ctx, reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestReceivedTimestamp, reqCtx.ResponseCompleteTimestamp)
-						metrics.RecordResponseSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseSize)
-						metrics.RecordInputTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Usage.PromptTokens)
-						metrics.RecordOutputTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Usage.CompletionTokens)
-						cachedToken := 0
-						if reqCtx.Usage.PromptTokenDetails != nil {
-							cachedToken = reqCtx.Usage.PromptTokenDetails.CachedTokens
-						}
-						metrics.RecordPromptCachedTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, cachedToken)
+					metrics.RecordRequestLatencies(ctx, reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestReceivedTimestamp, reqCtx.ResponseCompleteTimestamp)
+					metrics.RecordResponseSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseSize)
+					metrics.RecordInputTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Usage.PromptTokens)
+					metrics.RecordOutputTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Usage.CompletionTokens)
+					cachedToken := 0
+					if reqCtx.Usage.PromptTokenDetails != nil {
+						cachedToken = reqCtx.Usage.PromptTokenDetails.CachedTokens
 					}
+					metrics.RecordPromptCachedTokens(reqCtx.IncomingModelName, reqCtx.TargetModelName, cachedToken)
 				}
 			}
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
@@ -419,17 +398,16 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		}
 		r.RequestState = HeaderResponseResponseComplete
 	}
-	if r.RequestState == HeaderResponseResponseComplete && r.respBodyResp != nil && len(r.respBodyResp) > 0 {
+	if r.RequestState == HeaderResponseResponseComplete {
+		loggerTrace.Info("Sending response body response(s)")
 		for _, response := range r.respBodyResp {
 			if err := srv.Send(response); err != nil {
 				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
 			}
-
-			body := response.Response.(*extProcPb.ProcessingResponse_ResponseBody)
-			if body.ResponseBody.Response.GetBodyMutation().GetStreamedResponse().GetEndOfStream() {
-				logger.V(1).Info("EPP sent response body back to proxy")
-				r.RequestState = BodyResponseResponsesComplete
-			}
+		}
+		if r.ResponseComplete {
+			logger.V(1).Info("EPP sent response body back to proxy")
+			r.RequestState = BodyResponseResponsesComplete
 		}
 		// Dump the response so a new stream message can begin
 		r.respBodyResp = nil
