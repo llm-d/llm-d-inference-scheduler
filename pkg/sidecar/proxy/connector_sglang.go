@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -76,12 +82,30 @@ func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefi
 }
 
 func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Request, body []byte, prefillHost string) {
+	tracer := telemetry.Tracer()
+	ctx := r.Context()
+
+	// Prefill Stage - async
+	ctx, prefillSpan := tracer.Start(ctx, "llm_d.pd_proxy.prefill",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	prefillSpan.SetAttributes(
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillHost),
+		attribute.String("llm_d.pd_proxy.connector", "sglang"),
+		attribute.Bool("llm_d.pd_proxy.prefill.async", true),
+	)
+	prefillStart := time.Now()
+
 	// Create separate requests for prefill and decode
-	prefillReq := cloneWithJSONBody(r, body)
-	decodeReq := cloneWithJSONBody(r, body)
+	// Use context.WithoutCancel for prefillReq to prevent it from being aborted
+	// if the main HTTP handler (which serves decodeReq) finishes first.
+	prefillReq := cloneWithJSONBody(context.WithoutCancel(r.Context()), r, body)
+	decodeReq := cloneWithJSONBody(r.Context(), r, body)
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillHost)
 	if err != nil {
+		prefillSpan.SetStatus(codes.Error, "failed to create prefill handler")
+		prefillSpan.End()
 		if err := errorBadGateway(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -90,17 +114,71 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 
 	// Send prefill request asynchronously
 	go func() {
+		defer prefillSpan.End()
+		defer func() {
+			if rec := recover(); rec != nil && rec != http.ErrAbortHandler {
+				s.logger.Error(fmt.Errorf("panic: %v", rec), "panic in prefill request")
+			}
+		}()
 		pw := &bufferedResponseWriter{}
 		prefillHandler.ServeHTTP(pw, prefillReq)
+		prefillDuration := time.Since(prefillStart)
+		prefillSpan.SetAttributes(
+			attribute.Int("llm_d.pd_proxy.prefill.status_code", pw.statusCode),
+			attribute.Float64("llm_d.pd_proxy.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+		)
+		if pw.statusCode < 200 || pw.statusCode >= 300 {
+			prefillSpan.SetStatus(codes.Error, "prefill request failed")
+		}
 		s.logger.V(5).Info("prefill request completed", "status", pw.statusCode)
 	}()
 
+	// Decode Stage - sync
+	ctx, decodeSpan := tracer.Start(ctx, "llm_d.pd_proxy.decode",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer decodeSpan.End()
+
+	decodeSpan.SetAttributes(
+		attribute.String("llm_d.pd_proxy.connector", "sglang"),
+		attribute.Bool("llm_d.pd_proxy.decode.concurrent_with_prefill", true),
+	)
+	decodeStart := time.Now()
+
 	// Send decode request synchronously
+	decodeReq = decodeReq.WithContext(ctx)
 	s.decoderProxy.ServeHTTP(w, decodeReq)
+
+	decodeDuration := time.Since(decodeStart)
+	decodeSpan.SetAttributes(
+		attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())),
+		attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host),
+	)
+
+	// Calculate end-to-end P/D timing metrics for concurrent P/D.
+	// True TTFT captures time from gateway request start to decode start.
+	// In SGLang's concurrent mode, prefill duration is tracked in the async prefill span.
+	if currentSpan := trace.SpanFromContext(ctx); currentSpan.SpanContext().IsValid() {
+		var totalDuration time.Duration
+		var trueTTFT time.Duration
+		if requestStartValue := ctx.Value(requestStartTimeKey); requestStartValue != nil {
+			if requestStart, ok := requestStartValue.(time.Time); ok {
+				totalDuration = time.Since(requestStart)
+				trueTTFT = decodeStart.Sub(requestStart)
+			}
+		}
+
+		currentSpan.SetAttributes(
+			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.true_ttft_ms", float64(trueTTFT.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.decode_duration_ms", float64(decodeDuration.Milliseconds())),
+			attribute.Bool("llm_d.pd_proxy.concurrent_pd", true),
+		)
+	}
 }
 
-func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {
-	req := r.Clone(r.Context())
+func cloneWithJSONBody(ctx context.Context, r *http.Request, body []byte) *http.Request {
+	req := r.Clone(ctx)
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	return req

@@ -21,8 +21,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
@@ -57,9 +62,20 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	uuidStr := uuid.String()
 
 	// Prefill Stage
+	tracer := telemetry.Tracer()
+	ctx := r.Context()
+
+	ctx, prefillSpan := tracer.Start(ctx, "llm_d.pd_proxy.prefill",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	prefillSpan.SetAttributes(
+		attribute.String("llm_d.pd_proxy.request_id", uuidStr),
+		attribute.String("llm_d.pd_proxy.prefill_target", prefillPodHostPort),
+		attribute.String("llm_d.pd_proxy.connector", "nixlv2"),
+	)
+	prefillStart := time.Now()
 
 	// 1. Prepare prefill request
-	ctx := r.Context()
 	preq := r.Clone(ctx)
 
 	preq.Header.Add(requestHeaderRequestID, uuidStr)
@@ -107,11 +123,20 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	pw := &bufferedResponseWriter{}
 	prefillHandler.ServeHTTP(pw, preq)
 
+	prefillDuration := time.Since(prefillStart)
+	prefillSpan.SetAttributes(
+		attribute.Int("llm_d.pd_proxy.prefill.status_code", pw.statusCode),
+		attribute.Float64("llm_d.pd_proxy.prefill.duration_ms", float64(prefillDuration.Milliseconds())),
+	)
+
 	if isHTTPError(pw.statusCode) {
 		s.logger.Error(err, "request failed", "code", pw.statusCode)
+		prefillSpan.SetStatus(codes.Error, "prefill request failed")
+		prefillSpan.End()
 		w.WriteHeader(pw.statusCode)
 		return
 	}
+	prefillSpan.End()
 
 	// Process response - extract p/d fields
 	var prefillerResponse map[string]any
@@ -133,15 +158,31 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// Decode Stage
 
+	ctx, decodeSpan := tracer.Start(ctx, "llm_d.pd_proxy.decode",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer decodeSpan.End()
+
+	decodeSpan.SetAttributes(
+		attribute.String("llm_d.pd_proxy.request_id", uuidStr),
+		attribute.String("llm_d.pd_proxy.connector", "nixlv2"),
+	)
+	decodeStart := time.Now()
+
 	// 1. Prepare decode request
 	dreq := r.Clone(ctx)
 
 	dreq.Header.Add(requestHeaderRequestID, uuidStr)
 
 	delete(completionRequest, requestFieldStream)
+	streamingEnabled := false
 	if streamOk {
 		completionRequest[requestFieldStream] = streamValue
+		if streamBool, ok := streamValue.(bool); ok {
+			streamingEnabled = streamBool
+		}
 	}
+	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.streaming", streamingEnabled))
 	if streamOptionsOk {
 		completionRequest[requestFieldStreamOptions] = streamOptionsValue
 	}
@@ -168,8 +209,40 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	// 2. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	if !s.forwardDataParallel || !s.dataParallelHandler(w, dreq) {
+	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(w, dreq)
+	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.data_parallel", dataParallelUsed))
+
+	if !dataParallelUsed {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
+		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host))
 		s.decoderProxy.ServeHTTP(w, dreq)
+	}
+
+	decodeDuration := time.Since(decodeStart)
+	decodeSpan.SetAttributes(attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())))
+
+	// Calculate end-to-end P/D timing metrics.
+	// True TTFT captures time from gateway request start to decode start, including
+	// gateway routing, scheduling, prefill, and coordination overhead that
+	// per-instance vLLM metrics miss.
+	if currentSpan := trace.SpanFromContext(ctx); currentSpan.SpanContext().IsValid() {
+		var totalDuration time.Duration
+		var trueTTFT time.Duration
+		if requestStartValue := ctx.Value(requestStartTimeKey); requestStartValue != nil {
+			if requestStart, ok := requestStartValue.(time.Time); ok {
+				totalDuration = time.Since(requestStart)
+				trueTTFT = decodeStart.Sub(requestStart)
+			}
+		}
+
+		coordinatorOverhead := decodeStart.Sub(prefillStart.Add(prefillDuration))
+
+		currentSpan.SetAttributes(
+			attribute.Float64("llm_d.pd_proxy.total_duration_ms", float64(totalDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.true_ttft_ms", float64(trueTTFT.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.prefill_duration_ms", float64(prefillDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.decode_duration_ms", float64(decodeDuration.Milliseconds())),
+			attribute.Float64("llm_d.pd_proxy.coordinator_overhead_ms", float64(coordinatorOverhead.Milliseconds())),
+		)
 	}
 }

@@ -5,19 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
-	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 const (
@@ -61,15 +65,6 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse %s plugin config: %w", PrecisePrefixCachePluginType, err)
 		}
-	}
-
-	// Apply HF token from environment if not already set
-	if token := os.Getenv("HF_TOKEN"); token != "" &&
-		parameters.IndexerConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig != nil &&
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken == "" {
-		parameters.IndexerConfig.TokenizersPoolConfig.HFTokenizerConfig.HuggingFaceToken = token
 	}
 
 	// Validate model name is set
@@ -187,9 +182,22 @@ func (s *PrecisePrefixCacheScorer) Category() scheduling.ScorerCategory {
 // Score scores the provided endpoint based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
 func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+	// Start tracing span for scoring operation
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(ctx, "llm_d.epp.scorer.prefix_cache",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	debugLogger := logger.V(logutil.DEBUG)
 
+	// Set initial attributes
+	span.SetAttributes(
+		attribute.Int("llm_d.scorer.candidate_endpoints", len(endpoints)),
+	)
+
+	// Handle pod discovery and subscriber management
 	if s.kvEventsConfig.DiscoverPods {
 		// update subscribers here temporarily
 		for _, endpoint := range endpoints {
@@ -210,17 +218,33 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		}
 	}
 
+	// Early return if request is nil
 	if request == nil {
 		debugLogger.Info("Request is nil, skipping scoring")
+		span.SetAttributes(attribute.String("llm_d.scorer.result", "skipped_nil_request"))
 		return nil
+	}
+
+	// Set optional request attributes
+	if request.TargetModel != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+	}
+	if request.RequestId != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 	}
 
 	scores, err := s.getScores(ctx, request)
 	if err != nil {
 		logger.Error(err, "Failed to get endpoint scores")
+		span.SetStatus(codes.Error, err.Error())
 		return nil
 	}
 	debugLogger.Info("Got endpoint scores", "scores", scores)
+
+	// Track scoring statistics
+	span.SetAttributes(
+		attribute.Int("llm_d.scorer.scores_computed", len(scores)),
+	)
 
 	endpointToKey := func(endpoint scheduling.Endpoint) (string, bool) {
 		metadata := endpoint.GetMetadata()
@@ -231,6 +255,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		return metadata.Address, true
 	}
 
+	// Write prefix cache state to cycle state
 	state := &prefix.SchedulingContextState{
 		PrefixHashes:       []prefix.BlockHash{},
 		PrefixCacheServers: map[prefix.ServerID]int{},
@@ -244,7 +269,28 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 	}
 	cycleState.Write(plugin.StateKey(s.typedName.String()), state)
 
-	return indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
+	normalizedScores := indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
+
+	// Calculate score distribution for observability
+	if len(normalizedScores) > 0 {
+		maxScore := 0.0
+		totalScore := 0.0
+		for _, score := range normalizedScores {
+			if score > maxScore {
+				maxScore = score
+			}
+			totalScore += score
+		}
+		avgScore := totalScore / float64(len(normalizedScores))
+
+		span.SetAttributes(
+			attribute.Float64("llm_d.scorer.score.max", maxScore),
+			attribute.Float64("llm_d.scorer.score.avg", avgScore),
+			attribute.Int("llm_d.scorer.endpoints_scored", len(normalizedScores)),
+		)
+	}
+
+	return normalizedScores
 }
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
@@ -267,16 +313,16 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 		}
 
 		// Convert messages to conversation format
-		conversations := make([]preprocessing.Conversation, len(request.Body.ChatCompletions.Messages))
+		conversations := make([]types.Conversation, len(request.Body.ChatCompletions.Messages))
 		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = preprocessing.Conversation{
+			conversations[i] = types.Conversation{
 				Role:    msg.Role,
 				Content: msg.Content.Raw,
 			}
 		}
 
-		renderReq := &preprocessing.ApplyChatTemplateRequest{
-			Conversation:              [][]preprocessing.Conversation{conversations},
+		renderReq := &types.RenderChatRequest{
+			Conversation:              conversations,
 			Tools:                     request.Body.ChatCompletions.Tools,
 			Documents:                 request.Body.ChatCompletions.Documents,
 			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,

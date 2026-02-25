@@ -47,6 +47,18 @@ func (r requestEntry) String() string {
 	return fmt.Sprintf("%s:%s", r.RequestID, strings.Join(r.PodNames, "."))
 }
 
+// endpointScores implements logr.Marshaler to lazily convert endpoint keys
+// to strings only when the log line is actually written.
+type endpointScores map[scheduling.Endpoint]float64
+
+func (s endpointScores) MarshalLog() interface{} {
+	result := make(map[string]float64, len(s))
+	for ep, score := range s {
+		result[ep.GetMetadata().NamespacedName.String()] = score
+	}
+	return result
+}
+
 // compile-time type assertion
 var _ scheduling.Scorer = &ActiveRequest{}
 var _ requestcontrol.PreRequest = &ActiveRequest{}
@@ -152,6 +164,8 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *
 	}
 	s.mutex.RUnlock()
 
+	log.FromContext(ctx).V(logutil.DEBUG).Info("Active request counts", "endpointCounts", scoredEndpoints, "maxCount", maxCount)
+
 	scoredEndpointsMap := make(map[scheduling.Endpoint]float64, len(endpoints))
 	for _, endpoint := range endpoints {
 		endpointName := endpoint.GetMetadata().NamespacedName.String()
@@ -166,7 +180,7 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *
 		}
 	}
 
-	log.FromContext(ctx).V(logutil.DEBUG).Info("Scored endpoints", "scores", scoredEndpointsMap)
+	log.FromContext(ctx).V(logutil.DEBUG).Info("Scored endpoints", "scores", endpointScores(scoredEndpointsMap))
 	return scoredEndpointsMap
 }
 

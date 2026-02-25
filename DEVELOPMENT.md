@@ -6,38 +6,37 @@ Documentation for developing the inference scheduler.
 
 - [Make] `v4`+
 - [Golang] `v1.24`+
-- [Python] `v3.12`
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
 - [Kustomize]
+- [ZeroMQ]
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
-[Python]:https://www.python.org/
 [Docker]:https://www.docker.com/
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
 [Kustomize]:https://kubectl.docs.kubernetes.io/installation/kustomize/
+[ZeroMQ]:https://zeromq.org/
 
-### Python Version Configuration
+> [!NOTE]
+> **Python is NOT required** as of v0.5.1. Tokenization is handled by a separate UDS (Unix Domain Socket) tokenizer sidecar container. Previous versions (< v0.5.1) used embedded Python tokenizers with daulet/tokenizers bindings, but these are now deprecated.
 
-The project uses Python 3.12 by default, but this can be configured:
+## Tokenization Architecture
 
-**For local development:**
-`PYTHON_VERSION` in the Makefile set which Python version is used.
+The project uses **UDS (Unix Domain Socket)** tokenization. Tokenization is handled by a separate UDS tokenizer sidecar container, not by the EPP container itself. Previous embedded tokenizer approaches (daulet/tokenizers, direct Python/vLLM linking) are deprecated and no longer used.
 
-**For Docker builds:**
-The Python version is parameterized in the Dockerfile via the `PYTHON_VERSION` build argument, which defaults to 3.12. To build with a different Python version:
+**Building the UDS tokenizer image:**
 
 ```bash
-PYTHON_VERSION=3.13 make image-build
-
-# Or directly with Docker
-docker build --build-arg PYTHON_VERSION=3.13 -f Dockerfile.epp .
+make image-build-uds-tokenizer
 ```
 
-**For CI/CD:**
-Workflow uses Python 3.12 by default. The version can be set by modifying the `python-version` input in workflow file.
+The image is tagged as `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` by default. Override with:
+
+```bash
+UDS_TOKENIZER_TAG=v1.0.0 make image-build-uds-tokenizer
+```
 
 ## Kind Development Environment
 
@@ -241,7 +240,7 @@ And making requests with `curl`:
 
 ```bash
 curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: application/json' \
-  -d '{"model":"meta-llama/Llama-3.1-8B-Instruct","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 > [!NOTE]
