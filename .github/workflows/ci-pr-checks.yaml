@@ -9,6 +9,26 @@ on:
       - main
 
 jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pre-commit and tools
+        run: |
+          pip install pre-commit
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          curl -sL https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint && chmod +x /usr/local/bin/hadolint
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files
+
   check-changes:
     runs-on: ubuntu-latest
     outputs:
