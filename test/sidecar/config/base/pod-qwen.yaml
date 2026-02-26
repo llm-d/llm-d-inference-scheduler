@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: qwen2-0--5b
 spec:
-  initContainers:
+  containers:
     - name: routing-proxy
       image: routing-proxy
       args:
@@ -22,7 +22,6 @@ spec:
       #       - "true"
       #   initialDelaySeconds: 1
       #   periodSeconds: 360
-  containers:
     - name: vllm
       image: vllm/vllm-openai:v0.8.2
       args:

@@ -58,7 +58,7 @@ spec:
         app: ${POOL_NAME}
         llm-d.ai/role: decode
     spec:
-      initContainers:
+      containers:
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -72,7 +72,6 @@ spec:
         - containerPort: 8000
           protocol: TCP
         restartPolicy: Always
-      containers:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
         imagePullPolicy: IfNotPresent

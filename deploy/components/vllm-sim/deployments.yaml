@@ -14,7 +14,7 @@ spec:
       labels:
         app: ${POOL_NAME}
     spec:
-      initContainers:
+      containers:
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -55,7 +55,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
-      containers:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
         imagePullPolicy: IfNotPresent

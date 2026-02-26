@@ -17,7 +17,7 @@ spec:
                 operator: In
                 values:
                   - NVIDIA-A100-SXM4-80GB
-  initContainers:
+  containers:
     - name: routing-proxy
       image: routing-proxy
       securityContext:
@@ -33,7 +33,6 @@ spec:
           protocol: TCP
       restartPolicy: Always
       imagePullPolicy: Always
-  containers:
     - name: vllm
       image: vllm-openai
       securityContext:

@@ -15,7 +15,7 @@ spec:
         app: ${POOL_NAME}
         llm-d.ai/role: decode
     spec:
-      initContainers:
+      containers:
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -39,7 +39,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
-      containers:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
         imagePullPolicy: IfNotPresent
