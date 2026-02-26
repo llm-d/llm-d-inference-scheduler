@@ -18,9 +18,9 @@ package requestcontrol
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"sort"
 	"testing"
 	"time"
@@ -665,8 +665,6 @@ func TestDirector_HandleRequest(t *testing.T) {
 
 				reqCtx := &handlers.RequestContext{
 					Request: &handlers.Request{
-						// Create a copy of the map for each test run to avoid mutation issues.
-						Body: make(map[string]any),
 						Headers: map[string]string{
 							requtil.RequestIdHeaderKey: "test-req-id-" + test.name, // Ensure a default request ID
 						},
@@ -674,8 +672,11 @@ func TestDirector_HandleRequest(t *testing.T) {
 					ObjectiveKey:    test.inferenceObjectiveName,
 					TargetModelName: test.initialTargetModelName,
 				}
-				// Deep copy the body map.
-				maps.Copy(reqCtx.Request.Body, test.reqBodyMap)
+				var err error
+				reqCtx.Request.RawBody, err = json.Marshal(test.reqBodyMap)
+				if err != nil {
+					t.Fatalf("Error parsing the reqBodyMap, err is %v", err)
+				}
 
 				// Add appropriate path header based on request body content for path-based API detection
 				if _, hasPrompt := test.reqBodyMap["prompt"]; hasPrompt {
@@ -708,10 +709,15 @@ func TestDirector_HandleRequest(t *testing.T) {
 				}
 
 				if test.wantMutatedBodyModel != "" {
-					assert.NotNil(t, returnedReqCtx.Request.Body, "Expected mutated body, but reqCtx.Request.Body is nil")
-					assert.Equal(t, test.wantMutatedBodyModel, returnedReqCtx.Request.Body["model"],
+					assert.NotEmpty(t, returnedReqCtx.Request.RawBody, "Expected mutated body, but reqCtx.Request.Body is nil")
+					updatedBodyMap := make(map[string]any)
+					if err := json.Unmarshal(reqCtx.Request.RawBody, &updatedBodyMap); err != nil {
+						t.Errorf("Error to Unmarshal reqCtx.Request.UpdatedBody, err is %v", err)
+					}
+					assert.Equal(t, test.wantMutatedBodyModel, updatedBodyMap["model"],
 						"Mutated reqCtx.Request.Body model mismatch")
 				}
+				assert.Equal(t, len(reqCtx.Request.RawBody), reqCtx.RequestSize)
 			})
 		}
 	}
