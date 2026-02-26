@@ -107,17 +107,17 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 	profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 
+	// First find the Decode node
 	if _, executed := profileResults[h.decodeProfile]; !executed {
-		// if decode profile was not executed yet, first let the scheduler run the decode profile
 		return map[string]scheduling.SchedulerProfile{
 			h.decodeProfile: profiles[h.decodeProfile],
 		}
 	}
-	// otherwise, decode was already executed.
 
-	// when a profile run fails its result value is nil. we need to check decode result before continuing
-	// check if all configured profiles have been executed, or if decode failed, no need to run more profiles.
-	if len(profiles) == len(profileResults) || profileResults[h.decodeProfile] == nil {
+	// Safely verify Decode was successful before moving forward
+	decodeRes := profileResults[h.decodeProfile]
+	if decodeRes == nil || len(decodeRes.TargetEndpoints) == 0 {
+		// If we cannot find a decode pod, scheduling completely fails.
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
@@ -132,18 +132,22 @@ func (h *EdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 			h.encodeProfile: profiles[h.encodeProfile],
 		}
 	}
-	// otherwise, encode was already executed.
-	if len(profiles) == len(profileResults) || profileResults[h.encodeProfile] == nil {
+
+	// Safely verify Encode was successful. If not, fallback to single-stage Decode-only.
+	encodeRes := profileResults[h.encodeProfile]
+	if encodeRes == nil || len(encodeRes.TargetEndpoints) == 0 {
 		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	if h.decider != nil && h.decider.disaggregateEncode(ctx, request, profileResults[h.encodeProfile].TargetEndpoints[0]) {
-		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeEncodeDecode)
+	if h.decider != nil && !h.decider.disaggregateEncode(ctx, request, encodeRes.TargetEndpoints[0]) {
+		// Decider explicitly rejected the disaggregation
+		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
+		delete(profileResults, h.encodeProfile)
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
+	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeEncodeDecode)
 	return map[string]scheduling.SchedulerProfile{}
 }
 
