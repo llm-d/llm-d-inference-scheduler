@@ -87,7 +87,6 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Set span attributes for prefill
 	if len(prefillHostPort) == 0 {
 		s.logger.V(4).Info("skip disaggregated prefill")
 		span.SetAttributes(
@@ -165,6 +164,11 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	// If all encoders were filtered out, log and fall through
 	if len(encoderHostPorts) > 0 && len(allowedEncoders) == 0 {
 		s.logger.Info("SSRF protection: all encoder targets filtered out, falling back to P/D or decoder-only")
+		span.SetAttributes(
+			attribute.Bool("llm_d.epd_proxy.encode_disaggregation_used", false),
+			attribute.Int("llm_d.epd_proxy.encoder_allowed", len(allowedEncoders)),
+			attribute.Int("llm_d.epd_proxy.encoder_candidates", len(encoderHostPorts)),
+		)
 	}
 
 	// Use P/D protocol or decoder-only
