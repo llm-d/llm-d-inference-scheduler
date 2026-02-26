@@ -37,6 +37,7 @@ func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *sc
 
 	metrics := p.getOrCreateMetrics(programID)
 	metrics.IncrementRequests()
+	requestsTotal.WithLabelValues(programID).Inc()
 
 	log.FromContext(ctx).V(logutil.TRACE).Info("PrepareData: recorded program request",
 		"requestId", request.RequestId, "programId", programID,
@@ -58,11 +59,13 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 
 	metrics := p.getOrCreateMetrics(programID)
 	metrics.IncrementDispatched()
+	dispatchedTotal.WithLabelValues(programID).Inc()
 
 	if enqueueTimeRaw, ok := p.requestTimestamps.Load(request.RequestId); ok {
 		enqueueTime := enqueueTimeRaw.(time.Time)
 		waitMs := float64(time.Since(enqueueTime).Milliseconds())
 		metrics.RecordWaitTime(waitMs)
+		waitTimeMs.WithLabelValues(programID).Observe(waitMs)
 
 		log.FromContext(ctx).V(logutil.TRACE).Info("PreRequest: recorded wait time",
 			"requestId", request.RequestId, "programId", programID,
@@ -100,6 +103,8 @@ func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *sche
 	if response != nil {
 		metrics := p.getOrCreateMetrics(programID)
 		metrics.RecordTokens(int64(response.Usage.PromptTokens), int64(response.Usage.CompletionTokens))
+		inputTokensTotal.WithLabelValues(programID).Add(float64(response.Usage.PromptTokens))
+		outputTokensTotal.WithLabelValues(programID).Add(float64(response.Usage.CompletionTokens))
 
 		log.FromContext(ctx).V(logutil.TRACE).Info("ResponseComplete: recorded tokens",
 			"requestId", request.RequestId, "programId", programID,
