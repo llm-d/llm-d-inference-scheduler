@@ -350,7 +350,7 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 	// 5. Store PrefixCacheMatchInfo on each endpoint
 	blockSize := s.getBlockSizeTokens()
 	for _, ep := range endpoints {
-		addr := ep.GetMetadata().Address
+		addr := fmt.Sprintf("%s:%s", ep.GetMetadata().Address, ep.GetMetadata().Port)
 		matchLen := int(scores[addr])
 		ep.Put(prefixCacheMatchInfoKey, &prefixCacheMatchInfo{
 			matchBlocks:     matchLen,
@@ -459,7 +459,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 			return "", false
 		}
 
-		return metadata.Address, true
+		return fmt.Sprintf("%s:%s", metadata.Address, metadata.Port), true
 	}
 
 	// Write prefix cache state to cycle state
@@ -533,8 +533,9 @@ func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
 	targetEndpoint := primaryResult.TargetEndpoints[0]
 
 	// 3. Build speculative pod entry and add to index
+	targetMeta := targetEndpoint.GetMetadata()
 	speculativePod := kvblock.PodEntry{
-		PodIdentifier: targetEndpoint.GetMetadata().Address,
+		PodIdentifier: fmt.Sprintf("%s:%s", targetMeta.Address, targetMeta.Port),
 		Annotation:    "speculative",
 	}
 
@@ -550,8 +551,9 @@ func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
 
 	// 4. Handle P/D disaggregation: also add speculative entry for prefill endpoint
 	if pr, exists := schedulingResult.ProfileResults[experimentalPrefillProfile]; exists && len(pr.TargetEndpoints) > 0 {
+		prefillMeta := pr.TargetEndpoints[0].GetMetadata()
 		prefillPod := kvblock.PodEntry{
-			PodIdentifier: pr.TargetEndpoints[0].GetMetadata().Address,
+			PodIdentifier: fmt.Sprintf("%s:%s", prefillMeta.Address, prefillMeta.Port),
 			Annotation:    "speculative",
 		}
 		if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{prefillPod}); err != nil {
@@ -620,8 +622,8 @@ func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
 func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
 	podSet := sets.New[string]()
 	for _, ep := range endpoints {
-		if ep.GetMetadata() != nil {
-			podSet.Insert(ep.GetMetadata().Address)
+		if m := ep.GetMetadata(); m != nil {
+			podSet.Insert(fmt.Sprintf("%s:%s", m.Address, m.Port))
 		}
 	}
 	return podSet
