@@ -15,9 +15,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
@@ -27,7 +30,41 @@ import (
 const (
 	// PrecisePrefixCachePluginType is the type-name of the PrecisePrefixCacheScorer plugin.
 	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
+
+	// defaultSpeculativeTTL is the default TTL for speculative entries.
+	// This should be long enough for the vLLM engine to process the request
+	// and publish BlockStored events, after which confirmed entries replace them.
+	defaultSpeculativeTTL = 30 * time.Second
+
+	// stateKey is the PluginState key used to share data between
+	// PrepareRequestData, Score, and PreRequest.
+	stateKey = plugin.StateKey("precise-prefix-cache-state")
+
+	// prefixCacheMatchInfoKey is the endpoint data key for prefix cache match
+	// information. Once the upstream GIE attrprefix package is available in the
+	// pinned dependency, replace this with attrprefix.PrefixCacheMatchInfoKey.
+	prefixCacheMatchInfoKey = "PrefixCacheMatchInfoKey"
+
+	// experimentalPrefillProfile is the profile name for P/D disaggregation mode.
+	experimentalPrefillProfile = "prefill"
 )
+
+// prefixCacheMatchInfo mirrors the upstream attrprefix.PrefixCacheMatchInfo.
+// Replace with the upstream type once the GIE dependency is updated.
+type prefixCacheMatchInfo struct {
+	matchBlocks     int
+	totalBlocks     int
+	blockSizeTokens int
+}
+
+// Clone implements datalayer.Cloneable.
+func (p *prefixCacheMatchInfo) Clone() fwkdl.Cloneable {
+	return &prefixCacheMatchInfo{
+		matchBlocks:     p.matchBlocks,
+		totalBlocks:     p.totalBlocks,
+		blockSizeTokens: p.blockSizeTokens,
+	}
+}
 
 // PrecisePrefixCachePluginConfig holds the configuration for the
 // PrecisePrefixCacheScorer plugin.
@@ -42,10 +79,46 @@ type PrecisePrefixCachePluginConfig struct {
 	// used to subscribe to KV-cache events and update the internal KV-cache
 	// index state.
 	KVEventsConfig *kvevents.Config `json:"kvEventsConfig"`
+	// SpeculativeTTL is the time-to-live for speculative index entries.
+	// After this duration, speculative entries are evicted from the index.
+	// If zero, defaultSpeculativeTTL is used.
+	SpeculativeTTL time.Duration `json:"speculativeTTL"`
 }
 
-// compile-time type assertion
-var _ scheduling.Scorer = &PrecisePrefixCacheScorer{}
+// compile-time type assertions
+var (
+	_ scheduling.Scorer              = &PrecisePrefixCacheScorer{}
+	_ requestcontrol.PrepareDataPlugin = &PrecisePrefixCacheScorer{}
+	_ requestcontrol.PreRequest        = &PrecisePrefixCacheScorer{}
+)
+
+// speculativeEntries holds the data needed to evict speculative entries
+// from the index when the TTL expires.
+type speculativeEntries struct {
+	blockKeys  []kvblock.BlockHash
+	podEntries []kvblock.PodEntry
+}
+
+// precisePluginState holds data shared between PrepareRequestData, Score,
+// and PreRequest via PluginState.
+type precisePluginState struct {
+	blockKeys []kvblock.BlockHash
+	scores    map[string]float64 // pod addr → score
+}
+
+// Clone implements plugin.StateData.
+func (s *precisePluginState) Clone() plugin.StateData {
+	blockKeys := make([]kvblock.BlockHash, len(s.blockKeys))
+	copy(blockKeys, s.blockKeys)
+	scores := make(map[string]float64, len(s.scores))
+	for k, v := range s.scores {
+		scores[k] = v
+	}
+	return &precisePluginState{
+		blockKeys: blockKeys,
+		scores:    scores,
+	}
+}
 
 // PrecisePrefixCachePluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
@@ -135,12 +208,43 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 		}
 	}
 
+	// Determine speculative TTL
+	speculativeTTL := config.SpeculativeTTL
+	if speculativeTTL <= 0 {
+		speculativeTTL = defaultSpeculativeTTL
+	}
+
+	// Initialize speculative entries TTL cache with eviction callback
+	speculativeCache := ttlcache.New[string, *speculativeEntries](
+		ttlcache.WithTTL[string, *speculativeEntries](speculativeTTL),
+	)
+	speculativeCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
+		item *ttlcache.Item[string, *speculativeEntries],
+	) {
+		if reason != ttlcache.EvictionReasonExpired {
+			return
+		}
+		entries := item.Value()
+		for _, reqKey := range entries.blockKeys {
+			// Evict speculative entries from the index.
+			// Speculative entries were added without engineKey mapping (nil engineKeys),
+			// so Evict() falls back to treating the key as a requestKey directly.
+			//nolint:errcheck // best-effort cleanup on TTL expiry
+			kvCacheIndexer.KVBlockIndex().Evict(context.Background(), reqKey, entries.podEntries)
+		}
+	})
+	go speculativeCache.Start()
+
 	return &PrecisePrefixCacheScorer{
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
 		subscribersCache:   subscribersCache,
 		subscribersManager: subscribersManager,
 		kvEventsConfig:     config.KVEventsConfig,
+		pluginState:        plugin.NewPluginState(ctx),
+		speculativeCache:   speculativeCache,
+		speculativeTTL:     speculativeTTL,
+		blockSizeTokens:    config.TokenProcessorConfig.BlockSize,
 	}, nil
 }
 
@@ -149,6 +253,11 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 // It uses the `kvcache.Indexer` to score endpoints based on the KV-cache index
 // state, and the `kvevents.Pool` to subscribe to KV-cache events
 // to keep the internal KV-cache index state up-to-date.
+//
+// With speculative indexing, the scorer also implements PrepareDataPlugin and
+// PreRequest to proactively populate the index with expected cache entries
+// immediately after a routing decision, closing the blind spot between the
+// routing decision and the arrival of actual KV events from the engine.
 type PrecisePrefixCacheScorer struct {
 	typedName      plugin.TypedName
 	kvCacheIndexer *kvcache.Indexer
@@ -161,6 +270,19 @@ type PrecisePrefixCacheScorer struct {
 	subscribersCache   *ttlcache.Cache[string, struct{}]
 	subscribersManager *kvevents.SubscriberManager
 	kvEventsConfig     *kvevents.Config
+
+	// pluginState stores per-request data (block keys, scores) shared
+	// between PrepareRequestData, Score, and PreRequest extension points.
+	pluginState *plugin.PluginState
+
+	// speculativeCache tracks speculative entries added to the index so that
+	// they can be evicted when their TTL expires.
+	speculativeCache *ttlcache.Cache[string, *speculativeEntries]
+	speculativeTTL   time.Duration
+
+	// blockSizeTokens is the number of tokens per KV-block, used for
+	// constructing PrefixCacheMatchInfo in PrepareRequestData.
+	blockSizeTokens int
 }
 
 // TypedName returns the typed name of the plugin.
@@ -179,8 +301,83 @@ func (s *PrecisePrefixCacheScorer) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
+// --- PrepareDataPlugin implementation ---
+
+// Produces declares the data keys this plugin writes to endpoints.
+func (s *PrecisePrefixCacheScorer) Produces() map[string]any {
+	return map[string]any{
+		prefixCacheMatchInfoKey: prefixCacheMatchInfo{},
+	}
+}
+
+// Consumes declares the data keys this plugin requires from other plugins.
+func (s *PrecisePrefixCacheScorer) Consumes() map[string]any {
+	return map[string]any{}
+}
+
+// PrepareRequestData computes block keys, looks up the index, and stores
+// per-endpoint prefix match information. The computed block keys and scores
+// are saved to PluginState for reuse by Score() and PreRequest().
+func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
+	request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) error {
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+
+	if request == nil || request.Body == nil {
+		return nil
+	}
+
+	// 1. Compute block keys from the request
+	blockKeys, err := s.computeBlockKeys(ctx, request)
+	if err != nil {
+		return fmt.Errorf("failed to compute block keys: %w", err)
+	}
+	if len(blockKeys) == 0 {
+		return nil
+	}
+
+	// 2. Build pod set from endpoints for filtered lookup
+	podSet := extractPodSet(endpoints)
+
+	// 3. Lookup index for matching pods
+	keyToPods, err := s.kvCacheIndexer.KVBlockIndex().Lookup(ctx, blockKeys, podSet)
+	if err != nil {
+		return fmt.Errorf("failed to lookup block keys: %w", err)
+	}
+
+	// 4. Compute per-pod scores (longest prefix match)
+	scores := computeScoresFromKeyToPods(blockKeys, keyToPods)
+
+	// 5. Store PrefixCacheMatchInfo on each endpoint
+	blockSize := s.getBlockSizeTokens()
+	for _, ep := range endpoints {
+		addr := ep.GetMetadata().Address
+		matchLen := int(scores[addr])
+		ep.Put(prefixCacheMatchInfoKey, &prefixCacheMatchInfo{
+			matchBlocks:     matchLen,
+			totalBlocks:     len(blockKeys),
+			blockSizeTokens: blockSize,
+		})
+	}
+
+	// 6. Save to PluginState for Score() and PreRequest()
+	s.pluginState.Write(request.RequestId, stateKey, &precisePluginState{
+		blockKeys: blockKeys,
+		scores:    scores,
+	})
+
+	logger.V(logutil.TRACE).Info("PrepareRequestData completed",
+		"blockKeys", len(blockKeys), "scores", scores)
+
+	return nil
+}
+
+// --- Scorer implementation ---
+
 // Score scores the provided endpoint based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
+// If PrepareRequestData was called beforehand, Score reuses the pre-computed
+// results from PluginState. Otherwise, it falls back to computing scores
+// directly via getScores (backward compatible).
 func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	// Start tracing span for scoring operation
 	tracer := telemetry.Tracer()
@@ -233,11 +430,21 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 	}
 
-	scores, err := s.getScores(ctx, request)
-	if err != nil {
-		logger.Error(err, "Failed to get endpoint scores")
-		span.SetStatus(codes.Error, err.Error())
-		return nil
+	// Try to reuse pre-computed scores from PrepareRequestData
+	var scores map[string]float64
+	if state, err := plugin.ReadPluginStateKey[*precisePluginState](
+		s.pluginState, request.RequestId, stateKey); err == nil {
+		scores = state.scores
+		debugLogger.Info("Reusing pre-computed scores from PrepareRequestData")
+	} else {
+		// Fallback: compute scores directly (backward compatible path)
+		var scoreErr error
+		scores, scoreErr = s.getScores(ctx, request)
+		if scoreErr != nil {
+			logger.Error(scoreErr, "Failed to get endpoint scores")
+			span.SetStatus(codes.Error, scoreErr.Error())
+			return nil
+		}
 	}
 	debugLogger.Info("Got endpoint scores", "scores", scores)
 
@@ -291,6 +498,180 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 	}
 
 	return normalizedScores
+}
+
+// --- PreRequest implementation ---
+
+// PreRequest records speculative entries in the index for the selected endpoint
+// immediately after the scheduling decision. This closes the blind spot between
+// the routing decision and the arrival of actual KV events from the engine.
+// The speculative entries are associated with a TTL and will be automatically
+// evicted when the TTL expires.
+func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
+	request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+
+	// 1. Read block keys from PluginState
+	state, err := plugin.ReadPluginStateKey[*precisePluginState](
+		s.pluginState, request.RequestId, stateKey)
+	if err != nil {
+		logger.V(logutil.TRACE).Info("No plugin state found for PreRequest, skipping speculative indexing",
+			"requestID", request.RequestId)
+		return
+	}
+	s.pluginState.Delete(request.RequestId)
+
+	if len(state.blockKeys) == 0 {
+		return
+	}
+
+	// 2. Get target endpoint from scheduling result
+	primaryResult := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
+	if primaryResult == nil || len(primaryResult.TargetEndpoints) == 0 {
+		return
+	}
+	targetEndpoint := primaryResult.TargetEndpoints[0]
+
+	// 3. Build speculative pod entry and add to index
+	speculativePod := kvblock.PodEntry{
+		PodIdentifier: targetEndpoint.GetMetadata().Address,
+		Annotation:    "speculative",
+	}
+
+	allPodEntries := []kvblock.PodEntry{speculativePod}
+
+	index := s.kvCacheIndexer.KVBlockIndex()
+	// Pass nil engineKeys: speculative entries only need requestKey -> PodEntry mapping.
+	// Engine keys will be linked later when confirmed KV events arrive.
+	if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{speculativePod}); err != nil {
+		logger.Error(err, "Failed to add speculative entries to index",
+			"pod", speculativePod.PodIdentifier)
+	}
+
+	// 4. Handle P/D disaggregation: also add speculative entry for prefill endpoint
+	if pr, exists := schedulingResult.ProfileResults[experimentalPrefillProfile]; exists && len(pr.TargetEndpoints) > 0 {
+		prefillPod := kvblock.PodEntry{
+			PodIdentifier: pr.TargetEndpoints[0].GetMetadata().Address,
+			Annotation:    "speculative",
+		}
+		if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{prefillPod}); err != nil {
+			logger.Error(err, "Failed to add speculative entries for prefill endpoint",
+				"pod", prefillPod.PodIdentifier)
+		}
+		allPodEntries = append(allPodEntries, prefillPod)
+	}
+
+	// 5. Register in TTL cache for automatic eviction
+	s.speculativeCache.Set(request.RequestId, &speculativeEntries{
+		blockKeys:  state.blockKeys,
+		podEntries: allPodEntries,
+	}, s.speculativeTTL)
+
+	logger.V(logutil.TRACE).Info("Added speculative entries",
+		"requestID", request.RequestId,
+		"pod", speculativePod.PodIdentifier,
+		"blockKeys", len(state.blockKeys),
+		"ttl", s.speculativeTTL)
+}
+
+// --- Internal helper methods ---
+
+// computeBlockKeys extracts block keys from an LLM request by tokenizing
+// the prompt and computing KV-block hashes.
+func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
+	request *scheduling.LLMRequest) ([]kvblock.BlockHash, error) {
+	if request.Body == nil {
+		return nil, nil
+	}
+
+	// Chat completions path
+	if request.Body.ChatCompletions != nil {
+		conversations := make([]types.Conversation, len(request.Body.ChatCompletions.Messages))
+		for i, msg := range request.Body.ChatCompletions.Messages {
+			conversations[i] = types.Conversation{
+				Role:    msg.Role,
+				Content: msg.Content.Raw,
+			}
+		}
+
+		renderReq := &types.RenderChatRequest{
+			Conversation:              conversations,
+			Tools:                     request.Body.ChatCompletions.Tools,
+			Documents:                 request.Body.ChatCompletions.Documents,
+			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
+			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
+			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
+			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
+			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
+		}
+
+		return s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
+	}
+
+	// Regular completions path
+	if request.Body.Completions != nil {
+		return s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt, request.TargetModel)
+	}
+
+	return nil, nil
+}
+
+// extractPodSet builds a set of pod identifiers from endpoints for filtered index lookups.
+func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
+	podSet := sets.New[string]()
+	for _, ep := range endpoints {
+		if ep.GetMetadata() != nil {
+			podSet.Insert(ep.GetMetadata().Address)
+		}
+	}
+	return podSet
+}
+
+// computeScoresFromKeyToPods computes per-pod longest prefix match scores
+// from the index lookup result. This mirrors the intersection logic in the
+// LongestPrefixScorer: a pod's prefix chain ends as soon as it is missing
+// from any block key, even if other pods still have that key.
+func computeScoresFromKeyToPods(blockKeys []kvblock.BlockHash,
+	keyToPods map[kvblock.BlockHash][]kvblock.PodEntry) map[string]float64 {
+	podScores := make(map[string]float64)
+
+	if len(blockKeys) == 0 {
+		return podScores
+	}
+
+	// Initialize active pods from the first key
+	firstKeyPods := keyToPods[blockKeys[0]]
+	activePods := sets.New[string]()
+	for _, pod := range firstKeyPods {
+		activePods.Insert(pod.PodIdentifier)
+		podScores[pod.PodIdentifier] = 1
+	}
+
+	// For each subsequent key, intersect active pods with current key's pods.
+	// Pods not present in the current key are dropped from the active set.
+	for i := 1; i < len(blockKeys); i++ {
+		if activePods.Len() == 0 {
+			break
+		}
+
+		pods := keyToPods[blockKeys[i]]
+		currentPods := sets.New[string]()
+		for _, pod := range pods {
+			currentPods.Insert(pod.PodIdentifier)
+		}
+
+		activePods = activePods.Intersection(currentPods)
+		for pod := range activePods {
+			podScores[pod]++
+		}
+	}
+
+	return podScores
+}
+
+// getBlockSizeTokens returns the block size in tokens from the token processor config.
+func (s *PrecisePrefixCacheScorer) getBlockSizeTokens() int {
+	return s.blockSizeTokens
 }
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
