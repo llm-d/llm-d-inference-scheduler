@@ -79,9 +79,15 @@ type PrecisePrefixCachePluginConfig struct {
 	// used to subscribe to KV-cache events and update the internal KV-cache
 	// index state.
 	KVEventsConfig *kvevents.Config `json:"kvEventsConfig"`
+	// SpeculativeIndexing enables speculative indexing. When true, the plugin
+	// proactively adds predicted cache entries to the index immediately after
+	// a routing decision (via PrepareRequestData and PreRequest), closing the
+	// blind spot between routing and KV event arrival.
+	// When false, only confirmed KV events populate the index.
+	SpeculativeIndexing bool `json:"speculativeIndexing"`
 	// SpeculativeTTL is the time-to-live for speculative index entries.
 	// After this duration, speculative entries are evicted from the index.
-	// If zero, defaultSpeculativeTTL is used.
+	// If zero, defaultSpeculativeTTL is used. Only used when SpeculativeIndexing is true.
 	SpeculativeTTL time.Duration `json:"speculativeTTL"`
 }
 
@@ -208,32 +214,35 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 		}
 	}
 
-	// Determine speculative TTL
-	speculativeTTL := config.SpeculativeTTL
-	if speculativeTTL <= 0 {
-		speculativeTTL = defaultSpeculativeTTL
-	}
+	// Initialize speculative indexing components only when enabled
+	var speculativeCache *ttlcache.Cache[string, *speculativeEntries]
+	var speculativeTTL time.Duration
+	if config.SpeculativeIndexing {
+		speculativeTTL = config.SpeculativeTTL
+		if speculativeTTL <= 0 {
+			speculativeTTL = defaultSpeculativeTTL
+		}
 
-	// Initialize speculative entries TTL cache with eviction callback
-	speculativeCache := ttlcache.New[string, *speculativeEntries](
-		ttlcache.WithTTL[string, *speculativeEntries](speculativeTTL),
-	)
-	speculativeCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
-		item *ttlcache.Item[string, *speculativeEntries],
-	) {
-		if reason != ttlcache.EvictionReasonExpired {
-			return
-		}
-		entries := item.Value()
-		for _, reqKey := range entries.blockKeys {
-			// Evict speculative entries from the index.
-			// Speculative entries were added without engineKey mapping (nil engineKeys),
-			// so Evict() falls back to treating the key as a requestKey directly.
-			//nolint:errcheck // best-effort cleanup on TTL expiry
-			kvCacheIndexer.KVBlockIndex().Evict(context.Background(), reqKey, entries.podEntries)
-		}
-	})
-	go speculativeCache.Start()
+		speculativeCache = ttlcache.New[string, *speculativeEntries](
+			ttlcache.WithTTL[string, *speculativeEntries](speculativeTTL),
+		)
+		speculativeCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
+			item *ttlcache.Item[string, *speculativeEntries],
+		) {
+			if reason != ttlcache.EvictionReasonExpired {
+				return
+			}
+			entries := item.Value()
+			for _, reqKey := range entries.blockKeys {
+				// Evict speculative entries from the index.
+				// Speculative entries were added without engineKey mapping (nil engineKeys),
+				// so Evict() falls back to treating the key as a requestKey directly.
+				//nolint:errcheck // best-effort cleanup on TTL expiry
+				kvCacheIndexer.KVBlockIndex().Evict(context.Background(), reqKey, entries.podEntries)
+			}
+		})
+		go speculativeCache.Start()
+	}
 
 	return &PrecisePrefixCacheScorer{
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
@@ -245,6 +254,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 		speculativeCache:   speculativeCache,
 		speculativeTTL:     speculativeTTL,
 		blockSizeTokens:    config.TokenProcessorConfig.BlockSize,
+		speculativeEnabled: config.SpeculativeIndexing,
 	}, nil
 }
 
@@ -283,6 +293,9 @@ type PrecisePrefixCacheScorer struct {
 	// blockSizeTokens is the number of tokens per KV-block, used for
 	// constructing PrefixCacheMatchInfo in PrepareRequestData.
 	blockSizeTokens int
+
+	// speculativeEnabled controls whether speculative indexing is active.
+	speculativeEnabled bool
 }
 
 // TypedName returns the typed name of the plugin.
@@ -318,8 +331,13 @@ func (s *PrecisePrefixCacheScorer) Consumes() map[string]any {
 // PrepareRequestData computes block keys, looks up the index, and stores
 // per-endpoint prefix match information. The computed block keys and scores
 // are saved to PluginState for reuse by Score() and PreRequest().
+// This is a no-op when speculative indexing is disabled.
 func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 	request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) error {
+	if !s.speculativeEnabled {
+		return nil
+	}
+
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 
 	if request == nil || request.Body == nil {
@@ -507,8 +525,13 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 // the routing decision and the arrival of actual KV events from the engine.
 // The speculative entries are associated with a TTL and will be automatically
 // evicted when the TTL expires.
+// This is a no-op when speculative indexing is disabled.
 func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
 	request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+	if !s.speculativeEnabled {
+		return
+	}
+
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 
 	// 1. Read block keys from PluginState

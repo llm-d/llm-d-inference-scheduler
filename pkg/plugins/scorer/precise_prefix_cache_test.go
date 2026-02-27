@@ -617,9 +617,10 @@ func newTestScorer(t *testing.T) *PrecisePrefixCacheScorer {
 	}
 
 	scorer, err := New(ctx, PrecisePrefixCachePluginConfig{
-		IndexerConfig:  kvcacheConfig,
-		KVEventsConfig: kvevents.DefaultConfig(),
-		SpeculativeTTL: 5 * time.Second,
+		IndexerConfig:       kvcacheConfig,
+		KVEventsConfig:      kvevents.DefaultConfig(),
+		SpeculativeIndexing: true,
+		SpeculativeTTL:      5 * time.Second,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, scorer)
@@ -852,9 +853,10 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 
 	// Create scorer with very short TTL for testing eviction
 	scorer, err := New(ctx, PrecisePrefixCachePluginConfig{
-		IndexerConfig:  kvcacheConfig,
-		KVEventsConfig: kvevents.DefaultConfig(),
-		SpeculativeTTL: 200 * time.Millisecond,
+		IndexerConfig:       kvcacheConfig,
+		KVEventsConfig:      kvevents.DefaultConfig(),
+		SpeculativeIndexing: true,
+		SpeculativeTTL:      200 * time.Millisecond,
 	})
 	require.NoError(t, err)
 
