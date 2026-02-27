@@ -2,16 +2,17 @@
 # LGTM Gatekeeper - Required Status Check
 # ============================================================================
 # Rules Enforced:
-# 1. PR MUST have "lgtm" and "approve" labels
-# 2. PR MUST NOT have blocking labels (hold)
+# 1. PR MUST have the "lgtm" label
+# 2. PR MUST have a native GitHub Approved status (via /approve)
+# 3. PR MUST NOT have blocking labels (hold)
 # ============================================================================
 
 name: LGTM Gatekeeper
 on:
   pull_request:
-    # Run on PR open/reopen and label changes
-    # NOT on synchronize (handled by lgtm-reset.yml)
-    types: [opened, labeled, unlabeled, reopened]
+    types: [opened, labeled, unlabeled, reopened, synchronize]
+  pull_request_review:
+    types: [submitted, dismissed]
 
 env:
   BLOCKING_LABELS: "hold"
@@ -20,14 +21,18 @@ jobs:
   validate-pr:
     runs-on: ubuntu-latest
     steps:
-      - name: Enforce LGTM & Blockers
+      - name: Enforce LGTM, Approvals & Blockers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Dynamically grab the PR number depending on which event triggered the workflow
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.pull_request_review.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          # Fetch current labels
-          LABELS=$(gh pr view $PR_NUMBER --repo "$REPO" --json labels --jq '.labels[].name')
+          # Fetch current labels and review status in a single API call
+          PR_DATA=$(gh pr view $PR_NUMBER --repo "$REPO" --json labels,reviewDecision)
+          
+          # 1. Extract labels
+          LABELS=$(echo "$PR_DATA" | jq -r '.labels[].name')
           
           # Check 1: IS IT BLOCKED?
           if echo "$LABELS" | grep -Eiq "^($BLOCKING_LABELS)$"; then
@@ -35,23 +40,24 @@ jobs:
             exit 1
           fi
 
-          # Check 2: IS IT APPROVED? (both lgtm and approve required)
+          # Check 2: DOES IT HAVE LGTM?
           HAS_LGTM=false
-          HAS_APPROVE=false
-
           if echo "$LABELS" | grep -Fqx "lgtm"; then
             HAS_LGTM=true
           fi
 
-          if echo "$LABELS" | grep -Fqx "approve"; then
+          # Check 3: IS IT NATIVELY APPROVED?
+          REVIEW_STATUS=$(echo "$PR_DATA" | jq -r '.reviewDecision')
+          HAS_APPROVE=false
+          if [ "$REVIEW_STATUS" = "APPROVED" ]; then
             HAS_APPROVE=true
           fi
 
           if [ "$HAS_LGTM" = false ] || [ "$HAS_APPROVE" = false ]; then
-            echo "::error:: ⛔ FAILED: PR requires both 'lgtm' and 'approve' labels."
-            echo "  - lgtm: $HAS_LGTM"
-            echo "  - approve: $HAS_APPROVE"
+            echo "::error:: ⛔ FAILED: PR requires both the 'lgtm' label and a native GitHub Approval."
+            echo "  - lgtm label present: $HAS_LGTM"
+            echo "  - Native Approval (reviewDecision): $REVIEW_STATUS"
             exit 1
           fi
           
-          echo "✅ PASSED: Both lgtm and approve labels present, no blockers."
+          echo "✅ PASSED: PR has the lgtm label, is natively approved, and has no blockers."

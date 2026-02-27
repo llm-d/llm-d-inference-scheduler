@@ -388,12 +388,14 @@ The project uses a Prow-inspired ChatOps system to manage PR review process via 
 ### Merge Requirements
 
 For a PR to be merged, it must have:
-- ✅ **Both `lgtm` and `approve` labels** - Required for merge approval
-- ✅ **No blocking labels** - The `hold` label must not be present
-- ✅ **Signed and verified commits** - All commits must include a DCO sign-off
-- ✅ **All required status checks passing** - CI/CD checks must succeed
+- ✅ **The `lgtm` label AND a native GitHub Approval** - Triggered by authorized users via the `/lgtm` and `/approve` commands in the comments.
+- ✅ **No blocking labels** - The `hold` label must not be present.
+- ✅ **Signed and verified commits** - All commits must include a DCO sign-off.
+- ✅ **All required status checks passing** - CI/CD pipelines and gatekeeper checks must succeed.
 
 The gatekeeper workflow enforces these requirements as a required status check.
+
+*Note: The label and approval requirements are enforced by the custom LGTM Gatekeeper workflow, while commit signatures are enforced natively by the repository's branch rulesets.*
 
 ### Approval Reset on New Commits
 
