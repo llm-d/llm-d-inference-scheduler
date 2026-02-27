@@ -234,20 +234,13 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				// render the chat template
-				renderReq := &preprocessing.ApplyChatTemplateRequest{
+				// render the chat template and tokenize
+				renderReq := &preprocessing.RenderChatRequest{
 					Key:          tokenizerCacheKey,
-					Conversation: [][]preprocessing.Conversation{conversations},
+					Conversation: conversations,
 					ChatTemplate: req.ChatCompletions.ChatTemplate,
 				}
-				rendered, err := processor.ApplyChatTemplate(t.Context(), renderReq)
-				require.NoError(t, err)
-
-				// tokenize rendered prompt
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
-
-				tokens, _, err := testTokenizer.Encode(rendered, model, false)
+				tokens, _, err := processor.RenderChat(t.Context(), renderReq)
 				require.NoError(t, err)
 
 				tokenProcessor := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -539,10 +532,9 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 			kvcacheConfig, err := kvcache.NewDefaultConfig()
 			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
-				ModelName:             "test-model",
-				WorkersCount:          1,
-				MinPrefixOverlapRatio: 0.8,
-				LocalTokenizerConfig:  &localTokenizerConfig,
+				ModelName:            "test-model",
+				WorkersCount:         1,
+				LocalTokenizerConfig: &localTokenizerConfig,
 			}
 			require.NoError(t, err)
 
