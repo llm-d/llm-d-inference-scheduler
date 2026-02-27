@@ -54,7 +54,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -68,7 +69,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -87,7 +89,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -97,7 +100,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
@@ -107,7 +111,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 2,
@@ -178,7 +183,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -188,7 +194,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
@@ -275,7 +282,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -285,7 +293,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
@@ -295,7 +304,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 2,
@@ -365,7 +375,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -417,7 +428,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -425,7 +437,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -433,7 +446,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -462,7 +476,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -470,7 +485,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -478,7 +494,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -565,8 +582,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 			gotByAddress := make(map[string]float64)
 			for endpoint, score := range got {
-				if endpoint.GetMetadata() != nil {
-					gotByAddress[endpoint.GetMetadata().Address] = score
+				if m := endpoint.GetMetadata(); m != nil {
+					gotByAddress[fmt.Sprintf("%s:%s", m.Address, m.Port)] = score
 				}
 			}
 
@@ -634,7 +651,8 @@ func TestPrepareRequestData_PopulatesPluginState(t *testing.T) {
 		scheduling.NewEndpoint(
 			&fwkdl.EndpointMetadata{
 				NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-				Address:        "10.0.0.1:8080",
+				Address:        "10.0.0.1",
+				Port:           "8080",
 			}, nil, nil),
 	}
 
@@ -691,11 +709,13 @@ func TestScoreReusesPluginState(t *testing.T) {
 	endpoints := []scheduling.Endpoint{
 		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-			Address:        "10.0.0.1:8080",
+			Address:        "10.0.0.1",
+			Port:           "8080",
 		}, nil, nil),
 		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-			Address:        "10.0.0.2:8080",
+			Address:        "10.0.0.2",
+			Port:           "8080",
 		}, nil, nil),
 	}
 
@@ -719,7 +739,8 @@ func TestScoreReusesPluginState(t *testing.T) {
 
 	gotByAddress := make(map[string]float64)
 	for ep, score := range scores {
-		gotByAddress[ep.GetMetadata().Address] = score
+		m := ep.GetMetadata()
+		gotByAddress[fmt.Sprintf("%s:%s", m.Address, m.Port)] = score
 	}
 
 	// pod-a has 2 chunks, pod-b has 1
@@ -741,11 +762,13 @@ func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 	endpoints := []scheduling.Endpoint{
 		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-			Address:        "10.0.0.1:8080",
+			Address:        "10.0.0.1",
+			Port:           "8080",
 		}, nil, nil),
 		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-			Address:        "10.0.0.2:8080",
+			Address:        "10.0.0.2",
+			Port:           "8080",
 		}, nil, nil),
 	}
 
@@ -843,7 +866,8 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 	endpoints := []scheduling.Endpoint{
 		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-			Address:        "10.0.0.1:8080",
+			Address:        "10.0.0.1",
+			Port:           "8080",
 		}, nil, nil),
 	}
 
