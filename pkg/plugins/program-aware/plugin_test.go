@@ -137,23 +137,32 @@ func TestPick_RecordsEnqueueTime(t *testing.T) {
 	assert.Equal(t, enqueueTime, storedTime, "stored time should be the item's enqueue time")
 }
 
-func TestPick_PrefersLongerWaitingHead(t *testing.T) {
+func TestPick_PrefersHigherAvgWaitTime(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	// prog-a has been waiting 4 seconds, prog-b only 1 second.
+	// prog-a has a high EWMA wait time (4000ms), prog-b has a low one (100ms).
 	// Both have the same queue length and no prior dispatch history.
+	metricsA := &ProgramMetrics{}
+	metricsA.RecordWaitTime(4000)
+	p.programMetrics.Store("prog-a", metricsA)
+
+	metricsB := &ProgramMetrics{}
+	metricsB.RecordWaitTime(100)
+	p.programMetrics.Store("prog-b", metricsB)
+
+	now := time.Now()
 	queueA := &fcmocks.MockFlowQueueAccessor{
 		LenV:     1,
 		FlowKeyV: flowcontrol.FlowKey{ID: "prog-a"},
 		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: time.Now().Add(-4 * time.Second),
+			EnqueueTimeV: now,
 		},
 	}
 	queueB := &fcmocks.MockFlowQueueAccessor{
 		LenV:     1,
 		FlowKeyV: flowcontrol.FlowKey{ID: "prog-b"},
 		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: time.Now().Add(-1 * time.Second),
+			EnqueueTimeV: now,
 		},
 	}
 
@@ -166,7 +175,7 @@ func TestPick_PrefersLongerWaitingHead(t *testing.T) {
 
 	queue, err := p.Pick(context.Background(), band)
 	assert.NoError(t, err)
-	assert.Equal(t, queueA, queue, "should prefer the queue whose head has waited longer")
+	assert.Equal(t, queueA, queue, "should prefer the program with higher average wait time")
 }
 
 func TestPick_PenalizesHighDispatchCount(t *testing.T) {
@@ -421,12 +430,16 @@ func TestFullLifecycle(t *testing.T) {
 func TestScoreQueue(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	// Queue with head waiting 2.5s, length 50, no dispatched history.
+	// Program with EWMA wait time 2500ms, queue length 50, no dispatch history.
+	metrics := &ProgramMetrics{}
+	metrics.RecordWaitTime(2500)
+	p.programMetrics.Store("test-prog", metrics)
+
 	queue := &fcmocks.MockFlowQueueAccessor{
 		LenV:     50,
 		FlowKeyV: flowcontrol.FlowKey{ID: "test-prog"},
 		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: time.Now().Add(-2500 * time.Millisecond),
+			EnqueueTimeV: time.Now(),
 		},
 	}
 
@@ -436,14 +449,12 @@ func TestScoreQueue(t *testing.T) {
 	//         = 0.4 * 0.5 + 0.3 * 0.5 - 0
 	//         = 0.2 + 0.15
 	//         = 0.35
-	assert.InDelta(t, 0.35, score, 0.05) // small tolerance for timing
+	assert.InDelta(t, 0.35, score, 0.01)
 
 	// Now add dispatch history and verify penalty.
-	metrics := &ProgramMetrics{}
 	for range 500 {
 		metrics.IncrementDispatched()
 	}
-	p.programMetrics.Store("test-prog", metrics)
 
 	scoreWithDispatch := p.scoreQueue(queue)
 	// Penalty: 0.3 * (500/1000) = 0.15

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"math"
 	"sync"
-	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
@@ -20,12 +19,12 @@ const (
 	fairnessIDHeader = "x-gateway-inference-fairness-id"
 
 	// Default scoring weights for Pick().
-	defaultWeightHeadWait       = 0.4
+	defaultWeightAvgWait        = 0.4
 	defaultWeightQueueLength    = 0.3
 	defaultWeightTotalDispatched = 0.3
 
 	// Normalization caps for scoring.
-	capHeadWaitMs       = 5000.0
+	capAvgWaitMs        = 5000.0
 	capQueueLength      = 100.0
 	capTotalDispatched  = 1000.0
 )
@@ -118,23 +117,20 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 func (p *ProgramAwarePlugin) scoreQueue(queue flowcontrol.FlowQueueAccessor) float64 {
 	programID := queue.FlowKey().ID
 
-	// Live signal: how long has the head item been waiting?
-	headWaitMs := 0.0
-	if head := queue.PeekHead(); head != nil {
-		headWaitMs = float64(time.Since(head.EnqueueTime()).Milliseconds())
+	// Accumulated signal: EWMA of wait time the program has experienced.
+	// Programs that have historically waited longer get higher scores.
+	avgWaitMs := 0.0
+	totalDispatched := 0.0
+	if metricsRaw, ok := p.programMetrics.Load(programID); ok {
+		metrics := metricsRaw.(*ProgramMetrics)
+		avgWaitMs = metrics.AverageWaitTime()
+		totalDispatched = float64(metrics.DispatchedCount())
 	}
 
 	// Live signal: queue depth.
 	queueLen := float64(queue.Len())
 
-	// Accumulated signal: total dispatched requests for this program.
-	totalDispatched := 0.0
-	if metricsRaw, ok := p.programMetrics.Load(programID); ok {
-		metrics := metricsRaw.(*ProgramMetrics)
-		totalDispatched = float64(metrics.DispatchedCount())
-	}
-
-	return defaultWeightHeadWait*normalize(headWaitMs, capHeadWaitMs) +
+	return defaultWeightAvgWait*normalize(avgWaitMs, capAvgWaitMs) +
 		defaultWeightQueueLength*normalize(queueLen, capQueueLength) -
 		defaultWeightTotalDispatched*normalize(totalDispatched, capTotalDispatched)
 }
