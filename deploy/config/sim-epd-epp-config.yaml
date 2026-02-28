@@ -1,0 +1,23 @@
+# Sample EPP configuration for tunning with E/PD
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: encoder-header-handler
+- type: queue-scorer
+- type: encode-filter
+- type: decode-filter
+- type: always-encode-decider
+- type: ed-profile-handler
+  parameters:
+    deciderPluginName: always-encode-decider
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: queue-scorer
+    weight: 1
