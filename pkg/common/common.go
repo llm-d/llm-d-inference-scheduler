@@ -12,6 +12,9 @@ const (
 
 	// DataParallelPodHeader is the header name used to indicate the worker <ip:port> for Data Parallel
 	DataParallelPodHeader = "x-data-parallel-host-port"
+
+	// EncoderHostsPortsHeader is the header name used to indicate Encoder workers <ip:port> list
+	EncoderHostsPortsHeader = "x-encoder-hosts-ports"
 )
 
 // StripScheme removes the scheme from an endpoint URL, returning host:port.

@@ -58,14 +58,17 @@ const (
 	requestFieldBootstrapPort = "bootstrap_port"
 	requestFieldBootstrapRoom = "bootstrap_room"
 
-	// ConnectorNIXLV2 enables the P/D NIXL v2 protocol
-	ConnectorNIXLV2 = "nixlv2"
+	// KVConnectorNIXLV2 enables the P/D NIXL v2 protocol
+	KVConnectorNIXLV2 = "nixlv2"
 
-	// ConnectorSharedStorage enables (now deprecated) P/D Shared Storage protocol
-	ConnectorSharedStorage = "shared-storage"
+	// KVConnectorSharedStorage enables (now deprecated) P/D Shared Storage protocol
+	KVConnectorSharedStorage = "shared-storage"
 
-	// ConnectorSGLang enables SGLang P/D disaggregation protocol
-	ConnectorSGLang = "sglang"
+	// KVConnectorSGLang enables SGLang P/D disaggregation protocol
+	KVConnectorSGLang = "sglang"
+
+	// ECExampleConnector enables the Encoder-Prefiller-Decoder disaggregation protocol
+	ECExampleConnector = "ec-example"
 
 	// DefaultPoolGroup is the default pool group name
 	DefaultPoolGroup = "inference.networking.k8s.io"
@@ -75,14 +78,24 @@ const (
 
 // Config represents the proxy server configuration
 type Config struct {
-	// Connector is the name of the P/D protocol the proxy must follow.
-	Connector string
+	// KVConnector is the name of the KV protocol between Prefiller and Decoder.
+	KVConnector string
+
+	// ECConnector is the name of the EC protocol between Encoder and Prefiller (for EPD mode).
+	// If empty, encoder stage is skipped.
+	ECConnector string
 
 	// PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers.
 	PrefillerUseTLS bool
 
+	// EncoderUseTLS indicates whether to use TLS when sending requests to encoders.
+	EncoderUseTLS bool
+
 	// PrefillerInsecureSkipVerify configure the proxy to skip TLS verification for requests to prefiller.
 	PrefillerInsecureSkipVerify bool
+
+	// EncoderInsecureSkipVerify configure the proxy to skip TLS verification for requests to encoder.
+	EncoderInsecureSkipVerify bool
 
 	// DecoderInsecureSkipVerify configure the proxy to skip TLS verification for requests to decoder.
 	DecoderInsecureSkipVerify bool
@@ -96,20 +109,24 @@ type Config struct {
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
+type epdProtocolRunner func(http.ResponseWriter, *http.Request, string, []string)
 
 // Server is the reverse proxy server
 type Server struct {
-	logger               logr.Logger
-	addr                 net.Addr     // the proxy TCP address
-	port                 string       // the proxy TCP port
-	decoderURL           *url.URL     // the local decoder URL
-	handler              http.Handler // the handler function. either a Mux or a proxy
-	allowlistValidator   *AllowlistValidator
-	runConnectorProtocol protocolRunner // the handler for running the protocol
-	prefillerURLPrefix   string
+	logger                  logr.Logger
+	addr                    net.Addr     // the proxy TCP address
+	port                    string       // the proxy TCP port
+	decoderURL              *url.URL     // the local decoder URL
+	handler                 http.Handler // the handler function. either a Mux or a proxy
+	allowlistValidator      *AllowlistValidator
+	runPDConnectorProtocol  protocolRunner    // the handler for running the Prefiller-Decoder protocol
+	runEPDConnectorProtocol epdProtocolRunner // the handler for running the Encoder-Prefiller-Decoder protocol
+	prefillerURLPrefix      string
+	encoderURLPrefix        string
 
 	decoderProxy        http.Handler                     // decoder proxy handler
 	prefillerProxies    *lru.Cache[string, http.Handler] // cached prefiller proxy handlers
+	encoderProxies      *lru.Cache[string, http.Handler] // cached encoder proxy handlers
 	dataParallelProxies map[string]http.Handler          // Proxies to other vLLM servers
 	forwardDataParallel bool                             // Use special Data Parallel work around
 
@@ -120,23 +137,32 @@ type Server struct {
 
 // NewProxy creates a new routing reverse proxy
 func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
-	cache, _ := lru.New[string, http.Handler](16) // nolint:all
+	prefillerCache, _ := lru.New[string, http.Handler](16) // nolint:all
+	encoderCache, _ := lru.New[string, http.Handler](16)   // nolint:all
 
 	server := &Server{
 		port:                port,
 		decoderURL:          decodeURL,
-		prefillerProxies:    cache,
+		prefillerProxies:    prefillerCache,
+		encoderProxies:      encoderCache,
 		prefillerURLPrefix:  "http://",
+		encoderURLPrefix:    "http://",
 		config:              config,
 		dataParallelProxies: map[string]http.Handler{},
 		forwardDataParallel: true,
 		prefillSamplerFn:    rand.Intn,
 	}
 
-	server.setConnector()
-
+	server.setKVConnector()
 	if config.PrefillerUseTLS {
 		server.prefillerURLPrefix = "https://"
+	}
+
+	if config.ECConnector != "" {
+		server.setECConnector()
+		if config.EncoderUseTLS {
+			server.encoderURLPrefix = "https://"
+		}
 	}
 
 	return server
@@ -166,31 +192,51 @@ func (s *Server) Start(ctx context.Context, cert *tls.Certificate, allowlistVali
 // Clone returns a clone of the current Server struct
 func (s *Server) Clone() *Server {
 	return &Server{
-		addr:                 s.addr,
-		port:                 s.port,
-		decoderURL:           s.decoderURL,
-		handler:              s.handler,
-		allowlistValidator:   s.allowlistValidator,
-		runConnectorProtocol: s.runConnectorProtocol,
-		decoderProxy:         s.decoderProxy,
-		prefillerURLPrefix:   s.prefillerURLPrefix,
-		prefillerProxies:     s.prefillerProxies,
-		dataParallelProxies:  s.dataParallelProxies,
-		forwardDataParallel:  s.forwardDataParallel,
+		addr:                    s.addr,
+		port:                    s.port,
+		decoderURL:              s.decoderURL,
+		handler:                 s.handler,
+		allowlistValidator:      s.allowlistValidator,
+		runPDConnectorProtocol:  s.runPDConnectorProtocol,
+		runEPDConnectorProtocol: s.runEPDConnectorProtocol,
+		decoderProxy:            s.decoderProxy,
+		prefillerURLPrefix:      s.prefillerURLPrefix,
+		encoderURLPrefix:        s.encoderURLPrefix,
+		prefillerProxies:        s.prefillerProxies,
+		encoderProxies:          s.encoderProxies,
+		dataParallelProxies:     s.dataParallelProxies,
+		forwardDataParallel:     s.forwardDataParallel,
 	}
 }
 
-func (s *Server) setConnector() {
+func (s *Server) setKVConnector() {
 
-	switch s.config.Connector {
-	case ConnectorSharedStorage:
-		s.runConnectorProtocol = s.runSharedStorageProtocol
-	case ConnectorSGLang:
-		s.runConnectorProtocol = s.runSGLangProtocol
-	case ConnectorNIXLV2:
+	switch s.config.KVConnector {
+	case KVConnectorSharedStorage:
+		s.runPDConnectorProtocol = s.runSharedStorageProtocol
+	case KVConnectorSGLang:
+		s.runPDConnectorProtocol = s.runSGLangProtocol
+	case KVConnectorNIXLV2:
 		fallthrough
 	default:
-		s.runConnectorProtocol = s.runNIXLProtocolV2
+		s.runPDConnectorProtocol = s.runNIXLProtocolV2
+	}
+}
+
+func (s *Server) setECConnector() {
+	ecConnector := s.config.ECConnector
+
+	if ecConnector == "" {
+		// No encoder connector specified, encoder stage will be skipped
+		return
+	}
+
+	switch ecConnector {
+	case ECExampleConnector:
+		s.runEPDConnectorProtocol = s.runEPDProtocol
+	default:
+		// Unknown EC connector value, skip encoder stage
+		return
 	}
 }
 
@@ -212,8 +258,16 @@ func (s *Server) createRoutes() *http.ServeMux {
 	return mux
 }
 
-func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
-	proxy, exists := s.prefillerProxies.Get(hostPort)
+// createProxyHandler creates a reverse proxy handler for the given host:port.
+// It uses the provided cache, URL prefix, and TLS settings.
+func (s *Server) createProxyHandler(
+	hostPort string,
+	cache *lru.Cache[string, http.Handler],
+	urlPrefix string,
+	insecureSkipVerify bool,
+) (http.Handler, error) {
+	// Check cache first
+	proxy, exists := cache.Get(hostPort)
 	if exists {
 		return proxy, nil
 	}
@@ -221,7 +275,7 @@ func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
 	// Backward compatible behavior: trim `http:` prefix
 	hostPort, _ = strings.CutPrefix(hostPort, "http://")
 
-	u, err := url.Parse(s.prefillerURLPrefix + hostPort)
+	u, err := url.Parse(urlPrefix + hostPort)
 	if err != nil {
 		s.logger.Error(err, "failed to parse URL", "hostPort", hostPort)
 		return nil, err
@@ -231,7 +285,7 @@ func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
 	if u.Scheme == "https" {
 		newProxy.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: s.config.PrefillerInsecureSkipVerify,
+				InsecureSkipVerify: insecureSkipVerify,
 				MinVersion:         tls.VersionTLS12,
 				CipherSuites: []uint16{
 					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
@@ -244,7 +298,25 @@ func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
 			},
 		}
 	}
-	s.prefillerProxies.Add(hostPort, newProxy)
+	cache.Add(hostPort, newProxy)
 
 	return newProxy, nil
+}
+
+func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
+	return s.createProxyHandler(
+		hostPort,
+		s.prefillerProxies,
+		s.prefillerURLPrefix,
+		s.config.PrefillerInsecureSkipVerify,
+	)
+}
+
+func (s *Server) encoderProxyHandler(hostPort string) (http.Handler, error) {
+	return s.createProxyHandler(
+		hostPort,
+		s.encoderProxies,
+		s.encoderURLPrefix,
+		s.config.EncoderInsecureSkipVerify,
+	)
 }
