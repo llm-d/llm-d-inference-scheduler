@@ -1,0 +1,28 @@
+# Typos configuration
+# https://github.com/crate-ci/typos
+
+[default.extend-words]
+# Kubernetes abbreviation
+k8s = "k8s"
+# KServe project name
+KServe = "KServe"
+# vLLM project name
+vLLM = "vLLM"
+# Azure Kubernetes Service abbreviation
+AKS = "AKS"
+aks = "aks"
+# Indian Standard Time / Istio abbreviation
+IST = "IST"
+# Abbreviation (e.g., 2nd -> ND)
+ND = "ND"
+
+[files]
+extend-exclude = [
+    "*.png",
+    "*.jpg",
+    "deploy/",
+    "go.mod",
+    "go.sum",
+    "build/",
+    "testdata/"
+]
