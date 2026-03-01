@@ -41,7 +41,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 			defer GinkgoRecover()
 
 			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+			err := testInfo.proxy.Start(testInfo.ctx, validator)
 			Expect(err).ToNot(HaveOccurred())
 
 			testInfo.stoppedCh <- struct{}{}

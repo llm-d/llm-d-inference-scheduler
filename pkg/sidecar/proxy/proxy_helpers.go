@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -11,11 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
+  
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // startHTTP starts the HTTP reverse proxy.
-func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
+func (s *Server) startHTTP(ctx context.Context) error {
 	// Start SSRF protection validator
 	if err := s.allowlistValidator.Start(ctx); err != nil {
 		s.logger.Error(err, "Failed to start allowlist validator")
@@ -48,11 +51,36 @@ func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
 		MaxHeaderBytes:    1 << 20,           // 1 MB for headers is sufficient
 	}
 
-	// Create TLS certificates
+	var cert *tls.Certificate
+	if s.config.SecureServing {
+		var tempCert tls.Certificate
+		if s.config.CertPath != "" {
+			tempCert, err = tls.LoadX509KeyPair(s.config.CertPath+"/tls.crt", s.config.CertPath+"/tls.key")
+		} else {
+			tempCert, err = CreateSelfSignedTLSCertificate()
+		}
+		if err != nil {
+			return fmt.Errorf("failed to create TLS certificate: %w", err)
+		}
+		cert = &tempCert
+	}
+
 	if cert != nil {
+		getCertificate := func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return cert, nil
+		}
+		if s.config.CertPath != "" {
+			reloader, err := common.NewCertReloader(ctx, s.config.CertPath, cert)
+			if err != nil {
+				return fmt.Errorf("failed to start reloader: %w", err)
+			}
+			getCertificate = func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return reloader.Get(), nil
+			}
+		}
+
 		server.TLSConfig = &tls.Config{
-			Certificates: []tls.Certificate{*cert},
-			MinVersion:   tls.VersionTLS12,
+			MinVersion: tls.VersionTLS12,
 			CipherSuites: []uint16{
 				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
@@ -61,6 +89,7 @@ func (s *Server) startHTTP(ctx context.Context, cert *tls.Certificate) error {
 				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 			},
+			GetCertificate: getCertificate,
 		}
 		s.logger.Info("server TLS configured")
 	}
