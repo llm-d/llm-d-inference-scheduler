@@ -190,12 +190,12 @@ image-build-uds-tokenizer: check-container-tool ## Build UDS tokenizer image fro
 	if [ -z "$$KV_CACHE_PATH_CHECK" ]; then \
 		echo "Error: Could not find kv-cache module even after download."; \
 		exit 1; \
-	fi
+	fi; \
 	$(CONTAINER_RUNTIME) build \
 		--platform linux/$(TARGETARCH) \
 		-t $(UDS_TOKENIZER_IMAGE) \
-		-f $(KV_CACHE_PATH)/services/uds_tokenizer/Dockerfile \
-		$(KV_CACHE_PATH)/services/uds_tokenizer
+		-f $$KV_CACHE_PATH_CHECK/services/uds_tokenizer/Dockerfile \
+		$$KV_CACHE_PATH_CHECK/services/uds_tokenizer
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)
