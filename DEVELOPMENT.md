@@ -59,14 +59,14 @@ There are several ways to access the gateway:
 **Port forward**:
 
 ```bash
-$ kubectl --context llm-d-inference-scheduler-dev port-forward service/inference-gateway 8080:80
+kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio 8080:80
 ```
 
 **NodePort**
 
 ```bash
 # Determine the k8s node address
-$ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep address
+kubectl --context kind-llm-d-inference-scheduler-dev get node -o yaml | grep address
 # The service is accessible over port 80 of the worker IP address.
 ```
 
@@ -74,15 +74,15 @@ $ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep addres
 
 ```bash
 # Install and run cloud-provider-kind:
-$ go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
-$ kubectl --context llm-d-inference-scheduler-dev get service inference-gateway
+go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
+kubectl --context kind-llm-d-inference-scheduler-dev get service inference-gateway-istio
 # Wait for the LoadBalancer External-IP to become available. The service is accessible over port 80.
 ```
 
 You can now make requests matching the IP:port of one of the access mode above:
 
 ```bash
-$ curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 By default the created inference gateway, can be accessed on port 30080. This can
