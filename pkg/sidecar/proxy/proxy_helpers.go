@@ -142,3 +142,11 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 func isHTTPError(statusCode int) bool {
 	return statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices
 }
+
+// shouldFallbackToDecode returns false for client error 4xx status codes (400–451). For all other status codes, it returns true.
+func shouldFallbackToDecode(pw *bufferedResponseWriter) bool {
+	if pw.statusCode >= http.StatusBadRequest && pw.statusCode <= http.StatusUnavailableForLegalReasons {
+		return false
+	}
+	return true
+}
