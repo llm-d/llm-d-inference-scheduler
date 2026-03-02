@@ -44,6 +44,7 @@ Clone the repository and ensure Go modules download properly:
 cd /path/to/llm-d-inference-scheduler
 
 # Ensure private Go modules resolve
+export GO111MODULE=on
 export GOPRIVATE=github.com/llm-d/*
 go mod download
 ```
