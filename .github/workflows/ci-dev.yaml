@@ -1,0 +1,61 @@
+name: CI - Dev - Docker Container Image
+
+on:
+  push:
+    branches:
+      - main
+      - 'release-*'
+
+jobs:
+  docker-build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Set image names
+        id: version
+        run: |
+          repo="${GITHUB_REPOSITORY##*/}"
+          echo "project_name=${repo}-dev" >> "$GITHUB_OUTPUT"
+          echo "sidecar_name=llm-d-routing-sidecar-dev" >> "$GITHUB_OUTPUT"
+
+      - name: Set commit SHA tag
+        id: tag
+        run: |
+          echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push EPP dev image
+        uses: ./.github/actions/docker-build-and-push
+        with:
+          docker-file: Dockerfile.epp
+          tag: ${{ steps.tag.outputs.tag }}
+          image-name: ${{ steps.version.outputs.project_name }}
+          registry: ghcr.io/llm-d
+          github-token: ${{ secrets.GHCR_TOKEN }}
+          prerelease: "true"
+
+      - name: Build and push sidecar dev image
+        uses: ./.github/actions/docker-build-and-push
+        with:
+          docker-file: Dockerfile.sidecar
+          tag: ${{ steps.tag.outputs.tag }}
+          image-name: ${{ steps.version.outputs.sidecar_name }}
+          registry: ghcr.io/llm-d
+          github-token: ${{ secrets.GHCR_TOKEN }}
+          prerelease: "true"
+
+      - name: Run Trivy scan on EPP dev image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ghcr.io/llm-d/${{ steps.version.outputs.project_name }}:${{ steps.tag.outputs.tag }}
+
+      - name: Run Trivy scan on sidecar dev image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ghcr.io/llm-d/${{ steps.version.outputs.sidecar_name }}:${{ steps.tag.outputs.tag }}
