@@ -28,9 +28,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
 
+	reqcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/request"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	fwksched "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
@@ -140,7 +140,7 @@ func createTestChatCompletionsLLMRequest(reqID string, ttftSLO, tpotSLO float64)
 
 func createTestLLMRequestWithBody(reqID string, ttftSLO, tpotSLO float64, body *fwksched.LLMRequestBody) *fwksched.LLMRequest {
 	headers := make(map[string]string)
-	headers[requtil.RequestIdHeaderKey] = reqID
+	headers[reqcommon.RequestIdHeaderKey] = reqID
 	if ttftSLO > 0 {
 		headers["x-ttft-slo"] = fmt.Sprintf("%f", ttftSLO)
 	}
@@ -190,7 +190,7 @@ func setupPredictionContext(router *PredictedLatency, request *fwksched.LLMReque
 	}
 
 	// Store the context using the request ID
-	reqID := request.Headers[requtil.RequestIdHeaderKey]
+	reqID := request.Headers[reqcommon.RequestIdHeaderKey]
 	router.sloContextStore.Set(reqID, predictedLatencyCtx, ttlcache.DefaultTTL)
 }
 
@@ -772,7 +772,7 @@ func TestSloContextStoreEviction(t *testing.T) {
 
 	req := &fwksched.LLMRequest{
 		Headers: map[string]string{
-			requtil.RequestIdHeaderKey: requestID,
+			reqcommon.RequestIdHeaderKey: requestID,
 		},
 	}
 

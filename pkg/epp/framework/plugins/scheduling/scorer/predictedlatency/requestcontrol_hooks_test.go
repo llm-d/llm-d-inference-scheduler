@@ -28,10 +28,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	reqcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/request"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 )
 
 const (
@@ -87,7 +87,7 @@ func TestNewPredictedLatencyContext(t *testing.T) {
 
 func TestNewPredictedLatencyContext_NilBody(t *testing.T) {
 	request := &schedulingtypes.LLMRequest{
-		Headers: map[string]string{requtil.RequestIdHeaderKey: "test-nil-body"},
+		Headers: map[string]string{reqcommon.RequestIdHeaderKey: "test-nil-body"},
 		Body:    nil,
 	}
 	ctx := newPredictedLatencyContext(request)
@@ -378,7 +378,7 @@ func TestPredictedLatency_ResponseStreaming_FirstToken(t *testing.T) {
 
 	// Initialize the queue and add the request
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[requtil.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	beforeTime := time.Now()
@@ -432,7 +432,7 @@ func TestPredictedLatency_ResponseStreaming_SubsequentTokens(t *testing.T) {
 
 	// Initialize the queue and add the request
 	queue := newRequestPriorityQueue()
-	queue.Add(request.Headers[requtil.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
 
 	router.ResponseStreaming(ctx, request, response, endpoint.GetMetadata())
@@ -498,7 +498,7 @@ func TestPredictedLatency_ResponseComplete_Success(t *testing.T) {
 	// Create queue and add request
 	queue := newRequestPriorityQueue()
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
-	queue.Add(request.Headers[requtil.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
 
 	predictedLatencyCtx := newPredictedLatencyContext(request)
 	predictedLatencyCtx.ttft = 80
@@ -591,7 +591,7 @@ func TestPredictedLatency_ResponseComplete_WithMetrics(t *testing.T) {
 	// Create queue
 	queue := newRequestPriorityQueue()
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
-	queue.Add(request.Headers[requtil.RequestIdHeaderKey], 50.0)
+	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 50.0)
 
 	predictedLatencyCtx := newPredictedLatencyContext(request)
 	predictedLatencyCtx.ttft = 80
@@ -624,7 +624,7 @@ func TestPredictedLatency_ResponseComplete_NoSLOs(t *testing.T) {
 	// Create queue
 	queue := newRequestPriorityQueue()
 	router.runningRequestLists.Store(endpoint.GetMetadata().NamespacedName, queue)
-	queue.Add(request.Headers[requtil.RequestIdHeaderKey], 0)
+	queue.Add(request.Headers[reqcommon.RequestIdHeaderKey], 0)
 
 	predictedLatencyCtx := newPredictedLatencyContext(request)
 	predictedLatencyCtx.ttft = 80
