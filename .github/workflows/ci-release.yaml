@@ -8,26 +8,20 @@ on:
     types: [published]  # Also runs when a GitHub release is published
 
 jobs:
-  docker-build-and-push:
+  set-params:
     runs-on: ubuntu-latest
+    outputs:
+      project_name: ${{ steps.version.outputs.project_name }}
+      sidecar_name: ${{ steps.version.outputs.sidecar_name }}
+      tag: ${{ steps.tag.outputs.tag }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-
-      - name: Checkout source
-        uses: actions/checkout@v6
-
       - name: Set image names
         id: version
         run: |
           repo="${GITHUB_REPOSITORY##*/}"
           echo "project_name=$repo" >> "$GITHUB_OUTPUT"
           echo "sidecar_name=llm-d-routing-sidecar" >> "$GITHUB_OUTPUT"
-
-      - name: Print project name
-        run: echo "Project is ${{ steps.version.outputs.project_name }}"
 
       - name: Determine tag name
         id: tag
@@ -43,32 +37,13 @@ jobs:
           echo "prerelease=${PRE_RELEASE}" >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Build and push EPP image
-        uses: ./.github/actions/docker-build-and-push
-        with:
-          docker-file: Dockerfile.epp
-          tag: ${{ steps.tag.outputs.tag }}
-          image-name: ${{ steps.version.outputs.project_name }}
-          registry: ghcr.io/llm-d
-          github-token: ${{ secrets.GHCR_TOKEN }}
-          prerelease: ${{ steps.tag.outputs.prerelease }}
-
-      - name: Build and push sidecar image
-        uses: ./.github/actions/docker-build-and-push
-        with:
-          docker-file: Dockerfile.sidecar
-          tag: ${{ steps.tag.outputs.tag }}
-          image-name: ${{ steps.version.outputs.sidecar_name }}
-          registry: ghcr.io/llm-d
-          github-token: ${{ secrets.GHCR_TOKEN }}
-          prerelease: ${{ steps.tag.outputs.prerelease }}
-
-      - name: Run Trivy scan on EPP image
-        uses: ./.github/actions/trivy-scan
-        with:
-          image: ghcr.io/llm-d/${{ steps.version.outputs.project_name }}:${{ steps.tag.outputs.tag }}
-
-      - name: Run Trivy scan on sidecar image
-        uses: ./.github/actions/trivy-scan
-        with:
-          image: ghcr.io/llm-d/${{ steps.version.outputs.sidecar_name }}:${{ steps.tag.outputs.tag }}
+  build-and-push:
+    needs: set-params
+    uses: ./.github/workflows/ci-build-images.yaml
+    with:
+      epp-image-name: ${{ needs.set-params.outputs.project_name }}
+      sidecar-image-name: ${{ needs.set-params.outputs.sidecar_name }}
+      tag: ${{ needs.set-params.outputs.tag }}
+      prerelease: ${{ needs.set-params.outputs.prerelease }}
+    secrets:
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
