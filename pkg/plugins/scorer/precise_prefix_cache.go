@@ -108,8 +108,9 @@ type speculativeEntries struct {
 // precisePluginState holds data shared between PrepareRequestData, Score,
 // and PreRequest via PluginState.
 type precisePluginState struct {
-	blockKeys []kvblock.BlockHash
-	scores    map[string]float64 // pod addr → score
+	blockKeys       []kvblock.BlockHash
+	scores          map[string]float64 // pod addr → score (includes speculative entries)
+	confirmedScores map[string]float64 // pod addr → score (confirmed entries only, excludes speculative)
 }
 
 // Clone implements plugin.StateData.
@@ -120,9 +121,14 @@ func (s *precisePluginState) Clone() plugin.StateData {
 	for k, v := range s.scores {
 		scores[k] = v
 	}
+	confirmedScores := make(map[string]float64, len(s.confirmedScores))
+	for k, v := range s.confirmedScores {
+		confirmedScores[k] = v
+	}
 	return &precisePluginState{
-		blockKeys: blockKeys,
-		scores:    scores,
+		blockKeys:       blockKeys,
+		scores:          scores,
+		confirmedScores: confirmedScores,
 	}
 }
 
@@ -365,6 +371,12 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 	// 4. Compute per-pod scores (longest prefix match)
 	scores := computeScoresFromKeyToPods(blockKeys, keyToPods)
 
+	// 4b. Compute confirmed-only scores (excluding speculative entries).
+	// This is used by the no-hit-lru-scorer to correctly identify cold requests:
+	// when only speculative entries exist, confirmedScores will be empty,
+	// causing PrefixCacheServers to be empty, so isColdRequest returns true.
+	confirmedScores := computeConfirmedScoresFromKeyToPods(blockKeys, keyToPods)
+
 	// 5. Store PrefixCacheMatchInfo on each endpoint
 	blockSize := s.getBlockSizeTokens()
 	for _, ep := range endpoints {
@@ -379,12 +391,13 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 
 	// 6. Save to PluginState for Score() and PreRequest()
 	s.pluginState.Write(request.RequestId, stateKey, &precisePluginState{
-		blockKeys: blockKeys,
-		scores:    scores,
+		blockKeys:       blockKeys,
+		scores:          scores,
+		confirmedScores: confirmedScores,
 	})
 
 	logger.V(logutil.TRACE).Info("PrepareRequestData completed",
-		"blockKeys", len(blockKeys), "scores", scores)
+		"blockKeys", len(blockKeys), "scores", scores, "confirmedScores", confirmedScores)
 
 	return nil
 }
@@ -450,12 +463,16 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 
 	// Try to reuse pre-computed scores from PrepareRequestData
 	var scores map[string]float64
-	if state, err := plugin.ReadPluginStateKey[*precisePluginState](
+	var confirmedScores map[string]float64
+	if pluginStateData, err := plugin.ReadPluginStateKey[*precisePluginState](
 		s.pluginState, request.RequestId, stateKey); err == nil {
-		scores = state.scores
+		scores = pluginStateData.scores
+		confirmedScores = pluginStateData.confirmedScores
 		debugLogger.Info("Reusing pre-computed scores from PrepareRequestData")
 	} else {
-		// Fallback: compute scores directly (backward compatible path)
+		// Fallback: compute scores directly (backward compatible path).
+		// When speculative indexing is disabled, all entries are confirmed,
+		// so scores and confirmedScores are the same.
 		var scoreErr error
 		scores, scoreErr = s.getScores(ctx, request)
 		if scoreErr != nil {
@@ -463,6 +480,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 			span.SetStatus(codes.Error, scoreErr.Error())
 			return nil
 		}
+		confirmedScores = scores
 	}
 	debugLogger.Info("Got endpoint scores", "scores", scores)
 
@@ -480,8 +498,11 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		return fmt.Sprintf("%s:%s", metadata.Address, metadata.Port), true
 	}
 
-	// Write prefix cache state to cycle state
-	state := &prefix.SchedulingContextState{
+	// Write prefix cache state to cycle state.
+	// Only include endpoints with confirmed (non-speculative) scores > 0.
+	// This ensures the no-hit-lru-scorer correctly identifies cold requests
+	// when only speculative entries exist in the index.
+	prefixCacheState := &prefix.SchedulingContextState{
 		PrefixHashes:       []prefix.BlockHash{},
 		PrefixCacheServers: map[prefix.ServerID]int{},
 	}
@@ -490,9 +511,11 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		if !ok {
 			continue
 		}
-		state.PrefixCacheServers[prefix.ServerID(endpoint.GetMetadata().NamespacedName)] = int(scores[key])
+		if cs, exists := confirmedScores[key]; exists && cs > 0 {
+			prefixCacheState.PrefixCacheServers[prefix.ServerID(endpoint.GetMetadata().NamespacedName)] = int(cs)
+		}
 	}
-	cycleState.Write(plugin.StateKey(s.typedName.String()), state)
+	cycleState.Write(plugin.StateKey(s.typedName.String()), prefixCacheState)
 
 	normalizedScores := indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
 
@@ -682,6 +705,54 @@ func computeScoresFromKeyToPods(blockKeys []kvblock.BlockHash,
 		pods := keyToPods[blockKeys[i]]
 		currentPods := sets.New[string]()
 		for _, pod := range pods {
+			currentPods.Insert(pod.PodIdentifier)
+		}
+
+		activePods = activePods.Intersection(currentPods)
+		for pod := range activePods {
+			podScores[pod]++
+		}
+	}
+
+	return podScores
+}
+
+// computeConfirmedScoresFromKeyToPods computes per-pod longest prefix match
+// scores considering only confirmed (non-speculative) entries. This is used
+// to populate PrefixCacheServers in cycle state so that the no-hit-lru-scorer
+// can correctly distinguish cold requests (no confirmed cache hits) from warm
+// requests (confirmed cache hits exist).
+func computeConfirmedScoresFromKeyToPods(blockKeys []kvblock.BlockHash,
+	keyToPods map[kvblock.BlockHash][]kvblock.PodEntry) map[string]float64 {
+	podScores := make(map[string]float64)
+
+	if len(blockKeys) == 0 {
+		return podScores
+	}
+
+	// Initialize active pods from the first key, excluding speculative entries
+	firstKeyPods := keyToPods[blockKeys[0]]
+	activePods := sets.New[string]()
+	for _, pod := range firstKeyPods {
+		if pod.Annotation == "speculative" {
+			continue
+		}
+		activePods.Insert(pod.PodIdentifier)
+		podScores[pod.PodIdentifier] = 1
+	}
+
+	// For each subsequent key, intersect active pods with current key's confirmed pods.
+	for i := 1; i < len(blockKeys); i++ {
+		if activePods.Len() == 0 {
+			break
+		}
+
+		pods := keyToPods[blockKeys[i]]
+		currentPods := sets.New[string]()
+		for _, pod := range pods {
+			if pod.Annotation == "speculative" {
+				continue
+			}
 			currentPods.Insert(pod.PodIdentifier)
 		}
 
