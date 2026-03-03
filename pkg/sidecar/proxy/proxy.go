@@ -182,6 +182,8 @@ func (s *Server) Clone() *Server {
 		prefillerProxies:     s.prefillerProxies,
 		dataParallelProxies:  s.dataParallelProxies,
 		forwardDataParallel:  s.forwardDataParallel,
+		prefillSamplerFn:     s.prefillSamplerFn,
+		config:               s.config,
 	}
 }
 

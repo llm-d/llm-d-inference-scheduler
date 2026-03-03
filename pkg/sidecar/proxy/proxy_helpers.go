@@ -54,12 +54,17 @@ func (s *Server) startHTTP(ctx context.Context) error {
 	if s.config.SecureServing {
 		var tempCert tls.Certificate
 		if s.config.CertPath != "" {
-			tempCert, err = tls.LoadX509KeyPair(s.config.CertPath+"/tls.crt", s.config.CertPath+"/tls.key")
+			certFile := s.config.CertPath + "/tls.crt"
+			keyFile := s.config.CertPath + "/tls.key"
+			tempCert, err = tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				return fmt.Errorf("failed to load TLS key pair from cert %q and key %q: %w", certFile, keyFile, err)
+			}
 		} else {
 			tempCert, err = CreateSelfSignedTLSCertificate()
-		}
-		if err != nil {
-			return fmt.Errorf("failed to create TLS certificate: %w", err)
+			if err != nil {
+				return fmt.Errorf("failed to generate self-signed TLS certificate: %w", err)
+			}
 		}
 		cert = &tempCert
 	}
