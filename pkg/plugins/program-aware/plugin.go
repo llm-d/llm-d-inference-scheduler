@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"sync"
+	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
@@ -80,6 +81,11 @@ func (p *ProgramAwarePlugin) NewState(_ context.Context) any {
 // Pick selects which program queue to service next based on a scoring function
 // that considers live queue data and accumulated program metrics.
 func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBandAccessor) (flowcontrol.FlowQueueAccessor, error) {
+	start := time.Now()
+	defer func() {
+		pickLatencyUs.Observe(float64(time.Since(start).Microseconds()))
+	}()
+
 	if band == nil {
 		return nil, nil
 	}

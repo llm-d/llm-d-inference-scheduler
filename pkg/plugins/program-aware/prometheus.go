@@ -56,6 +56,15 @@ var (
 		},
 		[]string{"program_id"},
 	)
+
+	pickLatencyUs = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Subsystem: programAwareSubsystem,
+			Name:      "pick_latency_microseconds",
+			Help:      metricsutil.HelpMsgWithStability("Latency of the Pick() call in microseconds", compbasemetrics.ALPHA),
+			Buckets:   []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 5000},
+		},
+	)
 )
 
 // GetCollectors returns all Prometheus collectors for the program-aware plugin.
@@ -67,5 +76,6 @@ func GetCollectors() []prometheus.Collector {
 		waitTimeMs,
 		inputTokensTotal,
 		outputTokensTotal,
+		pickLatencyUs,
 	}
 }
