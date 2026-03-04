@@ -30,6 +30,12 @@ const (
 	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
 )
 
+type kvCacheIndexer interface {
+	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
+	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	KVBlockIndex() kvblock.Index
+}
+
 // PrecisePrefixCachePluginConfig holds the configuration for the
 // PrecisePrefixCacheScorer plugin.
 type PrecisePrefixCachePluginConfig struct {
@@ -156,7 +162,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 // to keep the internal KV-cache index state up-to-date.
 type PrecisePrefixCacheScorer struct {
 	typedName      plugin.TypedName
-	kvCacheIndexer *kvcache.Indexer
+	kvCacheIndexer kvCacheIndexer
 
 	// until the IGW data-layer is ready to provide endpoint events,
 	// we maintain a TTL cache of known endpoints that are discovered through
