@@ -16,9 +16,11 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	attrprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
@@ -45,7 +47,10 @@ type PrecisePrefixCachePluginConfig struct {
 }
 
 // compile-time type assertion
-var _ scheduling.Scorer = &PrecisePrefixCacheScorer{}
+var (
+	_ scheduling.Scorer                = &PrecisePrefixCacheScorer{}
+	_ requestcontrol.PrepareDataPlugin = &PrecisePrefixCacheScorer{}
+)
 
 // PrecisePrefixCachePluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
@@ -94,7 +99,10 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 		config.TokenProcessorConfig = kvblock.DefaultTokenProcessorConfig()
 	}
 
-	tokenProcessor := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
+	tokenProcessor, err := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token processor: %w", err)
+	}
 
 	// initialize the indexer
 	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig, tokenProcessor)
@@ -138,6 +146,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	return &PrecisePrefixCacheScorer{
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
+		blockSize:          config.TokenProcessorConfig.BlockSize,
 		subscribersCache:   subscribersCache,
 		subscribersManager: subscribersManager,
 		kvEventsConfig:     config.KVEventsConfig,
@@ -152,6 +161,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 type PrecisePrefixCacheScorer struct {
 	typedName      plugin.TypedName
 	kvCacheIndexer *kvcache.Indexer
+	blockSize      int
 
 	// until the IGW data-layer is ready to provide endpoint events,
 	// we maintain a TTL cache of known endpoints that are discovered through
@@ -233,13 +243,13 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 	}
 
-	scores, err := s.getScores(ctx, request)
+	scoreResult, err := s.getScores(ctx, request)
 	if err != nil {
 		logger.Error(err, "Failed to get endpoint scores")
 		span.SetStatus(codes.Error, err.Error())
 		return nil
 	}
-	debugLogger.Info("Got endpoint scores", "scores", scores)
+	debugLogger.Info("Got endpoint scores", "scores", scoresResult.Scores)
 
 	// Track scoring statistics
 	span.SetAttributes(
@@ -265,11 +275,11 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		if !ok {
 			continue
 		}
-		state.PrefixCacheServers[prefix.ServerID(endpoint.GetMetadata().NamespacedName)] = int(scores[key])
+		state.PrefixCacheServers[prefix.ServerID(endpoint.GetMetadata().NamespacedName)] = int(scoreResult.Scores[key])
 	}
 	cycleState.Write(plugin.StateKey(s.typedName.String()), state)
 
-	normalizedScores := indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
+	normalizedScores := indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scoreResult.Scores)
 
 	// Calculate score distribution for observability
 	if len(normalizedScores) > 0 {
@@ -297,7 +307,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 // based on the provided LLM request.
 // If the request contains chat completions, it processes them accordingly.
 // If the request contains regular completions, it uses the prompt directly.
-func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *scheduling.LLMRequest) (map[string]float64, error) {
+func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *scheduling.LLMRequest) (*kvcache.PodScoreResult, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 
@@ -357,4 +367,64 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 	}
 
 	return nil, errors.New("no valid input found in request")
+}
+
+// PrepareRequestData implements requestcontrol.PrepareDataPlugin.
+// It computes prefix cache scores and stores them in endpoint attributes for
+// downstream plugins (like predicted-latency-scorer) to consume.
+func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) error {
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+	debugLogger := logger.V(logutil.DEBUG)
+
+	scores, err := s.getScores(ctx, request)
+	if err != nil {
+		logger.Error(err, "Failed to get scores for PrepareData")
+		// Don't fail the request, just skip setting attributes
+		return nil
+	}
+
+	debugLogger.Info("Got scores for PrepareData", "scores", scores.Scores)
+
+	// Set precise prefix cache match info on each endpoint
+	for _, endpoint := range endpoints {
+		metadata := endpoint.GetMetadata()
+		if metadata == nil {
+			continue
+		}
+
+		endpointKey := metadata.Address
+		weightedScore := 0.0
+		matchBlocks := 0
+		if score, ok := scores.Scores[endpointKey]; ok {
+			weightedScore = score
+		}
+		if matches, ok := scores.ConsecutiveMatches[endpointKey]; ok {
+			matchBlocks = matches
+		}
+
+		// Create and set the precise prefix cache match info
+		// The score represents the weighted sum of consecutive matched blocks from the start
+		matchInfo := attrprefix.NewPrecisePrefixCacheMatchInfo(
+			matchBlocks,
+			scores.TotalBlocks,
+			s.blockSize,
+			weightedScore)
+		endpoint.Put(attrprefix.PrecisePrefixCacheMatchInfoKey, matchInfo)
+	}
+
+	return nil
+}
+
+// Produces implements requestcontrol.PrepareDataPlugin.
+// It declares that this plugin produces PrecisePrefixCacheMatchInfo attributes.
+func (s *PrecisePrefixCacheScorer) Produces() map[string]any {
+	return map[string]any{
+		attrprefix.PrecisePrefixCacheMatchInfoKey: attrprefix.PrecisePrefixCacheMatchInfo{},
+	}
+}
+
+// Consumes implements requestcontrol.PrepareDataPlugin.
+// It declares that this plugin doesn't consume any attributes from other plugins.
+func (s *PrecisePrefixCacheScorer) Consumes() map[string]any {
+	return map[string]any{}
 }
