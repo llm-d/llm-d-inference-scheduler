@@ -33,13 +33,14 @@ const (
 	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
 
 	// defaultSpeculativeTTL is the default TTL for speculative entries.
-	// This should be long enough for the vLLM engine to process the request
-	// and publish BlockStored events, after which confirmed entries replace them.
-	defaultSpeculativeTTL = 30 * time.Second
+	// This should be just long enough to cover the blind spot between
+	// routing decision and KV event arrival, maintaining high confidence
+	// in speculations while avoiding stale routing affinity.
+	defaultSpeculativeTTL = 2 * time.Second
 
 	// stateKey is the PluginState key used to share data between
 	// PrepareRequestData, Score, and PreRequest.
-	stateKey = plugin.StateKey("precise-prefix-cache-state")
+	stateKey = plugin.StateKey("prefix-cache-state")
 
 	// prefixCacheMatchInfoKey is the endpoint data key for prefix cache match
 	// information. Once the upstream GIE attrprefix package is available in the
@@ -746,7 +747,7 @@ func computeConfirmedScoresFromKeyToPods(blockKeys []kvblock.BlockHash,
 	firstKeyPods := keyToPods[blockKeys[0]]
 	activePods := sets.New[string]()
 	for _, pod := range firstKeyPods {
-		if pod.Annotation == "speculative" {
+		if pod.Speculative {
 			continue
 		}
 		activePods.Insert(pod.PodIdentifier)
@@ -762,7 +763,7 @@ func computeConfirmedScoresFromKeyToPods(blockKeys []kvblock.BlockHash,
 		pods := keyToPods[blockKeys[i]]
 		currentPods := sets.New[string]()
 		for _, pod := range pods {
-			if pod.Annotation == "speculative" {
+			if pod.Speculative {
 				continue
 			}
 			currentPods.Insert(pod.PodIdentifier)
