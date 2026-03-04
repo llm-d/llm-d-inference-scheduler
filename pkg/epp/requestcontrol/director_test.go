@@ -46,7 +46,9 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	fwk "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
 	fwksched "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 	poolutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pool"
@@ -298,7 +300,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 		mockAdmissionController *mockAdmissionController
 		inferenceObjectiveName  string
 		schedulerMockSetup      func(m *mockScheduler)
-		initialTargetModelName  string                   // Initial target model in the reqCtx.
+		initialTargetModelName  string // Initial target model in the reqCtx.
+		parser                  fwkrh.Parser
 		wantErrCode             string                   // Expected errutil code string
 		wantReqCtx              *handlers.RequestContext // Fields to check in the returned RequestContext
 		wantMutatedBodyModel    string                   // Expected model in reqCtx.Request.Body after PostDispatch
@@ -653,7 +656,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				config = config.WithAdmissionPlugins(newMockAdmissionPlugin("test-admit-plugin", test.admitRequestDenialError))
 
 				locator := NewCachedPodLocator(context.Background(), NewDatastorePodLocator(ds), time.Minute)
-				director := NewDirectorWithConfig(ds, mockSched, test.mockAdmissionController, locator, config)
+				director := NewDirectorWithConfig(ds, mockSched, test.mockAdmissionController, openai.NewOpenAIParser(), locator, config)
 				if test.name == "successful request with model rewrite" {
 					mockDs := &mockDatastore{
 						pods:     ds.PodList(datastore.AllPodsPredicate),
@@ -965,7 +968,7 @@ func TestDirector_ApplyWeightedModelRewrite(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			mockDs := &mockDatastore{rewrites: test.rewrites}
 			locator := NewCachedPodLocator(context.Background(), NewDatastorePodLocator(mockDs), time.Minute)
-			director := NewDirectorWithConfig(mockDs, &mockScheduler{}, &mockAdmissionController{}, locator, NewConfig())
+			director := NewDirectorWithConfig(mockDs, &mockScheduler{}, &mockAdmissionController{}, nil, locator, NewConfig())
 
 			reqCtx := &handlers.RequestContext{
 				IncomingModelName: test.incomingModel,
@@ -1070,6 +1073,7 @@ func TestDirector_HandleResponseReceived(t *testing.T) {
 		ds,
 		mockSched,
 		&mockAdmissionController{},
+		nil,
 		locator,
 		NewConfig().WithResponseReceivedPlugins(pr1),
 	)
@@ -1110,7 +1114,7 @@ func TestDirector_HandleResponseStreaming(t *testing.T) {
 	ds := datastore.NewDatastore(t.Context(), nil, 0)
 	mockSched := &mockScheduler{}
 	locator := NewCachedPodLocator(context.Background(), NewDatastorePodLocator(ds), time.Minute)
-	director := NewDirectorWithConfig(ds, mockSched, nil, locator, NewConfig().WithResponseStreamingPlugins(ps1))
+	director := NewDirectorWithConfig(ds, mockSched, nil, nil, locator, NewConfig().WithResponseStreamingPlugins(ps1))
 
 	reqCtx := &handlers.RequestContext{
 		Request: &handlers.Request{
@@ -1147,7 +1151,7 @@ func TestDirector_HandleResponseComplete(t *testing.T) {
 	ds := datastore.NewDatastore(t.Context(), nil, 0)
 	mockSched := &mockScheduler{}
 	locator := NewCachedPodLocator(context.Background(), NewDatastorePodLocator(ds), time.Minute)
-	director := NewDirectorWithConfig(ds, mockSched, nil, locator, NewConfig().WithResponseCompletePlugins(pc1))
+	director := NewDirectorWithConfig(ds, mockSched, nil, nil, locator, NewConfig().WithResponseCompletePlugins(pc1))
 
 	reqCtx := &handlers.RequestContext{
 		Request: &handlers.Request{
