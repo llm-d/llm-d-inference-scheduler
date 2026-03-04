@@ -164,11 +164,11 @@ var _ = Describe("Reverse Proxy", func() {
 			var proxy *Server
 
 			BeforeEach(func() {
-				cfg := Config{Connector: ConnectorNIXLV2}
+				cfg := Config{KVConnector: KVConnectorNIXLV2}
 				proxy = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
 
-				decodeHandler.Connector = ConnectorNIXLV2
-				prefillHandler.Connector = ConnectorNIXLV2
+				decodeHandler.Connector = KVConnectorNIXLV2
+				prefillHandler.Connector = KVConnectorNIXLV2
 			})
 
 			It("should successfully send request to 1. prefill 2. decode with the right fields (backward compatible behavior)", func() {

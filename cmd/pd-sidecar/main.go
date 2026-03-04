@@ -33,11 +33,16 @@ import (
 )
 
 var (
-	// supportedConnectors defines all valid P/D connector types
-	supportedConnectors = []string{
-		proxy.ConnectorNIXLV2,
-		proxy.ConnectorSharedStorage,
-		proxy.ConnectorSGLang,
+	// supportedKVConnectors defines all valid KV (Prefiller-Decoder) connector types
+	supportedKVConnectors = []string{
+		proxy.KVConnectorNIXLV2,
+		proxy.KVConnectorSharedStorage,
+		proxy.KVConnectorSGLang,
+	}
+
+	// supportedECConnectors defines all valid EC (Encoder-Prefiller) connector types
+	supportedECConnectors = []string{
+		proxy.ECExampleConnector,
 	}
 )
 
@@ -45,10 +50,13 @@ func main() {
 	port := flag.String("port", "8000", "the port the sidecar is listening on")
 	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
 	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
-	connector := flag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
+	kvConnector := flag.String("kv-connector", proxy.KVConnectorNIXLV2, "the KV connector between Prefiller and Decoder. Supported: "+strings.Join(supportedKVConnectors, ", "))
+	ecConnector := flag.String("ec-connector", proxy.ECExampleConnector, "the EC connector between Encoder and Prefiller (optional, for EPD mode). Supported: "+strings.Join(supportedECConnectors, ", "))
 	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
+	encoderUseTLS := flag.Bool("encoder-use-tls", false, "whether to use TLS when sending requests to encoders")
 	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
 	prefillerInsecureSkipVerify := flag.Bool("prefiller-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to prefiller")
+	encoderInsecureSkipVerify := flag.Bool("encoder-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to encoder")
 	decoderInsecureSkipVerify := flag.Bool("decoder-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to decoder")
 	secureProxy := flag.Bool("secure-proxy", true, "Enables secure proxy. Defaults to true.")
 	certPath := flag.String(
@@ -87,19 +95,37 @@ func main() {
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
-	// Validate connector
+	// Validate KV connector (Prefiller-Decoder)
 	isValidConnector := false
-	for _, validConnector := range supportedConnectors {
-		if *connector == validConnector {
+	for _, validConnector := range supportedKVConnectors {
+		if *kvConnector == validConnector {
 			isValidConnector = true
 			break
 		}
 	}
 	if !isValidConnector {
-		logger.Info("Error: --connector must be one of: " + strings.Join(supportedConnectors, ", "))
+		logger.Info("Error: --kv-connector must be one of: " + strings.Join(supportedKVConnectors, ", "))
 		return
 	}
-	logger.Info("p/d connector validated", "connector", connector)
+	logger.Info("KV connector (prefiller-decoder) validated", "kvConnector", kvConnector)
+
+	// Validate EC connector (Encoder-Prefiller) if specified
+	if *ecConnector != "" {
+		isValidEncoderConnector := false
+		for _, validConnector := range supportedECConnectors {
+			if *ecConnector == validConnector {
+				isValidEncoderConnector = true
+				break
+			}
+		}
+		if !isValidEncoderConnector {
+			logger.Info("Error: --ec-connector must be one of: " + strings.Join(supportedECConnectors, ", "))
+			return
+		}
+		logger.Info("EC connector (encoder-prefiller) validated", "ecConnector", ecConnector)
+	} else {
+		logger.Info("EC connector (encoder-prefiller) not specified, encoder stage will be skipped")
+	}
 
 	// Determine namespace and pool name for SSRF protection
 	if *enableSSRFProtection {
@@ -142,9 +168,12 @@ func main() {
 	}
 
 	config := proxy.Config{
-		Connector:                   *connector,
+		KVConnector:                 *kvConnector,
+		ECConnector:                 *ecConnector,
 		PrefillerUseTLS:             *prefillerUseTLS,
+		EncoderUseTLS:               *encoderUseTLS,
 		PrefillerInsecureSkipVerify: *prefillerInsecureSkipVerify,
+		EncoderInsecureSkipVerify:   *encoderInsecureSkipVerify,
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
 		DataParallelSize:            *vLLMDataParallelSize,
 		EnablePrefillerSampling:     *enablePrefillerSampling,

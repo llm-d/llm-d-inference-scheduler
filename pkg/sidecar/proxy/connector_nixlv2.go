@@ -71,7 +71,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	prefillSpan.SetAttributes(
 		attribute.String("llm_d.pd_proxy.request_id", uuidStr),
 		attribute.String("llm_d.pd_proxy.prefill_target", prefillPodHostPort),
-		attribute.String("llm_d.pd_proxy.connector", "nixlv2"),
+		attribute.String("llm_d.pd_proxy.kv_connector", "nixlv2"),
 	)
 	prefillStart := time.Now()
 
@@ -181,7 +181,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	decodeSpan.SetAttributes(
 		attribute.String("llm_d.pd_proxy.request_id", uuidStr),
-		attribute.String("llm_d.pd_proxy.connector", "nixlv2"),
+		attribute.String("llm_d.pd_proxy.kv_connector", "nixlv2"),
 	)
 	decodeStart := time.Now()
 
