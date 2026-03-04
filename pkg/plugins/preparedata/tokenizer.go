@@ -30,6 +30,11 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
+type tokenizer interface {
+	Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
+	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error)
+}
+
 const (
 	// TokenizerPluginType is the type name used to register the tokenizer plugin.
 	TokenizerPluginType = "tokenizer"
@@ -94,7 +99,7 @@ func NewTokenizerPlugin(ctx context.Context, config *tokenizerPluginConfig) (*To
 // the result to the LLMRequest for downstream consumers.
 type TokenizerPlugin struct {
 	typedName plugin.TypedName
-	tokenizer *tokenization.UdsTokenizer
+	tokenizer tokenizer
 }
 
 // TypedName returns the typed name of the plugin.
