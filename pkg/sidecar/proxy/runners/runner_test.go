@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The llm-d Authors.
+Copyright 2025, 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -61,11 +61,11 @@ func newTestContext() context.Context {
 	return ctx
 }
 
-var connectorsArr = []types.Connector{types.ConnectorSharedStorage, types.ConnectorNIXLV2}
+var connectors = []types.Connector{types.ConnectorSharedStorage, types.ConnectorNIXLV2}
 
 var _ = Describe("Common Connector tests", func() {
 
-	for _, connector := range connectorsArr {
+	for _, connector := range connectors {
 		When(fmt.Sprintf("running with the %s connector", connector.String()), func() {
 			// Regression test for commit bb181d6: Ensure that max_completion_tokens=1 in Prefill
 			It("should set max_completion_tokens=1 in prefill and restore original value in decode", func() {
