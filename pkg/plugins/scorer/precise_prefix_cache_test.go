@@ -816,7 +816,7 @@ func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 	require.True(t, exists, "First block key should have entries")
 	found := false
 	for _, pod := range firstKeyPods {
-		if pod.PodIdentifier == "10.0.0.1:8080" && pod.Annotation == "speculative" {
+		if pod.PodIdentifier == "10.0.0.1:8080" && pod.Annotations.Source == "speculative" {
 			found = true
 			break
 		}
@@ -918,7 +918,7 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 
 	// After eviction, no speculative entries should remain for this pod
 	for _, pod := range keyToPods[blockKeys[0]] {
-		assert.NotEqual(t, "speculative", pod.Annotation,
+		assert.NotEqual(t, "speculative", pod.Annotations.Source,
 			"Speculative entries should have been evicted after TTL")
 	}
 }
