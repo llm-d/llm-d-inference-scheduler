@@ -248,7 +248,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 				kvCacheIndexer.KVBlockIndex().Evict(context.Background(), reqKey, entries.podEntries)
 			}
 		})
-		go speculativeCache.Start()
+		go cleanCachePeriodically(ctx, speculativeCache, speculativeTTL)
 	}
 
 	return &PrecisePrefixCacheScorer{
