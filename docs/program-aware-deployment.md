@@ -115,7 +115,27 @@ docker images | grep program-aware
 
 ### Full deployment (first time)
 
-This creates the KIND cluster, loads images, installs CRDs, Istio, vllm simulator, and the EPP:
+This creates the KIND cluster, loads images, installs CRDs, Istio, vllm simulator, and the EPP.
+
+### (Optional) Tune vllm Simulator Flags
+
+Before deploying, you can customize the vllm simulator's latency and concurrency behavior by editing the deployment YAML at `deploy/components/vllm-sim/deployments.yaml`. Add or modify these flags in the `args` of the container named `vllm`:
+
+```yaml
+- "--time-to-first-token=10ms"
+- "--inter-token-latency=5ms"
+- "--inter-token-latency-std-dev=1ms"
+- "--max-num-seqs=10"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--time-to-first-token` | Simulated delay before the first token is generated |
+| `--inter-token-latency` | Simulated delay between subsequent tokens |
+| `--inter-token-latency-std-dev` | Standard deviation for inter-token latency (adds jitter) |
+| `--max-num-seqs` | Maximum number of concurrent sequences the simulator handles |
+
+### Run the deployment
 
 ```bash
 EPP_TAG=program-aware \
