@@ -31,7 +31,7 @@ func PrefillRoleFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin
 
 // NewPrefillRole creates and returns an instance of the Filter configured for prefill role
 func NewPrefillRole() *ByLabel {
-	return NewByLabel(PrefillRoleType, RoleLabel, false, RolePrefill, RolePrefillDecode, RoleBoth)
+	return NewByLabel(PrefillRoleType, RoleLabel, false, RolePrefill, RolePrefillDecode, RoleBoth, RoleAll)
 }
 
 // DecodeRoleFactory defines the factory function for the Decode filter.
@@ -41,5 +41,5 @@ func DecodeRoleFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.
 
 // NewDecodeRole creates and returns an instance of the Filter configured for decode role
 func NewDecodeRole() *ByLabel {
-	return NewByLabel(DecodeRoleType, RoleLabel, true, RoleDecode, RolePrefillDecode, RoleBoth)
+	return NewByLabel(DecodeRoleType, RoleLabel, true, RoleDecode, RolePrefillDecode, RoleBoth, RoleAll)
 }
