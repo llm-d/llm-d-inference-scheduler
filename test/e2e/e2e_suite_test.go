@@ -37,8 +37,8 @@ const (
 	gieCrdsKustomize = "../../deploy/components/crds-gie"
 	// inferExtManifest is the manifest for the inference extension test resources.
 	inferExtManifest = "./yaml/inference-pools.yaml"
-	// modelName is the test model name.
-	modelName = "food-review"
+	// simModelName is the test model name.
+	simModelName = "food-review"
 	// kvModelName is the model name used in KV tests.
 	kvModelName = "Qwen/Qwen2.5-1.5B-Instruct"
 	// safeKvModelName is the safe form of the model name used in KV tests
@@ -277,7 +277,7 @@ func createEnvoy() {
 }
 
 func createInferencePool(numTargetPorts int, toDelete bool) []string {
-	poolName := modelName + "-inference-pool"
+	poolName := simModelName + "-inference-pool"
 
 	if toDelete {
 		objName := []string{"inferencepool/" + poolName}
