@@ -90,11 +90,10 @@ func main() {
 		"cert-path", "", "The path to the certificate for secure proxy. The certificate and private key files "+
 			"are assumed to be named tls.crt and tls.key, respectively. If not set, and secureProxy is enabled, "+
 			"then a self-signed certificate is used (for testing).")
-	enableSSRFProtection := pflag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
-	inferencePoolNamespace := pflag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "the Kubernetes namespace to watch for InferencePool resources (defaults to INFERENCE_POOL_NAMESPACE env var)")
-	inferencePoolName := pflag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
-	enablePrefillerSampling := pflag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
-	poolGroup := pflag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
+	enableSSRFProtection := flag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
+	inferencePool := flag.String("inference-pool", os.Getenv("INFERENCE_POOL"), "InferencePool to watch in namespace/name format (e.g., default/my-pool). Can also use INFERENCE_POOL env var.")
+	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
+	poolGroup := flag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
@@ -180,16 +179,21 @@ func main() {
 		}
 	}
 
-	// Determine namespace and pool name for SSRF protection
+	// Parse and validate InferencePool for SSRF protection
+	var inferencePoolNamespace, inferencePoolName string
 	if *enableSSRFProtection {
-		if *inferencePoolNamespace == "" {
-			logger.Info("Error: --inference-pool-namespace or INFERENCE_POOL_NAMESPACE environment variable is required when --enable-ssrf-protection is true")
+		if *inferencePool == "" {
+			logger.Info("Error: --inference-pool is required when --enable-ssrf-protection is true")
 			return
 		}
-		if *inferencePoolName == "" {
-			logger.Info("Error: --inference-pool-name or INFERENCE_POOL_NAME environment variable is required when --enable-ssrf-protection is true")
+
+		parts := strings.SplitN(*inferencePool, "/", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			logger.Info("Error: --inference-pool must be in namespace/name format (e.g., default/my-pool)")
 			return
 		}
+		inferencePoolNamespace = parts[0]
+		inferencePoolName = parts[1]
 
 		logger.Info("SSRF protection enabled", "namespace", inferencePoolNamespace, "poolName", inferencePoolName)
 	}
@@ -217,7 +221,7 @@ func main() {
 	}
 
 	// Create SSRF protection validator
-	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *poolGroup, *inferencePoolNamespace, *inferencePoolName)
+	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *poolGroup, inferencePoolNamespace, inferencePoolName)
 	if err != nil {
 		logger.Error(err, "failed to create SSRF protection validator")
 		return
