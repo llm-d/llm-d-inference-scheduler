@@ -34,8 +34,8 @@ import (
 
 const (
 	// TLS stages
-	stagePrefiller = "prefiller"
-	stageDecoder   = "decoder"
+	prefillStage = "prefiller"
+	decodeStage  = "decoder"
 )
 
 var (
@@ -47,11 +47,20 @@ var (
 	}
 
 	// supportedTLSStages defines all valid stages for TLS configuration
-	supportedTLSStages = []string{
-		stagePrefiller,
-		stageDecoder,
+	supportedTLSStages = map[string]bool{
+		prefillStage: true,
+		decodeStage:  true,
 	}
 )
+
+// supportedTLSStagesNames returns a slice of supported TLS stage names
+func supportedTLSStagesNames() []string {
+	names := make([]string, 0, len(supportedTLSStages))
+	for stage := range supportedTLSStages {
+		names = append(names, stage)
+	}
+	return names
+}
 
 // containsStage checks if a stage is present in the slice
 func containsStage(stages []string, stage string) bool {
@@ -68,8 +77,8 @@ func main() {
 	vLLMPort := pflag.String("vllm-port", "8001", "the port vLLM is listening on")
 	vLLMDataParallelSize := pflag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
 	connector := pflag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
-	enableTLS := pflag.StringSlice("enable-tls", []string{}, "stages to enable TLS for. Supported: "+strings.Join(supportedTLSStages, ", ")+". Can be specified multiple times or as comma-separated values.")
-	tlsInsecureSkipVerify := pflag.StringSlice("tls-insecure-skip-verify", []string{}, "stages to skip TLS verification for. Supported: "+strings.Join(supportedTLSStages, ", ")+". Can be specified multiple times or as comma-separated values.")
+	enableTLS := pflag.StringSlice("enable-tls", []string{}, "stages to enable TLS for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
+	tlsInsecureSkipVerify := pflag.StringSlice("tls-insecure-skip-verify", []string{}, "stages to skip TLS verification for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
 	secureProxy := pflag.Bool("secure-proxy", true, "Enables secure proxy. Defaults to true.")
 	certPath := pflag.String(
 		"cert-path", "", "The path to the certificate for secure proxy. The certificate and private key files "+
@@ -126,29 +135,15 @@ func main() {
 
 	// Validate TLS stages
 	for _, stage := range *enableTLS {
-		isValid := false
-		for _, validStage := range supportedTLSStages {
-			if stage == validStage {
-				isValid = true
-				break
-			}
-		}
-		if !isValid {
-			logger.Info("Error: --enable-tls stages must be one of: " + strings.Join(supportedTLSStages, ", "))
+		if !supportedTLSStages[stage] {
+			logger.Info("Error: --enable-tls stages must be one of: " + strings.Join(supportedTLSStagesNames(), ", "))
 			return
 		}
 	}
 
 	for _, stage := range *tlsInsecureSkipVerify {
-		isValid := false
-		for _, validStage := range supportedTLSStages {
-			if stage == validStage {
-				isValid = true
-				break
-			}
-		}
-		if !isValid {
-			logger.Info("Error: --tls-insecure-skip-verify stages must be one of: " + strings.Join(supportedTLSStages, ", "))
+		if !supportedTLSStages[stage] {
+			logger.Info("Error: --tls-insecure-skip-verify stages must be one of: " + strings.Join(supportedTLSStagesNames(), ", "))
 			return
 		}
 	}
@@ -169,7 +164,7 @@ func main() {
 
 	// start reverse proxy HTTP server
 	scheme := "http"
-	if containsStage(*enableTLS, stageDecoder) {
+	if containsStage(*enableTLS, decodeStage) {
 		scheme = "https"
 	}
 	targetURL, err := url.Parse(scheme + "://localhost:" + *vLLMPort)
@@ -180,9 +175,9 @@ func main() {
 
 	config := proxy.Config{
 		Connector:                   *connector,
-		PrefillerUseTLS:             containsStage(*enableTLS, stagePrefiller),
-		PrefillerInsecureSkipVerify: containsStage(*tlsInsecureSkipVerify, stagePrefiller),
-		DecoderInsecureSkipVerify:   containsStage(*tlsInsecureSkipVerify, stageDecoder),
+		PrefillerUseTLS:             containsStage(*enableTLS, prefillStage),
+		PrefillerInsecureSkipVerify: containsStage(*tlsInsecureSkipVerify, prefillStage),
+		DecoderInsecureSkipVerify:   containsStage(*tlsInsecureSkipVerify, decodeStage),
 		DataParallelSize:            *vLLMDataParallelSize,
 		EnablePrefillerSampling:     *enablePrefillerSampling,
 		SecureServing:               *secureProxy,
