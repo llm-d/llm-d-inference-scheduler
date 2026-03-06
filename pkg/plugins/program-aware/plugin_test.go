@@ -283,36 +283,6 @@ func TestPreRequest_RecordsWaitTime(t *testing.T) {
 	assert.Greater(t, metrics.AverageWaitTime(), 0.0)
 }
 
-// --- ResponseReceived tests ---
-
-func TestResponseReceived_SetsHeader(t *testing.T) {
-	p := &ProgramAwarePlugin{}
-
-	request := &scheduling.LLMRequest{
-		RequestId: "req-1",
-		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
-	}
-	response := &requestcontrol.Response{Headers: map[string]string{}}
-
-	p.ResponseReceived(context.Background(), request, response, &datalayer.EndpointMetadata{})
-
-	assert.Equal(t, "prog-a", response.Headers["x-program-id"])
-}
-
-func TestResponseReceived_NilHeaders(t *testing.T) {
-	p := &ProgramAwarePlugin{}
-
-	request := &scheduling.LLMRequest{
-		RequestId: "req-1",
-		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
-	}
-	response := &requestcontrol.Response{}
-
-	p.ResponseReceived(context.Background(), request, response, &datalayer.EndpointMetadata{})
-
-	assert.Equal(t, "prog-a", response.Headers["x-program-id"])
-}
-
 // --- ResponseComplete tests ---
 
 func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
@@ -409,12 +379,8 @@ func TestFullLifecycle(t *testing.T) {
 	assert.Equal(t, int64(1), metrics.DispatchedCount())
 	assert.Greater(t, metrics.AverageWaitTime(), 0.0, "wait time should reflect queue residence time")
 
-	// 3. ResponseReceived
+	// 3. ResponseComplete
 	response := &requestcontrol.Response{Headers: map[string]string{}}
-	p.ResponseReceived(context.Background(), request, response, &datalayer.EndpointMetadata{})
-	assert.Equal(t, programID, response.Headers["x-program-id"])
-
-	// 4. ResponseComplete
 	response.Usage = requestcontrol.Usage{PromptTokens: 42, CompletionTokens: 17}
 	p.ResponseComplete(context.Background(), request, response, &datalayer.EndpointMetadata{})
 	assert.Equal(t, int64(42), metrics.TotalInputTokens())

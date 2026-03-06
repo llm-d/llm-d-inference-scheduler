@@ -73,24 +73,13 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 	}
 }
 
-// --- ResponseReceived interface ---
-
-// ResponseReceived sets the x-program-id response header so the client can identify the program association.
-func (p *ProgramAwarePlugin) ResponseReceived(_ context.Context, request *scheduling.LLMRequest, response *requestcontrol.Response, _ *datalayer.EndpointMetadata) {
-	programID := request.Headers[fairnessIDHeader]
-	if programID == "" {
-		return
-	}
-	if response.Headers == nil {
-		response.Headers = make(map[string]string)
-	}
-	response.Headers["x-program-id"] = programID
-}
-
 // --- ResponseComplete interface ---
 
 // ResponseComplete records token usage and cleans up per-request state.
 func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *scheduling.LLMRequest, response *requestcontrol.Response, _ *datalayer.EndpointMetadata) {
+	if request == nil {
+		return
+	}
 	programID := request.Headers[fairnessIDHeader]
 
 	// Cleanup per-request timestamp regardless of program ID presence.
