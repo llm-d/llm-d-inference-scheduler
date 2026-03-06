@@ -246,7 +246,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				// render the chat template and get tokens directly
+				// render the chat template and tokenize
 				renderReq := &preprocessing.RenderChatRequest{
 					Key:          tokenizerCacheKey,
 					Conversation: conversations,
