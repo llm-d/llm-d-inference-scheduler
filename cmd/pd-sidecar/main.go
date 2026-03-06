@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/spf13/pflag"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -31,6 +32,12 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
+const (
+	// TLS stages
+	stagePrefiller = "prefiller"
+	stageDecoder   = "decoder"
+)
+
 var (
 	// supportedConnectors defines all valid P/D connector types
 	supportedConnectors = []string{
@@ -38,31 +45,48 @@ var (
 		proxy.ConnectorSharedStorage,
 		proxy.ConnectorSGLang,
 	}
+
+	// supportedTLSStages defines all valid stages for TLS configuration
+	supportedTLSStages = []string{
+		stagePrefiller,
+		stageDecoder,
+	}
 )
 
+// containsStage checks if a stage is present in the slice
+func containsStage(stages []string, stage string) bool {
+	for _, s := range stages {
+		if s == stage {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
-	port := flag.String("port", "8000", "the port the sidecar is listening on")
-	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
-	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
-	connector := flag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
-	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
-	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
-	prefillerInsecureSkipVerify := flag.Bool("prefiller-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to prefiller")
-	decoderInsecureSkipVerify := flag.Bool("decoder-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to decoder")
-	secureProxy := flag.Bool("secure-proxy", true, "Enables secure proxy. Defaults to true.")
-	certPath := flag.String(
+	port := pflag.String("port", "8000", "the port the sidecar is listening on")
+	vLLMPort := pflag.String("vllm-port", "8001", "the port vLLM is listening on")
+	vLLMDataParallelSize := pflag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
+	connector := pflag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
+	enableTLS := pflag.StringSlice("enable-tls", []string{}, "stages to enable TLS for. Supported: "+strings.Join(supportedTLSStages, ", ")+". Can be specified multiple times or as comma-separated values.")
+	tlsInsecureSkipVerify := pflag.StringSlice("tls-insecure-skip-verify", []string{}, "stages to skip TLS verification for. Supported: "+strings.Join(supportedTLSStages, ", ")+". Can be specified multiple times or as comma-separated values.")
+	secureProxy := pflag.Bool("secure-proxy", true, "Enables secure proxy. Defaults to true.")
+	certPath := pflag.String(
 		"cert-path", "", "The path to the certificate for secure proxy. The certificate and private key files "+
 			"are assumed to be named tls.crt and tls.key, respectively. If not set, and secureProxy is enabled, "+
 			"then a self-signed certificate is used (for testing).")
-	enableSSRFProtection := flag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
-	inferencePoolNamespace := flag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "the Kubernetes namespace to watch for InferencePool resources (defaults to INFERENCE_POOL_NAMESPACE env var)")
-	inferencePoolName := flag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
-	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
-	poolGroup := flag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
+	enableSSRFProtection := pflag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
+	inferencePoolNamespace := pflag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "the Kubernetes namespace to watch for InferencePool resources (defaults to INFERENCE_POOL_NAMESPACE env var)")
+	inferencePoolName := pflag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
+	enablePrefillerSampling := pflag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
+	poolGroup := pflag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
-	flag.Parse()
+
+	// Add Go flags to pflag (for zap options compatibility)
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
 
 	logger := zap.New(zap.UseFlagOptions(&opts))
 	log.SetLogger(logger)
@@ -100,6 +124,35 @@ func main() {
 	}
 	logger.Info("p/d connector validated", "connector", connector)
 
+	// Validate TLS stages
+	for _, stage := range *enableTLS {
+		isValid := false
+		for _, validStage := range supportedTLSStages {
+			if stage == validStage {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			logger.Info("Error: --enable-tls stages must be one of: " + strings.Join(supportedTLSStages, ", "))
+			return
+		}
+	}
+
+	for _, stage := range *tlsInsecureSkipVerify {
+		isValid := false
+		for _, validStage := range supportedTLSStages {
+			if stage == validStage {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			logger.Info("Error: --tls-insecure-skip-verify stages must be one of: " + strings.Join(supportedTLSStages, ", "))
+			return
+		}
+	}
+
 	// Determine namespace and pool name for SSRF protection
 	if *enableSSRFProtection {
 		if *inferencePoolNamespace == "" {
@@ -116,7 +169,7 @@ func main() {
 
 	// start reverse proxy HTTP server
 	scheme := "http"
-	if *decoderUseTLS {
+	if containsStage(*enableTLS, stageDecoder) {
 		scheme = "https"
 	}
 	targetURL, err := url.Parse(scheme + "://localhost:" + *vLLMPort)
@@ -127,9 +180,9 @@ func main() {
 
 	config := proxy.Config{
 		Connector:                   *connector,
-		PrefillerUseTLS:             *prefillerUseTLS,
-		PrefillerInsecureSkipVerify: *prefillerInsecureSkipVerify,
-		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
+		PrefillerUseTLS:             containsStage(*enableTLS, stagePrefiller),
+		PrefillerInsecureSkipVerify: containsStage(*tlsInsecureSkipVerify, stagePrefiller),
+		DecoderInsecureSkipVerify:   containsStage(*tlsInsecureSkipVerify, stageDecoder),
 		DataParallelSize:            *vLLMDataParallelSize,
 		EnablePrefillerSampling:     *enablePrefillerSampling,
 		SecureServing:               *secureProxy,
