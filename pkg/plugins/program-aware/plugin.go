@@ -35,7 +35,6 @@ var (
 	_ flowcontrol.FairnessPolicy       = &ProgramAwarePlugin{}
 	_ requestcontrol.PrepareDataPlugin = &ProgramAwarePlugin{}
 	_ requestcontrol.PreRequest        = &ProgramAwarePlugin{}
-	_ requestcontrol.ResponseReceived  = &ProgramAwarePlugin{}
 	_ requestcontrol.ResponseComplete  = &ProgramAwarePlugin{}
 )
 
