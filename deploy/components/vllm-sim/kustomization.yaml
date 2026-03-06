@@ -11,3 +11,11 @@ kind: Kustomization
 resources:
 - deployments.yaml
 
+configMapGenerator:
+  - name: sidecar-config
+    files:
+      - sidecar-config.yaml
+    options:
+      disableNameSuffixHash: true
+      labels:
+        app: ${POOL_NAME}

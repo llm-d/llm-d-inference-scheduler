@@ -1,3 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+data:
+  sidecar-config.yaml: |-
+    port: 8000
+    vllm-port: 8200
+    connector: "shared-storage"
+    secure-proxy: false
+    data-parallel-size: 1
+    decoder-use-tls: false
+metadata:
+  name: sidecar-config
+  labels:
+    app: ${POOL_NAME}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,15 +78,14 @@ spec:
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
-        - "--port=8000"
-        - "--vllm-port=8200"
-        - "--connector=${CONNECTOR_TYPE}"
-        - "--secure-proxy=false"
-        - "--decoder-use-tls=false"
+        - "--config=/etc/config/sidecar-config.yaml"
         ports:
         - containerPort: 8000
           protocol: TCP
         restartPolicy: Always
+        volumeMounts:
+        - name: sidecar-config
+          mountPath: /etc/config
       containers:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
@@ -97,3 +111,7 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: metadata.namespace
+      volumes:
+      - name: sidecar-config
+        configMap:
+          name: sidecar-config
