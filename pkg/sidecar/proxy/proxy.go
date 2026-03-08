@@ -73,6 +73,43 @@ const (
 	LegacyPoolGroup = "inference.networking.x-k8s.io"
 )
 
+// ConnectorInfo holds metadata about a connector
+type ConnectorInfo struct {
+	Description string
+	Deprecated  bool
+}
+
+// SupportedConnectors is a registry of all supported P/D connectors with metadata
+var SupportedConnectors = map[string]ConnectorInfo{
+	ConnectorNIXLV2: {
+		Description: "NIXL v2 protocol for Prefiller-Decoder disaggregation",
+		Deprecated:  false,
+	},
+	ConnectorSharedStorage: {
+		Description: "Shared Storage protocol (deprecated)",
+		Deprecated:  true,
+	},
+	ConnectorSGLang: {
+		Description: "SGLang protocol for Prefiller-Decoder disaggregation",
+		Deprecated:  false,
+	},
+}
+
+// IsValidConnector checks if a connector name is valid
+func IsValidConnector(name string) (ConnectorInfo, bool) {
+	info, exists := SupportedConnectors[name]
+	return info, exists
+}
+
+// GetConnectorNames returns a slice of all connector names
+func GetConnectorNames() []string {
+	names := make([]string, 0, len(SupportedConnectors))
+	for name := range SupportedConnectors {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Config represents the proxy server configuration
 type Config struct {
 	// Connector is the name of the P/D protocol the proxy must follow.

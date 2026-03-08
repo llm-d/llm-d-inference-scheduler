@@ -31,20 +31,11 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
-var (
-	// supportedConnectors defines all valid P/D connector types
-	supportedConnectors = []string{
-		proxy.ConnectorNIXLV2,
-		proxy.ConnectorSharedStorage,
-		proxy.ConnectorSGLang,
-	}
-)
-
 func main() {
 	port := flag.String("port", "8000", "the port the sidecar is listening on")
 	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
 	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
-	connector := flag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
+	connector := flag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(proxy.GetConnectorNames(), ", "))
 	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
 	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
 	prefillerInsecureSkipVerify := flag.Bool("prefiller-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to prefiller")
@@ -87,18 +78,22 @@ func main() {
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
 	// Validate connector
-	isValidConnector := false
-	for _, validConnector := range supportedConnectors {
-		if *connector == validConnector {
-			isValidConnector = true
-			break
-		}
-	}
+	connectorInfo, isValidConnector := proxy.IsValidConnector(*connector)
 	if !isValidConnector {
-		logger.Info("Error: --connector must be one of: " + strings.Join(supportedConnectors, ", "))
+		logger.Info("Error: --connector must be one of: " + strings.Join(proxy.GetConnectorNames(), ", "))
 		return
 	}
-	logger.Info("p/d connector validated", "connector", connector)
+
+	// Warn if connector is deprecated
+	if connectorInfo.Deprecated {
+		logger.Info("WARNING: connector is deprecated",
+			"connector", *connector,
+			"description", connectorInfo.Description)
+	}
+
+	logger.Info("p/d connector validated",
+		"connector", *connector,
+		"description", connectorInfo.Description)
 
 	// Determine namespace and pool name for SSRF protection
 	if *enableSSRFProtection {
