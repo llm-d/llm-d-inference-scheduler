@@ -23,12 +23,12 @@ import (
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 )
 
@@ -46,7 +46,7 @@ type AdmissionController interface {
 	//
 	// Returns:
 	//   - nil: If the request is admitted and should proceed to scheduling.
-	//   - errutil.Error: If the request is rejected.
+	//   - errcommon.Error: If the request is rejected.
 	Admit(
 		ctx context.Context,
 		reqCtx *handlers.RequestContext,
@@ -73,8 +73,8 @@ func rejectIfSheddableAndSaturated(
 		if sd.Saturation(ctx, locator.Locate(ctx, reqCtx.Request.Metadata)) >= 1.0 {
 			logger.V(logutil.TRACE).Info("Request rejected: system saturated and request is sheddable",
 				"requestID", reqCtx.SchedulingRequest.RequestId)
-			return errutil.Error{
-				Code: errutil.InferencePoolResourceExhausted,
+			return errcommon.Error{
+				Code: errcommon.ResourceExhausted,
 				Msg:  "system saturated, sheddable request dropped",
 			}
 		}
@@ -196,7 +196,7 @@ func (r *flowControlRequest) FlowKey() flowcontrol.FlowKey {
 	return flowcontrol.FlowKey{ID: r.fairnessID, Priority: r.priority}
 }
 
-// translateFlowControlOutcome maps the context-rich outcome of the Flow Control layer to the public errutil.Error
+// translateFlowControlOutcome maps the context-rich outcome of the Flow Control layer to the public errcommon.Error
 // contract used by the Director.
 func translateFlowControlOutcome(outcome types.QueueOutcome, err error) error {
 	msg := "request rejected by flow control"
@@ -208,14 +208,14 @@ func translateFlowControlOutcome(outcome types.QueueOutcome, err error) error {
 	case types.QueueOutcomeDispatched:
 		return nil
 	case types.QueueOutcomeRejectedCapacity:
-		return errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: msg}
+		return errcommon.Error{Code: errcommon.ResourceExhausted, Msg: msg}
 	case types.QueueOutcomeEvictedTTL:
-		return errutil.Error{Code: errutil.ServiceUnavailable, Msg: "request timed out in queue: " + msg}
+		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "request timed out in queue: " + msg}
 	case types.QueueOutcomeEvictedContextCancelled:
-		return errutil.Error{Code: errutil.ServiceUnavailable, Msg: "client disconnected: " + msg}
+		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "client disconnected: " + msg}
 	case types.QueueOutcomeRejectedOther, types.QueueOutcomeEvictedOther:
-		return errutil.Error{Code: errutil.Internal, Msg: "internal flow control error: " + msg}
+		return errcommon.Error{Code: errcommon.Internal, Msg: "internal flow control error: " + msg}
 	default:
-		return errutil.Error{Code: errutil.Internal, Msg: "unhandled flow control outcome: " + msg}
+		return errcommon.Error{Code: errcommon.Internal, Msg: "unhandled flow control outcome: " + msg}
 	}
 }

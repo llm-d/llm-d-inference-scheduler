@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	reqcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/request"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
@@ -43,7 +44,6 @@ import (
 	fwksched "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
-	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 )
 
 const (
@@ -158,8 +158,8 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 	candidatePods := d.podLocator.Locate(ctx, reqCtx.Request.Metadata)
 	if len(candidatePods) == 0 {
-		return reqCtx, errutil.Error{
-			Code: errutil.ServiceUnavailable,
+		return reqCtx, errcommon.Error{
+			Code: errcommon.ServiceUnavailable,
 			Msg:  "failed to find candidate pods for serving the request",
 		}
 	}
@@ -175,12 +175,12 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	// Run admit request plugins
 	if !d.runAdmissionPlugins(ctx, reqCtx.SchedulingRequest, snapshotOfCandidatePods) {
 		logger.V(logutil.DEFAULT).Info("Request cannot be admitted")
-		return reqCtx, errutil.Error{Code: errutil.Internal, Msg: "request cannot be admitted"}
+		return reqCtx, errcommon.Error{Code: errcommon.Internal, Msg: "request cannot be admitted"}
 	}
 
 	result, err := d.scheduler.Schedule(ctx, reqCtx.SchedulingRequest, snapshotOfCandidatePods)
 	if err != nil {
-		return reqCtx, errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
+		return reqCtx, errcommon.Error{Code: errcommon.ResourceExhausted, Msg: fmt.Errorf("failed to find target pod: %w", err).Error()}
 	}
 
 	// Prepare Request (Populates RequestContext and call PreRequest plugins)
@@ -197,7 +197,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 func (d *Director) processRequestBody(ctx context.Context, reqCtx *handlers.RequestContext, parser fwkrh.Parser) (*fwksched.LLMRequestBody, error) {
 	llmRequestBody, err := parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 	if err != nil {
-		return nil, errutil.Error{Code: errutil.BadRequest, Msg: err.Error()}
+		return nil, errcommon.Error{Code: errcommon.BadRequest, Msg: err.Error()}
 	}
 
 	switch v := llmRequestBody.ParsedBody.(type) {
@@ -209,7 +209,7 @@ func (d *Director) processRequestBody(ctx context.Context, reqCtx *handlers.Requ
 			return nil, err
 		}
 	default:
-		return nil, errutil.Error{Code: errutil.BadRequest, Msg: "Unsupported llmRequest parsedBody"}
+		return nil, errcommon.Error{Code: errcommon.BadRequest, Msg: "Unsupported llmRequest parsedBody"}
 	}
 	return llmRequestBody, nil
 }
@@ -227,7 +227,7 @@ func (d *Director) mutateAndRepackage(ctx context.Context, reqCtx *handlers.Requ
 	requestBodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
 		logger.V(logutil.DEFAULT).Error(err, "Error marshalling request body")
-		return errutil.Error{Code: errutil.Internal, Msg: "Error marshalling request body"}
+		return errcommon.Error{Code: errcommon.Internal, Msg: "Error marshalling request body"}
 	}
 
 	reqCtx.Request.RawBody = requestBodyBytes
@@ -240,7 +240,7 @@ func (d *Director) mutateModel(reqCtx *handlers.RequestContext, bodyMap map[stri
 	var ok bool
 	reqCtx.IncomingModelName, ok = bodyMap["model"].(string)
 	if !ok {
-		return reqCtx, errutil.Error{Code: errutil.BadRequest, Msg: "model not found in request body"}
+		return reqCtx, errcommon.Error{Code: errcommon.BadRequest, Msg: "model not found in request body"}
 	}
 	if reqCtx.TargetModelName == "" {
 		// Default to incoming model name
@@ -293,7 +293,7 @@ func (d *Director) selectWeightedModel(models []v1alpha2.TargetModel) string {
 func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestContext, result *fwksched.SchedulingResult) (*handlers.RequestContext, error) {
 	logger := log.FromContext(ctx)
 	if result == nil || len(result.ProfileResults) == 0 {
-		return reqCtx, errutil.Error{Code: errutil.Internal, Msg: "results must be greater than zero"}
+		return reqCtx, errcommon.Error{Code: errcommon.Internal, Msg: "results must be greater than zero"}
 	}
 	// primary profile is used to set destination
 	targetMetadatas := []*fwkdl.EndpointMetadata{}
