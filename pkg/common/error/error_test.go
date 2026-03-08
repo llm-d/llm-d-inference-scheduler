@@ -60,14 +60,6 @@ func TestError_Error(t *testing.T) {
 			want: "inference error: ModelServerError - connection timeout",
 		},
 		{
-			name: "BadConfiguration error",
-			err: Error{
-				Code: BadConfiguration,
-				Msg:  "missing required field",
-			},
-			want: "inference error: BadConfiguration - missing required field",
-		},
-		{
 			name: "ResourceExhausted error",
 			err: Error{
 				Code: ResourceExhausted,
@@ -149,14 +141,6 @@ func TestCanonicalCode(t *testing.T) {
 			want: ModelServerError,
 		},
 		{
-			name: "Error type with BadConfiguration code",
-			err: Error{
-				Code: BadConfiguration,
-				Msg:  "invalid config",
-			},
-			want: BadConfiguration,
-		},
-		{
 			name: "Error type with ResourceExhausted code",
 			err: Error{
 				Code: ResourceExhausted,
@@ -223,7 +207,6 @@ func TestErrorConstants(t *testing.T) {
 		Internal:           "Internal",
 		ServiceUnavailable: "ServiceUnavailable",
 		ModelServerError:   "ModelServerError",
-		BadConfiguration:   "BadConfiguration",
 		ResourceExhausted:  "ResourceExhausted",
 	}
 

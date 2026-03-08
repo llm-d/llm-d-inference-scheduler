@@ -32,7 +32,6 @@ const (
 	Internal           = "Internal"
 	ServiceUnavailable = "ServiceUnavailable"
 	ModelServerError   = "ModelServerError"
-	BadConfiguration   = "BadConfiguration"
 	ResourceExhausted  = "ResourceExhausted"
 )
 

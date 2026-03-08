@@ -452,16 +452,6 @@ func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 				},
 			},
 		}
-	case errcommon.BadConfiguration:
-		resp = &extProcPb.ProcessingResponse{
-			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-				ImmediateResponse: &extProcPb.ImmediateResponse{
-					Status: &envoyTypePb.HttpStatus{
-						Code: envoyTypePb.StatusCode_NotFound,
-					},
-				},
-			},
-		}
 	default:
 		return nil, status.Errorf(status.Code(err), "failed to handle request: %v", err)
 	}
