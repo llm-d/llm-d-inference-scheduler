@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	reqenvoy "sigs.k8s.io/gateway-api-inference-extension/pkg/common/envoy/request"
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	reqcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/request"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
@@ -42,7 +43,6 @@ import (
 	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
-	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 )
 
 func NewStreamingServer(datastore Datastore, director Director, parser fwkrh.Parser) *StreamingServer {
@@ -168,7 +168,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		if reqCtx.ResponseStatusCode != "" {
 			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseStatusCode)
 		} else if err != nil {
-			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, errutil.CanonicalCode(err))
+			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, errcommon.CanonicalCode(err))
 		}
 		if reqCtx.RequestRunning {
 			metrics.DecRunningRequests(reqCtx.IncomingModelName)
@@ -252,7 +252,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				value := string(header.RawValue)
 				loggerTrace.Info("header", "key", header.Key, "value", value)
 				if header.Key == "status" && value != "200" {
-					reqCtx.ResponseStatusCode = errutil.ModelServerError
+					reqCtx.ResponseStatusCode = errcommon.ModelServerError
 				} else if header.Key == "content-type" && strings.Contains(value, "text/event-stream") {
 					reqCtx.modelServerStreaming = true
 					loggerTrace.Info("model server is streaming response")
@@ -406,10 +406,10 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 	var resp *extProcPb.ProcessingResponse
 
-	switch errutil.CanonicalCode(err) {
+	switch errcommon.CanonicalCode(err) {
 	// This code can be returned by scheduler when there is no capacity for sheddable
 	// requests.
-	case errutil.InferencePoolResourceExhausted:
+	case errcommon.ResourceExhausted:
 		resp = &extProcPb.ProcessingResponse{
 			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
 				ImmediateResponse: &extProcPb.ImmediateResponse{
@@ -420,7 +420,7 @@ func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 			},
 		}
 	// This code can be returned by when EPP processes the request and run into server-side errors.
-	case errutil.Internal:
+	case errcommon.Internal:
 		resp = &extProcPb.ProcessingResponse{
 			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
 				ImmediateResponse: &extProcPb.ImmediateResponse{
@@ -431,7 +431,7 @@ func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 			},
 		}
 	// This code can be returned by the director when there are no candidate pods for the request scheduling.
-	case errutil.ServiceUnavailable:
+	case errcommon.ServiceUnavailable:
 		resp = &extProcPb.ProcessingResponse{
 			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
 				ImmediateResponse: &extProcPb.ImmediateResponse{
@@ -442,7 +442,7 @@ func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 			},
 		}
 	// This code can be returned when users provide invalid json request.
-	case errutil.BadRequest:
+	case errcommon.BadRequest:
 		resp = &extProcPb.ProcessingResponse{
 			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
 				ImmediateResponse: &extProcPb.ImmediateResponse{
@@ -452,7 +452,7 @@ func buildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 				},
 			},
 		}
-	case errutil.BadConfiguration:
+	case errcommon.BadConfiguration:
 		resp = &extProcPb.ProcessingResponse{
 			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
 				ImmediateResponse: &extProcPb.ImmediateResponse{

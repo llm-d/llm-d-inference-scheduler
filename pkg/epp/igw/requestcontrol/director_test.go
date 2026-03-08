@@ -38,6 +38,7 @@ import (
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
+	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	reqcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/request"
 	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
@@ -51,7 +52,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/mocks"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-	errutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/error"
 	poolutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pool"
 	testutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
 )
@@ -303,7 +303,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		schedulerMockSetup      func(m *mockScheduler)
 		initialTargetModelName  string // Initial target model in the reqCtx.
 		parser                  fwkrh.Parser
-		wantErrCode             string                   // Expected errutil code string
+		wantErrCode             string                   // Expected errcommon code string
 		wantReqCtx              *handlers.RequestContext // Fields to check in the returned RequestContext
 		wantMutatedBodyModel    string                   // Expected model in reqCtx.Request.Body after PostDispatch
 		targetModelName         string                   // Expected model name after target model resolution
@@ -464,7 +464,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			wantMutatedBodyModel:    model,
 			targetModelName:         model,
 			admitRequestDenialError: errors.New("denied by admit plugin"),
-			wantErrCode:             errutil.Internal,
+			wantErrCode:             errcommon.Internal,
 		},
 		{
 			name: "successful chat completions request with multiple messages",
@@ -555,19 +555,19 @@ func TestDirector_HandleRequest(t *testing.T) {
 				"prompt": "sheddable prompt",
 			},
 			inferenceObjectiveName:  objectiveNameSheddable,
-			mockAdmissionController: &mockAdmissionController{admitErr: errutil.Error{Code: errutil.InferencePoolResourceExhausted, Msg: "simulated admission rejection"}},
-			wantErrCode:             errutil.InferencePoolResourceExhausted,
+			mockAdmissionController: &mockAdmissionController{admitErr: errcommon.Error{Code: errcommon.ResourceExhausted, Msg: "simulated admission rejection"}},
+			wantErrCode:             errcommon.ResourceExhausted,
 		},
 		{
 			name:                    "model not found, expect err",
 			reqBodyMap:              map[string]any{"prompt": "p"},
 			mockAdmissionController: &mockAdmissionController{admitErr: nil},
-			wantErrCode:             errutil.BadRequest,
+			wantErrCode:             errcommon.BadRequest,
 		},
 		{
 			name:        "prompt or messages not found, expect err",
 			reqBodyMap:  map[string]any{"model": model},
-			wantErrCode: errutil.BadRequest,
+			wantErrCode: errcommon.BadRequest,
 		},
 		{
 			name: "empty messages, expect err",
@@ -575,7 +575,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				"model":    model,
 				"messages": []any{},
 			},
-			wantErrCode: errutil.BadRequest,
+			wantErrCode: errcommon.BadRequest,
 		},
 		{
 			name: "scheduler returns error",
@@ -587,7 +587,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			schedulerMockSetup: func(m *mockScheduler) {
 				m.scheduleErr = errors.New("simulated scheduler failure")
 			},
-			wantErrCode:            errutil.InferencePoolResourceExhausted,
+			wantErrCode:            errcommon.ResourceExhausted,
 			inferenceObjectiveName: objectiveName,
 		},
 		{
@@ -601,7 +601,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				m.scheduleResults = nil
 				m.scheduleErr = nil
 			},
-			wantErrCode:            errutil.Internal,
+			wantErrCode:            errcommon.Internal,
 			inferenceObjectiveName: objectiveName,
 		},
 	}
@@ -693,8 +693,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 
 				if test.wantErrCode != "" {
 					assert.Error(t, err, "HandleRequest() should have returned an error")
-					var e errutil.Error
-					if assert.ErrorAs(t, err, &e, "Error should be of type errutil.Error") {
+					var e errcommon.Error
+					if assert.ErrorAs(t, err, &e, "Error should be of type errcommon.Error") {
 						assert.Equal(t, test.wantErrCode, e.Code, "Error code mismatch")
 					}
 					return
