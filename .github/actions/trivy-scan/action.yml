@@ -3,13 +3,14 @@ description: Scan container image with Trivy
 inputs:
   image:
     required: true
+    description: Image to scan
 runs:
   using: "composite"
   steps:
     - name: Install Trivy
       run: |
-        wget https://github.com/aquasecurity/trivy/releases/download/v0.44.1/trivy_0.44.1_Linux-64bit.deb
-        sudo dpkg -i trivy_0.44.1_Linux-64bit.deb
+        wget https://github.com/aquasecurity/trivy/releases/download/v0.69.2/trivy_0.69.2_Linux-64bit.deb
+        sudo dpkg -i trivy_0.69.2_Linux-64bit.deb
       shell: bash
 
 

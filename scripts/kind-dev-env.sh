@@ -135,7 +135,7 @@ fi
 set -u
 
 # Check for required programs
-for cmd in kind kubectl kustomize ${CONTAINER_RUNTIME}; do
+for cmd in kind kubectl ${CONTAINER_RUNTIME}; do
     if ! command -v "$cmd" &> /dev/null; then
         echo "Error: $cmd is not installed or not in the PATH."
         exit 1
@@ -232,13 +232,13 @@ fi
 # CRD Deployment (Gateway API + GIE)
 # ------------------------------------------------------------------------------
 
-kustomize build deploy/components/crds-gateway-api |
+kubectl kustomize deploy/components/crds-gateway-api |
 	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
 
-kustomize build deploy/components/crds-gie |
+kubectl kustomize deploy/components/crds-gie |
 	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
 
-kustomize build --enable-helm deploy/components/crds-istio |
+kubectl kustomize --enable-helm deploy/components/crds-istio |
 	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
 
 # ------------------------------------------------------------------------------
@@ -260,7 +260,7 @@ kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
 envsubst '$PRIMARY_PORT' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
-kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
+kubectl kustomize --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \

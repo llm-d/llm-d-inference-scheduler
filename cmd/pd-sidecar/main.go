@@ -16,7 +16,6 @@ limitations under the License.
 package main
 
 import (
-	"crypto/tls"
 	"flag"
 	"net/url"
 	"os"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 var (
@@ -69,6 +69,20 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 	log.IntoContext(ctx, logger)
+
+	// Initialize tracing before creating any spans
+	shutdownTracing, err := telemetry.InitTracing(ctx)
+	if err != nil {
+		// Log error but don't fail - tracing is optional
+		logger.Error(err, "Failed to initialize tracing")
+	}
+	if shutdownTracing != nil {
+		defer func() {
+			if err := shutdownTracing(ctx); err != nil {
+				logger.Error(err, "Failed to shutdown tracing")
+			}
+		}()
+	}
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
@@ -111,21 +125,6 @@ func main() {
 		return
 	}
 
-	var cert *tls.Certificate
-	if *secureProxy {
-		var tempCert tls.Certificate
-		if *certPath != "" {
-			tempCert, err = tls.LoadX509KeyPair(*certPath+"/tls.crt", *certPath+"/tls.key")
-		} else {
-			tempCert, err = proxy.CreateSelfSignedTLSCertificate()
-		}
-		if err != nil {
-			logger.Error(err, "failed to create TLS certificate")
-			return
-		}
-		cert = &tempCert
-	}
-
 	config := proxy.Config{
 		Connector:                   *connector,
 		PrefillerUseTLS:             *prefillerUseTLS,
@@ -133,6 +132,8 @@ func main() {
 		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
 		DataParallelSize:            *vLLMDataParallelSize,
 		EnablePrefillerSampling:     *enablePrefillerSampling,
+		SecureServing:               *secureProxy,
+		CertPath:                    *certPath,
 	}
 
 	// Create SSRF protection validator
@@ -144,7 +145,7 @@ func main() {
 
 	proxyServer := proxy.NewProxy(*port, targetURL, config)
 
-	if err := proxyServer.Start(ctx, cert, validator); err != nil {
+	if err := proxyServer.Start(ctx, validator); err != nil {
 		logger.Error(err, "failed to start proxy server")
 	}
 }
