@@ -27,6 +27,10 @@ import (
 const (
 	// PrecisePrefixCachePluginType is the type-name of the PrecisePrefixCacheScorer plugin.
 	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
+
+	// defaultSubscriptionTimeout defines how long to keep inactive endpoint
+	// subscriptions before removing them from the KV-events pool.
+	defaultSubscriptionTimeout = 10 * time.Minute
 )
 
 // PrecisePrefixCachePluginConfig holds the configuration for the
@@ -94,6 +98,18 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 		config.TokenProcessorConfig = kvblock.DefaultTokenProcessorConfig()
 	}
 
+	// Validate pod discovery configuration
+	if config.KVEventsConfig != nil && config.KVEventsConfig.DiscoverPods {
+		if config.KVEventsConfig.PodDiscoveryConfig == nil {
+			return nil, errors.New("podDiscoveryConfig is required when discoverPods is enabled")
+		}
+		if config.KVEventsConfig.PodDiscoveryConfig.SocketPort <= 0 ||
+			config.KVEventsConfig.PodDiscoveryConfig.SocketPort > 65535 {
+			return nil, fmt.Errorf("invalid socket port: must be between 1 and 65535, got %d",
+				config.KVEventsConfig.PodDiscoveryConfig.SocketPort)
+		}
+	}
+
 	tokenProcessor := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
 
 	// initialize the indexer
@@ -114,9 +130,8 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	// initialize the subscribers cache only if endpoint discovery is enabled
 	if config.KVEventsConfig.DiscoverPods {
 		// initialize the subscribers TTL cache
-		subscriptionTimeout := 10 * time.Minute
 		subscribersCache = ttlcache.New[string, struct{}](
-			ttlcache.WithTTL[string, struct{}](subscriptionTimeout),
+			ttlcache.WithTTL[string, struct{}](defaultSubscriptionTimeout),
 		)
 		subscribersCache.OnEviction(func(ctx context.Context, reason ttlcache.EvictionReason,
 			item *ttlcache.Item[string, struct{}],
@@ -125,7 +140,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 				subscribersManager.RemoveSubscriber(ctx, item.Key())
 			}
 		})
-		go cleanCachePeriodically(ctx, subscribersCache, subscriptionTimeout)
+		go cleanCachePeriodically(ctx, subscribersCache, defaultSubscriptionTimeout)
 	}
 	if config.KVEventsConfig.ZMQEndpoint != "" {
 		// setup local subscriber to support global socket mode
