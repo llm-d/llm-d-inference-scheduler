@@ -20,6 +20,12 @@ Documentation for developing the inference scheduler.
 [ZeroMQ]:https://zeromq.org/
 
 > [!NOTE]
+> Before committing and pushing changes to an upstream repository, you may want to 
+> explicitly run the `make presubmit` target to avoid failing PR checks. The checks
+> are also performed as part of a GitHub action, but running locally can save time
+> and an iteration.
+
+> [!NOTE]
 > **Python is NOT required** as of v0.5.1. Tokenization is handled by a separate UDS (Unix Domain Socket) tokenizer sidecar container. Previous versions (< v0.5.1) used embedded Python tokenizers with daulet/tokenizers bindings, but these are now deprecated.
 
 ## Tokenization Architecture
