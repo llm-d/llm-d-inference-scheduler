@@ -90,10 +90,14 @@ func main() {
 		"cert-path", "", "The path to the certificate for secure proxy. The certificate and private key files "+
 			"are assumed to be named tls.crt and tls.key, respectively. If not set, and secureProxy is enabled, "+
 			"then a self-signed certificate is used (for testing).")
-	enableSSRFProtection := flag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
-	inferencePool := flag.String("inference-pool", os.Getenv("INFERENCE_POOL"), "InferencePool to watch in namespace/name format (e.g., default/my-pool). Can also use INFERENCE_POOL env var.")
-	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
-	poolGroup := flag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
+	enableSSRFProtection := pflag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
+	inferencePool := pflag.String("inference-pool", os.Getenv("INFERENCE_POOL"), "InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace. Can also use INFERENCE_POOL env var.")
+	// Deprecated: use --inference-pool instead
+	deprecatedInferencePoolNamespace := pflag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "DEPRECATED: use --inference-pool instead. The Kubernetes namespace for the InferencePool.")
+	// Deprecated: use --inference-pool instead
+	deprecatedInferencePoolName := pflag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "DEPRECATED: use --inference-pool instead. The specific InferencePool name.")
+	enablePrefillerSampling := pflag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
+	poolGroup := pflag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
@@ -182,18 +186,42 @@ func main() {
 	// Parse and validate InferencePool for SSRF protection
 	var inferencePoolNamespace, inferencePoolName string
 	if *enableSSRFProtection {
-		if *inferencePool == "" {
+		// Prefer --inference-pool over deprecated flags
+		switch {
+		case *inferencePool != "":
+			if *deprecatedInferencePoolName != "" || *deprecatedInferencePoolNamespace != "" {
+				logger.Info("Warning: --inference-pool takes precedence over deprecated --inference-pool-name/--inference-pool-namespace flags")
+			}
+			parts := strings.SplitN(*inferencePool, "/", 2)
+			if len(parts) == 1 {
+				// Single name implies "default" namespace
+				inferencePoolNamespace = "default"
+				inferencePoolName = parts[0]
+			} else {
+				if parts[0] == "" || parts[1] == "" {
+					logger.Info("Error: --inference-pool must be in namespace/name or name format (e.g., default/my-pool or my-pool)")
+					return
+				}
+				inferencePoolNamespace = parts[0]
+				inferencePoolName = parts[1]
+			}
+		case *deprecatedInferencePoolName != "":
+			// Fall back to deprecated flags
+			logger.Info("Warning: using deprecated --inference-pool-name/--inference-pool-namespace flags, please migrate to --inference-pool")
+			inferencePoolName = *deprecatedInferencePoolName
+			inferencePoolNamespace = *deprecatedInferencePoolNamespace
+			if inferencePoolNamespace == "" {
+				inferencePoolNamespace = "default"
+			}
+		default:
 			logger.Info("Error: --inference-pool is required when --enable-ssrf-protection is true")
 			return
 		}
 
-		parts := strings.SplitN(*inferencePool, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			logger.Info("Error: --inference-pool must be in namespace/name format (e.g., default/my-pool)")
+		if inferencePoolName == "" {
+			logger.Info("Error: InferencePool name must not be empty")
 			return
 		}
-		inferencePoolNamespace = parts[0]
-		inferencePoolName = parts[1]
 
 		logger.Info("SSRF protection enabled", "namespace", inferencePoolNamespace, "poolName", inferencePoolName)
 	}
