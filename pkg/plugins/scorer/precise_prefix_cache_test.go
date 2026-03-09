@@ -554,10 +554,9 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 
 			kvcacheConfig, err := kvcache.NewDefaultConfig()
 			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
-				ModelName:             "test-model",
-				WorkersCount:          1,
-	
-				LocalTokenizerConfig:  &localTokenizerConfig,
+				ModelName:            "test-model",
+				WorkersCount:         1,
+				LocalTokenizerConfig: &localTokenizerConfig,
 			}
 			require.NoError(t, err)
 
