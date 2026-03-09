@@ -90,9 +90,11 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	if d.config.NonCachedTokens <= 0 { // always use disaggregation in case of non cached tokens number is 0
-		return true
-	}
+	// NEW: 0 means PD disabled
+        if d.config.NonCachedTokens == 0 {
+                debugLogger.Info("Prefix-based PD disabled (nonCachedTokens=0)")
+                return false
+        }
 	if endpoint == nil {
 		logger.Error(nil, "prefix decider: endpoint is nil")
 		return false
