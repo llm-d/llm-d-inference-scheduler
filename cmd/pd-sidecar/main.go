@@ -47,9 +47,9 @@ var (
 	}
 
 	// supportedTLSStages defines all valid stages for TLS configuration
-	supportedTLSStages = map[string]bool{
-		prefillStage: true,
-		decodeStage:  true,
+	supportedTLSStages = map[string]struct{}{
+		prefillStage: {},
+		decodeStage:  {},
 	}
 )
 
@@ -79,6 +79,12 @@ func main() {
 	connector := pflag.String("connector", proxy.ConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedConnectors, ", "))
 	enableTLS := pflag.StringSlice("enable-tls", []string{}, "stages to enable TLS for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
 	tlsInsecureSkipVerify := pflag.StringSlice("tls-insecure-skip-verify", []string{}, "stages to skip TLS verification for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
+
+	// Deprecated flags - kept for backward compatibility, will be removed in a future release
+	prefillerUseTLS := pflag.Bool("prefiller-use-tls", false, "Deprecated: use --enable-tls=prefiller instead. Whether to use TLS when sending requests to prefillers.")
+	decoderUseTLS := pflag.Bool("decoder-use-tls", false, "Deprecated: use --enable-tls=decoder instead. Whether to use TLS when sending requests to the decoder.")
+	prefillerInsecureSkipVerify := pflag.Bool("prefiller-tls-insecure-skip-verify", false, "Deprecated: use --tls-insecure-skip-verify=prefiller instead. Skip TLS verification for requests to prefiller.")
+	decoderInsecureSkipVerify := pflag.Bool("decoder-tls-insecure-skip-verify", false, "Deprecated: use --tls-insecure-skip-verify=decoder instead. Skip TLS verification for requests to decoder.")
 	secureProxy := pflag.Bool("secure-proxy", true, "Enables secure proxy. Defaults to true.")
 	certPath := pflag.String(
 		"cert-path", "", "The path to the certificate for secure proxy. The certificate and private key files "+
@@ -117,6 +123,32 @@ func main() {
 		}()
 	}
 
+	// Migrate deprecated boolean TLS flags to new StringSlice flags
+	if *prefillerUseTLS {
+		logger.Info("WARNING: --prefiller-use-tls is deprecated, use --enable-tls=prefiller instead")
+		if !containsStage(*enableTLS, prefillStage) {
+			*enableTLS = append(*enableTLS, prefillStage)
+		}
+	}
+	if *decoderUseTLS {
+		logger.Info("WARNING: --decoder-use-tls is deprecated, use --enable-tls=decoder instead")
+		if !containsStage(*enableTLS, decodeStage) {
+			*enableTLS = append(*enableTLS, decodeStage)
+		}
+	}
+	if *prefillerInsecureSkipVerify {
+		logger.Info("WARNING: --prefiller-tls-insecure-skip-verify is deprecated, use --tls-insecure-skip-verify=prefiller instead")
+		if !containsStage(*tlsInsecureSkipVerify, prefillStage) {
+			*tlsInsecureSkipVerify = append(*tlsInsecureSkipVerify, prefillStage)
+		}
+	}
+	if *decoderInsecureSkipVerify {
+		logger.Info("WARNING: --decoder-tls-insecure-skip-verify is deprecated, use --tls-insecure-skip-verify=decoder instead")
+		if !containsStage(*tlsInsecureSkipVerify, decodeStage) {
+			*tlsInsecureSkipVerify = append(*tlsInsecureSkipVerify, decodeStage)
+		}
+	}
+
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
 	// Validate connector
@@ -135,14 +167,14 @@ func main() {
 
 	// Validate TLS stages
 	for _, stage := range *enableTLS {
-		if !supportedTLSStages[stage] {
+		if _, ok := supportedTLSStages[stage]; !ok {
 			logger.Info("Error: --enable-tls stages must be one of: " + strings.Join(supportedTLSStagesNames(), ", "))
 			return
 		}
 	}
 
 	for _, stage := range *tlsInsecureSkipVerify {
-		if !supportedTLSStages[stage] {
+		if _, ok := supportedTLSStages[stage]; !ok {
 			logger.Info("Error: --tls-insecure-skip-verify stages must be one of: " + strings.Join(supportedTLSStagesNames(), ", "))
 			return
 		}
