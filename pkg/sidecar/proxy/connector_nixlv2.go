@@ -85,6 +85,14 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	maxTokensValue, maxTokensOk := completionRequest[requestFieldMaxTokens]
 	maxCompletionTokensValue, maxCompletionTokensOk := completionRequest[requestFieldMaxCompletionTokens]
 
+	// Determine if client wants streaming
+	clientWantsStreaming := false
+	if streamOk {
+		if streamBool, ok := streamValue.(bool); ok {
+			clientWantsStreaming = streamBool
+		}
+	}
+
 	completionRequest[requestFieldKVTransferParams] = map[string]any{
 		requestFieldDoRemoteDecode:  true,
 		requestFieldDoRemotePrefill: false,
@@ -172,6 +180,54 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	s.logger.V(5).Info("received prefiller response", requestFieldKVTransferParams, pKVTransferParams)
 
+	// 4. Send first token to client if streaming
+	var firstTokenSentTime time.Time
+	var decodeResponseWriter http.ResponseWriter = w
+	if clientWantsStreaming {
+		// Convert non-streaming response to SSE format and send first chunk
+		// Remove kv_transfer_params before sending to user
+		delete(prefillerResponse, requestFieldKVTransferParams)
+
+		streamChunk, err := json.Marshal(prefillerResponse)
+		if err != nil {
+			if err := errorJSONInvalid(err, w); err != nil {
+				s.logger.Error(err, "failed to marshal streaming chunk")
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		_, err = w.Write([]byte("data: "))
+		if err != nil {
+			s.logger.Error(err, "failed to write SSE prefix")
+			return
+		}
+		_, err = w.Write(streamChunk)
+		if err != nil {
+			s.logger.Error(err, "failed to write prefill chunk to client")
+			return
+		}
+		_, err = w.Write([]byte("\n\n"))
+		if err != nil {
+			s.logger.Error(err, "failed to write SSE suffix")
+			return
+		}
+
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		firstTokenSentTime = time.Now()
+		s.logger.V(4).Info("sent first token to client immediately after prefill")
+
+		// Wrap writer to prevent decode from re-writing headers
+		decodeResponseWriter = &headersSentWriter{ResponseWriter: w}
+	}
+
 	// Decode Stage
 
 	ctx, decodeSpan := tracer.Start(ctx, "llm_d.pd_proxy.decode",
@@ -185,7 +241,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	)
 	decodeStart := time.Now()
 
-	// 1. Prepare decode request
+	// 5. Prepare decode request
 	dreq := r.Clone(ctx)
 
 	dreq.Header.Add(requestHeaderRequestID, uuidStr)
@@ -204,11 +260,21 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	}
 	delete(completionRequest, requestFieldMaxTokens)
 	if maxTokensOk {
-		completionRequest[requestFieldMaxTokens] = maxTokensValue
+		// Decrement by 1 since prefill already generated 1 token
+		if val, ok := maxTokensValue.(float64); ok && val > 0 {
+			completionRequest[requestFieldMaxTokens] = val - 1
+		} else {
+			completionRequest[requestFieldMaxTokens] = maxTokensValue
+		}
 	}
 	delete(completionRequest, requestFieldMaxCompletionTokens)
 	if maxCompletionTokensOk {
-		completionRequest[requestFieldMaxCompletionTokens] = maxCompletionTokensValue
+		// Decrement by 1 since prefill already generated 1 token
+		if val, ok := maxCompletionTokensValue.(float64); ok && val > 0 {
+			completionRequest[requestFieldMaxCompletionTokens] = val - 1
+		} else {
+			completionRequest[requestFieldMaxCompletionTokens] = maxCompletionTokensValue
+		}
 	}
 	completionRequest[requestFieldKVTransferParams] = pKVTransferParams
 
@@ -222,32 +288,37 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	dreq.Body = io.NopCloser(strings.NewReader(string(dbody)))
 	dreq.ContentLength = int64(len(dbody))
 
-	// 2. Forward to local decoder.
+	// 6. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(w, dreq)
+	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeResponseWriter, dreq)
 	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.data_parallel", dataParallelUsed))
 
 	if !dataParallelUsed {
 		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
 		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host))
-		s.decoderProxy.ServeHTTP(w, dreq)
+		s.decoderProxy.ServeHTTP(decodeResponseWriter, dreq)
 	}
 
 	decodeDuration := time.Since(decodeStart)
 	decodeSpan.SetAttributes(attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())))
 
 	// Calculate end-to-end P/D timing metrics.
-	// True TTFT captures time from gateway request start to decode start, including
-	// gateway routing, scheduling, prefill, and coordination overhead that
-	// per-instance vLLM metrics miss.
+	// True TTFT captures time from gateway request start to when the first token reaches the user.
+	// For streaming clients: measures until first token is sent (after prefill).
+	// For non-streaming clients: measures until decode starts (includes KV transfer).
 	if currentSpan := trace.SpanFromContext(ctx); currentSpan.SpanContext().IsValid() {
 		var totalDuration time.Duration
 		var trueTTFT time.Duration
 		if requestStartValue := ctx.Value(requestStartTimeKey); requestStartValue != nil {
 			if requestStart, ok := requestStartValue.(time.Time); ok {
 				totalDuration = time.Since(requestStart)
-				trueTTFT = decodeStart.Sub(requestStart)
+				// Use actual first token sent time for streaming, decode start for non-streaming
+				if !firstTokenSentTime.IsZero() {
+					trueTTFT = firstTokenSentTime.Sub(requestStart)
+				} else {
+					trueTTFT = decodeStart.Sub(requestStart)
+				}
 			}
 		}
 
@@ -261,4 +332,19 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 			attribute.Float64("llm_d.pd_proxy.coordinator_overhead_ms", float64(coordinatorOverhead.Milliseconds())),
 		)
 	}
+}
+
+// headersSentWriter wraps a ResponseWriter to prevent duplicate WriteHeader calls
+// Used when headers have already been sent for streaming first token
+type headersSentWriter struct {
+	http.ResponseWriter
+}
+
+func (w *headersSentWriter) WriteHeader(statusCode int) {
+	// No-op: headers already sent
+}
+
+func (w *headersSentWriter) Write(b []byte) (int, error) {
+	// Write directly without calling WriteHeader
+	return w.ResponseWriter.Write(b)
 }
