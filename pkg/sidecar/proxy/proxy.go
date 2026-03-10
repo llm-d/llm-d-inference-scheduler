@@ -33,6 +33,8 @@ import (
 )
 
 const (
+	schemeHTTPS = "https"
+
 	requestHeaderRequestID = "x-request-id"
 
 	requestFieldKVTransferParams    = "kv_transfer_params"
@@ -289,7 +291,7 @@ func (s *Server) createProxyHandler(
 	}
 
 	newProxy := httputil.NewSingleHostReverseProxy(u)
-	if u.Scheme == "https" {
+	if u.Scheme == schemeHTTPS {
 		newProxy.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: insecureSkipVerify,
