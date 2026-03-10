@@ -86,12 +86,8 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	maxCompletionTokensValue, maxCompletionTokensOk := completionRequest[requestFieldMaxCompletionTokens]
 
 	// Determine if client wants streaming
-	clientWantsStreaming := false
-	if streamOk {
-		if streamBool, ok := streamValue.(bool); ok {
-			clientWantsStreaming = streamBool
-		}
-	}
+	streamBool, streamBoolOk := streamValue.(bool)
+	clientWantsStreaming := streamOk && streamBoolOk && streamBool
 
 	completionRequest[requestFieldKVTransferParams] = map[string]any{
 		requestFieldDoRemoteDecode:  true,
@@ -182,7 +178,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// 4. Send first token to client if streaming
 	var firstTokenSentTime time.Time
-	var decodeResponseWriter http.ResponseWriter = w
+	decodeResponseWriter := w
 	if clientWantsStreaming {
 		// Convert non-streaming response to SSE format and send first chunk
 		// Remove kv_transfer_params before sending to user
@@ -260,18 +256,26 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	}
 	delete(completionRequest, requestFieldMaxTokens)
 	if maxTokensOk {
-		// Decrement by 1 since prefill already generated 1 token
-		if val, ok := maxTokensValue.(float64); ok && val > 0 {
-			completionRequest[requestFieldMaxTokens] = val - 1
+		if clientWantsStreaming {
+			// Decrement by 1 since we already sent 1 token to streaming client
+			if val, ok := maxTokensValue.(float64); ok && val > 0 {
+				completionRequest[requestFieldMaxTokens] = val - 1
+			} else {
+				completionRequest[requestFieldMaxTokens] = maxTokensValue
+			}
 		} else {
 			completionRequest[requestFieldMaxTokens] = maxTokensValue
 		}
 	}
 	delete(completionRequest, requestFieldMaxCompletionTokens)
 	if maxCompletionTokensOk {
-		// Decrement by 1 since prefill already generated 1 token
-		if val, ok := maxCompletionTokensValue.(float64); ok && val > 0 {
-			completionRequest[requestFieldMaxCompletionTokens] = val - 1
+		if clientWantsStreaming {
+			// Decrement by 1 since we already sent 1 token to streaming client
+			if val, ok := maxCompletionTokensValue.(float64); ok && val > 0 {
+				completionRequest[requestFieldMaxCompletionTokens] = val - 1
+			} else {
+				completionRequest[requestFieldMaxCompletionTokens] = maxCompletionTokensValue
+			}
 		} else {
 			completionRequest[requestFieldMaxCompletionTokens] = maxCompletionTokensValue
 		}
