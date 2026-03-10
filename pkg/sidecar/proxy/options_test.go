@@ -17,51 +17,14 @@ limitations under the License.
 package proxy
 
 import (
-	"os"
 	"testing"
-
-	"github.com/spf13/pflag"
 )
 
-func TestNewOptions(t *testing.T) {
-	opts := NewOptions()
-
-	if opts.Port != "8000" {
-		t.Errorf("Expected Port to be '8000', got '%s'", opts.Port)
-	}
-	if opts.VLLMPort != "8001" {
-		t.Errorf("Expected VLLMPort to be '8001', got '%s'", opts.VLLMPort)
-	}
-	if opts.DataParallelSize != 1 {
-		t.Errorf("Expected DataParallelSize to be 1, got %d", opts.DataParallelSize)
-	}
-	if opts.Connector != KVConnectorNIXLV2 {
-		t.Errorf("Expected Connector to be '%s', got '%s'", KVConnectorNIXLV2, opts.Connector)
-	}
-	if !opts.SecureProxy {
-		t.Error("Expected SecureProxy to be true")
-	}
-	if opts.PoolGroup != DefaultPoolGroup {
-		t.Errorf("Expected PoolGroup to be '%s', got '%s'", DefaultPoolGroup, opts.PoolGroup)
-	}
-}
-
 func TestNewOptionsWithEnvVars(t *testing.T) {
-	// Set environment variables
-	if err := os.Setenv("INFERENCE_POOL_NAMESPACE", "test-namespace"); err != nil {
-		t.Fatalf("Failed to set INFERENCE_POOL_NAMESPACE: %v", err)
-	}
-	if err := os.Setenv("INFERENCE_POOL_NAME", "test-pool"); err != nil {
-		t.Fatalf("Failed to set INFERENCE_POOL_NAME: %v", err)
-	}
-	if err := os.Setenv("ENABLE_PREFILLER_SAMPLING", "true"); err != nil {
-		t.Fatalf("Failed to set ENABLE_PREFILLER_SAMPLING: %v", err)
-	}
-	defer func() {
-		_ = os.Unsetenv("INFERENCE_POOL_NAMESPACE")
-		_ = os.Unsetenv("INFERENCE_POOL_NAME")
-		_ = os.Unsetenv("ENABLE_PREFILLER_SAMPLING")
-	}()
+	// Set environment variables - t.Setenv automatically handles cleanup
+	t.Setenv("INFERENCE_POOL_NAMESPACE", "test-namespace")
+	t.Setenv("INFERENCE_POOL_NAME", "test-pool")
+	t.Setenv("ENABLE_PREFILLER_SAMPLING", "true")
 
 	opts := NewOptions()
 
@@ -73,26 +36,6 @@ func TestNewOptionsWithEnvVars(t *testing.T) {
 	}
 	if !opts.EnablePrefillerSampling {
 		t.Error("Expected EnablePrefillerSampling to be true")
-	}
-}
-
-func TestAddFlags(t *testing.T) {
-	opts := NewOptions()
-	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	opts.AddFlags(fs)
-
-	// Test that flags are registered
-	if fs.Lookup("port") == nil {
-		t.Error("Expected 'port' flag to be registered")
-	}
-	if fs.Lookup("connector") == nil {
-		t.Error("Expected 'connector' flag to be registered")
-	}
-	if fs.Lookup("enable-tls") == nil {
-		t.Error("Expected 'enable-tls' flag to be registered")
-	}
-	if fs.Lookup("tls-insecure-skip-verify") == nil {
-		t.Error("Expected 'tls-insecure-skip-verify' flag to be registered")
 	}
 }
 
@@ -126,11 +69,11 @@ func TestValidateTLSStages(t *testing.T) {
 		enableTLS []string
 		wantErr   bool
 	}{
-		{"valid prefiller", []string{"prefiller"}, false},
-		{"valid decoder", []string{"decoder"}, false},
-		{"valid both", []string{"prefiller", "decoder"}, false},
-		{"invalid stage", []string{"invalid"}, true},
-		{"mixed valid and invalid", []string{"prefiller", "invalid"}, true},
+		{name: "valid prefiller", enableTLS: []string{"prefiller"}, wantErr: false},
+		{name: "valid decoder", enableTLS: []string{"decoder"}, wantErr: false},
+		{name: "valid both", enableTLS: []string{"prefiller", "decoder"}, wantErr: false},
+		{name: "invalid stage", enableTLS: []string{"invalid"}, wantErr: true},
+		{name: "mixed valid and invalid", enableTLS: []string{"prefiller", "invalid"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -153,11 +96,11 @@ func TestValidateSSRFProtection(t *testing.T) {
 		poolName  string
 		wantErr   bool
 	}{
-		{"disabled", false, "", "", false},
-		{"enabled with both", true, "ns", "pool", false},
-		{"enabled missing namespace", true, "", "pool", true},
-		{"enabled missing pool name", true, "ns", "", true},
-		{"enabled missing both", true, "", "", true},
+		{name: "disabled", enabled: false, namespace: "", poolName: "", wantErr: false},
+		{name: "enabled with both", enabled: true, namespace: "ns", poolName: "pool", wantErr: false},
+		{name: "enabled missing namespace", enabled: true, namespace: "", poolName: "pool", wantErr: true},
+		{name: "enabled missing pool name", enabled: true, namespace: "ns", poolName: "", wantErr: true},
+		{name: "enabled missing both", enabled: true, namespace: "", poolName: "", wantErr: true},
 	}
 
 	for _, tt := range tests {

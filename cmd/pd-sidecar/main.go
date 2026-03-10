@@ -65,11 +65,6 @@ func main() {
 		}()
 	}
 
-	// Log deprecation warnings for old flags
-	if opts.Connector != "" && opts.Connector != opts.KVConnector {
-		logger.Info("WARNING: --connector is deprecated, use --kv-connector instead")
-	}
-
 	// Complete options (handles migration from deprecated flags)
 	if err := opts.Complete(); err != nil {
 		logger.Error(err, "Failed to complete configuration")
