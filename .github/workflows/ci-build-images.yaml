@@ -55,8 +55,10 @@ jobs:
         uses: ./.github/actions/trivy-scan
         with:
           image: ghcr.io/llm-d/${{ inputs.epp-image-name }}:${{ inputs.tag }}
+          github-token: ${{ secrets.GHCR_TOKEN }}
 
       - name: Run Trivy scan on sidecar image
         uses: ./.github/actions/trivy-scan
         with:
           image: ghcr.io/llm-d/${{ inputs.sidecar-image-name }}:${{ inputs.tag }}
+          github-token: ${{ secrets.GHCR_TOKEN }}

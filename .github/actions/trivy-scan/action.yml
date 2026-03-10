@@ -17,10 +17,15 @@ runs:
           ${{ runner.os }}-trivy-
 
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.29.0
+      uses: aquasecurity/trivy-action@0.35.0
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        TRIVY_USERNAME: ${{ github.actor }}
+        TRIVY_PASSWORD: ${{ inputs.github-token }}      
       with:
         image-ref: ${{ inputs.image }}
         format: 'table'
         severity: 'HIGH,CRITICAL'
         exit-code: '1'
         cache-dir: .trivy  # Explicitly tell Trivy to use the cached directory
+        debug: true
