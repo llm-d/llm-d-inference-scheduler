@@ -20,8 +20,6 @@ runs:
       uses: aquasecurity/trivy-action@0.35.0
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        TRIVY_USERNAME: ${{ github.actor }}
-        TRIVY_PASSWORD: ${{ inputs.github-token }}      
       with:
         image-ref: ${{ inputs.image }}
         format: 'table'
