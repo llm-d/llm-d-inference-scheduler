@@ -28,4 +28,3 @@ runs:
         severity: 'HIGH,CRITICAL'
         exit-code: '1'
         cache-dir: .trivy  # Explicitly tell Trivy to use the cached directory
-        debug: true
