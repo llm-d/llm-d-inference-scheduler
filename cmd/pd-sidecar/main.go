@@ -69,13 +69,6 @@ func main() {
 	}
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
-	logger.Info("KV connector validated", "kvConnector", opts.KVConnector)
-	if opts.ECConnector != "" {
-		logger.Info("EC connector validated", "ecConnector", opts.ECConnector)
-	}
-	if opts.EnableSSRFProtection {
-		logger.Info("SSRF protection enabled", "namespace", opts.InferencePoolNamespace, "poolName", opts.InferencePoolName)
-	}
 
 	// Parse target URL
 	targetURL, err := url.Parse(opts.TargetURL)
@@ -87,8 +80,8 @@ func main() {
 	config := proxy.Config{
 		KVConnector:                 opts.KVConnector,
 		ECConnector:                 opts.ECConnector,
-		PrefillerUseTLS:             opts.PrefillerUseTLS,
-		EncoderUseTLS:               opts.EncoderUseTLS,
+		PrefillerUseTLS:             opts.UseTLSForPrefiller,
+		EncoderUseTLS:               opts.UseTLSForEncoder,
 		PrefillerInsecureSkipVerify: opts.InsecureSkipVerifyForPrefiller,
 		EncoderInsecureSkipVerify:   opts.InsecureSkipVerifyForEncoder,
 		DecoderInsecureSkipVerify:   opts.InsecureSkipVerifyForDecoder,
@@ -97,6 +90,24 @@ func main() {
 		SecureServing:               opts.SecureProxy,
 		CertPath:                    opts.CertPath,
 	}
+
+	logger.Info("Proxy configuration",
+		"port", opts.Port,
+		"targetURL", opts.TargetURL,
+		"kvConnector", config.KVConnector,
+		"ecConnector", config.ECConnector,
+		"dataParallelSize", config.DataParallelSize,
+		"prefillerUseTLS", config.PrefillerUseTLS,
+		"prefillerInsecureSkipVerify", config.PrefillerInsecureSkipVerify,
+		"decoderInsecureSkipVerify", config.DecoderInsecureSkipVerify,
+		"enablePrefillerSampling", config.EnablePrefillerSampling,
+		"secureServing", config.SecureServing,
+		"certPath", config.CertPath,
+		"enableSSRFProtection", opts.EnableSSRFProtection,
+		"inferencePoolNamespace", opts.InferencePoolNamespace,
+		"inferencePoolName", opts.InferencePoolName,
+		"poolGroup", opts.PoolGroup,
+	)
 
 	// Create SSRF protection validator
 	validator, err := proxy.NewAllowlistValidator(opts.EnableSSRFProtection, opts.PoolGroup, opts.InferencePoolNamespace, opts.InferencePoolName)
