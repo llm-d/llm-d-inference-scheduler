@@ -91,12 +91,19 @@ func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *sche
 
 	if response != nil {
 		metrics := p.getOrCreateMetrics(programID)
-		metrics.RecordTokens(int64(response.Usage.PromptTokens), int64(response.Usage.CompletionTokens))
-		inputTokensTotal.WithLabelValues(programID).Add(float64(response.Usage.PromptTokens))
-		outputTokensTotal.WithLabelValues(programID).Add(float64(response.Usage.CompletionTokens))
+		promptTokens := int64(response.Usage.PromptTokens)
+		completionTokens := int64(response.Usage.CompletionTokens)
+
+		metrics.RecordTokens(promptTokens, completionTokens)
+		inputTokensTotal.WithLabelValues(programID).Add(float64(promptTokens))
+		outputTokensTotal.WithLabelValues(programID).Add(float64(completionTokens))
+
+		// Strategy hook: deduct actual token cost from per-flow accounting (DRR),
+		// or no-op (EWMA).
+		p.getStrategy().OnCompleted(metrics, promptTokens, completionTokens)
 
 		log.FromContext(ctx).V(logutil.TRACE).Info("ResponseComplete: recorded tokens",
 			"requestId", request.RequestId, "programId", programID,
-			"promptTokens", response.Usage.PromptTokens, "completionTokens", response.Usage.CompletionTokens)
+			"promptTokens", promptTokens, "completionTokens", completionTokens)
 	}
 }
