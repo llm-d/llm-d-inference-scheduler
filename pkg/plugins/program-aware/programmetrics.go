@@ -18,6 +18,11 @@ type ProgramMetrics struct {
 	dispatchedCount   atomic.Int64
 	totalInputTokens  atomic.Int64
 	totalOutputTokens atomic.Int64
+
+	// deficitTokens is the DRR deficit counter: positive means the program is owed
+	// service; negative means it has been overserved relative to its quantum.
+	// Only used by DRRStrategy; ignored by EWMAStrategy.
+	deficitTokens atomic.Int64
 }
 
 // IncrementRequests atomically increments the total request counter.
@@ -73,4 +78,26 @@ func (m *ProgramMetrics) TotalInputTokens() int64 {
 // TotalOutputTokens returns the total number of output tokens across all requests.
 func (m *ProgramMetrics) TotalOutputTokens() int64 {
 	return m.totalOutputTokens.Load()
+}
+
+// --- DRR deficit counter ---
+
+// AddDeficit increases the deficit counter by n tokens (quantum allocation).
+func (m *ProgramMetrics) AddDeficit(n int64) {
+	m.deficitTokens.Add(n)
+}
+
+// DeductTokens decreases the deficit counter by n tokens (actual cost deduction).
+func (m *ProgramMetrics) DeductTokens(n int64) {
+	m.deficitTokens.Add(-n)
+}
+
+// ResetDeficit sets the deficit counter to zero (called when the queue drains).
+func (m *ProgramMetrics) ResetDeficit() {
+	m.deficitTokens.Store(0)
+}
+
+// Deficit returns the current deficit counter value in tokens.
+func (m *ProgramMetrics) Deficit() int64 {
+	return m.deficitTokens.Load()
 }

@@ -3,6 +3,7 @@ package programaware
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -18,20 +19,22 @@ const (
 
 	// fairnessIDHeader is the standard header used to identify the program.
 	fairnessIDHeader = "x-gateway-inference-fairness-id"
-
-	// Default scoring weights for Pick().
-	// headWait: age of the oldest request in the queue — Avoids starvation
-	// avgWait: EWMA of historical wait times — Fairness signal.
-	// totalDispatched: anti-monopoly penalty for programs that have received the most service.
-	defaultWeightHeadWait        = 0.5
-	defaultWeightAvgWait         = 0.3
-	defaultWeightTotalDispatched = 0.2
-
-	// Normalization caps for scoring.
-	capHeadWaitMs       = 5000.0
-	capAvgWaitMs        = 5000.0
-	capTotalDispatched  = 1000.0
 )
+
+// Config holds the JSON-decoded configuration for the plugin.
+type Config struct {
+	// Strategy selects the fairness scoring algorithm used by Pick().
+	// Valid values: "ewma" (default), "drr".
+	//
+	//   "ewma" — head-of-queue age + EWMA historical wait + dispatch-count penalty.
+	//            Practical heuristic; strong starvation prevention.
+	//
+	//   "drr"  — Deficit Round Robin adapted for tokens [Shreedhar & Varghese 1995].
+	//            Each round every active queue earns a token quantum; actual token
+	//            usage is deducted at response completion. Provides provably
+	//            proportional fairness independent of request rate or size.
+	Strategy string `json:"strategy"`
+}
 
 // Compile-time interface assertions.
 var (
@@ -41,25 +44,40 @@ var (
 	_ requestcontrol.ResponseComplete  = &ProgramAwarePlugin{}
 )
 
-// ProgramAwarePluginFactory creates a new ProgramAwarePlugin instance.
-func ProgramAwarePluginFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+// ProgramAwarePluginFactory creates a new ProgramAwarePlugin from JSON config.
+// Example config: {"strategy": "drr"}
+func ProgramAwarePluginFactory(name string, rawCfg json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+	cfg := Config{Strategy: "ewma"}
+	if len(rawCfg) > 0 {
+		if err := json.Unmarshal(rawCfg, &cfg); err != nil {
+			return nil, fmt.Errorf("invalid config for %s plugin %q: %w", ProgramAwarePluginType, name, err)
+		}
+	}
+	strategy, err := newStrategy(cfg.Strategy)
+	if err != nil {
+		return nil, fmt.Errorf("%s plugin %q: %w", ProgramAwarePluginType, name, err)
+	}
 	return &ProgramAwarePlugin{
-		name: name,
+		name:     name,
+		strategy: strategy,
 	}, nil
 }
 
 // ProgramAwarePlugin implements a FairnessPolicy that selects which program's
-// queue to service next based on accumulated per-program metrics, and request
-// lifecycle hooks that track those metrics.
+// queue to service next, and request lifecycle hooks that track per-program metrics.
 //
-// Program identity comes from the standard x-gateway-inference-fairness-id header.
+// Fairness behaviour is determined by the configured ScoringStrategy (default: EWMA).
+// Program identity comes from the x-gateway-inference-fairness-id request header.
 type ProgramAwarePlugin struct {
-	name string
+	name     string
+	strategy ScoringStrategy
 
-	// programMetrics stores aggregated metrics per program. Key: program ID (string), Value: *ProgramMetrics.
+	// programMetrics stores aggregated metrics per program.
+	// Key: program ID (string), Value: *ProgramMetrics.
 	programMetrics sync.Map
 
-	// requestTimestamps tracks when PrepareData ran for each request, used to compute wait time in PreRequest.
+	// requestTimestamps tracks when Pick() dispatched each request,
+	// used to compute flow-control queue wait time in PreRequest.
 	// Key: request ID (string), Value: time.Time.
 	requestTimestamps sync.Map
 }
@@ -72,16 +90,28 @@ func (p *ProgramAwarePlugin) TypedName() plugin.TypedName {
 	}
 }
 
+// getStrategy returns the configured strategy, falling back to EWMA for zero-value
+// plugin instances constructed directly in tests.
+func (p *ProgramAwarePlugin) getStrategy() ScoringStrategy {
+	if p.strategy == nil {
+		return &EWMAStrategy{}
+	}
+	return p.strategy
+}
+
 // --- FairnessPolicy interface ---
 
-// NewState creates per-PriorityBand state. This plugin uses its own shared sync.Map
-// for metrics, so no per-band state is needed.
+// NewState creates per-PriorityBand state. This plugin uses its own sync.Map
+// for all state, so no per-band state is needed.
 func (p *ProgramAwarePlugin) NewState(_ context.Context) any {
 	return nil
 }
 
-// Pick selects which program queue to service next based on a scoring function
-// that considers live queue data and accumulated program metrics.
+// Pick selects which program queue to service next.
+//
+// For each queue in the band, the configured ScoringStrategy is given a chance
+// to update its per-program state (OnPickStart), then the queue with the highest
+// score is selected for dispatch.
 func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBandAccessor) (flowcontrol.FlowQueueAccessor, error) {
 	start := time.Now()
 	defer func() {
@@ -94,9 +124,22 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 
 	var bestQueue flowcontrol.FlowQueueAccessor
 	bestScore := -1.0
+	strategy := p.getStrategy()
 
 	band.IterateQueues(func(queue flowcontrol.FlowQueueAccessor) (keepIterating bool) {
-		if queue == nil || queue.Len() == 0 {
+		if queue == nil {
+			return true
+		}
+
+		queueLen := queue.Len()
+		metrics := p.getOrCreateMetrics(queue.FlowKey().ID)
+
+		// Strategy hook: runs for every queue, including empty ones.
+		// DRR: allocates quantum for active queues, resets deficit for idle queues.
+		// EWMA: no-op.
+		strategy.OnPickStart(queue.FlowKey().ID, queueLen, metrics)
+
+		if queueLen == 0 {
 			return true
 		}
 
@@ -109,54 +152,26 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 	})
 
 	// Record the selected item's enqueue time so PreRequest can compute
-	// the actual flow control queue wait time (enqueue → dispatch).
+	// the actual flow-control queue wait time (enqueue → dispatch).
 	if bestQueue != nil {
 		if head := bestQueue.PeekHead(); head != nil {
-			reqID := head.OriginalRequest().ID()
-			p.requestTimestamps.Store(reqID, head.EnqueueTime())
+			p.requestTimestamps.Store(head.OriginalRequest().ID(), head.EnqueueTime())
 		}
 	}
 
 	return bestQueue, nil
 }
 
-// scoreQueue computes a priority score for a program's queue.
-// Higher scores mean the queue should be serviced sooner.
-//
-// Scoring rationale:
-//   - headWait (0.5): age of the oldest request at the head of the queue.
-//     This is rate-neutral and for anti-starvation
-//   - avgWait (0.3): EWMA of historical wait times. Programs that have
-//     consistently experienced long waits accumulate a persistent fairness signal.
-//   - totalDispatched (0.2, negative): anti-monopoly penalty for attained service. Programs that
-//     have already received the most service are deprioritized. Later, we can consider this
-//    based on the compute used instead of just number of requests.
+// scoreQueue delegates to the configured ScoringStrategy.
 func (p *ProgramAwarePlugin) scoreQueue(queue flowcontrol.FlowQueueAccessor) float64 {
-	programID := queue.FlowKey().ID
-
-	// Accumulated signals from program history.
-	avgWaitMs := 0.0
-	totalDispatched := 0.0
-	if metricsRaw, ok := p.programMetrics.Load(programID); ok {
-		metrics := metricsRaw.(*ProgramMetrics)
-		avgWaitMs = metrics.AverageWaitTime()
-		totalDispatched = float64(metrics.DispatchedCount())
+	var metrics *ProgramMetrics
+	if metricsRaw, ok := p.programMetrics.Load(queue.FlowKey().ID); ok {
+		metrics = metricsRaw.(*ProgramMetrics)
 	}
-
-	// Live signal: age of the oldest request in the queue.
-	// This is independent of queue depth, so high-rate programs cannot
-	// dominate simply by building larger queues.
-	headWaitMs := 0.0
-	if head := queue.PeekHead(); head != nil {
-		headWaitMs = float64(time.Since(head.EnqueueTime()).Milliseconds())
-	}
-
-	return defaultWeightHeadWait*normalize(headWaitMs, capHeadWaitMs) +
-		defaultWeightAvgWait*normalize(avgWaitMs, capAvgWaitMs) -
-		defaultWeightTotalDispatched*normalize(totalDispatched, capTotalDispatched)
+	return p.getStrategy().ScoreQueue(queue, metrics)
 }
 
-// getOrCreateMetrics returns the ProgramMetrics for the given program ID, creating it if needed.
+// getOrCreateMetrics returns the ProgramMetrics for the given program ID, creating if needed.
 func (p *ProgramAwarePlugin) getOrCreateMetrics(programID string) *ProgramMetrics {
 	if metricsRaw, ok := p.programMetrics.Load(programID); ok {
 		return metricsRaw.(*ProgramMetrics)
