@@ -46,9 +46,9 @@ const (
 	ewmaWeightAvgWait         = 0.3
 	ewmaWeightTotalDispatched = 0.2
 	// Currently it is a constant, but would make it relative
-	ewmaCapHeadWaitMs         = 5000.0
-	ewmaCapAvgWaitMs          = 5000.0
-	ewmaCapTotalDispatched    = 1000.0
+	ewmaCapHeadWaitMs      = 5000.0
+	ewmaCapAvgWaitMs       = 5000.0
+	ewmaCapTotalDispatched = 1000.0
 )
 
 // EWMAStrategy scores queues using three normalized signals:
@@ -59,10 +59,13 @@ const (
 // This is a practical heuristic based on EWMA of wait time
 type EWMAStrategy struct{}
 
+// Name returns "ewma".
 func (s *EWMAStrategy) Name() string { return "ewma" }
 
+// OnPickStart is a no-op for EWMA; state is derived from request timestamps, not round counters.
 func (s *EWMAStrategy) OnPickStart(_ string, _ int, _ *ProgramMetrics) {}
 
+// ScoreQueue returns a weighted score combining head-of-queue age, EWMA wait time, and dispatch count.
 func (s *EWMAStrategy) ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) float64 {
 	avgWaitMs := 0.0
 	totalDispatched := 0.0
@@ -81,6 +84,7 @@ func (s *EWMAStrategy) ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *
 		ewmaWeightTotalDispatched*normalize(totalDispatched, ewmaCapTotalDispatched)
 }
 
+// OnCompleted is a no-op for EWMA; token usage is not tracked in this strategy.
 func (s *EWMAStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}
 
 // =============================================================================
@@ -121,8 +125,10 @@ const (
 // new or returning programs that start with deficit=0.
 type DRRStrategy struct{}
 
+// Name returns "drr".
 func (s *DRRStrategy) Name() string { return "drr" }
 
+// OnPickStart allocates a token quantum for active queues and resets deficit for idle queues.
 func (s *DRRStrategy) OnPickStart(_ string, queueLen int, metrics *ProgramMetrics) {
 	if metrics == nil {
 		return
@@ -138,6 +144,7 @@ func (s *DRRStrategy) OnPickStart(_ string, queueLen int, metrics *ProgramMetric
 	}
 }
 
+// ScoreQueue returns a weighted score combining the deficit counter and head-of-queue age.
 func (s *DRRStrategy) ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) float64 {
 	deficit := 0.0
 	if metrics != nil {
@@ -158,6 +165,7 @@ func (s *DRRStrategy) ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *P
 		drrWeightHeadWait*normalize(headWaitMs, drrCapHeadWaitMs)
 }
 
+// OnCompleted deducts actual token usage from the deficit counter.
 func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
 	if metrics == nil {
 		return

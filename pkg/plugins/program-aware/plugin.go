@@ -1,3 +1,5 @@
+// Package programaware implements a flow-control fairness policy that schedules
+// programs using their accumulated metrics using scoring strategies (EWMA or DRR).
 package programaware
 
 import (
@@ -46,6 +48,8 @@ var (
 
 // ProgramAwarePluginFactory creates a new ProgramAwarePlugin from JSON config.
 // Example config: {"strategy": "drr"}
+//
+//nolint:revive
 func ProgramAwarePluginFactory(name string, rawCfg json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	cfg := Config{Strategy: "ewma"}
 	if len(rawCfg) > 0 {
@@ -68,6 +72,8 @@ func ProgramAwarePluginFactory(name string, rawCfg json.RawMessage, _ plugin.Han
 //
 // Fairness behaviour is determined by the configured ScoringStrategy (default: EWMA).
 // Program identity comes from the x-gateway-inference-fairness-id request header.
+//
+//nolint:revive
 type ProgramAwarePlugin struct {
 	name     string
 	strategy ScoringStrategy
@@ -119,7 +125,7 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 	}()
 
 	if band == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil
 	}
 
 	var bestQueue flowcontrol.FlowQueueAccessor
