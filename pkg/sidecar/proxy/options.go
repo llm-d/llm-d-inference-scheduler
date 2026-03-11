@@ -74,9 +74,12 @@ type Options struct {
 
 	EnableSSRFProtection bool // EnableSSRFProtection enables SSRF protection using InferencePool allowlisting
 
-	InferencePoolNamespace string // InferencePoolNamespace is the Kubernetes namespace to watch for InferencePool resources
+	InferencePool string // InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace.
 
-	InferencePoolName string // InferencePoolName is the specific InferencePool name to watch
+	// Deprecated flag fields for InferencePool (kept for backward compatibility)
+	InferencePoolNamespace string // Deprecated: Use InferencePool instead. InferencePoolNamespace is the Kubernetes namespace to watch for InferencePool resources
+
+	InferencePoolName string // Deprecated: Use InferencePool instead. InferencePoolName is the specific InferencePool name to watch
 
 	EnablePrefillerSampling bool // EnablePrefillerSampling enables random selection of prefill instances
 
@@ -171,6 +174,7 @@ func NewOptions() *Options {
 		SecureProxy:                 true,
 		CertPath:                    "",
 		EnableSSRFProtection:        false,
+		InferencePool:               os.Getenv("INFERENCE_POOL"),
 		InferencePoolNamespace:      os.Getenv("INFERENCE_POOL_NAMESPACE"),
 		InferencePoolName:           os.Getenv("INFERENCE_POOL_NAME"),
 		EnablePrefillerSampling:     enablePrefillerSampling,
@@ -226,9 +230,14 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 
 	fs.BoolVar(&opts.EnableSSRFProtection, "enable-ssrf-protection", opts.EnableSSRFProtection, "enable SSRF protection using InferencePool allowlisting")
 
-	fs.StringVar(&opts.InferencePoolNamespace, "inference-pool-namespace", opts.InferencePoolNamespace, "the Kubernetes namespace to watch for InferencePool resources (defaults to INFERENCE_POOL_NAMESPACE env var)")
+	fs.StringVar(&opts.InferencePool, "inference-pool", opts.InferencePool, "InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace. Can also use INFERENCE_POOL env var.")
 
-	fs.StringVar(&opts.InferencePoolName, "inference-pool-name", opts.InferencePoolName, "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
+	// Deprecated flags - kept for backward compatibility
+	fs.StringVar(&opts.InferencePoolNamespace, "inference-pool-namespace", opts.InferencePoolNamespace, "Deprecated: use --inference-pool instead. The Kubernetes namespace for the InferencePool (defaults to INFERENCE_POOL_NAMESPACE env var)")
+	_ = fs.MarkDeprecated("inference-pool-namespace", "use --inference-pool instead")
+
+	fs.StringVar(&opts.InferencePoolName, "inference-pool-name", opts.InferencePoolName, "Deprecated: use --inference-pool instead. The specific InferencePool name (defaults to INFERENCE_POOL_NAME env var)")
+	_ = fs.MarkDeprecated("inference-pool-name", "use --inference-pool instead")
 
 	fs.BoolVar(&opts.EnablePrefillerSampling, "enable-prefiller-sampling", opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 
@@ -270,11 +279,23 @@ func validateStages(stages []string, supportedStages map[string]struct{}, flagNa
 
 // Complete performs post-processing of parsed command-line arguments.
 // This handles migration from deprecated boolean flags to new StringSlice flags,
-// sets configuration fields from flag fields, and computes the target URL.
+// parses the InferencePool field, sets configuration fields from flag fields, and computes the target URL.
 func (opts *Options) Complete() error {
 	// Migrate deprecated Connector flag to KVConnector
 	if opts.Connector != "" && opts.KVConnector == KVConnectorNIXLV2 {
 		opts.KVConnector = opts.Connector
+	// Parse InferencePool field (namespace/name or just name)
+	if opts.InferencePool != "" {
+		parts := strings.SplitN(opts.InferencePool, "/", 2)
+		if len(parts) == 2 {
+			// Format: namespace/name
+			opts.InferencePoolNamespace = parts[0]
+			opts.InferencePoolName = parts[1]
+		} else {
+			// Format: name (implies default namespace)
+			opts.InferencePoolNamespace = "default"
+			opts.InferencePoolName = parts[0]
+		}
 	}
 
 	// Migrate deprecated boolean TLS flags to new StringSlice flags
@@ -331,13 +352,28 @@ func (opts *Options) Validate() error {
 		return err
 	}
 
+	// Validate InferencePool format if provided
+	if opts.InferencePool != "" {
+		// Check for invalid characters (only allow alphanumeric, hyphen, and forward slash)
+		if strings.Count(opts.InferencePool, "/") > 1 {
+			return errors.New("--inference-pool must be in format 'namespace/name' or 'name', not multiple slashes")
+		}
+		// Validate that it doesn't contain invalid characters like spaces or special chars
+		parts := strings.Split(opts.InferencePool, "/")
+		for _, part := range parts {
+			if part == "" {
+				return errors.New("--inference-pool cannot have empty namespace or name")
+			}
+		}
+	}
+
 	// Validate SSRF protection requirements
 	if opts.EnableSSRFProtection {
 		if opts.InferencePoolNamespace == "" {
-			return errors.New("--inference-pool-namespace or INFERENCE_POOL_NAMESPACE environment variable is required when --enable-ssrf-protection is true")
+			return errors.New("--inference-pool, --inference-pool-namespace, INFERENCE_POOL, or INFERENCE_POOL_NAMESPACE environment variable is required when --enable-ssrf-protection is true")
 		}
 		if opts.InferencePoolName == "" {
-			return errors.New("--inference-pool-name or INFERENCE_POOL_NAME environment variable is required when --enable-ssrf-protection is true")
+			return errors.New("--inference-pool, --inference-pool-name, INFERENCE_POOL, or INFERENCE_POOL_NAME environment variable is required when --enable-ssrf-protection is true")
 		}
 	}
 

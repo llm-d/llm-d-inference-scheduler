@@ -117,6 +117,59 @@ func TestValidateSSRFProtection(t *testing.T) {
 	}
 }
 
+func TestCompleteInferencePoolParsing(t *testing.T) {
+	tests := []struct {
+		name              string
+		inferencePool     string
+		expectedNamespace string
+		expectedName      string
+	}{
+		{
+			name:              "namespace/name format",
+			inferencePool:     "my-namespace/my-pool",
+			expectedNamespace: "my-namespace",
+			expectedName:      "my-pool",
+		},
+		{
+			name:              "name only implies default namespace",
+			inferencePool:     "my-pool",
+			expectedNamespace: "default",
+			expectedName:      "my-pool",
+		},
+		{
+			name:              "empty string does not set values",
+			inferencePool:     "",
+			expectedNamespace: "",
+			expectedName:      "",
+		},
+		{
+			name:              "deprecated flags take precedence when InferencePool is empty",
+			inferencePool:     "",
+			expectedNamespace: "",
+			expectedName:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := NewOptions()
+			opts.InferencePool = tt.inferencePool
+
+			err := opts.Complete()
+			if err != nil {
+				t.Fatalf("Complete() unexpected error: %v", err)
+			}
+
+			if opts.InferencePoolNamespace != tt.expectedNamespace {
+				t.Errorf("InferencePoolNamespace = %v, want %v", opts.InferencePoolNamespace, tt.expectedNamespace)
+			}
+			if opts.InferencePoolName != tt.expectedName {
+				t.Errorf("InferencePoolName = %v, want %v", opts.InferencePoolName, tt.expectedName)
+			}
+		})
+	}
+}
+
 func TestCompleteTLSConfiguration(t *testing.T) {
 	tests := []struct {
 		name                         string
