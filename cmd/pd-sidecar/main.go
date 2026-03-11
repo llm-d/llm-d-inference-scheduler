@@ -16,7 +16,6 @@ limitations under the License.
 package main
 
 import (
-	"flag"
 	"net/url"
 
 	"github.com/spf13/pflag"
@@ -33,16 +32,8 @@ func main() {
 	// Initialize options with defaults
 	opts := proxy.NewOptions()
 
-	// Create flag set and add options flags (including logging flags)
-	fs := pflag.NewFlagSet("pd-sidecar", pflag.ExitOnError)
-	opts.AddFlags(fs)
-
-	// Add pflag flags to the standard flag set
-	pflag.CommandLine.AddFlagSet(fs)
-
-	// Add Go flags to pflag (for zap options compatibility)
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-
+	// Add options flags (including logging flags)
+	opts.AddFlags(pflag.CommandLine)
 	pflag.Parse()
 
 	logger := zap.New(zap.UseFlagOptions(&opts.LoggingOptions))
@@ -86,25 +77,21 @@ func main() {
 		logger.Info("SSRF protection enabled", "namespace", opts.InferencePoolNamespace, "poolName", opts.InferencePoolName)
 	}
 
-	// start reverse proxy HTTP server
-	scheme := "http"
-	if opts.GetDecoderUseTLS() {
-		scheme = "https"
-	}
-	targetURL, err := url.Parse(scheme + "://localhost:" + opts.VLLMPort)
+	// Parse target URL
+	targetURL, err := url.Parse(opts.TargetURL)
 	if err != nil {
-		logger.Error(err, "failed to create targetURL")
+		logger.Error(err, "failed to parse targetURL")
 		return
 	}
 
 	config := proxy.Config{
 		KVConnector:                 opts.KVConnector,
 		ECConnector:                 opts.ECConnector,
-		PrefillerUseTLS:             opts.GetPrefillerUseTLS(),
-		EncoderUseTLS:               opts.GetEncoderUseTLS(),
-		PrefillerInsecureSkipVerify: opts.GetPrefillerInsecureSkipVerify(),
-		EncoderInsecureSkipVerify:   opts.GetEncoderInsecureSkipVerify(),
-		DecoderInsecureSkipVerify:   opts.GetDecoderInsecureSkipVerify(),
+		PrefillerUseTLS:             opts.PrefillerUseTLS,
+		EncoderUseTLS:               opts.EncoderUseTLS,
+		PrefillerInsecureSkipVerify: opts.InsecureSkipVerifyForPrefiller,
+		EncoderInsecureSkipVerify:   opts.InsecureSkipVerifyForEncoder,
+		DecoderInsecureSkipVerify:   opts.InsecureSkipVerifyForDecoder,
 		DataParallelSize:            opts.DataParallelSize,
 		EnablePrefillerSampling:     opts.EnablePrefillerSampling,
 		SecureServing:               opts.SecureProxy,

@@ -34,6 +34,8 @@ type Options struct {
 
 	VLLMPort string // VLLMPort is the port vLLM is listening on
 
+	TargetURL string // TargetURL is the target URL for the proxy
+
 	DataParallelSize int // DataParallelSize is the vLLM DATA-PARALLEL-SIZE value
 
 	// KVConnector is the KV protocol between Prefiller and Decoder
@@ -49,6 +51,15 @@ type Options struct {
 
 	TLSInsecureSkipVerify []string // TLSInsecureSkipVerify stages to skip TLS verification for (new StringSlice flag)
 
+	UseTLSForPrefiller bool // UseTLSForPrefiller indicates whether to use TLS when sending requests to prefillers (set from EnableTLS)
+
+	UseTLSForDecoder bool // UseTLSForDecoder indicates whether to use TLS when sending requests to the decoder (set from EnableTLS)
+
+	InsecureSkipVerifyForPrefiller bool // InsecureSkipVerifyForPrefiller configures the proxy to skip TLS verification for requests to prefiller (set from TLSInsecureSkipVerify)
+
+	InsecureSkipVerifyForDecoder bool // InsecureSkipVerifyForDecoder configures the proxy to skip TLS verification for requests to decoder (set from TLSInsecureSkipVerify)
+
+	// Deprecated flag fields (kept for backward compatibility)
 	PrefillerUseTLS bool // Deprecated: Use EnableTLS instead. PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers
 
 	DecoderUseTLS bool // Deprecated: Use EnableTLS instead. DecoderUseTLS indicates whether to use TLS when sending requests to the decoder
@@ -169,8 +180,14 @@ func NewOptions() *Options {
 }
 
 // AddFlags binds the Options fields to command-line flags on the given FlagSet.
-// It also binds logging flags to the standard flag.CommandLine FlagSet.
+// It also sets up zap logging flags and integrates Go flags with pflag.
 func (opts *Options) AddFlags(fs *pflag.FlagSet) {
+	// Add logging flags to the standard flag set
+	opts.LoggingOptions.BindFlags(flag.CommandLine)
+
+	// Add Go flags to pflag (for zap options compatibility)
+	fs.AddGoFlagSet(flag.CommandLine)
+
 	fs.StringVar(&opts.Port, "port", opts.Port, "the port the sidecar is listening on")
 
 	fs.StringVar(&opts.VLLMPort, "vllm-port", opts.VLLMPort, "the port vLLM is listening on")
@@ -216,9 +233,6 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&opts.EnablePrefillerSampling, "enable-prefiller-sampling", opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 
 	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
-
-	// Add logging flags to the standard flag set
-	opts.LoggingOptions.BindFlags(flag.CommandLine)
 }
 
 // Validate checks the Options for invalid or conflicting values.
@@ -255,7 +269,8 @@ func validateStages(stages []string, supportedStages map[string]struct{}, flagNa
 }
 
 // Complete performs post-processing of parsed command-line arguments.
-// This handles migration from deprecated boolean flags to new StringSlice flags.
+// This handles migration from deprecated boolean flags to new StringSlice flags,
+// sets configuration fields from flag fields, and computes the target URL.
 func (opts *Options) Complete() error {
 	// Migrate deprecated Connector flag to KVConnector
 	if opts.Connector != "" && opts.KVConnector == KVConnectorNIXLV2 {
@@ -283,6 +298,19 @@ func (opts *Options) Complete() error {
 			opts.TLSInsecureSkipVerify = append(opts.TLSInsecureSkipVerify, decodeStage)
 		}
 	}
+
+	// Set configuration fields from flag fields
+	opts.UseTLSForPrefiller = containsStage(opts.EnableTLS, prefillStage)
+	opts.UseTLSForDecoder = containsStage(opts.EnableTLS, decodeStage)
+	opts.InsecureSkipVerifyForPrefiller = containsStage(opts.TLSInsecureSkipVerify, prefillStage)
+	opts.InsecureSkipVerifyForDecoder = containsStage(opts.TLSInsecureSkipVerify, decodeStage)
+
+	// Compute target URL based on decoder TLS settings and VLLM port
+	scheme := "http"
+	if opts.UseTLSForDecoder {
+		scheme = "https"
+	}
+	opts.TargetURL = scheme + "://localhost:" + opts.VLLMPort
 
 	return nil
 }
@@ -314,34 +342,4 @@ func (opts *Options) Validate() error {
 	}
 
 	return nil
-}
-
-// GetPrefillerUseTLS returns whether TLS should be used for prefiller based on EnableTLS
-func (opts *Options) GetPrefillerUseTLS() bool {
-	return containsStage(opts.EnableTLS, prefillStage)
-}
-
-// GetDecoderUseTLS returns whether TLS should be used for decoder based on EnableTLS
-func (opts *Options) GetDecoderUseTLS() bool {
-	return containsStage(opts.EnableTLS, decodeStage)
-}
-
-// GetEncoderUseTLS returns whether TLS should be used for encoder based on EnableTLS
-func (opts *Options) GetEncoderUseTLS() bool {
-	return containsStage(opts.EnableTLS, encodeStage)
-}
-
-// GetPrefillerInsecureSkipVerify returns whether to skip TLS verification for prefiller
-func (opts *Options) GetPrefillerInsecureSkipVerify() bool {
-	return containsStage(opts.TLSInsecureSkipVerify, prefillStage)
-}
-
-// GetDecoderInsecureSkipVerify returns whether to skip TLS verification for decoder
-func (opts *Options) GetDecoderInsecureSkipVerify() bool {
-	return containsStage(opts.TLSInsecureSkipVerify, decodeStage)
-}
-
-// GetEncoderInsecureSkipVerify returns whether to skip TLS verification for encoder
-func (opts *Options) GetEncoderInsecureSkipVerify() bool {
-	return containsStage(opts.TLSInsecureSkipVerify, encodeStage)
 }

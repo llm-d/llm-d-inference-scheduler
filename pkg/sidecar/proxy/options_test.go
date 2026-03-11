@@ -117,80 +117,140 @@ func TestValidateSSRFProtection(t *testing.T) {
 	}
 }
 
-func TestCompleteDeprecatedFlags(t *testing.T) {
-	opts := NewOptions()
-	opts.PrefillerUseTLS = true
-	opts.DecoderUseTLS = true
-
-	err := opts.Complete()
-	if err != nil {
-		t.Errorf("Complete() unexpected error: %v", err)
+func TestCompleteTLSConfiguration(t *testing.T) {
+	tests := []struct {
+		name                         string
+		enableTLS                    []string
+		tlsInsecureSkipVerify        []string
+		deprecatedPrefillerUseTLS    bool
+		deprecatedDecoderUseTLS      bool
+		deprecatedPrefillerInsecure  bool
+		deprecatedDecoderInsecure    bool
+		vllmPort                     string
+		expectedTargetURL            string
+		expectedUseTLSForPrefiller   bool
+		expectedUseTLSForDecoder     bool
+		expectedInsecureForPrefiller bool
+		expectedInsecureForDecoder   bool
+	}{
+		{
+			name:                         "no TLS configuration",
+			enableTLS:                    []string{},
+			tlsInsecureSkipVerify:        []string{},
+			vllmPort:                     "8001",
+			expectedTargetURL:            "http://localhost:8001",
+			expectedUseTLSForPrefiller:   false,
+			expectedUseTLSForDecoder:     false,
+			expectedInsecureForPrefiller: false,
+			expectedInsecureForDecoder:   false,
+		},
+		{
+			name:                         "prefiller TLS only",
+			enableTLS:                    []string{"prefiller"},
+			tlsInsecureSkipVerify:        []string{},
+			vllmPort:                     "8001",
+			expectedTargetURL:            "http://localhost:8001",
+			expectedUseTLSForPrefiller:   true,
+			expectedUseTLSForDecoder:     false,
+			expectedInsecureForPrefiller: false,
+			expectedInsecureForDecoder:   false,
+		},
+		{
+			name:                         "decoder TLS only",
+			enableTLS:                    []string{"decoder"},
+			tlsInsecureSkipVerify:        []string{},
+			vllmPort:                     "8001",
+			expectedTargetURL:            "https://localhost:8001",
+			expectedUseTLSForPrefiller:   false,
+			expectedUseTLSForDecoder:     true,
+			expectedInsecureForPrefiller: false,
+			expectedInsecureForDecoder:   false,
+		},
+		{
+			name:                         "both stages TLS",
+			enableTLS:                    []string{"prefiller", "decoder"},
+			tlsInsecureSkipVerify:        []string{},
+			vllmPort:                     "9000",
+			expectedTargetURL:            "https://localhost:9000",
+			expectedUseTLSForPrefiller:   true,
+			expectedUseTLSForDecoder:     true,
+			expectedInsecureForPrefiller: false,
+			expectedInsecureForDecoder:   false,
+		},
+		{
+			name:                         "TLS with insecure skip verify",
+			enableTLS:                    []string{"prefiller", "decoder"},
+			tlsInsecureSkipVerify:        []string{"prefiller", "decoder"},
+			vllmPort:                     "8001",
+			expectedTargetURL:            "https://localhost:8001",
+			expectedUseTLSForPrefiller:   true,
+			expectedUseTLSForDecoder:     true,
+			expectedInsecureForPrefiller: true,
+			expectedInsecureForDecoder:   true,
+		},
+		{
+			name:                         "deprecated flags migration",
+			enableTLS:                    []string{},
+			tlsInsecureSkipVerify:        []string{},
+			deprecatedPrefillerUseTLS:    true,
+			deprecatedDecoderUseTLS:      true,
+			deprecatedPrefillerInsecure:  true,
+			deprecatedDecoderInsecure:    true,
+			vllmPort:                     "8001",
+			expectedTargetURL:            "https://localhost:8001",
+			expectedUseTLSForPrefiller:   true,
+			expectedUseTLSForDecoder:     true,
+			expectedInsecureForPrefiller: true,
+			expectedInsecureForDecoder:   true,
+		},
+		{
+			name:                         "mixed deprecated and new flags",
+			enableTLS:                    []string{"prefiller"},
+			tlsInsecureSkipVerify:        []string{},
+			deprecatedDecoderUseTLS:      true,
+			deprecatedDecoderInsecure:    true,
+			vllmPort:                     "8001",
+			expectedTargetURL:            "https://localhost:8001",
+			expectedUseTLSForPrefiller:   true,
+			expectedUseTLSForDecoder:     true,
+			expectedInsecureForPrefiller: false,
+			expectedInsecureForDecoder:   true,
+		},
 	}
 
-	if !containsStage(opts.EnableTLS, "prefiller") {
-		t.Error("Expected 'prefiller' to be in EnableTLS after Complete()")
-	}
-	if !containsStage(opts.EnableTLS, "decoder") {
-		t.Error("Expected 'decoder' to be in EnableTLS after Complete()")
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := NewOptions()
+			opts.EnableTLS = tt.enableTLS
+			opts.TLSInsecureSkipVerify = tt.tlsInsecureSkipVerify
+			opts.PrefillerUseTLS = tt.deprecatedPrefillerUseTLS
+			opts.DecoderUseTLS = tt.deprecatedDecoderUseTLS
+			opts.PrefillerInsecureSkipVerify = tt.deprecatedPrefillerInsecure
+			opts.DecoderInsecureSkipVerify = tt.deprecatedDecoderInsecure
+			opts.VLLMPort = tt.vllmPort
 
-func TestCompleteDeprecatedInsecureFlags(t *testing.T) {
-	opts := NewOptions()
-	opts.PrefillerInsecureSkipVerify = true
-	opts.DecoderInsecureSkipVerify = true
+			err := opts.Complete()
+			if err != nil {
+				t.Fatalf("Complete() unexpected error: %v", err)
+			}
 
-	err := opts.Complete()
-	if err != nil {
-		t.Errorf("Complete() unexpected error: %v", err)
-	}
+			// Verify configuration fields
+			if opts.UseTLSForPrefiller != tt.expectedUseTLSForPrefiller {
+				t.Errorf("UseTLSForPrefiller = %v, want %v", opts.UseTLSForPrefiller, tt.expectedUseTLSForPrefiller)
+			}
+			if opts.UseTLSForDecoder != tt.expectedUseTLSForDecoder {
+				t.Errorf("UseTLSForDecoder = %v, want %v", opts.UseTLSForDecoder, tt.expectedUseTLSForDecoder)
+			}
+			if opts.InsecureSkipVerifyForPrefiller != tt.expectedInsecureForPrefiller {
+				t.Errorf("InsecureSkipVerifyForPrefiller = %v, want %v", opts.InsecureSkipVerifyForPrefiller, tt.expectedInsecureForPrefiller)
+			}
+			if opts.InsecureSkipVerifyForDecoder != tt.expectedInsecureForDecoder {
+				t.Errorf("InsecureSkipVerifyForDecoder = %v, want %v", opts.InsecureSkipVerifyForDecoder, tt.expectedInsecureForDecoder)
+			}
+			if opts.TargetURL != tt.expectedTargetURL {
+				t.Errorf("TargetURL = %v, want %v", opts.TargetURL, tt.expectedTargetURL)
+			}
 
-	if !containsStage(opts.TLSInsecureSkipVerify, "prefiller") {
-		t.Error("Expected 'prefiller' to be in TLSInsecureSkipVerify after Complete()")
-	}
-	if !containsStage(opts.TLSInsecureSkipVerify, "decoder") {
-		t.Error("Expected 'decoder' to be in TLSInsecureSkipVerify after Complete()")
-	}
-}
-
-func TestGetPrefillerUseTLS(t *testing.T) {
-	opts := NewOptions()
-	opts.EnableTLS = []string{"prefiller"}
-
-	if !opts.GetPrefillerUseTLS() {
-		t.Error("Expected GetPrefillerUseTLS() to return true")
-	}
-
-	opts.EnableTLS = []string{"decoder"}
-	if opts.GetPrefillerUseTLS() {
-		t.Error("Expected GetPrefillerUseTLS() to return false")
-	}
-}
-
-func TestGetDecoderUseTLS(t *testing.T) {
-	opts := NewOptions()
-	opts.EnableTLS = []string{"decoder"}
-
-	if !opts.GetDecoderUseTLS() {
-		t.Error("Expected GetDecoderUseTLS() to return true")
-	}
-
-	opts.EnableTLS = []string{"prefiller"}
-	if opts.GetDecoderUseTLS() {
-		t.Error("Expected GetDecoderUseTLS() to return false")
-	}
-}
-
-func TestContainsStage(t *testing.T) {
-	stages := []string{"prefiller", "decoder"}
-
-	if !containsStage(stages, "prefiller") {
-		t.Error("Expected containsStage to find 'prefiller'")
-	}
-	if !containsStage(stages, "decoder") {
-		t.Error("Expected containsStage to find 'decoder'")
-	}
-	if containsStage(stages, "invalid") {
-		t.Error("Expected containsStage to not find 'invalid'")
+		})
 	}
 }
