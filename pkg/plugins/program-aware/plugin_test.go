@@ -411,11 +411,11 @@ func TestScoreQueue(t *testing.T) {
 
 	score := p.scoreQueue(queue)
 
-	// Expected: 0.4 * (2500/5000) + 0.3 * (50/100) - 0.3 * (0/1000)
-	//         = 0.4 * 0.5 + 0.3 * 0.5 - 0
-	//         = 0.2 + 0.15
-	//         = 0.35
-	assert.InDelta(t, 0.35, score, 0.01)
+	// headWaitMs ≈ 0 (EnqueueTimeV: time.Now())
+	// Expected: 0.5 * (0/5000) + 0.3 * (2500/5000) - 0.2 * (0/1000)
+	//         = 0 + 0.3 * 0.5 - 0
+	//         = 0.15
+	assert.InDelta(t, 0.15, score, 0.01)
 
 	// Now add dispatch history and verify penalty.
 	for range 500 {
@@ -423,7 +423,7 @@ func TestScoreQueue(t *testing.T) {
 	}
 
 	scoreWithDispatch := p.scoreQueue(queue)
-	// Penalty: 0.3 * (500/1000) = 0.15
+	// Penalty: 0.2 * (500/1000) = 0.10 → new score = 0.15 - 0.10 = 0.05
 	assert.True(t, scoreWithDispatch < score,
 		"score with high dispatch count (%f) should be lower than without (%f)",
 		scoreWithDispatch, score)

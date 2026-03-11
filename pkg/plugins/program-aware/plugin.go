@@ -20,13 +20,16 @@ const (
 	fairnessIDHeader = "x-gateway-inference-fairness-id"
 
 	// Default scoring weights for Pick().
-	defaultWeightAvgWait        = 0.4
-	defaultWeightQueueLength    = 0.3
-	defaultWeightTotalDispatched = 0.3
+	// headWait: age of the oldest request in the queue — Avoids starvation
+	// avgWait: EWMA of historical wait times — Fairness signal.
+	// totalDispatched: anti-monopoly penalty for programs that have received the most service.
+	defaultWeightHeadWait        = 0.5
+	defaultWeightAvgWait         = 0.3
+	defaultWeightTotalDispatched = 0.2
 
 	// Normalization caps for scoring.
+	capHeadWaitMs       = 5000.0
 	capAvgWaitMs        = 5000.0
-	capQueueLength      = 100.0
 	capTotalDispatched  = 1000.0
 )
 
@@ -119,11 +122,19 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 
 // scoreQueue computes a priority score for a program's queue.
 // Higher scores mean the queue should be serviced sooner.
+//
+// Scoring rationale:
+//   - headWait (0.5): age of the oldest request at the head of the queue.
+//     This is rate-neutral and for anti-starvation
+//   - avgWait (0.3): EWMA of historical wait times. Programs that have
+//     consistently experienced long waits accumulate a persistent fairness signal.
+//   - totalDispatched (0.2, negative): anti-monopoly penalty for attained service. Programs that
+//     have already received the most service are deprioritized. Later, we can consider this
+//    based on the compute used instead of just number of requests.
 func (p *ProgramAwarePlugin) scoreQueue(queue flowcontrol.FlowQueueAccessor) float64 {
 	programID := queue.FlowKey().ID
 
-	// Accumulated signal: EWMA of wait time the program has experienced.
-	// Programs that have historically waited longer get higher scores.
+	// Accumulated signals from program history.
 	avgWaitMs := 0.0
 	totalDispatched := 0.0
 	if metricsRaw, ok := p.programMetrics.Load(programID); ok {
@@ -132,11 +143,16 @@ func (p *ProgramAwarePlugin) scoreQueue(queue flowcontrol.FlowQueueAccessor) flo
 		totalDispatched = float64(metrics.DispatchedCount())
 	}
 
-	// Live signal: queue depth.
-	queueLen := float64(queue.Len())
+	// Live signal: age of the oldest request in the queue.
+	// This is independent of queue depth, so high-rate programs cannot
+	// dominate simply by building larger queues.
+	headWaitMs := 0.0
+	if head := queue.PeekHead(); head != nil {
+		headWaitMs = float64(time.Since(head.EnqueueTime()).Milliseconds())
+	}
 
-	return defaultWeightAvgWait*normalize(avgWaitMs, capAvgWaitMs) +
-		defaultWeightQueueLength*normalize(queueLen, capQueueLength) -
+	return defaultWeightHeadWait*normalize(headWaitMs, capHeadWaitMs) +
+		defaultWeightAvgWait*normalize(avgWaitMs, capAvgWaitMs) -
 		defaultWeightTotalDispatched*normalize(totalDispatched, capTotalDispatched)
 }
 
