@@ -177,51 +177,63 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	s.logger.V(5).Info("received prefiller response", requestFieldKVTransferParams, pKVTransferParams)
 
 	// 4. Send first token to client if streaming
-	var firstTokenSentTime time.Time
-	decodeResponseWriter := w
+	// Channel to signal when first token has been sent and receive the timestamp
+	// Also carries any error that occurred and whether headers were sent
+	type firstTokenResult struct {
+		sentTime    time.Time
+		err         error
+		headersSent bool
+	}
+	firstTokenSent := make(chan firstTokenResult, 1)
+
 	if clientWantsStreaming {
-		// Convert non-streaming response to SSE format and send first chunk
-		// Remove kv_transfer_params before sending to user
+		// Remove kv_transfer_params before sending to user (do this before goroutine to avoid race)
 		delete(prefillerResponse, requestFieldKVTransferParams)
 
-		streamChunk, err := json.Marshal(prefillerResponse)
-		if err != nil {
-			if err := errorJSONInvalid(err, w); err != nil {
+		// Send first token in goroutine to allow parallel execution with decode prep
+		go func() {
+			streamChunk, err := json.Marshal(prefillerResponse)
+			if err != nil {
 				s.logger.Error(err, "failed to marshal streaming chunk")
+				firstTokenSent <- firstTokenResult{err: err, headersSent: false}
+				return
 			}
-			return
-		}
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.WriteHeader(http.StatusOK)
 
-		_, err = w.Write([]byte("data: "))
-		if err != nil {
-			s.logger.Error(err, "failed to write SSE prefix")
-			return
-		}
-		_, err = w.Write(streamChunk)
-		if err != nil {
-			s.logger.Error(err, "failed to write prefill chunk to client")
-			return
-		}
-		_, err = w.Write([]byte("\n\n"))
-		if err != nil {
-			s.logger.Error(err, "failed to write SSE suffix")
-			return
-		}
+			_, err = w.Write([]byte("data: "))
+			if err != nil {
+				s.logger.Error(err, "failed to write SSE prefix")
+				firstTokenSent <- firstTokenResult{err: err, headersSent: true}
+				return
+			}
+			_, err = w.Write(streamChunk)
+			if err != nil {
+				s.logger.Error(err, "failed to write prefill chunk to client")
+				firstTokenSent <- firstTokenResult{err: err, headersSent: true}
+				return
+			}
+			_, err = w.Write([]byte("\n\n"))
+			if err != nil {
+				s.logger.Error(err, "failed to write SSE suffix")
+				firstTokenSent <- firstTokenResult{err: err, headersSent: true}
+				return
+			}
 
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
 
-		firstTokenSentTime = time.Now()
-		s.logger.V(4).Info("sent first token to client immediately after prefill")
-
-		// Wrap writer to prevent decode from re-writing headers
-		decodeResponseWriter = &headersSentWriter{ResponseWriter: w}
+			sentTime := time.Now()
+			s.logger.V(4).Info("sent first token to client immediately after prefill")
+			firstTokenSent <- firstTokenResult{sentTime: sentTime, headersSent: true}
+		}()
+	} else {
+		// For non-streaming, signal immediately that we don't need to wait
+		firstTokenSent <- firstTokenResult{}
 	}
 
 	// Decode Stage
@@ -284,6 +296,14 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	dbody, err := json.Marshal(completionRequest)
 	if err != nil {
+		// Wait for goroutine to complete before returning
+		result := <-firstTokenSent
+		if result.headersSent {
+			// Headers already sent, can't send error response
+			s.logger.Error(err, "failed to marshal decode request, but response already started")
+			return
+		}
+		// Safe to send error response - headers not sent yet
 		if err := errorJSONInvalid(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -293,6 +313,29 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	dreq.ContentLength = int64(len(dbody))
 
 	// 6. Forward to local decoder.
+	// Wait for first token to be sent before forwarding to decoder
+	result := <-firstTokenSent
+	if result.err != nil {
+		// First token send failed
+		if result.headersSent {
+			// Partial response already sent to client, can't recover
+			s.logger.Error(result.err, "failed to send first token after headers sent, aborting request")
+		} else {
+			// Headers not sent yet, try to send error response
+			s.logger.Error(result.err, "failed to send first token before headers sent")
+			if err := errorJSONInvalid(result.err, w); err != nil {
+				s.logger.Error(err, "failed to send error response to client")
+			}
+		}
+		return
+	}
+	firstTokenSentTime := result.sentTime
+
+	// Use wrapper to prevent duplicate WriteHeader for streaming
+	decodeResponseWriter := w
+	if clientWantsStreaming {
+		decodeResponseWriter = &headersSentWriter{ResponseWriter: w}
+	}
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
 	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeResponseWriter, dreq)
