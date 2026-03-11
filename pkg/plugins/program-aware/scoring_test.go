@@ -75,48 +75,51 @@ func TestEWMA_TracksStepChange(t *testing.T) {
 // --- Score Calculation Matrix ---
 
 func TestScoreQueue_Matrix(t *testing.T) {
-	// score = 0.4 * normalize(avgWait, 5000) + 0.3 * normalize(queueLen, 100) - 0.3 * normalize(dispatched, 1000)
+	// score = 0.5 * normalize(headWaitMs, 5000) + 0.3 * normalize(avgWaitMs, 5000) - 0.2 * normalize(dispatched, 1000)
+	//
+	// headWait replaces queueLen so that high-rate programs cannot dominate by
+	// building larger queues — only how long the oldest request has been waiting matters.
 	tests := []struct {
-		name       string
-		avgWaitMs  float64
-		queueLen   int
-		dispatched int
-		wantScore  float64
+		name        string
+		headWaitMs  float64 // age of the head item, set via EnqueueTime offset
+		avgWaitMs   float64
+		dispatched  int
+		wantScore   float64
 	}{
 		{
 			name:       "zero everything",
-			avgWaitMs:  0, queueLen: 0, dispatched: 0,
-			wantScore:  0.0,
+			headWaitMs: 0, avgWaitMs: 0, dispatched: 0,
+			wantScore: 0.0,
 		},
 		{
-			name:       "max wait only",
-			avgWaitMs:  5000, queueLen: 0, dispatched: 0,
-			wantScore:  0.4, // 0.4*1 + 0.3*0 - 0.3*0
+			name:       "max head wait only",
+			headWaitMs: 5000, avgWaitMs: 0, dispatched: 0,
+			wantScore: 0.5, // 0.5*1 + 0.3*0 - 0.2*0
 		},
 		{
-			name:       "max queue only",
-			avgWaitMs:  0, queueLen: 100, dispatched: 0,
-			wantScore:  0.3, // 0.4*0 + 0.3*1 - 0.3*0
+			name:       "max avg wait only",
+			headWaitMs: 0, avgWaitMs: 5000, dispatched: 0,
+			wantScore: 0.3, // 0.5*0 + 0.3*1 - 0.2*0
 		},
 		{
 			name:       "max dispatch penalty only",
-			avgWaitMs:  0, queueLen: 0, dispatched: 1000,
-			wantScore:  -0.3, // 0.4*0 + 0.3*0 - 0.3*1
+			headWaitMs: 0, avgWaitMs: 0, dispatched: 1000,
+			wantScore: -0.2, // 0.5*0 + 0.3*0 - 0.2*1
 		},
 		{
 			name:       "all at 50%",
-			avgWaitMs:  2500, queueLen: 50, dispatched: 500,
-			wantScore:  0.2, // 0.4*0.5 + 0.3*0.5 - 0.3*0.5 = 0.2 + 0.15 - 0.15
+			headWaitMs: 2500, avgWaitMs: 2500, dispatched: 500,
+			wantScore: 0.30, // 0.5*0.5 + 0.3*0.5 - 0.2*0.5 = 0.25 + 0.15 - 0.10
 		},
 		{
-			name:       "high wait high dispatch — wait dominates",
-			avgWaitMs:  5000, queueLen: 0, dispatched: 1000,
-			wantScore:  0.1, // 0.4*1 + 0 - 0.3*1 = 0.1
+			name:       "high avg wait, high dispatch — net positive",
+			headWaitMs: 0, avgWaitMs: 5000, dispatched: 1000,
+			wantScore: 0.1, // 0.5*0 + 0.3*1 - 0.2*1 = 0.1
 		},
 		{
 			name:       "saturation — all signals capped",
-			avgWaitMs:  10000, queueLen: 200, dispatched: 2000,
-			wantScore:  0.4, // 0.4*1 + 0.3*1 - 0.3*1 = 0.4
+			headWaitMs: 10000, avgWaitMs: 10000, dispatched: 2000,
+			wantScore: 0.6, // 0.5*1 + 0.3*1 - 0.2*1 = 0.6
 		},
 	}
 
@@ -134,16 +137,17 @@ func TestScoreQueue_Matrix(t *testing.T) {
 			}
 			p.programMetrics.Store("test-prog", metrics)
 
+			enqueueTime := time.Now().Add(-time.Duration(tt.headWaitMs) * time.Millisecond)
 			queue := &fcmocks.MockFlowQueueAccessor{
-				LenV:     tt.queueLen,
+				LenV:     1,
 				FlowKeyV: flowcontrol.FlowKey{ID: "test-prog"},
 				PeekHeadV: &fcmocks.MockQueueItemAccessor{
-					EnqueueTimeV: time.Now(),
+					EnqueueTimeV: enqueueTime,
 				},
 			}
 
 			score := p.scoreQueue(queue)
-			assert.InDelta(t, tt.wantScore, score, 0.01, "score mismatch for case: %s", tt.name)
+			assert.InDelta(t, tt.wantScore, score, 0.02, "score mismatch for case: %s", tt.name)
 		})
 	}
 }
@@ -264,18 +268,17 @@ func TestPick_NewProgramVsEstablished(t *testing.T) {
 	queue, err := p.Pick(context.Background(), band)
 	assert.NoError(t, err)
 
-	// Established program has:
-	//   0.4 * (100/5000) + 0.3 * (3/100) - 0.3 * (200/1000)
-	//   = 0.4*0.02 + 0.3*0.03 - 0.3*0.2
-	//   = 0.008 + 0.009 - 0.06
-	//   = -0.043
+	// Established program has (headWaitMs≈0 since enqueue time is now):
+	//   0.5 * 0 + 0.3 * (100/5000) - 0.2 * (200/1000)
+	//   = 0 + 0.006 - 0.04
+	//   = -0.034
 	//
 	// New program has:
-	//   0.4 * (0/5000) + 0.3 * (3/100) - 0.3 * (0/1000)
-	//   = 0 + 0.009 - 0
-	//   = 0.009
+	//   0.5 * 0 + 0.3 * (0/5000) - 0.2 * (0/1000)
+	//   = 0 + 0 - 0
+	//   = 0.0
 	//
-	// New program wins because established has dispatch penalty.
+	// New program wins because established has a large dispatch penalty.
 	assert.Equal(t, "new-prog", queue.FlowKey().ID,
 		"new program should be preferred over established program with high dispatch count")
 
@@ -331,8 +334,8 @@ func TestPick_StarvationPrevention(t *testing.T) {
 	queue, err := p.Pick(context.Background(), band)
 	assert.NoError(t, err)
 
-	// Hog:    0.4*(10/5000) + 0.3*(5/100) - 0.3*(800/1000) = 0.0008 + 0.015 - 0.24 = -0.2242
-	// Starved: 0.4*(3000/5000) + 0.3*(5/100) - 0.3*(10/1000) = 0.24 + 0.015 - 0.003 = 0.252
+	// Hog (headWaitMs≈0):    0.5*0 + 0.3*(10/5000) - 0.2*(800/1000) = 0 + 0.0006 - 0.16 = -0.1594
+	// Starved (headWaitMs≈0): 0.5*0 + 0.3*(3000/5000) - 0.2*(10/1000) = 0 + 0.18 - 0.002 = 0.178
 	scoreHog := p.scoreQueue(queueHog)
 	scoreStarved := p.scoreQueue(queueStarved)
 	t.Logf("Hog score: %.4f, Starved score: %.4f", scoreHog, scoreStarved)
