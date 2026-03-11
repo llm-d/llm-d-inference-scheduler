@@ -39,11 +39,16 @@ const (
 )
 
 var (
-	// supportedKVConnectors defines all valid P/D KV connector types
+	// supportedKVConnectors defines all valid P/D (Prefiller-Decoder) KV connector types
 	supportedKVConnectors = map[string]struct{}{
 		proxy.KVConnectorNIXLV2:        {},
 		proxy.KVConnectorSharedStorage: {},
 		proxy.KVConnectorSGLang:        {},
+	}
+
+	// supportedECConnectors defines all valid EC (Encoder-Prefiller) connector types
+	supportedECConnectors = map[string]struct{}{
+		proxy.ECExampleConnector: {},
 	}
 
 	// supportedTLSStages defines all valid stages for TLS configuration
@@ -60,6 +65,11 @@ func supportedTLSStagesNames() []string {
 
 // supportedKVConnectorsNames returns a slice of supported KV connector names
 func supportedKVConnectorsNames() []string {
+	return supportedNames(supportedKVConnectors)
+}
+
+// supportedECConnectorsNames returns a slice of supported EC connector names
+func supportedECConnectorsNames() []string {
 	return supportedNames(supportedKVConnectors)
 }
 
@@ -86,11 +96,12 @@ func main() {
 	port := pflag.String("port", "8000", "the port the sidecar is listening on")
 	vLLMPort := pflag.String("vllm-port", "8001", "the port vLLM is listening on")
 	vLLMDataParallelSize := pflag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
-	connector := pflag.String("connector", proxy.KVConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedKVConnectorsNames(), ", "))
+	kvConnector := pflag.String("kv-connector", proxy.KVConnectorNIXLV2, "the KV connector between Prefiller and Decoder. Supported: "+strings.Join(supportedKVConnectorsNames(), ", "))
 	enableTLS := pflag.StringSlice("enable-tls", []string{}, "stages to enable TLS for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
 	tlsInsecureSkipVerify := pflag.StringSlice("tls-insecure-skip-verify", []string{}, "stages to skip TLS verification for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
 
 	// Deprecated flags - kept for backward compatibility, will be removed in a future release
+	deprecatedConnector := pflag.String("connector", "", "The P/D connector being used.")
 	prefillerUseTLS := pflag.Bool("prefiller-use-tls", false, "Deprecated: use --enable-tls=prefiller instead. Whether to use TLS when sending requests to prefillers.")
 	decoderUseTLS := pflag.Bool("decoder-use-tls", false, "Deprecated: use --enable-tls=decoder instead. Whether to use TLS when sending requests to the decoder.")
 	prefillerInsecureSkipVerify := pflag.Bool("prefiller-tls-insecure-skip-verify", false, "Deprecated: use --tls-insecure-skip-verify=prefiller instead. Skip TLS verification for requests to prefiller.")
@@ -108,12 +119,15 @@ func main() {
 	deprecatedInferencePoolName := pflag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "DEPRECATED: use --inference-pool instead. The specific InferencePool name.")
 	enablePrefillerSampling := pflag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 	poolGroup := pflag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
-
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
 
 	// Add Go flags to pflag (for zap options compatibility)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+
+	// Mark deprecated flags
+	pflag.CommandLine.MarkDeprecated("connector", "use --kv-connector instead")
+
 	pflag.Parse()
 
 	logger := zap.New(zap.UseFlagOptions(&opts))
@@ -134,6 +148,14 @@ func main() {
 				logger.Error(err, "Failed to shutdown tracing")
 			}
 		}()
+	}
+
+	// Migrate deprecated connector flag to new kv-connector flag
+	if *deprecatedConnector != "" {
+		if *kvConnector == proxy.KVConnectorNIXLV2 {
+			// Only override if kvConnector is still at default value
+			*kvConnector = *deprecatedConnector
+		}
 	}
 
 	// Migrate deprecated boolean TLS flags to new StringSlice flags
@@ -164,12 +186,12 @@ func main() {
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
-	// Validate connector
-	if _, ok := supportedKVConnectors[*connector]; !ok {
-		logger.Info("Error: --connector must be one of: " + strings.Join(supportedKVConnectorsNames(), ", "))
+	// Validate KV connector
+	if _, ok := supportedKVConnectors[*kvConnector]; !ok {
+		logger.Info("Error: --kv-connector must be one of: " + strings.Join(supportedKVConnectorsNames(), ", "))
 		return
 	}
-	logger.Info("p/d KV connector validated", "connector", connector)
+	logger.Info("KV connector (prefiller-decoder) validated", "kvConnector", *kvConnector)
 
 	// Validate TLS stages
 	for _, stage := range *enableTLS {
@@ -241,7 +263,7 @@ func main() {
 	}
 
 	config := proxy.Config{
-		KVConnector:                 *connector,
+		KVConnector:                 *kvConnector,
 		PrefillerUseTLS:             containsStage(*enableTLS, prefillStage),
 		PrefillerInsecureSkipVerify: containsStage(*tlsInsecureSkipVerify, prefillStage),
 		DecoderInsecureSkipVerify:   containsStage(*tlsInsecureSkipVerify, decodeStage),
@@ -264,5 +286,3 @@ func main() {
 		logger.Error(err, "failed to start proxy server")
 	}
 }
-
-// Made with Bob
