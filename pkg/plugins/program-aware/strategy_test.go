@@ -11,8 +11,6 @@ import (
 	fcmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol/mocks"
 )
 
-// --- Strategy selection ---
-
 func TestNewStrategy_Valid(t *testing.T) {
 	s, err := newStrategy("ewma")
 	require.NoError(t, err)
@@ -22,7 +20,6 @@ func TestNewStrategy_Valid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "drr", s.Name())
 
-	// Empty string defaults to EWMA.
 	s, err = newStrategy("")
 	require.NoError(t, err)
 	assert.Equal(t, "ewma", s.Name())
@@ -53,8 +50,6 @@ func TestFactory_InvalidStrategy(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// --- EWMA strategy ---
-
 func TestEWMAStrategy_OnPickStart_IsNoop(t *testing.T) {
 	s := &EWMAStrategy{}
 	m := &ProgramMetrics{}
@@ -71,8 +66,6 @@ func TestEWMAStrategy_OnCompleted_IsNoop(t *testing.T) {
 	s.OnCompleted(m, 100, 50)
 	assert.Equal(t, int64(0), m.Deficit(), "EWMA OnCompleted must not modify deficit")
 }
-
-// --- DRR strategy ---
 
 func TestDRRStrategy_OnPickStart_AllocatesQuantum(t *testing.T) {
 	s := &DRRStrategy{}
@@ -134,7 +127,7 @@ func TestDRRStrategy_ScoreQueue_PreferHighDeficit(t *testing.T) {
 	mHigh.AddDeficit(20000)
 
 	mLow := &ProgramMetrics{}
-	mLow.DeductTokens(20000) // overserved → negative deficit
+	mLow.DeductTokens(20000)
 
 	queueHigh := &fcmocks.MockFlowQueueAccessor{
 		FlowKeyV:  flowcontrol.FlowKey{ID: "high"},
@@ -161,20 +154,17 @@ func TestDRRStrategy_ScoreQueue_NilMetrics(t *testing.T) {
 		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
 	}
 
-	// nil metrics → deficit=0, headWait≈0 → score ≈ 0.7*0.5 + 0.3*0 = 0.35
 	score := s.ScoreQueue(queue, nil)
 	assert.InDelta(t, 0.35, score, 0.01, "nil metrics should score at deficit midpoint")
 }
-
-// --- DRR end-to-end Pick() integration ---
 
 func TestDRR_Pick_TokenHeavyProgramDeprioritized(t *testing.T) {
 	p := &ProgramAwarePlugin{strategy: &DRRStrategy{}}
 
 	// "heavy" has consumed many tokens relative to its quantum allocation.
 	mHeavy := p.getOrCreateMetrics("heavy")
-	mHeavy.AddDeficit(drrQuantumTokens * 2)   // 2 rounds of quantum earned
-	mHeavy.DeductTokens(drrQuantumTokens * 10) // but consumed 10x — deeply negative deficit
+	mHeavy.AddDeficit(drrQuantumTokens * 2)
+	mHeavy.DeductTokens(drrQuantumTokens * 10)
 
 	// "light" has only consumed its fair share.
 	mLight := p.getOrCreateMetrics("light")

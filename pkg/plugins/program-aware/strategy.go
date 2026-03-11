@@ -12,28 +12,19 @@ import (
 // All methods must be safe for concurrent use; Pick(), PreRequest(), and
 // ResponseComplete() may execute on different goroutines.
 type ScoringStrategy interface {
-	// Name returns the human-readable identifier used in config and logs.
 	Name() string
 
 	// OnPickStart is called once per queue per Pick() cycle, before scoring.
-	//   - queueLen == 0: the queue is idle/drained — reset per-flow state (e.g., DRR deficit).
-	//   - queueLen  > 0: the queue is active   — allocate per-round budget (e.g., DRR quantum).
-	// metrics is guaranteed non-nil.
 	OnPickStart(programID string, queueLen int, metrics *ProgramMetrics)
 
 	// ScoreQueue returns a priority score for the given queue.
-	// Higher scores cause the queue to be dispatched sooner.
-	// metrics may be nil if no requests have been seen for this program yet.
 	ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) float64
 
 	// OnCompleted is called when a response finishes with actual token usage.
-	// Use this to deduct resource consumption from per-flow accounting (e.g., DRR deficit).
-	// metrics is guaranteed non-nil.
 	OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64)
 }
 
 // newStrategy constructs a ScoringStrategy by name.
-// Valid names: "ewma" (default), "drr".
 func newStrategy(name string) (ScoringStrategy, error) {
 	switch name {
 	case "", "ewma":
@@ -99,12 +90,12 @@ func (s *EWMAStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}
 // DRR strategy constants.
 const (
 	// drrQuantumTokens is the token budget added to each non-empty queue's deficit
-	// per Pick() cycle. 1000 tokens ≈ one average LLM request (700 in / 300 out).
+	// per Pick() cycle.
 	// Increase for coarser but more stable fairness; decrease for finer granularity.
 	drrQuantumTokens int64 = 1000
 
 	// drrCapDeficit is the symmetric normalization range for the deficit counter.
-	// Deficit is mapped from [-cap, +cap] → [0, 1]. 50k tokens ≈ 50 average requests.
+	// Deficit is mapped from [-cap, +cap] -> [0, 1]. e.g. 50k tokens ≈ 50 average requests.
 	drrCapDeficit float64 = 50000.0
 
 	drrWeightDeficit  float64 = 0.7
@@ -114,19 +105,19 @@ const (
 
 // DRRStrategy implements Deficit Round Robin adapted for token-based LLM scheduling.
 //
-// Classic DRR [Shreedhar & Varghese, IEEE/ACM ToN 1995] assigns each active flow a fixed
+// Classic DRR (https://dl.acm.org/doi/pdf/10.1145/217391.217453) assigns each active flow a fixed
 // byte quantum per round, serves the highest-deficit flow first, and deducts actual bytes
 // served from the deficit counter. This guarantees proportional bandwidth allocation
 // independent of packet sizes — in contrast to EWMA which counts requests, not compute.
 //
-// Adaptation for LLM tokens:
-//   - "bytes"   → prompt + completion tokens (actual cost known at response completion)
-//   - "quantum" → drrQuantumTokens added per Pick() cycle per non-empty queue
+// Mapping for program-aware scheduler:
+//   - "bytes"   = prompt + completion tokens (actual cost known at response completion)
+//   - "quantum" = drrQuantumTokens added per Pick() cycle per non-empty queue
 //   - Actual token cost is deducted in OnCompleted() (ResponseComplete hook)
 //   - Idle queues have their deficit reset to 0: standard DRR behavior prevents programs
 //     from accumulating unbounded credit while inactive
 //
-// headWaitMs is retained as a secondary signal (weight 0.3) to prevent starvation of
+// headWaitMs is used as a secondary signal (weight 0.3) to prevent starvation of
 // new or returning programs that start with deficit=0.
 type DRRStrategy struct{}
 
@@ -153,7 +144,7 @@ func (s *DRRStrategy) ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *P
 		deficit = float64(metrics.Deficit())
 	}
 
-	// Shift-normalize deficit from [-cap, +cap] → [0, 1].
+	// Shift-normalize deficit from [-cap, +cap] -> [0, 1].
 	// Positive deficit (owed service) scores above 0.5.
 	// Negative deficit (overserved) scores below 0.5.
 	deficitNorm := math.Min(math.Max((deficit+drrCapDeficit)/(2*drrCapDeficit), 0), 1)
