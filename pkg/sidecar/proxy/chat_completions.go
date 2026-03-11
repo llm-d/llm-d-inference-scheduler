@@ -60,6 +60,8 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		requestPath = r.URL.Path
 	}
 	span.SetAttributes(
+		// DEPRECATED: will be replaced by llm_d.pd_proxy.kv_connector
+		attribute.String("llm_d.pd_proxy.connector", s.config.KVConnector),
 		attribute.String("llm_d.pd_proxy.kv_connector", s.config.KVConnector),
 		attribute.String("llm_d.pd_proxy.ec_connector", s.config.ECConnector),
 		attribute.String("llm_d.pd_proxy.request_path", requestPath),

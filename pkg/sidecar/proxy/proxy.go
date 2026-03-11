@@ -58,16 +58,16 @@ const (
 	requestFieldBootstrapPort = "bootstrap_port"
 	requestFieldBootstrapRoom = "bootstrap_room"
 
-	// KVConnectorNIXLV2 enables the P/D NIXL v2 protocol
+	// KVConnectorNIXLV2 enables the P/D KV NIXL v2 protocol
 	KVConnectorNIXLV2 = "nixlv2"
 
-	// KVConnectorSharedStorage enables (now deprecated) P/D Shared Storage protocol
+	// KVConnectorSharedStorage enables the P/D KV Shared Storage protocol
 	KVConnectorSharedStorage = "shared-storage"
 
-	// KVConnectorSGLang enables SGLang P/D disaggregation protocol
+	// KVConnectorSGLang enables SGLang the P/D KV disaggregation protocol
 	KVConnectorSGLang = "sglang"
 
-	// ECExampleConnector enables the Encoder-Prefiller-Decoder disaggregation protocol
+	// ECExampleConnector enables the Encoder disaggregation protocol (E/PD, E/P/D)
 	ECExampleConnector = "ec-example"
 
 	// DefaultPoolGroup is the default pool group name

@@ -178,11 +178,11 @@ func (s *Server) runEPDProtocol(w http.ResponseWriter, r *http.Request, prefillE
 	s.logger.V(4).Info("running EPD protocol", "prefiller", prefillEndPoint, "encoderCount", len(encodeEndPoints))
 
 	// Read request body
-	defer r.Body.Close() //nolint:all
+	defer func() { _ = r.Body.Close() }()
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error())) //nolint:all
+		_, _ = w.Write([]byte(err.Error()))
 		return
 	}
 
