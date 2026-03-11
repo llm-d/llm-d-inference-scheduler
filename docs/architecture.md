@@ -1,12 +1,12 @@
-# llm-d Inference Router Architecture
+# llm-d Inference Scheduler Architecture
 
 ---
 
 ## Overview
 
-**llm-d** is an extensible architecture designed to route inference requests efficiently across model-serving pods.
+**llm-d** is an extensible architecture designed to schedule inference requests efficiently across model-serving pods.
  A central component of this architecture is the **Inference Gateway**, which builds on the Kubernetes-native
- **Gateway API Inference Extension** to enable scalable, flexible, and pluggable routing of requests.
+ **Gateway API Inference Extension** (GIE) to enable scalable, flexible, and pluggable request scheduling.
 
 The design enables:
 
@@ -14,13 +14,13 @@ The design enables:
 - Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
-- Pluggable **filters**, **scorers**, and **scrapers** for extensible routing
+- Pluggable **filters**, **scorers**, and **scrapers** for extensible scheduling
 
 ---
 
 ## Core Goals
 
-- Route inference requests to optimal pods based on:
+- Schedule inference requests to optimal pods based on:
   - Base model compatibility
   - KV cache reuse
   - Load balancing
@@ -36,9 +36,17 @@ The design enables:
 
 The inference scheduler is built on top of:
 
-- **Envoy** as a programmable data plane
-- **EPP (External Processing Plugin)** using **GIE**
-- **BBR (External Processing Plugin)** using **GIE**
+- The [Envoy] gateway, as a programmable data plane.
+- An [EPP] (Endpoint Picker), making scheduling decisions, as the control plane.
+  The llm-d inference scheduler extends the EPP in [GIE] with state of the art
+  scheduling algorithms.
+- An optional [BBR] (Body Based Routing) component, to associate requests with
+  their corresponding model before the EPP is consulted.
+
+[Envoy]:https://www.envoyproxy.io/
+[EPP]:https://gateway-api-inference-extension.sigs.k8s.io/#endpoint-picker
+[BBR]:https://gateway-api-inference-extension.sigs.k8s.io/#concepts-and-definitions
+[GIE]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
 
 ---
 
@@ -599,7 +607,8 @@ The **vLLM sidecar** handles orchestration between Prefill and Decode stages. It
 
 - Single `InferencePool` and single `EPP` due to Envoy limitations
 - Model-based filtering can be handled within EPP
-- Currently only one base model is supported
+- Currently only one base model **per `InferencePool`** is supported.
+  Multiple models are supported via multiple `InferencePools`.
 
 > [!NOTE]
 > The `InferenceModel` CRD is in the process of being significantly changed in IGW.

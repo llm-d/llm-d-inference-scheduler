@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/spf13/pflag"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -31,46 +32,89 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
+const (
+	// TLS stages
+	prefillStage = "prefiller"
+	decodeStage  = "decoder"
+)
+
 var (
-	// supportedKVConnectors defines all valid KV (Prefiller-Decoder) connector types
-	supportedKVConnectors = []string{
-		proxy.KVConnectorNIXLV2,
-		proxy.KVConnectorSharedStorage,
-		proxy.KVConnectorSGLang,
+	// supportedKVConnectors defines all valid P/D KV connector types
+	supportedKVConnectors = map[string]struct{}{
+		proxy.KVConnectorNIXLV2:        {},
+		proxy.KVConnectorSharedStorage: {},
+		proxy.KVConnectorSGLang:        {},
 	}
 
-	// supportedECConnectors defines all valid EC (Encoder-Prefiller) connector types
-	supportedECConnectors = []string{
-		proxy.ECExampleConnector,
+	// supportedTLSStages defines all valid stages for TLS configuration
+	supportedTLSStages = map[string]struct{}{
+		prefillStage: {},
+		decodeStage:  {},
 	}
 )
 
+// supportedTLSStagesNames returns a slice of supported TLS stage names
+func supportedTLSStagesNames() []string {
+	return supportedNames(supportedTLSStages)
+}
+
+// supportedKVConnectorsNames returns a slice of supported KV connector names
+func supportedKVConnectorsNames() []string {
+	return supportedNames(supportedKVConnectors)
+}
+
+// supportedNames returns a slice of supported names from the given map[string]struct{}
+func supportedNames(aMap map[string]struct{}) []string {
+	names := make([]string, 0, len(aMap))
+	for name := range aMap {
+		names = append(names, name)
+	}
+	return names
+}
+
+// containsStage checks if a stage is present in the slice
+func containsStage(stages []string, stage string) bool {
+	for _, s := range stages {
+		if s == stage {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
-	port := flag.String("port", "8000", "the port the sidecar is listening on")
-	vLLMPort := flag.String("vllm-port", "8001", "the port vLLM is listening on")
-	vLLMDataParallelSize := flag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
-	kvConnector := flag.String("kv-connector", proxy.KVConnectorNIXLV2, "the KV connector between Prefiller and Decoder. Supported: "+strings.Join(supportedKVConnectors, ", "))
-	ecConnector := flag.String("ec-connector", proxy.ECExampleConnector, "the EC connector between Encoder and Prefiller (optional, for EPD mode). Supported: "+strings.Join(supportedECConnectors, ", "))
-	prefillerUseTLS := flag.Bool("prefiller-use-tls", false, "whether to use TLS when sending requests to prefillers")
-	encoderUseTLS := flag.Bool("encoder-use-tls", false, "whether to use TLS when sending requests to encoders")
-	decoderUseTLS := flag.Bool("decoder-use-tls", false, "whether to use TLS when sending requests to the decoder")
-	prefillerInsecureSkipVerify := flag.Bool("prefiller-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to prefiller")
-	encoderInsecureSkipVerify := flag.Bool("encoder-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to encoder")
-	decoderInsecureSkipVerify := flag.Bool("decoder-tls-insecure-skip-verify", false, "configures the proxy to skip TLS verification for requests to decoder")
-	secureProxy := flag.Bool("secure-proxy", true, "Enables secure proxy. Defaults to true.")
-	certPath := flag.String(
+	port := pflag.String("port", "8000", "the port the sidecar is listening on")
+	vLLMPort := pflag.String("vllm-port", "8001", "the port vLLM is listening on")
+	vLLMDataParallelSize := pflag.Int("data-parallel-size", 1, "the vLLM DATA-PARALLEL-SIZE value")
+	connector := pflag.String("connector", proxy.KVConnectorNIXLV2, "the P/D connector being used. Supported: "+strings.Join(supportedKVConnectorsNames(), ", "))
+	enableTLS := pflag.StringSlice("enable-tls", []string{}, "stages to enable TLS for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
+	tlsInsecureSkipVerify := pflag.StringSlice("tls-insecure-skip-verify", []string{}, "stages to skip TLS verification for. Supported: "+strings.Join(supportedTLSStagesNames(), ", ")+". Can be specified multiple times or as comma-separated values.")
+
+	// Deprecated flags - kept for backward compatibility, will be removed in a future release
+	prefillerUseTLS := pflag.Bool("prefiller-use-tls", false, "Deprecated: use --enable-tls=prefiller instead. Whether to use TLS when sending requests to prefillers.")
+	decoderUseTLS := pflag.Bool("decoder-use-tls", false, "Deprecated: use --enable-tls=decoder instead. Whether to use TLS when sending requests to the decoder.")
+	prefillerInsecureSkipVerify := pflag.Bool("prefiller-tls-insecure-skip-verify", false, "Deprecated: use --tls-insecure-skip-verify=prefiller instead. Skip TLS verification for requests to prefiller.")
+	decoderInsecureSkipVerify := pflag.Bool("decoder-tls-insecure-skip-verify", false, "Deprecated: use --tls-insecure-skip-verify=decoder instead. Skip TLS verification for requests to decoder.")
+	secureProxy := pflag.Bool("secure-proxy", true, "Enables secure proxy. Defaults to true.")
+	certPath := pflag.String(
 		"cert-path", "", "The path to the certificate for secure proxy. The certificate and private key files "+
 			"are assumed to be named tls.crt and tls.key, respectively. If not set, and secureProxy is enabled, "+
 			"then a self-signed certificate is used (for testing).")
-	enableSSRFProtection := flag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
-	inferencePoolNamespace := flag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "the Kubernetes namespace to watch for InferencePool resources (defaults to INFERENCE_POOL_NAMESPACE env var)")
-	inferencePoolName := flag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "the specific InferencePool name to watch (defaults to INFERENCE_POOL_NAME env var)")
-	enablePrefillerSampling := flag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
-	poolGroup := flag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
+	enableSSRFProtection := pflag.Bool("enable-ssrf-protection", false, "enable SSRF protection using InferencePool allowlisting")
+	inferencePool := pflag.String("inference-pool", os.Getenv("INFERENCE_POOL"), "InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace. Can also use INFERENCE_POOL env var.")
+	// Deprecated: use --inference-pool instead
+	deprecatedInferencePoolNamespace := pflag.String("inference-pool-namespace", os.Getenv("INFERENCE_POOL_NAMESPACE"), "DEPRECATED: use --inference-pool instead. The Kubernetes namespace for the InferencePool.")
+	// Deprecated: use --inference-pool instead
+	deprecatedInferencePoolName := pflag.String("inference-pool-name", os.Getenv("INFERENCE_POOL_NAME"), "DEPRECATED: use --inference-pool instead. The specific InferencePool name.")
+	enablePrefillerSampling := pflag.Bool("enable-prefiller-sampling", func() bool { b, _ := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); return b }(), "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
+	poolGroup := pflag.String("pool-group", proxy.DefaultPoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine) // optional to allow zap logging control via CLI
-	flag.Parse()
+
+	// Add Go flags to pflag (for zap options compatibility)
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
 
 	logger := zap.New(zap.UseFlagOptions(&opts))
 	log.SetLogger(logger)
@@ -92,48 +136,93 @@ func main() {
 		}()
 	}
 
+	// Migrate deprecated boolean TLS flags to new StringSlice flags
+	if *prefillerUseTLS {
+		logger.Info("WARNING: --prefiller-use-tls is deprecated, use --enable-tls=prefiller instead")
+		if !containsStage(*enableTLS, prefillStage) {
+			*enableTLS = append(*enableTLS, prefillStage)
+		}
+	}
+	if *decoderUseTLS {
+		logger.Info("WARNING: --decoder-use-tls is deprecated, use --enable-tls=decoder instead")
+		if !containsStage(*enableTLS, decodeStage) {
+			*enableTLS = append(*enableTLS, decodeStage)
+		}
+	}
+	if *prefillerInsecureSkipVerify {
+		logger.Info("WARNING: --prefiller-tls-insecure-skip-verify is deprecated, use --tls-insecure-skip-verify=prefiller instead")
+		if !containsStage(*tlsInsecureSkipVerify, prefillStage) {
+			*tlsInsecureSkipVerify = append(*tlsInsecureSkipVerify, prefillStage)
+		}
+	}
+	if *decoderInsecureSkipVerify {
+		logger.Info("WARNING: --decoder-tls-insecure-skip-verify is deprecated, use --tls-insecure-skip-verify=decoder instead")
+		if !containsStage(*tlsInsecureSkipVerify, decodeStage) {
+			*tlsInsecureSkipVerify = append(*tlsInsecureSkipVerify, decodeStage)
+		}
+	}
+
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
-	// Validate KV connector (Prefiller-Decoder)
-	isValidConnector := false
-	for _, validConnector := range supportedKVConnectors {
-		if *kvConnector == validConnector {
-			isValidConnector = true
-			break
-		}
-	}
-	if !isValidConnector {
-		logger.Info("Error: --kv-connector must be one of: " + strings.Join(supportedKVConnectors, ", "))
+	// Validate connector
+	if _, ok := supportedKVConnectors[*connector]; !ok {
+		logger.Info("Error: --connector must be one of: " + strings.Join(supportedKVConnectorsNames(), ", "))
 		return
 	}
-	logger.Info("KV connector (prefiller-decoder) validated", "kvConnector", kvConnector)
+	logger.Info("p/d KV connector validated", "connector", connector)
 
-	// Validate EC connector (Encoder-Prefiller) if specified
-	if *ecConnector != "" {
-		isValidEncoderConnector := false
-		for _, validConnector := range supportedECConnectors {
-			if *ecConnector == validConnector {
-				isValidEncoderConnector = true
-				break
-			}
-		}
-		if !isValidEncoderConnector {
-			logger.Info("Error: --ec-connector must be one of: " + strings.Join(supportedECConnectors, ", "))
+	// Validate TLS stages
+	for _, stage := range *enableTLS {
+		if _, ok := supportedTLSStages[stage]; !ok {
+			logger.Info("Error: --enable-tls stages must be one of: " + strings.Join(supportedTLSStagesNames(), ", "))
 			return
 		}
-		logger.Info("EC connector (encoder-prefiller) validated", "ecConnector", ecConnector)
-	} else {
-		logger.Info("EC connector (encoder-prefiller) not specified, encoder stage will be skipped")
 	}
 
-	// Determine namespace and pool name for SSRF protection
-	if *enableSSRFProtection {
-		if *inferencePoolNamespace == "" {
-			logger.Info("Error: --inference-pool-namespace or INFERENCE_POOL_NAMESPACE environment variable is required when --enable-ssrf-protection is true")
+	for _, stage := range *tlsInsecureSkipVerify {
+		if _, ok := supportedTLSStages[stage]; !ok {
+			logger.Info("Error: --tls-insecure-skip-verify stages must be one of: " + strings.Join(supportedTLSStagesNames(), ", "))
 			return
 		}
-		if *inferencePoolName == "" {
-			logger.Info("Error: --inference-pool-name or INFERENCE_POOL_NAME environment variable is required when --enable-ssrf-protection is true")
+	}
+
+	// Parse and validate InferencePool for SSRF protection
+	var inferencePoolNamespace, inferencePoolName string
+	if *enableSSRFProtection {
+		// Prefer --inference-pool over deprecated flags
+		switch {
+		case *inferencePool != "":
+			if *deprecatedInferencePoolName != "" || *deprecatedInferencePoolNamespace != "" {
+				logger.Info("Warning: --inference-pool takes precedence over deprecated --inference-pool-name/--inference-pool-namespace flags")
+			}
+			parts := strings.SplitN(*inferencePool, "/", 2)
+			if len(parts) == 1 {
+				// Single name implies "default" namespace
+				inferencePoolNamespace = "default"
+				inferencePoolName = parts[0]
+			} else {
+				if parts[0] == "" || parts[1] == "" {
+					logger.Info("Error: --inference-pool must be in namespace/name or name format (e.g., default/my-pool or my-pool)")
+					return
+				}
+				inferencePoolNamespace = parts[0]
+				inferencePoolName = parts[1]
+			}
+		case *deprecatedInferencePoolName != "":
+			// Fall back to deprecated flags
+			logger.Info("Warning: using deprecated --inference-pool-name/--inference-pool-namespace flags, please migrate to --inference-pool")
+			inferencePoolName = *deprecatedInferencePoolName
+			inferencePoolNamespace = *deprecatedInferencePoolNamespace
+			if inferencePoolNamespace == "" {
+				inferencePoolNamespace = "default"
+			}
+		default:
+			logger.Info("Error: --inference-pool is required when --enable-ssrf-protection is true")
+			return
+		}
+
+		if inferencePoolName == "" {
+			logger.Info("Error: InferencePool name must not be empty")
 			return
 		}
 
@@ -142,7 +231,7 @@ func main() {
 
 	// start reverse proxy HTTP server
 	scheme := "http"
-	if *decoderUseTLS {
+	if containsStage(*enableTLS, decodeStage) {
 		scheme = "https"
 	}
 	targetURL, err := url.Parse(scheme + "://localhost:" + *vLLMPort)
@@ -152,13 +241,10 @@ func main() {
 	}
 
 	config := proxy.Config{
-		KVConnector:                 *kvConnector,
-		ECConnector:                 *ecConnector,
-		PrefillerUseTLS:             *prefillerUseTLS,
-		EncoderUseTLS:               *encoderUseTLS,
-		PrefillerInsecureSkipVerify: *prefillerInsecureSkipVerify,
-		EncoderInsecureSkipVerify:   *encoderInsecureSkipVerify,
-		DecoderInsecureSkipVerify:   *decoderInsecureSkipVerify,
+		KVConnector:                 *connector,
+		PrefillerUseTLS:             containsStage(*enableTLS, prefillStage),
+		PrefillerInsecureSkipVerify: containsStage(*tlsInsecureSkipVerify, prefillStage),
+		DecoderInsecureSkipVerify:   containsStage(*tlsInsecureSkipVerify, decodeStage),
 		DataParallelSize:            *vLLMDataParallelSize,
 		EnablePrefillerSampling:     *enablePrefillerSampling,
 		SecureServing:               *secureProxy,
@@ -166,7 +252,7 @@ func main() {
 	}
 
 	// Create SSRF protection validator
-	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *poolGroup, *inferencePoolNamespace, *inferencePoolName)
+	validator, err := proxy.NewAllowlistValidator(*enableSSRFProtection, *poolGroup, inferencePoolNamespace, inferencePoolName)
 	if err != nil {
 		logger.Error(err, "failed to create SSRF protection validator")
 		return
@@ -178,3 +264,5 @@ func main() {
 		logger.Error(err, "failed to start proxy server")
 	}
 }
+
+// Made with Bob

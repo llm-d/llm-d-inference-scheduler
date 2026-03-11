@@ -67,7 +67,6 @@ spec:
         - "--vllm-port=8200"
         - "--kv-connector=${CONNECTOR_TYPE}"
         - "--secure-proxy=false"
-        - "--decoder-use-tls=false"
         ports:
         - containerPort: 8000
           protocol: TCP
