@@ -121,8 +121,6 @@ func NewOptions() *Options {
 		Port:                    "8000",
 		VLLMPort:                "8001",
 		DataParallelSize:        1,
-		KVConnector:             KVConnectorNIXLV2,
-		Connector:               KVConnectorNIXLV2,
 		SecureProxy:             true,
 		InferencePool:           os.Getenv("INFERENCE_POOL"),
 		InferencePoolNamespace:  os.Getenv("INFERENCE_POOL_NAMESPACE"),
@@ -195,7 +193,7 @@ func validateStages(stages []string, supportedStages map[string]struct{}, flagNa
 // parses the InferencePool field, sets configuration fields from flag fields, and computes the target URL.
 func (opts *Options) Complete() error {
 	// Migrate deprecated Connector flag to KVConnector
-	if opts.Connector != "" && opts.KVConnector == KVConnectorNIXLV2 {
+	if opts.Connector != "" && opts.KVConnector == "" {
 		opts.KVConnector = opts.Connector
 	}
 
