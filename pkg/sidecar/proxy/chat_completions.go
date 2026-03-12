@@ -184,5 +184,3 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 }
-
-// Made with Bob
