@@ -93,6 +93,34 @@ help: ## Print help
 
 ##@ Development
 
+.PHONY: install-hooks
+install-hooks: ## Install git hooks
+	git config core.hooksPath hooks
+
+.PHONY: presubmit
+presubmit: LINT_NEW_ONLY=true
+presubmit: git-branch-check signed-commits-check go-mod-check format lint
+
+.PHONY: git-branch-check
+git-branch-check:
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$branch" = "main" ]; then \
+		echo "ERROR: Direct push to 'main' is not allowed."; \
+		echo "Create a branch and open a PR instead."; \
+		exit 1; \
+	fi
+
+.PHONY: signed-commits-check
+signed-commits-check:
+	@./scripts/check-commits.sh upstream/main
+
+.PHONY: go-mod-check
+go-mod-check:
+	@echo "Checking go.mod/go.sum are clean..."
+	@go mod tidy
+	@git diff --exit-code go.mod go.sum || \
+	( echo "ERROR: go.mod/go.sum are not tidy. Run 'go mod tidy' and commit."; exit 1 )
+
 .PHONY: clean
 clean: ## Clean build artifacts, tools and caches
 	go clean -testcache -cache
@@ -115,10 +143,6 @@ lint: check-golangci-lint check-typos ## Run lint (use LINT_NEW_ONLY=true to onl
 		$(GOLANGCI_LINT) run; \
 	fi
 	$(TYPOS)
-
-.PHONY: install-hooks
-install-hooks: ## Install git hooks
-	git config core.hooksPath hooks
 
 .PHONY: test
 test: test-unit test-e2e ## Run all tests (unit and e2e)
@@ -190,12 +214,12 @@ image-build-uds-tokenizer: check-container-tool ## Build UDS tokenizer image fro
 	if [ -z "$$KV_CACHE_PATH_CHECK" ]; then \
 		echo "Error: Could not find kv-cache module even after download."; \
 		exit 1; \
-	fi
+	fi; \
 	$(CONTAINER_RUNTIME) build \
 		--platform linux/$(TARGETARCH) \
 		-t $(UDS_TOKENIZER_IMAGE) \
-		-f $(KV_CACHE_PATH)/services/uds_tokenizer/Dockerfile \
-		$(KV_CACHE_PATH)/services/uds_tokenizer
+		-f $$KV_CACHE_PATH_CHECK/services/uds_tokenizer/Dockerfile \
+		$$KV_CACHE_PATH_CHECK/services/uds_tokenizer
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)

@@ -1,0 +1,62 @@
+name: Build and Push Container Images
+
+on:
+  workflow_call:
+    inputs:
+      epp-image-name:
+        required: true
+        type: string
+      sidecar-image-name:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: string
+    secrets:
+      GHCR_TOKEN:
+        required: true
+
+jobs:
+  docker-build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Build and push EPP image
+        uses: ./.github/actions/docker-build-and-push
+        with:
+          docker-file: Dockerfile.epp
+          tag: ${{ inputs.tag }}
+          image-name: ${{ inputs.epp-image-name }}
+          registry: ghcr.io/llm-d
+          github-token: ${{ secrets.GHCR_TOKEN }}
+          prerelease: ${{ inputs.prerelease }}
+
+      - name: Build and push sidecar image
+        uses: ./.github/actions/docker-build-and-push
+        with:
+          docker-file: Dockerfile.sidecar
+          tag: ${{ inputs.tag }}
+          image-name: ${{ inputs.sidecar-image-name }}
+          registry: ghcr.io/llm-d
+          github-token: ${{ secrets.GHCR_TOKEN }}
+          prerelease: ${{ inputs.prerelease }}
+
+      - name: Run Trivy scan on EPP image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ghcr.io/llm-d/${{ inputs.epp-image-name }}:${{ inputs.tag }}
+
+      - name: Run Trivy scan on sidecar image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ghcr.io/llm-d/${{ inputs.sidecar-image-name }}:${{ inputs.tag }}
