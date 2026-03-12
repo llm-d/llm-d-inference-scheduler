@@ -70,6 +70,10 @@ func NewPrefixBasedPDDecider(config PrefixBasedPDDeciderConfig) (*PrefixBasedPDD
 		return nil, err
 	}
 
+	if config.NonCachedTokens == 0 {
+		log.Log.Info("Prefix-based PD disabled (NonCachedTokens=0)")
+	}
+
 	return &PrefixBasedPDDecider{
 		config: config,
 	}, nil
@@ -93,7 +97,6 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 	// NonCachedTokens defines the minimum number of non-cached tokens required
 	// to trigger disaggregated PD. A value of 0 disables disaggregation.
 	if d.config.NonCachedTokens == 0 {
-		debugLogger.Info("Prefix-based PD disabled")
 		return false
 	}
 	if endpoint == nil {
