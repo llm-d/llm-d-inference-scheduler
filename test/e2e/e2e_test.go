@@ -328,6 +328,41 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
+	ginkgo.When("Running KV configuration with external tokenizer PrepareData plugin", func() {
+		ginkgo.It("should run successfully", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			epp := createEndPointPicker(kvExternalTokenizerConfig)
+
+			modelServers := createModelServers(false, true, false, 1, 0, 0)
+			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
+
+			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
+			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
+
+			// Test completions
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, kvModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			// Test chat completions
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			// Repeat to verify prefix cache affinity with pre-tokenized prompts
+			for range 3 {
+				nsHdr, podHdr, _ = runCompletion(simplePrompt, kvModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+			}
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
 	ginkgo.When("Scaling up and down the model servers", func() {
 		ginkgo.It("should distribute inference requests across all model servers", func() {
 			infPoolObjects = createInferencePool(1, true)
@@ -900,6 +935,45 @@ plugins:
       kvBlockIndexConfig:
         enableMetrics: false                  # enable kv-block index metrics (prometheus)
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: precise-prefix-cache-scorer
+    weight: 10
+`
+
+// EPP config for running with precise prefix scoring and external tokenizer PrepareData plugin.
+// The tokenizer plugin runs in the PrepareData phase (before scoring) and attaches
+// pre-computed token IDs to the request, so the scorer skips internal tokenization.
+const kvExternalTokenizerConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: tokenizer
+  parameters:
+    modelName: Qwen/Qwen2.5-1.5B-Instruct
+- type: precise-prefix-cache-scorer
+  parameters:
+    tokenProcessorConfig:
+      blockSize: 16
+      hashSeed: "42"
+    kvEventsConfig:
+      zmqEndpoint: tcp://0.0.0.0:5557
+    indexerConfig:
+      prefixStoreConfig:
+        blockSize: 16
+      tokenizersPoolConfig:
+        modelName: Qwen/Qwen2.5-1.5B-Instruct
+        uds:
+          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
+      kvBlockIndexConfig:
+        enableMetrics: false
 - type: decode-filter
 - type: max-score-picker
 - type: single-profile-handler

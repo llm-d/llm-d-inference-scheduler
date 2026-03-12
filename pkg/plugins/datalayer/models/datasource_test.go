@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/http"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/http"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 )
 

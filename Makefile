@@ -198,7 +198,7 @@ build-%: check-go ## Build the project
 ##@ Container image Build/Push/Pull
 
 .PHONY:	image-build
-image-build: image-build-epp image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
+image-build: image-build-epp image-build-sidecar image-build-uds-tokenizer ## Build Container image using $(CONTAINER_RUNTIME)
 
 # Path to kv-cache repo for UDS tokenizer image build (can be overridden)
 KV_CACHE_PATH ?= $(shell go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null)
