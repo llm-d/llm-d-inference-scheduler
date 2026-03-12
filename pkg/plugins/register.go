@@ -5,6 +5,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
+	programaware "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/program-aware"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 )
@@ -28,4 +29,6 @@ func RegisterAllPlugins() {
 	// pd decider plugins
 	plugin.Register(profile.PrefixBasedPDDeciderPluginType, profile.PrefixBasedPDDeciderPluginFactory)
 	plugin.Register(profile.AlwaysDisaggDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
+	// program-aware fairness plugin
+	plugin.Register(programaware.ProgramAwarePluginType, programaware.ProgramAwarePluginFactory)
 }
