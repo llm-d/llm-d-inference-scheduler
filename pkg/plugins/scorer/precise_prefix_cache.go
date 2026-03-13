@@ -94,7 +94,7 @@ type PrecisePrefixCachePluginConfig struct {
 
 // compile-time type assertions
 var (
-	_ scheduling.Scorer              = &PrecisePrefixCacheScorer{}
+	_ scheduling.Scorer                = &PrecisePrefixCacheScorer{}
 	_ requestcontrol.PrepareDataPlugin = &PrecisePrefixCacheScorer{}
 	_ requestcontrol.PreRequest        = &PrecisePrefixCacheScorer{}
 )
@@ -381,7 +381,11 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 	// 5. Store PrefixCacheMatchInfo on each endpoint
 	blockSize := s.getBlockSizeTokens()
 	for _, ep := range endpoints {
-		addr := fmt.Sprintf("%s:%s", ep.GetMetadata().Address, ep.GetMetadata().Port)
+		md := ep.GetMetadata()
+		if md == nil {
+			continue
+		}
+		addr := fmt.Sprintf("%s:%s", md.Address, md.Port)
 		matchLen := int(scores[addr])
 		ep.Put(prefixCacheMatchInfoKey, &prefixCacheMatchInfo{
 			matchBlocks:     matchLen,
