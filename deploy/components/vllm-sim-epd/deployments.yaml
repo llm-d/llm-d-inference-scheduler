@@ -49,12 +49,9 @@ spec:
         - "--model=${MODEL_NAME}"
         - "--port=8000"
         - "--gpu-memory-utilization=0.7"
-        - "--mm-processor-kwargs"
-        - '{"max_pixels": 313600}'
         - "--enforce-eager"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         - "--no-enable-prefix-caching"
-        - "--max-num-batched-tokens=114688"
         - "--mm-encoder-only"
         - "--ec-transfer-config"
         - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
@@ -126,6 +123,7 @@ spec:
         - "--vllm-port=8200"
         - "--secure-proxy=false"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "--ec-connector=ec-example"
         ports:
         - name: sidecar-http
           containerPort: 8000
@@ -167,10 +165,7 @@ spec:
         - "--port=8200"
         - "--gpu-memory-utilization=0.7"
         - "--max-model-len=32768"
-        - "--mm-processor-kwargs"
-        - '{"max_pixels": 313600}'
         - "--enforce-eager"
-        - "--max-num-seqs=1"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         - "--ec-transfer-config"
         - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_consumer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
