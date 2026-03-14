@@ -17,9 +17,15 @@ limitations under the License.
 package proxy
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 func TestExtractMMItems(t *testing.T) {
@@ -170,4 +176,176 @@ func TestBuildEncoderRequest(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, 1, len(content))
 	assert.Equal(t, "image_url", content[0]["type"])
+}
+
+func TestMMItemURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		item     map[string]any
+		expected string
+	}{
+		{
+			name: "image_url with url",
+			item: map[string]any{
+				"type": "image_url",
+				"image_url": map[string]any{
+					"url": "https://example.com/image.jpg",
+				},
+			},
+			expected: "https://example.com/image.jpg",
+		},
+		{
+			name: "audio_url with url",
+			item: map[string]any{
+				"type": "audio_url",
+				"audio_url": map[string]any{
+					"url": "https://example.com/audio.mp3",
+				},
+			},
+			expected: "https://example.com/audio.mp3",
+		},
+		{
+			name: "input_audio has no url",
+			item: map[string]any{
+				"type": "input_audio",
+				"input_audio": map[string]any{
+					"data":   "base64data",
+					"format": "wav",
+				},
+			},
+			expected: "",
+		},
+		{
+			name:     "text type has no url",
+			item:     map[string]any{"type": "text", "text": "hello"},
+			expected: "",
+		},
+		{
+			name: "image_url missing nested url field",
+			item: map[string]any{
+				"type":      "image_url",
+				"image_url": map[string]any{},
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, mmItemURL(tt.item))
+		})
+	}
+}
+
+func TestFanoutEncoderPrimerDeduplication(t *testing.T) {
+	// Set up a logger so the Server doesn't panic on s.logger calls.
+	logger := zap.New(zap.UseDevMode(true))
+	log.SetLogger(logger)
+
+	var requestCount atomic.Int32
+	encoderBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":""}}]}`))
+	}))
+	defer encoderBackend.Close()
+
+	encoderURL, err := url.Parse(encoderBackend.URL)
+	assert.NoError(t, err)
+	srv := NewProxy("0", encoderURL, Config{})
+	srv.logger = log.Log
+
+	encoderHostPort := encoderURL.Host
+
+	tests := []struct {
+		name          string
+		request       map[string]any
+		expectedCalls int32
+	}{
+		{
+			name: "no duplicates — all items sent",
+			request: map[string]any{
+				"messages": []any{
+					map[string]any{
+						"role": "user",
+						"content": []any{
+							map[string]any{
+								"type": "image_url",
+								"image_url": map[string]any{
+									"url": "https://example.com/img1.jpg",
+								},
+							},
+							map[string]any{
+								"type": "image_url",
+								"image_url": map[string]any{
+									"url": "https://example.com/img2.jpg",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedCalls: 2,
+		},
+		{
+			name: "duplicate image URLs — second is skipped",
+			request: map[string]any{
+				"messages": []any{
+					map[string]any{
+						"role": "user",
+						"content": []any{
+							map[string]any{
+								"type": "image_url",
+								"image_url": map[string]any{
+									"url": "https://example.com/same.jpg",
+								},
+							},
+							map[string]any{
+								"type": "image_url",
+								"image_url": map[string]any{
+									"url": "https://example.com/same.jpg",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedCalls: 1,
+		},
+		{
+			name: "inline audio items are never deduplicated",
+			request: map[string]any{
+				"messages": []any{
+					map[string]any{
+						"role": "user",
+						"content": []any{
+							map[string]any{
+								"type": "input_audio",
+								"input_audio": map[string]any{
+									"data": "aaa", "format": "wav",
+								},
+							},
+							map[string]any{
+								"type": "input_audio",
+								"input_audio": map[string]any{
+									"data": "aaa", "format": "wav",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedCalls: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requestCount.Store(0)
+			err := srv.fanoutEncoderPrimer(tt.request, []string{encoderHostPort}, "test-req-id")
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedCalls, requestCount.Load())
+		})
+	}
 }
