@@ -143,6 +143,12 @@ lint: check-golangci-lint check-typos ## Run lint (use LINT_NEW_ONLY=true to onl
 		$(GOLANGCI_LINT) run; \
 	fi
 	$(TYPOS)
+	@if grep -rni --exclude-dir=.git --exclude-dir=bin --exclude-dir=vendor --exclude-dir=node_modules --binary-files=without-match "made with bob" . | grep -v "grep.*made with bob" ; then \
+		echo ""; \
+		echo "ERROR: Found prohibited Bob-related comments in the codebase!"; \
+		echo "Please remove these comments."; \
+		exit 1; \
+	fi
 
 .PHONY: test
 test: test-unit test-e2e ## Run all tests (unit and e2e)
