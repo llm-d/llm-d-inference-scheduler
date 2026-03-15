@@ -76,7 +76,7 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 			clone.forwardDataParallel = false
 			// Configure handlers
 			clone.handler = clone.createRoutes()
-			clone.setConnector()
+			clone.setKVConnector()
 
 			return clone.startHTTP(ctx)
 		})

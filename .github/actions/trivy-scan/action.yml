@@ -4,25 +4,14 @@ inputs:
   image:
     required: true
     description: "Image to scan (e.g., 'my-repo/my-image:latest')"
+
 runs:
   using: "composite"
   steps:
-    - name: Cache Trivy DB
-      uses: actions/cache@v4
-      with:
-        path: .trivy
-        # Use a key that changes daily or weekly to ensure the DB stays fresh
-        key: ${{ runner.os }}-trivy-${{ github.run_id }}
-        restore-keys: |
-          ${{ runner.os }}-trivy-
-
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@0.35.0
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
       with:
         image-ref: ${{ inputs.image }}
         format: 'table'
         severity: 'HIGH,CRITICAL'
         exit-code: '1'
-        cache-dir: .trivy  # Explicitly tell Trivy to use the cached directory

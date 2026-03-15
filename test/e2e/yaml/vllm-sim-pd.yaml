@@ -65,7 +65,7 @@ spec:
         args:
         - "--port=8000"
         - "--vllm-port=8200"
-        - "--connector=${CONNECTOR_TYPE}"
+        - "--kv-connector=${CONNECTOR_TYPE}"
         - "--secure-proxy=false"
         ports:
         - containerPort: 8000
