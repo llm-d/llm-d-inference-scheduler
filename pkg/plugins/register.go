@@ -21,7 +21,7 @@ func RegisterAllPlugins() {
 	plugin.Register(prerequest.EncodeHeaderHandlerType, prerequest.EncodeHeaderHandlerFactory)
 	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
 	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
-	plugin.Register(profile.EdProfileHandlerType, profile.EdProfileHandlerFactory)
+	plugin.Register(profile.E_pdProfileHandlerType, profile.E_pdProfileHandlerFactory)
 	plugin.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
 	plugin.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
