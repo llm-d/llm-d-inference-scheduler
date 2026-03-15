@@ -25,7 +25,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 func TestExtractMMItems(t *testing.T) {
@@ -237,11 +236,30 @@ func TestMMItemURL(t *testing.T) {
 	}
 }
 
-func TestFanoutEncoderPrimerDeduplication(t *testing.T) {
-	// Set up a logger so the Server doesn't panic on s.logger calls.
-	logger := zap.New(zap.UseDevMode(true))
-	log.SetLogger(logger)
+// imageURLItem builds an image_url content item.
+func imageURLItem(url string) map[string]any {
+	return map[string]any{"type": "image_url", "image_url": map[string]any{"url": url}}
+}
 
+// inlineAudioItem builds an input_audio content item.
+func inlineAudioItem(data, format string) map[string]any {
+	return map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": data, "format": format}}
+}
+
+// userMessageRequest wraps content items in a minimal chat-completions request.
+func userMessageRequest(items ...map[string]any) map[string]any {
+	content := make([]any, len(items))
+	for i, item := range items {
+		content[i] = item
+	}
+	return map[string]any{
+		"messages": []any{
+			map[string]any{"role": "user", "content": content},
+		},
+	}
+}
+
+func TestFanoutEncoderPrimerDeduplication(t *testing.T) {
 	var requestCount atomic.Int32
 	encoderBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
@@ -264,78 +282,18 @@ func TestFanoutEncoderPrimerDeduplication(t *testing.T) {
 		expectedCalls int32
 	}{
 		{
-			name: "no duplicates — all items sent",
-			request: map[string]any{
-				"messages": []any{
-					map[string]any{
-						"role": "user",
-						"content": []any{
-							map[string]any{
-								"type": "image_url",
-								"image_url": map[string]any{
-									"url": "https://example.com/img1.jpg",
-								},
-							},
-							map[string]any{
-								"type": "image_url",
-								"image_url": map[string]any{
-									"url": "https://example.com/img2.jpg",
-								},
-							},
-						},
-					},
-				},
-			},
+			name:          "no duplicates — all items sent",
+			request:       userMessageRequest(imageURLItem("https://example.com/img1.jpg"), imageURLItem("https://example.com/img2.jpg")),
 			expectedCalls: 2,
 		},
 		{
-			name: "duplicate image URLs — second is skipped",
-			request: map[string]any{
-				"messages": []any{
-					map[string]any{
-						"role": "user",
-						"content": []any{
-							map[string]any{
-								"type": "image_url",
-								"image_url": map[string]any{
-									"url": "https://example.com/same.jpg",
-								},
-							},
-							map[string]any{
-								"type": "image_url",
-								"image_url": map[string]any{
-									"url": "https://example.com/same.jpg",
-								},
-							},
-						},
-					},
-				},
-			},
+			name:          "duplicate image URLs — second is skipped",
+			request:       userMessageRequest(imageURLItem("https://example.com/same.jpg"), imageURLItem("https://example.com/same.jpg")),
 			expectedCalls: 1,
 		},
 		{
-			name: "inline audio items are never deduplicated",
-			request: map[string]any{
-				"messages": []any{
-					map[string]any{
-						"role": "user",
-						"content": []any{
-							map[string]any{
-								"type": "input_audio",
-								"input_audio": map[string]any{
-									"data": "aaa", "format": "wav",
-								},
-							},
-							map[string]any{
-								"type": "input_audio",
-								"input_audio": map[string]any{
-									"data": "aaa", "format": "wav",
-								},
-							},
-						},
-					},
-				},
-			},
+			name:          "inline audio items are never deduplicated",
+			request:       userMessageRequest(inlineAudioItem("aaa", "wav"), inlineAudioItem("aaa", "wav")),
 			expectedCalls: 2,
 		},
 	}

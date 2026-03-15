@@ -130,15 +130,15 @@ func (s *Server) fanoutEncoderPrimer(originalRequest map[string]any, encoderHost
 	}
 
 	// Deduplicate URL-based items; keep all non-URL items (e.g. inline audio).
-	seenURLs := make(map[string]bool)
+	seenURLs := make(map[string]struct{})
 	var mmItems []map[string]any
 	for _, item := range allItems {
 		if url := mmItemURL(item); url != "" {
-			if seenURLs[url] {
+			if _, seen := seenURLs[url]; seen {
 				s.logger.V(4).Info("skipping duplicate multimodal URL", "url", url, "requestID", requestID)
 				continue
 			}
-			seenURLs[url] = true
+			seenURLs[url] = struct{}{}
 		}
 		mmItems = append(mmItems, item)
 	}
