@@ -13,55 +13,55 @@ import (
 )
 
 const (
-	// E_pdProfileHandlerType is the type of the E_pdProfileHandler.
-	E_pdProfileHandlerType = "e-pd-profile-handler"
+	// EncoderPDProfileHandlerType is the type of the EncoderPDProfileHandler.
+	EncoderPDProfileHandlerType = "e-pd-profile-handler"
 
-	defaultE_pdEncodeProfile = "encode"
+	defaultEncoderPDEncodeProfile = "encode"
 )
 
-// e_pdDeciderPlugin extends plugin.Plugin with an encode stage decision.
-type e_pdDeciderPlugin interface {
+// encoderPDDeciderPlugin extends plugin.Plugin with an encode stage decision.
+type encoderPDDeciderPlugin interface {
 	plugin.Plugin
 	// disaggregateEncode decides if the encode stage should run for this request.
 	// Returns true if encode is needed (e.g. encoding cache miss on a multimodal request).
 	disaggregateEncode(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool
 }
 
-type e_pdProfileHandlerParameters struct {
+type encoderPDProfileHandlerParameters struct {
 	DecodeProfile     string `json:"decodeProfile"`
 	EncodeProfile     string `json:"encodeProfile"`
 	DeciderPluginName string `json:"deciderPluginName"`
 }
 
 // compile-time type assertion
-var _ scheduling.ProfileHandler = &E_pdProfileHandler{}
+var _ scheduling.ProfileHandler = &EncoderPDProfileHandler{}
 
-// E_pdProfileHandlerFactory defines the factory function for the E_pdProfileHandler.
-func E_pdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	parameters := e_pdProfileHandlerParameters{
+// EncoderPDProfileHandlerFactory defines the factory function for the EncoderPDProfileHandler.
+func EncoderPDProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	parameters := encoderPDProfileHandlerParameters{
 		DecodeProfile: defaultDecodeProfile,
-		EncodeProfile: defaultE_pdEncodeProfile,
+		EncodeProfile: defaultEncoderPDEncodeProfile,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", E_pdProfileHandlerType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", EncoderPDProfileHandlerType, err)
 		}
 	}
 
-	var deciderPlugin e_pdDeciderPlugin
+	var deciderPlugin encoderPDDeciderPlugin
 	if parameters.DeciderPluginName != "" {
 		p := handle.Plugin(parameters.DeciderPluginName)
 		if p == nil {
 			return nil, fmt.Errorf("invalid decider plugin type: %s", parameters.DeciderPluginName)
 		}
 		var ok bool
-		deciderPlugin, ok = p.(e_pdDeciderPlugin)
+		deciderPlugin, ok = p.(encoderPDDeciderPlugin)
 		if !ok {
-			return nil, fmt.Errorf("decider plugin of type: %s does not implement e_pdDeciderPlugin", parameters.DeciderPluginName)
+			return nil, fmt.Errorf("decider plugin of type: %s does not implement encoderPDDeciderPlugin", parameters.DeciderPluginName)
 		}
 	}
 
-	handler := NewE_pdProfileHandler(
+	handler := NewEncoderPDProfileHandler(
 		parameters.DecodeProfile,
 		parameters.EncodeProfile,
 		deciderPlugin,
@@ -70,40 +70,40 @@ func E_pdProfileHandlerFactory(name string, rawParameters json.RawMessage, handl
 	return handler.WithName(name), nil
 }
 
-// NewE_pdProfileHandler initializes a new E_pdProfileHandler and returns its pointer.
-func NewE_pdProfileHandler(decodeProfile, encodeProfile string, deciderPlugin e_pdDeciderPlugin) *E_pdProfileHandler {
-	return &E_pdProfileHandler{
-		typedName:     plugin.TypedName{Type: E_pdProfileHandlerType},
+// NewEncoderPDProfileHandler initializes a new EncoderPDProfileHandler and returns its pointer.
+func NewEncoderPDProfileHandler(decodeProfile, encodeProfile string, deciderPlugin encoderPDDeciderPlugin) *EncoderPDProfileHandler {
+	return &EncoderPDProfileHandler{
+		typedName:     plugin.TypedName{Type: EncoderPDProfileHandlerType},
 		decodeProfile: decodeProfile,
 		encodeProfile: encodeProfile,
 		decider:       deciderPlugin,
 	}
 }
 
-// E_pdProfileHandler handles scheduler profiles for E_PD (Encode → Decode).
+// EncoderPDProfileHandler handles scheduler profiles for E_PD (Encode → Decode).
 // Decode is always scheduled first to determine the target worker.
 // Encode is then conditionally scheduled for multimodal content if the decider approves.
-type E_pdProfileHandler struct {
+type EncoderPDProfileHandler struct {
 	typedName     plugin.TypedName
 	decodeProfile string
 	encodeProfile string
-	decider       e_pdDeciderPlugin
+	decider       encoderPDDeciderPlugin
 }
 
 // TypedName returns the typed name of the plugin.
-func (h *E_pdProfileHandler) TypedName() plugin.TypedName {
+func (h *EncoderPDProfileHandler) TypedName() plugin.TypedName {
 	return h.typedName
 }
 
 // WithName sets the name of the plugin.
-func (h *E_pdProfileHandler) WithName(name string) *E_pdProfileHandler {
+func (h *EncoderPDProfileHandler) WithName(name string) *EncoderPDProfileHandler {
 	h.typedName.Name = name
 	return h
 }
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *E_pdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
+func (h *EncoderPDProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
 	profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 
@@ -154,7 +154,7 @@ func (h *E_pdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState,
 // ProcessResults handles the outcome of the profile runs after the selected profiles ran.
 // In case of an error in any of the profiles, the matching entry in the profileResults will contain nil, to indicate there was
 // an error while running the profile.
-func (h *E_pdProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest,
+func (h *EncoderPDProfileHandler) ProcessResults(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest,
 	profileResults map[string]*scheduling.ProfileRunResult) (*scheduling.SchedulingResult, error) {
 
 	decodeRunResults := profileResults[h.decodeProfile]
