@@ -12,7 +12,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func TestE_pdProfileHandlerFactory(t *testing.T) {
+func TestEncoderPDProfileHandlerFactory(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	tests := []struct {
 		name       string
@@ -50,8 +50,7 @@ func TestE_pdProfileHandlerFactory(t *testing.T) {
 		},
 	}
 
-	handle, err := createHandleWithE_pdDeciderPlugins(ctx)
-	assert.NoError(t, err)
+	handle := createHandleWithEncoderPDDeciderPlugins(ctx)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,7 +60,7 @@ func TestE_pdProfileHandlerFactory(t *testing.T) {
 				assert.NoError(t, err)
 				rawParams = json.RawMessage(bytes)
 			}
-			plugin, err := E_pdProfileHandlerFactory(tt.pluginName, rawParams, handle)
+			plugin, err := EncoderPDProfileHandlerFactory(tt.pluginName, rawParams, handle)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -74,7 +73,7 @@ func TestE_pdProfileHandlerFactory(t *testing.T) {
 	}
 }
 
-func TestE_pdProfileHandlerFactoryInvalidJSON(t *testing.T) {
+func TestEncoderPDProfileHandlerFactoryInvalidJSON(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	invalidTests := []struct {
@@ -91,13 +90,12 @@ func TestE_pdProfileHandlerFactoryInvalidJSON(t *testing.T) {
 		},
 	}
 
-	handle, err := createHandleWithE_pdDeciderPlugins(ctx)
-	assert.NoError(t, err)
+	handle := createHandleWithEncoderPDDeciderPlugins(ctx)
 
 	for _, tt := range invalidTests {
 		t.Run(tt.name, func(t *testing.T) {
 			rawParams := json.RawMessage(tt.jsonParams)
-			plugin, err := E_pdProfileHandlerFactory("test", rawParams, handle)
+			plugin, err := EncoderPDProfileHandlerFactory("test", rawParams, handle)
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
@@ -154,7 +152,7 @@ func createChatRequest(hasImage, hasVideo, hasAudio bool) *scheduling.LLMRequest
 	}
 }
 
-func TestE_pdProfileHandler_Pick(t *testing.T) {
+func TestEncoderPDProfileHandler_Pick(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	profiles := map[string]scheduling.SchedulerProfile{
@@ -186,8 +184,8 @@ func TestE_pdProfileHandler_Pick(t *testing.T) {
 			name:    "all profiles already executed → run nothing",
 			request: createChatRequest(true, false, false),
 			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile:     newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				defaultE_pdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
+				defaultDecodeProfile:          newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEncoderPDEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectedProfiles: []string{},
 		},
@@ -205,7 +203,7 @@ func TestE_pdProfileHandler_Pick(t *testing.T) {
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
-			expectedProfiles: []string{defaultE_pdEncodeProfile},
+			expectedProfiles: []string{defaultEncoderPDEncodeProfile},
 		},
 		{
 			name:    "decode done, has video → run encode",
@@ -213,7 +211,7 @@ func TestE_pdProfileHandler_Pick(t *testing.T) {
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
-			expectedProfiles: []string{defaultE_pdEncodeProfile},
+			expectedProfiles: []string{defaultEncoderPDEncodeProfile},
 		},
 		{
 			name:    "decode done, has audio → run encode",
@@ -221,7 +219,7 @@ func TestE_pdProfileHandler_Pick(t *testing.T) {
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
-			expectedProfiles: []string{defaultE_pdEncodeProfile},
+			expectedProfiles: []string{defaultEncoderPDEncodeProfile},
 		},
 		{
 			name:    "decode done, has multiple multimodal types → run encode",
@@ -229,14 +227,14 @@ func TestE_pdProfileHandler_Pick(t *testing.T) {
 			profileResults: map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod1"),
 			},
-			expectedProfiles: []string{defaultE_pdEncodeProfile},
+			expectedProfiles: []string{defaultEncoderPDEncodeProfile},
 		},
 		{
 			name:    "encode failed (nil result) → run nothing",
 			request: createChatRequest(true, false, false),
 			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile:     newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				defaultE_pdEncodeProfile: nil,
+				defaultDecodeProfile:          newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEncoderPDEncodeProfile: nil,
 			},
 			expectedProfiles: []string{},
 		},
@@ -244,9 +242,9 @@ func TestE_pdProfileHandler_Pick(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewE_pdProfileHandler(
+			handler := NewEncoderPDProfileHandler(
 				defaultDecodeProfile,
-				defaultE_pdEncodeProfile,
+				defaultEncoderPDEncodeProfile,
 				nil, // no decider plugin
 			)
 
@@ -256,7 +254,7 @@ func TestE_pdProfileHandler_Pick(t *testing.T) {
 	}
 }
 
-func TestE_pdProfileHandler_PickWithDecider(t *testing.T) {
+func TestEncoderPDProfileHandler_PickWithDecider(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	profiles := map[string]scheduling.SchedulerProfile{
@@ -267,27 +265,27 @@ func TestE_pdProfileHandler_PickWithDecider(t *testing.T) {
 	tests := []struct {
 		name             string
 		request          *scheduling.LLMRequest
-		decider          e_pdDeciderPlugin
+		decider          encoderPDDeciderPlugin
 		profileResults   map[string]*scheduling.ProfileRunResult
 		expectedProfiles []string
 	}{
 		{
 			name:    "decider says disaggregate → encode runs",
 			request: createChatRequest(true, false, false),
-			decider: &mockE_pdDecider{shouldDisaggregate: true},
+			decider: &mockEncoderPDDecider{shouldDisaggregate: true},
 			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile:     newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				defaultE_pdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
+				defaultDecodeProfile:          newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEncoderPDEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectedProfiles: []string{},
 		},
 		{
 			name:    "decider says no disaggregate → skip encode",
 			request: createChatRequest(true, false, false),
-			decider: &mockE_pdDecider{shouldDisaggregate: false},
+			decider: &mockEncoderPDDecider{shouldDisaggregate: false},
 			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile:     newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				defaultE_pdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
+				defaultDecodeProfile:          newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEncoderPDEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectedProfiles: []string{},
 		},
@@ -295,9 +293,9 @@ func TestE_pdProfileHandler_PickWithDecider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewE_pdProfileHandler(
+			handler := NewEncoderPDProfileHandler(
 				defaultDecodeProfile,
-				defaultE_pdEncodeProfile,
+				defaultEncoderPDEncodeProfile,
 				tt.decider,
 			)
 
@@ -307,7 +305,7 @@ func TestE_pdProfileHandler_PickWithDecider(t *testing.T) {
 	}
 }
 
-func TestE_pdProfileHandler_ProcessResults(t *testing.T) {
+func TestEncoderPDProfileHandler_ProcessResults(t *testing.T) {
 	tests := []struct {
 		name           string
 		profileResults map[string]*scheduling.ProfileRunResult
@@ -330,42 +328,42 @@ func TestE_pdProfileHandler_ProcessResults(t *testing.T) {
 			checkResult: func(t *testing.T, res *scheduling.SchedulingResult) {
 				assert.Equal(t, defaultDecodeProfile, res.PrimaryProfileName)
 				assert.Contains(t, res.ProfileResults, defaultDecodeProfile)
-				assert.NotContains(t, res.ProfileResults, defaultE_pdEncodeProfile)
+				assert.NotContains(t, res.ProfileResults, defaultEncoderPDEncodeProfile)
 			},
 		},
 		{
 			name: "decode success, with encode",
 			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile:     newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				defaultE_pdEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
+				defaultDecodeProfile:          newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEncoderPDEncodeProfile: newMockProfileRunResult(DefaultTestPodPort, "pod2"),
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *scheduling.SchedulingResult) {
 				assert.Equal(t, defaultDecodeProfile, res.PrimaryProfileName)
 				assert.Contains(t, res.ProfileResults, defaultDecodeProfile)
-				assert.Contains(t, res.ProfileResults, defaultE_pdEncodeProfile)
+				assert.Contains(t, res.ProfileResults, defaultEncoderPDEncodeProfile)
 			},
 		},
 		{
 			name: "decode success, encode failed (nil) → only decode in results",
 			profileResults: map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile:     newMockProfileRunResult(DefaultTestPodPort, "pod1"),
-				defaultE_pdEncodeProfile: nil,
+				defaultDecodeProfile:          newMockProfileRunResult(DefaultTestPodPort, "pod1"),
+				defaultEncoderPDEncodeProfile: nil,
 			},
 			expectError: false,
 			checkResult: func(t *testing.T, res *scheduling.SchedulingResult) {
 				assert.Equal(t, defaultDecodeProfile, res.PrimaryProfileName)
 				assert.Contains(t, res.ProfileResults, defaultDecodeProfile)
-				assert.NotContains(t, res.ProfileResults, defaultE_pdEncodeProfile)
+				assert.NotContains(t, res.ProfileResults, defaultEncoderPDEncodeProfile)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewE_pdProfileHandler(
+			handler := NewEncoderPDProfileHandler(
 				defaultDecodeProfile,
-				defaultE_pdEncodeProfile,
+				defaultEncoderPDEncodeProfile,
 				nil,
 			)
 
@@ -445,27 +443,27 @@ func TestHasMultimodalContent(t *testing.T) {
 	}
 }
 
-// mockE_pdDecider is a mock implementation of e_pdDeciderPlugin for testing
-type mockE_pdDecider struct {
+// mockEncoderPDDecider is a mock implementation of encoderPDDeciderPlugin for testing
+type mockEncoderPDDecider struct {
 	typedName          plugin.TypedName
 	shouldDisaggregate bool
 }
 
-func (m *mockE_pdDecider) TypedName() plugin.TypedName {
+func (m *mockEncoderPDDecider) TypedName() plugin.TypedName {
 	return m.typedName
 }
 
-func (m *mockE_pdDecider) disaggregateEncode(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
+func (m *mockEncoderPDDecider) disaggregateEncode(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
 	return m.shouldDisaggregate
 }
 
-// createHandleWithE_pdDeciderPlugins creates a plugin handle with E_PD-specific decider plugins
-func createHandleWithE_pdDeciderPlugins(ctx context.Context) (plugin.Handle, error) {
+// createHandleWithEncoderPDDeciderPlugins creates a plugin handle with EncoderPD-specific decider plugins
+func createHandleWithEncoderPDDeciderPlugins(ctx context.Context) plugin.Handle {
 	handle := plugin.NewEppHandle(ctx, nil)
 
-	// Add E_PD decider plugin
+	// Add EncoderPD decider plugin
 	plugin1 := newAlwaysEncodeDecider()
 	handle.AddPlugin(AlwaysEncodeDeciderPluginType, plugin1)
 
-	return handle, nil
+	return handle
 }

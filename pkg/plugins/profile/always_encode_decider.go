@@ -14,7 +14,7 @@ const (
 )
 
 // compile-time type assertion
-var _ e_pdDeciderPlugin = &AlwaysEncodeDecider{}
+var _ encoderPDDeciderPlugin = &AlwaysEncodeDecider{}
 
 // AlwaysEncodeDecider is an EP decider plugin which always decides to encode.
 type AlwaysEncodeDecider struct {
