@@ -55,6 +55,7 @@ func TestValidateConnector(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := NewOptions()
 			opts.Connector = tt.connector
+			_ = opts.Complete() // Complete must be called before Validate
 			err := opts.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
@@ -80,6 +81,7 @@ func TestValidateTLSStages(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := NewOptions()
 			opts.EnableTLS = tt.enableTLS
+			_ = opts.Complete() // Complete must be called before Validate
 			err := opts.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
@@ -109,6 +111,7 @@ func TestValidateSSRFProtection(t *testing.T) {
 			opts.EnableSSRFProtection = tt.enabled
 			opts.InferencePoolNamespace = tt.namespace
 			opts.InferencePoolName = tt.poolName
+			_ = opts.Complete() // Complete must be called before Validate
 			err := opts.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
