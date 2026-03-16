@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jellydator/ttlcache/v3 v3.4.0
-	github.com/llm-d/llm-d-kv-cache v0.6.0
+	github.com/llm-d/llm-d-kv-cache v0.6.1-0.20260316131614-c7dc95ae8dfa
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
 	github.com/openai/openai-go v1.12.0
@@ -22,15 +22,15 @@ require (
 	go.opentelemetry.io/otel/trace v1.42.0
 	golang.org/x/sync v0.20.0
 	google.golang.org/grpc v1.79.2
-	k8s.io/api v0.34.5
-	k8s.io/apiextensions-apiserver v0.34.5
-	k8s.io/apimachinery v0.34.5
-	k8s.io/client-go v0.34.5
-	k8s.io/component-base v0.34.5
-	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
-	sigs.k8s.io/controller-runtime v0.22.5
+	k8s.io/api v0.35.2
+	k8s.io/apiextensions-apiserver v0.35.2
+	k8s.io/apimachinery v0.35.2
+	k8s.io/client-go v0.35.2
+	k8s.io/component-base v0.35.2
+	k8s.io/utils v0.0.0-20260108192941-914a6e750570
+	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/gateway-api v1.4.1
-	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20260128235548-fd30cb97714a
+	sigs.k8s.io/gateway-api-inference-extension v0.0.0-20260316135939-f0ca6aef5114
 )
 
 require (
@@ -57,8 +57,8 @@ require (
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
-	github.com/go-openapi/jsonpointer v0.22.1 // indirect
-	github.com/go-openapi/jsonreference v0.21.3 // indirect
+	github.com/go-openapi/jsonpointer v0.22.4 // indirect
+	github.com/go-openapi/jsonreference v0.21.4 // indirect
 	github.com/go-openapi/swag v0.25.4 // indirect
 	github.com/go-openapi/swag/cmdutils v0.25.4 // indirect
 	github.com/go-openapi/swag/conv v0.25.4 // indirect
@@ -76,7 +76,7 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/cel-go v0.26.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
+	github.com/google/pprof v0.0.0-20260202012954-cb029daf43ef // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/grafana/regexp v0.0.0-20250905093917-f7b3be9d1853 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
@@ -95,7 +95,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
-	github.com/prometheus/prometheus v0.309.1 // indirect
+	github.com/prometheus/prometheus v0.310.0 // indirect
 	github.com/redis/go-redis/v9 v9.11.0 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
@@ -117,7 +117,7 @@ require (
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/exp v0.0.0-20250808145144-a408d31f581a // indirect
+	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/mod v0.32.0 // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
