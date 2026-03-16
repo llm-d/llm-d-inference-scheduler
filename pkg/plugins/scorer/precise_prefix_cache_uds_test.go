@@ -2,6 +2,7 @@ package scorer
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -59,7 +60,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -73,7 +75,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -92,7 +95,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -102,7 +106,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
@@ -112,7 +117,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 2,
@@ -174,7 +180,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -184,7 +191,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
@@ -270,7 +278,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -280,7 +289,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 1,
@@ -290,7 +300,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 2,
@@ -359,7 +370,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					&fwkdl.Metrics{
 						WaitingQueueSize: 0,
@@ -415,7 +427,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -423,7 +436,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -431,7 +445,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -460,7 +475,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1:8080",
+						Address:        "10.0.0.1",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -468,7 +484,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2:8080",
+						Address:        "10.0.0.2",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -476,7 +493,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				scheduling.NewEndpoint(
 					&fwkdl.EndpointMetadata{
 						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3:8080",
+						Address:        "10.0.0.3",
+						Port:           "8080",
 					},
 					nil,
 					nil,
@@ -571,7 +589,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 			gotByAddress := make(map[string]float64)
 			for endpoint, score := range got {
 				if endpoint.GetMetadata() != nil {
-					gotByAddress[endpoint.GetMetadata().Address] = score
+					m := endpoint.GetMetadata()
+					gotByAddress[fmt.Sprintf("%s:%s", m.Address, m.Port)] = score
 				}
 			}
 

@@ -52,6 +52,10 @@ func (m *mockKVCacheIndexer) ScoreTokens(ctx context.Context, tokens []uint32, m
 	return map[string]float64{}, nil
 }
 
+func (m *mockKVCacheIndexer) ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error) {
+	return nil, nil
+}
+
 func (m *mockKVCacheIndexer) KVBlockIndex() kvblock.Index {
 	return nil
 }
@@ -60,14 +64,16 @@ var testEndpoints = []scheduling.Endpoint{
 	scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-			Address:        "10.0.0.1:8080",
+			Address:        "10.0.0.1",
+			Port:           "8080",
 		},
 		nil, nil,
 	),
 	scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-			Address:        "10.0.0.2:8080",
+			Address:        "10.0.0.2",
+			Port:           "8080",
 		},
 		nil, nil,
 	),
@@ -82,6 +88,7 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 	scorer := &PrecisePrefixCacheScorer{
 		typedName:      plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
 		kvEventsConfig: &kvevents.Config{},
+		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
 			scoreTokensFunc: func(_ context.Context, tokens []uint32, modelName string, _ []string) (map[string]float64, error) {
 				capturedTokens = tokens
@@ -92,6 +99,7 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 	}
 
 	request := &scheduling.LLMRequest{
+		RequestId:   "test-tokenized",
 		TargetModel: "test-model",
 		TokenizedPrompt: &scheduling.TokenizedPrompt{
 			TokenIDs: tokenIDs,
@@ -111,6 +119,7 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 	scorer := &PrecisePrefixCacheScorer{
 		typedName:      plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
 		kvEventsConfig: &kvevents.Config{},
+		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
 			scoreTokensFunc: func(_ context.Context, _ []uint32, _ string, _ []string) (map[string]float64, error) {
 				fromTokensCalled = true
@@ -123,6 +132,7 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 	}
 
 	request := &scheduling.LLMRequest{
+		RequestId:   "test-skip-empty",
 		TargetModel: "test-model",
 		TokenizedPrompt: &scheduling.TokenizedPrompt{
 			TokenIDs: []uint32{},

@@ -19,8 +19,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
@@ -42,11 +42,6 @@ const (
 	// PrepareRequestData, Score, and PreRequest.
 	stateKey = plugin.StateKey("prefix-cache-state")
 
-	// prefixCacheMatchInfoKey is the endpoint data key for prefix cache match
-	// information. Once the upstream GIE attrprefix package is available in the
-	// pinned dependency, replace this with attrprefix.PrefixCacheMatchInfoKey.
-	prefixCacheMatchInfoKey = "PrefixCacheMatchInfoKey"
-
 	// experimentalPrefillProfile is the profile name for P/D disaggregation mode.
 	experimentalPrefillProfile = "prefill"
 )
@@ -56,23 +51,6 @@ type kvCacheIndexer interface {
 	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
 	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
-}
-
-// prefixCacheMatchInfo mirrors the upstream attrprefix.PrefixCacheMatchInfo.
-// Replace with the upstream type once the GIE dependency is updated.
-type prefixCacheMatchInfo struct {
-	matchBlocks     int
-	totalBlocks     int
-	blockSizeTokens int
-}
-
-// Clone implements datalayer.Cloneable.
-func (p *prefixCacheMatchInfo) Clone() fwkdl.Cloneable {
-	return &prefixCacheMatchInfo{
-		matchBlocks:     p.matchBlocks,
-		totalBlocks:     p.totalBlocks,
-		blockSizeTokens: p.blockSizeTokens,
-	}
 }
 
 // PrecisePrefixCachePluginConfig holds the configuration for the
@@ -332,7 +310,7 @@ func (s *PrecisePrefixCacheScorer) Category() scheduling.ScorerCategory {
 // Produces declares the data keys this plugin writes to endpoints.
 func (s *PrecisePrefixCacheScorer) Produces() map[string]any {
 	return map[string]any{
-		prefixCacheMatchInfoKey: prefixCacheMatchInfo{},
+		dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{},
 	}
 }
 
@@ -387,11 +365,7 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 		}
 		addr := fmt.Sprintf("%s:%s", md.Address, md.Port)
 		matchLen := int(scores[addr])
-		ep.Put(prefixCacheMatchInfoKey, &prefixCacheMatchInfo{
-			matchBlocks:     matchLen,
-			totalBlocks:     len(blockKeys),
-			blockSizeTokens: blockSize,
-		})
+		ep.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(matchLen, len(blockKeys), blockSize))
 	}
 
 	// 6. Save to PluginState for Score() and PreRequest()
