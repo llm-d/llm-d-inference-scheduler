@@ -16,6 +16,7 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -130,6 +131,11 @@ type PdProfileHandler struct {
 	prefillProfile        string
 	primaryPort           string
 	decider               pdDeciderPlugin
+}
+
+// Consumes defines data types consumed by this plugin (through the PD decider).
+func (*PdProfileHandler) Consumes() map[string]any {
+	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
 }
 
 // TypedName returns the typed name of the plugin.

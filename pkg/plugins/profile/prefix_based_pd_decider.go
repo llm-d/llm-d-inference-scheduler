@@ -130,8 +130,3 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 
 	return true
 }
-
-// Consumes defines data types consumed by this plugin
-func (*PrefixBasedPDDecider) Consumes() map[string]any {
-	return map[string]any{prefix.PrefixCacheMatchInfoKey: prefix.PrefixCacheMatchInfo{}}
-}
