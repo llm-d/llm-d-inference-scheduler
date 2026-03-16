@@ -142,7 +142,8 @@ lint: check-golangci-lint check-typos ## Run lint (use LINT_NEW_ONLY=true to onl
 		printf "\033[33mChecking all code (LINT_NEW_ONLY=false, default)\033[0m\n"; \
 		$(GOLANGCI_LINT) run; \
 	fi
-	$(TYPOS)
+	@echo "Checking for spelling errors with typos..."
+	@$(TYPOS) --format brief
 
 .PHONY: test
 test: test-unit test-e2e ## Run all tests (unit and e2e)
