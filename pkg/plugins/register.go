@@ -20,8 +20,9 @@ func RegisterAllPlugins() {
 	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
 	plugin.Register(prerequest.EncodeHeaderHandlerType, prerequest.EncodeHeaderHandlerFactory)
 	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
+	plugin.Register(profile.DisaggProfileHandlerType, profile.DisaggProfileHandlerFactory)
+	// Legacy aliases — existing YAML configs continue to work.
 	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
-	plugin.Register(profile.EncoderPDProfileHandlerType, profile.EncoderPDProfileHandlerFactory)
 	plugin.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
 	plugin.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
