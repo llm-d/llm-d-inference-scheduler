@@ -25,23 +25,15 @@ import (
 
 const (
 	// PdProfileHandlerType is the type of the PdProfileHandler
-	PdProfileHandlerType = "pd-profile-handler"
 
-	defaultDecodeProfile     = "decode"
 	defaultPrefillProfile    = "prefill"
 	defaultPrefixPluginType  = prefix.PrefixCachePluginType
 	defaultDeciderPluginName = AlwaysDisaggDeciderPluginType
 
 	// AverageCharactersPerToken is an estimated average characters per token, used since the request we cached is not tokenized.
-	AverageCharactersPerToken = 4
 )
 
 // pdDeciderPlugin interface for pd decider plugins
-type pdDeciderPlugin interface {
-	plugin.Plugin
-	// disaggregate checks if disaggregated PD is required for the given request and endpoint.
-	disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool
-}
 
 type pdProfileHandlerParameters struct {
 	DecodeProfile     string `json:"decodeProfile"`
@@ -265,20 +257,4 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 		PrimaryProfileName: h.decodeProfile,
 		ProfileResults:     updatedResults,
 	}, nil
-}
-
-// returns length of user input in tokens
-func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
-	if request.Body.Completions != nil { // assumed to be valid if not nil
-		return len([]byte(request.Body.Completions.Prompt)) / AverageCharactersPerToken, nil
-	}
-
-	// must be chat-completions request at this point, return bytes of entire messages
-	prompt, err := json.Marshal(request.Body.ChatCompletions.Messages)
-
-	if err != nil {
-		return 0, err
-	}
-
-	return len(prompt) / AverageCharactersPerToken, nil
 }
