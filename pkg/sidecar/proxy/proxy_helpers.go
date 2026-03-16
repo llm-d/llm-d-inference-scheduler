@@ -132,7 +132,7 @@ func (s *Server) startHTTP(ctx context.Context) error {
 // Passthrough decoder handler
 func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureSkipVerify bool) *httputil.ReverseProxy {
 	decoderProxy := httputil.NewSingleHostReverseProxy(decoderURL)
-	if decoderURL.Scheme == "https" {
+	if decoderURL.Scheme == schemeHTTPS {
 		decoderProxy.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: decoderInsecureSkipVerify,
