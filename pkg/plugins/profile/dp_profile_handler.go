@@ -117,7 +117,7 @@ func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *schedu
 
 	targetPod := profileResult.TargetEndpoints[0].GetMetadata()
 
-	request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
+	request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
 
 	for _, target := range profileResult.TargetEndpoints {
 		newMetadata := target.GetMetadata().Clone()

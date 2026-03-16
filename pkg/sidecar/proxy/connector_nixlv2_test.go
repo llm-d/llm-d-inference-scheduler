@@ -63,7 +63,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
