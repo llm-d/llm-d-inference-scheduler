@@ -123,7 +123,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check if encoder headers are present to determine if we should use EPD protocol
-	encoderHostPorts := r.Header.Values(common.EncoderHostsPortsHeader)
+	encoderHostPorts := r.Header.Values(common.EncoderPodsHeader)
 	if len(encoderHostPorts) == 1 {
 		encoderHostPorts = strings.Split(encoderHostPorts[0], ",")
 	}
