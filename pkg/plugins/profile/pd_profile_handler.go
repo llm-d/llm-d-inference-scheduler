@@ -76,7 +76,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 	}
 
 	if parameters.PrimaryPort != 0 {
-		log.FromContext(handle.Context()).Info("Deprecated: primaryPort not needed with Istio 1.28.1")
+		log.FromContext(handle.Context()).Info("Deprecated: primaryPort not needed with Istio >= 1.28.1")
 		if parameters.PrimaryPort < 1 || parameters.PrimaryPort > 65535 {
 			return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
 		}

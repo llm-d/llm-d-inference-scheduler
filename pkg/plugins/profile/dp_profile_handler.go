@@ -29,7 +29,7 @@ var _ scheduling.ProfileHandler = &DataParallelProfileHandler{}
 
 // DataParallelProfileHandlerFactory defines the factory function for the DataParallelProfileHandler
 func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	log.FromContext(handle.Context()).Info("Deprecated: Use simple-profile-handler with Istio 1.28.1")
+	log.FromContext(handle.Context()).Info("Deprecated: Use simple-profile-handler with Istio >= 1.28.1")
 	parameters := dataParallelProfileHandlerParameters{
 		PrimaryPort: 8000,
 	}
