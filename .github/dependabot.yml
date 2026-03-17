@@ -24,9 +24,9 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "sigs.k8s.io/*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      # Ignore major updates for all packages
+      # Ignore major updates for all Go packages
       - dependency-name: "*"
-        update-types: ["version-update:semver-major"]        
+        update-types: ["version-update:semver-major"]
     groups:
       go-dependencies:
         patterns:
@@ -46,8 +46,13 @@ updates:
       - "release-note-none"
     commit-message:
       prefix: "deps(actions)"
+    # No "ignore" block here: This allows major version updates
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
-  # 3. Docker base image updates (e.g., for Dockerfile FROM lines)
+  # 3. Docker base image updates
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
