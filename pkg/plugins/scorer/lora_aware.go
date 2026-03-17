@@ -318,31 +318,23 @@ func (s *LoRAAware) getShardForAdapter(adapterName string, endpoints []schedulin
 	}
 
 	// Create a sorted copy of endpoints for deterministic ordering
-	sortedEndpoints := make([]scheduling.Endpoint, len(endpoints))
-	copy(sortedEndpoints, endpoints)
-	sort.Slice(sortedEndpoints, func(i, j int) bool {
-		return sortedEndpoints[i].GetMetadata().NamespacedName.String() <
-			sortedEndpoints[j].GetMetadata().NamespacedName.String()
+	sorted := make([]scheduling.Endpoint, len(endpoints))
+	copy(sorted, endpoints)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].GetMetadata().NamespacedName.String() <
+			sorted[j].GetMetadata().NamespacedName.String()
 	})
 
 	// Hash the adapter name to get a deterministic seed
 	seed := int64(hashString(adapterName))
 
-	// Create a new random source with the seed for deterministic shuffling
+	// Shuffle in-place and return the first shardSize endpoints
 	rng := rand.New(rand.NewSource(seed))
-
-	// Shuffle the endpoints deterministically based on the adapter name
-	shuffled := make([]scheduling.Endpoint, len(sortedEndpoints))
-	copy(shuffled, sortedEndpoints)
-	rng.Shuffle(len(shuffled), func(i, j int) {
-		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	rng.Shuffle(len(sorted), func(i, j int) {
+		sorted[i], sorted[j] = sorted[j], sorted[i]
 	})
 
-	// Take the top shardSize endpoints from the shuffled list
-	result := make([]scheduling.Endpoint, shardSize)
-	copy(result, shuffled[:shardSize])
-
-	return result
+	return sorted[:shardSize]
 }
 
 // hashString computes a hash value for a string using FNV-1a algorithm.
