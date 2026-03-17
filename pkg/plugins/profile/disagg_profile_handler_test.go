@@ -479,7 +479,7 @@ func TestDisaggProfileHandler_ProcessResults_PD(t *testing.T) {
 				assert.Contains(t, res.ProfileResults, defaultDecodeProfile)
 				assert.NotContains(t, res.ProfileResults, testPrefillProfile)
 				assert.Equal(t, testPodPort, res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata().Port)
-				assert.Empty(t, hdrs[common.DataParallelPodHeader])
+				assert.Empty(t, hdrs[common.DataParallelEndpointHeader])
 			},
 		},
 		{
@@ -501,7 +501,7 @@ func TestDisaggProfileHandler_ProcessResults_PD(t *testing.T) {
 			},
 			check: func(t *testing.T, res *scheduling.SchedulingResult, hdrs map[string]string) {
 				assert.Equal(t, "9000", res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata().Port)
-				assert.Equal(t, "10.0.0.1:8000", hdrs[common.DataParallelPodHeader])
+				assert.Equal(t, "10.0.0.1:8000", hdrs[common.DataParallelEndpointHeader])
 			},
 		},
 	}

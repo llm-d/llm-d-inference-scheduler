@@ -326,7 +326,7 @@ func (h *DisaggProfileHandler) ProcessResults(
 	if h.primaryPort != "" {
 		// Data-parallel: rewrite decode endpoint port; stash original in a header.
 		targetEndpoint := decodeRunResults.TargetEndpoints[0].GetMetadata()
-		request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
+		request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
 
 		updated := scheduling.ProfileRunResult{}
 		for _, target := range decodeRunResults.TargetEndpoints {
