@@ -10,10 +10,8 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
@@ -77,7 +75,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 		return nil, fmt.Errorf("invalid decider plugin type: %s", parameters.DeciderPluginName)
 	}
 
-	deciderPlugin, ok := plugin.(prefillDeciderPlugin)
+	deciderPlugin, ok := plugin.(deciderPlugin)
 	if !ok {
 		return nil, fmt.Errorf("decider plugin of type: %s does not implement pdDeciderPlugin", parameters.DeciderPluginName)
 	}
@@ -95,7 +93,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string,
-	primaryPort int, deciderPlugin prefillDeciderPlugin) (*PdProfileHandler, error) {
+	primaryPort int, deciderPlugin deciderPlugin) (*PdProfileHandler, error) {
 	result := &PdProfileHandler{
 		typedName:             plugin.TypedName{Type: PdProfileHandlerType},
 		prefixPluginTypedName: plugin.TypedName{Type: prefixPluginType, Name: prefixPluginName},
@@ -117,7 +115,7 @@ type PdProfileHandler struct {
 	decodeProfile         string
 	prefillProfile        string
 	primaryPort           string
-	decider               prefillDeciderPlugin
+	decider               deciderPlugin
 }
 
 // Consumes defines data types consumed by this plugin (through the PD decider).
@@ -185,16 +183,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	inputTokens, err := getUserInputLenInTokens(request)
-	if err != nil {
-		log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input")
-		span.SetStatus(codes.Error, err.Error())
-		return nil
-	}
-
-	span.SetAttributes(attribute.Int("llm_d.profile_handler.input_tokens", inputTokens))
-
-	if h.decider != nil && h.decider.disaggregate(ctx, inputTokens, profileResults[h.decodeProfile].TargetEndpoints[0]) {
+	if h.decider != nil && h.decider.decide(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
 		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
 		// run the prefill profile
 		span.SetAttributes(

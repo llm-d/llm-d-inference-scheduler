@@ -10,10 +10,7 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
@@ -33,24 +30,19 @@ const (
 
 	defaultDecodeProfile  = "decode"
 	defaultPrefillProfile = "prefill"
+	defaultEncodeProfile  = "encode"
 
 	// AverageCharactersPerToken is an estimated average characters per token,
 	// used since the request we cache is not tokenized.
 	AverageCharactersPerToken = 4
 )
 
-// ── Decider interfaces ──────────────────────────────────────────────────────
+// ── Interfaces ──────────────────────────────────────────────────────────────
 
-// prefillDeciderPlugin decides whether disaggregated prefill stage should run for the request.
-type prefillDeciderPlugin interface {
+// deciderPlugin is the shared interface for all disaggregation deciders.
+type deciderPlugin interface {
 	plugin.Plugin
-	disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool
-}
-
-// encoderDeciderPlugin decides whether the disaggregated encode stage should run for the request.
-type encoderDeciderPlugin interface {
-	plugin.Plugin
-	disaggregateEncode(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool
+	decide(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool
 }
 
 // ── Factory & constructor ────────────────────────────────────────────────────
@@ -62,13 +54,13 @@ type disaggProfileHandlerParameters struct {
 	PrefixPluginType        string `json:"prefixPluginType"`
 	PrefixPluginName        string `json:"prefixPluginName"`
 	PrimaryPort             int    `json:"primaryPort"`
-	PDDeciderPluginName     string `json:"pdDeciderPluginName"`
+	PrefillDeciderPluginName     string `json:"prefillDeciderPluginName"`
 	EncodeDeciderPluginName string `json:"encodeDeciderPluginName"`
 }
 
 // DisaggProfileHandlerFactory is the unified factory for all disaggregation
 // profile handlers. Active stages are determined by which profiles are configured:
-//   - Set prefillProfile + optional prefillDeciderPlugin for P/D
+//   - Set prefillProfile + optional deciderPlugin for P/D
 //   - Set encodeProfile (+ optional encodeDeciderPluginName) for E/PD
 //   - Set both for E/P/D
 //   - Omit both for decode-only
@@ -85,37 +77,39 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 	if parameters.PrefixPluginName == "" {
 		parameters.PrefixPluginName = parameters.PrefixPluginType
 	}
+	if parameters.PrefillProfile == "" {
+		parameters.PrefillProfile = defaultPrefillProfile
+	}
+	if parameters.EncodeProfile == "" {
+		parameters.EncodeProfile = defaultEncodeProfile
+	}
 
 	if parameters.PrimaryPort < 0 || parameters.PrimaryPort > 65535 {
 		return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
 	}
 
 	// Resolve PD decider (required when prefill is active).
-	var pdDecider prefillDeciderPlugin
-	if parameters.PDDeciderPluginName != "" {
-		p := handle.Plugin(parameters.PDDeciderPluginName)
+	var pdDecider deciderPlugin
+	if parameters.PrefillDeciderPluginName != "" {
+		p := handle.Plugin(parameters.PrefillDeciderPluginName)
 		if p == nil {
-			return nil, fmt.Errorf("pdDeciderPluginName not found: %s", parameters.PDDeciderPluginName)
+			return nil, fmt.Errorf("prefillDeciderPluginName not found: %s", parameters.PrefillDeciderPluginName)
 		}
 		var ok bool
-		pdDecider, ok = p.(prefillDeciderPlugin)
+		pdDecider, ok = p.(deciderPlugin)
 		if !ok {
-			return nil, fmt.Errorf("plugin %s does not implement pdDeciderPlugin", parameters.PDDeciderPluginName)
+			return nil, fmt.Errorf("plugin %s does not implement prefillDeciderPlugin", parameters.PrefillDeciderPluginName)
 		}
 	}
-	if parameters.PrefillProfile != "" && pdDecider == nil {
-		return nil, errors.New("pdDeciderPluginName is required when prefillProfile is set")
-	}
-
 	// Resolve encode decider (optional).
-	var encodeDecider encoderDeciderPlugin
+	var encodeDecider deciderPlugin
 	if parameters.EncodeDeciderPluginName != "" {
 		ep := handle.Plugin(parameters.EncodeDeciderPluginName)
 		if ep == nil {
 			return nil, fmt.Errorf("encodeDeciderPluginName not found: %s", parameters.EncodeDeciderPluginName)
 		}
 		var ok bool
-		encodeDecider, ok = ep.(encoderDeciderPlugin)
+		encodeDecider, ok = ep.(deciderPlugin)
 		if !ok {
 			return nil, fmt.Errorf("plugin %s does not implement encodeDeciderPlugin", parameters.EncodeDeciderPluginName)
 		}
@@ -133,8 +127,8 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 func NewDisaggProfileHandler(
 	decodeProfile, prefillProfile, encodeProfile string,
 	primaryPort int,
-	pdDecider prefillDeciderPlugin,
-	encodeDecider encoderDeciderPlugin,
+	pdDecider deciderPlugin,
+	encodeDecider deciderPlugin,
 ) *DisaggProfileHandler {
 	return newDisaggProfileHandler(
 		DisaggProfileHandlerType,
@@ -161,10 +155,10 @@ var _ scheduling.ProfileHandler = &DisaggProfileHandler{}
 type DisaggProfileHandler struct {
 	typedName      plugin.TypedName
 	decodeProfile  string
-	prefillProfile string // empty → no prefill stage
-	encodeProfile  string // empty → no encode stage
-	pdDecider      prefillDeciderPlugin
-	encodeDecider  encoderDeciderPlugin
+	prefillProfile string
+	encodeProfile  string
+	pdDecider      deciderPlugin
+	encodeDecider  deciderPlugin
 	primaryPort    string
 }
 
@@ -181,8 +175,8 @@ func newDisaggProfileHandler(
 	handlerType string,
 	decodeProfile, prefillProfile, encodeProfile string,
 	primaryPort int,
-	pdDecider prefillDeciderPlugin,
-	encodeDecider encoderDeciderPlugin,
+	pdDecider deciderPlugin,
+	encodeDecider deciderPlugin,
 ) *DisaggProfileHandler {
 	h := &DisaggProfileHandler{
 		typedName:      plugin.TypedName{Type: handlerType},
@@ -242,39 +236,21 @@ func (h *DisaggProfileHandler) Pick(
 	}
 
 	// ── Stage 2: Encode (optional) ─────────────────────────────────────────
-	if h.encodeProfile != "" {
+	if _, hasEncodeProfile := profiles[h.encodeProfile]; hasEncodeProfile {
 		if _, executed := profileResults[h.encodeProfile]; !executed {
-			if hasMultimodalContent(request) {
+			if h.encodeDecider != nil && h.encodeDecider.decide(ctx, request, decodeRes.TargetEndpoints[0]) {
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_encode"))
 				return map[string]scheduling.SchedulerProfile{h.encodeProfile: profiles[h.encodeProfile]}
 			}
-			// No multimodal content — skip the encode stage entirely.
-			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_encode_no_multimodal"))
-		} else {
-			// Encode has run; let the decider veto it.
-			encodeRes := profileResults[h.encodeProfile]
-			if encodeRes != nil && len(encodeRes.TargetEndpoints) > 0 &&
-				h.encodeDecider != nil && !h.encodeDecider.disaggregateEncode(ctx, request, encodeRes.TargetEndpoints[0]) {
-				// Decider rejected encode: mark absent so ProcessResults omits it,
-				// and fall through to check the prefill stage.
-				// NOTE: this deliberately mutates the caller's map so that
-				// ProcessResults sees the updated state.
-				profileResults[h.encodeProfile] = nil
-			}
+			// Decider rejected encode — skip the encode stage entirely.
+			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_encode"))
 		}
 	}
 
 	// ── Stage 3: Prefill (optional) ────────────────────────────────────────
-	if h.prefillProfile != "" {
+	if _, hasPrefillProfile := profiles[h.prefillProfile]; hasPrefillProfile {
 		if _, executed := profileResults[h.prefillProfile]; !executed {
-			inputTokens, err := getUserInputLenInTokens(request)
-			if err != nil {
-				log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input")
-				span.SetStatus(codes.Error, err.Error())
-				return map[string]scheduling.SchedulerProfile{}
-			}
-			span.SetAttributes(attribute.Int("llm_d.profile_handler.input_tokens", inputTokens))
-			if h.pdDecider != nil && h.pdDecider.disaggregate(ctx, inputTokens, decodeRes.TargetEndpoints[0]) {
+			if h.pdDecider != nil && h.pdDecider.decide(ctx, request, decodeRes.TargetEndpoints[0]) {
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_prefill"))
 				return map[string]scheduling.SchedulerProfile{h.prefillProfile: profiles[h.prefillProfile]}
 			}
@@ -282,8 +258,8 @@ func (h *DisaggProfileHandler) Pick(
 	}
 
 	// ── All stages done: record routing decision ───────────────────────────
-	encodeUsed := h.encodeProfile != "" && profileResults[h.encodeProfile] != nil
-	prefillUsed := h.prefillProfile != "" && profileResults[h.prefillProfile] != nil
+	encodeUsed := profileResults[h.encodeProfile] != nil
+	prefillUsed := profileResults[h.prefillProfile] != nil
 
 	var decision string
 	switch {
@@ -334,13 +310,13 @@ func (h *DisaggProfileHandler) ProcessResults(
 		updatedResults[h.decodeProfile] = decodeRunResults
 	}
 
-	if h.prefillProfile != "" {
+	if h.pdDecider != nil {
 		if prefillRes, ok := profileResults[h.prefillProfile]; ok && prefillRes != nil {
 			updatedResults[h.prefillProfile] = prefillRes
 		}
 	}
 
-	if h.encodeProfile != "" {
+	if h.encodeDecider != nil {
 		if encodeRes, ok := profileResults[h.encodeProfile]; ok && encodeRes != nil {
 			updatedResults[h.encodeProfile] = encodeRes
 		}
@@ -350,40 +326,4 @@ func (h *DisaggProfileHandler) ProcessResults(
 		PrimaryProfileName: h.decodeProfile,
 		ProfileResults:     updatedResults,
 	}, nil
-}
-
-// ── Shared helpers ──────────────────────────────────────────────────────────
-
-// getUserInputLenInTokens returns an estimated token count for the user input.
-func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
-	if request == nil || request.Body == nil {
-		return 0, errors.New("request or request body is nil")
-	}
-	if request.Body.Completions != nil {
-		return len([]byte(request.Body.Completions.Prompt)) / AverageCharactersPerToken, nil
-	}
-	if request.Body.ChatCompletions == nil {
-		return 0, errors.New("request has neither completions nor chat completions body")
-	}
-	prompt, err := json.Marshal(request.Body.ChatCompletions.Messages)
-	if err != nil {
-		return 0, err
-	}
-	return len(prompt) / AverageCharactersPerToken, nil
-}
-
-// hasMultimodalContent returns true if the request contains any image, video, or audio content blocks.
-func hasMultimodalContent(request *scheduling.LLMRequest) bool {
-	if request == nil || request.Body == nil || request.Body.ChatCompletions == nil {
-		return false
-	}
-	for _, msg := range request.Body.ChatCompletions.Messages {
-		// See https://github.com/vllm-project/vllm/blob/main/docs/features/multimodal_inputs.md#online-serving
-		for _, block := range msg.Content.Structured {
-			if block.Type == "image_url" || block.Type == "video_url" || block.Type == "input_audio" {
-				return true
-			}
-		}
-	}
-	return false
 }

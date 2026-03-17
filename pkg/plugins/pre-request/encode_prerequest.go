@@ -7,11 +7,14 @@ import (
 	"net"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 const (
@@ -68,12 +71,28 @@ func (p *EncodeHeaderHandler) WithName(name string) *EncodeHeaderHandler {
 
 // PreRequest wires encode SchedulerProfile result into a header to indicate encode worker
 func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+	tracer := telemetry.Tracer()
+	_, span := tracer.Start(ctx, "llm_d.epp.prerequest.encode_disaggregation",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	if request != nil && request.TargetModel != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+	}
+	if request != nil && request.RequestId != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+	}
 	if _, found := request.Headers[common.EncoderEndpointsHeader]; found {
 		request.Headers[common.EncoderEndpointsHeader] = "" // clear header, if already set
 	}
 
 	encodeProfileRunResult, exists := schedulingResult.ProfileResults[p.encodeProfile]
 	if !exists {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.encode.reason", "no_encode_profile_result"),
+		)
 		return // encode profile failed to run or we chose not to run it, no-op in this case
 	}
 
@@ -89,4 +108,9 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 	if len(encodeHostPorts) > 0 {
 		request.Headers[common.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
 	}
+
+	span.SetAttributes(
+		attribute.Bool("llm_d.epp.encode.disaggregation_used", true),
+		attribute.String("llm_d.epp.encode.endpoints", strings.Join(encodeHostPorts, ",")),
+	)
 }
