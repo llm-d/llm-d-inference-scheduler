@@ -122,7 +122,6 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 	}
 	handler := NewDisaggProfileHandler(
 		parameters.DecodeProfile, parameters.PrefillProfile, parameters.EncodeProfile,
-		parameters.PrefixPluginType, parameters.PrefixPluginName,
 		parameters.PrimaryPort,
 		pdDecider, encodeDecider,
 	)
@@ -133,7 +132,6 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 // Active stages are determined by which profile names are non-empty.
 func NewDisaggProfileHandler(
 	decodeProfile, prefillProfile, encodeProfile string,
-	prefixPluginType, prefixPluginName string,
 	primaryPort int,
 	pdDecider prefillDeciderPlugin,
 	encodeDecider encoderDeciderPlugin,
@@ -141,7 +139,6 @@ func NewDisaggProfileHandler(
 	return newDisaggProfileHandler(
 		DisaggProfileHandlerType,
 		decodeProfile, prefillProfile, encodeProfile,
-		prefixPluginType, prefixPluginName,
 		primaryPort,
 		pdDecider, encodeDecider,
 	)
@@ -162,14 +159,13 @@ var _ scheduling.ProfileHandler = &DisaggProfileHandler{}
 // All three handler types (P/D, E/PD, E/P/D) share this single implementation;
 // active stages are selected by setting encodeProfile / prefillProfile.
 type DisaggProfileHandler struct {
-	typedName             plugin.TypedName
-	decodeProfile         string
-	prefillProfile        string // empty → no prefill stage
-	encodeProfile         string // empty → no encode stage
-	pdDecider             prefillDeciderPlugin
-	encodeDecider         encoderDeciderPlugin
-	primaryPort           string
-	prefixPluginTypedName plugin.TypedName
+	typedName      plugin.TypedName
+	decodeProfile  string
+	prefillProfile string // empty → no prefill stage
+	encodeProfile  string // empty → no encode stage
+	pdDecider      prefillDeciderPlugin
+	encodeDecider  encoderDeciderPlugin
+	primaryPort    string
 }
 
 // TypedName returns the typed name of the plugin.
@@ -184,19 +180,17 @@ func (h *DisaggProfileHandler) WithName(name string) *DisaggProfileHandler {
 func newDisaggProfileHandler(
 	handlerType string,
 	decodeProfile, prefillProfile, encodeProfile string,
-	prefixPluginType, prefixPluginName string,
 	primaryPort int,
 	pdDecider prefillDeciderPlugin,
 	encodeDecider encoderDeciderPlugin,
 ) *DisaggProfileHandler {
 	h := &DisaggProfileHandler{
-		typedName:             plugin.TypedName{Type: handlerType},
-		decodeProfile:         decodeProfile,
-		prefillProfile:        prefillProfile,
-		encodeProfile:         encodeProfile,
-		pdDecider:             pdDecider,
-		encodeDecider:         encodeDecider,
-		prefixPluginTypedName: plugin.TypedName{Type: prefixPluginType, Name: prefixPluginName},
+		typedName:      plugin.TypedName{Type: handlerType},
+		decodeProfile:  decodeProfile,
+		prefillProfile: prefillProfile,
+		encodeProfile:  encodeProfile,
+		pdDecider:      pdDecider,
+		encodeDecider:  encodeDecider,
 	}
 	if primaryPort != 0 {
 		h.primaryPort = strconv.Itoa(primaryPort)

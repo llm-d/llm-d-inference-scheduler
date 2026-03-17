@@ -254,7 +254,6 @@ func TestPDSchedule(t *testing.T) {
 			assert.NoError(t, err)
 
 			profileHandle := profile.NewDisaggProfileHandler(decode, prefill, "",
-				prefixScorer.TypedName().Type, prefixScorer.TypedName().Name,
 				0, deciderPlugin, nil)
 
 			schedulerConfig := scheduling.NewSchedulerConfig(profileHandle, map[string]fwkschd.SchedulerProfile{
