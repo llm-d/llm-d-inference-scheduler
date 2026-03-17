@@ -33,7 +33,7 @@ func (p PrefixBasedPDDeciderConfig) validate() error {
 }
 
 // compile-time type assertion
-var _ pdDeciderPlugin = &PrefixBasedPDDecider{}
+var _ prefillDeciderPlugin = &PrefixBasedPDDecider{}
 
 // PrefixBasedPDDecider is a PD decider plugin which decision is based prefix aware
 type PrefixBasedPDDecider struct {
