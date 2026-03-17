@@ -5,6 +5,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	compbasemetrics "k8s.io/component-base/metrics"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/metrics"
+
+	programaware "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/program-aware"
 )
 
 const (
@@ -31,9 +33,11 @@ var (
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
-	return []prometheus.Collector{
-		SchedulerPDDecisionCount,
-	}
+	extra := programaware.GetCollectors()
+	collectors := make([]prometheus.Collector, 0, 1+len(extra))
+	collectors = append(collectors, SchedulerPDDecisionCount)
+	collectors = append(collectors, extra...)
+	return collectors
 }
 
 // RecordPDDecision increments the counter for a specific P/D routing decision.
