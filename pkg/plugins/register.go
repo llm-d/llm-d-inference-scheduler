@@ -22,7 +22,7 @@ func RegisterAllPlugins() {
 	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
 	plugin.Register(profile.DisaggProfileHandlerType, profile.DisaggProfileHandlerFactory)
 	// Legacy aliases — existing YAML configs continue to work.
-	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
+	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
 	plugin.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
 	plugin.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
