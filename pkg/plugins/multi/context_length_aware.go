@@ -3,6 +3,7 @@ package multi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -254,7 +255,7 @@ func estimateContextLength(request *scheduling.LLMRequest) int {
 // Examples: "0-2048", "2048-8192", "0-2048,8192-16384"
 func parseContextRanges(rangeStr string) ([]contextRange, error) {
 	if rangeStr == "" {
-		return nil, fmt.Errorf("empty range string")
+		return nil, errors.New("empty range string")
 	}
 
 	parts := strings.Split(rangeStr, ",")
@@ -309,7 +310,7 @@ func matchesAnyRange(contextLength int, ranges []contextRange) bool {
 // - No match
 // - Very wide ranges
 func calculateRangeScore(contextLength int, ranges []contextRange) float64 {
-	var bestScore float64 = 0.0
+	var bestScore float64
 
 	for _, r := range ranges {
 		// Check if context length is within this range
