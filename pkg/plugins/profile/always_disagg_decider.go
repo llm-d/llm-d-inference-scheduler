@@ -14,7 +14,7 @@ const (
 )
 
 // compile-time type assertion
-var _ prefillDeciderPlugin = &AlwaysDisaggPDDecider{}
+var _ deciderPlugin = &AlwaysDisaggPDDecider{}
 
 // AlwaysDisaggPDDecider is a PD decider plugin which always decide to disaggregate PD
 type AlwaysDisaggPDDecider struct {
@@ -29,7 +29,9 @@ func AlwaysDisaggPDDeciderPluginFactory(name string, _ json.RawMessage,
 }
 
 func newAlwaysDisaggPDDecider() *AlwaysDisaggPDDecider {
-	return &AlwaysDisaggPDDecider{}
+	return &AlwaysDisaggPDDecider{
+		typedName: plugin.TypedName{Type: AlwaysDisaggDeciderPluginType},
+	}
 }
 
 // TypedName returns the typed name of the plugin.
@@ -40,10 +42,9 @@ func (d *AlwaysDisaggPDDecider) TypedName() plugin.TypedName {
 // WithName sets the name of the plugin.
 func (d *AlwaysDisaggPDDecider) WithName(name string) *AlwaysDisaggPDDecider {
 	d.typedName.Name = name
-	d.typedName.Type = AlwaysDisaggDeciderPluginType
 	return d
 }
 
-func (d *AlwaysDisaggPDDecider) disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
+func (d *AlwaysDisaggPDDecider) decide(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
 	return true
 }

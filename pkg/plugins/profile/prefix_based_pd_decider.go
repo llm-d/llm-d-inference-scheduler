@@ -33,7 +33,7 @@ func (p PrefixBasedPDDeciderConfig) validate() error {
 }
 
 // compile-time type assertion
-var _ prefillDeciderPlugin = &PrefixBasedPDDecider{}
+var _ deciderPlugin = &PrefixBasedPDDecider{}
 
 // PrefixBasedPDDecider is a PD decider plugin which decision is based prefix aware
 type PrefixBasedPDDecider struct {
@@ -71,7 +71,8 @@ func NewPrefixBasedPDDecider(config PrefixBasedPDDeciderConfig) (*PrefixBasedPDD
 	}
 
 	return &PrefixBasedPDDecider{
-		config: config,
+		typedName: plugin.TypedName{Type: PrefixBasedPDDeciderPluginType},
+		config:    config,
 	}, nil
 }
 
@@ -83,11 +84,10 @@ func (d *PrefixBasedPDDecider) TypedName() plugin.TypedName {
 // WithName sets the name of the plugin.
 func (d *PrefixBasedPDDecider) WithName(name string) *PrefixBasedPDDecider {
 	d.typedName.Name = name
-	d.typedName.Type = PrefixBasedPDDeciderPluginType
 	return d
 }
 
-func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
+func (d *PrefixBasedPDDecider) decide(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
@@ -96,6 +96,11 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 	}
 	if endpoint == nil {
 		logger.Error(nil, "prefix decider: endpoint is nil")
+		return false
+	}
+	inputTokens, err := getUserInputLenInTokens(request)
+	if err != nil {
+		logger.Error(err, "prefix decider: failed to get user input length in tokens")
 		return false
 	}
 	if inputTokens < d.config.NonCachedTokens {
@@ -135,4 +140,22 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 // Consumes defines data types consumed by this plugin
 func (*PrefixBasedPDDecider) Consumes() map[string]any {
 	return map[string]any{approximateprefix.PrefixCacheMatchInfoKey: approximateprefix.PrefixCacheMatchInfo{}}
+}
+
+// getUserInputLenInTokens returns an estimated token count for the user input.
+func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
+	if request == nil || request.Body == nil {
+		return 0, errors.New("request or request body is nil")
+	}
+	if request.Body.Completions != nil {
+		return len([]byte(request.Body.Completions.Prompt)) / AverageCharactersPerToken, nil
+	}
+	if request.Body.ChatCompletions == nil {
+		return 0, errors.New("request has neither completions nor chat completions body")
+	}
+	prompt, err := json.Marshal(request.Body.ChatCompletions.Messages)
+	if err != nil {
+		return 0, err
+	}
+	return len(prompt) / AverageCharactersPerToken, nil
 }

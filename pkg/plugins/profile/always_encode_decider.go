@@ -14,7 +14,7 @@ const (
 )
 
 // compile-time type assertion
-var _ encoderDeciderPlugin = &AlwaysEncodeDecider{}
+var _ deciderPlugin = &AlwaysEncodeDecider{}
 
 // AlwaysEncodeDecider is an EP decider plugin which always decides to encode.
 type AlwaysEncodeDecider struct {
@@ -28,7 +28,9 @@ func AlwaysEncodeDeciderPluginFactory(name string, _ json.RawMessage, _ plugin.H
 }
 
 func newAlwaysEncodeDecider() *AlwaysEncodeDecider {
-	return &AlwaysEncodeDecider{}
+	return &AlwaysEncodeDecider{
+		typedName: plugin.TypedName{Type: AlwaysEncodeDeciderPluginType},
+	}
 }
 
 // TypedName returns the typed name of the plugin.
@@ -39,10 +41,25 @@ func (d *AlwaysEncodeDecider) TypedName() plugin.TypedName {
 // WithName sets the name of the plugin.
 func (d *AlwaysEncodeDecider) WithName(name string) *AlwaysEncodeDecider {
 	d.typedName.Name = name
-	d.typedName.Type = AlwaysEncodeDeciderPluginType
 	return d
 }
 
-func (d *AlwaysEncodeDecider) disaggregateEncode(ctx context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
-	return true
+func (d *AlwaysEncodeDecider) decide(_ context.Context, request *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
+	return hasMultimodalContent(request)
+}
+
+// hasMultimodalContent returns true if the request contains any image, video, or audio content blocks.
+func hasMultimodalContent(request *scheduling.LLMRequest) bool {
+	if request == nil || request.Body == nil || request.Body.ChatCompletions == nil {
+		return false
+	}
+	for _, msg := range request.Body.ChatCompletions.Messages {
+		// See https://github.com/vllm-project/vllm/blob/main/docs/features/multimodal_inputs.md#online-serving
+		for _, block := range msg.Content.Structured {
+			if block.Type == "image_url" || block.Type == "video_url" || block.Type == "input_audio" {
+				return true
+			}
+		}
+	}
+	return false
 }

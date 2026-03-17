@@ -132,7 +132,7 @@ type mockEncodeDecider struct {
 
 func (m *mockEncodeDecider) TypedName() plugin.TypedName { return plugin.TypedName{} }
 
-func (m *mockEncodeDecider) disaggregateEncode(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
+func (m *mockEncodeDecider) decide(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
 	return m.allow
 }
 
@@ -156,42 +156,6 @@ func TestHasMultimodalContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, hasMultimodalContent(tt.req))
-		})
-	}
-}
-
-func TestGetUserInputLenInTokens(t *testing.T) {
-	tests := []struct {
-		name     string
-		req      *scheduling.LLMRequest
-		wantMin  int // at least this many tokens
-		wantZero bool
-	}{
-		{
-			name:    "completions prompt",
-			req:     completionsRequest("hello world hello world"), // 23 chars → 5 tokens
-			wantMin: 5,
-		},
-		{
-			name:    "chat completions",
-			req:     chatRequest(false, false, false),
-			wantMin: 1,
-		},
-		{
-			name:     "empty completions prompt",
-			req:      completionsRequest(""),
-			wantZero: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tokens, err := getUserInputLenInTokens(tt.req)
-			assert.NoError(t, err)
-			if tt.wantZero {
-				assert.Zero(t, tokens)
-			} else {
-				assert.GreaterOrEqual(t, tokens, tt.wantMin)
-			}
 		})
 	}
 }
@@ -225,12 +189,12 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 		// P/D style (prefill + decode)
 		{"PD style", map[string]any{
 			"prefillProfile":      "prefill",
-			"pdDeciderPluginName": AlwaysDisaggDeciderPluginType,
+			"prefillDeciderPluginName": AlwaysDisaggDeciderPluginType,
 		}, false},
 		{"PD custom profiles", map[string]any{
 			"decodeProfile": "my-decode", "prefillProfile": "my-prefill",
 			"prefixPluginName": "my-prefix", "primaryPort": 8080,
-			"pdDeciderPluginName": PrefixBasedPDDeciderPluginType,
+			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
 		}, false},
 
 		// E/PD style (encode + decode)
@@ -246,7 +210,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 		{"full EPD", map[string]any{
 			"prefillProfile":          "prefill",
 			"encodeProfile":           "encode",
-			"pdDeciderPluginName":     PrefixBasedPDDeciderPluginType,
+			"prefillDeciderPluginName":     PrefixBasedPDDeciderPluginType,
 			"encodeDeciderPluginName": AlwaysEncodeDeciderPluginType,
 			"primaryPort":             8000,
 		}, false},
@@ -259,9 +223,9 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 		{"primaryPort negative", map[string]any{"primaryPort": -1}, true},
 
 		// decider errors
-		{"prefill without pdDecider", map[string]any{"prefillProfile": "prefill"}, true},
+		{"prefill without pdDecider is ok (stage inactive)", map[string]any{"prefillProfile": "prefill"}, false},
 		{"unknown pdDecider", map[string]any{
-			"prefillProfile": "prefill", "pdDeciderPluginName": "INVALID",
+			"prefillProfile": "prefill", "prefillDeciderPluginName": "INVALID",
 		}, true},
 		{"unknown encodeDecider", map[string]any{
 			"encodeDeciderPluginName": "INVALID",
@@ -285,7 +249,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 func TestDisaggProfileHandlerFactory_InvalidJSON(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := handleWithDeciders(ctx)
-	for _, raw := range []string{`{"pdDeciderPluginName": `, `{"primaryPort": 8080.5}`} {
+	for _, raw := range []string{`{"prefillDeciderPluginName": `, `{"primaryPort": 8080.5}`} {
 		p, err := DisaggProfileHandlerFactory("h", json.RawMessage(raw), handle)
 		assert.Error(t, err)
 		assert.Nil(t, p)
@@ -380,7 +344,8 @@ func TestDisaggProfileHandler_Pick_PD_InputTokenError(t *testing.T) {
 		defaultDecodeProfile: makeProfileRunResult(testPodPort, "pod1"),
 	}
 
-	decider := newAlwaysDisaggPDDecider()
+	decider, err := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: 1})
+	assert.NoError(t, err)
 	h := NewDisaggProfileHandler(defaultDecodeProfile, testPrefillProfile, "",
 		0, decider, nil)
 
@@ -606,7 +571,7 @@ func TestDisaggProfileHandler_Pick_EPD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, nil)
+			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, newAlwaysEncodeDecider())
 			got := h.Pick(ctx, nil, tt.req, profiles, tt.results)
 			assert.ElementsMatch(t, tt.want, profileNames(got))
 		})
@@ -622,33 +587,23 @@ func TestDisaggProfileHandler_Pick_EPD_EncodeDecider(t *testing.T) {
 	}
 	results := map[string]*scheduling.ProfileRunResult{
 		defaultDecodeProfile: makeProfileRunResult(testPodPort, "pod1"),
-		testEncodeProfile:    makeProfileRunResult(testPodPort, "pod2"),
 	}
 
 	tests := []struct {
-		name       string
-		allow      bool
-		wantEncode bool
+		name string
+		allow bool
+		want []string
 	}{
-		{"decider approves → encode kept in results", true, true},
-		{"decider rejects → encode removed from results", false, false},
+		{"decider approves → run encode", true, []string{testEncodeProfile}},
+		{"decider rejects → skip encode", false, nil},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile,
 				0, nil, &mockEncodeDecider{allow: tt.allow})
-			// copy results so mutations don't bleed between subtests
-			resultsCopy := map[string]*scheduling.ProfileRunResult{
-				defaultDecodeProfile: results[defaultDecodeProfile],
-				testEncodeProfile:    results[testEncodeProfile],
-			}
-			h.Pick(ctx, nil, chatRequest(true, false, false), profiles, resultsCopy)
-			if tt.wantEncode {
-				assert.NotNil(t, resultsCopy[testEncodeProfile])
-			} else {
-				assert.Nil(t, resultsCopy[testEncodeProfile])
-			}
+			got := h.Pick(ctx, nil, chatRequest(true, false, false), profiles, results)
+			assert.ElementsMatch(t, tt.want, profileNames(got))
 		})
 	}
 }
@@ -703,7 +658,7 @@ func TestDisaggProfileHandler_ProcessResults_EPD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, nil)
+			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, newAlwaysEncodeDecider())
 			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -819,7 +774,7 @@ func TestDisaggProfileHandler_Pick_EPD_Full(t *testing.T) {
 
 			h := NewDisaggProfileHandler(
 				defaultDecodeProfile, testPrefillProfile, testEncodeProfile,
-				0, decider, nil,
+				0, decider, newAlwaysEncodeDecider(),
 			)
 
 			inputTokens := 0
@@ -850,13 +805,12 @@ func TestDisaggProfileHandler_Pick_EPD_Full_EncodeDecider(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		allow      bool
-		wantEncode bool
-		wantNext   []string // expected next profile from Pick after encode completes
+		name     string
+		allow    bool
+		wantNext []string // expected next profile from Pick (encode not yet run)
 	}{
-		{"decider approves → encode kept, run prefill next", true, true, []string{testPrefillProfile}},
-		{"decider rejects → encode removed, run prefill next", false, false, []string{testPrefillProfile}},
+		{"decider approves → run encode next", true, []string{testEncodeProfile}},
+		{"decider rejects → skip encode, run prefill next", false, []string{testPrefillProfile}},
 	}
 
 	for _, tt := range tests {
@@ -871,7 +825,6 @@ func TestDisaggProfileHandler_Pick_EPD_Full_EncodeDecider(t *testing.T) {
 
 			results := map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile: makeProfileRunResult(testPodPort, "pod1"),
-				testEncodeProfile:    makeProfileRunResult(testPodPort, "pod2"),
 			}
 
 			inputTokens := len(longPrompt) / AverageCharactersPerToken
@@ -879,12 +832,6 @@ func TestDisaggProfileHandler_Pick_EPD_Full_EncodeDecider(t *testing.T) {
 
 			got := h.Pick(ctx, nil, multimodalLong, profiles, results)
 			assert.ElementsMatch(t, tt.wantNext, profileNames(got))
-
-			if tt.wantEncode {
-				assert.NotNil(t, results[testEncodeProfile])
-			} else {
-				assert.Nil(t, results[testEncodeProfile])
-			}
 		})
 	}
 }
@@ -947,7 +894,7 @@ func TestDisaggProfileHandler_ProcessResults_EPD_Full(t *testing.T) {
 			decider, _ := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{})
 			h := NewDisaggProfileHandler(
 				defaultDecodeProfile, testPrefillProfile, testEncodeProfile,
-				0, decider, nil,
+				0, decider, newAlwaysEncodeDecider(),
 			)
 			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
 			if tt.expectErr {
