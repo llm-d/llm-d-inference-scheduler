@@ -54,19 +54,14 @@ type disaggProfileHandlerParameters struct {
 //   - Omit both for decode-only
 func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := disaggProfileHandlerParameters{
-		DecodeProfile: defaultDecodeProfile,
+		DecodeProfile:  defaultDecodeProfile,
+		PrefillProfile: defaultPrefillProfile,
+		EncodeProfile:  defaultEncodeProfile,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
 		}
-	}
-
-	if parameters.PrefillProfile == "" {
-		parameters.PrefillProfile = defaultPrefillProfile
-	}
-	if parameters.EncodeProfile == "" {
-		parameters.EncodeProfile = defaultEncodeProfile
 	}
 
 	if parameters.PrimaryPort < 0 || parameters.PrimaryPort > 65535 {
