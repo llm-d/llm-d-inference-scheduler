@@ -101,11 +101,10 @@ type LoRAAware struct {
 	typedName           plugin.TypedName
 	configuredShardSize int                 // 0 means auto-calculate based on endpoint count
 	baseModel           string              // Base model name
+	mu                  sync.RWMutex        // Protects shardCache, cachedShardSize, and cachedEndpointCount
 	shardCache          map[string][]string // Cache of adapter -> endpoint names
-	shardCacheMu        sync.RWMutex        // Protects shardCache
 	cachedShardSize     int                 // Cached calculated shard size
 	cachedEndpointCount int                 // Number of endpoints for cached shard size
-	shardSizeMu         sync.RWMutex        // Protects shard size cache
 }
 
 // TypedName returns the typed name of the plugin.
@@ -233,17 +232,17 @@ func (s *LoRAAware) getShardSize(numEndpoints int) int {
 	}
 
 	// Check if we have a cached value for this endpoint count
-	s.shardSizeMu.RLock()
+	s.mu.RLock()
 	if s.cachedEndpointCount == numEndpoints && s.cachedShardSize > 0 {
 		cachedSize := s.cachedShardSize
-		s.shardSizeMu.RUnlock()
+		s.mu.RUnlock()
 		return cachedSize
 	}
-	s.shardSizeMu.RUnlock()
+	s.mu.RUnlock()
 
 	// Calculate and cache the shard size
-	s.shardSizeMu.Lock()
-	defer s.shardSizeMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Double-check after acquiring write lock
 	if s.cachedEndpointCount == numEndpoints && s.cachedShardSize > 0 {
@@ -264,17 +263,17 @@ func (s *LoRAAware) getShardSize(numEndpoints int) int {
 // or computes and caches it if not already present.
 func (s *LoRAAware) getOrComputeShard(adapterName string, endpoints []scheduling.Endpoint, shardSize int) []string {
 	// Try to get from cache first (read lock)
-	s.shardCacheMu.RLock()
+	s.mu.RLock()
 	cachedNames, found := s.shardCache[adapterName]
-	s.shardCacheMu.RUnlock()
+	s.mu.RUnlock()
 
 	if found {
 		return cachedNames
 	}
 
 	// Not in cache, compute the shard (write lock)
-	s.shardCacheMu.Lock()
-	defer s.shardCacheMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Double-check after acquiring write lock (another goroutine might have computed it)
 	if cachedNames, found := s.shardCache[adapterName]; found {
