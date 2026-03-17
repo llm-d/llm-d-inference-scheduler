@@ -93,6 +93,34 @@ func TestEncodeHeaderHandlerFactory(t *testing.T) {
 	}
 }
 
+func TestPreRequestEncodeNilRequest(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewEncodeHeaderHandler("encode").WithName("test")
+
+	result := &scheduling.SchedulingResult{
+		ProfileResults: map[string]*scheduling.ProfileRunResult{},
+	}
+
+	// Should not panic
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, nil, result)
+	})
+}
+
+func TestPreRequestEncodeNilSchedulingResult(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewEncodeHeaderHandler("encode").WithName("test")
+
+	request := &scheduling.LLMRequest{
+		Headers: map[string]string{},
+	}
+
+	// Should not panic
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, nil)
+	})
+}
+
 func TestPreRequestEncodeProfileExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewEncodeHeaderHandler("encode").WithName("test")

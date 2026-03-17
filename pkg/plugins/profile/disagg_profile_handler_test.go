@@ -489,6 +489,17 @@ func TestDisaggProfileHandler_ProcessResults_PD(t *testing.T) {
 	}
 }
 
+func TestDisaggProfileHandler_ProcessResults_NilRequest(t *testing.T) {
+	h := NewDisaggProfileHandler(defaultDecodeProfile, testPrefillProfile, "",
+		9000, nil, nil)
+	results := map[string]*scheduling.ProfileRunResult{
+		defaultDecodeProfile: makeProfileRunResult(testPodPort, "pod1"),
+	}
+	_, err := h.ProcessResults(context.Background(), nil, nil, results)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "request is nil")
+}
+
 // ── E/PD Pick tests ──────────────────────────────────────────────────────────
 
 func TestDisaggProfileHandler_Pick_EPD(t *testing.T) {

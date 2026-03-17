@@ -19,7 +19,7 @@ import (
 
 const (
 	// EncodeHeaderHandlerType is the type of the EncodeHeaderHandler
-	EncodeHeaderHandlerType = "encoder-header-handler"
+	EncodeHeaderHandlerType = "encode-header-handler"
 
 	defaultEncodeProfile = "encode"
 )
@@ -77,10 +77,19 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 	)
 	defer span.End()
 
-	if request != nil && request.TargetModel != "" {
+	if request == nil {
+		span.SetAttributes(attribute.String("llm_d.epp.encode.reason", "request_is_nil"))
+		return
+	}
+	if schedulingResult == nil {
+		span.SetAttributes(attribute.String("llm_d.epp.encode.reason", "scheduling_result_is_nil"))
+		return
+	}
+
+	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	if request != nil && request.RequestId != "" {
+	if request.RequestId != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 	}
 	if _, found := request.Headers[common.EncoderEndpointsHeader]; found {

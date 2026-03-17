@@ -210,8 +210,13 @@ func (h *DisaggProfileHandler) Pick(
 
 	// ── Stage 1: Decode ────────────────────────────────────────────────────
 	if _, executed := profileResults[h.decodeProfile]; !executed {
+		decodeProfile, ok := profiles[h.decodeProfile]
+		if !ok {
+			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "error_missing_decode_profile"))
+			return map[string]scheduling.SchedulerProfile{}
+		}
 		span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_decode"))
-		return map[string]scheduling.SchedulerProfile{h.decodeProfile: profiles[h.decodeProfile]}
+		return map[string]scheduling.SchedulerProfile{h.decodeProfile: decodeProfile}
 	}
 
 	decodeRes := profileResults[h.decodeProfile]
@@ -230,7 +235,8 @@ func (h *DisaggProfileHandler) Pick(
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_encode"))
 				return map[string]scheduling.SchedulerProfile{h.encodeProfile: profiles[h.encodeProfile]}
 			}
-			// Decider rejected encode — skip the encode stage entirely.
+			// Decider rejected encode — mark as evaluated so we don't re-run the decider.
+			profileResults[h.encodeProfile] = nil
 			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_encode"))
 		}
 	}
@@ -242,6 +248,8 @@ func (h *DisaggProfileHandler) Pick(
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_prefill"))
 				return map[string]scheduling.SchedulerProfile{h.prefillProfile: profiles[h.prefillProfile]}
 			}
+			// Decider rejected prefill — mark as evaluated so we don't re-run the decider.
+			profileResults[h.prefillProfile] = nil
 		}
 	}
 
@@ -274,8 +282,12 @@ func (h *DisaggProfileHandler) ProcessResults(
 	request *scheduling.LLMRequest,
 	profileResults map[string]*scheduling.ProfileRunResult,
 ) (*scheduling.SchedulingResult, error) {
+	if request == nil {
+		return nil, errors.New("request is nil")
+	}
+
 	decodeRunResults := profileResults[h.decodeProfile]
-	if decodeRunResults == nil {
+	if decodeRunResults == nil || len(decodeRunResults.TargetEndpoints) == 0 {
 		return nil, errors.New("failed to find available decode workers")
 	}
 
