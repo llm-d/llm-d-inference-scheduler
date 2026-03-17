@@ -101,12 +101,46 @@ func buildEncoderRequest(originalRequest map[string]any, mmItem map[string]any) 
 	return encoderRequest
 }
 
+// mmItemURL returns the URL string for a multimodal item, or empty string if not URL-based.
+func mmItemURL(item map[string]any) string {
+	itemType, _ := item["type"].(string)
+	switch itemType {
+	case "image_url":
+		if m, ok := item["image_url"].(map[string]any); ok {
+			if u, ok := m["url"].(string); ok {
+				return u
+			}
+		}
+	case "audio_url":
+		if m, ok := item["audio_url"].(map[string]any); ok {
+			if u, ok := m["url"].(string); ok {
+				return u
+			}
+		}
+	}
+	return ""
+}
+
 // fanoutEncoderPrimer sends concurrent requests to encoder cluster for all MM items. We assume that there is no identical MM items in the same request.
 func (s *Server) fanoutEncoderPrimer(originalRequest map[string]any, encoderHostPorts []string, requestID string) error {
-	mmItems := extractMMItems(originalRequest)
-	if len(mmItems) == 0 {
+	allItems := extractMMItems(originalRequest)
+	if len(allItems) == 0 {
 		s.logger.V(4).Info("no multimodal items, skipping encoder", "requestID", requestID)
 		return nil
+	}
+
+	// Deduplicate URL-based items; keep all non-URL items (e.g. inline audio).
+	seenURLs := make(map[string]struct{})
+	var mmItems []map[string]any
+	for _, item := range allItems {
+		if url := mmItemURL(item); url != "" {
+			if _, seen := seenURLs[url]; seen {
+				s.logger.V(4).Info("skipping duplicate multimodal URL", "url", url, "requestID", requestID)
+				continue
+			}
+			seenURLs[url] = struct{}{}
+		}
+		mmItems = append(mmItems, item)
 	}
 
 	s.logger.Info("processing multimodal items", "count", len(mmItems), "requestID", requestID, "encoderHostPorts", encoderHostPorts)

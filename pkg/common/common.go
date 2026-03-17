@@ -7,14 +7,14 @@ package common
 import "net/url"
 
 const (
-	// PrefillPodHeader is the header name used to indicate Prefill worker <ip:port>
-	PrefillPodHeader = "x-prefiller-host-port"
+	// PrefillEndpointHeader is the header name used to indicate Prefill worker <ip:port>
+	PrefillEndpointHeader = "x-prefiller-host-port"
 
-	// DataParallelPodHeader is the header name used to indicate the worker <ip:port> for Data Parallel
-	DataParallelPodHeader = "x-data-parallel-host-port"
+	// EncoderEndpointsHeader is the header name used to indicate Encoder workers <ip:port> list
+	EncoderEndpointsHeader = "x-encoder-hosts-ports"
 
-	// EncoderHostsPortsHeader is the header name used to indicate Encoder workers <ip:port> list
-	EncoderHostsPortsHeader = "x-encoder-hosts-ports"
+	// DataParallelEndpointHeader is the header name used to indicate the worker <ip:port> for Data Parallel
+	DataParallelEndpointHeader = "x-data-parallel-host-port"
 )
 
 // StripScheme removes the scheme from an endpoint URL, returning host:port.

@@ -68,7 +68,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	)
 
 	var prefillHostPorts []string
-	prefillHostPorts = r.Header.Values(common.PrefillPodHeader)
+	prefillHostPorts = r.Header.Values(common.PrefillEndpointHeader)
 
 	// https://datatracker.ietf.org/doc/html/rfc7230#section-3.2.2 specifies proxies
 	// may combine multiple header values with a comma. Accept either one host per
@@ -123,7 +123,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check if encoder headers are present to determine if we should use EPD protocol
-	encoderHostPorts := r.Header.Values(common.EncoderHostsPortsHeader)
+	encoderHostPorts := r.Header.Values(common.EncoderEndpointsHeader)
 	if len(encoderHostPorts) == 1 {
 		encoderHostPorts = strings.Split(encoderHostPorts[0], ",")
 	}

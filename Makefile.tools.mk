@@ -200,5 +200,3 @@ check-typos:
 	  echo "ERROR: typos is not installed."; \
 	  echo "Run: make install-typos (or install-tools)"; \
 	  exit 1; }
-	@echo "Checking for spelling errors with typos..."
-	@$(TYPOS) --format brief

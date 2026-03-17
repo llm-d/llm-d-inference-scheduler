@@ -16,7 +16,7 @@ import (
 // dataParallelHandler checks if Data Parallel handling is needed.
 // Returns true if Data Parallel processing was needed
 func (s *Server) dataParallelHandler(w http.ResponseWriter, r *http.Request) bool {
-	dataParallelPodHostPort := r.Header.Get(common.DataParallelPodHeader)
+	dataParallelPodHostPort := r.Header.Get(common.DataParallelEndpointHeader)
 	if dataParallelPodHostPort != "" {
 		handler := s.dataParallelProxies[dataParallelPodHostPort]
 		if handler != nil {

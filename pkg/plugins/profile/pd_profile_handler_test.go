@@ -393,7 +393,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				assert.NotContains(t, res.ProfileResults, defaultPrefillProfile)
 				metadata := res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, DefaultTestPodPort, metadata.Port)
-				assert.Empty(t, headers[common.DataParallelPodHeader])
+				assert.Empty(t, headers[common.DataParallelEndpointHeader])
 			},
 		},
 		{
@@ -420,7 +420,9 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 			checkResult: func(t *testing.T, res *scheduling.SchedulingResult, headers map[string]string) {
 				metadata := res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, "9000", metadata.Port)
-				assert.Equal(t, "10.0.0.1:8000", headers[common.DataParallelPodHeader])
+
+				hostPort := headers[common.DataParallelEndpointHeader]
+				assert.Equal(t, "10.0.0.1:8000", hostPort)
 			},
 		},
 	}

@@ -115,7 +115,7 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillPodHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
 }
 
 func TestPreRequestPrefillProfileNotExists(t *testing.T) {
@@ -133,7 +133,7 @@ func TestPreRequestPrefillProfileNotExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	_, exists := request.Headers[common.PrefillPodHeader]
+	_, exists := request.Headers[common.PrefillEndpointHeader]
 	assert.False(t, exists)
 }
 
@@ -143,7 +143,7 @@ func TestPreRequestClearsExistingHeader(t *testing.T) {
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
-			common.PrefillPodHeader: "old-host:9999",
+			common.PrefillEndpointHeader: "old-host:9999",
 		},
 	}
 
@@ -160,7 +160,7 @@ func TestPreRequestClearsExistingHeader(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillPodHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
 }
 
 func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
@@ -169,7 +169,7 @@ func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
-			common.PrefillPodHeader: "stale-host:9999",
+			common.PrefillEndpointHeader: "stale-host:9999",
 		},
 	}
 
@@ -180,7 +180,7 @@ func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	val := request.Headers[common.PrefillPodHeader]
+	val := request.Headers[common.PrefillEndpointHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -205,7 +205,7 @@ func TestPreRequestCustomPrefillProfile(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillPodHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
 }
 
 func TestPreRequestIPv6Address(t *testing.T) {
@@ -229,5 +229,5 @@ func TestPreRequestIPv6Address(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[common.PrefillPodHeader])
+	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[common.PrefillEndpointHeader])
 }
