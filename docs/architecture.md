@@ -589,10 +589,9 @@ pods configured for specific context length ranges.
 - Support heterogeneous deployments with different GPU configurations
 
 The plugin scores all pods based on how well their ranges match the request:
-- Higher scores for tighter/more specific ranges (specialized pods)
-- Lower scores for very wide ranges (generalist pods)
-- Zero score for non-matching ranges
-- Neutral score (0.5) for pods without labels
+- **In-range match (0.5–1.0):** Higher scores for tighter/more specific ranges (specialized pods), lower scores for very wide ranges (generalist pods)
+- **Out-of-range fallback (0.0–0.3):** When no range matches, pods are ranked by proximity to the request. For example, a 9000-token request prefers a pod with `max=8192` over one with `max=2048`. Fallback scores never exceed 0.3, so an in-range match always wins.
+- **Neutral score (0.5):** Pods without the context length label
 
 If `enableFiltering` is set to true, the plugin also filters out pods that do not match the request's context length.
 

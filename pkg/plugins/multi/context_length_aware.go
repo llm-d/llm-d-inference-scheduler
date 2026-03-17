@@ -302,39 +302,30 @@ func matchesAnyRange(contextLength int, ranges []contextRange) bool {
 	return false
 }
 
-// calculateRangeScore calculates a score based on how well the ranges match the context length
-// Higher scores for:
-// - Exact range matches
-// - Tighter ranges (smaller width)
-// Lower scores for:
-// - No match
-// - Very wide ranges
+// calculateRangeScore calculates a score based on how well the ranges match the context length.
+//
+// Scoring tiers (higher tier always wins over lower):
+//   - In-range match (0.5–1.0): exact or tight matches score highest, wide ranges lower
+//   - Out-of-range fallback (0.0–0.3): when no range matches, pods are ranked by proximity
+//     to the request — e.g., the pod with the largest max is preferred for oversized requests
+//
+// This ensures that out-of-range requests still get routed to the most reasonable pod
+// rather than being scored equally (0.0) and selected arbitrarily.
 func calculateRangeScore(contextLength int, ranges []contextRange) float64 {
 	var bestScore float64
+	matched := false
 
 	for _, r := range ranges {
-		// Check if context length is within this range
 		if contextLength >= r.min && contextLength <= r.max {
+			matched = true
 			rangeWidth := r.max - r.min
 			if rangeWidth == 0 {
-				// Exact match (degenerate range)
 				return 1.0
 			}
 
-			// Score based on how tight the range is
-			// Normalize by position within range and range width
-			// Tighter ranges get higher scores (up to 1.0)
-			// Wider ranges get lower scores (approaching 0.5)
-
-			// Calculate range width score (narrower is better)
-			// Use log scale to handle very large ranges
 			widthScore := 1.0 / (1.0 + float64(rangeWidth)/10000.0)
-
-			// Score based on distance from maximum (more headroom = better)
 			headroom := float64(r.max - contextLength)
 			positionScore := headroom / float64(rangeWidth)
-
-			// Combine scores (width is more important than position)
 			score := 0.7*widthScore + 0.3*positionScore
 
 			if score > bestScore {
@@ -343,5 +334,30 @@ func calculateRangeScore(contextLength int, ranges []contextRange) float64 {
 		}
 	}
 
-	return bestScore
+	if matched {
+		return bestScore
+	}
+
+	// Out-of-range fallback: score by proximity to the nearest range boundary.
+	// Capped at 0.3 so a fallback never outscores an in-range match.
+	const maxFallbackScore = 0.3
+	bestFallback := 0.0
+
+	for _, r := range ranges {
+		var distance int
+		if contextLength > r.max {
+			// Request exceeds this range — prefer larger max values
+			distance = contextLength - r.max
+		} else {
+			// Request below this range — prefer smaller min values
+			distance = r.min - contextLength
+		}
+		// Inverse distance scoring: closer ranges score higher
+		score := maxFallbackScore / (1.0 + float64(distance)/1000.0)
+		if score > bestFallback {
+			bestFallback = score
+		}
+	}
+
+	return bestFallback
 }

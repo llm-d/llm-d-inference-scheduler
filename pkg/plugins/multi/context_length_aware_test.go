@@ -146,12 +146,14 @@ func TestContextLengthAwareScore(t *testing.T) {
 	scores := plugin.Score(ctx, nil, request, endpoints)
 
 	// With context length 0:
-	// - tight-range (0-20): should score high (tight match)
-	// - wide-range (0-10000): should score lower than tight
-	// - no-match (500-1000): should score 0
+	// - tight-range (0-20): should score high (in-range match)
+	// - wide-range (0-10000): should score lower than tight (in-range but wide)
+	// - no-match (500-1000): out-of-range fallback, scored by proximity (0 < score <= 0.3)
 	// - no-label: should score 0.5 (neutral)
 	assert.Greater(t, scores[endpoints[0]], scores[endpoints[1]], "tight range should score higher than wide range")
-	assert.Equal(t, 0.0, scores[endpoints[2]], "no match should score 0")
+	assert.Greater(t, scores[endpoints[2]], 0.0, "out-of-range should get a fallback score > 0")
+	assert.LessOrEqual(t, scores[endpoints[2]], 0.3, "out-of-range fallback should not exceed 0.3")
+	assert.Greater(t, scores[endpoints[1]], scores[endpoints[2]], "in-range match should outscore out-of-range fallback")
 	assert.Equal(t, 0.5, scores[endpoints[3]], "no label should score 0.5")
 }
 
@@ -197,6 +199,56 @@ func TestParseContextRanges(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, tt.expected, ranges)
+			}
+		})
+	}
+}
+
+func TestCalculateRangeScoreFallback(t *testing.T) {
+	tests := []struct {
+		name          string
+		contextLength int
+		ranges        []contextRange
+		wantHigher    string // which range index should score higher, described
+	}{
+		{
+			name:          "exceeds all ranges — prefer largest max",
+			contextLength: 9000,
+			ranges: []contextRange{
+				{min: 0, max: 2048}, // index 0
+				{min: 0, max: 8192}, // index 1 — closer to 9000
+			},
+		},
+		{
+			name:          "below all ranges — prefer smallest min",
+			contextLength: 50,
+			ranges: []contextRange{
+				{min: 500, max: 2048}, // index 0 — min=500, distance=450
+				{min: 100, max: 1024}, // index 1 — min=100, distance=50 (closer)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scores := make([]float64, len(tt.ranges))
+			for i, r := range tt.ranges {
+				scores[i] = calculateRangeScore(tt.contextLength, []contextRange{r})
+			}
+
+			// All fallback scores must be in (0, 0.3]
+			for i, s := range scores {
+				assert.Greater(t, s, 0.0, "range %d should have positive fallback score", i)
+				assert.LessOrEqual(t, s, 0.3, "range %d fallback should not exceed 0.3", i)
+			}
+
+			if tt.name == "exceeds all ranges — prefer largest max" {
+				// index 1 (max=8192) should score higher than index 0 (max=2048)
+				assert.Greater(t, scores[1], scores[0], "pod with larger max should score higher")
+			}
+			if tt.name == "below all ranges — prefer smallest min" {
+				// index 1 (min=100) should score higher than index 0 (min=500)
+				assert.Greater(t, scores[1], scores[0], "pod with smaller min should score higher")
 			}
 		})
 	}
