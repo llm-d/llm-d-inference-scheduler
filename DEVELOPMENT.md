@@ -9,7 +9,6 @@ Documentation for developing the inference scheduler.
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
 - [Kubectl] `v1.14`+
-- [ZeroMQ]
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
@@ -17,7 +16,6 @@ Documentation for developing the inference scheduler.
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
 [Kubectl]:https://kubectl.docs.kubernetes.io/installation/kubectl/
-[ZeroMQ]:https://zeromq.org/
 
 > [!NOTE]
 > Before committing and pushing changes to an upstream repository, you may want to 

@@ -74,8 +74,7 @@ BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
 # go source files
 SRC = $(shell find . -type f -name '*.go')
 
-# CGO_ENABLED=1 is required for ZMQ (linking handled via pkg-config)
-CGO_ENABLED=1
+CGO_ENABLED=0
 
 
 # Internal variables for generic targets
@@ -152,12 +151,12 @@ test: test-unit test-e2e ## Run all tests (unit and e2e)
 test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
 .PHONY: test-unit-%
-test-unit-%: check-dependencies ## Run unit tests
+test-unit-%: ## Run unit tests
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
 	@go test -v $$($($*_TEST_FILES) | tr '\n' ' ')
 
 .PHONY: test-filter
-test-filter: check-dependencies ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
+test-filter: ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
 	@if [ -z "$(PATTERN)" ]; then \
 		echo "ERROR: PATTERN is required. Usage: make test-filter PATTERN=TestName [TYPE=epp|sidecar]"; \
 		exit 1; \
@@ -171,7 +170,7 @@ test-filter: check-dependencies ## Run filtered unit tests (usage: make test-fil
 	fi
 
 .PHONY: test-integration
-test-integration: check-dependencies ## Run integration tests
+test-integration: ## Run integration tests
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
 	go test -v -tags=integration_tests ./test/integration/
 

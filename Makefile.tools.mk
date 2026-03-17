@@ -34,8 +34,8 @@ endef
 ##@ Tools
 
 .PHONY: install-tools
-install-tools: install-ginkgo install-golangci-lint install-kustomize install-typos install-dependencies ## Install all development tools and dependencies
-	@echo "All development tools and dependencies are installed."
+install-tools: install-ginkgo install-golangci-lint install-kustomize install-typos ## Install all development tools
+	@echo "All development tools are installed."
 
 .PHONY: install-ginkgo
 install-ginkgo: $(GINKGO)
@@ -59,76 +59,6 @@ $(TYPOS): | $(LOCALBIN)
 	curl -L https://github.com/crate-ci/typos/releases/download/$(TYPOS_VERSION)/typos-$(TYPOS_VERSION)-$(TYPOS_ARCH).tar.gz | tar -xz -C $(LOCALBIN) $(TAR_OPTS)
 	chmod +x $(TYPOS)
 	@echo "typos installed successfully."
-
-##@ Dependencies
-
-.PHONY: check-dependencies
-check-dependencies: ## Check if development dependencies are installed
-	@if [ "$(TARGETOS)" = "linux" ]; then \
-	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'sudo make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  else \
-	    echo "WARNING: Unsupported Linux package manager. Cannot verify dependencies."; \
-	  fi; \
-	elif [ "$(TARGETOS)" = "darwin" ]; then \
-	  if [ -x "$$(command -v brew)" ]; then \
-	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
-	      echo "ERROR: Missing dependencies. Please run 'make install-dependencies'"; \
-	      exit 1; \
-	    fi; \
-	  else \
-	    echo "ERROR: Homebrew is not installed and is required. Install it from https://brew.sh/"; \
-	    exit 1; \
-	  fi; \
-	fi
-	@echo "✅ All dependencies are installed."
-
-.PHONY: install-dependencies
-install-dependencies: ## Install development dependencies based on OS/ARCH
-	@echo "Checking and installing development dependencies..."
-	@if [ "$(TARGETOS)" = "linux" ]; then \
-	  if [ -x "$$(command -v apt)" ]; then \
-	    if ! dpkg -s libzmq3-dev >/dev/null 2>&1 || ! dpkg -s g++ >/dev/null 2>&1; then \
-	      echo "Installing dependencies with apt..."; \
-	      apt-get update && apt-get install -y libzmq3-dev g++; \
-	    else \
-	      echo "✅ ZMQ and g++ are already installed."; \
-	    fi; \
-	  elif [ -x "$$(command -v dnf)" ]; then \
-	    if ! rpm -q zeromq-devel >/dev/null 2>&1 || ! rpm -q gcc-c++ >/dev/null 2>&1; then \
-	      echo "Installing dependencies with dnf..."; \
-	      dnf install -y zeromq-devel gcc-c++; \
-	    else \
-	      echo "✅ ZMQ and gcc-c++ are already installed."; \
-	    fi; \
-	  else \
-	    echo "ERROR: Unsupported Linux package manager. Install libzmq and g++/gcc-c++ manually."; \
-	    exit 1; \
-	  fi; \
-	elif [ "$(TARGETOS)" = "darwin" ]; then \
-	  if [ -x "$$(command -v brew)" ]; then \
-	    if ! brew list zeromq pkg-config >/dev/null 2>&1; then \
-	      echo "Installing dependencies with brew..."; \
-	      brew install zeromq pkg-config; \
-	    else \
-	      echo "✅ ZeroMQ and pkg-config are already installed."; \
-	    fi; \
-	  else \
-	    echo "ERROR: Homebrew is not installed and is required to install zeromq. Install it from https://brew.sh/"; \
-	    exit 1; \
-	  fi; \
-	else \
-	  echo "ERROR: Unsupported OS: $(TARGETOS). Install development dependencies manually."; \
-	  exit 1; \
-	fi
 
 .PHONY: check-tools
 check-tools: check-go check-ginkgo check-golangci-lint check-kustomize check-envsubst check-container-tool check-kubectl check-buildah check-typos ## Check that all required tools are installed
