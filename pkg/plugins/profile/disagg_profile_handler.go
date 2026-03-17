@@ -16,6 +16,7 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
@@ -27,15 +28,11 @@ import (
 const (
 	// DisaggProfileHandlerType is the canonical type for the unified disaggregation profile handler.
 	DisaggProfileHandlerType = "disagg-profile-handler"
+	defaultPrefixPluginType  = prefix.PrefixCachePluginType
+	defaultDeciderPluginName = AlwaysDisaggDeciderPluginType
 
-	// PdProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
-	PdProfileHandlerType = "pd-profile-handler"
-	// EncoderPDProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
-	EncoderPDProfileHandlerType = "e-pd-profile-handler"
-	// EPDProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
-	EPDProfileHandlerType = "e-p-d-profile-handler"
-
-	defaultDecodeProfile = "decode"
+	defaultDecodeProfile  = "decode"
+	defaultPrefillProfile = "prefill"
 
 	// AverageCharactersPerToken is an estimated average characters per token,
 	// used since the request we cache is not tokenized.
@@ -44,14 +41,14 @@ const (
 
 // ── Decider interfaces ──────────────────────────────────────────────────────
 
-// pdDeciderPlugin decides whether disaggregated P/D should run for a request.
-type pdDeciderPlugin interface {
+// prefillDeciderPlugin decides whether disaggregated prefill stage should run for the request.
+type prefillDeciderPlugin interface {
 	plugin.Plugin
 	disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool
 }
 
-// encoderPDDeciderPlugin decides whether the encode stage should run for a request.
-type encoderPDDeciderPlugin interface {
+// encoderDeciderPlugin decides whether the disaggregated encode stage should run for the request.
+type encoderDeciderPlugin interface {
 	plugin.Plugin
 	disaggregateEncode(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool
 }
@@ -71,7 +68,7 @@ type disaggProfileHandlerParameters struct {
 
 // DisaggProfileHandlerFactory is the unified factory for all disaggregation
 // profile handlers. Active stages are determined by which profiles are configured:
-//   - Set prefillProfile + pdDeciderPluginName for P/D
+//   - Set prefillProfile + optional prefillDeciderPlugin for P/D
 //   - Set encodeProfile (+ optional encodeDeciderPluginName) for E/PD
 //   - Set both for E/P/D
 //   - Omit both for decode-only
@@ -94,14 +91,14 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 	}
 
 	// Resolve PD decider (required when prefill is active).
-	var pdDecider pdDeciderPlugin
+	var pdDecider prefillDeciderPlugin
 	if parameters.PDDeciderPluginName != "" {
 		p := handle.Plugin(parameters.PDDeciderPluginName)
 		if p == nil {
 			return nil, fmt.Errorf("pdDeciderPluginName not found: %s", parameters.PDDeciderPluginName)
 		}
 		var ok bool
-		pdDecider, ok = p.(pdDeciderPlugin)
+		pdDecider, ok = p.(prefillDeciderPlugin)
 		if !ok {
 			return nil, fmt.Errorf("plugin %s does not implement pdDeciderPlugin", parameters.PDDeciderPluginName)
 		}
@@ -111,19 +108,18 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 	}
 
 	// Resolve encode decider (optional).
-	var encodeDecider encoderPDDeciderPlugin
+	var encodeDecider encoderDeciderPlugin
 	if parameters.EncodeDeciderPluginName != "" {
 		ep := handle.Plugin(parameters.EncodeDeciderPluginName)
 		if ep == nil {
 			return nil, fmt.Errorf("encodeDeciderPluginName not found: %s", parameters.EncodeDeciderPluginName)
 		}
 		var ok bool
-		encodeDecider, ok = ep.(encoderPDDeciderPlugin)
+		encodeDecider, ok = ep.(encoderDeciderPlugin)
 		if !ok {
-			return nil, fmt.Errorf("plugin %s does not implement encoderPDDeciderPlugin", parameters.EncodeDeciderPluginName)
+			return nil, fmt.Errorf("plugin %s does not implement encodeDeciderPlugin", parameters.EncodeDeciderPluginName)
 		}
 	}
-
 	handler := NewDisaggProfileHandler(
 		parameters.DecodeProfile, parameters.PrefillProfile, parameters.EncodeProfile,
 		parameters.PrefixPluginType, parameters.PrefixPluginName,
@@ -139,8 +135,8 @@ func NewDisaggProfileHandler(
 	decodeProfile, prefillProfile, encodeProfile string,
 	prefixPluginType, prefixPluginName string,
 	primaryPort int,
-	pdDecider pdDeciderPlugin,
-	encodeDecider encoderPDDeciderPlugin,
+	pdDecider prefillDeciderPlugin,
+	encodeDecider encoderDeciderPlugin,
 ) *DisaggProfileHandler {
 	return newDisaggProfileHandler(
 		DisaggProfileHandlerType,
@@ -170,8 +166,8 @@ type DisaggProfileHandler struct {
 	decodeProfile         string
 	prefillProfile        string // empty → no prefill stage
 	encodeProfile         string // empty → no encode stage
-	pdDecider             pdDeciderPlugin
-	encodeDecider         encoderPDDeciderPlugin
+	pdDecider             prefillDeciderPlugin
+	encodeDecider         encoderDeciderPlugin
 	primaryPort           string
 	prefixPluginTypedName plugin.TypedName
 }
@@ -190,8 +186,8 @@ func newDisaggProfileHandler(
 	decodeProfile, prefillProfile, encodeProfile string,
 	prefixPluginType, prefixPluginName string,
 	primaryPort int,
-	pdDecider pdDeciderPlugin,
-	encodeDecider encoderPDDeciderPlugin,
+	pdDecider prefillDeciderPlugin,
+	encodeDecider encoderDeciderPlugin,
 ) *DisaggProfileHandler {
 	h := &DisaggProfileHandler{
 		typedName:             plugin.TypedName{Type: handlerType},

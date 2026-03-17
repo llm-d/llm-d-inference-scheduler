@@ -17,7 +17,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
@@ -25,13 +24,8 @@ import (
 )
 
 const (
-	// PdProfileHandlerType is the type of the PdProfileHandler
-
-	defaultPrefillProfile    = "prefill"
-	defaultPrefixPluginType  = prefix.PrefixCachePluginType
-	defaultDeciderPluginName = AlwaysDisaggDeciderPluginType
-
-	// AverageCharactersPerToken is an estimated average characters per token, used since the request we cached is not tokenized.
+	// PdProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
+	PdProfileHandlerType = "pd-profile-handler"
 )
 
 // pdDeciderPlugin interface for pd decider plugins
@@ -83,7 +77,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 		return nil, fmt.Errorf("invalid decider plugin type: %s", parameters.DeciderPluginName)
 	}
 
-	deciderPlugin, ok := plugin.(pdDeciderPlugin)
+	deciderPlugin, ok := plugin.(prefillDeciderPlugin)
 	if !ok {
 		return nil, fmt.Errorf("decider plugin of type: %s does not implement pdDeciderPlugin", parameters.DeciderPluginName)
 	}
@@ -101,7 +95,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
 func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string,
-	primaryPort int, deciderPlugin pdDeciderPlugin) (*PdProfileHandler, error) {
+	primaryPort int, deciderPlugin prefillDeciderPlugin) (*PdProfileHandler, error) {
 	result := &PdProfileHandler{
 		typedName:             plugin.TypedName{Type: PdProfileHandlerType},
 		prefixPluginTypedName: plugin.TypedName{Type: prefixPluginType, Name: prefixPluginName},
@@ -123,7 +117,7 @@ type PdProfileHandler struct {
 	decodeProfile         string
 	prefillProfile        string
 	primaryPort           string
-	decider               pdDeciderPlugin
+	decider               prefillDeciderPlugin
 }
 
 // Consumes defines data types consumed by this plugin (through the PD decider).

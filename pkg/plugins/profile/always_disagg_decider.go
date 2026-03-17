@@ -14,7 +14,7 @@ const (
 )
 
 // compile-time type assertion
-var _ pdDeciderPlugin = &AlwaysDisaggPDDecider{}
+var _ prefillDeciderPlugin = &AlwaysDisaggPDDecider{}
 
 // AlwaysDisaggPDDecider is a PD decider plugin which always decide to disaggregate PD
 type AlwaysDisaggPDDecider struct {
