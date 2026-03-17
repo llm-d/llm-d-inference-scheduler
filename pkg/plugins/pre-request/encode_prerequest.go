@@ -68,8 +68,8 @@ func (p *EncodeHeaderHandler) WithName(name string) *EncodeHeaderHandler {
 
 // PreRequest wires encode SchedulerProfile result into a header to indicate encode worker
 func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
-	if _, found := request.Headers[common.EncoderHostsPortsHeader]; found {
-		request.Headers[common.EncoderHostsPortsHeader] = "" // clear header, if already set
+	if _, found := request.Headers[common.EncoderEndpointsHeader]; found {
+		request.Headers[common.EncoderEndpointsHeader] = "" // clear header, if already set
 	}
 
 	encodeProfileRunResult, exists := schedulingResult.ProfileResults[p.encodeProfile]
@@ -87,6 +87,6 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 
 	// Join all host:port pairs with commas
 	if len(encodeHostPorts) > 0 {
-		request.Headers[common.EncoderHostsPortsHeader] = strings.Join(encodeHostPorts, ",")
+		request.Headers[common.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
 	}
 }

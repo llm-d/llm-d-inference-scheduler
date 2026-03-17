@@ -116,7 +116,7 @@ func TestPreRequestEncodeProfileExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(encodeTestAddr, encodeTestPort), request.Headers[common.EncoderHostsPortsHeader])
+	assert.Equal(t, net.JoinHostPort(encodeTestAddr, encodeTestPort), request.Headers[common.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeProfileNotExists(t *testing.T) {
@@ -134,7 +134,7 @@ func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	_, exists := request.Headers[common.EncoderHostsPortsHeader]
+	_, exists := request.Headers[common.EncoderEndpointsHeader]
 	assert.False(t, exists)
 }
 
@@ -144,7 +144,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
-			common.EncoderHostsPortsHeader: "old-host:9999",
+			common.EncoderEndpointsHeader: "old-host:9999",
 		},
 	}
 
@@ -161,7 +161,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(encodeTestAddr, encodeTestPort), request.Headers[common.EncoderHostsPortsHeader])
+	assert.Equal(t, net.JoinHostPort(encodeTestAddr, encodeTestPort), request.Headers[common.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
@@ -170,7 +170,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
-			common.EncoderHostsPortsHeader: "stale-host:9999",
+			common.EncoderEndpointsHeader: "stale-host:9999",
 		},
 	}
 
@@ -181,7 +181,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	val := request.Headers[common.EncoderHostsPortsHeader]
+	val := request.Headers[common.EncoderEndpointsHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -206,7 +206,7 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(encodeTestAddr, encodeTestPort), request.Headers[common.EncoderHostsPortsHeader])
+	assert.Equal(t, net.JoinHostPort(encodeTestAddr, encodeTestPort), request.Headers[common.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeIPv6Address(t *testing.T) {
@@ -230,7 +230,7 @@ func TestPreRequestEncodeIPv6Address(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(encodeTestIPv6Addr, encodeTestPort), request.Headers[common.EncoderHostsPortsHeader])
+	assert.Equal(t, net.JoinHostPort(encodeTestIPv6Addr, encodeTestPort), request.Headers[common.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
@@ -260,5 +260,5 @@ func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 		net.JoinHostPort(encodeTestAddr, encodeTestPort),
 		net.JoinHostPort(addr2, encodeTestPort),
 	}, ",")
-	assert.Equal(t, expected, request.Headers[common.EncoderHostsPortsHeader])
+	assert.Equal(t, expected, request.Headers[common.EncoderEndpointsHeader])
 }
