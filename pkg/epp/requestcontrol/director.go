@@ -141,11 +141,12 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	requestObjectives := fwksched.RequestObjectives{Priority: *infObjective.Spec.Priority}
 
 	reqCtx.SchedulingRequest = &fwksched.LLMRequest{
-		RequestId:   reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey],
-		TargetModel: reqCtx.TargetModelName,
-		Body:        llmRequestBody,
-		Headers:     reqCtx.Request.Headers,
-		Objectives:  requestObjectives,
+		RequestId:        reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey],
+		TargetModel:      reqCtx.TargetModelName,
+		Body:             llmRequestBody,
+		Headers:          reqCtx.Request.Headers,
+		Objectives:       requestObjectives,
+		RequestSizeBytes: reqCtx.RequestSize,
 	}
 
 	logger = logger.WithValues("objectiveKey", reqCtx.ObjectiveKey, "incomingModelName", reqCtx.IncomingModelName, "targetModelName", reqCtx.TargetModelName, "priority", infObjective.Spec.Priority)
