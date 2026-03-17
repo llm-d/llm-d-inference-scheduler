@@ -21,7 +21,6 @@ plugins:
     nonCachedTokens: 16
 - type: pd-profile-handler
   parameters:
-    primaryPort: ${PRIMARY_PORT}
     deciderPluginName: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill

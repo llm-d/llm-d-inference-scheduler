@@ -93,14 +93,6 @@ if [ "${KV_CACHE_ENABLED}" == "true" ]; then
   fi
 fi
 
-# Set PRIMARY_PORT based on PD mode with data parallelism
-if [ "${PD_ENABLED}" == "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-  PRIMARY_PORT="8000"
-else
-  PRIMARY_PORT="0"
-fi
-export PRIMARY_PORT
-
 # Determine EPP config file based on feature flags
 if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
   # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
@@ -111,10 +103,6 @@ elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   # Prefill-Decode mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-  # Data Parallel mode (only needed for Istio pre-1.28.1)
-  # Not really called in kind(docker.io/istio/pilot:1.28.1) by "make env-dev-kind"
-  DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
 else
   # Simple mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
@@ -263,7 +251,7 @@ TEMP_FILE=$(mktemp)
 trap "rm -f \"${TEMP_FILE}\"" EXIT
 
 kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
-envsubst '$PRIMARY_PORT $MODEL_NAME' < ${EPP_CONFIG} > ${TEMP_FILE}
+envsubst '$MODEL_NAME' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
 kubectl kustomize --enable-helm  ${KUSTOMIZE_DIR} \
