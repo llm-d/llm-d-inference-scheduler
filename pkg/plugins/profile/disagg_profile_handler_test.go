@@ -12,7 +12,6 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -200,7 +199,7 @@ func TestGetUserInputLenInTokens(t *testing.T) {
 // ── TypedName / WithName ─────────────────────────────────────────────────────
 
 func TestDisaggProfileHandler_TypedName(t *testing.T) {
-	h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, "", "", 0, nil, nil)
+	h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, nil)
 	assert.Equal(t, DisaggProfileHandlerType, h.TypedName().Type)
 	assert.Empty(t, h.TypedName().Name)
 
@@ -356,7 +355,7 @@ func TestDisaggProfileHandler_Pick_PD(t *testing.T) {
 			assert.NoError(t, err)
 
 			h := NewDisaggProfileHandler(defaultDecodeProfile, testPrefillProfile, "",
-				prefix.PrefixCachePluginType, prefix.PrefixCachePluginType, 0, decider, nil)
+				0, decider, nil)
 
 			inputTokens := len(req.Body.Completions.Prompt) / AverageCharactersPerToken
 			injectPrefixCache(tt.profileResults, tt.cachedTokens, inputTokens)
@@ -383,7 +382,7 @@ func TestDisaggProfileHandler_Pick_PD_InputTokenError(t *testing.T) {
 
 	decider := newAlwaysDisaggPDDecider()
 	h := NewDisaggProfileHandler(defaultDecodeProfile, testPrefillProfile, "",
-		prefix.PrefixCachePluginType, prefix.PrefixCachePluginType, 0, decider, nil)
+		0, decider, nil)
 
 	got := h.Pick(ctx, nil, req, profiles, results)
 	assert.Empty(t, got, "should return empty map on input token estimation error")
@@ -438,7 +437,7 @@ func TestDisaggProfileHandler_Pick_PD_Series(t *testing.T) {
 			decider, err := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: tt.nonCachedTokens})
 			assert.NoError(t, err)
 			h := NewDisaggProfileHandler(defaultDecodeProfile, testPrefillProfile, "",
-				prefix.PrefixCachePluginType, prefix.PrefixCachePluginType, 0, decider, nil)
+				0, decider, nil)
 
 			for _, step := range tt.steps {
 				// Fresh results per step to avoid mutation leaking between iterations.
@@ -510,7 +509,7 @@ func TestDisaggProfileHandler_ProcessResults_PD(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			decider, _ := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{})
 			h := NewDisaggProfileHandler(defaultDecodeProfile, testPrefillProfile, "",
-				prefix.PrefixCachePluginType, prefix.PrefixCachePluginType, tt.primaryPort, decider, nil)
+				tt.primaryPort, decider, nil)
 
 			hdrs := map[string]string{}
 			req := &scheduling.LLMRequest{Headers: hdrs}
@@ -607,7 +606,7 @@ func TestDisaggProfileHandler_Pick_EPD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, "", "", 0, nil, nil)
+			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, nil)
 			got := h.Pick(ctx, nil, tt.req, profiles, tt.results)
 			assert.ElementsMatch(t, tt.want, profileNames(got))
 		})
@@ -638,7 +637,7 @@ func TestDisaggProfileHandler_Pick_EPD_EncodeDecider(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile,
-				"", "", 0, nil, &mockEncodeDecider{allow: tt.allow})
+				0, nil, &mockEncodeDecider{allow: tt.allow})
 			// copy results so mutations don't bleed between subtests
 			resultsCopy := map[string]*scheduling.ProfileRunResult{
 				defaultDecodeProfile: results[defaultDecodeProfile],
@@ -704,7 +703,7 @@ func TestDisaggProfileHandler_ProcessResults_EPD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, "", "", 0, nil, nil)
+			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, nil)
 			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -820,7 +819,6 @@ func TestDisaggProfileHandler_Pick_EPD_Full(t *testing.T) {
 
 			h := NewDisaggProfileHandler(
 				defaultDecodeProfile, testPrefillProfile, testEncodeProfile,
-				prefix.PrefixCachePluginType, prefix.PrefixCachePluginType,
 				0, decider, nil,
 			)
 
@@ -868,7 +866,6 @@ func TestDisaggProfileHandler_Pick_EPD_Full_EncodeDecider(t *testing.T) {
 
 			h := NewDisaggProfileHandler(
 				defaultDecodeProfile, testPrefillProfile, testEncodeProfile,
-				prefix.PrefixCachePluginType, prefix.PrefixCachePluginType,
 				0, decider, &mockEncodeDecider{allow: tt.allow},
 			)
 
@@ -950,7 +947,6 @@ func TestDisaggProfileHandler_ProcessResults_EPD_Full(t *testing.T) {
 			decider, _ := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{})
 			h := NewDisaggProfileHandler(
 				defaultDecodeProfile, testPrefillProfile, testEncodeProfile,
-				prefix.PrefixCachePluginType, prefix.PrefixCachePluginType,
 				0, decider, nil,
 			)
 			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
