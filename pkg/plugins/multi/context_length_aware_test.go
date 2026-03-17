@@ -3,18 +3,15 @@ package multi
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
-	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -106,7 +103,7 @@ func TestContextLengthAwareFilter(t *testing.T) {
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: true,
 	}
-	plugin := NewContextLengthAware("test-filter", params, nil)
+	plugin := NewContextLengthAware("test-filter", params)
 	request := createRequest()
 
 	// With empty request body, context length is 0, matches 0-100 range
@@ -143,7 +140,7 @@ func TestContextLengthAwareScore(t *testing.T) {
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: false,
 	}
-	plugin := NewContextLengthAware("test-scorer", params, nil)
+	plugin := NewContextLengthAware("test-scorer", params)
 	request := createRequest()
 
 	scores := plugin.Score(ctx, nil, request, endpoints)
@@ -205,55 +202,53 @@ func TestParseContextRanges(t *testing.T) {
 	}
 }
 
-// Tokenization tests
+func TestContextLengthAwareConsumes(t *testing.T) {
+	params := &contextLengthAwareParams{Label: DefaultContextLengthLabel}
+	plugin := NewContextLengthAware("test-consumes", params)
 
-func getTestTokenizerConfig(t *testing.T) tokenization.LocalTokenizerConfig {
-	d, err := os.Getwd()
-	require.NoError(t, err)
-	modelDir := filepath.Join(d, "testdata")
-	return tokenization.LocalTokenizerConfig{
-		ModelTokenizerMap: map[string]string{
-			"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-		},
-	}
+	consumed := plugin.Consumes()
+	require.NotNil(t, consumed)
+	assert.Contains(t, consumed, preparedata.TokenizedPromptKey)
+	assert.IsType(t, scheduling.TokenizedPrompt{}, consumed[preparedata.TokenizedPromptKey])
 }
 
-func TestContextLengthAwareWithTokenizer(t *testing.T) {
+// TokenizedPrompt tests — plugin consumes tokens from the tokenizer PrepareData plugin
+
+func TestContextLengthAwareWithTokenizedPrompt(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
-	localConfig := getTestTokenizerConfig(t)
-	tokenizer, err := tokenization.NewCachedLocalTokenizer(ctx, "test-model", localConfig)
-	require.NoError(t, err)
-
-	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
-		"he found himself transformed in his bed into a horrible vermin."
-
-	tokens, _, err := tokenizer.Encode(prompt, "test-model", true)
-	require.NoError(t, err)
-	actualTokenCount := len(tokens)
+	tokenCount := 42
 
 	endpoints := []scheduling.Endpoint{
 		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "tight-match"},
 			"10.0.0.1",
-			map[string]string{DefaultContextLengthLabel: fmt.Sprintf("0-%d", actualTokenCount+10)}),
+			map[string]string{DefaultContextLengthLabel: fmt.Sprintf("0-%d", tokenCount+10)}),
 		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "no-match"},
 			"10.0.0.2",
-			map[string]string{DefaultContextLengthLabel: fmt.Sprintf("%d-%d", actualTokenCount+100, actualTokenCount+200)}),
+			map[string]string{DefaultContextLengthLabel: fmt.Sprintf("%d-%d", tokenCount+100, tokenCount+200)}),
 	}
 
 	params := &contextLengthAwareParams{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: true,
-		ModelName:       "test-model",
 	}
-	plugin := NewContextLengthAware("test-tokenizer", params, tokenizer)
+	plugin := NewContextLengthAware("test-tokenized", params)
+
+	// Simulate tokenizer PrepareData plugin having set TokenizedPrompt
+	tokenIDs := make([]uint32, tokenCount)
+	for i := range tokenIDs {
+		tokenIDs[i] = uint32(i + 1)
+	}
 
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-request",
 		TargetModel: "test-model",
+		TokenizedPrompt: &scheduling.TokenizedPrompt{
+			TokenIDs: tokenIDs,
+		},
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
-				Prompt: prompt,
+				Prompt: "some prompt text",
 			},
 		},
 	}
@@ -263,58 +258,33 @@ func TestContextLengthAwareWithTokenizer(t *testing.T) {
 	assert.Equal(t, "tight-match", filteredEndpoints[0].GetMetadata().NamespacedName.Name)
 }
 
-func TestContextLengthAwareWithChatCompletions(t *testing.T) {
+func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
-	localConfig := getTestTokenizerConfig(t)
-	tokenizer, err := tokenization.NewCachedLocalTokenizer(ctx, "test-model", localConfig)
-	require.NoError(t, err)
-
-	messages := []scheduling.Message{
-		{Role: "system", Content: scheduling.Content{Raw: "You are a helpful assistant."}},
-		{Role: "user", Content: scheduling.Content{Raw: "Hello, how are you?"}},
-	}
-
-	// Count tokens using ApplyChatTemplate (matching implementation behavior)
-	conversations := make([]preprocessing.Conversation, len(messages))
-	for i, msg := range messages {
-		conversations[i] = preprocessing.Conversation{
-			Role:    msg.Role,
-			Content: msg.Content.Raw,
-		}
-	}
-	renderReq := &preprocessing.ApplyChatTemplateRequest{
-		Conversation: [][]preprocessing.Conversation{conversations},
-	}
-	renderedText, err := tokenizer.ApplyChatTemplate("test-model", renderReq)
-	require.NoError(t, err)
-
-	tokens, _, err := tokenizer.Encode(renderedText, "test-model", false)
-	require.NoError(t, err)
-	actualTokenCount := len(tokens)
+	// Without TokenizedPrompt, falls back to char estimation (len * 0.25)
+	prompt := "Hello, how are you?" // 19 chars => ~4 tokens estimated
 
 	endpoints := []scheduling.Endpoint{
 		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "matching-range"},
 			"10.0.0.1",
-			map[string]string{DefaultContextLengthLabel: fmt.Sprintf("0-%d", actualTokenCount+50)}),
+			map[string]string{DefaultContextLengthLabel: "0-50"}),
 		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "non-matching-range"},
 			"10.0.0.2",
-			map[string]string{DefaultContextLengthLabel: fmt.Sprintf("%d-%d", actualTokenCount+100, actualTokenCount+200)}),
+			map[string]string{DefaultContextLengthLabel: "100-200"}),
 	}
 
 	params := &contextLengthAwareParams{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: true,
-		ModelName:       "test-model",
 	}
-	plugin := NewContextLengthAware("test-chat-tokenizer", params, tokenizer)
+	plugin := NewContextLengthAware("test-fallback", params)
 
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-request",
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
-			ChatCompletions: &scheduling.ChatCompletionsRequest{
-				Messages: messages,
+			Completions: &scheduling.CompletionsRequest{
+				Prompt: prompt,
 			},
 		},
 	}

@@ -604,20 +604,18 @@ If `enableFiltering` is set to true, the plugin also filters out pods that do no
     Default: `llm-d.ai/context-length-range`
   - `enableFiltering` (optional): If true, the plugin operates as a filter, excluding non-matching pods.
     Default: false
-  - `modelName` (required when using tokenizer): The model name for tokenization.
-  - `localTokenizerConfig` (optional): Configuration for local tokenizer files.
-    - `modelTokenizerMap`: Map of model names to local tokenizer.json file paths.
-  - `hfTokenizerConfig` (optional): Configuration for HuggingFace tokenizers.
-    - `huggingFaceToken`: HuggingFace API token (can also use `HF_TOKEN` env var).
-    - `tokenizersCacheDir`: Directory to cache downloaded tokenizers.
 
 **Token Counting:**
 
-When a tokenizer is configured, the plugin uses precise tokenization:
-1. For chat completions: renders messages using the model's chat template, then tokenizes
-2. For regular completions: tokenizes the prompt directly
+This plugin consumes `TokenizedPrompt` from the request, which is produced by the `tokenizer`
+PrepareData plugin. When the tokenizer plugin is configured, the context-length-aware plugin uses
+the exact token count (`len(TokenizedPrompt.TokenIDs)`) for routing decisions. This avoids
+double-tokenization with other plugins that also consume tokens (e.g., `precise-prefix-cache-scorer`).
 
-When no tokenizer is configured, falls back to character-based estimation (characters × 0.25).
+When the tokenizer PrepareData plugin is not configured, the plugin falls back to character-based
+estimation (characters × 0.25).
+
+**Note:** The `prepareDataPlugins` feature gate must be enabled for precise tokenization.
 
 **Label Format:**
 
@@ -636,13 +634,17 @@ llm-d.ai/context-length-range: "0-2048,8192-16384"
 **Example - Scorer with Precise Tokenization:**
 
 ```yaml
+featureGates:
+- prepareDataPlugins
 plugins:
+  - type: tokenizer
+    parameters:
+      modelName: meta-llama/Llama-3.1-8B-Instruct
+      udsTokenizerConfig:
+        socketFile: /tmp/tokenizer/tokenizer-uds.socket
   - type: context-length-aware
     parameters:
       label: llm-d.ai/context-length-range
-      modelName: meta-llama/Llama-3.1-8B-Instruct
-      hfTokenizerConfig:
-        tokenizersCacheDir: /tmp/tokenizers
   - type: load-aware-scorer
   - type: max-score-picker
 schedulingProfiles:
@@ -655,7 +657,7 @@ schedulingProfiles:
       - pluginRef: max-score-picker
 ```
 
-**Example - Filter with Estimation Fallback:**
+**Example - Filter with Estimation Fallback (no tokenizer):**
 
 ```yaml
 plugins:

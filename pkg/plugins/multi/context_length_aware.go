@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 )
 
 const (
@@ -39,22 +39,6 @@ type contextLengthAwareParams struct {
 	// If false, the plugin only scores pods.
 	// Default is false.
 	EnableFiltering bool `json:"enableFiltering"`
-
-	// ModelName is the name of the model to use for tokenization.
-	// This is required when using precise tokenization.
-	// The model name should match an entry in the LocalTokenizerConfig.ModelTokenizerMap
-	// or be a valid HuggingFace model ID when using HFTokenizerConfig.
-	ModelName string `json:"modelName,omitempty"`
-
-	// LocalTokenizerConfig provides a mapping from model names to local tokenizer.json file paths.
-	// When configured, the plugin uses precise tokenization instead of character-based estimation.
-	// This is optional - if not configured, falls back to character-based estimation.
-	LocalTokenizerConfig *tokenization.LocalTokenizerConfig `json:"localTokenizerConfig,omitempty"`
-
-	// HFTokenizerConfig holds the configuration for the HuggingFace tokenizer.
-	// When configured (and local tokenizer is not available), downloads tokenizers from HuggingFace.
-	// This is optional - if not configured, falls back to character-based estimation.
-	HFTokenizerConfig *tokenization.HFTokenizerConfig `json:"hfTokenizerConfig,omitempty"`
 }
 
 // contextRange represents a single context length range.
@@ -63,11 +47,12 @@ type contextRange struct {
 	max int
 }
 
-var _ scheduling.Filter = &ContextLengthAware{} // validate interface conformance
-var _ scheduling.Scorer = &ContextLengthAware{} // validate interface conformance
+var _ scheduling.Filter = &ContextLengthAware{}     // validate interface conformance
+var _ scheduling.Scorer = &ContextLengthAware{}     // validate interface conformance
+var _ plugin.ConsumerPlugin = &ContextLengthAware{} // validate interface conformance
 
 // ContextLengthAwareFactory defines the factory function for the ContextLengthAware plugin.
-func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := &contextLengthAwareParams{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: false,
@@ -83,41 +68,15 @@ func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, handl
 		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'label' must be specified", ContextLengthAwareType)
 	}
 
-	// Initialize tokenizer if configuration is provided
-	var tokenizer tokenization.Tokenizer
-	if parameters.LocalTokenizerConfig != nil && parameters.LocalTokenizerConfig.IsEnabled() {
-		if parameters.ModelName == "" {
-			return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'modelName' is required when using localTokenizerConfig", ContextLengthAwareType)
-		}
-
-		var err error
-		tokenizer, err = tokenization.NewCachedLocalTokenizer(handle.Context(), parameters.ModelName, *parameters.LocalTokenizerConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create local tokenizer for '%s' plugin: %w", ContextLengthAwareType, err)
-		}
-	} else if parameters.HFTokenizerConfig != nil && parameters.HFTokenizerConfig.IsEnabled() {
-		if parameters.ModelName == "" {
-			return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'modelName' is required when using hfTokenizerConfig", ContextLengthAwareType)
-		}
-
-		var err error
-		tokenizer, err = tokenization.NewCachedHFTokenizer(handle.Context(), parameters.ModelName, parameters.HFTokenizerConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create HuggingFace tokenizer for '%s' plugin: %w", ContextLengthAwareType, err)
-		}
-	}
-
-	return NewContextLengthAware(name, parameters, tokenizer), nil
+	return NewContextLengthAware(name, parameters), nil
 }
 
 // NewContextLengthAware creates and returns an instance of the ContextLengthAware plugin.
-func NewContextLengthAware(name string, params *contextLengthAwareParams, tokenizer tokenization.Tokenizer) *ContextLengthAware {
+func NewContextLengthAware(name string, params *contextLengthAwareParams) *ContextLengthAware {
 	return &ContextLengthAware{
 		typedName:       plugin.TypedName{Type: ContextLengthAwareType, Name: name},
 		labelName:       params.Label,
 		enableFiltering: params.EnableFiltering,
-		modelName:       params.ModelName,
-		tokenizer:       tokenizer,
 	}
 }
 
@@ -126,6 +85,10 @@ func NewContextLengthAware(name string, params *contextLengthAwareParams, tokeni
 // It checks for a specific label on endpoints that defines the context length ranges they support.
 // If filtering is enabled, endpoints that don't support the request's context length are filtered out.
 // Additionally, it scores endpoints based on how well their context length ranges match the request.
+//
+// For precise token counting, this plugin consumes TokenizedPrompt from the request, which is
+// produced by the tokenizer PrepareData plugin. When TokenizedPrompt is not available (tokenizer
+// plugin not configured), it falls back to character-based estimation.
 type ContextLengthAware struct {
 	// typedName defines the plugin typed name
 	typedName plugin.TypedName
@@ -133,11 +96,6 @@ type ContextLengthAware struct {
 	labelName string
 	// enableFiltering indicates whether filtering is enabled
 	enableFiltering bool
-	// modelName is the model name used for tokenization
-	modelName string
-	// tokenizer is the tokenizer instance for precise token counting
-	// If nil, falls back to character-based estimation
-	tokenizer tokenization.Tokenizer
 }
 
 // TypedName returns the typed name of the plugin.
@@ -238,85 +196,31 @@ func (p *ContextLengthAware) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
+// Consumes declares that this plugin reads TokenizedPrompt from the request,
+// as produced by the tokenizer PrepareData plugin.
+func (p *ContextLengthAware) Consumes() map[string]any {
+	return map[string]any{preparedata.TokenizedPromptKey: scheduling.TokenizedPrompt{}}
+}
+
 // getContextLength returns the context length (token count) for the request.
-// It uses precise tokenization if a tokenizer is configured, otherwise falls back to estimation.
+// It uses the pre-computed TokenizedPrompt (set by the tokenizer PrepareData plugin) if available,
+// otherwise falls back to character-based estimation.
 // Returns the token count and a boolean indicating whether precise tokenization was used.
 func (p *ContextLengthAware) getContextLength(ctx context.Context, request *scheduling.LLMRequest) (int, bool) {
 	if request == nil || request.Body == nil {
 		return 0, false
 	}
 
-	// If tokenizer is available, try to use precise tokenization
-	if p.tokenizer != nil {
-		tokenCount, err := p.computeTokenCount(request)
-		if err == nil {
-			return tokenCount, true
-		}
-		// Log the error and fall back to estimation
-		logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware")
-		logger.Error(err, "Failed to tokenize request, falling back to character-based estimation")
+	// Use pre-computed tokens from the tokenizer PrepareData plugin
+	if request.TokenizedPrompt != nil && len(request.TokenizedPrompt.TokenIDs) > 0 {
+		return len(request.TokenizedPrompt.TokenIDs), true
 	}
+
+	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware")
+	logger.Info("TokenizedPrompt not available, falling back to character-based estimation")
 
 	// Fall back to character-based estimation
 	return estimateContextLength(request), false
-}
-
-// computeTokenCount uses the tokenizer to compute the exact token count for the request.
-func (p *ContextLengthAware) computeTokenCount(request *scheduling.LLMRequest) (int, error) {
-	if request == nil || request.Body == nil {
-		return 0, nil
-	}
-
-	var text string
-	addSpecialToken := true
-
-	// Handle chat completions
-	if request.Body.ChatCompletions != nil {
-		// Convert messages to conversation format
-		conversations := make([]preprocessing.Conversation, len(request.Body.ChatCompletions.Messages))
-		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = preprocessing.Conversation{
-				Role:    msg.Role,
-				Content: msg.Content.Raw,
-			}
-		}
-
-		renderReq := &preprocessing.ApplyChatTemplateRequest{
-			Conversation:              [][]preprocessing.Conversation{conversations},
-			Tools:                     request.Body.ChatCompletions.Tools,
-			Documents:                 request.Body.ChatCompletions.Documents,
-			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
-		}
-
-		var err error
-		text, err = p.tokenizer.ApplyChatTemplate(p.modelName, renderReq)
-		if err != nil {
-			return 0, fmt.Errorf("failed to apply chat template for model %q: %w", p.modelName, err)
-		}
-		// https://github.com/vllm-project/vllm/blob/v0.11.2/vllm/entrypoints/openai/protocol.py#L613
-		addSpecialToken = false
-	}
-
-	// Handle regular completions
-	if request.Body.Completions != nil {
-		text = request.Body.Completions.Prompt
-	}
-
-	if text == "" {
-		return 0, nil
-	}
-
-	// Tokenize and count using the pre-initialized tokenizer
-	tokens, _, err := p.tokenizer.Encode(text, p.modelName, addSpecialToken)
-	if err != nil {
-		return 0, fmt.Errorf("failed to encode text for model %q: %w", p.modelName, err)
-	}
-
-	return len(tokens), nil
 }
 
 // estimateContextLength estimates the context length from the request using character count.
