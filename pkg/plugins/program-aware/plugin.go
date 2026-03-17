@@ -165,6 +165,8 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 		}
 	}
 
+	fairnessIndex.Set(p.computeFairnessIndex())
+
 	return bestQueue, nil
 }
 
@@ -185,6 +187,28 @@ func (p *ProgramAwarePlugin) getOrCreateMetrics(programID string) *ProgramMetric
 	m := &ProgramMetrics{}
 	actual, _ := p.programMetrics.LoadOrStore(programID, m)
 	return actual.(*ProgramMetrics)
+}
+
+// computeFairnessIndex returns Jain's Fairness Index over the EWMA average wait
+// Returns 1.0 when fewer than 2 programs have wait data.
+func (p *ProgramAwarePlugin) computeFairnessIndex() float64 {
+	var sum, sumSq float64
+	var n float64
+	p.programMetrics.Range(func(_, value any) bool {
+		m := value.(*ProgramMetrics)
+		if !m.HasWaitData() {
+			return true
+		}
+		x := m.AverageWaitTime()
+		sum += x
+		sumSq += x * x
+		n++
+		return true
+	})
+	if n <= 1 || sumSq == 0 {
+		return 1.0
+	}
+	return (sum * sum) / (n * sumSq)
 }
 
 // normalize clamps v/cap to [0, 1].

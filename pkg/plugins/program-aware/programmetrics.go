@@ -47,6 +47,13 @@ func (m *ProgramMetrics) RecordWaitTime(waitMs float64) {
 	}
 }
 
+// HasWaitData returns true if at least one wait time observation has been recorded.
+func (m *ProgramMetrics) HasWaitData() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hasWaitData
+}
+
 // AverageWaitTime returns the current EWMA of wait time in milliseconds.
 func (m *ProgramMetrics) AverageWaitTime() float64 {
 	m.mu.Lock()

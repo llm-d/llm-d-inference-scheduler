@@ -391,6 +391,59 @@ func TestFullLifecycle(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// --- fairness index tests ---
+
+func TestComputeFairnessIndex_EqualWaitTimes(t *testing.T) {
+	p := &ProgramAwarePlugin{}
+
+	mA := &ProgramMetrics{}
+	mA.RecordWaitTime(100)
+	p.programMetrics.Store("prog-a", mA)
+
+	mB := &ProgramMetrics{}
+	mB.RecordWaitTime(100)
+	p.programMetrics.Store("prog-b", mB)
+
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "equal wait times → perfect fairness")
+}
+
+func TestComputeFairnessIndex_SkewedWaitTimes(t *testing.T) {
+	p := &ProgramAwarePlugin{}
+
+	mA := &ProgramMetrics{}
+	mA.RecordWaitTime(100)
+	p.programMetrics.Store("prog-a", mA)
+
+	mB := &ProgramMetrics{}
+	mB.RecordWaitTime(10)
+	p.programMetrics.Store("prog-b", mB)
+
+	idx := p.computeFairnessIndex()
+	// J = (100+10)^2 / (2 * (100^2 + 10^2)) = 12100 / 20200 ≈ 0.599
+	assert.Less(t, idx, 1.0, "skewed wait times should produce index < 1")
+	assert.InDelta(t, 0.599, idx, 0.01)
+}
+
+func TestComputeFairnessIndex_SingleProgram(t *testing.T) {
+	p := &ProgramAwarePlugin{}
+
+	m := &ProgramMetrics{}
+	m.RecordWaitTime(500)
+	p.programMetrics.Store("prog-a", m)
+
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "single program → trivially fair")
+}
+
+func TestComputeFairnessIndex_NoWaitData(t *testing.T) {
+	p := &ProgramAwarePlugin{}
+
+	// Programs exist but have no wait data yet.
+	p.programMetrics.Store("prog-a", &ProgramMetrics{})
+	p.programMetrics.Store("prog-b", &ProgramMetrics{})
+
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "no wait data → 1.0")
+}
+
 // --- scoreQueue tests ---
 
 func TestScoreQueue(t *testing.T) {
