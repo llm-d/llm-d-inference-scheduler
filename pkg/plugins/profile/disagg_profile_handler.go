@@ -48,14 +48,14 @@ type deciderPlugin interface {
 // ── Factory & constructor ────────────────────────────────────────────────────
 
 type disaggProfileHandlerParameters struct {
-	DecodeProfile           string `json:"decodeProfile"`
-	PrefillProfile          string `json:"prefillProfile"`
-	EncodeProfile           string `json:"encodeProfile"`
-	PrefixPluginType        string `json:"prefixPluginType"`
-	PrefixPluginName        string `json:"prefixPluginName"`
-	PrimaryPort             int    `json:"primaryPort"`
-	PrefillDeciderPluginName     string `json:"prefillDeciderPluginName"`
-	EncodeDeciderPluginName string `json:"encodeDeciderPluginName"`
+	DecodeProfile            string `json:"decodeProfile"`
+	PrefillProfile           string `json:"prefillProfile"`
+	EncodeProfile            string `json:"encodeProfile"`
+	PrefixPluginType         string `json:"prefixPluginType"`
+	PrefixPluginName         string `json:"prefixPluginName"`
+	PrimaryPort              int    `json:"primaryPort"`
+	PrefillDeciderPluginName string `json:"prefillDeciderPluginName"`
+	EncodeDeciderPluginName  string `json:"encodeDeciderPluginName"`
 }
 
 // DisaggProfileHandlerFactory is the unified factory for all disaggregation

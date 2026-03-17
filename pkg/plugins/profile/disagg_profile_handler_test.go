@@ -188,7 +188,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 
 		// P/D style (prefill + decode)
 		{"PD style", map[string]any{
-			"prefillProfile":      "prefill",
+			"prefillProfile":           "prefill",
 			"prefillDeciderPluginName": AlwaysDisaggDeciderPluginType,
 		}, false},
 		{"PD custom profiles", map[string]any{
@@ -208,11 +208,11 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 
 		// E/P/D style (all three)
 		{"full EPD", map[string]any{
-			"prefillProfile":          "prefill",
-			"encodeProfile":           "encode",
-			"prefillDeciderPluginName":     PrefixBasedPDDeciderPluginType,
-			"encodeDeciderPluginName": AlwaysEncodeDeciderPluginType,
-			"primaryPort":             8000,
+			"prefillProfile":           "prefill",
+			"encodeProfile":            "encode",
+			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
+			"encodeDeciderPluginName":  AlwaysEncodeDeciderPluginType,
+			"primaryPort":              8000,
 		}, false},
 
 		// port validation
@@ -590,9 +590,9 @@ func TestDisaggProfileHandler_Pick_EPD_EncodeDecider(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
+		name  string
 		allow bool
-		want []string
+		want  []string
 	}{
 		{"decider approves → run encode", true, []string{testEncodeProfile}},
 		{"decider rejects → skip encode", false, nil},
