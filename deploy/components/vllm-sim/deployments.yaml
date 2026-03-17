@@ -95,6 +95,10 @@ spec:
           containerPort: 8207
           protocol: TCP
         env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
         - name: PORT
           value: "8200"
         - name: PYTHONHASHSEED
