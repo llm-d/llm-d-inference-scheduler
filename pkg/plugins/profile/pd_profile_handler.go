@@ -40,8 +40,9 @@ type pdProfileHandlerParameters struct {
 // compile-time type assertion
 var _ scheduling.ProfileHandler = &PdProfileHandler{}
 
-// Deprecated: PdProfileHandlerFactory is deprecated.
-// Use DisaggProfileHandlerFactory instead.
+// PdProfileHandlerFactory defines the factory function for the PdProfileHandler.
+//
+// Deprecated: Use DisaggProfileHandlerFactory instead.
 func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := pdProfileHandlerParameters{
 		DecodeProfile:     defaultDecodeProfile,
@@ -91,8 +92,9 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 
 }
 
-// Deprecated: NewPdProfileHandler is deprecated.
-// Use NewDisaggProfileHandler instead.
+// NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
+//
+// Deprecated: Use NewDisaggProfileHandler instead.
 func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string,
 	primaryPort int, deciderPlugin deciderPlugin) (*PdProfileHandler, error) {
 	result := &PdProfileHandler{
@@ -109,8 +111,9 @@ func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefix
 	return result, nil
 }
 
-// Deprecated: PdProfileHandler is deprecated.
-// Use DisaggProfileHandler instead.
+// PdProfileHandler handles scheduler profiles for PD.
+//
+// Deprecated: Use DisaggProfileHandler instead.
 type PdProfileHandler struct {
 	typedName             plugin.TypedName
 	prefixPluginTypedName plugin.TypedName
