@@ -193,7 +193,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 		}, false},
 		{"PD custom profiles", map[string]any{
 			"decodeProfile": "my-decode", "prefillProfile": "my-prefill",
-			"prefixPluginName": "my-prefix", "primaryPort": 8080,
+			"primaryPort": 8080,
 			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
 		}, false},
 

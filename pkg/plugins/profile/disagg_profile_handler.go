@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
@@ -25,7 +24,6 @@ import (
 const (
 	// DisaggProfileHandlerType is the canonical type for the unified disaggregation profile handler.
 	DisaggProfileHandlerType = "disagg-profile-handler"
-	defaultPrefixPluginType  = prefix.PrefixCachePluginType
 	defaultDeciderPluginName = AlwaysDisaggDeciderPluginType
 
 	defaultDecodeProfile  = "decode"
@@ -51,8 +49,6 @@ type disaggProfileHandlerParameters struct {
 	DecodeProfile            string `json:"decodeProfile"`
 	PrefillProfile           string `json:"prefillProfile"`
 	EncodeProfile            string `json:"encodeProfile"`
-	PrefixPluginType         string `json:"prefixPluginType"`
-	PrefixPluginName         string `json:"prefixPluginName"`
 	PrimaryPort              int    `json:"primaryPort"`
 	PrefillDeciderPluginName string `json:"prefillDeciderPluginName"`
 	EncodeDeciderPluginName  string `json:"encodeDeciderPluginName"`
@@ -74,9 +70,6 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 		}
 	}
 
-	if parameters.PrefixPluginName == "" {
-		parameters.PrefixPluginName = parameters.PrefixPluginType
-	}
 	if parameters.PrefillProfile == "" {
 		parameters.PrefillProfile = defaultPrefillProfile
 	}

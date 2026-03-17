@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
@@ -23,7 +24,8 @@ import (
 
 const (
 	// PdProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
-	PdProfileHandlerType = "pd-profile-handler"
+	PdProfileHandlerType    = "pd-profile-handler"
+	defaultPrefixPluginType = prefix.PrefixCachePluginType
 )
 
 // pdDeciderPlugin interface for pd decider plugins
@@ -40,7 +42,8 @@ type pdProfileHandlerParameters struct {
 // compile-time type assertion
 var _ scheduling.ProfileHandler = &PdProfileHandler{}
 
-// PdProfileHandlerFactory defines the factory function for the PdProfileHandler
+// Deprecated: PdProfileHandlerFactory is deprecated.
+// Use DisaggProfileHandlerFactory instead.
 func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := pdProfileHandlerParameters{
 		DecodeProfile:     defaultDecodeProfile,
@@ -91,7 +94,8 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 
 }
 
-// NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
+// Deprecated: NewPdProfileHandler is deprecated.
+// Use NewDisaggProfileHandler instead.
 func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string,
 	primaryPort int, deciderPlugin deciderPlugin) (*PdProfileHandler, error) {
 	result := &PdProfileHandler{
@@ -108,7 +112,8 @@ func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefix
 	return result, nil
 }
 
-// PdProfileHandler handles scheduler profiles for PD.
+// Deprecated: PdProfileHandler is deprecated.
+// Use DisaggProfileHandler instead.
 type PdProfileHandler struct {
 	typedName             plugin.TypedName
 	prefixPluginTypedName plugin.TypedName
