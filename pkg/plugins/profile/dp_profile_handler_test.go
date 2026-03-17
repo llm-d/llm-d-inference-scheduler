@@ -8,9 +8,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestDataParallelProfileHandlerFactory(t *testing.T) {
@@ -76,7 +78,8 @@ func TestDataParallelProfileHandlerFactory(t *testing.T) {
 			if tt.jsonParams != "" {
 				rawParams = json.RawMessage(tt.jsonParams)
 			}
-			plugin, err := DataParallelProfileHandlerFactory(tt.pluginName, rawParams, nil)
+			handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
+			plugin, err := DataParallelProfileHandlerFactory(tt.pluginName, rawParams, handle)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -112,7 +115,8 @@ func TestDataParallelProfileHandlerFactoryInvalidJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			rawParams := json.RawMessage(tt.jsonParams)
-			plugin, err := DataParallelProfileHandlerFactory("test", rawParams, nil)
+			handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
+			plugin, err := DataParallelProfileHandlerFactory("test", rawParams, handle)
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
