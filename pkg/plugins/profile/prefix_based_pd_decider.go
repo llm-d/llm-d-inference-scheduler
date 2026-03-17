@@ -70,6 +70,10 @@ func NewPrefixBasedPDDecider(config PrefixBasedPDDeciderConfig) (*PrefixBasedPDD
 		return nil, err
 	}
 
+	if config.NonCachedTokens == 0 {
+		log.Log.Info("Prefix-based PD disabled (NonCachedTokens=0)")
+	}
+
 	return &PrefixBasedPDDecider{
 		typedName: plugin.TypedName{Type: PrefixBasedPDDeciderPluginType},
 		config:    config,
@@ -91,8 +95,10 @@ func (d *PrefixBasedPDDecider) decide(ctx context.Context, request *scheduling.L
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	if d.config.NonCachedTokens <= 0 { // always use disaggregation in case of non cached tokens number is 0
-		return true
+	// NonCachedTokens defines the minimum number of non-cached tokens required
+	// to trigger disaggregated PD. A value of 0 disables disaggregation.
+	if d.config.NonCachedTokens == 0 {
+		return false
 	}
 	if endpoint == nil {
 		logger.Error(nil, "prefix decider: endpoint is nil")
