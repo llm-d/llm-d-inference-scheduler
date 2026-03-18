@@ -4,14 +4,14 @@ kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
 plugins:
-- type: encoder-header-handler
+- type: encode-header-handler
 - type: queue-scorer
 - type: encode-filter
 - type: decode-filter
 - type: always-encode-decider
-- type: e-pd-profile-handler
+- type: disagg-profile-handler
   parameters:
-    deciderPluginName: always-encode-decider
+    encodeDeciderPluginName: always-encode-decider
 schedulingProfiles:
 - name: encode
   plugins:
