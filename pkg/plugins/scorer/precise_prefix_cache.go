@@ -104,7 +104,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 
 	tokenProcessor, err := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create token processor: %w", err)
 	}
 
 	// initialize the indexer
