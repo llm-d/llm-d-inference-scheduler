@@ -717,6 +717,8 @@ func runChatCompletion(prompt, modelName string) (string, string, string) {
 }
 
 // getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+//
+//nolint:unparam // metricName may vary in future test cases
 func getCounterMetric(metricsURL, metricName, labelMatch string) int {
 	resp, err := http.Get(metricsURL)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
