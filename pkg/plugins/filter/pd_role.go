@@ -14,6 +14,8 @@ const (
 	// RoleDecode set for designated decode workers
 	RoleDecode = "decode"
 	// RoleBoth set for workers that can act as both prefill and decode
+	//
+	// Deprecated: Use RolePrefillDecode instead. This constant is maintained for backward compatibility.
 	RoleBoth = "both"
 
 	// DecodeRoleType is the type of the DecodeFilter

@@ -210,9 +210,11 @@ Sets a header for use in disaggregated prefill/decode
 
 #### PdProfileHandler
 
+> **⚠️ Deprecated:** Use `disagg-profile-handler` instead. This handler is maintained for backward compatibility only.
+
 Selects the profiles to use when running with disaggregated prefill/decode
 
-- **Type**: `pd-profile-handler`
+- **Type**: `pd-profile-handler` (deprecated)
 - **Parameters**:
   - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
   - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.

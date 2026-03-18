@@ -122,7 +122,7 @@ func handleWithDeciders(ctx context.Context) plugin.Handle {
 	p1, _ := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: 4})
 	h.AddPlugin(PrefixBasedPDDeciderPluginType, p1)
 	h.AddPlugin(AlwaysDisaggDeciderPluginType, newAlwaysDisaggPDDecider())
-	h.AddPlugin(AlwaysEncodeDeciderPluginType, newAlwaysEncodeDecider())
+	h.AddPlugin(AlwaysDisaggEncodePluginType, newAlwaysDisaggEncodeDecider())
 	return h
 }
 
@@ -132,7 +132,7 @@ type mockEncodeDecider struct {
 
 func (m *mockEncodeDecider) TypedName() plugin.TypedName { return plugin.TypedName{} }
 
-func (m *mockEncodeDecider) decide(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
+func (m *mockEncodeDecider) disaggregate(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
 	return m.allow
 }
 
@@ -203,7 +203,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 		}, false},
 		{"EPD with encode decider", map[string]any{
 			"encodeProfile":           "encode",
-			"encodeDeciderPluginName": AlwaysEncodeDeciderPluginType,
+			"encodeDeciderPluginName": AlwaysDisaggEncodePluginType,
 		}, false},
 
 		// E/P/D style (all three)
@@ -211,7 +211,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 			"prefillProfile":           "prefill",
 			"encodeProfile":            "encode",
 			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
-			"encodeDeciderPluginName":  AlwaysEncodeDeciderPluginType,
+			"encodeDeciderPluginName":  AlwaysDisaggEncodePluginType,
 			"primaryPort":              8000,
 		}, false},
 
@@ -582,7 +582,7 @@ func TestDisaggProfileHandler_Pick_EPD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, newAlwaysEncodeDecider())
+			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, newAlwaysDisaggEncodeDecider())
 			got := h.Pick(ctx, nil, tt.req, profiles, tt.results)
 			assert.ElementsMatch(t, tt.want, profileNames(got))
 		})
@@ -669,7 +669,7 @@ func TestDisaggProfileHandler_ProcessResults_EPD(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, newAlwaysEncodeDecider())
+			h := NewDisaggProfileHandler(defaultDecodeProfile, "", testEncodeProfile, 0, nil, newAlwaysDisaggEncodeDecider())
 			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -785,7 +785,7 @@ func TestDisaggProfileHandler_Pick_EPD_Full(t *testing.T) {
 
 			h := NewDisaggProfileHandler(
 				defaultDecodeProfile, testPrefillProfile, testEncodeProfile,
-				0, decider, newAlwaysEncodeDecider(),
+				0, decider, newAlwaysDisaggEncodeDecider(),
 			)
 
 			inputTokens := 0
@@ -905,7 +905,7 @@ func TestDisaggProfileHandler_ProcessResults_EPD_Full(t *testing.T) {
 			decider, _ := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{})
 			h := NewDisaggProfileHandler(
 				defaultDecodeProfile, testPrefillProfile, testEncodeProfile,
-				0, decider, newAlwaysEncodeDecider(),
+				0, decider, newAlwaysDisaggEncodeDecider(),
 			)
 			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
 			if tt.expectErr {

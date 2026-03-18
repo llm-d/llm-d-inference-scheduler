@@ -16,6 +16,10 @@ import (
 const (
 	// PrefixBasedPDDeciderPluginType is the type-name of the prefixBasedPDDecider plugin.
 	PrefixBasedPDDeciderPluginType = "prefix-based-pd-decider"
+
+	// AverageCharactersPerToken is an estimated average characters per token,
+	// used since the request we cache is not tokenized.
+	AverageCharactersPerToken = 4
 )
 
 // PrefixBasedPDDeciderConfig holds the configuration for the prefixBasedPDDecider plugin.
@@ -91,7 +95,7 @@ func (d *PrefixBasedPDDecider) WithName(name string) *PrefixBasedPDDecider {
 	return d
 }
 
-func (d *PrefixBasedPDDecider) decide(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
+func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
@@ -113,7 +117,7 @@ func (d *PrefixBasedPDDecider) decide(ctx context.Context, request *scheduling.L
 		debugLogger.Info("Input is shorter than the nonCachedToken, no disaggregated PD")
 		return false
 	}
-	// inspect the decode endpoint to decide if prefill should run or not.
+	// inspect the decode endpoint to disaggregate if prefill should run or not.
 	// if the non-cached part is short enough - no disaggregation.
 	prefixInfoRaw, ok := endpoint.Get(prefix.PrefixCacheMatchInfoKey)
 	if !ok || prefixInfoRaw == nil {

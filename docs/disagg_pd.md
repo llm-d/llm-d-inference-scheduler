@@ -138,7 +138,9 @@ The LLM-D inference scheduler supports integration with external disaggregated p
 
 By default, LLM-D uses the label key `llm-d.ai/role` with values:
 - `"prefill"` → prefill-only pods
-- `"decode"` or `"both"` → decode-capable pods  
+- `"decode"` → decode-capable pods
+- `"prefill-decode"` → pods capable of both prefill and decode
+- `"both"` → **deprecated** (use `"prefill-decode"` instead)
 
 However, external systems may use alternative labels like:
 ```yaml
@@ -181,8 +183,9 @@ plugins:
   - type: prefix-based-pd-decider
     parameters:
       nonCachedTokens: 8
+  # Note: pd-profile-handler is deprecated, use disagg-profile-handler instead
   - type: pd-profile-handler
-    parameters:    
+    parameters:
       deciderPluginName: prefix-based-pd-decider
       primaryPort: 8000
 schedulingProfiles:

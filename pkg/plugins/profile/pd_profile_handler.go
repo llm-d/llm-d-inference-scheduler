@@ -24,8 +24,9 @@ import (
 
 const (
 	// PdProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
-	PdProfileHandlerType    = "pd-profile-handler"
-	defaultPrefixPluginType = prefix.PrefixCachePluginType
+	PdProfileHandlerType     = "pd-profile-handler"
+	defaultPrefixPluginType  = prefix.PrefixCachePluginType
+	defaultDeciderPluginName = PrefixBasedPDDeciderPluginType
 )
 
 // pdDeciderPlugin interface for pd decider plugins
@@ -191,7 +192,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	if h.decider != nil && h.decider.decide(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
+	if h.decider != nil && h.decider.disaggregate(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
 		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
 		// run the prefill profile
 		span.SetAttributes(

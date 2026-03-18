@@ -24,24 +24,11 @@ import (
 const (
 	// DisaggProfileHandlerType is the canonical type for the unified disaggregation profile handler.
 	DisaggProfileHandlerType = "disagg-profile-handler"
-	defaultDeciderPluginName = AlwaysDisaggDeciderPluginType
 
 	defaultDecodeProfile  = "decode"
 	defaultPrefillProfile = "prefill"
 	defaultEncodeProfile  = "encode"
-
-	// AverageCharactersPerToken is an estimated average characters per token,
-	// used since the request we cache is not tokenized.
-	AverageCharactersPerToken = 4
 )
-
-// ── Interfaces ──────────────────────────────────────────────────────────────
-
-// deciderPlugin is the shared interface for all disaggregation deciders.
-type deciderPlugin interface {
-	plugin.Plugin
-	decide(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool
-}
 
 // ── Factory & constructor ────────────────────────────────────────────────────
 
@@ -231,7 +218,7 @@ func (h *DisaggProfileHandler) Pick(
 	// ── Stage 2: Encode (optional) ─────────────────────────────────────────
 	if _, hasEncodeProfile := profiles[h.encodeProfile]; hasEncodeProfile {
 		if _, executed := profileResults[h.encodeProfile]; !executed {
-			if h.encodeDecider != nil && h.encodeDecider.decide(ctx, request, decodeRes.TargetEndpoints[0]) {
+			if h.encodeDecider != nil && h.encodeDecider.disaggregate(ctx, request, decodeRes.TargetEndpoints[0]) {
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_encode"))
 				return map[string]scheduling.SchedulerProfile{h.encodeProfile: profiles[h.encodeProfile]}
 			}
@@ -244,7 +231,7 @@ func (h *DisaggProfileHandler) Pick(
 	// ── Stage 3: Prefill (optional) ────────────────────────────────────────
 	if _, hasPrefillProfile := profiles[h.prefillProfile]; hasPrefillProfile {
 		if _, executed := profileResults[h.prefillProfile]; !executed {
-			if h.pdDecider != nil && h.pdDecider.decide(ctx, request, decodeRes.TargetEndpoints[0]) {
+			if h.pdDecider != nil && h.pdDecider.disaggregate(ctx, request, decodeRes.TargetEndpoints[0]) {
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_prefill"))
 				return map[string]scheduling.SchedulerProfile{h.prefillProfile: profiles[h.prefillProfile]}
 			}
