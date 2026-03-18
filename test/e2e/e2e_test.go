@@ -283,7 +283,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 				// Test decode-first fallback: cache_hit_threshold is set AND X-Cache-Threshold header
 				// forces simulator to return "cache_threshold" finish_reason, triggering P/D fallback
-				nsHdr, podHdr, finishReason := runCompletionWithCacheThreshold(extraPrompt, 0.5, true)
+				nsHdr, podHdr, finishReason := runCompletionWithCacheThreshold(simplePrompt, 0.5, true)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 				// The sidecar completes the P/D flow but returns cache_threshold as the finish_reason
@@ -383,7 +383,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServers(false, false, false, 0, 0, 1)
+			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
 			epp := createEndPointPicker(disaggDecodeOnlyConfig)
 
