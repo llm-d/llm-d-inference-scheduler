@@ -304,6 +304,78 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
+	ginkgo.When("Running a PD configuration with shared-storage connector using disagg-profile-handler", func() {
+		ginkgo.It("should run regular (non-streaming) requests successfully", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			prefillReplicas := 1
+			decodeReplicas := 2
+			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+
+			epp := createEndPointPicker(pdDisaggConfig)
+
+			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
+			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+
+			// Test regular completion request
+			nsHdr, podHdrCompletion, _ := runCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdrCompletion).Should(gomega.BeElementOf(decodePods))
+
+			// Test regular chat completion request
+			nsHdr, podHdrChat, _ := runChatCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdrChat).Should(gomega.BeElementOf(decodePods))
+
+			// Run completion with a different prompt
+			nsHdr, podHdr, _ := runCompletion(extraPrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Run completion with original prompt (should go to same pod due to prefix cache)
+			nsHdr, podHdr, _ = runCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+			gomega.Expect(podHdr).Should(gomega.Equal(podHdrCompletion))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+
+		ginkgo.It("should run streaming requests successfully", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			prefillReplicas := 1
+			decodeReplicas := 2
+			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+
+			epp := createEndPointPicker(pdDisaggConfig)
+
+			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
+			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+
+			// Test streaming completion request
+			nsHdr, podHdr := runStreamingCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Test streaming chat completion request
+			nsHdr, podHdr = runStreamingChatCompletion(simplePrompt)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Run streaming completion with a different prompt
+			nsHdr, podHdr = runStreamingCompletion(extraPrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
 	ginkgo.When("Running simple non-PD KV enabled configuration", func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
@@ -897,6 +969,42 @@ plugins:
 - type: pd-profile-handler
   parameters:
     deciderPluginName: prefix-based-pd-decider
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
+// EPP configuration for running with P/D using the unified disagg-profile-handler
+const pdDisaggConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: prefill-header-handler
+- type: prefix-cache-scorer
+  parameters:
+    blockSizeTokens: 16
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: prefill-filter
+- type: decode-filter
+- type: max-score-picker
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+- type: disagg-profile-handler
+  parameters:
+    prefillDeciderPluginName: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill
   plugins:
