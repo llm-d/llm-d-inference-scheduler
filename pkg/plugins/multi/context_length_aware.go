@@ -110,8 +110,8 @@ func (p *ContextLengthAware) WithName(name string) *ContextLengthAware {
 	return p
 }
 
-// Filter filters out endpoints that don't have a context length range matching the request
-// This is only active when mode is "filter".
+// Filter filters out endpoints that don't have a context length range matching the request.
+// This is only active when enableFiltering is true.
 func (p *ContextLengthAware) Filter(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	if !p.enableFiltering {
 		return endpoints // pass through if not in filter mode
@@ -153,7 +153,7 @@ func (p *ContextLengthAware) Filter(ctx context.Context, _ *scheduling.CycleStat
 	return filteredEndpoints
 }
 
-// Score scores endpoints based on how well their context length ranges match the request
+// Score scores endpoints based on how well their context length ranges match the request.
 // Endpoints with tighter/more specific ranges matching the request get higher scores.
 func (p *ContextLengthAware) Score(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware.Score")
@@ -250,9 +250,9 @@ func estimateContextLength(request *scheduling.LLMRequest) int {
 	return estimatedTokens
 }
 
-// parseContextRanges parses a label value into context ranges
-// Expected format: "min-max" or "min-max,min-max,..."
-// Examples: "0-2048", "2048-8192", "0-2048,8192-16384"
+// parseContextRanges parses a label value into context ranges.
+// Expected format: "min-max" or "min-max,min-max,...", where min and max are positive integers.
+// Examples: "0-2048", "2048-8192", "0-2048,8192-16384".
 func parseContextRanges(rangeStr string) ([]contextRange, error) {
 	if rangeStr == "" {
 		return nil, errors.New("empty range string")
@@ -278,10 +278,6 @@ func parseContextRanges(rangeStr string) ([]contextRange, error) {
 			return nil, fmt.Errorf("invalid max value: %s", bounds[1])
 		}
 
-		if minVal < 0 || maxVal < 0 {
-			return nil, fmt.Errorf("negative values not allowed: min=%d, max=%d", minVal, maxVal)
-		}
-
 		if minVal > maxVal {
 			return nil, fmt.Errorf("min (%d) cannot be greater than max (%d)", minVal, maxVal)
 		}
@@ -292,7 +288,7 @@ func parseContextRanges(rangeStr string) ([]contextRange, error) {
 	return ranges, nil
 }
 
-// matchesAnyRange checks if the context length falls within any of the given ranges
+// matchesAnyRange checks if the context length falls within any of the given ranges.
 func matchesAnyRange(contextLength int, ranges []contextRange) bool {
 	for _, r := range ranges {
 		if contextLength >= r.min && contextLength <= r.max {
