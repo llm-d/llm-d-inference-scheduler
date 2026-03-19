@@ -18,12 +18,13 @@ RUN go mod download
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
-# Build EPP with pure Go (no CGO, no external libraries required)
-# The default kv-cache build uses UDS tokenizer (//go:build !embedded_tokenizers)
+RUN go mod download
+
+# Build EPP
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o bin/epp cmd/epp/main.go
 
 # Runtime stage
-# Use ubi9 as a minimal base image to package the manager binary
+# Use ubi9-micro as a minimal base image
 FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
 
 WORKDIR /
