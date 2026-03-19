@@ -155,10 +155,17 @@ test: test-unit test-e2e ## Run all tests (unit and e2e)
 .PHONY: test-unit
 test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
+# Set COVERAGE=1 to collect coverage profiles during unit tests (always set in CI via test-coverage-*)
+COVERAGE ?=
+
 .PHONY: test-unit-%
-test-unit-%: ## Run unit tests
+test-unit-%: ## Run unit tests (set COVERAGE=1 to also collect coverage profiles)
+	@$(if $(COVERAGE),mkdir -p $(COVERAGE_DIR))
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@go test -v $$($($*_TEST_FILES) | tr '\n' ' ')
+	@go test -v \
+	    $(if $(COVERAGE),-coverprofile=$(COVERAGE_DIR)/$*.out -covermode=atomic) \
+	    $$($($*_TEST_FILES) | tr '\n' ' ')
+	@$(if $(COVERAGE),go tool cover -func=$(COVERAGE_DIR)/$*.out | tail -1)
 
 .PHONY: test-filter
 test-filter: ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
@@ -175,9 +182,13 @@ test-filter: ## Run filtered unit tests (usage: make test-filter PATTERN=TestNam
 	fi
 
 .PHONY: test-integration
-test-integration: ## Run integration tests
+test-integration: ## Run integration tests (set COVERAGE=1 to also collect coverage profiles)
+	@$(if $(COVERAGE),mkdir -p $(COVERAGE_DIR))
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
-	go test -v -tags=integration_tests ./test/integration/
+	@go test -v -tags=integration_tests \
+	    $(if $(COVERAGE),-coverprofile=$(COVERAGE_DIR)/integration.out -covermode=atomic) \
+	    ./test/integration/
+	@$(if $(COVERAGE),go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1)
 
 .PHONY: test-e2e
 test-e2e: image-build image-build-uds-tokenizer image-pull ## Run end-to-end tests against a new kind cluster
@@ -207,20 +218,12 @@ BASE_REF           ?= main
 test-coverage: test-coverage-epp test-coverage-sidecar ## Run unit tests with coverage for all components
 
 .PHONY: test-coverage-%
-test-coverage-%: ## Run unit tests with coverage (epp or sidecar)
-	@mkdir -p $(COVERAGE_DIR)
-	@printf "\033[33;1m==== Running $* Unit Tests with Coverage ====\033[0m\n"
-	@go test -coverprofile=$(COVERAGE_DIR)/$*.out -covermode=atomic \
-	    $$($($(*)_TEST_FILES) | tr '\n' ' ')
-	@go tool cover -func=$(COVERAGE_DIR)/$*.out | tail -1
+test-coverage-%: ## Run unit tests with coverage (epp or sidecar); equivalent to COVERAGE=1 make test-unit-%
+	@$(MAKE) test-unit-$* COVERAGE=1
 
 .PHONY: test-coverage-integration
-test-coverage-integration: ## Run integration tests with coverage
-	@mkdir -p $(COVERAGE_DIR)
-	@printf "\033[33;1m==== Running Integration Tests with Coverage ====\033[0m\n"
-	@go test -coverprofile=$(COVERAGE_DIR)/integration.out -covermode=atomic \
-	    -tags=integration_tests ./test/integration/
-	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
+test-coverage-integration: ## Run integration tests with coverage; equivalent to COVERAGE=1 make test-integration
+	@$(MAKE) test-integration COVERAGE=1
 
 .PHONY: coverage-report
 coverage-report: ## Generate HTML coverage reports (open coverage/*.html in browser)
