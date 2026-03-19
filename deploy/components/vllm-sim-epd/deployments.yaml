@@ -26,7 +26,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm-encoder
+  name: vllm-sim-encoder
   labels:
     app: ${POOL_NAME}
 spec:
@@ -44,63 +44,56 @@ spec:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
         imagePullPolicy: IfNotPresent
-        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
         args:
         - "--model=${MODEL_NAME}"
         - "--port=8000"
-        - "--gpu-memory-utilization=0.7"
-        - "--enforce-eager"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         - "--no-enable-prefix-caching"
         - "--mm-encoder-only"
         - "--ec-transfer-config"
         - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
         ports:
-        - name: http
+        - name: encode-http
           containerPort: 8000
+          protocol: TCP
+        - name: encode-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: encode-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: encode-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: encode-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: encode-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: encode-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: encode-rank7
+          containerPort: 8007
           protocol: TCP
         env:
         - name: PORT
           value: "8000"
-        - name: HUGGINGFACE_HUB_CACHE
-          value: "/data"
-        - name: TRITON_CACHE_DIR
-          value: "/.triton-cache"
         volumeMounts:
         - mountPath: /shared-ec-cache
           name: ec-cache
-        - mountPath: /data
-          name: data
-        - mountPath: /dev/shm
-          name: shm
-        - name: metrics-volume
-          mountPath: /.config
-        - name: torch-compile-cache
-          mountPath: /.cache
-        - name: triton-cache
-          mountPath: /.triton-cache
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       volumes:
       - name: ec-cache
         persistentVolumeClaim:
           claimName: ec-cache-pvc
-      - name: data
-        emptyDir: {}
-      - name: shm
-        emptyDir:
-          medium: Memory
-      - name: metrics-volume
-        emptyDir: {}
-      - name: torch-compile-cache
-        emptyDir: {}
-      - name: triton-cache
-        emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm-pd
+  name: vllm-sim-pd
   labels:
     app: ${POOL_NAME}
 spec:
@@ -159,13 +152,10 @@ spec:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
         imagePullPolicy: IfNotPresent
-        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
         args:
         - "--model=${MODEL_NAME}"
         - "--port=8200"
-        - "--gpu-memory-utilization=0.7"
         - "--max-model-len=32768"
-        - "--enforce-eager"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         - "--ec-transfer-config"
         - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_consumer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
@@ -197,37 +187,12 @@ spec:
         env:
         - name: PORT
           value: "8200"
-        - name: HUGGINGFACE_HUB_CACHE
-          value: "/data"
-        - name: TRITON_CACHE_DIR
-          value: "/.triton-cache"
         volumeMounts:
         - mountPath: /shared-ec-cache
           name: ec-cache
-        - mountPath: /data
-          name: data
-        - mountPath: /dev/shm
-          name: shm
-        - name: metrics-volume
-          mountPath: /.config
-        - name: torch-compile-cache
-          mountPath: /.cache
-        - name: triton-cache
-          mountPath: /.triton-cache
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       volumes:
       - name: ec-cache
         persistentVolumeClaim:
           claimName: ec-cache-pvc
-      - name: data
-        emptyDir: {}
-      - name: shm
-        emptyDir:
-          medium: Memory
-      - name: metrics-volume
-        emptyDir: {}
-      - name: torch-compile-cache
-        emptyDir: {}
-      - name: triton-cache
-        emptyDir: {}

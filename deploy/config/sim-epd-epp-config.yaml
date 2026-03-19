@@ -8,10 +8,10 @@ plugins:
 - type: queue-scorer
 - type: encode-filter
 - type: decode-filter
-- type: always-encode-decider
+- type: always-disagg-encode-decider
 - type: disagg-profile-handler
   parameters:
-    encodeDeciderPluginName: always-encode-decider
+    encodeDeciderPluginName: always-disagg-encode-decider
 schedulingProfiles:
 - name: encode
   plugins:
