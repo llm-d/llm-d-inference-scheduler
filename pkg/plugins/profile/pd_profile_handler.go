@@ -47,6 +47,7 @@ var _ scheduling.ProfileHandler = &PdProfileHandler{}
 //
 // Deprecated: Use DisaggProfileHandlerFactory instead.
 func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	log.FromContext(handle.Context()).Info("Deprecated: pd-profile-handler is deprecated, use disagg-profile-handler instead")
 	parameters := pdProfileHandlerParameters{
 		DecodeProfile:     defaultDecodeProfile,
 		PrefillProfile:    defaultPrefillProfile,
@@ -193,7 +194,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 	}
 
 	if h.decider != nil && h.decider.disaggregate(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
-		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
+		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode) //nolint:staticcheck // intentional: pd-profile-handler is itself deprecated
 		// run the prefill profile
 		span.SetAttributes(
 			attribute.String("llm_d.profile_handler.decision", "prefill_decode"),
@@ -204,7 +205,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		}
 	}
 
-	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
+	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly) //nolint:staticcheck // intentional: pd-profile-handler is itself deprecated
 	span.SetAttributes(
 		attribute.String("llm_d.profile_handler.decision", "decode_only"),
 	)

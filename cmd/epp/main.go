@@ -63,7 +63,7 @@ func run() int {
 	// when it processes configuration in runner.parsePluginsConfiguration()
 
 	if err := runner.NewRunner().
-		WithCustomCollectors(metrics.GetCollectors()...).
+		WithCustomCollectors(metrics.GetDisaggCollectors()...).
 		Run(ctx); err != nil {
 		return 1
 	}

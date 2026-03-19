@@ -7,22 +7,10 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/metrics"
 )
 
-const (
-	// SchedulerSubsystem is the metric prefix of the package.
-	SchedulerSubsystem = "llm_d_inference_scheduler"
-
-	// DecisionTypeDecodeOnly is for requests that are routed to decode instance only.
-	DecisionTypeDecodeOnly = "decode-only"
-	// DecisionTypePrefillDecode is for requests that are gone through P/D.
-	DecisionTypePrefillDecode = "prefill-decode"
-	// DecisionTypeEncodeDecode is for requests that are gone through E/PD.
-	DecisionTypeEncodeDecode = "encode-decode"
-	// DecisionTypeEncodePrefillDecode is for requests that are gone through E/P/D.
-	DecisionTypeEncodePrefillDecode = "encode-prefill-decode"
-)
-
 var (
 	// SchedulerPDDecisionCount records request P/D decision.
+	//
+	// Deprecated: Use SchedulerDisaggDecisionCount instead.
 	SchedulerPDDecisionCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: SchedulerSubsystem,
@@ -34,16 +22,15 @@ var (
 )
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
+//
+// Deprecated: Use GetDisaggCollectors instead.
 func GetCollectors() []prometheus.Collector {
-	return []prometheus.Collector{
-		SchedulerPDDecisionCount,
-	}
+	return []prometheus.Collector{SchedulerPDDecisionCount}
 }
 
 // RecordPDDecision increments the counter for a specific P/D routing decision.
-// The decisionType must be one of the DecisionType* constants (e.g., DecisionTypeDecodeOnly).
-// The model parameter should be the target model name (e.g., from request.TargetModel);
-// if empty, the caller should pass a placeholder like "unknown" to avoid empty labels.
+//
+// Deprecated: Use RecordDisaggDecision instead.
 func RecordPDDecision(modelName, decisionType string) {
 	if modelName == "" {
 		modelName = "unknown"

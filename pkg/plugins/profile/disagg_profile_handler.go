@@ -237,6 +237,7 @@ func (h *DisaggProfileHandler) Pick(
 			}
 			// Decider rejected prefill — mark as evaluated so we don't re-run the decider.
 			profileResults[h.prefillProfile] = nil
+			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_prefil"))
 		}
 	}
 
@@ -244,18 +245,8 @@ func (h *DisaggProfileHandler) Pick(
 	encodeUsed := profileResults[h.encodeProfile] != nil
 	prefillUsed := profileResults[h.prefillProfile] != nil
 
-	var decision string
-	switch {
-	case encodeUsed && prefillUsed:
-		decision = metrics.DecisionTypeEncodePrefillDecode
-	case encodeUsed:
-		decision = metrics.DecisionTypeEncodeDecode
-	case prefillUsed:
-		decision = metrics.DecisionTypePrefillDecode
-	default:
-		decision = metrics.DecisionTypeDecodeOnly
-	}
-	metrics.RecordPDDecision(request.TargetModel, decision)
+	decision := metrics.DisaggDecisionType(encodeUsed, prefillUsed)
+	metrics.RecordDisaggDecision(request.TargetModel, decision)
 	span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "complete_"+decision))
 
 	return map[string]scheduling.SchedulerProfile{}
