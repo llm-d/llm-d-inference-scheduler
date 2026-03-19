@@ -74,8 +74,9 @@ type PrecisePrefixCachePluginConfig struct {
 	SpeculativeIndexing bool `json:"speculativeIndexing"`
 	// SpeculativeTTL is the time-to-live for speculative index entries.
 	// After this duration, speculative entries are evicted from the index.
-	// If zero, defaultSpeculativeTTL is used. Only used when SpeculativeIndexing is true.
-	SpeculativeTTL time.Duration `json:"speculativeTTL"`
+	// If empty, defaultSpeculativeTTL is used. Only used when SpeculativeIndexing is true.
+	// Accepts Go duration strings (e.g. "2s", "500ms").
+	SpeculativeTTL string `json:"speculativeTTL"`
 }
 
 // compile-time type assertions
@@ -174,6 +175,16 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 
 	go kvCacheIndexer.Run(ctx)
 
+	// initialize the KV block scorer with the same config the indexer uses
+	scorerConfig := kvcache.DefaultKVBlockScorerConfig()
+	if config.IndexerConfig != nil && config.IndexerConfig.BackendConfigs != nil {
+		scorerConfig.BackendConfigs = config.IndexerConfig.BackendConfigs
+	}
+	kvBlockScorer, err := kvcache.NewKVBlockScorer(scorerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create KVBlockScorer: %w", err)
+	}
+
 	// initialize the KV-events pool
 	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex(), tokenProcessor, engineadapter.NewVLLMAdapter())
 	pool.Start(ctx)
@@ -209,7 +220,13 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	var speculativeCache *ttlcache.Cache[string, *speculativeEntries]
 	var speculativeTTL time.Duration
 	if config.SpeculativeIndexing {
-		speculativeTTL = config.SpeculativeTTL
+		if config.SpeculativeTTL != "" {
+			var err error
+			speculativeTTL, err = time.ParseDuration(config.SpeculativeTTL)
+			if err != nil {
+				return nil, fmt.Errorf("invalid speculativeTTL %q: %w", config.SpeculativeTTL, err)
+			}
+		}
 		if speculativeTTL <= 0 {
 			speculativeTTL = defaultSpeculativeTTL
 		}
@@ -238,6 +255,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	return &PrecisePrefixCacheScorer{
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
+		kvBlockScorer:      kvBlockScorer,
 		subscribersCache:   subscribersCache,
 		subscribersManager: subscribersManager,
 		kvEventsConfig:     config.KVEventsConfig,
@@ -280,6 +298,9 @@ type PrecisePrefixCacheScorer struct {
 	// they can be evicted when their TTL expires.
 	speculativeCache *ttlcache.Cache[string, *speculativeEntries]
 	speculativeTTL   time.Duration
+
+	// kvBlockScorer scores pods based on block hits with device-backend weights.
+	kvBlockScorer kvcache.KVBlockScorer
 
 	// blockSizeTokens is the number of tokens per KV-block, used for
 	// constructing PrefixCacheMatchInfo in PrepareRequestData.
@@ -353,8 +374,11 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 		return fmt.Errorf("failed to lookup block keys: %w", err)
 	}
 
-	// 4. Compute per-pod scores (longest prefix match)
-	scores := computeScoresFromKeyToPods(blockKeys, keyToPods)
+	// 4. Compute per-pod scores using KVBlockScorer (supports device-backend weights)
+	scores, err := s.kvBlockScorer.Score(ctx, blockKeys, keyToPods)
+	if err != nil {
+		return fmt.Errorf("failed to score block keys: %w", err)
+	}
 
 	// 5. Store PrefixCacheMatchInfo on each endpoint
 	blockSize := s.getBlockSizeTokens()
@@ -643,48 +667,6 @@ func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
 		}
 	}
 	return podSet
-}
-
-// computeScoresFromKeyToPods computes per-pod longest prefix match scores
-// from the index lookup result. This mirrors the intersection logic in the
-// LongestPrefixScorer: a pod's prefix chain ends as soon as it is missing
-// from any block key, even if other pods still have that key.
-func computeScoresFromKeyToPods(blockKeys []kvblock.BlockHash,
-	keyToPods map[kvblock.BlockHash][]kvblock.PodEntry) map[string]float64 {
-	podScores := make(map[string]float64)
-
-	if len(blockKeys) == 0 {
-		return podScores
-	}
-
-	// Initialize active pods from the first key
-	firstKeyPods := keyToPods[blockKeys[0]]
-	activePods := sets.New[string]()
-	for _, pod := range firstKeyPods {
-		activePods.Insert(pod.PodIdentifier)
-		podScores[pod.PodIdentifier] = 1
-	}
-
-	// For each subsequent key, intersect active pods with current key's pods.
-	// Pods not present in the current key are dropped from the active set.
-	for i := 1; i < len(blockKeys); i++ {
-		if activePods.Len() == 0 {
-			break
-		}
-
-		pods := keyToPods[blockKeys[i]]
-		currentPods := sets.New[string]()
-		for _, pod := range pods {
-			currentPods.Insert(pod.PodIdentifier)
-		}
-
-		activePods = activePods.Intersection(currentPods)
-		for pod := range activePods {
-			podScores[pod]++
-		}
-	}
-
-	return podScores
 }
 
 // getBlockSizeTokens returns the block size in tokens from the token processor config.

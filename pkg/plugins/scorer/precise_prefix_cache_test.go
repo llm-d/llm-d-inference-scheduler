@@ -624,7 +624,7 @@ func newTestScorer(t *testing.T) *PrecisePrefixCacheScorer {
 		IndexerConfig:       kvcacheConfig,
 		KVEventsConfig:      kvevents.DefaultConfig(),
 		SpeculativeIndexing: true,
-		SpeculativeTTL:      5 * time.Second,
+		SpeculativeTTL:      "5s",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, scorer)
@@ -861,7 +861,7 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 		IndexerConfig:       kvcacheConfig,
 		KVEventsConfig:      kvevents.DefaultConfig(),
 		SpeculativeIndexing: true,
-		SpeculativeTTL:      200 * time.Millisecond,
+		SpeculativeTTL:      "200ms",
 	})
 	require.NoError(t, err)
 
@@ -928,9 +928,12 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 	}
 }
 
-// TestComputeScoresFromKeyToPods verifies the helper function that computes
-// longest prefix match scores from index lookup results.
-func TestComputeScoresFromKeyToPods(t *testing.T) {
+// TestKVBlockScorerIntegration verifies that KVBlockScorer.Score() computes
+// longest prefix match scores correctly (replacing the old computeScoresFromKeyToPods helper).
+func TestKVBlockScorerIntegration(t *testing.T) {
+	scorer, err := kvcache.NewKVBlockScorer(kvcache.DefaultKVBlockScorerConfig())
+	require.NoError(t, err)
+
 	blockKeys := []kvblock.BlockHash{
 		kvblock.BlockHash(111),
 		kvblock.BlockHash(222),
@@ -944,7 +947,8 @@ func TestComputeScoresFromKeyToPods(t *testing.T) {
 			blockKeys[2]: {{PodIdentifier: "pod-a"}},
 		}
 
-		scores := computeScoresFromKeyToPods(blockKeys, keyToPods)
+		scores, err := scorer.Score(t.Context(), blockKeys, keyToPods)
+		require.NoError(t, err)
 		assert.Equal(t, float64(3), scores["pod-a"])
 		assert.Equal(t, float64(1), scores["pod-b"]) // only first block
 	})
@@ -956,13 +960,15 @@ func TestComputeScoresFromKeyToPods(t *testing.T) {
 			blockKeys[2]: {{PodIdentifier: "pod-a"}},
 		}
 
-		scores := computeScoresFromKeyToPods(blockKeys, keyToPods)
+		scores, err := scorer.Score(t.Context(), blockKeys, keyToPods)
+		require.NoError(t, err)
 		assert.Equal(t, float64(1), scores["pod-a"]) // only first block counted
 	})
 
 	t.Run("empty index", func(t *testing.T) {
 		keyToPods := map[kvblock.BlockHash][]kvblock.PodEntry{}
-		scores := computeScoresFromKeyToPods(blockKeys, keyToPods)
+		scores, err := scorer.Score(t.Context(), blockKeys, keyToPods)
+		require.NoError(t, err)
 		assert.Empty(t, scores)
 	})
 }
