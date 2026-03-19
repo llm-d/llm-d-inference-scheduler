@@ -20,9 +20,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
@@ -576,7 +576,7 @@ func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
 	targetMeta := targetEndpoint.GetMetadata()
 	speculativePod := kvblock.PodEntry{
 		PodIdentifier: fmt.Sprintf("%s:%s", targetMeta.Address, targetMeta.Port),
-		Speculative: true,
+		Speculative:   true,
 	}
 
 	allPodEntries := []kvblock.PodEntry{speculativePod}
@@ -594,7 +594,7 @@ func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
 		prefillMeta := pr.TargetEndpoints[0].GetMetadata()
 		prefillPod := kvblock.PodEntry{
 			PodIdentifier: fmt.Sprintf("%s:%s", prefillMeta.Address, prefillMeta.Port),
-			Speculative: true,
+			Speculative:   true,
 		}
 		if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{prefillPod}); err != nil {
 			logger.Error(err, "Failed to add speculative entries for prefill endpoint",
