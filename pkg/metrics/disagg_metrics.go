@@ -12,7 +12,7 @@ const (
 
 	// DecisionTypeDecodeOnly is for requests that are routed to decode instance only.
 	DecisionTypeDecodeOnly = "decode-only"
-	// DecisionTypePrefillDecode is for requests that are gone through P/D.
+	// DecisionTypePrefillDecode is for requests that are gone through P/D or EP/D.
 	DecisionTypePrefillDecode = "prefill-decode"
 	// DecisionTypeEncodeDecode is for requests that are gone through E/PD.
 	DecisionTypeEncodeDecode = "encode-decode"
