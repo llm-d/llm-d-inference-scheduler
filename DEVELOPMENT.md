@@ -8,7 +8,7 @@ Documentation for developing the inference scheduler.
 - [Golang] `v1.24`+
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
-- [Kubectl] `v1.14`+
+- [Kubectl] `v1.25`+
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
@@ -103,7 +103,7 @@ access the inference gatyeway.
 > [!NOTE]
 > If you require significant customization of this environment beyond
 > what the standard deployment provides, you can use the `deploy/components`
-> with `kustomize` to build your own highly customized environment. You can use
+> with `kubectl kustomize` to build your own highly customized environment. You can use
 > the `deploy/environments/kind` deployment as a reference for your own.
 
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind

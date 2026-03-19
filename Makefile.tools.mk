@@ -8,13 +8,11 @@ $(LOCALLIB):
 ## Tool binary names.
 GINKGO = $(LOCALBIN)/ginkgo
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
-KUSTOMIZE = $(LOCALBIN)/kustomize
 TYPOS = $(LOCALBIN)/typos
 
 ## Tool fixed versions.
 GINKGO_VERSION ?= v2.27.2
 GOLANGCI_LINT_VERSION ?= v2.8.0
-KUSTOMIZE_VERSION ?= v5.5.0
 TYPOS_VERSION ?= v1.34.0
 
 ## go-install-tool will 'go install' any package with custom target and version.
@@ -34,7 +32,7 @@ endef
 ##@ Tools
 
 .PHONY: install-tools
-install-tools: install-ginkgo install-golangci-lint install-kustomize install-typos ## Install all development tools
+install-tools: install-ginkgo install-golangci-lint install-typos ## Install all development tools
 	@echo "All development tools are installed."
 
 .PHONY: install-ginkgo
@@ -46,11 +44,6 @@ $(GINKGO): | $(LOCALBIN)
 install-golangci-lint: $(GOLANGCI_LINT)
 $(GOLANGCI_LINT): | $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
-
-.PHONY: install-kustomize
-install-kustomize: $(KUSTOMIZE)
-$(KUSTOMIZE): | $(LOCALBIN)
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 .PHONY: install-typos
 install-typos: $(TYPOS)
@@ -85,9 +78,9 @@ check-golangci-lint:
 
 .PHONY: check-kustomize
 check-kustomize:
-	@command -v kustomize >/dev/null 2>&1 || [ -f "$(KUSTOMIZE)" ] || { \
-	  echo "ERROR: kustomize is not installed."; \
-	  echo "Run: make install-kustomize (or install-tools)"; \
+	@kubectl kustomize --help 2>&1 | grep -q -- '--enable-helm' || { \
+	  echo "ERROR: kubectl kustomize does not support --enable-helm."; \
+	  echo "Upgrade kubectl to v1.25 or later (https://kubernetes.io/docs/tasks/tools/)"; \
 	  exit 1; }
 
 .PHONY: check-envsubst
