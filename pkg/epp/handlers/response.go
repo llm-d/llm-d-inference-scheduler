@@ -21,6 +21,7 @@ import (
 
 	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+	"google.golang.org/protobuf/types/known/structpb"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	envoy "sigs.k8s.io/gateway-api-inference-extension/pkg/common/envoy"
@@ -81,7 +82,7 @@ func (s *StreamingServer) generateResponseHeaderResponse(reqCtx *RequestContext)
 	}
 }
 
-func generateResponseBodyResponses(responseBodyBytes []byte, setEoS bool) []*extProcPb.ProcessingResponse {
+func generateResponseBodyResponses(responseBodyBytes []byte, setEoS bool, dynamicMetadata *structpb.Struct) []*extProcPb.ProcessingResponse {
 	commonResponses := envoy.BuildChunkedBodyResponses(responseBodyBytes, setEoS)
 	responses := make([]*extProcPb.ProcessingResponse, 0, len(commonResponses))
 	for _, commonResp := range commonResponses {
@@ -93,6 +94,11 @@ func generateResponseBodyResponses(responseBodyBytes []byte, setEoS bool) []*ext
 			},
 		}
 		responses = append(responses, resp)
+	}
+
+	// Attach dynamic metadata to the last response if available.
+	if len(responses) > 0 && dynamicMetadata != nil {
+		responses[len(responses)-1].DynamicMetadata = dynamicMetadata
 	}
 	return responses
 }
