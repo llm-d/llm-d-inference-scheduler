@@ -574,6 +574,19 @@ Several things should be noted:
 3. The scheduler profile for prefill, must include the `PrefillFilter`
 4. The scheduler profile for decode, must include the `DecodeFilter`
 
+### Speculative Indexing
+
+Speculative indexing closes the blind spot between a routing decision and KV event arrival by immediately writing a predicted cache entry to the prefix-cache index. This lets the next request with the same prefix hit the cache without waiting for engine confirmation. See [#538](https://github.com/llm-d/llm-d-inference-scheduler/issues/538) for background.
+
+Enable via `precise-prefix-cache-scorer` parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `speculativeIndexing` | bool | `false` | Enable speculative index entries on routing decisions. |
+| `speculativeTTL` | duration string | `"2s"` | TTL for speculative entries. Accepts Go duration strings (e.g. `"2s"`, `"500ms"`). |
+
+Requires the `prepareDataPlugins` feature gate and KV events from vLLM engines.
+
 ---
 
 ## Metric Scraping
