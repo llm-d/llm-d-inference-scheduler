@@ -108,8 +108,8 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 	// Collect all target endpoints as comma-separated host:port pairs
 	var encodeHostPorts []string
 	for _, endpoint := range encodeProfileRunResult.TargetEndpoints {
-		targetPod := endpoint.GetMetadata()
-		encodeHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
+		targetEndpoint := endpoint.GetMetadata()
+		encodeHostPort := net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
 		encodeHostPorts = append(encodeHostPorts, encodeHostPort)
 	}
 
