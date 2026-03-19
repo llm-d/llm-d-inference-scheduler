@@ -66,6 +66,29 @@ jobs:
         shell: bash
         run: make build
 
-      - name: Run make test
+      - name: Restore main branch coverage baseline
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: coverage/baseline
+          key: coverage-main
+
+      - name: Run unit tests with coverage
         shell: bash
-        run: make test
+        run: make test-coverage
+
+      - name: Compare coverage against main baseline
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: make coverage-compare BASELINE_DIR=coverage/baseline
+
+      - name: Save coverage baseline (main branch only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: coverage
+          key: coverage-main
+
+      - name: Run make test-e2e
+        shell: bash
+        run: make test-e2e
