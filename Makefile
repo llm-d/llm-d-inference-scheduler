@@ -76,6 +76,11 @@ SRC = $(shell find . -type f -name '*.go')
 
 CGO_ENABLED=0
 
+# Linker flags for go build inside Docker images.
+# Default strips debug symbols for smaller production images.
+# Override locally to build a debuggable image: LDFLAGS="" make image-build-epp
+LDFLAGS ?= -s -w
+
 
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
@@ -233,11 +238,12 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 	@printf "\033[33;1m==== Building Docker image $($*_IMAGE) ====\033[0m\n"
 	$(CONTAINER_RUNTIME) build \
 		--platform linux/$(TARGETARCH) \
- 		--build-arg TARGETOS=linux \
+		--build-arg TARGETOS=linux \
 		--build-arg TARGETARCH=$(TARGETARCH) \
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
- 		-t $($*_IMAGE) -f Dockerfile.$* .
+		--build-arg LDFLAGS="$(LDFLAGS)" \
+		-t $($*_IMAGE) -f Dockerfile.$* .
 
 .PHONY: image-push
 image-push: image-push-epp image-push-sidecar ## Push container images to registry using $(CONTAINER_RUNTIME)

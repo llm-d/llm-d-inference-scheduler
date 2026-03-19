@@ -1,14 +1,10 @@
-## Minimal runtime Dockerfile (microdnf-only, no torch, wrapper in site-packages)
-## Simplified EPP Dockerfile - UDS tokenizer only (no vLLM, no embedded tokenizer)
-## This build uses the default kv-cache pool (UDS-only, no embedded_tokenizers build tag)
-## Tokenization is handled by a separate UDS tokenizer sidecar container
-##
 ## Pure Go build, no CGO required
 # Go build stage
 FROM quay.io/projectquay/golang:1.25 AS go-builder
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG LDFLAGS="-s -w"
 
 WORKDIR /workspace
 
@@ -16,15 +12,16 @@ WORKDIR /workspace
 COPY go.mod go.mod
 COPY go.sum go.sum
 
+# Download dependencies - this layer is cached as long as go.mod/go.sum are unchanged
+RUN go mod download
+
 # Copy the go source
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 
-RUN go mod download
-
 # Build EPP with pure Go (no CGO, no external libraries required)
 # The default kv-cache build uses UDS tokenizer (//go:build !embedded_tokenizers)
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o bin/epp cmd/epp/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o bin/epp cmd/epp/main.go
 
 # Runtime stage
 # Use ubi9 as a minimal base image to package the manager binary

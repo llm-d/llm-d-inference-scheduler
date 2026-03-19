@@ -128,6 +128,13 @@ EPP_TAG=0.0.4 make env-dev-kind
 ```
 
 > [!NOTE]
+> By default, images are built with debug symbols stripped (`-s -w`) for smaller size.
+> To build a debuggable image (e.g., for use with `dlv`), override `LDFLAGS`:
+> ```bash
+> LDFLAGS="" make image-build-epp
+> ```
+
+> [!NOTE]
 > If you want to load a different tag of llm-d-inference-sim, you can use the environment variable `VLLM_SIMULATOR_TAG` to specify it.
 
 > [!NOTE]
