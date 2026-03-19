@@ -19,5 +19,3 @@ func hasMultimodalContent(request *scheduling.LLMRequest) bool {
 	}
 	return false
 }
-
-// Made with Bob

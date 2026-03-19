@@ -288,16 +288,12 @@ func (h *DisaggProfileHandler) ProcessResults(
 		updatedResults[h.decodeProfile] = decodeRunResults
 	}
 
-	if h.pdDecider != nil {
-		if prefillRes, ok := profileResults[h.prefillProfile]; ok && prefillRes != nil {
-			updatedResults[h.prefillProfile] = prefillRes
-		}
+	if prefillRes, ok := profileResults[h.prefillProfile]; ok && prefillRes != nil {
+		updatedResults[h.prefillProfile] = prefillRes
 	}
 
-	if h.encodeDecider != nil {
-		if encodeRes, ok := profileResults[h.encodeProfile]; ok && encodeRes != nil {
-			updatedResults[h.encodeProfile] = encodeRes
-		}
+	if encodeRes, ok := profileResults[h.encodeProfile]; ok && encodeRes != nil {
+		updatedResults[h.encodeProfile] = encodeRes
 	}
 
 	return &scheduling.SchedulingResult{

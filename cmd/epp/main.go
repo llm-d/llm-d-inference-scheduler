@@ -62,8 +62,9 @@ func run() int {
 	// Note: GIE built-in plugins are automatically registered by the runner
 	// when it processes configuration in runner.parsePluginsConfiguration()
 
+	allCollectors := append(metrics.GetDisaggCollectors(), metrics.GetCollectors()...) //nolint:staticcheck // GetCollectors is deprecated but needed for pd-profile-handler metrics
 	if err := runner.NewRunner().
-		WithCustomCollectors(metrics.GetDisaggCollectors()...).
+		WithCustomCollectors(allCollectors...).
 		Run(ctx); err != nil {
 		return 1
 	}
