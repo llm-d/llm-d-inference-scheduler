@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	// AlwaysDisaggDeciderPluginType is the type-name of the alwaysDisaggPDDecider plugin.
-	AlwaysDisaggDeciderPluginType = "always-disagg-pd-decider"
+	// AlwaysDisaggPDDeciderPluginType is the type-name of the alwaysDisaggPDDecider plugin.
+	AlwaysDisaggPDDeciderPluginType = "always-disagg-pd-decider"
 )
 
 // compile-time type assertion
@@ -30,7 +30,7 @@ func AlwaysDisaggPDDeciderPluginFactory(name string, _ json.RawMessage,
 
 func newAlwaysDisaggPDDecider() *AlwaysDisaggPDDecider {
 	return &AlwaysDisaggPDDecider{
-		typedName: plugin.TypedName{Type: AlwaysDisaggDeciderPluginType},
+		typedName: plugin.TypedName{Type: AlwaysDisaggPDDeciderPluginType},
 	}
 }
 

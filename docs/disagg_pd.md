@@ -1,64 +1,92 @@
-# Disaggregated Prefill/Decode Inference Serving in LLM-D
+# Disaggregated Inference Serving in LLM-D
 
 ## Overview
 
-This document describes the architecture and request lifecycle for enabling **disaggregated prefill and decode (P/D)** inference execution in the LLM-D router. The architecture aims to improve flexibility, scalability, and performance by enabling separation of prefill and decode stages onto different workers.
+This document describes the architecture and request lifecycle for enabling **disaggregated inference execution** in the LLM-D router. LLM-D supports multiple disaggregation topologies:
 
-This evolved version removes the requirement for sidecars on the **prefill node**, simplifying deployment while maintaining orchestration from the **decode node**.
+- **EPD** (no disaggregation) — a single node handles all three functions (encode, prefill, and decode). This is the default mode when no disaggregation is configured.
+- **P/D** (Prefill/Decode) — separates the prefill and decode stages onto different workers. This is functionally equivalent to EP/D, since prefill workers also handle encoding (multimodal processing) as part of the prefill stage.
+- **E/PD** (Encode/Prefill-Decode) — offloads multimodal encoding to dedicated workers while a single worker handles prefill and decode
+- **E/P/D** (Encode/Prefill/Decode) — the full three-stage pipeline where each stage runs on a specialized worker
+
+> **Note**: The Encode (E) stage is only relevant for requests with multimodal content (images, video, or audio). For text-only requests, the encode stage is skipped regardless of the configured topology.
+
+All topologies are driven by the unified `disagg-profile-handler` plugin, which selects active stages based on configuration, the user request (e.g., presence of multimodal content), and the system status (e.g., KV-cache hit ratio on the selected decode pod). The architecture aims to improve flexibility, scalability, and performance by enabling separation of inference stages onto different workers.
 
 ---
 
 ## Goals
 
-- Enable routing of prefill and decode to different pods
+- Enable routing of encode, prefill, and decode to different workers
 - Maintain low latency and high throughput
-- Improve resource utilization by specializing pods for prefill or decode
+- Improve resource utilization by specializing pods for each stage
+- Support multimodal workloads by offloading encoding to dedicated workers
 - Align with GIE-compatible architectures for potential upstreaming
 
 ---
 
 ## Key Components
 
-| Component            | Role                                                                 |
-|----------------------|----------------------------------------------------------------------|
-| **Prefill Worker**   | Handles only prefill stage using vLLM engine                         |
-| **Decode Worker**    | Handles decode stage and contains the sidecar for coordination       |
-| **Sidecar (Decode)** | Orchestrates communication with prefill worker and manages lifecycle |
-| **Envoy Proxy**      | Accepts OpenAI-style requests and forwards them to EPP               |
-| **EPP**              | Endpoint Picker, makes scheduling decisions                     |
+| Component            | Role                                                                         |
+|----------------------|------------------------------------------------------------------------------|
+| **Encode Worker**    | Handles multimodal encoding (images, video, audio) for E/PD and E/P/D       |
+| **Prefill Worker**   | Handles prefill stage using vLLM engine; in EP/D configuration, also handles encoding for multimodal requests |
+| **Decode Worker**    | Handles decode stage and contains the sidecar for coordination               |
+| **Sidecar (Decode)** | Orchestrates communication with encode/prefill workers and manages lifecycle |
+| **Envoy Proxy**      | Accepts OpenAI-style requests and forwards them to EPP                       |
+| **EPP**              | Endpoint Picker, makes scheduling decisions                                  |
 
 ---
 
 ## Request Lifecycle
 
-1. **User Request**
-   - Sent via OpenAI API to the Envoy Proxy
+### P/D (Prefill/Decode)
 
-2. **EPP Scheduling Decision**
-   - EPP evaluates:
-     - Prompt length
-     - KV-cache hit probability
-     - System and pod load
-   - Selects either:
-     - **Single node** path (decode handles all)
-     - **Split node** path (distinct prefill and decode workers)
-   - Returns Decode Worker (always), and optionally Prefill Worker URL
+1. **User Request** — Sent via OpenAI API to the Envoy Proxy
+2. **EPP Scheduling Decision** — The `disagg-profile-handler` runs stages in order:
+   1. **Decode**: always runs first, selects a decode pod
+   2. **Prefill** (optional): the PD decider evaluates prompt length and prefix-cache hit; if disaggregation is warranted, a prefill pod is selected
+3. **Execution** — Request lands on Decode Worker:
+   - If `x-prefiller-host-port` header doesn't exist → runs both stages locally
+   - If `x-prefiller-host-port` header exists → sidecar sends prefill to the selected Prefill Worker, then runs decode locally
+4. **Response Flow** — decode sidecar → Envoy → EPP → User
 
-3. **Execution**
-   - Request lands on Decode Worker (as selected by EPP)
-   - Decode sidecar coordinates:
-     - If `x-prefiller-host-port` header doesn't exist, runs both stages locally by passing request to local vLLM
-     - If `x-prefiller-host-port` header exists:
-       - Sends the prefill job to the selected Prefill Worker with a special request field `do_remote_decode=true`
-       - Upon receiving the response from the Prefill Worker runs the decode stage
+### E/PD (Encode/Prefill-Decode)
 
-4. **Response Flow**
-   - Response flows from decode sidecar → Envoy → EPP → User
+For multimodal requests (images, video, audio), the encode stage can be disaggregated to dedicated workers:
+
+1. **User Request** — Multimodal request sent via OpenAI API
+2. **EPP Scheduling Decision** — The `disagg-profile-handler` runs stages in order:
+   1. **Decode**: selects a decode pod
+   2. **Encode** (optional): the encode decider checks for multimodal content; if present, an encode pod is selected
+3. **Execution** — Request lands on Decode Worker:
+   - If encode was scheduled → sidecar sends encoding work to the selected Encode Worker(s) via the `x-encoder-hosts-ports` header
+   - Encode Worker processes multimodal content and returns encoding metadata (embedding references)
+   - Decode Worker reads embeddings via EC_Connector and runs prefill + decode locally
+4. **Response Flow** — decode sidecar → Envoy → EPP → User
+
+### E/P/D (Encode/Prefill/Decode)
+
+The full three-stage pipeline combines both encode and prefill disaggregation:
+
+1. **User Request** — Multimodal request sent via OpenAI API
+2. **EPP Scheduling Decision** — The `disagg-profile-handler` runs all three stages in order:
+   1. **Decode**: selects a decode pod
+   2. **Encode** (optional): if multimodal content is detected, an encode pod is selected
+   3. **Prefill** (optional): if the PD decider determines disaggregation is beneficial, a prefill pod is selected
+3. **Execution** — Request lands on Decode Worker:
+   - If encode was scheduled → sidecar sends encoding work to the selected Encode Worker(s) via the `x-encoder-hosts-ports` header
+   - Encode Worker processes multimodal content and returns encoding metadata (embedding references)
+   - If prefill was scheduled → sidecar sends prefill to Prefill Worker via the `x-prefiller-host-port` header
+   - Prefill Worker reads embeddings via EC_Connector and executes prefill operation
+   - Decode Worker runs decode locally
+4. **Response Flow** — decode sidecar → Envoy → EPP → User
 
 ---
 
 ## Architectural Details
 
+### P/D Sequence
 
 ```mermaid
 sequenceDiagram
@@ -68,13 +96,63 @@ sequenceDiagram
   participant D as Decode Worker(vLLM)
   participant P as Prefill Worker(vLLM)
 
-
   C->>I: Inference Request
   I->>DS: Request is sent to the Decode Worker Sidecar <br/> with the selected Prefill worker set in a header.
   DS->>P: Remote Prefill with prompt(max_tokens=1)
   P-->>P: Run prefill
   P->>DS: Remote kv parameters
-  DS->> D: Request is sent to the Decode Worker (vLLM) with remote_prefill true, <br/>prefill ID and memory block IDs 
+  DS->> D: Request is sent to the Decode Worker (vLLM) with remote_prefill true, <br/>prefill ID and memory block IDs
+        D-->>P: Read kv-cache
+        D-->>D: Schedule decode into queue & run decode
+  D->>DS: Inference Response
+  DS->>I: Inference Response
+  I->>C: Inference Response
+```
+
+### E/PD Sequence
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant I as Inference Gateway
+  participant DS as Decode Worker Sidecar
+  participant E as Encode Worker
+  participant D as Decode Worker(vLLM)
+
+  C->>I: Multimodal Inference Request
+  I->>DS: Request with x-encoder-hosts-ports header
+  DS->>E: Send multimodal content for encoding
+  E-->>E: Process images/video/audio
+  E->>DS: Encoding metadata (embedding references)
+  DS->>D: Request with encoding metadata
+  D-->>E: Read embeddings via EC_Connector
+  D-->>D: Run prefill + decode locally
+  D->>DS: Inference Response
+  DS->>I: Inference Response
+  I->>C: Inference Response
+```
+
+### E/P/D Sequence
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant I as Inference Gateway
+  participant DS as Decode Worker Sidecar
+  participant E as Encode Worker
+  participant P as Prefill Worker(vLLM)
+  participant D as Decode Worker(vLLM)
+
+  C->>I: Multimodal Inference Request
+  I->>DS: Request with x-encoder-hosts-ports <br/> and x-prefiller-host-port headers
+  DS->>E: Send multimodal content for encoding
+  E-->>E: Process images/video/audio
+  E->>DS: Encoding metadata (embedding references)
+  DS->>P: Remote Prefill with prompt and encoding metadata (max_tokens=1)
+  P-->>E: Read embeddings via EC_Connector
+  P-->>P: Run prefill
+  P->>DS: Remote kv parameters
+  DS->>D: Request with remote_prefill true, <br/>prefill ID and memory block IDs
         D-->>P: Read kv-cache
         D-->>D: Schedule decode into queue & run decode
   D->>DS: Inference Response
@@ -84,31 +162,37 @@ sequenceDiagram
 
 ### Sidecar Responsibilities (Decode Only)
 
-- Receives EPP metadata (decode pod, optional prefill pod)
-- Sends request to prefill
-- Waits for the result and validates it
+- Receives EPP metadata (decode pod, optional encode pod(s), optional prefill pod)
+- If encode endpoints are present, sends multimodal content to Encode Worker(s), waits for results and validates them
+- If prefill endpoint is present, sends prefill request to Prefill Worker, waits for results and validates them
 - Launches local decode job
 - Sends final response
 
-> **Note**: No sidecar or coordination logic is needed on the prefill node.
+> **Note**: No sidecar or coordination logic is needed on the prefill or encode nodes.
 
 ---
 
 ## Worker Selection Logic
 
-- **Decode/Prefill Worker**:
-  - Prefer longest prefix match/kv-cache utilization (depends on available scorers) and low load
+- **Decode Worker**: Prefer longest prefix match / kv-cache utilization (depends on available scorers) and low load
+- **Prefill Worker**: Same scoring criteria as decode
+- **Encode Worker**: Selected when multimodal content is detected in the request
 
-> **Skip prefill worker** when:
-> - Prefix match/kv-cache hit is high
+> **Skip prefill** when:
+> - Prefix match / kv-cache hit is high
 > - Prompt is very short
+
+> **Skip encode** when:
+> - Request contains no multimodal content (text-only)
+> - Encode decider rejects the request
 
 ---
 
 
 ## Drawbacks & Limitations
 
-- Slight increase in TTFT for disaggregated P/D 
+- Slight increase in TTFT for disaggregated P/D and E/P/D
+- Additional network hops for E/P/D (encode → prefill → decode)
 - Possibility of stranded memory on prefill crash
 - The need for timeout and retry logic
 
@@ -127,32 +211,40 @@ sequenceDiagram
 
 - Cache coordinate
 - Pre-allocation of kv blocks in the decode node, push cache from the prefill to the decode worker during calculation
+- More sophisticated encode worker selection (e.g., load-aware scheduling, content-type-based routing, locality-aware placement)
 
 ---
 
 ## Integrating External Prefill/Decode Workloads
 
-The LLM-D inference scheduler supports integration with external disaggregated prefill/decode (P/D) workloads other inference frameworks that follow the same P/D separation pattern but use **different Kubernetes Pod labeling conventions**.
+The LLM-D inference scheduler supports integration with external disaggregated encode/prefill/decode (E/P/D) workloads or other inference frameworks that follow the same E/P/D separation pattern but use **different Kubernetes Pod labeling conventions**.
 
 ### Labeling Convention Flexibility
 
 By default, LLM-D uses the label key `llm-d.ai/role` with values:
+- `"encode"` → encode-only pods (multimodal encoding)
 - `"prefill"` → prefill-only pods
 - `"decode"` → decode-capable pods
+- `"encode-prefill"` → pods capable of both encode and prefill (EP/D or P/D)
+- `"encode-decode"` → pods capable of both encode and decode (E/PD, rare)
 - `"prefill-decode"` → pods capable of both prefill and decode
+- `"encode-prefill-decode"` → pods capable of all three stages
 - `"both"` → **deprecated** (use `"prefill-decode"` instead)
 
 However, external systems may use alternative labels like:
 ```yaml
+role: encode
 role: prefill
 role: decode
 ```
 
-To accommodate this **without code changes**, you can configure the **EndpointPickerConfig** to use the generic `by-label` filter plugin instead of the hardcoded `prefill-filter` / `decode-filter`.
+To accommodate this **without code changes**, you can configure the **EndpointPickerConfig** to use the generic `by-label` filter plugin instead of the hardcoded `encode-filter` / `prefill-filter` / `decode-filter`.
 
-### Configuration Example
+### Configuration Examples
 
-Below is a minimal `EndpointPickerConfig` that enables integration with workloads using label `role=prefill` / `role=decode`:
+#### P/D Configuration
+
+Below is a minimal `EndpointPickerConfig` for P/D disaggregation using custom labels:
 
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1
@@ -183,12 +275,76 @@ plugins:
   - type: prefix-based-pd-decider
     parameters:
       nonCachedTokens: 8
-  # Note: pd-profile-handler is deprecated, use disagg-profile-handler instead
-  - type: pd-profile-handler
+  - type: disagg-profile-handler
     parameters:
-      deciderPluginName: prefix-based-pd-decider
-      primaryPort: 8000
+      prefillProfile: prefill
+      decodeProfile: decode
+      prefillDeciderPluginName: prefix-based-pd-decider
 schedulingProfiles:
+  - name: prefill
+    plugins:
+      - pluginRef: "prefill-pods"
+      - pluginRef: "max-score-picker"
+      - pluginRef: "prefix-cache-scorer"
+  - name: decode
+    plugins:
+      - pluginRef: "decode-pods"
+      - pluginRef: "max-score-picker"
+      - pluginRef: "prefix-cache-scorer"
+```
+
+#### E/P/D Configuration
+
+Below is an `EndpointPickerConfig` for full E/P/D disaggregation using custom labels:
+
+```yaml
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+  # Encoding selection: match Pods with label role=encode
+  - type: by-label
+    name: "encode-pods"
+    parameters:
+      label: "role"
+      validValues: ["encode"]
+  # Prefill selection: match Pods with label role=prefill
+  - type: by-label
+    name: "prefill-pods"
+    parameters:
+      label: "role"
+      validValues: ["prefill"]
+  # Decode selection: match Pods with label role=decode
+  - type: by-label
+    name: "decode-pods"
+    parameters:
+      label: "role"
+      validValues: ["decode"]
+  - type: prefix-cache-scorer
+    parameters:
+      autoTune: false
+      blockSize: 5
+      maxPrefixBlocksToMatch: 256
+      lruCapacityPerServer: 31250
+  - type: max-score-picker
+  - type: encode-header-handler
+  - type: prefill-header-handler
+  - type: always-disagg-encode-decider
+  - type: prefix-based-pd-decider
+    parameters:
+      nonCachedTokens: 8
+  - type: disagg-profile-handler
+    parameters:
+      encodeProfile: encode
+      prefillProfile: prefill
+      decodeProfile: decode
+      encodeDeciderPluginName: always-disagg-encode-decider
+      prefillDeciderPluginName: prefix-based-pd-decider
+schedulingProfiles:
+  - name: encode
+    plugins:
+      - pluginRef: "encode-pods"
   - name: prefill
     plugins:
       - pluginRef: "prefill-pods"
@@ -203,17 +359,22 @@ schedulingProfiles:
 
 ---
 
-## Diagram
+## Diagrams
 
 ![Disaggregated Prefill/Decode Architecture](./images/dp_architecture.png)
 
---- 
-## PD Deciders
+TODO: add E/P/D diagram
 
-PD deciders are pd handler plugins responsible for determining whether disaggregated P/D should be executed for a given request, based on the properties of the request prompt.
+---
+## Deciders
 
- 
-### Prefix-Based PD Decider
+Deciders are handler plugins responsible for determining whether a disaggregated stage should be executed for a given request.
+
+### PD Deciders
+
+PD deciders determine whether prefill should be offloaded to a separate worker, based on the properties of the request prompt.
+
+#### Prefix-Based PD Decider
 
 The `prefix-based-pd-decider` plugin makes the disaggregation decision according to the length of the non-cached suffix of the prompt relative to tokens already cached on the selected decode pod.
 
@@ -245,7 +406,7 @@ featureGates:
 ```
 
 
-### Always-Disagg PD Decider
+#### Always-Disagg PD Decider
 The `always-disagg-pd-decider` is a simpler alternative used mainly for testing or benchmarking.
 It always triggers disaggregation, regardless of prefix cache state or prompt characteristics.
 
@@ -260,6 +421,26 @@ This plugin accepts no parameters.
 
 It’s useful for validating end-to-end prefill/decode splitting and comparing system performance under forced disaggregation.
 
+### Encode Deciders
+
+Encode deciders determine whether multimodal encoding should be offloaded to dedicated encode workers.
+
+#### Always-Disagg Encode Decider
+
+The `always-disagg-encode-decider` triggers encode disaggregation whenever the request contains multimodal content (images, video, or audio). Text-only requests are never sent to encode workers.
+
+**Configuration example:**
+
+```yaml
+- type: always-disagg-encode-decider
+```
+
+**Notes:**
+This plugin accepts no parameters.
+
+It checks for the presence of `image_url`, `video_url`, or `input_audio` content blocks in the chat-completions request body. If any multimodal content is found, the encode stage is activated.
+
 ---
 
 ## References
+

@@ -112,7 +112,8 @@ func TestPreRequestEncodeNilSchedulingResult(t *testing.T) {
 	handler := NewEncodeHeaderHandler("encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
-		Headers: map[string]string{},
+		RequestId: "req-123",
+		Headers:   map[string]string{},
 	}
 
 	// Should not panic
@@ -152,7 +153,8 @@ func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 	handler := NewEncodeHeaderHandler("encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
-		Headers: map[string]string{},
+		RequestId: "req-123",
+		Headers:   map[string]string{},
 	}
 
 	result := &scheduling.SchedulingResult{
@@ -171,6 +173,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 	handler := NewEncodeHeaderHandler("encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
+		RequestId: "req-123",
 		Headers: map[string]string{
 			common.EncoderEndpointsHeader: "old-host:9999",
 		},
@@ -197,6 +200,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 	handler := NewEncodeHeaderHandler("encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
+		RequestId: "req-123",
 		Headers: map[string]string{
 			common.EncoderEndpointsHeader: "stale-host:9999",
 		},
@@ -218,7 +222,8 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 	handler := NewEncodeHeaderHandler("my-custom-encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
-		Headers: map[string]string{},
+		RequestId: "req-123",
+		Headers:   map[string]string{},
 	}
 
 	result := &scheduling.SchedulingResult{
@@ -242,7 +247,8 @@ func TestPreRequestEncodeIPv6Address(t *testing.T) {
 	handler := NewEncodeHeaderHandler("encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
-		Headers: map[string]string{},
+		RequestId: "req-123",
+		Headers:   map[string]string{},
 	}
 
 	result := &scheduling.SchedulingResult{
@@ -266,7 +272,8 @@ func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 	handler := NewEncodeHeaderHandler("encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
-		Headers: map[string]string{},
+		RequestId: "req-123",
+		Headers:   map[string]string{},
 	}
 
 	addr2 := "10.0.0.6"

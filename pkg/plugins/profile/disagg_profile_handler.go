@@ -6,15 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
@@ -36,7 +33,6 @@ type disaggProfileHandlerParameters struct {
 	DecodeProfile            string `json:"decodeProfile"`
 	PrefillProfile           string `json:"prefillProfile"`
 	EncodeProfile            string `json:"encodeProfile"`
-	PrimaryPort              int    `json:"primaryPort"`
 	PrefillDeciderPluginName string `json:"prefillDeciderPluginName"`
 	EncodeDeciderPluginName  string `json:"encodeDeciderPluginName"`
 }
@@ -57,10 +53,6 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
 		}
-	}
-
-	if parameters.PrimaryPort < 0 || parameters.PrimaryPort > 65535 {
-		return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
 	}
 
 	// Resolve PD decider (required when prefill is active).
@@ -91,7 +83,6 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 	}
 	handler := NewDisaggProfileHandler(
 		parameters.DecodeProfile, parameters.PrefillProfile, parameters.EncodeProfile,
-		parameters.PrimaryPort,
 		pdDecider, encodeDecider,
 	)
 	return handler.WithName(name), nil
@@ -101,14 +92,12 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 // Active stages are determined by which profile names are non-empty.
 func NewDisaggProfileHandler(
 	decodeProfile, prefillProfile, encodeProfile string,
-	primaryPort int,
 	pdDecider deciderPlugin,
 	encodeDecider deciderPlugin,
 ) *DisaggProfileHandler {
 	return newDisaggProfileHandler(
 		DisaggProfileHandlerType,
 		decodeProfile, prefillProfile, encodeProfile,
-		primaryPort,
 		pdDecider, encodeDecider,
 	)
 }
@@ -134,7 +123,6 @@ type DisaggProfileHandler struct {
 	encodeProfile  string
 	pdDecider      deciderPlugin
 	encodeDecider  deciderPlugin
-	primaryPort    string
 }
 
 // TypedName returns the typed name of the plugin.
@@ -149,11 +137,10 @@ func (h *DisaggProfileHandler) WithName(name string) *DisaggProfileHandler {
 func newDisaggProfileHandler(
 	handlerType string,
 	decodeProfile, prefillProfile, encodeProfile string,
-	primaryPort int,
 	pdDecider deciderPlugin,
 	encodeDecider deciderPlugin,
 ) *DisaggProfileHandler {
-	h := &DisaggProfileHandler{
+	return &DisaggProfileHandler{
 		typedName:      plugin.TypedName{Type: handlerType},
 		decodeProfile:  decodeProfile,
 		prefillProfile: prefillProfile,
@@ -161,10 +148,6 @@ func newDisaggProfileHandler(
 		pdDecider:      pdDecider,
 		encodeDecider:  encodeDecider,
 	}
-	if primaryPort != 0 {
-		h.primaryPort = strconv.Itoa(primaryPort)
-	}
-	return h
 }
 
 // Pick implements scheduling.ProfileHandler.
@@ -191,9 +174,7 @@ func (h *DisaggProfileHandler) Pick(
 	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	if request.RequestId != "" {
-		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
-	}
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 
 	// ── Stage 1: Decode ────────────────────────────────────────────────────
 	if _, executed := profileResults[h.decodeProfile]; !executed {
@@ -271,22 +252,7 @@ func (h *DisaggProfileHandler) ProcessResults(
 
 	updatedResults := map[string]*scheduling.ProfileRunResult{}
 
-	if h.primaryPort != "" {
-		// Data-parallel: rewrite decode endpoint port; stash original in a header.
-		targetEndpoint := decodeRunResults.TargetEndpoints[0].GetMetadata()
-		request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
-
-		updated := scheduling.ProfileRunResult{}
-		for _, target := range decodeRunResults.TargetEndpoints {
-			info := target.GetMetadata().Clone()
-			info.Port = h.primaryPort
-			updated.TargetEndpoints = append(updated.TargetEndpoints,
-				scheduling.NewEndpoint(info, target.GetMetrics().Clone(), nil))
-		}
-		updatedResults[h.decodeProfile] = &updated
-	} else {
-		updatedResults[h.decodeProfile] = decodeRunResults
-	}
+	updatedResults[h.decodeProfile] = decodeRunResults
 
 	if prefillRes, ok := profileResults[h.prefillProfile]; ok && prefillRes != nil {
 		updatedResults[h.prefillProfile] = prefillRes

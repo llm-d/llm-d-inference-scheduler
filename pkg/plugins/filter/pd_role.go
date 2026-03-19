@@ -18,12 +18,13 @@ const (
 	// Deprecated: Use RolePrefillDecode instead. This constant is maintained for backward compatibility.
 	RoleBoth = "both"
 
+	// RolePrefillDecode set for workers that can handle prefill and decode stages
+	RolePrefillDecode = "prefill-decode"
+
 	// DecodeRoleType is the type of the DecodeFilter
 	DecodeRoleType = "decode-filter"
 	// PrefillRoleType is the type of the PrefillFilter
 	PrefillRoleType = "prefill-filter"
-	// RolePrefillDecode set for workers that can handle prefill and decode stages
-	RolePrefillDecode = "prefill-decode"
 )
 
 // PrefillRoleFactory defines the factory function for the Prefill filter.

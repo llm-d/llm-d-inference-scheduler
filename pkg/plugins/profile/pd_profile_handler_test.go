@@ -465,6 +465,6 @@ func createHandleWithDeciderPlugins(ctx context.Context) plugin.Handle {
 	plugin1, _ := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: 4})
 	handle.AddPlugin(PrefixBasedPDDeciderPluginType, plugin1)
 	plugin2 := newAlwaysDisaggPDDecider()
-	handle.AddPlugin(AlwaysDisaggDeciderPluginType, plugin2)
+	handle.AddPlugin(AlwaysDisaggPDDeciderPluginType, plugin2)
 	return handle
 }

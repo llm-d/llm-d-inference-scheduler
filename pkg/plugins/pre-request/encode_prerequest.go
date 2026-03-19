@@ -78,7 +78,10 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 	defer span.End()
 
 	if request == nil {
-		span.SetAttributes(attribute.String("llm_d.epp.encode.reason", "request_is_nil"))
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.encode.reason", "request_is_nil"),
+		)
 		return
 	}
 	if schedulingResult == nil {
@@ -89,9 +92,8 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	if request.RequestId != "" {
-		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
-	}
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+
 	if _, found := request.Headers[common.EncoderEndpointsHeader]; found {
 		request.Headers[common.EncoderEndpointsHeader] = "" // clear header, if already set
 	}

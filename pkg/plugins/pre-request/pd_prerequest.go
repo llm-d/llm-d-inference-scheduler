@@ -77,12 +77,19 @@ func (p *PrefillHeaderHandler) PreRequest(ctx context.Context, request *scheduli
 	)
 	defer span.End()
 
-	if request != nil && request.TargetModel != "" {
+	if request == nil {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.String("llm_d.epp.pd.reason", "request_is_nil"),
+		)
+		return
+	}
+
+	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	if request != nil && request.RequestId != "" {
-		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
-	}
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+
 	if _, found := request.Headers[common.PrefillEndpointHeader]; found {
 		request.Headers[common.PrefillEndpointHeader] = "" // clear header, if already set
 	}
