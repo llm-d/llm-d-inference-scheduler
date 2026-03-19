@@ -20,14 +20,9 @@ on:
         required: true
 
 jobs:
-  docker-build-and-push:
+  build-epp:
     runs-on: ubuntu-latest
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-
       - name: Checkout source
         uses: actions/checkout@v6
 
@@ -41,6 +36,17 @@ jobs:
           github-token: ${{ secrets.GHCR_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
 
+      - name: Run Trivy scan on EPP image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ghcr.io/llm-d/${{ inputs.epp-image-name }}:${{ inputs.tag }}
+
+  build-sidecar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
       - name: Build and push sidecar image
         uses: ./.github/actions/docker-build-and-push
         with:
@@ -50,11 +56,6 @@ jobs:
           registry: ghcr.io/llm-d
           github-token: ${{ secrets.GHCR_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
-
-      - name: Run Trivy scan on EPP image
-        uses: ./.github/actions/trivy-scan
-        with:
-          image: ghcr.io/llm-d/${{ inputs.epp-image-name }}:${{ inputs.tag }}
 
       - name: Run Trivy scan on sidecar image
         uses: ./.github/actions/trivy-scan
