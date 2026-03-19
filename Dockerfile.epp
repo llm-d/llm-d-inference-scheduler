@@ -3,7 +3,7 @@
 ## This build uses the default kv-cache pool (UDS-only, no embedded_tokenizers build tag)
 ## Tokenization is handled by a separate UDS tokenizer sidecar container
 ##
-## CGO is still required for ZMQ (kvevents) but Python/vLLM dependencies are removed
+## Pure Go build, no CGO required
 # Go build stage
 FROM quay.io/projectquay/golang:1.25 AS go-builder
 
@@ -11,12 +11,6 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
-
-# Install ZMQ development libraries (required for CGO)
-# The builder is based on UBI8, so we need epel-release-8
-RUN dnf install -y 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm' && \
-    dnf install -y zeromq-devel pkgconfig && \
-    dnf clean all
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -28,24 +22,15 @@ COPY pkg/ pkg/
 
 RUN go mod download
 
-# Build EPP with CGO for ZMQ only (no Python, no embedded tokenizer)
+# Build EPP with pure Go (no CGO, no external libraries required)
 # The default kv-cache build uses UDS tokenizer (//go:build !embedded_tokenizers)
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o bin/epp cmd/epp/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o bin/epp cmd/epp/main.go
 
 # Runtime stage
 # Use ubi9 as a minimal base image to package the manager binary
-# Refer to https://catalog.redhat.com/software/containers/ubi9/ubi-minimal/615bd9b4075b022acc111bf5 for more details
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
 
 WORKDIR /
-
-# Install ZMQ runtime library only (no Python needed)
-RUN curl -L -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    rpm -i /tmp/epel-release.rpm && \
-    rm /tmp/epel-release.rpm && \
-    microdnf install -y --setopt=install_weak_deps=0 zeromq && \
-    microdnf clean all && \
-    rm -rf /var/cache/yum /var/lib/yum
 
 COPY --from=go-builder /workspace/bin/epp /app/epp
 

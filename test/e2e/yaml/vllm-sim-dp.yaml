@@ -22,9 +22,8 @@ spec:
         args:
         - "--port=8000"
         - "--vllm-port=8200"
-        - "--connector=nixlv2"
+        - "--kv-connector=nixlv2"
         - "--secure-proxy=false"
-        - "--decoder-use-tls=false"
         - "--data-parallel-size=2"
         ports:
         - name: sidecar-http

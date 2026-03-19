@@ -44,7 +44,7 @@ type sidecarTestInfo struct {
 	proxy          *Server
 }
 
-var connectors = []string{ConnectorSharedStorage, ConnectorNIXLV2}
+var connectors = []string{KVConnectorSharedStorage, KVConnectorNIXLV2}
 
 var _ = Describe("Common Connector tests", func() {
 
@@ -59,7 +59,7 @@ var _ = Describe("Common Connector tests", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+					err := testInfo.proxy.Start(testInfo.ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
@@ -82,7 +82,7 @@ var _ = Describe("Common Connector tests", func() {
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
 				Expect(err).ToNot(HaveOccurred())
-				req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+				req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 				rp, err := http.DefaultClient.Do(req)
 				Expect(err).ToNot(HaveOccurred())
@@ -121,7 +121,7 @@ var _ = Describe("Common Connector tests", func() {
 					defer GinkgoRecover()
 
 					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+					err := testInfo.proxy.Start(testInfo.ctx, validator)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
@@ -143,7 +143,7 @@ var _ = Describe("Common Connector tests", func() {
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
 				Expect(err).ToNot(HaveOccurred())
-				req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+				req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 				rp, err := http.DefaultClient.Do(req)
 				Expect(err).ToNot(HaveOccurred())
@@ -203,7 +203,7 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	url, err := url.Parse(testInfo.decodeBackend.URL)
 	Expect(err).ToNot(HaveOccurred())
 	testInfo.decodeURL = url
-	cfg := Config{Connector: connector}
+	cfg := Config{KVConnector: connector}
 	testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg) // port 0 to automatically choose one that's available.
 
 	return &testInfo

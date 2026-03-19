@@ -28,7 +28,8 @@ type dataParallelProfileHandlerParameters struct {
 var _ scheduling.ProfileHandler = &DataParallelProfileHandler{}
 
 // DataParallelProfileHandlerFactory defines the factory function for the DataParallelProfileHandler
-func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	log.FromContext(handle.Context()).Info("Deprecated: Use simple-profile-handler with Istio >= 1.28.1")
 	parameters := dataParallelProfileHandlerParameters{
 		PrimaryPort: 8000,
 	}
@@ -117,7 +118,7 @@ func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *schedu
 
 	targetPod := profileResult.TargetEndpoints[0].GetMetadata()
 
-	request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
+	request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
 
 	for _, target := range profileResult.TargetEndpoints {
 		newMetadata := target.GetMetadata().Clone()

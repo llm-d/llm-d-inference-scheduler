@@ -130,10 +130,26 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	)
 
 	if isHTTPError(pw.statusCode) {
-		s.logger.Error(err, "request failed", "code", pw.statusCode)
+		s.logger.Error(err, "request failed", "code", pw.statusCode, "body", pw.buffer.String())
 		prefillSpan.SetStatus(codes.Error, "prefill request failed")
 		prefillSpan.End()
-		w.WriteHeader(pw.statusCode)
+
+		if shouldFallbackToDecode(pw) {
+			s.logger.Info("fallback to decode", "request_id", uuidStr)
+			r.Body = io.NopCloser(strings.NewReader(string(original)))
+			s.decoderProxy.ServeHTTP(w, r)
+		} else {
+			for key, values := range pw.Header() {
+				for _, v := range values {
+					w.Header().Add(key, v)
+				}
+			}
+			w.WriteHeader(pw.statusCode)
+			_, err := w.Write([]byte(pw.buffer.String()))
+			if err != nil {
+				s.logger.Error(err, "failed to send error response to client")
+			}
+		}
 		return
 	}
 	prefillSpan.End()

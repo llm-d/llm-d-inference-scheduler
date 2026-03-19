@@ -7,10 +7,10 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
 
 const (
@@ -70,6 +70,10 @@ func NewPrefixBasedPDDecider(config PrefixBasedPDDeciderConfig) (*PrefixBasedPDD
 		return nil, err
 	}
 
+	if config.NonCachedTokens == 0 {
+		log.Log.Info("Prefix-based PD disabled (NonCachedTokens=0)")
+	}
+
 	return &PrefixBasedPDDecider{
 		config: config,
 	}, nil
@@ -90,8 +94,10 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	if d.config.NonCachedTokens <= 0 { // always use disaggregation in case of non cached tokens number is 0
-		return true
+	// NonCachedTokens defines the minimum number of non-cached tokens required
+	// to trigger disaggregated PD. A value of 0 disables disaggregation.
+	if d.config.NonCachedTokens == 0 {
+		return false
 	}
 	if endpoint == nil {
 		logger.Error(nil, "prefix decider: endpoint is nil")
@@ -103,12 +109,12 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 	}
 	// inspect the decode endpoint to decide if prefill should run or not.
 	// if the non-cached part is short enough - no disaggregation.
-	prefixInfoRaw, ok := endpoint.Get(approximateprefix.PrefixCacheMatchInfoKey)
+	prefixInfoRaw, ok := endpoint.Get(prefix.PrefixCacheMatchInfoKey)
 	if !ok || prefixInfoRaw == nil {
 		logger.Error(nil, "unable to read prefix cache state")
 		return false
 	}
-	prefixCacheMatchInfo, ok := prefixInfoRaw.(*approximateprefix.PrefixCacheMatchInfo)
+	prefixCacheMatchInfo, ok := prefixInfoRaw.(*prefix.PrefixCacheMatchInfo)
 	if !ok {
 		logger.Error(nil, "wrong type of prefix cache match info")
 		return false
@@ -129,9 +135,4 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 	}
 
 	return true
-}
-
-// Consumes defines data types consumed by this plugin
-func (*PrefixBasedPDDecider) Consumes() map[string]any {
-	return map[string]any{approximateprefix.PrefixCacheMatchInfoKey: approximateprefix.PrefixCacheMatchInfo{}}
 }

@@ -8,16 +8,20 @@ Documentation for developing the inference scheduler.
 - [Golang] `v1.24`+
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
-- [Kustomize]
-- [ZeroMQ]
+- [Kubectl] `v1.25`+
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
 [Docker]:https://www.docker.com/
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
-[Kustomize]:https://kubectl.docs.kubernetes.io/installation/kustomize/
-[ZeroMQ]:https://zeromq.org/
+[Kubectl]:https://kubectl.docs.kubernetes.io/installation/kubectl/
+
+> [!NOTE]
+> Before committing and pushing changes to an upstream repository, you may want to 
+> explicitly run the `make presubmit` target to avoid failing PR checks. The checks
+> are also performed as part of a GitHub action, but running locally can save time
+> and an iteration.
 
 > [!NOTE]
 > **Python is NOT required** as of v0.5.1. Tokenization is handled by a separate UDS (Unix Domain Socket) tokenizer sidecar container. Previous versions (< v0.5.1) used embedded Python tokenizers with daulet/tokenizers bindings, but these are now deprecated.
@@ -59,14 +63,14 @@ There are several ways to access the gateway:
 **Port forward**:
 
 ```bash
-$ kubectl --context llm-d-inference-scheduler-dev port-forward service/inference-gateway 8080:80
+kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio 8080:80
 ```
 
 **NodePort**
 
 ```bash
 # Determine the k8s node address
-$ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep address
+kubectl --context kind-llm-d-inference-scheduler-dev get node -o yaml | grep address
 # The service is accessible over port 80 of the worker IP address.
 ```
 
@@ -74,15 +78,15 @@ $ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep addres
 
 ```bash
 # Install and run cloud-provider-kind:
-$ go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
-$ kubectl --context llm-d-inference-scheduler-dev get service inference-gateway
+go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
+kubectl --context kind-llm-d-inference-scheduler-dev get service inference-gateway-istio
 # Wait for the LoadBalancer External-IP to become available. The service is accessible over port 80.
 ```
 
 You can now make requests matching the IP:port of one of the access mode above:
 
 ```bash
-$ curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 By default the created inference gateway, can be accessed on port 30080. This can
@@ -99,7 +103,7 @@ access the inference gatyeway.
 > [!NOTE]
 > If you require significant customization of this environment beyond
 > what the standard deployment provides, you can use the `deploy/components`
-> with `kustomize` to build your own highly customized environment. You can use
+> with `kubectl kustomize` to build your own highly customized environment. You can use
 > the `deploy/environments/kind` deployment as a reference for your own.
 
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind

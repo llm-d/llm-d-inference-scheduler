@@ -11,12 +11,13 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents/engineadapter"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
@@ -28,6 +29,12 @@ const (
 	// PrecisePrefixCachePluginType is the type-name of the PrecisePrefixCacheScorer plugin.
 	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
 )
+
+type kvCacheIndexer interface {
+	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
+	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	KVBlockIndex() kvblock.Index
+}
 
 // PrecisePrefixCachePluginConfig holds the configuration for the
 // PrecisePrefixCacheScorer plugin.
@@ -50,7 +57,8 @@ var _ scheduling.Scorer = &PrecisePrefixCacheScorer{}
 // PrecisePrefixCachePluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
 func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
-	handle plugin.Handle) (plugin.Plugin, error) {
+	handle plugin.Handle,
+) (plugin.Plugin, error) {
 	indexerConfig, err := kvcache.NewDefaultConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize indexer config: %w", err)
@@ -94,7 +102,10 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 		config.TokenProcessorConfig = kvblock.DefaultTokenProcessorConfig()
 	}
 
-	tokenProcessor := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
+	tokenProcessor, err := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token processor: %w", err)
+	}
 
 	// initialize the indexer
 	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig, tokenProcessor)
@@ -105,7 +116,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	go kvCacheIndexer.Run(ctx)
 
 	// initialize the KV-events pool
-	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex(), tokenProcessor)
+	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex(), tokenProcessor, engineadapter.NewVLLMAdapter())
 	pool.Start(ctx)
 
 	subscribersManager := kvevents.NewSubscriberManager(pool)
@@ -151,7 +162,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 // to keep the internal KV-cache index state up-to-date.
 type PrecisePrefixCacheScorer struct {
 	typedName      plugin.TypedName
-	kvCacheIndexer *kvcache.Indexer
+	kvCacheIndexer kvCacheIndexer
 
 	// until the IGW data-layer is ready to provide endpoint events,
 	// we maintain a TTL cache of known endpoints that are discovered through
@@ -295,8 +306,10 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
 // based on the provided LLM request.
-// If the request contains chat completions, it processes them accordingly.
-// If the request contains regular completions, it uses the prompt directly.
+// If the request already has TokenizedPrompt set (e.g. by an external tokenizer
+// PrepareData plugin), it calls ScoreTokens directly, bypassing
+// prompt/chat tokenization.
+// Otherwise, chat completions and regular completions are tokenized internally.
 func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *scheduling.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
@@ -304,6 +317,16 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 	traceLogger.Info("Getting scores",
 		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"isCompletions", request.Body != nil && request.Body.Completions != nil)
+
+	if request.TokenizedPrompt != nil && len(request.TokenizedPrompt.TokenIDs) > 0 {
+		traceLogger.Info("tokens already in the request, skipping tokenization")
+
+		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, request.TokenizedPrompt.TokenIDs, request.TargetModel, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
+		}
+		return scores, nil
+	}
 
 	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.
 	// If an unexpected dual payload slips through (parser regression/new client), log it and use chat semantics.

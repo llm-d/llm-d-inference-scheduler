@@ -8,9 +8,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestDataParallelProfileHandlerFactory(t *testing.T) {
@@ -76,7 +78,8 @@ func TestDataParallelProfileHandlerFactory(t *testing.T) {
 			if tt.jsonParams != "" {
 				rawParams = json.RawMessage(tt.jsonParams)
 			}
-			plugin, err := DataParallelProfileHandlerFactory(tt.pluginName, rawParams, nil)
+			handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
+			plugin, err := DataParallelProfileHandlerFactory(tt.pluginName, rawParams, handle)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -112,7 +115,8 @@ func TestDataParallelProfileHandlerFactoryInvalidJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			rawParams := json.RawMessage(tt.jsonParams)
-			plugin, err := DataParallelProfileHandlerFactory("test", rawParams, nil)
+			handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
+			plugin, err := DataParallelProfileHandlerFactory("test", rawParams, handle)
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
@@ -226,7 +230,7 @@ func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
 				require.Len(t, pods, 1)
 				assert.Equal(t, "9000", pods[0].GetMetadata().Port)                // overridden
 				expectedHeader := net.JoinHostPort("10.0.0.1", DefaultTestPodPort) // original
-				assert.Equal(t, expectedHeader, headers[common.DataParallelPodHeader])
+				assert.Equal(t, expectedHeader, headers[common.DataParallelEndpointHeader])
 			},
 		},
 		{
@@ -239,7 +243,7 @@ func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
 			checkResult: func(t *testing.T, res *scheduling.SchedulingResult, headers map[string]string) {
 				pod := res.ProfileResults["dp"].TargetEndpoints[0]
 				assert.Equal(t, "0", pod.GetMetadata().Port)
-				assert.Equal(t, "10.0.0.1:8080", headers[common.DataParallelPodHeader])
+				assert.Equal(t, "10.0.0.1:8080", headers[common.DataParallelEndpointHeader])
 			},
 		},
 		{
@@ -255,7 +259,7 @@ func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
 				for _, p := range pods {
 					assert.Equal(t, "8080", p.GetMetadata().Port)
 				}
-				assert.Equal(t, net.JoinHostPort("10.0.0.1", DefaultTestPodPort), headers[common.DataParallelPodHeader])
+				assert.Equal(t, net.JoinHostPort("10.0.0.1", DefaultTestPodPort), headers[common.DataParallelEndpointHeader])
 			},
 		},
 	}

@@ -43,27 +43,27 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 		},
 		{
 			name: "passthrough with no header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{}}},
 
 			expectedPassthrough: true,
 		},
 		{
 			name: "default prefill to one header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a"}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a"}}},
 
 			expectedCode:             200,
 			expectedPrefillHostPorts: []string{"a"},
 		},
 		{
 			name: "default prefill to first header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a,b"}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,b"}}},
 
 			expectedCode:             200,
 			expectedPrefillHostPorts: []string{"a"},
 		},
 		{
 			name:     "sample from comma delimited header",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a,b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -71,7 +71,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 		},
 		{
 			name:     "sample from comma delimited header with whitespace",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{" a, b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{" a, b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -79,7 +79,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 		},
 		{
 			name:     "sample from duplicate values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a,a"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,a"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -87,7 +87,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 		},
 		{
 			name:     "sample from multiple header values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a", "b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a", "b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -95,14 +95,14 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 		},
 		{
 			name:     "sample from empty header value",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{""}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{""}}},
 			sampling: true,
 
 			expectedPassthrough: true,
 		},
 		{
 			name:     "sample from multiple empty header values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"", ""}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"", ""}}},
 			sampling: true,
 
 			expectedPassthrough: true,
@@ -119,7 +119,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.prefillSamplerFn = func(n int) int { return i % n }
 				// verify the hostPort value
 				var hostPort string
-				s.runConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string) { hostPort = selectedHostPort }
+				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string) { hostPort = selectedHostPort }
 				var passthrough bool
 				s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 					passthrough = true

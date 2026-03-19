@@ -32,7 +32,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 	var testInfo *sidecarTestInfo
 
 	BeforeEach(func() {
-		testInfo = sidecarConnectionTestSetup(ConnectorNIXLV2)
+		testInfo = sidecarConnectionTestSetup(KVConnectorNIXLV2)
 	})
 
 	It("should successfully send request to 1. prefill 2. decode with the correct fields", func() {
@@ -41,7 +41,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 			defer GinkgoRecover()
 
 			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+			err := testInfo.proxy.Start(testInfo.ctx, validator)
 			Expect(err).ToNot(HaveOccurred())
 
 			testInfo.stoppedCh <- struct{}{}
@@ -63,7 +63,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())

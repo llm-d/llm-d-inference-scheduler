@@ -74,6 +74,9 @@ export PD_ENABLED="\"${PD_ENABLED:-false}\""
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 
+# By default we are not setting up for external tokenizer
+export EXTERNAL_TOKENIZER_ENABLED="${EXTERNAL_TOKENIZER_ENABLED:-false}"
+
 # Replica counts for P and D
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
 export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
@@ -90,25 +93,16 @@ if [ "${KV_CACHE_ENABLED}" == "true" ]; then
   fi
 fi
 
-# Set PRIMARY_PORT based on PD mode with data parallelism
-if [ "${PD_ENABLED}" == "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-  PRIMARY_PORT="8000"
-else
-  PRIMARY_PORT="0"
-fi
-export PRIMARY_PORT
-
 # Determine EPP config file based on feature flags
-if [ "${KV_CACHE_ENABLED}" == "true" ]; then
+if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
+  # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
+elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
   # KV cache mode (simple mode only)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   # Prefill-Decode mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-  # Data Parallel mode (only needed for Istio pre-1.28.1)
-  # Not really called in kind(docker.io/istio/pilot:1.28.1) by "make env-dev-kind"
-  DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
 else
   # Simple mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
@@ -135,7 +129,7 @@ fi
 set -u
 
 # Check for required programs
-for cmd in kind kubectl kustomize ${CONTAINER_RUNTIME}; do
+for cmd in kind kubectl ${CONTAINER_RUNTIME}; do
     if ! command -v "$cmd" &> /dev/null; then
         echo "Error: $cmd is not installed or not in the PATH."
         exit 1
@@ -232,13 +226,13 @@ fi
 # CRD Deployment (Gateway API + GIE)
 # ------------------------------------------------------------------------------
 
-kustomize build deploy/components/crds-gateway-api |
+kubectl kustomize deploy/components/crds-gateway-api |
 	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
 
-kustomize build deploy/components/crds-gie |
+kubectl kustomize deploy/components/crds-gie |
 	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
 
-kustomize build --enable-helm deploy/components/crds-istio |
+kubectl kustomize --enable-helm deploy/components/crds-istio |
 	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
 
 # ------------------------------------------------------------------------------
@@ -257,10 +251,10 @@ TEMP_FILE=$(mktemp)
 trap "rm -f \"${TEMP_FILE}\"" EXIT
 
 kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
-envsubst '$PRIMARY_PORT' < ${EPP_CONFIG} > ${TEMP_FILE}
+envsubst '$MODEL_NAME' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
-kustomize build --enable-helm  ${KUSTOMIZE_DIR} \
+kubectl kustomize --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \

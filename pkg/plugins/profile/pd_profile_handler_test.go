@@ -8,10 +8,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -332,8 +332,8 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			for profileName, profileRes := range tt.profileResults {
 				if profileName == defaultDecodeProfile && profileRes != nil {
 					for _, pod := range profileRes.TargetEndpoints {
-						pod.Put(approximateprefix.PrefixCacheMatchInfoKey,
-							approximateprefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, 1))
+						pod.Put(dl_prefix.PrefixCacheMatchInfoKey,
+							dl_prefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, 1))
 					}
 				}
 			}
@@ -436,8 +436,8 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 				for profileName, profileRes := range profileResults {
 					if profileName == defaultDecodeProfile && profileRes != nil {
 						for _, endpoint := range profileRes.TargetEndpoints {
-							endpoint.Put(approximateprefix.PrefixCacheMatchInfoKey,
-								approximateprefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, 1))
+							endpoint.Put(dl_prefix.PrefixCacheMatchInfoKey,
+								dl_prefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, 1))
 						}
 					}
 				}
@@ -477,7 +477,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				assert.NotContains(t, res.ProfileResults, defaultPrefillProfile)
 				metadata := res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, DefaultTestPodPort, metadata.Port)
-				assert.Empty(t, headers[common.DataParallelPodHeader])
+				assert.Empty(t, headers[common.DataParallelEndpointHeader])
 			},
 		},
 		{
@@ -505,7 +505,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				metadata := res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, "9000", metadata.Port)
 
-				hostPort := headers[common.DataParallelPodHeader]
+				hostPort := headers[common.DataParallelEndpointHeader]
 				assert.Equal(t, "10.0.0.1:8000", hostPort)
 			},
 		},

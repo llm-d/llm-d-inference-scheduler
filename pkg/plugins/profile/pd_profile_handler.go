@@ -13,9 +13,10 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -75,6 +76,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 	}
 
 	if parameters.PrimaryPort != 0 {
+		log.FromContext(handle.Context()).Info("Deprecated: primaryPort not needed with Istio >= 1.28.1")
 		if parameters.PrimaryPort < 1 || parameters.PrimaryPort > 65535 {
 			return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
 		}
@@ -130,6 +132,11 @@ type PdProfileHandler struct {
 	prefillProfile        string
 	primaryPort           string
 	decider               pdDeciderPlugin
+}
+
+// Consumes defines data types consumed by this plugin (through the PD decider).
+func (*PdProfileHandler) Consumes() map[string]any {
+	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
 }
 
 // TypedName returns the typed name of the plugin.
@@ -238,7 +245,7 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 		// Data Parallel is active
 
 		targetEndpoint := decodeRunResults.TargetEndpoints[0].GetMetadata()
-		request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
+		request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
 
 		updatedResult := scheduling.ProfileRunResult{
 			TargetEndpoints: []scheduling.Endpoint{},
