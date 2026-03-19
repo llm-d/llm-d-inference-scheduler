@@ -1,4 +1,3 @@
-## Pure Go build, no CGO required
 # Go build stage
 FROM quay.io/projectquay/golang:1.25 AS go-builder
 
