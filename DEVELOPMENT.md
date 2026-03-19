@@ -26,6 +26,69 @@ Documentation for developing the inference scheduler.
 > [!NOTE]
 > **Python is NOT required** as of v0.5.1. Tokenization is handled by a separate UDS (Unix Domain Socket) tokenizer sidecar container. Previous versions (< v0.5.1) used embedded Python tokenizers with daulet/tokenizers bindings, but these are now deprecated.
 
+## Running Tests
+
+### Unit Tests
+
+```bash
+make test-unit          # run all unit tests (epp + sidecar)
+make test-unit-epp      # epp only
+make test-unit-sidecar  # sidecar only
+```
+
+### Unit Tests with Coverage
+
+```bash
+make test-coverage          # run all unit tests and report coverage
+make test-coverage-epp      # epp only
+make test-coverage-sidecar  # sidecar only
+```
+
+The `COVERAGE=1` variable is equivalent — useful when you want coverage
+without switching target names:
+
+```bash
+COVERAGE=1 make test-unit
+```
+
+Coverage profiles are written to `coverage/` (gitignored). To generate
+an HTML report and open it in a browser:
+
+```bash
+make coverage-report
+open coverage/epp.html
+```
+
+### Comparing Coverage Against a Baseline
+
+To see how your changes affect coverage relative to `main`:
+
+```bash
+make test-coverage          # run coverage on your branch first
+make coverage-compare       # builds a baseline from main in a temp worktree, then diffs
+```
+
+To compare against a different ref:
+
+```bash
+make coverage-compare BASE_REF=release-0.5
+```
+
+### Integration Tests
+
+```bash
+make test-integration                   # without coverage
+make test-coverage-integration          # with coverage
+COVERAGE=1 make test-integration        # equivalent
+```
+
+### Filtered Tests
+
+```bash
+make test-filter PATTERN=TestName           # epp tests matching pattern
+make test-filter PATTERN=TestName TYPE=sidecar
+```
+
 ## Tokenization Architecture
 
 The project uses **UDS (Unix Domain Socket)** tokenization. Tokenization is handled by a separate UDS tokenizer sidecar container, not by the EPP container itself. Previous embedded tokenizer approaches (daulet/tokenizers, direct Python/vLLM linking) are deprecated and no longer used.
