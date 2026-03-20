@@ -71,6 +71,13 @@ export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 # By default we are not setting up for PD
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
+# By default we are not deploying Prometheus monitoring
+export PROM_ENABLED="${PROM_ENABLED:-false}"
+
+# Set the host port to map to the Prometheus NodePort (30090)
+: "${PROM_HOST_PORT:=30090}"
+
+
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 
@@ -136,6 +143,19 @@ for cmd in kind kubectl ${CONTAINER_RUNTIME}; do
     fi
 done
 
+# Prometheus config-reloader needs sufficient inotify resources
+if [ "${PROM_ENABLED}" == "true" ]; then
+  INOTIFY_INSTANCES=$(cat /proc/sys/fs/inotify/max_user_instances)
+  if [ "${INOTIFY_INSTANCES}" -lt 512 ]; then
+    echo "Error: fs.inotify.max_user_instances is ${INOTIFY_INSTANCES} (need >= 512) for Prometheus."
+    echo ""
+    echo "  sudo sysctl -w fs.inotify.max_user_instances=512"
+    echo ""
+    echo "To persist: echo 'fs.inotify.max_user_instances=512' | sudo tee /etc/sysctl.d/99-inotify.conf"
+    exit 1
+  fi
+fi
+
 TARGET_PORTS="8000"
 
 NEW_LINE=$'\n'
@@ -154,6 +174,13 @@ export TARGET_PORTS
 if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "Cluster '${CLUSTER_NAME}' already exists, re-using"
 else
+    EXTRA_PORT_MAPPINGS=""
+    if [ "${PROM_ENABLED}" == "true" ]; then
+      EXTRA_PORT_MAPPINGS="  - containerPort: 30090
+    hostPort: ${PROM_HOST_PORT}
+    protocol: TCP"
+    fi
+
     kind create cluster --name "${CLUSTER_NAME}" --config - << EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -163,6 +190,7 @@ nodes:
   - containerPort: 30080
     hostPort: ${GATEWAY_HOST_PORT}
     protocol: TCP
+${EXTRA_PORT_MAPPINGS}
 EOF
 fi
 
@@ -273,6 +301,41 @@ kubectl --context ${KUBE_CONTEXT} -n default wait --for=condition=available --ti
 # Wait for the gateway to be ready
 kubectl --context ${KUBE_CONTEXT} wait gateway/inference-gateway --for=condition=Programmed --timeout=300s
 
+# ------------------------------------------------------------------------------
+# Prometheus Monitoring (optional)
+# ------------------------------------------------------------------------------
+
+if [ "${PROM_ENABLED}" == "true" ]; then
+  echo "Deploying Prometheus monitoring stack..."
+
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
+  helm repo update prometheus-community
+
+  # Install kube-prometheus-stack (Prometheus only)
+  helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+    --namespace monitoring --create-namespace \
+    --set grafana.enabled=false \
+    --set alertmanager.enabled=false \
+    --set kubeControllerManager.enabled=false \
+    --set kubeEtcd.enabled=false \
+    --set kubeProxy.enabled=false \
+    --set kubeScheduler.enabled=false \
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.resources.requests.memory=512Mi \
+    --set prometheus.prometheusSpec.resources.limits.memory=1Gi \
+    --set prometheus.service.type=NodePort \
+    --set prometheus.service.nodePort=30090 \
+    --kube-context ${KUBE_CONTEXT} \
+    --wait --timeout 300s
+
+  kubectl kustomize deploy/components/monitoring \
+    | envsubst '${EPP_NAME} ${POOL_NAME}' \
+    | kubectl --context ${KUBE_CONTEXT} apply -f -
+
+  echo "Prometheus monitoring deployed."
+fi
+
 cat <<EOF
 -----------------------------------------
 Deployment completed!
@@ -298,3 +361,13 @@ See DEVELOPMENT.md for additional access methods if the above fails.
 
 -----------------------------------------
 EOF
+
+if [ "${PROM_ENABLED}" == "true" ]; then
+cat <<EOF
+
+Monitoring:
+
+* Prometheus: http://localhost:${PROM_HOST_PORT}
+
+EOF
+fi

@@ -100,6 +100,32 @@ KIND_GATEWAY_HOST_PORT=<selected-port> make env-dev-kind
 **Where:** &lt;selected-port&gt; is the port on your local machine you want to use to
 access the inference gatyeway.
 
+### Prometheus Monitoring
+
+To deploy Prometheus alongside the dev environment:
+
+```bash
+PROM_ENABLED=true make env-dev-kind
+```
+
+Prometheus will be accessible at `http://localhost:30090`. To use a different host port:
+
+```bash
+PROM_ENABLED=true KIND_PROM_HOST_PORT=30091 make env-dev-kind
+```
+
+> [!NOTE]
+> Port mappings are baked into the Kind cluster at creation time. If you change
+> `PROM_ENABLED` or `KIND_PROM_HOST_PORT`, you must recreate the cluster:
+> `make clean-env-dev-kind` first.
+
+### Grafana Dashboard
+
+The upstream [Inference Gateway dashboard](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/tools/dashboards/inference_gateway.json) covers EPP, inference pool, and vLLM metrics.
+
+To use it: add a Prometheus datasource pointed at `http://localhost:30090`, then import
+the JSON via **Dashboards > New > Import**. See the [Grafana installation docs](https://grafana.com/docs/grafana/latest/setup-grafana/installation/) for setup.
+
 > [!NOTE]
 > If you require significant customization of this environment beyond
 > what the standard deployment provides, you can use the `deploy/components`
@@ -157,6 +183,13 @@ The setup can be split in two:
 
 This enables cluster sharing by multiple developers. In case of private/personal
 clusters, the `default` namespace can be used directly.
+
+### RBAC and Permissions
+
+EPP is namespace-scoped. Its `Role` grants `get/watch/list` on `inferencepools`
+and `pods`, plus `create` on `tokenreviews`/`subjectaccessreviews` for metrics
+auth (`--metrics-endpoint-auth=true`, the default). To disable metrics auth and
+avoid the cluster-scoped RBAC requirement, use `--metrics-endpoint-auth=false`.
 
 ### Setup - Infrastructure
 
