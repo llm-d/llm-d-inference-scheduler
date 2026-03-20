@@ -30,9 +30,8 @@ const (
 )
 
 type contextLengthAwareParams struct {
-	// Label is the pod label name to check for context length ranges
-	// Format expected: "min-max" (e.g., "0-2048" or "2048-8192")
-	// Multiple ranges can be specified with comma separation (e.g., "0-2048,8192-16384")
+	// Label is the pod label name to check for context length range.
+	// Format expected: "min-max" (e.g., "0-2048" or "2048-8192"), where min and max are positive integers.
 	Label string `json:"label"`
 
 	// EnableFiltering determines whether the plugin also filters pods that don't match a
@@ -136,14 +135,13 @@ func (p *ContextLengthAware) Filter(ctx context.Context, _ *scheduling.CycleStat
 			continue
 		}
 
-		ranges, err := parseContextRanges(rangeStr)
+		r, err := parseContextRange(rangeStr)
 		if err != nil {
 			logger.Error(err, "Failed to parse context range label", "endpoint", metadata.NamespacedName, "rangeStr", rangeStr)
 			continue
 		}
 
-		// Check if any range matches
-		if matchesAnyRange(contextLength, ranges) {
+		if contextLength >= r.min && contextLength <= r.max {
 			filteredEndpoints = append(filteredEndpoints, endpoint)
 		}
 	}
@@ -176,15 +174,14 @@ func (p *ContextLengthAware) Score(ctx context.Context, _ *scheduling.CycleState
 			continue
 		}
 
-		ranges, err := parseContextRanges(rangeStr)
+		r, err := parseContextRange(rangeStr)
 		if err != nil {
 			logger.Error(err, "Failed to parse context range label", "endpoint", metadata.NamespacedName, "rangeStr", rangeStr)
 			scoredEndpoints[endpoint] = 0.0
 			continue
 		}
 
-		// Find the best matching range and calculate score
-		score := calculateRangeScore(contextLength, ranges)
+		score := calculateRangeScore(contextLength, r)
 		scoredEndpoints[endpoint] = score
 	}
 
@@ -250,110 +247,70 @@ func estimateContextLength(request *scheduling.LLMRequest) int {
 	return estimatedTokens
 }
 
-// parseContextRanges parses a label value into context ranges.
-// Expected format: "min-max" or "min-max,min-max,...", where min and max are positive integers.
-// Examples: "0-2048", "2048-8192", "0-2048,8192-16384".
-func parseContextRanges(rangeStr string) ([]contextRange, error) {
+// parseContextRange parses a label value into a single context range.
+// Expected format: "min-max", where min and max are positive integers.
+// Examples: "0-2048", "2048-8192".
+func parseContextRange(rangeStr string) (contextRange, error) {
 	if rangeStr == "" {
-		return nil, errors.New("empty range string")
+		return contextRange{}, errors.New("empty range string")
 	}
 
-	parts := strings.Split(rangeStr, ",")
-	ranges := make([]contextRange, 0, len(parts))
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		bounds := strings.Split(part, "-")
-		if len(bounds) != 2 {
-			return nil, fmt.Errorf("invalid range format: %s (expected 'min-max')", part)
-		}
-
-		minVal, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
-		if err != nil {
-			return nil, fmt.Errorf("invalid min value: %s", bounds[0])
-		}
-
-		maxVal, err := strconv.Atoi(strings.TrimSpace(bounds[1]))
-		if err != nil {
-			return nil, fmt.Errorf("invalid max value: %s", bounds[1])
-		}
-
-		if minVal > maxVal {
-			return nil, fmt.Errorf("min (%d) cannot be greater than max (%d)", minVal, maxVal)
-		}
-
-		ranges = append(ranges, contextRange{min: minVal, max: maxVal})
+	bounds := strings.Split(rangeStr, "-")
+	if len(bounds) != 2 {
+		return contextRange{}, fmt.Errorf("invalid range format: %s (expected 'min-max')", rangeStr)
 	}
 
-	return ranges, nil
+	minVal, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
+	if err != nil {
+		return contextRange{}, fmt.Errorf("invalid min value: %s", bounds[0])
+	}
+
+	maxVal, err := strconv.Atoi(strings.TrimSpace(bounds[1]))
+	if err != nil {
+		return contextRange{}, fmt.Errorf("invalid max value: %s", bounds[1])
+	}
+
+	if minVal > maxVal {
+		return contextRange{}, fmt.Errorf("min (%d) cannot be greater than max (%d)", minVal, maxVal)
+	}
+
+	return contextRange{min: minVal, max: maxVal}, nil
 }
 
-// matchesAnyRange checks if the context length falls within any of the given ranges.
-func matchesAnyRange(contextLength int, ranges []contextRange) bool {
-	for _, r := range ranges {
-		if contextLength >= r.min && contextLength <= r.max {
-			return true
-		}
-	}
-	return false
-}
-
-// calculateRangeScore calculates a score based on how well the ranges match the context length.
+// calculateRangeScore calculates a score for how well a pod's context range matches the request.
 //
 // Scoring tiers (higher tier always wins over lower):
-//   - In-range match (0.5–1.0): exact or tight matches score highest, wide ranges lower
-//   - Out-of-range fallback (0.0–0.3): when no range matches, pods are ranked by proximity
-//     to the request — e.g., the pod with the largest max is preferred for oversized requests
+//   - In-range match (0.5–1.0): exact or tight matches score highest, wide ranges lower.
+//   - Out-of-range fallback (0.0–0.3): scored by proximity to the nearest boundary,
+//     so the pod with the largest max is preferred for oversized requests.
 //
 // This ensures that out-of-range requests still get routed to the most reasonable pod
 // rather than being scored equally (0.0) and selected arbitrarily.
-func calculateRangeScore(contextLength int, ranges []contextRange) float64 {
-	var bestScore float64
-	matched := false
-
-	for _, r := range ranges {
-		if contextLength >= r.min && contextLength <= r.max {
-			matched = true
-			rangeWidth := r.max - r.min
-			if rangeWidth == 0 {
-				return 1.0
-			}
-
-			widthScore := 1.0 / (1.0 + float64(rangeWidth)/10000.0)
-			headroom := float64(r.max - contextLength)
-			positionScore := headroom / float64(rangeWidth)
-			score := 0.7*widthScore + 0.3*positionScore
-
-			if score > bestScore {
-				bestScore = score
-			}
+func calculateRangeScore(contextLength int, r contextRange) float64 {
+	// In-range match
+	if contextLength >= r.min && contextLength <= r.max {
+		rangeWidth := r.max - r.min
+		if rangeWidth == 0 {
+			return 1.0
 		}
-	}
 
-	if matched {
-		return bestScore
+		widthScore := 1.0 / (1.0 + float64(rangeWidth)/10000.0)
+		headroom := float64(r.max - contextLength)
+		positionScore := headroom / float64(rangeWidth)
+
+		return 0.7*widthScore + 0.3*positionScore
 	}
 
 	// Out-of-range fallback: score by proximity to the nearest range boundary.
 	// Capped at 0.3 so a fallback never outscores an in-range match.
 	const maxFallbackScore = 0.3
-	bestFallback := 0.0
 
-	for _, r := range ranges {
-		var distance int
-		if contextLength > r.max {
-			// Request exceeds this range — prefer larger max values
-			distance = contextLength - r.max
-		} else {
-			// Request below this range — prefer smaller min values
-			distance = r.min - contextLength
-		}
-		// Inverse distance scoring: closer ranges score higher
-		score := maxFallbackScore / (1.0 + float64(distance)/1000.0)
-		if score > bestFallback {
-			bestFallback = score
-		}
+	var distance int
+	if contextLength > r.max {
+		distance = contextLength - r.max
+	} else {
+		distance = r.min - contextLength
 	}
 
-	return bestFallback
+	return maxFallbackScore / (1.0 + float64(distance)/1000.0)
 }

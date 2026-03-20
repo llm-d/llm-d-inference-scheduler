@@ -618,16 +618,10 @@ estimation (characters × 0.25).
 
 **Label Format:**
 
-Pods should be labeled with context length ranges using the format `"min-max"`, where _min_ and _max_ are both positive integers:
+Each pod should be labeled with a single context length range using the format `"min-max"`, where _min_ and _max_ are both positive integers:
 
 ```yaml
 llm-d.ai/context-length-range: "0-2048"
-```
-
-Multiple ranges can be specified with comma separation:
-
-```yaml
-llm-d.ai/context-length-range: "0-2048,8192-16384"
 ```
 
 **Example - Scorer with Precise Tokenization:**
@@ -688,13 +682,6 @@ metadata:
   name: vllm-long-context
   labels:
     llm-d.ai/context-length-range: "2048-8192"
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vllm-flexible
-  labels:
-    llm-d.ai/context-length-range: "0-2048,4096-32768"
 ```
 
 ---

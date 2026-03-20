@@ -91,9 +91,9 @@ func TestContextLengthAwareFilter(t *testing.T) {
 		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "medium-range"},
 			"10.0.0.2",
 			map[string]string{DefaultContextLengthLabel: "100-500"}),
-		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "multi-range"},
+		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "wide-range"},
 			"10.0.0.3",
-			map[string]string{DefaultContextLengthLabel: "0-100,500-2000"}),
+			map[string]string{DefaultContextLengthLabel: "0-2000"}),
 		createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "no-label"},
 			"10.0.0.4",
 			map[string]string{}),
@@ -106,7 +106,7 @@ func TestContextLengthAwareFilter(t *testing.T) {
 	plugin := NewContextLengthAware("test-filter", params)
 	request := createRequest()
 
-	// With empty request body, context length is 0, matches 0-100 range
+	// With empty request body, context length is 0, matches 0-100 and 0-2000 ranges
 	filteredEndpoints := plugin.Filter(ctx, nil, request, endpoints)
 
 	gotNames := make([]string, len(filteredEndpoints))
@@ -114,7 +114,7 @@ func TestContextLengthAwareFilter(t *testing.T) {
 		gotNames[i] = endpoint.GetMetadata().NamespacedName.Name
 	}
 
-	expectedEndpoints := []string{"short-range", "multi-range", "no-label"}
+	expectedEndpoints := []string{"short-range", "wide-range", "no-label"}
 	assert.ElementsMatch(t, expectedEndpoints, gotNames)
 }
 
@@ -157,22 +157,17 @@ func TestContextLengthAwareScore(t *testing.T) {
 	assert.Equal(t, 0.5, scores[endpoints[3]], "no label should score 0.5")
 }
 
-func TestParseContextRanges(t *testing.T) {
+func TestParseContextRange(t *testing.T) {
 	tests := []struct {
 		name      string
 		rangeStr  string
-		expected  []contextRange
+		expected  contextRange
 		expectErr bool
 	}{
 		{
-			name:     "single range",
+			name:     "valid range",
 			rangeStr: "0-100",
-			expected: []contextRange{{min: 0, max: 100}},
-		},
-		{
-			name:     "multiple ranges",
-			rangeStr: "0-100,500-2000",
-			expected: []contextRange{{min: 0, max: 100}, {min: 500, max: 2000}},
+			expected: contextRange{min: 0, max: 100},
 		},
 		{
 			name:      "empty string",
@@ -180,7 +175,7 @@ func TestParseContextRanges(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			name:      "invalid format",
+			name:      "invalid format with three parts",
 			rangeStr:  "0-100-200",
 			expectErr: true,
 		},
@@ -189,69 +184,48 @@ func TestParseContextRanges(t *testing.T) {
 			rangeStr:  "100-50",
 			expectErr: true,
 		},
+		{
+			name:      "non-numeric value",
+			rangeStr:  "abc-100",
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ranges, err := parseContextRanges(tt.rangeStr)
+			r, err := parseContextRange(tt.rangeStr)
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
 				require.NoError(t, err)
-				assert.Equal(t, tt.expected, ranges)
+				assert.Equal(t, tt.expected, r)
 			}
 		})
 	}
 }
 
 func TestCalculateRangeScoreFallback(t *testing.T) {
-	tests := []struct {
-		name          string
-		contextLength int
-		ranges        []contextRange
-		wantHigher    string // which range index should score higher, described
-	}{
-		{
-			name:          "exceeds all ranges — prefer largest max",
-			contextLength: 9000,
-			ranges: []contextRange{
-				{min: 0, max: 2048}, // index 0
-				{min: 0, max: 8192}, // index 1 — closer to 9000
-			},
-		},
-		{
-			name:          "below all ranges — prefer smallest min",
-			contextLength: 50,
-			ranges: []contextRange{
-				{min: 500, max: 2048}, // index 0 — min=500, distance=450
-				{min: 100, max: 1024}, // index 1 — min=100, distance=50 (closer)
-			},
-		},
-	}
+	t.Run("exceeds range — prefer largest max", func(t *testing.T) {
+		smallMax := calculateRangeScore(9000, contextRange{min: 0, max: 2048})
+		largeMax := calculateRangeScore(9000, contextRange{min: 0, max: 8192})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			scores := make([]float64, len(tt.ranges))
-			for i, r := range tt.ranges {
-				scores[i] = calculateRangeScore(tt.contextLength, []contextRange{r})
-			}
+		assert.Greater(t, smallMax, 0.0)
+		assert.LessOrEqual(t, smallMax, 0.3)
+		assert.Greater(t, largeMax, 0.0)
+		assert.LessOrEqual(t, largeMax, 0.3)
+		assert.Greater(t, largeMax, smallMax, "pod with larger max should score higher")
+	})
 
-			// All fallback scores must be in (0, 0.3]
-			for i, s := range scores {
-				assert.Greater(t, s, 0.0, "range %d should have positive fallback score", i)
-				assert.LessOrEqual(t, s, 0.3, "range %d fallback should not exceed 0.3", i)
-			}
+	t.Run("below range — prefer smallest min", func(t *testing.T) {
+		farMin := calculateRangeScore(50, contextRange{min: 500, max: 2048})
+		closeMin := calculateRangeScore(50, contextRange{min: 100, max: 1024})
 
-			if tt.name == "exceeds all ranges — prefer largest max" {
-				// index 1 (max=8192) should score higher than index 0 (max=2048)
-				assert.Greater(t, scores[1], scores[0], "pod with larger max should score higher")
-			}
-			if tt.name == "below all ranges — prefer smallest min" {
-				// index 1 (min=100) should score higher than index 0 (min=500)
-				assert.Greater(t, scores[1], scores[0], "pod with smaller min should score higher")
-			}
-		})
-	}
+		assert.Greater(t, farMin, 0.0)
+		assert.LessOrEqual(t, farMin, 0.3)
+		assert.Greater(t, closeMin, 0.0)
+		assert.LessOrEqual(t, closeMin, 0.3)
+		assert.Greater(t, closeMin, farMin, "pod with smaller min should score higher")
+	})
 }
 
 func TestContextLengthAwareConsumes(t *testing.T) {
