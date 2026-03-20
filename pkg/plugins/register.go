@@ -24,6 +24,7 @@ func RegisterAllPlugins() {
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugin.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)
 	plugin.Register(scorer.NoHitLRUType, scorer.NoHitLRUFactory)
+	plugin.Register(scorer.PendingTokensType, scorer.PendingTokensFactory)
 	plugin.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
 	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
 	// pd decider plugins
