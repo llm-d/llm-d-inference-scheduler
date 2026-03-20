@@ -22,8 +22,7 @@ jobs:
           filters: |
             src:
               - '**/*.go'
-              - Dockerfile.epp
-              - Dockerfile.sidecar
+              - Dockerfile.*
               - Makefile*
               - go.mod
               - scripts/**
@@ -38,24 +37,26 @@ jobs:
       - name: Sanity check repo contents
         run: ls -la
 
-      - name: Extract Go version from go.mod
-        run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
+      - name: Create and resolve Go cache volumes
+        id: go-cache
+        run: |
+          docker volume create llm-d-gomodcache
+          docker volume create llm-d-gobuildcache
+          echo "mod=$(docker volume inspect llm-d-gomodcache -f '{{.Mountpoint}}')" >> $GITHUB_OUTPUT
+          echo "build=$(docker volume inspect llm-d-gobuildcache -f '{{.Mountpoint}}')" >> $GITHUB_OUTPUT
 
-      - name: Set up Go with cache
-        uses: actions/setup-go@v6
+      - name: Cache Go modules and build cache
+        uses: actions/cache@v4
         with:
-          go-version: "${{ env.GO_VERSION }}"
-          cache-dependency-path: ./go.sum
+          path: |
+            ${{ steps.go-cache.outputs.mod }}
+            ${{ steps.go-cache.outputs.build }}
+          key: go-cache-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-cache-
 
-      - name: Install dependencies
-        run: go mod tidy
-
-      - name: Run lint checks
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: "v2.8.0"
-          args: "--config=./.golangci.yml"
-          skip-cache: true
+      - name: Run make lint
+        run: make lint
 
       - name: Run make build
         shell: bash
