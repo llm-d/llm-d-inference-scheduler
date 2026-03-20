@@ -127,6 +127,18 @@ help: ## Print help
 
 ##@ Development
 
+.PHONY: builder-shell
+builder-shell: image-build-builder ## Open a shell in the builder container
+	$(CONTAINER_RUNTIME) run -it $(BUILDER_RUN_FLAGS) $(BUILDER_IMAGE) bash
+
+.PHONY: builder-cluster-shell
+builder-cluster-shell: image-build-builder ## Open a shell with cluster access
+	$(CONTAINER_RUNTIME) run -it $(BUILDER_RUN_FLAGS) $(BUILDER_CLUSTER_FLAGS) $(BUILDER_IMAGE) bash
+
+.PHONY: builder-e2e-shell
+builder-e2e-shell: image-build-builder ## Open a shell with e2e test access
+	$(CONTAINER_RUNTIME) run -it $(BUILDER_RUN_FLAGS) $(BUILDER_E2E_FLAGS) $(BUILDER_IMAGE) bash
+
 .PHONY: install-hooks
 install-hooks: ## Install git hooks
 	git config core.hooksPath hooks
