@@ -63,7 +63,7 @@ else
 	TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
 endif
 
-CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
+CONTAINER_RUNTIME := $(shell { command -v podman >/dev/null 2>&1 && echo podman; } || { command -v docker >/dev/null 2>&1 && echo docker; } || echo "")
 export CONTAINER_RUNTIME
 BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_RUNTIME))
 PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
