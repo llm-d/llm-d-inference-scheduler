@@ -149,7 +149,7 @@ func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *Act
 		}
 	})
 
-	go cleanCachePeriodically(ctx, requestCache, requestTimeout)
+	go CleanCachePeriodically(ctx, requestCache, requestTimeout)
 
 	return scorer
 }
@@ -313,7 +313,8 @@ func (s *ActiveRequest) decrementPodCount(endpointName string) {
 	}
 }
 
-func cleanCachePeriodically[K comparable, V any](ctx context.Context, cache *ttlcache.Cache[K, V], requestTimeout time.Duration) {
+// CleanCachePeriodically periodically deletes expired entries from a TTL cache.
+func CleanCachePeriodically[K comparable, V any](ctx context.Context, cache *ttlcache.Cache[K, V], requestTimeout time.Duration) {
 	ticker := time.NewTicker(requestTimeout)
 	defer ticker.Stop()
 

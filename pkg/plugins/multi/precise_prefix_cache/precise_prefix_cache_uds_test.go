@@ -1,4 +1,4 @@
-package scorer
+package preciseprefixcache
 
 import (
 	"context"
@@ -567,7 +567,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				},
 			}
 
-			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
+			prefixCacheScorer, err := New(ctx, PluginConfig{
 				IndexerConfig:  kvcacheConfig,
 				KVEventsConfig: kvevents.DefaultConfig(),
 			})

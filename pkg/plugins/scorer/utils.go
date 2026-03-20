@@ -6,15 +6,15 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
-// endpointToKey is a function type that converts a Pod to a string key.
+// EndpointToKeyFunc is a function type that converts a Pod to a string key.
 // It returns the key and a boolean indicating success.
-type endpointToKeyFunc func(endpoint scheduling.Endpoint) (string, bool)
+type EndpointToKeyFunc func(endpoint scheduling.Endpoint) (string, bool)
 
-// indexedScoresToNormalizedScoredPods converts a map of pod scores to a map of
+// IndexedScoresToNormalizedScoredPods converts a map of pod scores to a map of
 // normalized scores. The function takes a list of pods, a function to convert
 // a pod to a key, and a map of scores indexed by those keys. It returns a map
 // of pods to their normalized scores.
-func indexedScoresToNormalizedScoredPods(endpoints []scheduling.Endpoint, endpointToKey endpointToKeyFunc,
+func IndexedScoresToNormalizedScoredPods(endpoints []scheduling.Endpoint, endpointToKey EndpointToKeyFunc,
 	scores map[string]float64) map[scheduling.Endpoint]float64 {
 	scoredEndpoints := make(map[scheduling.Endpoint]float64)
 	minScore, maxScore := getMinMax(scores)
