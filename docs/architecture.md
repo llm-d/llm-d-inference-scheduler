@@ -14,6 +14,7 @@ The design enables:
 - Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
+  - We have introduced experimental **Encode/Prefill/Decode (E/P/D and all its permutations)** execution. For a detailed explanation, see [Disaggregated Inference Serving](./disaggregation.md)
 - Pluggable **filters**, **scorers**, and **scrapers** for extensible scheduling
 
 ---
@@ -298,12 +299,12 @@ plugins:
   - type: by-label
     parameters:
       label: "inference-role"
-      validValues: ["decode", "both"]
+      validValues: ["decode", "prefill-decode"]
       allowsNoLabel: false
 ```
 
 In this example:
-- Only pods labeled for decoding (`inference-role=decode`) or supporting both stages (`inference-role=both`) are selected.
+- Only pods labeled for decoding (`inference-role=decode`) or supporting both stages (`inference-role=prefill-decode`) are selected.
 - Pods missing the `inference-role` label are not considered for decode scheduling.
 
 ---
@@ -311,7 +312,7 @@ In this example:
 #### DecodeFilter
 
 Filters out pods that are not marked either as decode or both prefill and decode. The filter looks for
- the label `llm-d.ai/role`, with a value of either `decode` or `both`. In addition pods that are missing
+ the label `llm-d.ai/role`, with a value of either `decode` or `prefill-decode`. In addition pods that are missing
  the label will not be filtered out.
 
 - **Type**: `decode-filter`
@@ -321,7 +322,7 @@ Filters out pods that are not marked either as decode or both prefill and decode
 
 #### PrefillFilter
 
-Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`.
+Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill` or `prefill-decode`.
 
 - **Type**: `prefill-filter`
 - **Parameters**: None
@@ -549,7 +550,7 @@ plugins:
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
-- type: pd-profile-handler
+- type: disagg-profile-handler
   parameters:
     threshold: 10
 schedulingProfiles:
@@ -568,7 +569,7 @@ schedulingProfiles:
 ```
 
 Several things should be noted:
-1. The `PrefillHeader`, `PdProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
+1. The `PrefillHeader`, `DisaggProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
  plugins must be in the list of plugins instantiated.
 2. There must be two scheduler profiles defined.
 3. The scheduler profile for prefill, must include the `PrefillFilter`
@@ -597,14 +598,16 @@ Requires the `prepareDataPlugins` feature gate and KV events from vLLM engines.
 
 ---
 
-## Disaggregated Prefill/Decode (P/D)
+## Disaggregated Encode/Prefill/Decode (E/P/D)
 
 When enabled, the router:
 
 - Selects one pod for **Prefill** (prompt processing)
 - Selects another pod for **Decode** (token generation)
 
-The **vLLM sidecar** handles orchestration between Prefill and Decode stages. It allows:
+*Note:* Note: Encode disaggregation is an experimental feature. When enabled, the router identifies all pods capable of encoding, and the vLLM sidecar distributes multimedia requests to randomly selected pods from that subset. More sophisticated selection strategies are planned for future versions.
+
+The **vLLM sidecar** handles orchestration between Encode, Prefill and Decode stages. It allows:
 
 - Queuing
 - Local memory management
