@@ -20,12 +20,13 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -93,6 +94,12 @@ type Config struct {
 	ECConnector string
 	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE argument.
 	DataParallelSize int
+
+	// MaxIdleConnsPerHost controls how many idle keep-alive connections are
+	// maintained per host for the reverse proxy transports. Set this to at
+	// least the expected concurrency level to avoid connection churn.
+	MaxIdleConnsPerHost int
+
 	// EnablePrefillerSampling configures the proxy to randomly choose from the set
 	// of provided prefill hosts instead of always using the first one.
 	EnablePrefillerSampling bool
@@ -178,8 +185,8 @@ type Server struct {
 
 // NewProxy creates a new routing reverse proxy from the given Config.
 func NewProxy(config Config) *Server {
-	prefillerCache, _ := lru.New[string, http.Handler](16) // nolint:all
-	encoderCache, _ := lru.New[string, http.Handler](16)   // nolint:all
+	prefillerCache, _ := lru.New[string, http.Handler](1024) // nolint:all
+	encoderCache, _ := lru.New[string, http.Handler](1024)   // nolint:all
 
 	server := &Server{
 		readyCh:             make(chan struct{}),
@@ -190,7 +197,7 @@ func NewProxy(config Config) *Server {
 		config:              config,
 		dataParallelProxies: map[string]http.Handler{},
 		forwardDataParallel: true,
-		prefillSamplerFn:    rand.Intn,
+		prefillSamplerFn:    rand.IntN,
 	}
 
 	server.setKVConnector()
@@ -336,22 +343,30 @@ func (s *Server) createProxyHandler(
 	}
 
 	newProxy := httputil.NewSingleHostReverseProxy(u)
+	maxIdle := s.config.MaxIdleConnsPerHost
+	if maxIdle <= 0 {
+		maxIdle = 1024
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 0 // unlimited
+	transport.MaxIdleConnsPerHost = maxIdle
+	transport.MaxConnsPerHost = 0 // unlimited
+	transport.IdleConnTimeout = 90 * time.Second
 	if u.Scheme == schemeHTTPS {
-		newProxy.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: insecureSkipVerify,
-				MinVersion:         tls.VersionTLS12,
-				CipherSuites: []uint16{
-					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-				},
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: insecureSkipVerify,
+			MinVersion:         tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 			},
 		}
 	}
+	newProxy.Transport = transport
 	cache.Add(hostPort, newProxy)
 
 	return newProxy, nil
