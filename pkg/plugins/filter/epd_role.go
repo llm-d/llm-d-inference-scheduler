@@ -13,9 +13,6 @@ const (
 	// RoleEncodePrefill set for workers that can handle encode+prefill (EP/D or P/D disaggregation)
 	RoleEncodePrefill = "encode-prefill"
 
-	// RoleEncodeDecode set for workers that can handle encode+decode (E/PD disaggregation - rare)
-	RoleEncodeDecode = "encode-decode"
-
 	// RoleEncodePrefillDecode set for workers that can handle encode+prefill+decode
 	RoleEncodePrefillDecode = "encode-prefill-decode"
 
@@ -35,7 +32,6 @@ func NewEncodeRole() *ByLabel {
 	return NewByLabel(EncodeRoleType, RoleLabel, false,
 		RoleEncode,
 		RoleEncodePrefill,
-		RoleEncodeDecode,
 		RoleEncodePrefillDecode,
 	)
 }

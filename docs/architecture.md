@@ -209,18 +209,19 @@ Sets a header for use in disaggregated prefill/decode
 
 ---
 
-#### PdProfileHandler
+#### DisaggProfileHandler
 
-> **⚠️ Deprecated:** Use `disagg-profile-handler` instead. This handler is maintained for backward compatibility only.
 
-Selects the profiles to use when running with disaggregated prefill/decode
+Selects the profiles to use when running with disaggregation
 
-- **Type**: `pd-profile-handler` (deprecated)
+- **Type**: `disagg-profile-handler`
 - **Parameters**:
   - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
   - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-  - `deciderPluginName`: specifies the name of the decider plugin. Decider determines whether disaggregated PD should be executed
-  - `primaryPort`: the base port number used for data parallel communication.
+  - `encodeProfile`: specifies the name of the profile used for the encode scheduling. Only needed if the encode profile is not named `encode`.
+  - `encodeDeciderPluginName`: specifies the name of the encode decider plugin. Decider determines whether disaggregated Encode should be executed
+  - `prefillDeciderPluginName`: specifies the name of the prefill decider plugin. Decider determines whether disaggregated PD should be executed
+
 
 **Note:** When using this plugin you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
 
@@ -244,10 +245,9 @@ plugins:
 - type: prefix-based-pd-decider
   parameters:
     nonCachedTokens: 4
-- type: pd-profile-handler
+- type: disagg-profile-handler
   parameters:
-    primaryPort: 8000
-    deciderPluginName: prefix-based-pd-decider
+    prefillDeciderPluginName: prefix-based-pd-decider
 ```
 
 ---
@@ -312,8 +312,7 @@ In this example:
 #### DecodeFilter
 
 Filters out pods that are not marked either as decode or both prefill and decode. The filter looks for
- the label `llm-d.ai/role`, with a value of either `decode` or `prefill-decode`. In addition pods that are missing
- the label will not be filtered out.
+ the label `llm-d.ai/role`, with a value of either `decode`, `prefill-decode` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
 
 - **Type**: `decode-filter`
 - **Parameters**: None
@@ -322,7 +321,16 @@ Filters out pods that are not marked either as decode or both prefill and decode
 
 #### PrefillFilter
 
-Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill` or `prefill-decode`.
+Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`, `encode-prefil`, `prefill-decode` or `encode-prefill-decode`.
+
+- **Type**: `prefill-filter`
+- **Parameters**: None
+
+---
+
+#### EncodeFilter
+
+Filters out pods that are not marked as encode. The filter looks for the label `llm-d.ai/role`, with a value of `encode`, `encode-prefill` or `encode-prefill-decode`.
 
 - **Type**: `prefill-filter`
 - **Parameters**: None
@@ -550,9 +558,12 @@ plugins:
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
+- type: prefix-based-pd-decider
+    parameters:
+      nonCachedTokens: 8
 - type: disagg-profile-handler
   parameters:
-    threshold: 10
+    prefillDeciderPluginName: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill
   plugins:
