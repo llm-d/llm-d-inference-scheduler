@@ -17,10 +17,10 @@ limitations under the License.
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,7 +106,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		}
 		return
 	}
-	preq.Body = io.NopCloser(strings.NewReader(string(pbody)))
+	preq.Body = io.NopCloser(bytes.NewReader(pbody))
 	preq.ContentLength = int64(len(pbody))
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillPodHostPort)
@@ -136,7 +136,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 		if shouldFallbackToDecode(pw) {
 			s.logger.Info("fallback to decode", "request_id", uuidStr)
-			r.Body = io.NopCloser(strings.NewReader(string(original)))
+			r.Body = io.NopCloser(bytes.NewReader(original))
 			s.decoderProxy.ServeHTTP(w, r)
 		} else {
 			for key, values := range pw.Header() {
@@ -145,7 +145,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 				}
 			}
 			w.WriteHeader(pw.statusCode)
-			_, err := w.Write([]byte(pw.buffer.String()))
+			_, err := w.Write(pw.bodyBytes())
 			if err != nil {
 				s.logger.Error(err, "failed to send error response to client")
 			}
@@ -156,7 +156,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 
 	// Process response - extract p/d fields
 	var prefillerResponse map[string]any
-	if err := json.Unmarshal([]byte(pw.buffer.String()), &prefillerResponse); err != nil {
+	if err := json.Unmarshal(pw.bodyBytes(), &prefillerResponse); err != nil {
 		if err := errorJSONInvalid(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -219,7 +219,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		}
 		return
 	}
-	dreq.Body = io.NopCloser(strings.NewReader(string(dbody)))
+	dreq.Body = io.NopCloser(bytes.NewReader(dbody))
 	dreq.ContentLength = int64(len(dbody))
 
 	// 2. Forward to local decoder.
