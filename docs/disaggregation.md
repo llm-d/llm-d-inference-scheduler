@@ -269,7 +269,7 @@ plugins:
   - type: prefix-cache-scorer
     parameters:
       autoTune: false
-      blockSize: 5
+      blockSizeTokens: 5
       maxPrefixBlocksToMatch: 256
       lruCapacityPerServer: 31250
   - type: max-score-picker
@@ -326,7 +326,7 @@ plugins:
   - type: prefix-cache-scorer
     parameters:
       autoTune: false
-      blockSize: 5
+      blockSizeTokens: 5
       maxPrefixBlocksToMatch: 256
       lruCapacityPerServer: 31250
   - type: max-score-picker
