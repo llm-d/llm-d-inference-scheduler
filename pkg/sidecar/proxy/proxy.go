@@ -78,41 +78,48 @@ const (
 	LegacyPoolGroup = "inference.networking.x-k8s.io"
 )
 
-// Config represents the proxy server configuration
+// Config represents the complete runtime configuration for the proxy server.
 type Config struct {
-	// KVConnector is the name of the KV protocol between Prefiller and Decoder.
-	KVConnector string
+	// Port is the port the sidecar is listening on.
+	Port string
+	// TargetURL is the URL of the local decoder (vLLM) instance.
+	TargetURL *url.URL
 
-	// ECConnector is the name of the EC protocol between Encoder and Prefiller (for EPD mode).
+	// KVConnector is the name of the KV protocol between prefiller and decoder.
+	KVConnector string
+	// ECConnector is the name of the EC protocol between encoder and prefiller (for EPD mode).
 	// If empty, encoder stage is skipped.
 	ECConnector string
-
-	// PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers.
-	PrefillerUseTLS bool
-
-	// EncoderUseTLS indicates whether to use TLS when sending requests to encoders.
-	EncoderUseTLS bool
-
-	// PrefillerInsecureSkipVerify configure the proxy to skip TLS verification for requests to prefiller.
-	PrefillerInsecureSkipVerify bool
-
-	// EncoderInsecureSkipVerify configure the proxy to skip TLS verification for requests to encoder.
-	EncoderInsecureSkipVerify bool
-
-	// DecoderInsecureSkipVerify configure the proxy to skip TLS verification for requests to decoder.
-	DecoderInsecureSkipVerify bool
-
-	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE command line argument
+	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE argument.
 	DataParallelSize int
-
 	// EnablePrefillerSampling configures the proxy to randomly choose from the set
 	// of provided prefill hosts instead of always using the first one.
 	EnablePrefillerSampling bool
 
+	// UseTLSForPrefiller indicates whether to use TLS when sending requests to prefillers.
+	UseTLSForPrefiller bool
+	// UseTLSForEncoder indicates whether to use TLS when sending requests to encoders.
+	UseTLSForEncoder bool
+	// InsecureSkipVerifyForPrefiller configures the proxy to skip TLS verification for requests to the prefiller.
+	InsecureSkipVerifyForPrefiller bool
+	// InsecureSkipVerifyForEncoder configures the proxy to skip TLS verification for requests to the encoder.
+	InsecureSkipVerifyForEncoder bool
+	// InsecureSkipVerifyForDecoder configures the proxy to skip TLS verification for requests to the decoder.
+	InsecureSkipVerifyForDecoder bool
+
+	// SecureServing enables TLS for the sidecar server itself.
+	SecureServing bool
 	// CertPath is the path to TLS certificates for the sidecar server.
 	CertPath string
-	// SecureServing enables TLS for the sidecar server.
-	SecureServing bool
+
+	// EnableSSRFProtection enables SSRF protection using InferencePool allowlisting.
+	EnableSSRFProtection bool
+	// InferencePoolNamespace is the Kubernetes namespace of the InferencePool to watch.
+	InferencePoolNamespace string
+	// InferencePoolName is the name of the InferencePool to watch.
+	InferencePoolName string
+	// PoolGroup is the API group of the InferencePool resource.
+	PoolGroup string
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
@@ -143,14 +150,14 @@ type Server struct {
 	config Config
 }
 
-// NewProxy creates a new routing reverse proxy
-func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
+// NewProxy creates a new routing reverse proxy from the given Config.
+func NewProxy(config Config) *Server {
 	prefillerCache, _ := lru.New[string, http.Handler](16) // nolint:all
 	encoderCache, _ := lru.New[string, http.Handler](16)   // nolint:all
 
 	server := &Server{
-		port:                port,
-		decoderURL:          decodeURL,
+		port:                config.Port,
+		decoderURL:          config.TargetURL,
 		readyCh:             make(chan struct{}),
 		prefillerProxies:    prefillerCache,
 		encoderProxies:      encoderCache,
@@ -163,13 +170,13 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 	}
 
 	server.setKVConnector()
-	if config.PrefillerUseTLS {
+	if config.UseTLSForPrefiller {
 		server.prefillerURLPrefix = "https://"
 	}
 
 	if config.ECConnector != "" {
 		server.setECConnector()
-		if config.EncoderUseTLS {
+		if config.UseTLSForEncoder {
 			server.encoderURLPrefix = "https://"
 		}
 	}
@@ -178,10 +185,22 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 }
 
 // Start the HTTP reverse proxy.
-func (s *Server) Start(ctx context.Context, allowlistValidator *AllowlistValidator) error {
+// If s.allowlistValidator has not been pre-set (e.g. in tests), it is constructed from s.config.
+func (s *Server) Start(ctx context.Context) error {
 	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
 
-	s.allowlistValidator = allowlistValidator
+	if s.allowlistValidator == nil {
+		var err error
+		s.allowlistValidator, err = NewAllowlistValidator(
+			s.config.EnableSSRFProtection,
+			s.config.PoolGroup,
+			s.config.InferencePoolNamespace,
+			s.config.InferencePoolName,
+		)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Configure handlers
 	s.handler = s.createRoutes()
@@ -263,7 +282,7 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
 	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
 
-	s.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.DecoderInsecureSkipVerify)
+	s.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.InsecureSkipVerifyForDecoder)
 
 	mux.Handle("/", s.decoderProxy)
 
@@ -320,7 +339,7 @@ func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
 		hostPort,
 		s.prefillerProxies,
 		s.prefillerURLPrefix,
-		s.config.PrefillerInsecureSkipVerify,
+		s.config.InsecureSkipVerifyForPrefiller,
 	)
 }
 
@@ -329,6 +348,6 @@ func (s *Server) encoderProxyHandler(hostPort string) (http.Handler, error) {
 		hostPort,
 		s.encoderProxies,
 		s.encoderURLPrefix,
-		s.config.EncoderInsecureSkipVerify,
+		s.config.InsecureSkipVerifyForEncoder,
 	)
 }

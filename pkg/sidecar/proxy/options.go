@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -28,43 +29,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-// Options holds all configuration options for the pd-sidecar proxy.
+// Options holds the CLI-facing configuration for the pd-sidecar proxy.
+// It embeds Config which represents the complete processed runtime configuration.
+// After Options.Complete(), the embedded Config is fully populated and ready to
+// pass directly to NewProxy.
 type Options struct {
-	Port             string // Port is the port the sidecar is listening on
-	VLLMPort         string // VLLMPort is the port vLLM is listening on
-	TargetURL        string // TargetURL is the target URL for the proxy
-	DataParallelSize int    // DataParallelSize is the vLLM DATA-PARALLEL-SIZE value
-	// KVConnector is the KV protocol between Prefiller and Decoder
-	KVConnector string
-	// ECConnector is the EC protocol between Encoder and Prefiller (for EPD mode)
-	ECConnector string
-	// Deprecated: Use KVConnector instead. Connector is the P/D connector being used
-	Connector                      string
-	EnableTLS                      []string // EnableTLS stages to enable TLS for (new StringSlice flag)
-	TLSInsecureSkipVerify          []string // TLSInsecureSkipVerify stages to skip TLS verification for (new StringSlice flag)
-	UseTLSForPrefiller             bool     // UseTLSForPrefiller indicates whether to use TLS when sending requests to prefillers (set from EnableTLS)
-	UseTLSForEncoder               bool     // UseTLSForEncoder indicates whether to use TLS when sending requests to encoders (set from EnableTLS)
-	UseTLSForDecoder               bool     // UseTLSForDecoder indicates whether to use TLS when sending requests to the decoder (set from EnableTLS)
-	InsecureSkipVerifyForPrefiller bool     // InsecureSkipVerifyForPrefiller configures the proxy to skip TLS verification for requests to prefiller (set from TLSInsecureSkipVerify)
-	InsecureSkipVerifyForEncoder   bool     // InsecureSkipVerifyForEncoder configures the proxy to skip TLS verification for requests to encoder (set from TLSInsecureSkipVerify)
-	InsecureSkipVerifyForDecoder   bool     // InsecureSkipVerifyForDecoder configures the proxy to skip TLS verification for requests to decoder (set from TLSInsecureSkipVerify)
+	// Config holds the processed runtime configuration (populated by Complete()).
+	// Fields with direct CLI flags are bound here via embedding; derived fields are set in Complete().
+	Config
 
-	// Deprecated flag fields (kept for backward compatibility)
-	PrefillerUseTLS             bool   // Deprecated: Use EnableTLS instead. PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers
-	DecoderUseTLS               bool   // Deprecated: Use EnableTLS instead. DecoderUseTLS indicates whether to use TLS when sending requests to the decoder
-	PrefillerInsecureSkipVerify bool   // Deprecated: Use TLSInsecureSkipVerify instead. PrefillerInsecureSkipVerify configures the proxy to skip TLS verification for requests to prefiller
-	DecoderInsecureSkipVerify   bool   // Deprecated: Use TLSInsecureSkipVerify instead. DecoderInsecureSkipVerify configures the proxy to skip TLS verification for requests to decoder
-	SecureProxy                 bool   // SecureProxy enables secure proxy
-	CertPath                    string // CertPath is the path to the certificate for secure proxy
-	EnableSSRFProtection        bool   // EnableSSRFProtection enables SSRF protection using InferencePool allowlisting
-	InferencePool               string // InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace.
+	// VLLMPort is the port vLLM is listening on; used to compute Config.TargetURL in Complete().
+	VLLMPort string
+	// EnableTLS is the list of stages to enable TLS for; used to compute Config.UseTLSFor* in Complete().
+	EnableTLS []string
+	// TLSInsecureSkipVerify is the list of stages to skip TLS verification for; used to compute Config.InsecureSkipVerifyFor* in Complete().
+	TLSInsecureSkipVerify []string
+	// InferencePool in namespace/name or name format; used to compute Config.InferencePoolNamespace/Name in Complete().
+	InferencePool string
 
-	// Deprecated flag fields for InferencePool (kept for backward compatibility)
-	InferencePoolNamespace  string      // Deprecated: Use InferencePool instead. InferencePoolNamespace is the Kubernetes namespace to watch for InferencePool resources
-	InferencePoolName       string      // Deprecated: Use InferencePool instead. InferencePoolName is the specific InferencePool name to watch
-	EnablePrefillerSampling bool        // EnablePrefillerSampling enables random selection of prefill instances
-	PoolGroup               string      // PoolGroup is the group of the InferencePool this Endpoint Picker is associated with
-	LoggingOptions          zap.Options // LoggingOptions holds the zap logging configuration
+	// Deprecated flag fields - kept for backward compatibility; migrated in Complete()
+	Connector                   string // Deprecated: use --kv-connector instead
+	PrefillerUseTLS             bool   // Deprecated: use --enable-tls=prefiller instead
+	DecoderUseTLS               bool   // Deprecated: use --enable-tls=decoder instead
+	PrefillerInsecureSkipVerify bool   // Deprecated: use --tls-insecure-skip-verify=prefiller instead
+	DecoderInsecureSkipVerify   bool   // Deprecated: use --tls-insecure-skip-verify=decoder instead
+
+	LoggingOptions zap.Options // LoggingOptions holds the zap logging configuration
 }
 
 const (
@@ -99,37 +89,26 @@ var (
 	supportedTLSStageNamesStr    = strings.Join([]string{prefillStage, decodeStage, encodeStage}, ", ")
 )
 
-// containsStage checks if a stage is present in the slice
-func containsStage(stages []string, stage string) bool {
-	for _, s := range stages {
-		if s == stage {
-			return true
-		}
-	}
-	return false
-}
-
 // NewOptions returns a new Options struct initialized with default values.
 func NewOptions() *Options {
-	// Get default value for EnablePrefillerSampling from environment
 	enablePrefillerSampling := false
 	if val, err := strconv.ParseBool(os.Getenv("ENABLE_PREFILLER_SAMPLING")); err == nil {
 		enablePrefillerSampling = val
 	}
 
 	return &Options{
-		Port:                    "8000",
-		VLLMPort:                "8001",
-		DataParallelSize:        1,
-		KVConnector:             "",
-		ECConnector:             "",
-		Connector:               KVConnectorNIXLV2,
-		SecureProxy:             true,
-		InferencePool:           os.Getenv("INFERENCE_POOL"),
-		InferencePoolNamespace:  os.Getenv("INFERENCE_POOL_NAMESPACE"),
-		InferencePoolName:       os.Getenv("INFERENCE_POOL_NAME"),
-		EnablePrefillerSampling: enablePrefillerSampling,
-		PoolGroup:               DefaultPoolGroup,
+		Config: Config{
+			Port:                    "8000",
+			DataParallelSize:        1,
+			SecureServing:           true,
+			EnablePrefillerSampling: enablePrefillerSampling,
+			PoolGroup:               DefaultPoolGroup,
+			InferencePoolNamespace:  os.Getenv("INFERENCE_POOL_NAMESPACE"),
+			InferencePoolName:       os.Getenv("INFERENCE_POOL_NAME"),
+		},
+		VLLMPort:      "8001",
+		InferencePool: os.Getenv("INFERENCE_POOL"),
+		Connector:     KVConnectorNIXLV2,
 	}
 }
 
@@ -142,18 +121,24 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	// Add Go flags to pflag (for zap options compatibility)
 	fs.AddGoFlagSet(flag.CommandLine)
 
+	// Direct Config fields - bound via embedded struct
 	fs.StringVar(&opts.Port, "port", opts.Port, "the port the sidecar is listening on")
 	fs.StringVar(&opts.VLLMPort, "vllm-port", opts.VLLMPort, "the port vLLM is listening on")
 	fs.IntVar(&opts.DataParallelSize, "data-parallel-size", opts.DataParallelSize, "the vLLM DATA-PARALLEL-SIZE value")
-
 	fs.StringVar(&opts.KVConnector, "kv-connector", opts.KVConnector,
-		"the KV protocol between Prefiller and Decoder. Supported: "+supportedKVConnectorNamesStr)
-
+		"the KV protocol between prefiller and decoder. Supported: "+supportedKVConnectorNamesStr)
 	fs.StringVar(&opts.ECConnector, "ec-connector", opts.ECConnector,
-		"the EC protocol between Encoder and Prefiller (for EPD mode). Supported: "+supportedECConnectorNamesStr+". Leave empty to skip encoder stage.")
+		"the EC protocol between encoder and prefiller (for EPD mode). Supported: "+supportedECConnectorNamesStr+". Leave empty to skip encoder stage.")
+	fs.BoolVar(&opts.SecureServing, "secure-proxy", opts.SecureServing, "Enables secure proxy. Defaults to true.")
+	fs.StringVar(&opts.CertPath, "cert-path", opts.CertPath, "The path to the certificate for secure proxy. The certificate and private key files are assumed to be named tls.crt and tls.key, respectively. If not set, and secureProxy is enabled, then a self-signed certificate is used (for testing).")
+	fs.BoolVar(&opts.EnableSSRFProtection, "enable-ssrf-protection", opts.EnableSSRFProtection, "enable SSRF protection using InferencePool allowlisting")
+	fs.BoolVar(&opts.EnablePrefillerSampling, "enable-prefiller-sampling", opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
+	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 
+	// Raw flag fields (require transformation in Complete())
 	fs.StringSliceVar(&opts.EnableTLS, "enable-tls", opts.EnableTLS, "stages to enable TLS for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
 	fs.StringSliceVar(&opts.TLSInsecureSkipVerify, "tls-insecure-skip-verify", opts.TLSInsecureSkipVerify, "stages to skip TLS verification for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
+	fs.StringVar(&opts.InferencePool, "inference-pool", opts.InferencePool, "InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace. Can also use INFERENCE_POOL env var.")
 
 	// Deprecated flags - kept for backward compatibility
 	fs.StringVar(&opts.Connector, "connector", opts.Connector, "Deprecated: use --kv-connector instead. The P/D connector being used. Supported: "+supportedKVConnectorNamesStr)
@@ -167,18 +152,11 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	_ = fs.MarkDeprecated("prefiller-tls-insecure-skip-verify", "use --tls-insecure-skip-verify=prefiller instead")
 	fs.BoolVar(&opts.DecoderInsecureSkipVerify, "decoder-tls-insecure-skip-verify", opts.DecoderInsecureSkipVerify, "Deprecated: use --tls-insecure-skip-verify=decoder instead. Skip TLS verification for requests to decoder.")
 	_ = fs.MarkDeprecated("decoder-tls-insecure-skip-verify", "use --tls-insecure-skip-verify=decoder instead")
-	fs.BoolVar(&opts.SecureProxy, "secure-proxy", opts.SecureProxy, "Enables secure proxy. Defaults to true.")
-	fs.StringVar(&opts.CertPath, "cert-path", opts.CertPath, "The path to the certificate for secure proxy. The certificate and private key files are assumed to be named tls.crt and tls.key, respectively. If not set, and secureProxy is enabled, then a self-signed certificate is used (for testing).")
-	fs.BoolVar(&opts.EnableSSRFProtection, "enable-ssrf-protection", opts.EnableSSRFProtection, "enable SSRF protection using InferencePool allowlisting")
-	fs.StringVar(&opts.InferencePool, "inference-pool", opts.InferencePool, "InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace. Can also use INFERENCE_POOL env var.")
 
-	// Deprecated flags - kept for backward compatibility
 	fs.StringVar(&opts.InferencePoolNamespace, "inference-pool-namespace", opts.InferencePoolNamespace, "Deprecated: use --inference-pool instead. The Kubernetes namespace for the InferencePool (defaults to INFERENCE_POOL_NAMESPACE env var)")
 	_ = fs.MarkDeprecated("inference-pool-namespace", "use --inference-pool instead")
 	fs.StringVar(&opts.InferencePoolName, "inference-pool-name", opts.InferencePoolName, "Deprecated: use --inference-pool instead. The specific InferencePool name (defaults to INFERENCE_POOL_NAME env var)")
 	_ = fs.MarkDeprecated("inference-pool-name", "use --inference-pool instead")
-	fs.BoolVar(&opts.EnablePrefillerSampling, "enable-prefiller-sampling", opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
-	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 }
 
 // validateStages checks if all stages in the slice are valid according to the supportedStages map
@@ -192,69 +170,65 @@ func validateStages(stages []string, supportedStages map[string]struct{}, flagNa
 }
 
 // Complete performs post-processing of parsed command-line arguments.
-// This handles migration from deprecated boolean flags to new StringSlice flags,
-// parses the InferencePool field, sets configuration fields from flag fields, and computes the target URL.
+// It handles migration from deprecated flags, parses the InferencePool field,
+// computes boolean TLS fields, and builds Config.TargetURL.
+// After Complete(), opts.Config is fully populated.
 func (opts *Options) Complete() error {
 	// Migrate deprecated Connector flag to KVConnector
 	if opts.Connector != "" && opts.KVConnector == "" {
 		opts.KVConnector = opts.Connector
 	}
 
-	// Parse InferencePool field (namespace/name or just name)
+	// Parse InferencePool field (namespace/name or just name), overriding deprecated separate flags
 	if opts.InferencePool != "" {
 		parts := strings.SplitN(opts.InferencePool, "/", 2)
 		if len(parts) == 2 {
-			// Format: namespace/name
 			opts.InferencePoolNamespace = parts[0]
 			opts.InferencePoolName = parts[1]
 		} else {
-			// Format: name (implies default namespace)
 			opts.InferencePoolNamespace = "default"
 			opts.InferencePoolName = parts[0]
 		}
 	}
 
-	// Migrate deprecated boolean TLS flags to new StringSlice flags
-	if opts.PrefillerUseTLS {
-		if !containsStage(opts.EnableTLS, prefillStage) {
-			opts.EnableTLS = append(opts.EnableTLS, prefillStage)
-		}
+	// Migrate deprecated boolean TLS flags into EnableTLS/TLSInsecureSkipVerify slices
+	if opts.PrefillerUseTLS && !containsStage(opts.EnableTLS, prefillStage) {
+		opts.EnableTLS = append(opts.EnableTLS, prefillStage)
 	}
-	if opts.DecoderUseTLS {
-		if !containsStage(opts.EnableTLS, decodeStage) {
-			opts.EnableTLS = append(opts.EnableTLS, decodeStage)
-		}
+	if opts.DecoderUseTLS && !containsStage(opts.EnableTLS, decodeStage) {
+		opts.EnableTLS = append(opts.EnableTLS, decodeStage)
 	}
-	if opts.PrefillerInsecureSkipVerify {
-		if !containsStage(opts.TLSInsecureSkipVerify, prefillStage) {
-			opts.TLSInsecureSkipVerify = append(opts.TLSInsecureSkipVerify, prefillStage)
-		}
+	if opts.PrefillerInsecureSkipVerify && !containsStage(opts.TLSInsecureSkipVerify, prefillStage) {
+		opts.TLSInsecureSkipVerify = append(opts.TLSInsecureSkipVerify, prefillStage)
 	}
-	if opts.DecoderInsecureSkipVerify {
-		if !containsStage(opts.TLSInsecureSkipVerify, decodeStage) {
-			opts.TLSInsecureSkipVerify = append(opts.TLSInsecureSkipVerify, decodeStage)
-		}
+	if opts.DecoderInsecureSkipVerify && !containsStage(opts.TLSInsecureSkipVerify, decodeStage) {
+		opts.TLSInsecureSkipVerify = append(opts.TLSInsecureSkipVerify, decodeStage)
 	}
 
-	// Set configuration fields from flag fields
+	// Compute Config TLS fields from stage slices
 	opts.UseTLSForPrefiller = containsStage(opts.EnableTLS, prefillStage)
 	opts.UseTLSForEncoder = containsStage(opts.EnableTLS, encodeStage)
-	opts.UseTLSForDecoder = containsStage(opts.EnableTLS, decodeStage)
+	useTLSForDecoder := containsStage(opts.EnableTLS, decodeStage)
 	opts.InsecureSkipVerifyForPrefiller = containsStage(opts.TLSInsecureSkipVerify, prefillStage)
 	opts.InsecureSkipVerifyForEncoder = containsStage(opts.TLSInsecureSkipVerify, encodeStage)
 	opts.InsecureSkipVerifyForDecoder = containsStage(opts.TLSInsecureSkipVerify, decodeStage)
 
-	// Compute target URL based on decoder TLS settings and VLLM port
+	// Compute Config.TargetURL from VLLMPort and decoder TLS setting
 	scheme := "http"
-	if opts.UseTLSForDecoder {
+	if useTLSForDecoder {
 		scheme = schemeHTTPS
 	}
-	opts.TargetURL = scheme + "://localhost:" + opts.VLLMPort
+	var err error
+	opts.TargetURL, err = url.Parse(scheme + "://localhost:" + opts.VLLMPort)
+	if err != nil {
+		return fmt.Errorf("failed to parse target URL: %w", err)
+	}
 
 	return nil
 }
 
 // Validate checks the Options for invalid or conflicting values.
+// Complete must be called before Validate.
 func (opts *Options) Validate() error {
 	// Validate KV connector
 	if _, ok := supportedKVConnectors[opts.KVConnector]; !ok {
@@ -279,18 +253,15 @@ func (opts *Options) Validate() error {
 	if err := validateStages(opts.EnableTLS, supportedTLSStages, "--enable-tls"); err != nil {
 		return err
 	}
-
 	if err := validateStages(opts.TLSInsecureSkipVerify, supportedTLSStages, "--tls-insecure-skip-verify"); err != nil {
 		return err
 	}
 
 	// Validate InferencePool format if provided
 	if opts.InferencePool != "" {
-		// Check for invalid characters (only allow alphanumeric, hyphen, and forward slash)
 		if strings.Count(opts.InferencePool, "/") > 1 {
 			return errors.New("--inference-pool must be in format 'namespace/name' or 'name', not multiple slashes")
 		}
-		// Validate that it doesn't contain invalid characters like spaces or special chars
 		parts := strings.Split(opts.InferencePool, "/")
 		for _, part := range parts {
 			if part == "" {
@@ -310,4 +281,14 @@ func (opts *Options) Validate() error {
 	}
 
 	return nil
+}
+
+// containsStage checks if a stage is present in the slice
+func containsStage(stages []string, stage string) bool {
+	for _, s := range stages {
+		if s == stage {
+			return true
+		}
+	}
+	return false
 }

@@ -16,8 +16,6 @@ limitations under the License.
 package main
 
 import (
-	"net/url"
-
 	"github.com/spf13/pflag"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -56,7 +54,7 @@ func main() {
 		}()
 	}
 
-	// Complete options (handles migration from deprecated flags)
+	// Complete options (handles migration from deprecated flags, populates Config)
 	if err := opts.Complete(); err != nil {
 		logger.Error(err, "Failed to complete configuration")
 		return
@@ -70,55 +68,27 @@ func main() {
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
-	// Parse target URL
-	targetURL, err := url.Parse(opts.TargetURL)
-	if err != nil {
-		logger.Error(err, "failed to parse targetURL")
-		return
-	}
-
-	config := proxy.Config{
-		KVConnector:                 opts.KVConnector,
-		ECConnector:                 opts.ECConnector,
-		PrefillerUseTLS:             opts.UseTLSForPrefiller,
-		EncoderUseTLS:               opts.UseTLSForEncoder,
-		PrefillerInsecureSkipVerify: opts.InsecureSkipVerifyForPrefiller,
-		EncoderInsecureSkipVerify:   opts.InsecureSkipVerifyForEncoder,
-		DecoderInsecureSkipVerify:   opts.InsecureSkipVerifyForDecoder,
-		DataParallelSize:            opts.DataParallelSize,
-		EnablePrefillerSampling:     opts.EnablePrefillerSampling,
-		SecureServing:               opts.SecureProxy,
-		CertPath:                    opts.CertPath,
-	}
-
 	logger.Info("Proxy configuration",
 		"port", opts.Port,
 		"targetURL", opts.TargetURL,
-		"kvConnector", config.KVConnector,
-		"ecConnector", config.ECConnector,
-		"dataParallelSize", config.DataParallelSize,
-		"prefillerUseTLS", config.PrefillerUseTLS,
-		"prefillerInsecureSkipVerify", config.PrefillerInsecureSkipVerify,
-		"decoderInsecureSkipVerify", config.DecoderInsecureSkipVerify,
-		"enablePrefillerSampling", config.EnablePrefillerSampling,
-		"secureServing", config.SecureServing,
-		"certPath", config.CertPath,
+		"kvConnector", opts.KVConnector,
+		"ecConnector", opts.ECConnector,
+		"dataParallelSize", opts.DataParallelSize,
+		"useTLSForPrefiller", opts.UseTLSForPrefiller,
+		"insecureSkipVerifyForPrefiller", opts.InsecureSkipVerifyForPrefiller,
+		"insecureSkipVerifyForDecoder", opts.InsecureSkipVerifyForDecoder,
+		"enablePrefillerSampling", opts.EnablePrefillerSampling,
+		"secureServing", opts.SecureServing,
+		"certPath", opts.CertPath,
 		"enableSSRFProtection", opts.EnableSSRFProtection,
 		"inferencePoolNamespace", opts.InferencePoolNamespace,
 		"inferencePoolName", opts.InferencePoolName,
 		"poolGroup", opts.PoolGroup,
 	)
 
-	// Create SSRF protection validator
-	validator, err := proxy.NewAllowlistValidator(opts.EnableSSRFProtection, opts.PoolGroup, opts.InferencePoolNamespace, opts.InferencePoolName)
-	if err != nil {
-		logger.Error(err, "failed to create SSRF protection validator")
-		return
-	}
+	proxyServer := proxy.NewProxy(opts.Config)
 
-	proxyServer := proxy.NewProxy(opts.Port, targetURL, config)
-
-	if err := proxyServer.Start(ctx, validator); err != nil {
+	if err := proxyServer.Start(ctx); err != nil {
 		logger.Error(err, "failed to start proxy server")
 	}
 }

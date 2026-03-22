@@ -58,7 +58,7 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 		if err != nil {
 			return err
 		}
-		handler := s.createDecoderProxyHandler(decoderURL, s.config.DecoderInsecureSkipVerify)
+		handler := s.createDecoderProxyHandler(decoderURL, s.config.InsecureSkipVerifyForDecoder)
 		s.dataParallelProxies[hostPort] = handler
 	}
 
