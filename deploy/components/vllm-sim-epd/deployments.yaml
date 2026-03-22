@@ -40,6 +40,36 @@ spec:
         app: ${POOL_NAME}
         llm-d.ai/role: encode
     spec:
+      initContainers:
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       containers:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
@@ -81,11 +111,16 @@ spec:
         - name: PORT
           value: "8000"
         volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
         - mountPath: /shared-ec-cache
           name: ec-cache
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       volumes:
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}
       - name: ec-cache
         persistentVolumeClaim:
           claimName: ec-cache-pvc
@@ -108,6 +143,35 @@ spec:
         llm-d.ai/role: prefill-decode
     spec:
       initContainers:
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -188,11 +252,16 @@ spec:
         - name: PORT
           value: "8200"
         volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
         - mountPath: /shared-ec-cache
           name: ec-cache
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       volumes:
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}
       - name: ec-cache
         persistentVolumeClaim:
           claimName: ec-cache-pvc
