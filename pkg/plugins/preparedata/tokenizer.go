@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
@@ -34,6 +35,40 @@ import (
 type tokenizer interface {
 	Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
 	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error)
+}
+
+// TokenizedPrompt contains the result of tokenizing the request prompt.
+// This was previously defined in the upstream scheduling package but was
+// removed in GIE v1.4.0. We define it locally and share it between plugins
+// via a package-level sync.Map keyed by request ID.
+type TokenizedPrompt struct {
+	// TokenIDs are the token IDs for the prompt.
+	TokenIDs []uint32
+}
+
+// tokenizedPromptStore is a package-level store for tokenized prompts,
+// keyed by request ID. This allows the tokenizer PrepareData plugin to
+// produce data that scorer plugins can consume.
+var tokenizedPromptStore sync.Map
+
+// StoreTokenizedPrompt stores a tokenized prompt for the given request ID.
+func StoreTokenizedPrompt(requestID string, tp *TokenizedPrompt) {
+	tokenizedPromptStore.Store(requestID, tp)
+}
+
+// LoadTokenizedPrompt retrieves the tokenized prompt for the given request ID.
+// Returns nil if no tokenized prompt has been stored for this request.
+func LoadTokenizedPrompt(requestID string) *TokenizedPrompt {
+	v, ok := tokenizedPromptStore.Load(requestID)
+	if !ok {
+		return nil
+	}
+	return v.(*TokenizedPrompt)
+}
+
+// DeleteTokenizedPrompt removes the tokenized prompt for the given request ID.
+func DeleteTokenizedPrompt(requestID string) {
+	tokenizedPromptStore.Delete(requestID)
 }
 
 const (
@@ -112,7 +147,7 @@ func (p *TokenizerPlugin) WithName(name string) *TokenizerPlugin {
 
 // Produces returns the data keys this plugin produces.
 func (p *TokenizerPlugin) Produces() map[string]any {
-	return map[string]any{TokenizedPromptKey: scheduling.TokenizedPrompt{}}
+	return map[string]any{TokenizedPromptKey: TokenizedPrompt{}}
 }
 
 // Consumes returns the data keys this plugin requires.
@@ -121,14 +156,14 @@ func (p *TokenizerPlugin) Consumes() map[string]any {
 }
 
 // PrepareRequestData tokenizes the request prompt and stores the result
-// on the LLMRequest so that scorers and filters can use it.
-// If the request already contains tokenized data, tokenization is skipped.
-// This method is fail-open: errors are logged and TokenizedPrompt is left nil.
+// in a shared store so that scorers and filters can use it.
+// If the request already has tokenized data stored, tokenization is skipped.
+// This method is fail-open: errors are logged and no tokenized prompt is stored.
 func (p *TokenizerPlugin) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, pods []scheduling.Endpoint) error {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 
-	if request.TokenizedPrompt != nil {
+	if LoadTokenizedPrompt(request.RequestId) != nil {
 		traceLogger.Info("TokenizedPrompt already set, skipping")
 		return nil
 	}
@@ -164,9 +199,9 @@ func (p *TokenizerPlugin) PrepareRequestData(ctx context.Context, request *sched
 	}
 
 	traceLogger.Info("Tokenization succeeded", "tokenCount", len(tokenIDs))
-	request.TokenizedPrompt = &scheduling.TokenizedPrompt{
+	StoreTokenizedPrompt(request.RequestId, &TokenizedPrompt{
 		TokenIDs: tokenIDs,
-	}
+	})
 
 	return nil
 }

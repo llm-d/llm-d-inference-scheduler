@@ -106,7 +106,7 @@ func TestTokenizerPlugin_ProducesAndConsumes(t *testing.T) {
 	produces := p.Produces()
 	require.NotNil(t, produces)
 	assert.Contains(t, produces, TokenizedPromptKey)
-	assert.IsType(t, scheduling.TokenizedPrompt{}, produces[TokenizedPromptKey])
+	assert.IsType(t, TokenizedPrompt{}, produces[TokenizedPromptKey])
 
 	assert.Nil(t, p.Consumes())
 }
@@ -133,7 +133,7 @@ func TestTokenizerPlugin_PrepareRequestData(t *testing.T) {
 		{
 			name: "skips when already tokenized",
 			request: &scheduling.LLMRequest{
-				TokenizedPrompt: &scheduling.TokenizedPrompt{TokenIDs: []uint32{1, 2, 3}},
+				RequestId: "already-tokenized",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
 				},
@@ -143,14 +143,15 @@ func TestTokenizerPlugin_PrepareRequestData(t *testing.T) {
 		},
 		{
 			name:          "skips nil body",
-			request:       &scheduling.LLMRequest{Body: nil},
+			request:       &scheduling.LLMRequest{RequestId: "nil-body", Body: nil},
 			tokenizer:     nil,
 			wantNilPrompt: true,
 		},
 		{
 			name: "skips unsupported request type",
 			request: &scheduling.LLMRequest{
-				Body: &scheduling.LLMRequestBody{},
+				RequestId: "unsupported",
+				Body:      &scheduling.LLMRequestBody{},
 			},
 			tokenizer:     nil,
 			wantNilPrompt: true,
@@ -158,6 +159,7 @@ func TestTokenizerPlugin_PrepareRequestData(t *testing.T) {
 		{
 			name: "tokenizes completions request",
 			request: &scheduling.LLMRequest{
+				RequestId: "completions",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{
 						Prompt: "The quick brown fox",
@@ -170,6 +172,7 @@ func TestTokenizerPlugin_PrepareRequestData(t *testing.T) {
 		{
 			name: "tokenizes chat completions request",
 			request: &scheduling.LLMRequest{
+				RequestId: "chat-completions",
 				Body: &scheduling.LLMRequestBody{
 					ChatCompletions: &scheduling.ChatCompletionsRequest{
 						Messages: []scheduling.Message{
@@ -184,6 +187,7 @@ func TestTokenizerPlugin_PrepareRequestData(t *testing.T) {
 		{
 			name: "fail-open on tokenization error",
 			request: &scheduling.LLMRequest{
+				RequestId: "fail-open",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{Prompt: "fail"},
 				},
@@ -202,15 +206,25 @@ func TestTokenizerPlugin_PrepareRequestData(t *testing.T) {
 			ctx := utils.NewTestContext(t)
 			p := newTestPlugin(tt.tokenizer)
 
+			// Pre-store tokenized prompt for the "already tokenized" test case
+			if tt.name == "skips when already tokenized" {
+				StoreTokenizedPrompt(tt.request.RequestId, &TokenizedPrompt{TokenIDs: []uint32{1, 2, 3}})
+				defer DeleteTokenizedPrompt(tt.request.RequestId)
+			}
+
 			err := p.PrepareRequestData(ctx, tt.request, nil)
 			require.NoError(t, err)
 
+			tp := LoadTokenizedPrompt(tt.request.RequestId)
 			if tt.wantNilPrompt {
-				assert.Nil(t, tt.request.TokenizedPrompt)
+				assert.Nil(t, tp)
 			} else {
-				require.NotNil(t, tt.request.TokenizedPrompt)
-				assert.Equal(t, tt.wantTokenIDs, tt.request.TokenizedPrompt.TokenIDs)
+				require.NotNil(t, tp)
+				assert.Equal(t, tt.wantTokenIDs, tp.TokenIDs)
 			}
+
+			// Clean up stored prompts
+			DeleteTokenizedPrompt(tt.request.RequestId)
 		})
 	}
 }

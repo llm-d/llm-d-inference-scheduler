@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -101,10 +102,12 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-tokenized",
 		TargetModel: "test-model",
-		TokenizedPrompt: &scheduling.TokenizedPrompt{
-			TokenIDs: tokenIDs,
-		},
 	}
+
+	preparedata.StoreTokenizedPrompt(request.RequestId, &preparedata.TokenizedPrompt{
+		TokenIDs: tokenIDs,
+	})
+	defer preparedata.DeleteTokenizedPrompt(request.RequestId)
 
 	scorer.Score(ctx, scheduling.NewCycleState(), request, testEndpoints)
 
@@ -134,13 +137,15 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-skip-empty",
 		TargetModel: "test-model",
-		TokenizedPrompt: &scheduling.TokenizedPrompt{
-			TokenIDs: []uint32{},
-		},
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
 		},
 	}
+
+	preparedata.StoreTokenizedPrompt(request.RequestId, &preparedata.TokenizedPrompt{
+		TokenIDs: []uint32{},
+	})
+	defer preparedata.DeleteTokenizedPrompt(request.RequestId)
 
 	scorer.Score(ctx, scheduling.NewCycleState(), request, testEndpoints)
 	assert.False(t, fromTokensCalled, "ScoreTokens should not be called with empty TokenIDs")

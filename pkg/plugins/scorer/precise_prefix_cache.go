@@ -25,6 +25,7 @@ import (
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
@@ -688,10 +689,11 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"isCompletions", request.Body != nil && request.Body.Completions != nil)
 
-	if request.TokenizedPrompt != nil && len(request.TokenizedPrompt.TokenIDs) > 0 {
+	tokenizedPrompt := preparedata.LoadTokenizedPrompt(request.RequestId)
+	if tokenizedPrompt != nil && len(tokenizedPrompt.TokenIDs) > 0 {
 		traceLogger.Info("tokens already in the request, skipping tokenization")
 
-		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, request.TokenizedPrompt.TokenIDs, request.TargetModel, nil)
+		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tokenizedPrompt.TokenIDs, request.TargetModel, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
 		}
