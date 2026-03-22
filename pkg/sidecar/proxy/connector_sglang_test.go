@@ -44,8 +44,8 @@ var _ = Describe("SGLang Connector", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, validator)
+			testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+			err := testInfo.proxy.Start(testInfo.ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			testInfo.stoppedCh <- struct{}{}
@@ -136,14 +136,16 @@ var _ = Describe("SGLang Connector", func() {
 
 		// Re-initialize proxy to fetch the new mock addresses
 		cfg := Config{
+			Port:        "0",
+			TargetURL:   testInfo.decodeURL,
 			KVConnector: KVConnectorSGLang,
 		}
-		testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg)
+		testInfo.proxy = NewProxy(cfg)
 
 		go func() {
 			defer GinkgoRecover()
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, validator)
+			testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+			err := testInfo.proxy.Start(testInfo.ctx)
 			Expect(err).ToNot(HaveOccurred())
 			testInfo.stoppedCh <- struct{}{}
 		}()

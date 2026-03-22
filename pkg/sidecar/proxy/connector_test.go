@@ -57,8 +57,8 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, validator)
+					testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+					err := testInfo.proxy.Start(testInfo.ctx)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
@@ -118,8 +118,8 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, validator)
+					testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+					err := testInfo.proxy.Start(testInfo.ctx)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
@@ -200,8 +200,8 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	url, err := url.Parse(testInfo.decodeBackend.URL)
 	Expect(err).ToNot(HaveOccurred())
 	testInfo.decodeURL = url
-	cfg := Config{KVConnector: connector}
-	testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg) // port 0 to automatically choose one that's available.
+	cfg := Config{Port: "0", TargetURL: testInfo.decodeURL, KVConnector: connector}
+	testInfo.proxy = NewProxy(cfg)
 
 	return &testInfo
 }

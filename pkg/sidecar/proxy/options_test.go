@@ -294,8 +294,10 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			if opts.UseTLSForPrefiller != tt.expectedUseTLSForPrefiller {
 				t.Errorf("UseTLSForPrefiller = %v, want %v", opts.UseTLSForPrefiller, tt.expectedUseTLSForPrefiller)
 			}
-			if opts.UseTLSForDecoder != tt.expectedUseTLSForDecoder {
-				t.Errorf("UseTLSForDecoder = %v, want %v", opts.UseTLSForDecoder, tt.expectedUseTLSForDecoder)
+			// UseTLSForDecoder is encoded in TargetURL scheme (https = true)
+			useTLSForDecoder := opts.TargetURL != nil && opts.TargetURL.Scheme == schemeHTTPS
+			if useTLSForDecoder != tt.expectedUseTLSForDecoder {
+				t.Errorf("UseTLSForDecoder (via TargetURL.Scheme) = %v, want %v", useTLSForDecoder, tt.expectedUseTLSForDecoder)
 			}
 			if opts.InsecureSkipVerifyForPrefiller != tt.expectedInsecureForPrefiller {
 				t.Errorf("InsecureSkipVerifyForPrefiller = %v, want %v", opts.InsecureSkipVerifyForPrefiller, tt.expectedInsecureForPrefiller)
@@ -303,7 +305,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			if opts.InsecureSkipVerifyForDecoder != tt.expectedInsecureForDecoder {
 				t.Errorf("InsecureSkipVerifyForDecoder = %v, want %v", opts.InsecureSkipVerifyForDecoder, tt.expectedInsecureForDecoder)
 			}
-			if opts.TargetURL != tt.expectedTargetURL {
+			if opts.TargetURL == nil || opts.TargetURL.String() != tt.expectedTargetURL {
 				t.Errorf("TargetURL = %v, want %v", opts.TargetURL, tt.expectedTargetURL)
 			}
 
