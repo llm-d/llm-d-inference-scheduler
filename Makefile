@@ -241,11 +241,11 @@ coverage-compare: ## Compare coverage vs baseline (BASELINE_DIR=path or BASE_REF
 	    printf "\033[33;1m==== Building Baseline Coverage from $(BASE_REF) ====\033[0m\n"; \
 	    WORKTREE=$$(mktemp -d); \
 	    git worktree add --quiet "$$WORKTREE" "$(BASE_REF)"; \
-	    cd "$$WORKTREE" && mkdir -p "$(COVERAGE_DIR)/baseline" && \
+	    ( cd "$$WORKTREE" && mkdir -p "$(COVERAGE_DIR)/baseline" && \
 	        go test -coverprofile="$(COVERAGE_DIR)/baseline/epp.out" -covermode=atomic \
 	            $$($(epp_TEST_FILES) | tr '\n' ' ') && \
 	        go test -coverprofile="$(COVERAGE_DIR)/baseline/sidecar.out" -covermode=atomic \
-	            $$($(sidecar_TEST_FILES) | tr '\n' ' '); \
+	            $$($(sidecar_TEST_FILES) | tr '\n' ' ') ); \
 	    git worktree remove --force "$$WORKTREE"; \
 	    ./scripts/compare-coverage.sh "$(COVERAGE_DIR)/baseline" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \
 	fi
