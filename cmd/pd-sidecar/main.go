@@ -68,23 +68,7 @@ func main() {
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
 
-	logger.Info("Proxy configuration",
-		"port", opts.Port,
-		"targetURL", opts.TargetURL,
-		"kvConnector", opts.KVConnector,
-		"ecConnector", opts.ECConnector,
-		"dataParallelSize", opts.DataParallelSize,
-		"useTLSForPrefiller", opts.UseTLSForPrefiller,
-		"insecureSkipVerifyForPrefiller", opts.InsecureSkipVerifyForPrefiller,
-		"insecureSkipVerifyForDecoder", opts.InsecureSkipVerifyForDecoder,
-		"enablePrefillerSampling", opts.EnablePrefillerSampling,
-		"secureServing", opts.SecureServing,
-		"certPath", opts.CertPath,
-		"enableSSRFProtection", opts.EnableSSRFProtection,
-		"inferencePoolNamespace", opts.InferencePoolNamespace,
-		"inferencePoolName", opts.InferencePoolName,
-		"poolGroup", opts.PoolGroup,
-	)
+	logger.Info("Proxy configuration", "config", opts.Config)
 
 	proxyServer := proxy.NewProxy(opts.Config)
 

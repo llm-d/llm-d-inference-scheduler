@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"math/rand"
 	"net"
 	"net/http"
@@ -120,6 +121,31 @@ type Config struct {
 	InferencePoolName string
 	// PoolGroup is the API group of the InferencePool resource.
 	PoolGroup string
+}
+
+// MarshalJSON implements json.Marshaler for Config.
+// It overrides the default marshaling of TargetURL (*url.URL) to serialize it as a string.
+func (c Config) MarshalJSON() ([]byte, error) {
+	// alias avoids infinite recursion when calling json.Marshal below
+	type alias Config
+	targetURL := ""
+	if c.TargetURL != nil {
+		targetURL = c.TargetURL.String()
+	}
+	return json.Marshal(struct {
+		alias
+		TargetURL string `json:"TargetURL"`
+	}{
+		alias:     alias(c),
+		TargetURL: targetURL,
+	})
+}
+
+// String returns a JSON representation of Config for logging and debugging.
+// It implements fmt.Stringer.
+func (c Config) String() string {
+	b, _ := json.Marshal(c)
+	return string(b)
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
