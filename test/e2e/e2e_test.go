@@ -862,7 +862,6 @@ kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer
   parameters:
-    hashBlockSize: 10
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 256
 - type: decode-filter

@@ -542,7 +542,6 @@ plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
   parameters:
-    hashBlockSize: 5
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
 - type: prefill-filter
@@ -551,7 +550,6 @@ plugins:
 - type: pd-profile-handler
   parameters:
     threshold: 10
-    hashBlockSize: 5
 schedulingProfiles:
 - name: prefill
   plugins:
