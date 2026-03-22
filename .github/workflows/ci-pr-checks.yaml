@@ -66,6 +66,9 @@ jobs:
         shell: bash
         run: make build
 
+      # Restore the baseline saved from the last main push so the compare step
+      # can diff against it. Missing cache (first PR ever) is not an error;
+      # compare-coverage.sh reports all components as "new" and exits 0.
       - name: Restore main branch coverage baseline
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@v4
@@ -82,11 +85,20 @@ jobs:
         shell: bash
         run: make coverage-compare BASELINE_DIR=coverage/baseline
 
+      # Copy the freshly generated profiles into coverage/baseline so that
+      # the saved path matches the restored path on future PR runs.
+      - name: Stage coverage baseline for caching
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        run: |
+          mkdir -p coverage/baseline
+          cp coverage/*.out coverage/baseline/
+
       - name: Save coverage baseline (main branch only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/cache/save@v4
         with:
-          path: coverage
+          path: coverage/baseline
           key: coverage-main
 
       - name: Run make test-e2e
