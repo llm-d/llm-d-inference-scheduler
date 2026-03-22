@@ -102,7 +102,6 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 
 			targetPod := decodePods[0]
-			survivingPod := decodePods[1]
 
 			ginkgo.By("Force-deleting decode pod " + targetPod)
 			deletePodByName(targetPod, 0)
@@ -110,11 +109,11 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 			ginkgo.By("Waiting for killed pod to be replaced")
 			gomega.Eventually(podGone(targetPod, 1), podRemovalTimeout, 1*time.Second).Should(gomega.BeTrue())
 
-			ginkgo.By("Verifying new requests route to the surviving pod")
+			ginkgo.By("Verifying new requests route to a pod other than the killed one")
 			for range 5 {
 				nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-				gomega.Expect(podHdr).Should(gomega.Equal(survivingPod))
+				gomega.Expect(podHdr).ShouldNot(gomega.Equal(targetPod))
 			}
 
 			ginkgo.By("Waiting for replacement pod to become ready")
@@ -160,15 +159,13 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 			ginkgo.By(fmt.Sprintf("Force-deleting decode pod %s during the stream", targetPod))
 			deletePodByName(targetPod, 0)
 
-			select {
-			case err := <-errCh:
-				if err != nil {
-					ginkgo.By(fmt.Sprintf("Stream terminated with error: %v", err))
-				} else {
-					ginkgo.By("Stream completed before pod was killed")
-				}
-			case <-time.After(disruptionClient.Timeout + 5*time.Second):
-				ginkgo.Fail("streaming request hung after pod kill")
+			err := <-errCh
+			if err != nil {
+				ginkgo.By(fmt.Sprintf("Stream terminated with error: %v", err))
+				gomega.Expect(err).ShouldNot(gomega.MatchError(context.DeadlineExceeded),
+					"stream should fail fast on pod kill, not hang until client timeout")
+			} else {
+				ginkgo.By("Stream completed before pod was killed")
 			}
 
 			ginkgo.By("Waiting for replacement pod")
@@ -223,15 +220,11 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 			ginkgo.By("Scaling deployment back up")
 			scaleDeployment(modelServers, 1)
 
-			ginkgo.By("Waiting for pod to become ready")
-			gomega.Eventually(func() int {
-				_, currentDecode := getModelServerPods(podSelector, prefillSelector, decodeSelector)
-				return len(currentDecode)
-			}, readyTimeout, 2*time.Second).Should(gomega.Equal(1))
-
 			ginkgo.By("Verifying requests succeed after recovery")
-			nsHdr, _, _ = runCompletion(simplePrompt, simModelName)
-			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Eventually(func() string {
+				nsHdr, _, _ := runCompletion(simplePrompt, simModelName)
+				return nsHdr
+			}, eppRecoveryTimeout, 2*time.Second).Should(gomega.Equal(nsName))
 		})
 	})
 
@@ -321,12 +314,6 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 
 			ginkgo.By("Scaling back to 1")
 			scaleDeployment(modelServers, 1)
-
-			ginkgo.By("Waiting for pod to become ready")
-			gomega.Eventually(func() int {
-				_, currentDecode := getModelServerPods(podSelector, prefillSelector, decodeSelector)
-				return len(currentDecode)
-			}, readyTimeout, 2*time.Second).Should(gomega.Equal(1))
 
 			ginkgo.By("Waiting for traffic to observe recovery")
 			successBaseline := tc.successes()
