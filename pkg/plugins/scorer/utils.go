@@ -4,6 +4,8 @@ import (
 	"math"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
 
 // endpointToKey is a function type that converts a Pod to a string key.
@@ -54,4 +56,25 @@ func getMinMax(scores map[string]float64) (float64, float64) {
 	}
 
 	return minScore, maxScore
+}
+
+// stripDPRankFromScores takes a scores map that may contain DP-aware keys
+// (e.g., "10.0.0.1:8080@dp0") and returns a new map with the "@dp<N>" suffix
+// stripped, along with a map of the winning DP rank per pod identifier.
+// When multiple DP ranks exist for the same base pod identifier,
+// the highest score is kept (best rank wins for that endpoint).
+// The winningRanks map only contains entries for pods that had DP rank suffixes.
+func stripDPRankFromScores(scores map[string]float64) (map[string]float64, map[string]int) {
+	stripped := make(map[string]float64, len(scores))
+	winningRanks := make(map[string]int, len(scores))
+	for key, score := range scores {
+		baseKey, dpRank := common.ParseDPScoringKey(key)
+		if existing, ok := stripped[baseKey]; !ok || score > existing {
+			stripped[baseKey] = score
+			if dpRank != common.NoDataParallelRank {
+				winningRanks[baseKey] = dpRank
+			}
+		}
+	}
+	return stripped, winningRanks
 }
