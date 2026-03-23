@@ -99,6 +99,8 @@ type Config struct {
 
 	// UseTLSForPrefiller indicates whether to use TLS when sending requests to prefillers.
 	UseTLSForPrefiller bool
+	// UseTLSForDecoder indicates whether to use TLS when sending requests to the decoder.
+	UseTLSForDecoder bool
 	// UseTLSForEncoder indicates whether to use TLS when sending requests to encoders.
 	UseTLSForEncoder bool
 	// InsecureSkipVerifyForPrefiller configures the proxy to skip TLS verification for requests to the prefiller.
@@ -211,7 +213,7 @@ func NewProxy(config Config) *Server {
 }
 
 // Start the HTTP reverse proxy.
-// If s.allowlistValidator has not been pre-set (e.g. in tests), it is constructed from s.config.
+// allowlistValidator is constructed from s.config on first call; inject an alternative before calling Start to override.
 func (s *Server) Start(ctx context.Context) error {
 	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
 

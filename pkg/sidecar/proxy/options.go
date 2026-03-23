@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -121,7 +122,6 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	// Add Go flags to pflag (for zap options compatibility)
 	fs.AddGoFlagSet(flag.CommandLine)
 
-	// Direct Config fields - bound via embedded struct
 	fs.StringVar(&opts.Port, "port", opts.Port, "the port the sidecar is listening on")
 	fs.StringVar(&opts.VLLMPort, "vllm-port", opts.VLLMPort, "the port vLLM is listening on")
 	fs.IntVar(&opts.DataParallelSize, "data-parallel-size", opts.DataParallelSize, "the vLLM DATA-PARALLEL-SIZE value")
@@ -135,7 +135,6 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&opts.EnablePrefillerSampling, "enable-prefiller-sampling", opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 
-	// Raw flag fields (require transformation in Complete())
 	fs.StringSliceVar(&opts.EnableTLS, "enable-tls", opts.EnableTLS, "stages to enable TLS for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
 	fs.StringSliceVar(&opts.TLSInsecureSkipVerify, "tls-insecure-skip-verify", opts.TLSInsecureSkipVerify, "stages to skip TLS verification for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
 	fs.StringVar(&opts.InferencePool, "inference-pool", opts.InferencePool, "InferencePool in namespace/name or name format (e.g., default/my-pool or my-pool). A single name implies the 'default' namespace. Can also use INFERENCE_POOL env var.")
@@ -192,30 +191,30 @@ func (opts *Options) Complete() error {
 	}
 
 	// Migrate deprecated boolean TLS flags into EnableTLS/TLSInsecureSkipVerify slices
-	if opts.PrefillerUseTLS && !containsStage(opts.EnableTLS, prefillStage) {
+	if opts.PrefillerUseTLS && !slices.Contains(opts.EnableTLS, prefillStage) {
 		opts.EnableTLS = append(opts.EnableTLS, prefillStage)
 	}
-	if opts.DecoderUseTLS && !containsStage(opts.EnableTLS, decodeStage) {
+	if opts.DecoderUseTLS && !slices.Contains(opts.EnableTLS, decodeStage) {
 		opts.EnableTLS = append(opts.EnableTLS, decodeStage)
 	}
-	if opts.PrefillerInsecureSkipVerify && !containsStage(opts.TLSInsecureSkipVerify, prefillStage) {
+	if opts.PrefillerInsecureSkipVerify && !slices.Contains(opts.TLSInsecureSkipVerify, prefillStage) {
 		opts.TLSInsecureSkipVerify = append(opts.TLSInsecureSkipVerify, prefillStage)
 	}
-	if opts.DecoderInsecureSkipVerify && !containsStage(opts.TLSInsecureSkipVerify, decodeStage) {
+	if opts.DecoderInsecureSkipVerify && !slices.Contains(opts.TLSInsecureSkipVerify, decodeStage) {
 		opts.TLSInsecureSkipVerify = append(opts.TLSInsecureSkipVerify, decodeStage)
 	}
 
 	// Compute Config TLS fields from stage slices
-	opts.UseTLSForPrefiller = containsStage(opts.EnableTLS, prefillStage)
-	opts.UseTLSForEncoder = containsStage(opts.EnableTLS, encodeStage)
-	useTLSForDecoder := containsStage(opts.EnableTLS, decodeStage)
-	opts.InsecureSkipVerifyForPrefiller = containsStage(opts.TLSInsecureSkipVerify, prefillStage)
-	opts.InsecureSkipVerifyForEncoder = containsStage(opts.TLSInsecureSkipVerify, encodeStage)
-	opts.InsecureSkipVerifyForDecoder = containsStage(opts.TLSInsecureSkipVerify, decodeStage)
+	opts.UseTLSForPrefiller = slices.Contains(opts.EnableTLS, prefillStage)
+	opts.UseTLSForDecoder = slices.Contains(opts.EnableTLS, decodeStage)
+	opts.UseTLSForEncoder = slices.Contains(opts.EnableTLS, encodeStage)
+	opts.InsecureSkipVerifyForPrefiller = slices.Contains(opts.TLSInsecureSkipVerify, prefillStage)
+	opts.InsecureSkipVerifyForEncoder = slices.Contains(opts.TLSInsecureSkipVerify, encodeStage)
+	opts.InsecureSkipVerifyForDecoder = slices.Contains(opts.TLSInsecureSkipVerify, decodeStage)
 
 	// Compute Config.TargetURL from VLLMPort and decoder TLS setting
 	scheme := "http"
-	if useTLSForDecoder {
+	if opts.UseTLSForDecoder {
 		scheme = schemeHTTPS
 	}
 	var err error
@@ -281,14 +280,4 @@ func (opts *Options) Validate() error {
 	}
 
 	return nil
-}
-
-// containsStage checks if a stage is present in the slice
-func containsStage(stages []string, stage string) bool {
-	for _, s := range stages {
-		if s == stage {
-			return true
-		}
-	}
-	return false
 }

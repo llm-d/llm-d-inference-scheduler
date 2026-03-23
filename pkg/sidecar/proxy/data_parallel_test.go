@@ -54,11 +54,10 @@ var _ = Describe("Data Parallel support", func() {
 			decodeURL, err := url.Parse("http://localhost:" + strconv.Itoa(fakeDecodePort))
 			Expect(err).ToNot(HaveOccurred())
 			cfg := Config{
-				Port:                         strconv.Itoa(fakeProxyPort),
-				TargetURL:                    decodeURL,
-				KVConnector:                  KVConnectorNIXLV2,
-				InsecureSkipVerifyForDecoder: false,
-				DataParallelSize:             testDataParallelSize,
+				Port:             strconv.Itoa(fakeProxyPort),
+				TargetURL:        decodeURL,
+				KVConnector:      KVConnectorNIXLV2,
+				DataParallelSize: testDataParallelSize,
 			}
 			theProxy := NewProxy(cfg)
 			theProxy.allowlistValidator, err = NewAllowlistValidator(false, DefaultPoolGroup, "", "")
