@@ -37,12 +37,10 @@ type disaggProfileHandlerParameters struct {
 	EncodeDeciderPluginName  string `json:"encodeDeciderPluginName"`
 }
 
-// DisaggProfileHandlerFactory is the unified factory for all disaggregation
-// profile handlers. Active stages are determined by which profiles are configured:
-//   - Set prefillProfile + optional deciderPlugin for P/D
-//   - Set encodeProfile (+ optional encodeDeciderPluginName) for E/PD
-//   - Set both for E/P/D
-//   - Omit both for decode-only
+// DisaggProfileHandlerFactory is the unified factory for all disaggregation profile handlers.
+//
+//	if rawParameters include PrefillDeciderPluginName - P disaggregation will be supported
+//	if rawParameters include EncodeDeciderPluginName - E disaggregation will be supported
 func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := disaggProfileHandlerParameters{
 		DecodeProfile:  defaultDecodeProfile,
@@ -55,7 +53,7 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 		}
 	}
 
-	// Resolve PD decider (required when prefill is active).
+	// Resolve PD decider (optional).
 	var pdDecider deciderPlugin
 	if parameters.PrefillDeciderPluginName != "" {
 		p := handle.Plugin(parameters.PrefillDeciderPluginName)
@@ -89,12 +87,8 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 }
 
 // NewDisaggProfileHandler creates a DisaggProfileHandler directly.
-// Active stages are determined by which profile names are non-empty.
-func NewDisaggProfileHandler(
-	decodeProfile, prefillProfile, encodeProfile string,
-	pdDecider deciderPlugin,
-	encodeDecider deciderPlugin,
-) *DisaggProfileHandler {
+// Active stages are determined by non-empty deciders.
+func NewDisaggProfileHandler(decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *DisaggProfileHandler {
 	return newDisaggProfileHandler(
 		DisaggProfileHandlerType,
 		decodeProfile, prefillProfile, encodeProfile,
@@ -114,7 +108,7 @@ var _ scheduling.ProfileHandler = &DisaggProfileHandler{}
 //   - Prefill (P): schedules a prefill pod for KV-cache disaggregation
 //   - Decode  (D): schedules the decode pod (always runs first)
 //
-// All three handler types (P/D, E/PD, E/P/D) share this single implementation;
+// All four handler types (D, P/D, E/PD, E/P/D) share this single implementation;
 // active stages are selected by setting encodeProfile / prefillProfile.
 type DisaggProfileHandler struct {
 	typedName      plugin.TypedName
@@ -134,12 +128,7 @@ func (h *DisaggProfileHandler) WithName(name string) *DisaggProfileHandler {
 	return h
 }
 
-func newDisaggProfileHandler(
-	handlerType string,
-	decodeProfile, prefillProfile, encodeProfile string,
-	pdDecider deciderPlugin,
-	encodeDecider deciderPlugin,
-) *DisaggProfileHandler {
+func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *DisaggProfileHandler {
 	return &DisaggProfileHandler{
 		typedName:      plugin.TypedName{Type: handlerType},
 		decodeProfile:  decodeProfile,
@@ -153,13 +142,8 @@ func newDisaggProfileHandler(
 // Pick implements scheduling.ProfileHandler.
 // Stages run in order: decode → encode (optional) → prefill (optional).
 // Returns the next profile to execute, or an empty map when all stages are done.
-func (h *DisaggProfileHandler) Pick(
-	ctx context.Context,
-	_ *scheduling.CycleState,
-	request *scheduling.LLMRequest,
-	profiles map[string]scheduling.SchedulerProfile,
-	profileResults map[string]*scheduling.ProfileRunResult,
-) map[string]scheduling.SchedulerProfile {
+func (h *DisaggProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(ctx, "llm_d.epp.disagg.profile_handler.pick",
 		trace.WithSpanKind(trace.SpanKindInternal),
@@ -218,7 +202,7 @@ func (h *DisaggProfileHandler) Pick(
 			}
 			// Decider rejected prefill — mark as evaluated so we don't re-run the decider.
 			profileResults[h.prefillProfile] = nil
-			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_prefil"))
+			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_prefill"))
 		}
 	}
 

@@ -9,9 +9,12 @@ This document describes the architecture and request lifecycle for enabling **di
 - **E/PD** (Encode/Prefill-Decode) — offloads multimodal encoding to dedicated workers while a single worker handles prefill and decode.
 - **E/P/D** (Encode/Prefill/Decode) — the full three-stage pipeline where each stage runs on a specialized worker.
 
-> **Note**: The Encode (E) stage is only relevant for requests with multimodal content (images, video, or audio). For text-only requests, the encode stage is skipped regardless of the configured topology.
+> [!NOTE] 
+> The Encode (E) stage is only relevant for requests with multimodal content (images, video, or audio). For text-only requests, the encode stage is skipped regardless of the configured topology.
 
-> **Note**: Encode disaggregation (E/PD and E/P/D) is under active development in both vLLM and llm-d-inference-scheduler. The implementation described here is a proof of concept (PoC) and is subject to change.
+> [!WARNING]
+> Encode disaggregation (E/PD and E/P/D) is under active development in both vLLM and llm-d-inference-scheduler. 
+> The implementation described here is a proof of concept (PoC) and is subject to change.
 
 All topologies are driven by the unified `disagg-profile-handler` plugin, which selects active stages based on configuration, the user request (e.g., presence of multimodal content), and the system status (e.g., KV-cache hit ratio on the selected decode pod). The architecture aims to improve flexibility, scalability, and performance by enabling separation of inference stages onto different workers.
 
@@ -170,7 +173,8 @@ sequenceDiagram
 - Launches local decode job
 - Sends final response
 
-> **Note**: No sidecar or coordination logic is needed on the prefill or encode nodes.
+> [!NOTE]
+> No sidecar or coordination logic is needed on the prefill or encode nodes.
 
 ---
 
@@ -332,7 +336,7 @@ plugins:
   - type: max-score-picker
   - type: encode-header-handler
   - type: prefill-header-handler
-  - type: always-disagg-encode-decider
+  - type: always-disagg-multimodal-decider
   - type: prefix-based-pd-decider
     parameters:
       nonCachedTokens: 8
@@ -341,7 +345,7 @@ plugins:
       encodeProfile: encode
       prefillProfile: prefill
       decodeProfile: decode
-      encodeDeciderPluginName: always-disagg-encode-decider
+      encodeDeciderPluginName: always-disagg-multimodal-decider
       prefillDeciderPluginName: prefix-based-pd-decider
 schedulingProfiles:
   - name: encode
@@ -418,8 +422,8 @@ It always triggers disaggregation, regardless of prefix cache state or prompt ch
 - type: always-disagg-pd-decider
 ```
 
-**Notes:**
-This plugin accepts no parameters.
+> [!NOTE]
+> This plugin accepts no parameters.
 
 It’s useful for validating end-to-end prefill/decode splitting and comparing system performance under forced disaggregation.
 
@@ -427,18 +431,18 @@ It’s useful for validating end-to-end prefill/decode splitting and comparing s
 
 Encode deciders determine whether multimodal encoding should be offloaded to dedicated encode workers.
 
-#### Always-Disagg Encode Decider
+#### Always Disagg Multimodal Decider
 
-The `always-disagg-encode-decider` triggers encode disaggregation whenever the request contains multimodal content (images, video, or audio). Text-only requests are never sent to encode workers.
+The `always-disagg-multimodal-decider` triggers encode disaggregation whenever the request contains multimodal content (images, video, or audio). Text-only requests are never sent to encode workers.
 
 **Configuration example:**
 
 ```yaml
-- type: always-disagg-encode-decider
+- type: always-disagg-multimodal-decider
 ```
 
-**Notes:**
-This plugin accepts no parameters.
+> [!NOTE]
+> This plugin accepts no parameters.
 
 It checks for the presence of `image_url`, `video_url`, or `input_audio` content blocks in the chat-completions request body. If any multimodal content is found, the encode stage is activated.
 

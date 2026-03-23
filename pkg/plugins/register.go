@@ -36,5 +36,5 @@ func RegisterAllPlugins() {
 	plugin.Register(profile.AlwaysDisaggPDDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(preparedata.TokenizerPluginType, preparedata.TokenizerPluginFactory)
 	// ep decider plugins
-	plugin.Register(profile.AlwaysDisaggEncodePluginType, profile.AlwaysDisaggEncodeDeciderPluginFactory)
+	plugin.Register(profile.AlwaysDisaggMulimodalPluginType, profile.AlwaysDisaggMulimodalDeciderPluginFactory)
 }

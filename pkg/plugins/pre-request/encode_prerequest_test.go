@@ -267,6 +267,31 @@ func TestPreRequestEncodeIPv6Address(t *testing.T) {
 	assert.Equal(t, net.JoinHostPort(encodeTestIPv6Addr, encodeTestPort), request.Headers[common.EncoderEndpointsHeader])
 }
 
+func TestPreRequestEncodeProfileNilResult(t *testing.T) {
+	// disagg_profile_handler sets the encode profile result to nil when the
+	// decider decides not to encode. Verify PreRequest handles this gracefully.
+	ctx := utils.NewTestContext(t)
+	handler := NewEncodeHeaderHandler("encode").WithName("test")
+
+	request := &scheduling.LLMRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"encode": nil,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, result)
+	})
+	_, exists := request.Headers[common.EncoderEndpointsHeader]
+	assert.False(t, exists)
+}
+
 func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewEncodeHeaderHandler("encode").WithName("test")

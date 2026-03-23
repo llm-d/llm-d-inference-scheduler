@@ -90,12 +90,10 @@ func (p *PrefillHeaderHandler) PreRequest(ctx context.Context, request *scheduli
 	}
 	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 
-	if _, found := request.Headers[common.PrefillEndpointHeader]; found {
-		request.Headers[common.PrefillEndpointHeader] = "" // clear header, if already set
-	}
+	delete(request.Headers, common.PrefillEndpointHeader) // clear header, if already set
 
-	prefillProfileRunResult, exists := schedulingResult.ProfileResults[p.prefillProfile]
-	if !exists {
+	prefillProfileRunResult, ok := schedulingResult.ProfileResults[p.prefillProfile]
+	if !ok || prefillProfileRunResult == nil {
 		span.SetAttributes(
 			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
 			attribute.String("llm_d.epp.pd.reason", "no_prefill_profile_result"),

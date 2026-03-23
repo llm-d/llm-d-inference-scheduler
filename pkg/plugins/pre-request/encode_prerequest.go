@@ -94,12 +94,10 @@ func (p *EncodeHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 	}
 	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 
-	if _, found := request.Headers[common.EncoderEndpointsHeader]; found {
-		request.Headers[common.EncoderEndpointsHeader] = "" // clear header, if already set
-	}
+	delete(request.Headers, common.EncoderEndpointsHeader) // clear header, if already set
 
-	encodeProfileRunResult, exists := schedulingResult.ProfileResults[p.encodeProfile]
-	if !exists {
+	encodeProfileRunResult, ok := schedulingResult.ProfileResults[p.encodeProfile]
+	if !ok || encodeProfileRunResult == nil {
 		span.SetAttributes(
 			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
 			attribute.String("llm_d.epp.encode.reason", "no_encode_profile_result"),

@@ -223,7 +223,8 @@ Selects the profiles to use when running with disaggregation
   - `prefillDeciderPluginName`: specifies the name of the prefill decider plugin. Decider determines whether disaggregated PD should be executed
 
 
-**Note:** When using this plugin you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
+> [!NOTE]
+> When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
 
 ---
 
@@ -234,7 +235,8 @@ Type: `prefix-based-pd-decider`
 **Parameters**
 - `nonCachedTokens`: length, in token, of the uncached part of the user input above which disaggregated PD is triggered.
 
-Note: `prepareDataPlugins` feature gate should be enabled
+> [!NOTE]
+> `prepareDataPlugins` feature gate should be enabled
 
 **Example**
 ```yaml
@@ -256,7 +258,8 @@ plugins:
 
 Filters out pods using a standard Kubernetes label selector.
 
-**Note:** Only the matching labels feature of Kubernetes label selectors is supported.
+> [!NOTE]
+>  Only the matching labels feature of Kubernetes label selectors is supported.
 
 - **Type**: `by-label-selector`
 - **Parameters**: A standard Kubernetes label selector.
@@ -321,7 +324,7 @@ Filters out pods that are not marked either as decode or both prefill and decode
 
 #### PrefillFilter
 
-Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`, `encode-prefil`, `prefill-decode` or `encode-prefill-decode`.
+Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`, `encode-prefill`, `prefill-decode` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
 
 - **Type**: `prefill-filter`
 - **Parameters**: None
@@ -330,9 +333,9 @@ Filters out pods that are not marked as prefill. The filter looks for the label 
 
 #### EncodeFilter
 
-Filters out pods that are not marked as encode. The filter looks for the label `llm-d.ai/role`, with a value of `encode`, `encode-prefill` or `encode-prefill-decode`.
+Filters out pods that are not marked as encode. The filter looks for the label `llm-d.ai/role`, with a value of `encode`, `encode-prefill` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
 
-- **Type**: `prefill-filter`
+- **Type**: `encode-filter`
 - **Parameters**: None
 
 ---
@@ -361,12 +364,13 @@ Configuration:
 
 See list of parameters at [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
 
-Note that in most cases you will only need to set:
-- Model name in the `tokenizersPoolConfig` to match the model used in the vLLM deployment.
-- HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
-  - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
-- **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
-- `KVBlockIndex` metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
+> [!NOTE] 
+> In most cases you will only need to set:
+> - Model name in the `tokenizersPoolConfig` to match the model used in the vLLM deployment.
+> - HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
+>  - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
+> - **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
+> - `KVBlockIndex` metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
 
 Example configuration with the above parameters set:
 
@@ -536,9 +540,11 @@ schedulingProfiles:
         weight: 1
 ```
 
-**Note:** This scorer is designed to work alongside a prefix cache scorer (such as `prefix-cache-scorer` or
-`precise-prefix-cache-scorer`). If no prefix cache state is available, all requests are treated as cold.
-When integrating with a prefix-cache scorer, the prefix-cache scorer should be defined first in the scheduling profile.
+> [!NOTE]
+>  This scorer is designed to work alongside a prefix cache scorer (such as `prefix-cache-scorer` or
+> `precise-prefix-cache-scorer`). If no prefix cache state is available, all requests are treated as cold.
+> When integrating with a prefix-cache scorer, the prefix-cache scorer should be defined first in the scheduling 
+> profile.
 
 ---
 
@@ -616,7 +622,11 @@ When enabled, the router:
 - Selects one pod for **Prefill** (prompt processing)
 - Selects another pod for **Decode** (token generation)
 
-*Note:* Note: Encode disaggregation is an experimental feature. When enabled, the router identifies all pods capable of encoding, and the vLLM sidecar distributes multimedia requests to randomly selected pods from that subset. More sophisticated selection strategies are planned for future versions.
+> [!NOTE] 
+> Encode disaggregation is an experimental feature. When enabled, the router 
+> identifies all pods capable of encoding, and the vLLM sidecar distributes multimedia 
+> requests to randomly selected pods from that subset. More sophisticated selection 
+> strategies are planned for future versions.
 
 The **vLLM sidecar** handles orchestration between Encode, Prefill and Decode stages. It allows:
 
@@ -624,7 +634,9 @@ The **vLLM sidecar** handles orchestration between Encode, Prefill and Decode st
 - Local memory management
 - Experimental protocol compatibility
 
-> **Note**: The detailed E/P/D design is available in this document: [Disaggregated Inference Serving in llm-d](./disaggregation.md)
+> [!NOTE] 
+The detailed E/P/D design is available in this document:
+>[Disaggregated Inference Serving in llm-d](./disaggregation.md)
 
 ---
 

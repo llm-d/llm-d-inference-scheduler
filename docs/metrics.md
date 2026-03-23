@@ -37,4 +37,7 @@ Metrics defined in llm-d-scheduler are in addition to Inference Gateway metrics.
     *   `decision_type`: string ("decode-only" or "prefill-decode")
 *   **Release Stage:** ALPHA
 *   **Description:** Counts the number of requests processed, broken down by the Prefill/Decode disaggregation decision. This metric only covers P/D disaggregation and does not account for encode disaggregation.
-*   **Note:** This metric is maintained for backward compatibility with the deprecated `pd-profile-handler`. New deployments should use `disagg_decision_total`.
+
+> [!NOTE]
+> This metric is maintained for backward compatibility with the deprecated
+> `pd-profile-handler`. New deployments should use `disagg_decision_total`.

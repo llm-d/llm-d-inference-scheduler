@@ -27,7 +27,7 @@ func EncodeRoleFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.
 
 // NewEncodeRole creates and returns an instance of the Filter configured for encode role.
 // Encode is the first stage in the pipeline: Encode → Prefill → Decode
-// Accepts pods with roles: encode, encode-prefill, encode-decode, or encode-prefill-decode.
+// Accepts pods with roles: encode, encode-prefill or encode-prefill-decode.
 func NewEncodeRole() *ByLabel {
 	return NewByLabel(EncodeRoleType, RoleLabel, false,
 		RoleEncode,
