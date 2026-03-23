@@ -217,38 +217,21 @@ kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Rea
 # Load Container Images
 # ------------------------------------------------------------------------------
 
-# Load the vllm simulator image into the cluster (only if it's a locally built image)
-if [ -n "$(${CONTAINER_RUNTIME} images -q "${VLLM_SIMULATOR_IMAGE}")" ]; then
-    if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-        podman save ${VLLM_SIMULATOR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-    else
-        if docker image inspect "${VLLM_SIMULATOR_IMAGE}" > /dev/null 2>&1; then
-            echo "INFO: Loading image into KIND cluster..."
-            kind --name ${CLUSTER_NAME} load docker-image ${VLLM_SIMULATOR_IMAGE}
-        fi
-    fi
+LINUX_ARCH="$(uname -m)"
+case "${LINUX_ARCH}" in
+    x86_64) LINUX_ARCH="amd64" ;;
+    aarch64|arm64) LINUX_ARCH="arm64" ;;
+esac
+
+PLATFORM_ARGS=()
+if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
+    PLATFORM_ARGS=("--platform" "linux/${LINUX_ARCH}")
 fi
 
-# Load the ext_proc endpoint-picker image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${EPP_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${EPP_IMAGE}
-fi
-
-# Load the sidecar image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${SIDECAR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
-fi
-
-# Load the UDS tokenizer image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${UDS_TOKENIZER_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${UDS_TOKENIZER_IMAGE}
-fi
+for IMAGE in "${VLLM_SIMULATOR_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_IMAGE}"; do
+    echo "Loading ${IMAGE} into kind cluster..."
+    "${CONTAINER_RUNTIME}" save "${PLATFORM_ARGS[@]}" "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+done
 
 # ------------------------------------------------------------------------------
 # CRD Deployment (Gateway API + GIE)
