@@ -357,7 +357,7 @@ func (s *Plugin) Produces() map[string]any {
 // internal tokenization.
 func (s *Plugin) Consumes() map[string]any {
 	return map[string]any{
-		preparedata.TokenizedPromptKey: scheduling.TokenizedPrompt{},
+		preparedata.TokenizedPromptKey: (*scheduling.TokenizedPrompt)(nil),
 	}
 }
 

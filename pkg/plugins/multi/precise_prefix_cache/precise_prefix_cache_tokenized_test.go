@@ -238,5 +238,5 @@ func TestConsumes_DeclaresTokenizedPromptKey(t *testing.T) {
 	consumes := scorer.Consumes()
 	require.NotNil(t, consumes)
 	assert.Contains(t, consumes, "TokenizedPrompt")
-	assert.IsType(t, scheduling.TokenizedPrompt{}, consumes["TokenizedPrompt"])
+	assert.IsType(t, (*scheduling.TokenizedPrompt)(nil), consumes["TokenizedPrompt"])
 }
