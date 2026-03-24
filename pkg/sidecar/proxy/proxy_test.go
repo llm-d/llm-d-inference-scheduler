@@ -81,8 +81,7 @@ var _ = Describe("Reverse Proxy", func() {
 					stoppedCh <- struct{}{}
 				}()
 
-				time.Sleep(1 * time.Second)
-				Expect(proxy.addr).ToNot(BeNil())
+				<-proxy.readyCh
 
 				tr := &http.Transport{
 					TLSClientConfig: &tls.Config{
@@ -181,8 +180,7 @@ var _ = Describe("Reverse Proxy", func() {
 					stoppedCh <- struct{}{}
 				}()
 
-				time.Sleep(1 * time.Second)
-				Expect(proxy.addr).ToNot(BeNil())
+				<-proxy.readyCh
 				proxyBaseAddr := "http://" + proxy.addr.String()
 
 				By("sending a /v1/chat/completions request with prefill header")
@@ -255,8 +253,7 @@ var _ = Describe("Reverse Proxy", func() {
 					stoppedCh <- struct{}{}
 				}()
 
-				time.Sleep(1 * time.Second)
-				Expect(proxy.addr).ToNot(BeNil())
+				<-proxy.readyCh
 				proxyBaseAddr := "http://" + proxy.addr.String()
 
 				By("sending a /v1/chat/completions request with prefill header")

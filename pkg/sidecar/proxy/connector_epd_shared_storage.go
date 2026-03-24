@@ -131,7 +131,7 @@ func (s *Server) fanoutEncoderPrimer(originalRequest map[string]any, encoderHost
 
 	// Deduplicate URL-based items; keep all non-URL items (e.g. inline audio).
 	seenURLs := make(map[string]struct{})
-	var mmItems []map[string]any
+	mmItems := make([]map[string]any, 0, len(allItems))
 	for _, item := range allItems {
 		if url := mmItemURL(item); url != "" {
 			if _, seen := seenURLs[url]; seen {

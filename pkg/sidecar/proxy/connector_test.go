@@ -24,7 +24,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
@@ -65,8 +64,7 @@ var _ = Describe("Common Connector tests", func() {
 					testInfo.stoppedCh <- struct{}{}
 				}()
 
-				time.Sleep(1 * time.Second)
-				Expect(testInfo.proxy.addr).ToNot(BeNil())
+				<-testInfo.proxy.readyCh
 				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 				By("sending a /v1/chat/completions request with max_completion_tokens set")
@@ -127,8 +125,7 @@ var _ = Describe("Common Connector tests", func() {
 					testInfo.stoppedCh <- struct{}{}
 				}()
 
-				time.Sleep(1 * time.Second)
-				Expect(testInfo.proxy.addr).ToNot(BeNil())
+				<-testInfo.proxy.readyCh
 				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 				By("sending a /v1/chat/completions request without max_completion_tokens")

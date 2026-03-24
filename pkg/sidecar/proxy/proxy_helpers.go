@@ -30,6 +30,7 @@ func (s *Server) startHTTP(ctx context.Context) error {
 		return err
 	}
 	s.addr = ln.Addr()
+	close(s.readyCh)
 
 	// Wrap handler with OpenTelemetry middleware to extract trace context from incoming requests
 	handler := otelhttp.NewHandler(s.handler, "llm-d-pd-proxy",

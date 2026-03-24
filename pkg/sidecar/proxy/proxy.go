@@ -121,10 +121,11 @@ type epdProtocolRunner func(http.ResponseWriter, *http.Request, string, []string
 // Server is the reverse proxy server
 type Server struct {
 	logger                  logr.Logger
-	addr                    net.Addr     // the proxy TCP address
-	port                    string       // the proxy TCP port
-	decoderURL              *url.URL     // the local decoder URL
-	handler                 http.Handler // the handler function. either a Mux or a proxy
+	addr                    net.Addr      // the proxy TCP address
+	readyCh                 chan struct{} // closed once addr is set and server is listening
+	port                    string        // the proxy TCP port
+	decoderURL              *url.URL      // the local decoder URL
+	handler                 http.Handler  // the handler function. either a Mux or a proxy
 	allowlistValidator      *AllowlistValidator
 	runPDConnectorProtocol  protocolRunner    // the handler for running the Prefiller-Decoder protocol
 	runEPDConnectorProtocol epdProtocolRunner // the handler for running the Encoder-Prefiller-Decoder protocol
@@ -150,6 +151,7 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 	server := &Server{
 		port:                port,
 		decoderURL:          decodeURL,
+		readyCh:             make(chan struct{}),
 		prefillerProxies:    prefillerCache,
 		encoderProxies:      encoderCache,
 		prefillerURLPrefix:  "http://",
@@ -196,17 +198,18 @@ func (s *Server) Start(ctx context.Context, allowlistValidator *AllowlistValidat
 	return grp.Wait()
 }
 
-// Clone returns a clone of the current Server struct
+// Clone returns a clone of the current Server struct.
+// Note: decoderURL and decoderProxy are intentionally not copied — callers (e.g. startDataParallel)
+// always set them explicitly after cloning.
 func (s *Server) Clone() *Server {
 	return &Server{
 		addr:                    s.addr,
+		readyCh:                 make(chan struct{}),
 		port:                    s.port,
-		decoderURL:              s.decoderURL,
 		handler:                 s.handler,
 		allowlistValidator:      s.allowlistValidator,
 		runPDConnectorProtocol:  s.runPDConnectorProtocol,
 		runEPDConnectorProtocol: s.runEPDConnectorProtocol,
-		decoderProxy:            s.decoderProxy,
 		prefillerURLPrefix:      s.prefillerURLPrefix,
 		encoderURLPrefix:        s.encoderURLPrefix,
 		prefillerProxies:        s.prefillerProxies,
