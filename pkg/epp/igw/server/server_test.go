@@ -240,6 +240,10 @@ func runStreamingTest(t *testing.T, streamingResponse bool, hasTrailers bool) {
 		}
 	}
 
+	if director.handleResponseBodyEndStreamCount != 1 {
+		t.Errorf("HandleResponseBody was called with endOfStream=true %d times, expected 1", director.handleResponseBodyEndStreamCount)
+	}
+
 	cancel()
 	<-errChan
 	testListener.Close()
@@ -295,7 +299,8 @@ func recvResponseTrailers(stream pb.ExternalProcessor_ProcessClient) error {
 }
 
 type testDirector struct {
-	requestHeaders map[string]string
+	requestHeaders                   map[string]string
+	handleResponseBodyEndStreamCount int
 }
 
 func (ts *testDirector) HandleRequest(ctx context.Context, reqCtx *handlers.RequestContext) (*handlers.RequestContext, error) {
@@ -320,7 +325,11 @@ func (ts *testDirector) HandleRequest(ctx context.Context, reqCtx *handlers.Requ
 func (ts *testDirector) HandleResponseHeader(ctx context.Context, reqCtx *handlers.RequestContext) *handlers.RequestContext {
 	return reqCtx
 }
+
 func (ts *testDirector) HandleResponseBody(ctx context.Context, reqCtx *handlers.RequestContext, endOfStream bool) *handlers.RequestContext {
+	if endOfStream {
+		ts.handleResponseBodyEndStreamCount++
+	}
 	return reqCtx
 }
 func (ts *testDirector) GetRandomEndpoint() *fwkdl.EndpointMetadata {
