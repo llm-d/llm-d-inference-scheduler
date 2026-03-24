@@ -17,8 +17,8 @@ TARGETARCH ?= $(shell command -v go >/dev/null 2>&1 && go env GOARCH || uname -m
 PROJECT_NAME ?= llm-d-inference-scheduler
 SIDECAR_IMAGE_NAME ?= llm-d-routing-sidecar
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
-SIDECAR_NAME ?= pd-sidecar
 UDS_TOKENIZER_IMAGE_NAME ?= llm-d-uds-tokenizer
+SIDECAR_NAME ?= pd-sidecar
 IMAGE_REGISTRY ?= ghcr.io/llm-d
 
 IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
@@ -63,7 +63,7 @@ else
 	TYPOS_ARCH = $(TYPOS_TARGET_ARCH)-unknown-linux-musl
 endif
 
-CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
+CONTAINER_RUNTIME := $(shell { command -v podman >/dev/null 2>&1 && echo podman; } || { command -v docker >/dev/null 2>&1 && echo docker; } || echo "")
 export CONTAINER_RUNTIME
 BUILDER := $(shell command -v buildah >/dev/null 2>&1 && echo buildah || echo $(CONTAINER_RUNTIME))
 PLATFORMS ?= linux/amd64 # linux/arm64 # linux/s390x,linux/ppc64le
@@ -187,7 +187,7 @@ test-integration: ## Run integration tests
 	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
 
 .PHONY: test-e2e
-test-e2e: image-build image-build-uds-tokenizer image-pull ## Run end-to-end tests against a new kind cluster
+test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	PATH=$(LOCALBIN):$$PATH ./test/scripts/run_e2e.sh
 
@@ -255,28 +255,7 @@ build-%: check-go ## Build the project
 ##@ Container image Build/Push/Pull
 
 .PHONY:	image-build
-image-build: image-build-epp image-build-sidecar image-build-uds-tokenizer ## Build Container image using $(CONTAINER_RUNTIME)
-
-# Path to kv-cache repo for UDS tokenizer image build (can be overridden)
-KV_CACHE_PATH ?= $(shell go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null)
-
-.PHONY: image-build-uds-tokenizer
-image-build-uds-tokenizer: check-container-tool ## Build UDS tokenizer image from kv-cache
-	@printf "\033[33;1m==== Building UDS Tokenizer image $(UDS_TOKENIZER_IMAGE) ====\033[0m\n"
-	@if [ -z "$(KV_CACHE_PATH)" ]; then \
-		echo "kv-cache module not found, downloading Go modules..."; \
-		go mod download; \
-	fi
-	@KV_CACHE_PATH_CHECK=$$(go list -m -f '{{.Dir}}' github.com/llm-d/llm-d-kv-cache 2>/dev/null); \
-	if [ -z "$$KV_CACHE_PATH_CHECK" ]; then \
-		echo "Error: Could not find kv-cache module even after download."; \
-		exit 1; \
-	fi; \
-	$(CONTAINER_RUNTIME) build \
-		--platform linux/$(TARGETARCH) \
-		-t $(UDS_TOKENIZER_IMAGE) \
-		-f $$KV_CACHE_PATH_CHECK/services/uds_tokenizer/Dockerfile \
-		$$KV_CACHE_PATH_CHECK/services/uds_tokenizer
+image-build: image-build-epp image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)

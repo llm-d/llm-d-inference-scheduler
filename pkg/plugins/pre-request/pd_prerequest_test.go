@@ -208,6 +208,31 @@ func TestPreRequestCustomPrefillProfile(t *testing.T) {
 	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
 }
 
+func TestPreRequestPrefillProfileNilResult(t *testing.T) {
+	// disagg_profile_handler sets the prefill profile result to nil when the
+	// decider decides not to prefill. Verify PreRequest handles this gracefully.
+	ctx := utils.NewTestContext(t)
+	handler := NewPrefillHeaderHandler("prefill").WithName("test")
+
+	request := &scheduling.LLMRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"prefill": nil,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, result)
+	})
+	_, exists := request.Headers[common.PrefillEndpointHeader]
+	assert.False(t, exists)
+}
+
 func TestPreRequestIPv6Address(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewPrefillHeaderHandler("prefill").WithName("test")

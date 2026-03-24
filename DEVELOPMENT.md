@@ -23,9 +23,6 @@ Documentation for developing the inference scheduler.
 > are also performed as part of a GitHub action, but running locally can save time
 > and an iteration.
 
-> [!NOTE]
-> **Python is NOT required** as of v0.5.1. Tokenization is handled by a separate UDS (Unix Domain Socket) tokenizer sidecar container. Previous versions (< v0.5.1) used embedded Python tokenizers with daulet/tokenizers bindings, but these are now deprecated.
-
 ## Running Tests
 
 ### Unit Tests
@@ -76,19 +73,29 @@ make test-filter PATTERN=TestName TYPE=sidecar
 
 ## Tokenization Architecture
 
+> [!NOTE]
+> **Python is NOT required**. Previous EPP versions (before v0.5.1) used embedded Python tokenizers.
+
 The project uses **UDS (Unix Domain Socket)** tokenization. Tokenization is handled by a separate UDS tokenizer sidecar container, not by the EPP container itself. Previous embedded tokenizer approaches (daulet/tokenizers, direct Python/vLLM linking) are deprecated and no longer used.
 
-**Building the UDS tokenizer image:**
+The UDS tokenizer image is built and published by the [llm-d-kv-cache](https://github.com/llm-d/llm-d-kv-cache) repository.
+Published images are available: `ghcr.io/llm-d/llm-d-uds-tokenizer:<tag>`
 
-```bash
-make image-build-uds-tokenizer
-```
+- The `:dev` tag is kept up-to-date from the kv-cache `main` branch.
+- To use a specific release version, set `UDS_TOKENIZER_TAG` (or `UDS_TOKENIZER_IMAGE` for a fully custom reference):
 
-The image is tagged as `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` by default. Override with:
+  ```bash
+  UDS_TOKENIZER_TAG=v0.7.0 make env-dev-kind
+  ```
 
-```bash
-UDS_TOKENIZER_TAG=v1.0.0 make image-build-uds-tokenizer
-```
+- To use a different registry, set `IMAGE_REGISTRY` (shared with all other images):
+
+  ```bash
+  IMAGE_REGISTRY=quay.io/my-org make env-dev-kind
+  ```
+
+- To build the image from source, see the kv-cache repo:
+  `make image-build-uds` in `llm-d-kv-cache/`
 
 ## Kind Development Environment
 

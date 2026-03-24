@@ -1,0 +1,351 @@
+// Package profile provides profile handler plugins for the epp.
+package profile
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
+)
+
+// ── Constants ───────────────────────────────────────────────────────────────
+
+const (
+	// DisaggProfileHandlerType is the canonical type for the unified disaggregation profile handler.
+	DisaggProfileHandlerType = "disagg-profile-handler"
+
+	defaultDecodeProfile  = "decode"
+	defaultPrefillProfile = "prefill"
+	defaultEncodeProfile  = "encode"
+)
+
+// ── Factory & constructor ────────────────────────────────────────────────────
+
+type disaggProfilesParameters struct {
+	Decode  string `json:"decode,omitempty"`
+	Prefill string `json:"prefill,omitempty"`
+	Encode  string `json:"encode,omitempty"`
+}
+
+type disaggDecidersParameters struct {
+	Prefill string `json:"prefill,omitempty"`
+	Encode  string `json:"encode,omitempty"`
+}
+
+type disaggProfileHandlerParameters struct {
+	Profiles disaggProfilesParameters `json:"profiles"`
+	Deciders disaggDecidersParameters `json:"deciders"`
+
+	// Deprecated flat fields - kept for backward compatibility.
+	// If set, they are promoted to Profiles/Deciders when the nested fields are absent.
+	DeprecatedDecodeProfile            string `json:"decodeProfile,omitempty"`
+	DeprecatedPrefillProfile           string `json:"prefillProfile,omitempty"`
+	DeprecatedEncodeProfile            string `json:"encodeProfile,omitempty"`
+	DeprecatedPrefillDeciderPluginName string `json:"prefillDeciderPluginName,omitempty"`
+	DeprecatedEncodeDeciderPluginName  string `json:"encodeDeciderPluginName,omitempty"`
+	// DeprecatedDeciderPluginName is a legacy alias from pd-profile-handler, maps to deciders.prefill.
+	DeprecatedDeciderPluginName string `json:"deciderPluginName,omitempty"`
+}
+
+// hasDeprecatedFields reports whether any deprecated flat field is set.
+func (p *disaggProfileHandlerParameters) hasDeprecatedFields() bool {
+	return p.DeprecatedDecodeProfile != "" ||
+		p.DeprecatedPrefillProfile != "" ||
+		p.DeprecatedEncodeProfile != "" ||
+		p.DeprecatedPrefillDeciderPluginName != "" ||
+		p.DeprecatedDeciderPluginName != "" ||
+		p.DeprecatedEncodeDeciderPluginName != ""
+}
+
+// hasNestedFields reports whether any nested profiles/deciders field is set.
+func (p *disaggProfileHandlerParameters) hasNestedFields() bool {
+	return p.Profiles.Decode != "" || p.Profiles.Prefill != "" || p.Profiles.Encode != "" ||
+		p.Deciders.Prefill != "" || p.Deciders.Encode != ""
+}
+
+// validateAndApplyDeprecatedFields returns an error when both deprecated flat fields
+// and nested profiles/deciders fields are set simultaneously, otherwise promotes the
+// deprecated flat fields into their nested equivalents and logs a warning for each.
+func (p *disaggProfileHandlerParameters) validateAndApplyDeprecatedFields(logger interface{ Info(string, ...any) }) error {
+	if p.hasDeprecatedFields() && p.hasNestedFields() {
+		return errors.New("cannot mix deprecated flat parameters (decodeProfile, prefillProfile, encodeProfile, " +
+			"deciderPluginName, prefillDeciderPluginName, encodeDeciderPluginName) " +
+			"with nested parameters (profiles, deciders): use one format or the other")
+	}
+	if p.DeprecatedDecodeProfile != "" {
+		logger.Info("Deprecated parameter 'decodeProfile', use 'profiles.decode' instead")
+		p.Profiles.Decode = p.DeprecatedDecodeProfile
+	}
+	if p.DeprecatedPrefillProfile != "" {
+		logger.Info("Deprecated parameter 'prefillProfile', use 'profiles.prefill' instead")
+		p.Profiles.Prefill = p.DeprecatedPrefillProfile
+	}
+	if p.DeprecatedEncodeProfile != "" {
+		logger.Info("Deprecated parameter 'encodeProfile', use 'profiles.encode' instead")
+		p.Profiles.Encode = p.DeprecatedEncodeProfile
+	}
+	if p.DeprecatedPrefillDeciderPluginName != "" {
+		logger.Info("Deprecated parameter 'prefillDeciderPluginName', use 'deciders.prefill' instead")
+		p.Deciders.Prefill = p.DeprecatedPrefillDeciderPluginName
+	}
+	if p.DeprecatedDeciderPluginName != "" {
+		logger.Info("Deprecated parameter 'deciderPluginName', use 'deciders.prefill' instead")
+		p.Deciders.Prefill = p.DeprecatedDeciderPluginName
+	}
+	if p.DeprecatedEncodeDeciderPluginName != "" {
+		logger.Info("Deprecated parameter 'encodeDeciderPluginName', use 'deciders.encode' instead")
+		p.Deciders.Encode = p.DeprecatedEncodeDeciderPluginName
+	}
+	return nil
+}
+
+// DisaggProfileHandlerFactory is the unified factory for all disaggregation profile handlers.
+//
+//	if parameters.deciders.prefill is set - P disaggregation will be supported
+//	if parameters.deciders.encode is set - E disaggregation will be supported
+func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	// Initialize without profile defaults so applyDeprecatedFields can detect
+	// whether the nested fields were explicitly provided.
+	parameters := disaggProfileHandlerParameters{}
+	if rawParameters != nil {
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
+		}
+	}
+
+	logger := log.FromContext(handle.Context())
+
+	// Promote any deprecated flat fields that are still in use.
+	if err := parameters.validateAndApplyDeprecatedFields(logger); err != nil {
+		return nil, err
+	}
+
+	// Apply profile name defaults for any fields still unset.
+	if parameters.Profiles.Decode == "" {
+		parameters.Profiles.Decode = defaultDecodeProfile
+	}
+	if parameters.Profiles.Prefill == "" {
+		parameters.Profiles.Prefill = defaultPrefillProfile
+	}
+	if parameters.Profiles.Encode == "" {
+		parameters.Profiles.Encode = defaultEncodeProfile
+	}
+
+	// Resolve PD decider (optional).
+	var pdDecider deciderPlugin
+	if parameters.Deciders.Prefill != "" {
+		p := handle.Plugin(parameters.Deciders.Prefill)
+		if p == nil {
+			return nil, fmt.Errorf("deciders.prefill plugin not found: %s", parameters.Deciders.Prefill)
+		}
+		var ok bool
+		pdDecider, ok = p.(deciderPlugin)
+		if !ok {
+			return nil, fmt.Errorf("plugin %s does not implement prefillDeciderPlugin", parameters.Deciders.Prefill)
+		}
+	} else {
+		logger.Info("No deciders.prefill configured, P/D disaggregation disabled")
+	}
+	// Resolve encode decider (optional).
+	var encodeDecider deciderPlugin
+	if parameters.Deciders.Encode != "" {
+		ep := handle.Plugin(parameters.Deciders.Encode)
+		if ep == nil {
+			return nil, fmt.Errorf("deciders.encode plugin not found: %s", parameters.Deciders.Encode)
+		}
+		var ok bool
+		encodeDecider, ok = ep.(deciderPlugin)
+		if !ok {
+			return nil, fmt.Errorf("plugin %s does not implement encodeDeciderPlugin", parameters.Deciders.Encode)
+		}
+	} else {
+		logger.Info("No deciders.encode configured, E disaggregation disabled")
+	}
+	// Create handler
+	handler := NewDisaggProfileHandler(
+		parameters.Profiles.Decode, parameters.Profiles.Prefill, parameters.Profiles.Encode,
+		pdDecider, encodeDecider,
+	)
+	return handler.WithName(name), nil
+}
+
+// NewDisaggProfileHandler creates a DisaggProfileHandler directly.
+// Active stages are determined by non-empty deciders.
+func NewDisaggProfileHandler(decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *DisaggProfileHandler {
+	return newDisaggProfileHandler(
+		DisaggProfileHandlerType,
+		decodeProfile, prefillProfile, encodeProfile,
+		pdDecider, encodeDecider,
+	)
+}
+
+// ── Shared implementation ───────────────────────────────────────────────────
+
+// compile-time assertion
+var _ scheduling.ProfileHandler = &DisaggProfileHandler{}
+
+// DisaggProfileHandler is the unified disaggregation profile handler.
+// It drives one or more of the following stages, each optional except decode:
+//
+//   - Encode  (E): schedules encoder pods for multimodal content
+//   - Prefill (P): schedules a prefill pod for KV-cache disaggregation
+//   - Decode  (D): schedules the decode pod (always runs first)
+//
+// All four handler types (D, P/D, E/PD, E/P/D) share this single implementation;
+// active stages are selected by setting encodeProfile / prefillProfile.
+type DisaggProfileHandler struct {
+	typedName      plugin.TypedName
+	decodeProfile  string
+	prefillProfile string
+	encodeProfile  string
+	pdDecider      deciderPlugin
+	encodeDecider  deciderPlugin
+}
+
+// TypedName returns the typed name of the plugin.
+func (h *DisaggProfileHandler) TypedName() plugin.TypedName { return h.typedName }
+
+// WithName sets the instance name of the plugin.
+func (h *DisaggProfileHandler) WithName(name string) *DisaggProfileHandler {
+	h.typedName.Name = name
+	return h
+}
+
+// Consumes defines data types consumed by this plugin (through the PD decider).
+func (*DisaggProfileHandler) Consumes() map[string]any {
+	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
+}
+
+func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *DisaggProfileHandler {
+	return &DisaggProfileHandler{
+		typedName:      plugin.TypedName{Type: handlerType},
+		decodeProfile:  decodeProfile,
+		prefillProfile: prefillProfile,
+		encodeProfile:  encodeProfile,
+		pdDecider:      pdDecider,
+		encodeDecider:  encodeDecider,
+	}
+}
+
+// Pick implements scheduling.ProfileHandler.
+// Stages run in order: decode → encode (optional) → prefill (optional).
+// Returns the next profile to execute, or an empty map when all stages are done.
+func (h *DisaggProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(ctx, "llm_d.epp.disagg.profile_handler.pick",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	if request == nil {
+		span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "complete_nil_request"))
+		return map[string]scheduling.SchedulerProfile{}
+	}
+
+	if request.TargetModel != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+	}
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+
+	// ── Stage 1: Decode ────────────────────────────────────────────────────
+	if _, executed := profileResults[h.decodeProfile]; !executed {
+		decodeProfile, ok := profiles[h.decodeProfile]
+		if !ok {
+			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "error_missing_decode_profile"))
+			return map[string]scheduling.SchedulerProfile{}
+		}
+		span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_decode"))
+		return map[string]scheduling.SchedulerProfile{h.decodeProfile: decodeProfile}
+	}
+
+	decodeRes := profileResults[h.decodeProfile]
+	if decodeRes == nil || len(decodeRes.TargetEndpoints) == 0 {
+		span.SetAttributes(
+			attribute.String("llm_d.profile_handler.decision", "complete"),
+			attribute.Bool("llm_d.profile_handler.decode_failed", true),
+		)
+		return map[string]scheduling.SchedulerProfile{}
+	}
+
+	// ── Stage 2: Encode (optional) ─────────────────────────────────────────
+	if _, hasEncodeProfile := profiles[h.encodeProfile]; hasEncodeProfile {
+		if _, executed := profileResults[h.encodeProfile]; !executed {
+			if h.encodeDecider != nil && h.encodeDecider.disaggregate(ctx, request, decodeRes.TargetEndpoints[0]) {
+				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_encode"))
+				return map[string]scheduling.SchedulerProfile{h.encodeProfile: profiles[h.encodeProfile]}
+			}
+			// Decider rejected encode - mark as evaluated so we don't re-run the decider.
+			profileResults[h.encodeProfile] = nil
+			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_encode"))
+		}
+	}
+
+	// ── Stage 3: Prefill (optional) ────────────────────────────────────────
+	if _, hasPrefillProfile := profiles[h.prefillProfile]; hasPrefillProfile {
+		if _, executed := profileResults[h.prefillProfile]; !executed {
+			if h.pdDecider != nil && h.pdDecider.disaggregate(ctx, request, decodeRes.TargetEndpoints[0]) {
+				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_prefill"))
+				return map[string]scheduling.SchedulerProfile{h.prefillProfile: profiles[h.prefillProfile]}
+			}
+			// Decider rejected prefill - mark as evaluated so we don't re-run the decider.
+			profileResults[h.prefillProfile] = nil
+			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_prefill"))
+		}
+	}
+
+	// ── All stages done: record routing decision ───────────────────────────
+	encodeUsed := profileResults[h.encodeProfile] != nil
+	prefillUsed := profileResults[h.prefillProfile] != nil
+
+	decision := metrics.DisaggDecisionType(encodeUsed, prefillUsed)
+	metrics.RecordDisaggDecision(request.TargetModel, decision)
+	span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "complete_"+decision))
+
+	return map[string]scheduling.SchedulerProfile{}
+}
+
+// ProcessResults implements scheduling.ProfileHandler.
+// Builds the final SchedulingResult from whichever stages ran successfully.
+func (h *DisaggProfileHandler) ProcessResults(
+	_ context.Context,
+	_ *scheduling.CycleState,
+	request *scheduling.LLMRequest,
+	profileResults map[string]*scheduling.ProfileRunResult,
+) (*scheduling.SchedulingResult, error) {
+	if request == nil {
+		return nil, errors.New("request is nil")
+	}
+
+	decodeRunResults := profileResults[h.decodeProfile]
+	if decodeRunResults == nil || len(decodeRunResults.TargetEndpoints) == 0 {
+		return nil, errors.New("failed to find available decode workers")
+	}
+
+	updatedResults := map[string]*scheduling.ProfileRunResult{}
+
+	updatedResults[h.decodeProfile] = decodeRunResults
+
+	if prefillRes, ok := profileResults[h.prefillProfile]; ok && prefillRes != nil {
+		updatedResults[h.prefillProfile] = prefillRes
+	}
+
+	if encodeRes, ok := profileResults[h.encodeProfile]; ok && encodeRes != nil {
+		updatedResults[h.encodeProfile] = encodeRes
+	}
+
+	return &scheduling.SchedulingResult{
+		PrimaryProfileName: h.decodeProfile,
+		ProfileResults:     updatedResults,
+	}, nil
+}

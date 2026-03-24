@@ -14,6 +14,7 @@ The design enables:
 - Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
+  - We have introduced experimental **Encode/Prefill/Decode (E/P/D and all its permutations)** execution. For a detailed explanation, see [Disaggregated Inference Serving](./disaggregation.md)
 - Pluggable **filters**, **scorers**, and **scrapers** for extensible scheduling
 
 ---
@@ -208,18 +209,48 @@ Sets a header for use in disaggregated prefill/decode
 
 ---
 
-#### PdProfileHandler
+#### DisaggProfileHandler
 
-Selects the profiles to use when running with disaggregated prefill/decode
 
-- **Type**: `pd-profile-handler`
+Selects the profiles to use when running with disaggregation
+
+- **Type**: `disagg-profile-handler`
 - **Parameters**:
-  - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
-  - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-  - `deciderPluginName`: specifies the name of the decider plugin. Decider determines whether disaggregated PD should be executed
-  - `primaryPort`: the base port number used for data parallel communication.
+  - `profiles` (optional): names of scheduling profiles to use. Defaults match the profile names.
+    - `decode`: name of the decode scheduling profile. Defaults to `decode`.
+    - `prefill`: name of the prefill scheduling profile. Defaults to `prefill`.
+    - `encode`: name of the encode scheduling profile. Defaults to `encode`.
+  - `deciders` (optional): decider plugins that control whether each disaggregation stage runs.
+    - `prefill`: name of the prefill decider plugin. When set, enables P/D disaggregation.
+    - `encode`: name of the encode decider plugin. When set, enables E disaggregation.
 
-**Note:** When using this plugin you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
+
+> [!NOTE]
+> When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
+
+**Examples**
+
+Decode-only (no disaggregation):
+```yaml
+- type: disagg-profile-handler
+```
+
+P/D disaggregation:
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+```
+
+E/P/D disaggregation:
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+      encode: always-disagg-multimodal-decider
+```
 
 ---
 
@@ -230,7 +261,8 @@ Type: `prefix-based-pd-decider`
 **Parameters**
 - `nonCachedTokens`: length, in token, of the uncached part of the user input above which disaggregated PD is triggered.
 
-Note: `prepareDataPlugins` feature gate should be enabled
+> [!NOTE]
+> `prepareDataPlugins` feature gate should be enabled
 
 **Example**
 ```yaml
@@ -241,10 +273,10 @@ plugins:
 - type: prefix-based-pd-decider
   parameters:
     nonCachedTokens: 4
-- type: pd-profile-handler
+- type: disagg-profile-handler
   parameters:
-    primaryPort: 8000
-    deciderPluginName: prefix-based-pd-decider
+    deciders:
+      prefill: prefix-based-pd-decider
 ```
 
 ---
@@ -253,7 +285,8 @@ plugins:
 
 Filters out pods using a standard Kubernetes label selector.
 
-**Note:** Only the matching labels feature of Kubernetes label selectors is supported.
+> [!NOTE]
+>  Only the matching labels feature of Kubernetes label selectors is supported.
 
 - **Type**: `by-label-selector`
 - **Parameters**: A standard Kubernetes label selector.
@@ -296,12 +329,12 @@ plugins:
   - type: by-label
     parameters:
       label: "inference-role"
-      validValues: ["decode", "both"]
+      validValues: ["decode", "prefill-decode"]
       allowsNoLabel: false
 ```
 
 In this example:
-- Only pods labeled for decoding (`inference-role=decode`) or supporting both stages (`inference-role=both`) are selected.
+- Only pods labeled for decoding (`inference-role=decode`) or supporting both stages (`inference-role=prefill-decode`) are selected.
 - Pods missing the `inference-role` label are not considered for decode scheduling.
 
 ---
@@ -309,8 +342,7 @@ In this example:
 #### DecodeFilter
 
 Filters out pods that are not marked either as decode or both prefill and decode. The filter looks for
- the label `llm-d.ai/role`, with a value of either `decode` or `both`. In addition pods that are missing
- the label will not be filtered out.
+ the label `llm-d.ai/role`, with a value of either `decode`, `prefill-decode` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
 
 - **Type**: `decode-filter`
 - **Parameters**: None
@@ -319,9 +351,18 @@ Filters out pods that are not marked either as decode or both prefill and decode
 
 #### PrefillFilter
 
-Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`.
+Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`, `encode-prefill`, `prefill-decode` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
 
 - **Type**: `prefill-filter`
+- **Parameters**: None
+
+---
+
+#### EncodeFilter
+
+Filters out pods that are not marked as encode. The filter looks for the label `llm-d.ai/role`, with a value of `encode`, `encode-prefill` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
+
+- **Type**: `encode-filter`
 - **Parameters**: None
 
 ---
@@ -350,12 +391,13 @@ Configuration:
 
 See list of parameters at [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
 
-Note that in most cases you will only need to set:
-- Model name in the `tokenizersPoolConfig` to match the model used in the vLLM deployment.
-- HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
-  - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
-- **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
-- `KVBlockIndex` metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
+> [!NOTE] 
+> In most cases you will only need to set:
+> - Model name in the `tokenizersPoolConfig` to match the model used in the vLLM deployment.
+> - HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
+>  - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
+> - **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
+> - `KVBlockIndex` metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
 
 Example configuration with the above parameters set:
 
@@ -525,9 +567,11 @@ schedulingProfiles:
         weight: 1
 ```
 
-**Note:** This scorer is designed to work alongside a prefix cache scorer (such as `prefix-cache-scorer` or
-`precise-prefix-cache-scorer`). If no prefix cache state is available, all requests are treated as cold.
-When integrating with a prefix-cache scorer, the prefix-cache scorer should be defined first in the scheduling profile.
+> [!NOTE]
+>  This scorer is designed to work alongside a prefix cache scorer (such as `prefix-cache-scorer` or
+> `precise-prefix-cache-scorer`). If no prefix cache state is available, all requests are treated as cold.
+> When integrating with a prefix-cache scorer, the prefix-cache scorer should be defined first in the scheduling 
+> profile.
 
 ---
 
@@ -547,9 +591,13 @@ plugins:
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
-- type: pd-profile-handler
+- type: prefix-based-pd-decider
+    parameters:
+      nonCachedTokens: 8
+- type: disagg-profile-handler
   parameters:
-    threshold: 10
+    deciders:
+      prefill: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill
   plugins:
@@ -566,7 +614,7 @@ schedulingProfiles:
 ```
 
 Several things should be noted:
-1. The `PrefillHeader`, `PdProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
+1. The `PrefillHeader`, `DisaggProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
  plugins must be in the list of plugins instantiated.
 2. There must be two scheduler profiles defined.
 3. The scheduler profile for prefill, must include the `PrefillFilter`
@@ -595,20 +643,28 @@ Requires the `prepareDataPlugins` feature gate and KV events from vLLM engines.
 
 ---
 
-## Disaggregated Prefill/Decode (P/D)
+## Disaggregated Encode/Prefill/Decode (E/P/D)
 
 When enabled, the router:
 
 - Selects one pod for **Prefill** (prompt processing)
 - Selects another pod for **Decode** (token generation)
 
-The **vLLM sidecar** handles orchestration between Prefill and Decode stages. It allows:
+> [!NOTE] 
+> Encode disaggregation is an experimental feature. When enabled, the router 
+> identifies all pods capable of encoding, and the vLLM sidecar distributes multimedia 
+> requests to randomly selected pods from that subset. More sophisticated selection 
+> strategies are planned for future versions.
+
+The **vLLM sidecar** handles orchestration between Encode, Prefill and Decode stages. It allows:
 
 - Queuing
 - Local memory management
 - Experimental protocol compatibility
 
-> **Note**: The detailed P/D design is available in this document: [Disaggregated Prefill/Decode in llm-d](./disagg_pd.md)
+> [!NOTE] 
+The detailed E/P/D design is available in this document:
+>[Disaggregated Inference Serving in llm-d](./disaggregation.md)
 
 ---
 
