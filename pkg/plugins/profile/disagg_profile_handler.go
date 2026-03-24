@@ -9,6 +9,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
@@ -54,6 +55,8 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 		}
 	}
 
+	logger := log.FromContext(handle.Context())
+
 	// Resolve PD decider (optional).
 	var pdDecider deciderPlugin
 	if parameters.PrefillDeciderPluginName != "" {
@@ -66,6 +69,8 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 		if !ok {
 			return nil, fmt.Errorf("plugin %s does not implement prefillDeciderPlugin", parameters.PrefillDeciderPluginName)
 		}
+	} else {
+		logger.Info("No prefillDeciderPluginName configured, P/D disaggregation disabled")
 	}
 	// Resolve encode decider (optional).
 	var encodeDecider deciderPlugin
@@ -79,7 +84,10 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 		if !ok {
 			return nil, fmt.Errorf("plugin %s does not implement encodeDeciderPlugin", parameters.EncodeDeciderPluginName)
 		}
+	} else {
+		logger.Info("No encodeDeciderPluginName configured, E disaggregation disabled")
 	}
+	// Create handler
 	handler := NewDisaggProfileHandler(
 		parameters.DecodeProfile, parameters.PrefillProfile, parameters.EncodeProfile,
 		pdDecider, encodeDecider,
