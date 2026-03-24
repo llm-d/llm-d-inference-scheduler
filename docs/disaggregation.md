@@ -4,10 +4,10 @@
 
 This document describes the architecture and request lifecycle for enabling **disaggregated inference execution** in the llm-d router. llm-d supports multiple disaggregation topologies:
 
-- **EPD** (no disaggregation) — a single node handles all three functions (encode, prefill, and decode). This is the default mode when no disaggregation is configured.
-- **P/D** (Prefill/Decode) — separates the prefill and decode stages onto different workers. This is functionally equivalent to EP/D, since prefill workers also handle encoding (multimodal processing) as part of the prefill stage.
-- **E/PD** (Encode/Prefill-Decode) — offloads multimodal encoding to dedicated workers while a single worker handles prefill and decode.
-- **E/P/D** (Encode/Prefill/Decode) — the full three-stage pipeline where each stage runs on a specialized worker.
+- **EPD** (no disaggregation) – a single node handles all three functions (encode, prefill, and decode). This is the default mode when no disaggregation is configured.
+- **P/D** (Prefill/Decode) – separates the prefill and decode stages onto different workers. This is functionally equivalent to EP/D, since prefill workers also handle encoding (multimodal processing) as part of the prefill stage.
+- **E/PD** (Encode/Prefill-Decode) – offloads multimodal encoding to dedicated workers while a single worker handles prefill and decode.
+- **E/P/D** (Encode/Prefill/Decode) – the full three-stage pipeline where each stage runs on a specialized worker.
 
 > [!NOTE] 
 > The Encode (E) stage is only relevant for requests with multimodal content (images, video, or audio). For text-only requests, the encode stage is skipped regardless of the configured topology.
@@ -47,45 +47,45 @@ All topologies are driven by the unified `disagg-profile-handler` plugin, which 
 
 ### P/D (Prefill/Decode)
 
-1. **User Request** — Sent via OpenAI API to the Envoy Proxy
-2. **EPP Scheduling Decision** — The `disagg-profile-handler` runs stages in order:
+1. **User Request** – Sent via OpenAI API to the Envoy Proxy
+2. **EPP Scheduling Decision** – The `disagg-profile-handler` runs stages in order:
    1. **Decode**: always runs first, selects a decode pod
    2. **Prefill** (optional): the PD decider evaluates prompt length and prefix-cache hit; if disaggregation is warranted, a prefill pod is selected
-3. **Execution** — Request lands on Decode Worker:
+3. **Execution** – Request lands on Decode Worker:
    - If `x-prefiller-host-port` header doesn't exist → runs both stages locally
    - If `x-prefiller-host-port` header exists → sidecar sends prefill to the selected Prefill Worker, then runs decode locally
-4. **Response Flow** — decode sidecar → Envoy → EPP → User
+4. **Response Flow** – decode sidecar → Envoy → EPP → User
 
 ### E/PD (Encode/Prefill-Decode)
 
 For multimodal requests (images, video, audio), the encode stage can be disaggregated to dedicated workers:
 
-1. **User Request** — Multimodal request sent via OpenAI API
-2. **EPP Scheduling Decision** — The `disagg-profile-handler` runs stages in order:
+1. **User Request** – Multimodal request sent via OpenAI API
+2. **EPP Scheduling Decision** – The `disagg-profile-handler` runs stages in order:
    1. **Decode**: selects a decode pod
    2. **Encode** (optional): the encode decider checks for multimodal content; if present, an encode pod is selected
-3. **Execution** — Request lands on Decode Worker:
+3. **Execution** – Request lands on Decode Worker:
    - If encode was scheduled → sidecar sends encoding work to the selected Encode Worker(s) via the `x-encoder-hosts-ports` header
    - Encode Worker processes multimodal content and returns encoding metadata (embedding references)
    - Decode Worker reads embeddings via EC_Connector and runs prefill + decode locally
-4. **Response Flow** — decode sidecar → Envoy → EPP → User
+4. **Response Flow** – decode sidecar → Envoy → EPP → User
 
 ### E/P/D (Encode/Prefill/Decode)
 
 The full three-stage pipeline combines both encode and prefill disaggregation:
 
-1. **User Request** — Multimodal request sent via OpenAI API
-2. **EPP Scheduling Decision** — The `disagg-profile-handler` runs all three stages in order:
+1. **User Request** – Multimodal request sent via OpenAI API
+2. **EPP Scheduling Decision** – The `disagg-profile-handler` runs all three stages in order:
    1. **Decode**: selects a decode pod
    2. **Encode** (optional): if multimodal content is detected, an encode pod is selected
    3. **Prefill** (optional): if the PD decider determines disaggregation is beneficial, a prefill pod is selected
-3. **Execution** — Request lands on Decode Worker:
+3. **Execution** – Request lands on Decode Worker:
    - If encode was scheduled → sidecar sends encoding work to the selected Encode Worker(s) via the `x-encoder-hosts-ports` header
    - Encode Worker processes multimodal content and returns encoding metadata (embedding references)
    - If prefill was scheduled → sidecar sends prefill to Prefill Worker via the `x-prefiller-host-port` header
    - Prefill Worker reads embeddings via EC_Connector and executes prefill operation
    - Decode Worker runs decode locally
-4. **Response Flow** — decode sidecar → Envoy → EPP → User
+4. **Response Flow** – decode sidecar → Envoy → EPP → User
 
 ---
 
@@ -387,7 +387,7 @@ The `prefix-based-pd-decider` plugin makes the disaggregation decision according
 **How It Works**
 - Once a decode pod is selected, the decider checks how many tokens from the incoming prompt have already been sent to this pod
 
-- If the remaining non-cached suffix length is longer than the configured threshold (nonCachedTokens), disaggregation is triggered — the prefill will run remotely on a prefill pod, and decode locally on the decode pod
+- If the remaining non-cached suffix length is longer than the configured threshold (nonCachedTokens), disaggregation is triggered – the prefill will run remotely on a prefill pod, and decode locally on the decode pod
 
 - If the non-cached suffix is shorter or equal to the threshold, the full request runs locally on the decode worker without remote prefill
 

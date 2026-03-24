@@ -15,11 +15,11 @@ Metrics defined in llm-d-scheduler are in addition to Inference Gateway metrics.
 *   **Type:** Counter
 *   **Labels:**
     *   `model_name`: string (the target model name, or "unknown" if empty)
-    *   `decision_type`: string — one of:
-        *   `decode-only` — the request used the decode-only path (no disaggregation)
-        *   `prefill-decode` — the request was split into prefill and decode stages (P/D or EP/D)
-        *   `encode-decode` — the request used encode disaggregation with local prefill+decode (E/PD)
-        *   `encode-prefill-decode` — the request used the full three-stage pipeline (E/P/D)
+    *   `decision_type`: string – one of:
+        *   `decode-only` – the request used the decode-only path (no disaggregation)
+        *   `prefill-decode` – the request was split into prefill and decode stages (P/D or EP/D)
+        *   `encode-decode` – the request used encode disaggregation with local prefill+decode (E/PD)
+        *   `encode-prefill-decode` – the request used the full three-stage pipeline (E/P/D)
 *   **Release Stage:** ALPHA
 *   **Description:** Counts the number of requests processed, broken down by the disaggregation routing decision.
 *   **Usage:** Provides a high-level view of how many requests are utilizing each disaggregation topology.
