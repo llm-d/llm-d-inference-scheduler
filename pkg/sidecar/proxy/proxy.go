@@ -158,8 +158,6 @@ type Server struct {
 	logger                  logr.Logger
 	addr                    net.Addr      // the proxy TCP address
 	readyCh                 chan struct{} // closed once addr is set and server is listening
-	port                    string        // the proxy TCP port
-	decoderURL              *url.URL      // the local decoder URL
 	handler                 http.Handler  // the handler function. either a Mux or a proxy
 	allowlistValidator      *AllowlistValidator
 	runPDConnectorProtocol  protocolRunner    // the handler for running the Prefiller-Decoder protocol
@@ -184,8 +182,6 @@ func NewProxy(config Config) *Server {
 	encoderCache, _ := lru.New[string, http.Handler](16)   // nolint:all
 
 	server := &Server{
-		port:                config.Port,
-		decoderURL:          config.TargetURL,
 		readyCh:             make(chan struct{}),
 		prefillerProxies:    prefillerCache,
 		encoderProxies:      encoderCache,
@@ -215,7 +211,7 @@ func NewProxy(config Config) *Server {
 // Start the HTTP reverse proxy.
 // allowlistValidator is constructed from s.config on first call; inject an alternative before calling Start to override.
 func (s *Server) Start(ctx context.Context) error {
-	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
+	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.config.Port)
 
 	if s.allowlistValidator == nil {
 		var err error
@@ -252,7 +248,6 @@ func (s *Server) Clone() *Server {
 	return &Server{
 		addr:                    s.addr,
 		readyCh:                 make(chan struct{}),
-		port:                    s.port,
 		handler:                 s.handler,
 		allowlistValidator:      s.allowlistValidator,
 		runPDConnectorProtocol:  s.runPDConnectorProtocol,
@@ -310,7 +305,7 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
 	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
 
-	s.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.InsecureSkipVerifyForDecoder)
+	s.decoderProxy = s.createDecoderProxyHandler(s.config.TargetURL, s.config.InsecureSkipVerifyForDecoder)
 
 	mux.Handle("/", s.decoderProxy)
 

@@ -37,24 +37,22 @@ func (s *Server) dataParallelHandler(w http.ResponseWriter, r *http.Request) boo
 
 func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) error {
 	podIP := os.Getenv("POD_IP")
-	basePort, err := strconv.Atoi(s.port)
+	basePort, err := strconv.Atoi(s.config.Port)
 	if err != nil {
 		return err
 	}
-	baseDecoderPort, err := strconv.Atoi(s.decoderURL.Port())
+	baseDecoderPort, err := strconv.Atoi(s.config.TargetURL.Port())
 	if err != nil {
 		return err
 	}
-	decoderScheme := s.decoderURL.Scheme // capture before goroutines launch
-
-	s.dataParallelProxies[net.JoinHostPort(podIP, s.port)] = s.decoderProxy
+	s.dataParallelProxies[net.JoinHostPort(podIP, s.config.Port)] = s.decoderProxy
 
 	// Fill in map of proxies, thus avoiding locks
 	for idx := range s.config.DataParallelSize - 1 {
 		decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
 		rankPort := strconv.Itoa(basePort + idx + 1)
 		hostPort := net.JoinHostPort(podIP, rankPort)
-		decoderURL, err := url.Parse(decoderScheme + "://localhost:" + decoderPort)
+		decoderURL, err := url.Parse(s.config.TargetURL.Scheme + "://localhost:" + decoderPort)
 		if err != nil {
 			return err
 		}
@@ -66,15 +64,15 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 		grp.Go(func() error {
 			rankPort := strconv.Itoa(basePort + idx + 1)
 			decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
-			decoderURL, err := url.Parse(decoderScheme + "://localhost:" + decoderPort)
+			decoderURL, err := url.Parse(s.config.TargetURL.Scheme + "://localhost:" + decoderPort)
 			if err != nil {
 				return err
 			}
 
 			clone := s.Clone()
 			clone.logger = log.FromContext(ctx).WithName("proxy server on port " + rankPort)
-			clone.port = rankPort
-			clone.decoderURL = decoderURL
+			clone.config.Port = rankPort
+			clone.config.TargetURL = decoderURL
 			clone.forwardDataParallel = false
 			// Configure handlers
 			clone.handler = clone.createRoutes()

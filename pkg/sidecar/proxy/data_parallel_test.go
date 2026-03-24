@@ -74,7 +74,7 @@ var _ = Describe("Data Parallel support", func() {
 			rank0Server := httptest.NewServer(&rank0Handler)
 			tempURL, err = url.Parse(rank0Server.URL)
 			Expect(err).ToNot(HaveOccurred())
-			theProxy.decoderURL = tempURL
+			theProxy.config.TargetURL = tempURL
 
 			proxyHandler := theProxy.createRoutes()
 			req := httptest.NewRequest("POST", "/v1/completions", nil)
