@@ -256,11 +256,14 @@ func TestDisaggProfileHandlerFactory_DeprecatedFlatParams(t *testing.T) {
 			"encodeProfile":            "my-encode",
 			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
 		}, false},
-		{"deprecated fields overridden by nested", map[string]any{
-			"decodeProfile": "ignored-decode",
+		{"mixing deprecated and nested fields is an error", map[string]any{
+			"decodeProfile": "my-decode",
 			"profiles":      map[string]any{"decode": "my-decode"},
-			"deciders":      map[string]any{"prefill": AlwaysDisaggPDDeciderPluginType},
-		}, false},
+		}, true},
+		{"mixing deprecated decider and nested deciders is an error", map[string]any{
+			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
+			"deciders":                 map[string]any{"prefill": AlwaysDisaggPDDeciderPluginType},
+		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
