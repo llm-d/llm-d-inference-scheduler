@@ -21,6 +21,11 @@ const (
 
 	// fairnessIDHeader is the standard header used to identify the program.
 	fairnessIDHeader = "x-gateway-inference-fairness-id"
+
+	// defaultFairnessID is the flow key assigned by the upstream framework when
+	// no x-gateway-inference-fairness-id header is present on the request.
+	// Matches the constant in sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers/request.go.
+	defaultFairnessID = "default-flow"
 )
 
 // Config holds the JSON-decoded configuration for the plugin.
@@ -225,6 +230,7 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 			normalized[d] = strategy.NormalizeDimension(d, e.raw[d], dimMin[d], dimMax[d])
 		}
 		score := strategy.Score(normalized)
+		queueScore.WithLabelValues(e.queue.FlowKey().ID).Set(score)
 		if score > bestScore {
 			bestScore = score
 			bestQueue = e.queue
