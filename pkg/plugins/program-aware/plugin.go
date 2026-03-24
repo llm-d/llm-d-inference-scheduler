@@ -254,7 +254,8 @@ func (p *ProgramAwarePlugin) getOrCreateMetrics(programID string) *ProgramMetric
 	return actual.(*ProgramMetrics)
 }
 
-// computeFairnessIndex returns Jain's Fairness Index over the EWMA average wait
+// computeFairnessIndex returns Jain's Fairness Index over the total average wait
+// time (accumulated wait / total observations) for each program.
 // Returns 1.0 when fewer than 2 programs have wait data.
 func (p *ProgramAwarePlugin) computeFairnessIndex() float64 {
 	var sum, sumSq float64
@@ -264,7 +265,7 @@ func (p *ProgramAwarePlugin) computeFairnessIndex() float64 {
 		if !m.HasWaitData() {
 			return true
 		}
-		x := m.AverageWaitTime()
+		x := m.TotalAverageWaitTime()
 		sum += x
 		sumSq += x * x
 		n++

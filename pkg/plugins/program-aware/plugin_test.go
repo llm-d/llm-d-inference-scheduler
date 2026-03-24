@@ -43,6 +43,23 @@ func TestProgramMetrics_EWMA(t *testing.T) {
 	assert.InDelta(t, 106.0, m.AverageWaitTime(), 0.01)
 }
 
+func TestProgramMetrics_TotalAverageWaitTime(t *testing.T) {
+	m := &ProgramMetrics{}
+
+	assert.Equal(t, 0.0, m.TotalAverageWaitTime(), "no data → 0")
+
+	m.RecordWaitTime(100)
+	assert.InDelta(t, 100.0, m.TotalAverageWaitTime(), 0.01)
+
+	m.RecordWaitTime(200)
+	// total = 300, count = 2 → 150
+	assert.InDelta(t, 150.0, m.TotalAverageWaitTime(), 0.01)
+
+	m.RecordWaitTime(50)
+	// total = 350, count = 3 → 116.67
+	assert.InDelta(t, 116.67, m.TotalAverageWaitTime(), 0.01)
+}
+
 func TestProgramMetrics_Counters(t *testing.T) {
 	m := &ProgramMetrics{}
 
