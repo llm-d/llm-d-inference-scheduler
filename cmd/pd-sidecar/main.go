@@ -86,6 +86,7 @@ func main() {
 		EncoderInsecureSkipVerify:   opts.InsecureSkipVerifyForEncoder,
 		DecoderInsecureSkipVerify:   opts.InsecureSkipVerifyForDecoder,
 		DataParallelSize:            opts.DataParallelSize,
+		MaxIdleConnsPerHost:         opts.MaxIdleConnsPerHost,
 		EnablePrefillerSampling:     opts.EnablePrefillerSampling,
 		SecureServing:               opts.SecureProxy,
 		CertPath:                    opts.CertPath,

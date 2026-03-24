@@ -63,6 +63,7 @@ type Options struct {
 	InferencePoolNamespace  string      // Deprecated: Use InferencePool instead. InferencePoolNamespace is the Kubernetes namespace to watch for InferencePool resources
 	InferencePoolName       string      // Deprecated: Use InferencePool instead. InferencePoolName is the specific InferencePool name to watch
 	EnablePrefillerSampling bool        // EnablePrefillerSampling enables random selection of prefill instances
+	MaxIdleConnsPerHost     int         // MaxIdleConnsPerHost controls idle keep-alive connections per host for reverse proxy transports
 	PoolGroup               string      // PoolGroup is the group of the InferencePool this Endpoint Picker is associated with
 	LoggingOptions          zap.Options // LoggingOptions holds the zap logging configuration
 }
@@ -178,6 +179,7 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&opts.InferencePoolName, "inference-pool-name", opts.InferencePoolName, "Deprecated: use --inference-pool instead. The specific InferencePool name (defaults to INFERENCE_POOL_NAME env var)")
 	_ = fs.MarkDeprecated("inference-pool-name", "use --inference-pool instead")
 	fs.BoolVar(&opts.EnablePrefillerSampling, "enable-prefiller-sampling", opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
+	fs.IntVar(&opts.MaxIdleConnsPerHost, "max-idle-conns-per-host", opts.MaxIdleConnsPerHost, "max idle keep-alive connections per host for reverse proxy transports. Set to at least the expected concurrency. 0 means default (1024).")
 	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
 }
 
