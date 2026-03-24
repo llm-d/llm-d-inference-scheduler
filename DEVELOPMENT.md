@@ -30,25 +30,12 @@ Documentation for developing the inference scheduler.
 
 ### Unit Tests
 
+Coverage and race detection are always enabled.
+
 ```bash
 make test-unit          # run all unit tests (epp + sidecar)
 make test-unit-epp      # epp only
 make test-unit-sidecar  # sidecar only
-```
-
-### Unit Tests with Coverage
-
-```bash
-make test-coverage          # run all unit tests and report coverage
-make test-coverage-epp      # epp only
-make test-coverage-sidecar  # sidecar only
-```
-
-The `COVERAGE=1` variable is equivalent — useful when you want coverage
-without switching target names:
-
-```bash
-COVERAGE=1 make test-unit
 ```
 
 Coverage profiles are written to `coverage/` (gitignored). To generate
@@ -64,8 +51,8 @@ open coverage/epp.html
 To see how your changes affect coverage relative to `main`:
 
 ```bash
-make test-coverage          # run coverage on your branch first
-make coverage-compare       # builds a baseline from main in a temp worktree, then diffs
+make test-unit          # run tests on your branch first
+make coverage-compare   # builds a baseline from main in a temp worktree, then diffs
 ```
 
 To compare against a different ref:
@@ -77,9 +64,7 @@ make coverage-compare BASE_REF=release-0.5
 ### Integration Tests
 
 ```bash
-make test-integration                   # without coverage
-make test-coverage-integration          # with coverage
-COVERAGE=1 make test-integration        # equivalent
+make test-integration   # coverage and race detection always enabled
 ```
 
 ### Filtered Tests

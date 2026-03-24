@@ -155,17 +155,13 @@ test: test-unit test-e2e ## Run all tests (unit and e2e)
 .PHONY: test-unit
 test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
-# Set COVERAGE=1 to collect coverage profiles during unit tests (always set in CI via test-coverage-*)
-COVERAGE ?=
-
 .PHONY: test-unit-%
-test-unit-%: ## Run unit tests (set COVERAGE=1 to also collect coverage profiles)
-	@$(if $(COVERAGE),mkdir -p $(COVERAGE_DIR))
+test-unit-%: ## Run unit tests
+	@mkdir -p $(COVERAGE_DIR)
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@go test -v \
-	    $(if $(COVERAGE),-coverprofile=$(COVERAGE_DIR)/$*.out -covermode=atomic) \
+	@go test -v -race -coverprofile=$(COVERAGE_DIR)/$*.out -covermode=atomic \
 	    $$($($*_TEST_FILES) | tr '\n' ' ')
-	@$(if $(COVERAGE),go tool cover -func=$(COVERAGE_DIR)/$*.out | tail -1)
+	@go tool cover -func=$(COVERAGE_DIR)/$*.out | tail -1
 
 .PHONY: test-filter
 test-filter: ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
@@ -182,13 +178,13 @@ test-filter: ## Run filtered unit tests (usage: make test-filter PATTERN=TestNam
 	fi
 
 .PHONY: test-integration
-test-integration: ## Run integration tests (set COVERAGE=1 to also collect coverage profiles)
-	@$(if $(COVERAGE),mkdir -p $(COVERAGE_DIR))
+test-integration: ## Run integration tests
+	@mkdir -p $(COVERAGE_DIR)
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
-	@go test -v -tags=integration_tests \
-	    $(if $(COVERAGE),-coverprofile=$(COVERAGE_DIR)/integration.out -covermode=atomic) \
+	@go test -v -race -tags=integration_tests \
+	    -coverprofile=$(COVERAGE_DIR)/integration.out -covermode=atomic \
 	    ./test/integration/
-	@$(if $(COVERAGE),go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1)
+	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
 
 .PHONY: test-e2e
 test-e2e: image-build image-build-uds-tokenizer image-pull ## Run end-to-end tests against a new kind cluster
@@ -215,15 +211,10 @@ COVERAGE_THRESHOLD ?= 0
 BASE_REF           ?= main
 
 .PHONY: test-coverage
-test-coverage: test-coverage-epp test-coverage-sidecar ## Run unit tests with coverage for all components
-
-.PHONY: test-coverage-%
-test-coverage-%: ## Run unit tests with coverage (epp or sidecar); equivalent to COVERAGE=1 make test-unit-%
-	@$(MAKE) test-unit-$* COVERAGE=1
+test-coverage: test-unit-epp test-unit-sidecar ## Run all unit tests with coverage (alias for test-unit)
 
 .PHONY: test-coverage-integration
-test-coverage-integration: ## Run integration tests with coverage; equivalent to COVERAGE=1 make test-integration
-	@$(MAKE) test-integration COVERAGE=1
+test-coverage-integration: test-integration ## Run integration tests with coverage (alias for test-integration)
 
 .PHONY: coverage-report
 coverage-report: ## Generate HTML coverage reports (open coverage/*.html in browser)
@@ -242,9 +233,9 @@ coverage-compare: ## Compare coverage vs baseline (BASELINE_DIR=path or BASE_REF
 	    WORKTREE=$$(mktemp -d); \
 	    git worktree add --quiet "$$WORKTREE" "$(BASE_REF)"; \
 	    ( cd "$$WORKTREE" && mkdir -p "$(COVERAGE_DIR)/baseline" && \
-	        go test -coverprofile="$(COVERAGE_DIR)/baseline/epp.out" -covermode=atomic \
+	        go test -race -coverprofile="$(COVERAGE_DIR)/baseline/epp.out" -covermode=atomic \
 	            $$($(epp_TEST_FILES) | tr '\n' ' ') && \
-	        go test -coverprofile="$(COVERAGE_DIR)/baseline/sidecar.out" -covermode=atomic \
+	        go test -race -coverprofile="$(COVERAGE_DIR)/baseline/sidecar.out" -covermode=atomic \
 	            $$($(sidecar_TEST_FILES) | tr '\n' ' ') ); \
 	    git worktree remove --force "$$WORKTREE"; \
 	    ./scripts/compare-coverage.sh "$(COVERAGE_DIR)/baseline" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \

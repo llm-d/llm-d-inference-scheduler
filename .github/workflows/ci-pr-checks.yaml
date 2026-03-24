@@ -76,9 +76,9 @@ jobs:
           path: coverage/baseline
           key: coverage-main
 
-      - name: Run unit tests with coverage
+      - name: Run unit tests
         shell: bash
-        run: make test-coverage
+        run: make test-unit
 
       - name: Compare coverage against main baseline
         if: github.event_name == 'pull_request'
