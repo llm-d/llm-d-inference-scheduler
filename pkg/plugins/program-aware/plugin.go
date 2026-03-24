@@ -36,6 +36,34 @@ type Config struct {
 	//            usage is deducted at response completion. Provides provably
 	//            proportional fairness independent of request rate or size.
 	Strategy string `json:"strategy"`
+
+	// --- EWMA weights (only used when strategy == "ewma") ---
+
+	// WeightHeadWait is the weight for head-of-queue age (starvation guard).
+	// Default: 0.5.
+	WeightHeadWait *float64 `json:"weightHeadWait,omitempty"`
+
+	// WeightAvgWait is the weight for EWMA historical wait time (fairness debt).
+	// Default: 0.3.
+	WeightAvgWait *float64 `json:"weightAvgWait,omitempty"`
+
+	// WeightTotalDispatched is the penalty weight for dispatch count (anti-monopoly).
+	// Default: 0.2.
+	WeightTotalDispatched *float64 `json:"weightTotalDispatched,omitempty"`
+
+	// --- DRR weights (only used when strategy == "drr") ---
+
+	// WeightDeficit is the weight for the deficit counter signal.
+	// Default: 0.7.
+	WeightDeficit *float64 `json:"weightDeficit,omitempty"`
+
+	// WeightDRRHeadWait is the weight for head-of-queue age in DRR.
+	// Default: 0.3.
+	WeightDRRHeadWait *float64 `json:"weightDrrHeadWait,omitempty"`
+
+	// QuantumTokens is the token budget added to each non-empty queue per Pick() cycle.
+	// Default: 1000.
+	QuantumTokens *int64 `json:"quantumTokens,omitempty"`
 }
 
 // Compile-time interface assertions.
@@ -57,7 +85,7 @@ func ProgramAwarePluginFactory(name string, rawCfg json.RawMessage, _ plugin.Han
 			return nil, fmt.Errorf("invalid config for %s plugin %q: %w", ProgramAwarePluginType, name, err)
 		}
 	}
-	strategy, err := newStrategy(cfg.Strategy)
+	strategy, err := newStrategy(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("%s plugin %q: %w", ProgramAwarePluginType, name, err)
 	}
@@ -100,7 +128,11 @@ func (p *ProgramAwarePlugin) TypedName() plugin.TypedName {
 // plugin instances constructed directly in tests.
 func (p *ProgramAwarePlugin) getStrategy() ScoringStrategy {
 	if p.strategy == nil {
-		return &EWMAStrategy{}
+		return &EWMAStrategy{
+			weightHeadWait:        defaultEWMAWeightHeadWait,
+			weightAvgWait:         defaultEWMAWeightAvgWait,
+			weightTotalDispatched: defaultEWMAWeightTotalDispatched,
+		}
 	}
 	return p.strategy
 }
@@ -113,11 +145,20 @@ func (p *ProgramAwarePlugin) NewState(_ context.Context) any {
 	return nil
 }
 
+// queueEntry holds collected data for a non-empty queue during the two-pass Pick.
+type queueEntry struct {
+	queue flowcontrol.FlowQueueAccessor
+	raw   []float64
+}
+
 // Pick selects which program queue to service next.
 //
-// For each queue in the band, the configured ScoringStrategy is given a chance
-// to update its per-program state (OnPickStart), then the queue with the highest
-// score is selected for dispatch.
+// Uses a two-pass approach for adaptive normalization:
+//  1. Pass 1: OnPickStart for all queues + CollectRaw for non-empty ones, tracking
+//     per-dimension min/max across all queues.
+//  2. Pass 2: Normalize using observed ranges, score, and select the best queue.
+//
+// This eliminates fixed normalization caps and adapts to any workload pattern.
 func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBandAccessor) (flowcontrol.FlowQueueAccessor, error) {
 	start := time.Now()
 	defer func() {
@@ -128,9 +169,14 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 		return nil, nil //nolint:nilnil
 	}
 
-	var bestQueue flowcontrol.FlowQueueAccessor
-	bestScore := -1.0
 	strategy := p.getStrategy()
+	numDims := strategy.NumDimensions()
+
+	// --- Pass 1: OnPickStart + CollectRaw, track per-dimension min/max ---
+	var entries []queueEntry
+	dimMin := make([]float64, numDims)
+	dimMax := make([]float64, numDims)
+	first := true
 
 	band.IterateQueues(func(queue flowcontrol.FlowQueueAccessor) (keepIterating bool) {
 		if queue == nil {
@@ -149,13 +195,41 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 			return true
 		}
 
-		score := p.scoreQueue(queue)
-		if score > bestScore {
-			bestScore = score
-			bestQueue = queue
+		raw := strategy.CollectRaw(queue, metrics)
+		entries = append(entries, queueEntry{queue: queue, raw: raw})
+
+		if first {
+			copy(dimMin, raw)
+			copy(dimMax, raw)
+			first = false
+		} else {
+			for d := range numDims {
+				if raw[d] < dimMin[d] {
+					dimMin[d] = raw[d]
+				}
+				if raw[d] > dimMax[d] {
+					dimMax[d] = raw[d]
+				}
+			}
 		}
 		return true
 	})
+
+	// --- Pass 2: Normalize + Score, select best ---
+	var bestQueue flowcontrol.FlowQueueAccessor
+	bestScore := math.Inf(-1)
+
+	normalized := make([]float64, numDims)
+	for _, e := range entries {
+		for d := range numDims {
+			normalized[d] = strategy.NormalizeDimension(d, e.raw[d], dimMin[d], dimMax[d])
+		}
+		score := strategy.Score(normalized)
+		if score > bestScore {
+			bestScore = score
+			bestQueue = e.queue
+		}
+	}
 
 	// Record the selected item's enqueue time so PreRequest can compute
 	// the actual flow-control queue wait time (enqueue → dispatch).
@@ -168,15 +242,6 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 	fairnessIndex.Set(p.computeFairnessIndex())
 
 	return bestQueue, nil
-}
-
-// scoreQueue delegates to the configured ScoringStrategy.
-func (p *ProgramAwarePlugin) scoreQueue(queue flowcontrol.FlowQueueAccessor) float64 {
-	var metrics *ProgramMetrics
-	if metricsRaw, ok := p.programMetrics.Load(queue.FlowKey().ID); ok {
-		metrics = metricsRaw.(*ProgramMetrics)
-	}
-	return p.getStrategy().ScoreQueue(queue, metrics)
 }
 
 // getOrCreateMetrics returns the ProgramMetrics for the given program ID, creating if needed.
@@ -209,12 +274,4 @@ func (p *ProgramAwarePlugin) computeFairnessIndex() float64 {
 		return 1.0
 	}
 	return (sum * sum) / (n * sumSq)
-}
-
-// normalize clamps v/cap to [0, 1].
-func normalize(v, cap float64) float64 {
-	if cap <= 0 {
-		return 0
-	}
-	return math.Min(math.Max(v/cap, 0), 1)
 }

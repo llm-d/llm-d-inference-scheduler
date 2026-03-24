@@ -2,7 +2,6 @@ package programaware
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
@@ -11,53 +10,110 @@ import (
 // ScoringStrategy determines how program queues are prioritized for dispatch.
 // All methods must be safe for concurrent use; Pick(), PreRequest(), and
 // ResponseComplete() may execute on different goroutines.
+//
+// Scoring uses per-cycle relative normalization: each dimension is normalized
+// against the observed min/max across all queues in the current Pick() cycle.
+// This eliminates fixed caps and adapts automatically to any workload pattern.
 type ScoringStrategy interface {
 	Name() string
 
 	// OnPickStart is called once per queue per Pick() cycle, before scoring.
 	OnPickStart(programID string, queueLen int, metrics *ProgramMetrics)
 
-	// ScoreQueue returns a priority score for the given queue.
-	ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) float64
+	// NumDimensions returns the number of raw metric dimensions this strategy uses.
+	NumDimensions() int
+
+	// CollectRaw extracts unnormalized metric values for a queue.
+	// Returns a slice of length NumDimensions().
+	CollectRaw(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) []float64
+
+	// NormalizeDimension normalizes a single raw value given the observed min/max
+	// for that dimension across all queues in this Pick() cycle.
+	// Returns 0.5 when min == max (no discriminative signal).
+	NormalizeDimension(dim int, raw, min, max float64) float64
+
+	// Score computes the final weighted score from normalized [0,1] values.
+	Score(normalized []float64) float64
 
 	// OnCompleted is called when a response finishes with actual token usage.
 	OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64)
 }
 
-// newStrategy constructs a ScoringStrategy by name.
-func newStrategy(name string) (ScoringStrategy, error) {
-	switch name {
+// newStrategy constructs a ScoringStrategy from the plugin config.
+func newStrategy(cfg Config) (ScoringStrategy, error) {
+	switch cfg.Strategy {
 	case "", "ewma":
-		return &EWMAStrategy{}, nil
+		return &EWMAStrategy{
+			weightHeadWait:        floatOr(cfg.WeightHeadWait, defaultEWMAWeightHeadWait),
+			weightAvgWait:         floatOr(cfg.WeightAvgWait, defaultEWMAWeightAvgWait),
+			weightTotalDispatched: floatOr(cfg.WeightTotalDispatched, defaultEWMAWeightTotalDispatched),
+		}, nil
 	case "drr":
-		return &DRRStrategy{}, nil
+		return &DRRStrategy{
+			weightDeficit:  floatOr(cfg.WeightDeficit, defaultDRRWeightDeficit),
+			weightHeadWait: floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
+			quantumTokens:  int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
+		}, nil
 	default:
-		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"ewma\", \"drr\"", name)
+		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"ewma\", \"drr\"", cfg.Strategy)
 	}
+}
+
+// floatOr returns *p if non-nil, otherwise the default.
+func floatOr(p *float64, def float64) float64 {
+	if p != nil {
+		return *p
+	}
+	return def
+}
+
+// int64Or returns *p if non-nil, otherwise the default.
+func int64Or(p *int64, def int64) int64 {
+	if p != nil {
+		return *p
+	}
+	return def
+}
+
+// rangeNormalize performs min-max normalization: (v - min) / (max - min) → [0, 1].
+// Returns 0.5 when min == max (no discriminative signal for this dimension).
+func rangeNormalize(v, min, max float64) float64 {
+	if max == min {
+		return 0.5
+	}
+	return (v - min) / (max - min)
 }
 
 // =============================================================================
 // EWMA Strategy (default)
 // =============================================================================
 
-// EWMA strategy constants.
+// EWMA dimension indices.
 const (
-	ewmaWeightHeadWait        = 0.5
-	ewmaWeightAvgWait         = 0.3
-	ewmaWeightTotalDispatched = 0.2
-	// Currently it is a constant, but would make it relative
-	ewmaCapHeadWaitMs      = 5000.0
-	ewmaCapAvgWaitMs       = 5000.0
-	ewmaCapTotalDispatched = 1000.0
+	ewmaDimHeadWait        = 0
+	ewmaDimAvgWait         = 1
+	ewmaDimTotalDispatched = 2
+	ewmaNumDimensions      = 3
+)
+
+// Default EWMA strategy weights.
+const (
+	defaultEWMAWeightHeadWait        = 0.5
+	defaultEWMAWeightAvgWait         = 0.3
+	defaultEWMAWeightTotalDispatched = 0.2
 )
 
 // EWMAStrategy scores queues using three normalized signals:
-//   - headWait (0.5): age of the oldest request — rate-neutral starvation guard.
-//   - avgWait  (0.3): EWMA of historical wait times — accumulated fairness debt.
-//   - dispatched (0.2, penalty): anti-monopoly signal based on request count.
+//   - headWait: age of the oldest request — rate-neutral starvation guard.
+//   - avgWait: EWMA of historical wait times — accumulated fairness debt.
+//   - dispatched (penalty): anti-monopoly signal based on request count.
 //
-// This is a practical heuristic based on EWMA of wait time
-type EWMAStrategy struct{}
+// Weights are configurable via the plugin config; defaults are 0.5/0.3/0.2.
+type EWMAStrategy struct {
+	weightHeadWait        float64
+	weightAvgWait         float64
+	weightTotalDispatched float64
+}
 
 // Name returns "ewma".
 func (s *EWMAStrategy) Name() string { return "ewma" }
@@ -65,23 +121,42 @@ func (s *EWMAStrategy) Name() string { return "ewma" }
 // OnPickStart is a no-op for EWMA; state is derived from request timestamps, not round counters.
 func (s *EWMAStrategy) OnPickStart(_ string, _ int, _ *ProgramMetrics) {}
 
-// ScoreQueue returns a weighted score combining head-of-queue age, EWMA wait time, and dispatch count.
-func (s *EWMAStrategy) ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) float64 {
-	avgWaitMs := 0.0
-	totalDispatched := 0.0
+// NumDimensions returns 3 (headWait, avgWait, totalDispatched).
+func (s *EWMAStrategy) NumDimensions() int { return ewmaNumDimensions }
+
+// CollectRaw extracts unnormalized [headWaitMs, avgWaitMs, totalDispatched].
+func (s *EWMAStrategy) CollectRaw(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) []float64 {
+	raw := make([]float64, ewmaNumDimensions)
+
 	if metrics != nil {
-		avgWaitMs = metrics.AverageWaitTime()
-		totalDispatched = float64(metrics.DispatchedCount())
+		raw[ewmaDimAvgWait] = metrics.AverageWaitTime()
+		raw[ewmaDimTotalDispatched] = float64(metrics.DispatchedCount())
 	}
 
-	headWaitMs := 0.0
 	if head := queue.PeekHead(); head != nil {
-		headWaitMs = float64(time.Since(head.EnqueueTime()).Milliseconds())
+		raw[ewmaDimHeadWait] = float64(time.Since(head.EnqueueTime()).Milliseconds())
 	}
 
-	return ewmaWeightHeadWait*normalize(headWaitMs, ewmaCapHeadWaitMs) +
-		ewmaWeightAvgWait*normalize(avgWaitMs, ewmaCapAvgWaitMs) -
-		ewmaWeightTotalDispatched*normalize(totalDispatched, ewmaCapTotalDispatched)
+	return raw
+}
+
+// NormalizeDimension performs range normalization for all EWMA dimensions.
+func (s *EWMAStrategy) NormalizeDimension(_ int, raw, min, max float64) float64 {
+	return rangeNormalize(raw, min, max)
+}
+
+// Score computes the final score using the stronger of the two starvation signals
+// (headWait, avgWait) minus a dispatch-count penalty.
+//
+// headWait and avgWait are correlated: a starved flow has both high head-of-queue
+// age AND high EWMA wait. Using max() instead of addition prevents double-counting
+// and ensures new flows (avgWait=0) score the same as existing flows with identical
+// queue age, eliminating the cold-start disadvantage.
+func (s *EWMAStrategy) Score(normalized []float64) float64 {
+	return max(
+		s.weightHeadWait*normalized[ewmaDimHeadWait],
+		s.weightAvgWait*normalized[ewmaDimAvgWait],
+	) - s.weightTotalDispatched*normalized[ewmaDimTotalDispatched]
 }
 
 // OnCompleted is a no-op for EWMA; token usage is not tracked in this strategy.
@@ -91,20 +166,18 @@ func (s *EWMAStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}
 // DRR Strategy
 // =============================================================================
 
-// DRR strategy constants.
+// DRR dimension indices.
 const (
-	// drrQuantumTokens is the token budget added to each non-empty queue's deficit
-	// per Pick() cycle.
-	// Increase for coarser but more stable fairness; decrease for finer granularity.
-	drrQuantumTokens int64 = 1000
+	drrDimDeficit    = 0
+	drrDimHeadWait   = 1
+	drrNumDimensions = 2
+)
 
-	// drrCapDeficit is the symmetric normalization range for the deficit counter.
-	// Deficit is mapped from [-cap, +cap] -> [0, 1]. e.g. 50k tokens ≈ 50 average requests.
-	drrCapDeficit float64 = 50000.0
-
-	drrWeightDeficit  float64 = 0.7
-	drrWeightHeadWait float64 = 0.3
-	drrCapHeadWaitMs  float64 = 5000.0
+// Default DRR strategy values.
+const (
+	defaultDRRQuantumTokens  int64   = 1000
+	defaultDRRWeightDeficit  float64 = 0.7
+	defaultDRRWeightHeadWait float64 = 0.3
 )
 
 // DRRStrategy implements Deficit Round Robin adapted for token-based LLM scheduling.
@@ -112,18 +185,24 @@ const (
 // Classic DRR (https://dl.acm.org/doi/pdf/10.1145/217391.217453) assigns each active flow a fixed
 // byte quantum per round, serves the highest-deficit flow first, and deducts actual bytes
 // served from the deficit counter. This guarantees proportional bandwidth allocation
-// independent of packet sizes — in contrast to EWMA which counts requests, not compute.
+// — in contrast to EWMA which counts requests, not compute.
 //
 // Mapping for program-aware scheduler:
 //   - "bytes"   = prompt + completion tokens (actual cost known at response completion)
-//   - "quantum" = drrQuantumTokens added per Pick() cycle per non-empty queue
+//   - "quantum" = quantumTokens added per Pick() cycle per non-empty queue
 //   - Actual token cost is deducted in OnCompleted() (ResponseComplete hook)
 //   - Idle queues have their deficit reset to 0: standard DRR behavior prevents programs
 //     from accumulating unbounded credit while inactive
 //
-// headWaitMs is used as a secondary signal (weight 0.3) to prevent starvation of
+// headWaitMs is used as a secondary signal to prevent starvation of
 // new or returning programs that start with deficit=0.
-type DRRStrategy struct{}
+//
+// Weights and quantum are configurable via the plugin config; defaults are 0.7/0.3/1000.
+type DRRStrategy struct {
+	weightDeficit  float64
+	weightHeadWait float64
+	quantumTokens  int64
+}
 
 // Name returns "drr".
 func (s *DRRStrategy) Name() string { return "drr" }
@@ -140,29 +219,39 @@ func (s *DRRStrategy) OnPickStart(_ string, queueLen int, metrics *ProgramMetric
 		metrics.ResetDeficit()
 	} else {
 		// Allocate this round's token quantum.
-		metrics.AddDeficit(drrQuantumTokens)
+		metrics.AddDeficit(s.quantumTokens)
 	}
 }
 
-// ScoreQueue returns a weighted score combining the deficit counter and head-of-queue age.
-func (s *DRRStrategy) ScoreQueue(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) float64 {
-	deficit := 0.0
+// NumDimensions returns 2 (deficit, headWait).
+func (s *DRRStrategy) NumDimensions() int { return drrNumDimensions }
+
+// CollectRaw extracts unnormalized [deficit, headWaitMs].
+func (s *DRRStrategy) CollectRaw(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) []float64 {
+	raw := make([]float64, drrNumDimensions)
+
 	if metrics != nil {
-		deficit = float64(metrics.Deficit())
+		raw[drrDimDeficit] = float64(metrics.Deficit())
 	}
 
-	// Shift-normalize deficit from [-cap, +cap] -> [0, 1].
-	// Positive deficit (owed service) scores above 0.5.
-	// Negative deficit (overserved) scores below 0.5.
-	deficitNorm := math.Min(math.Max((deficit+drrCapDeficit)/(2*drrCapDeficit), 0), 1)
-
-	headWaitMs := 0.0
 	if head := queue.PeekHead(); head != nil {
-		headWaitMs = float64(time.Since(head.EnqueueTime()).Milliseconds())
+		raw[drrDimHeadWait] = float64(time.Since(head.EnqueueTime()).Milliseconds())
 	}
 
-	return drrWeightDeficit*deficitNorm +
-		drrWeightHeadWait*normalize(headWaitMs, drrCapHeadWaitMs)
+	return raw
+}
+
+// NormalizeDimension performs range normalization for all DRR dimensions.
+// For deficit, this naturally maps negative deficit (overserved) to low scores
+// and positive deficit (owed service) to high scores.
+func (s *DRRStrategy) NormalizeDimension(_ int, raw, min, max float64) float64 {
+	return rangeNormalize(raw, min, max)
+}
+
+// Score computes the weighted combination of deficit and head wait.
+func (s *DRRStrategy) Score(normalized []float64) float64 {
+	return s.weightDeficit*normalized[drrDimDeficit] +
+		s.weightHeadWait*normalized[drrDimHeadWait]
 }
 
 // OnCompleted deducts actual token usage from the deficit counter.
