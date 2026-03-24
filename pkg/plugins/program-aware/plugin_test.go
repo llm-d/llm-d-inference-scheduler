@@ -328,15 +328,16 @@ func TestResponseComplete_NoFairnessHeader_StillCleansTimestamp(t *testing.T) {
 	assert.False(t, ok, "timestamp should be cleaned up even without fairness header")
 }
 
-// --- normalize tests ---
+// --- rangeNormalize tests ---
 
-func TestNormalize(t *testing.T) {
-	assert.InDelta(t, 0.0, normalize(0, 100), 0.001)
-	assert.InDelta(t, 0.5, normalize(50, 100), 0.001)
-	assert.InDelta(t, 1.0, normalize(100, 100), 0.001)
-	assert.InDelta(t, 1.0, normalize(200, 100), 0.001, "should clamp to 1")
-	assert.InDelta(t, 0.0, normalize(-10, 100), 0.001, "should clamp to 0")
-	assert.InDelta(t, 0.0, normalize(50, 0), 0.001, "zero cap returns 0")
+func TestRangeNormalize(t *testing.T) {
+	assert.InDelta(t, 0.0, rangeNormalize(0, 0, 100), 0.001)
+	assert.InDelta(t, 0.5, rangeNormalize(50, 0, 100), 0.001)
+	assert.InDelta(t, 1.0, rangeNormalize(100, 0, 100), 0.001)
+	assert.InDelta(t, 0.5, rangeNormalize(42, 42, 42), 0.001, "min==max returns 0.5")
+	assert.InDelta(t, 0.5, rangeNormalize(-10, -20, 0), 0.001, "works with negative range")
+	assert.InDelta(t, 0.0, rangeNormalize(-20, -20, 0), 0.001, "min of negative range")
+	assert.InDelta(t, 1.0, rangeNormalize(0, -20, 0), 0.001, "max of negative range")
 }
 
 // --- Produces / Consumes tests ---
@@ -444,40 +445,84 @@ func TestComputeFairnessIndex_NoWaitData(t *testing.T) {
 	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "no wait data → 1.0")
 }
 
-// --- scoreQueue tests ---
+// --- Two-pass scoring tests ---
 
-func TestScoreQueue(t *testing.T) {
+func TestPick_DispatchPenaltyViaFullCycle(t *testing.T) {
+	// Verify that dispatch count acts as a penalty through the full Pick() cycle.
+	// Two programs with identical avgWait and headWait, but prog-a has many dispatches.
 	p := &ProgramAwarePlugin{}
 
-	// Program with EWMA wait time 2500ms, queue length 50, no dispatch history.
-	metrics := &ProgramMetrics{}
-	metrics.RecordWaitTime(2500)
-	p.programMetrics.Store("test-prog", metrics)
+	metricsA := &ProgramMetrics{}
+	metricsA.RecordWaitTime(2500)
+	for range 500 {
+		metricsA.IncrementDispatched()
+	}
+	p.programMetrics.Store("prog-a", metricsA)
 
-	queue := &fcmocks.MockFlowQueueAccessor{
-		LenV:     50,
-		FlowKeyV: flowcontrol.FlowKey{ID: "test-prog"},
+	metricsB := &ProgramMetrics{}
+	metricsB.RecordWaitTime(2500)
+	p.programMetrics.Store("prog-b", metricsB)
+
+	now := time.Now()
+	queueA := &fcmocks.MockFlowQueueAccessor{
+		LenV:     1,
+		FlowKeyV: flowcontrol.FlowKey{ID: "prog-a"},
 		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: time.Now(),
+			EnqueueTimeV:     now,
+			OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: "a-req"},
+		},
+	}
+	queueB := &fcmocks.MockFlowQueueAccessor{
+		LenV:     1,
+		FlowKeyV: flowcontrol.FlowKey{ID: "prog-b"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{
+			EnqueueTimeV:     now,
+			OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: "b-req"},
 		},
 	}
 
-	score := p.scoreQueue(queue)
-
-	// headWaitMs ≈ 0 (EnqueueTimeV: time.Now())
-	// Expected: 0.5 * (0/5000) + 0.3 * (2500/5000) - 0.2 * (0/1000)
-	//         = 0 + 0.3 * 0.5 - 0
-	//         = 0.15
-	assert.InDelta(t, 0.15, score, 0.01)
-
-	// Now add dispatch history and verify penalty.
-	for range 500 {
-		metrics.IncrementDispatched()
+	band := &fcmocks.MockPriorityBandAccessor{
+		IterateQueuesFunc: func(cb func(flowcontrol.FlowQueueAccessor) bool) {
+			cb(queueA)
+			cb(queueB)
+		},
 	}
 
-	scoreWithDispatch := p.scoreQueue(queue)
-	// Penalty: 0.2 * (500/1000) = 0.10 → new score = 0.15 - 0.10 = 0.05
-	assert.True(t, scoreWithDispatch < score,
-		"score with high dispatch count (%f) should be lower than without (%f)",
-		scoreWithDispatch, score)
+	queue, err := p.Pick(context.Background(), band)
+	assert.NoError(t, err)
+	assert.Equal(t, queueB, queue, "prog-b (no dispatches) should be preferred over prog-a (500 dispatches)")
+}
+
+func TestPick_AllIdenticalMetrics(t *testing.T) {
+	// When all queues have identical metrics, Pick should still return a valid queue.
+	p := &ProgramAwarePlugin{}
+
+	now := time.Now()
+	queueA := &fcmocks.MockFlowQueueAccessor{
+		LenV:     1,
+		FlowKeyV: flowcontrol.FlowKey{ID: "prog-a"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{
+			EnqueueTimeV:     now,
+			OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: "a-req"},
+		},
+	}
+	queueB := &fcmocks.MockFlowQueueAccessor{
+		LenV:     1,
+		FlowKeyV: flowcontrol.FlowKey{ID: "prog-b"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{
+			EnqueueTimeV:     now,
+			OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: "b-req"},
+		},
+	}
+
+	band := &fcmocks.MockPriorityBandAccessor{
+		IterateQueuesFunc: func(cb func(flowcontrol.FlowQueueAccessor) bool) {
+			cb(queueA)
+			cb(queueB)
+		},
+	}
+
+	queue, err := p.Pick(context.Background(), band)
+	assert.NoError(t, err)
+	assert.NotNil(t, queue, "should select a queue even when all metrics are identical")
 }
