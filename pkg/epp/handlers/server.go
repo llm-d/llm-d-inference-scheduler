@@ -272,16 +272,18 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			chunk := v.ResponseBody.Body
 
 			if reqCtx.modelServerStreaming {
+				if endOfStream {
+					reqCtx.ResponseComplete = true
+					reqCtx.ResponseCompleteTimestamp = time.Now()
+				}
 				s.HandleResponseBody(ctx, reqCtx, chunk, endOfStream)
 				// For streaming response, we send response chunk back to envoy every time we received it.
 				reqCtx.respBodyResp = generateResponseBodyResponses(chunk, endOfStream, reqCtx.Response.DynamicMetadata)
 			} else {
 				body = append(body, chunk...)
-			}
-
-			// If this chunk marks the end of the stream, trigger the finalization logic.
-			if endOfStream {
-				s.finishResponse(ctx, reqCtx, body, reqCtx.modelServerStreaming)
+				if endOfStream {
+					s.finishResponse(ctx, reqCtx, body, reqCtx.modelServerStreaming)
+				}
 			}
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
 			// For HTTP, the response trailer is not sent. Thus, this case will not be triggered.
@@ -330,7 +332,6 @@ func (s *StreamingServer) finishResponse(ctx context.Context, reqCtx *RequestCon
 
 	reqCtx.ResponseComplete = true
 	reqCtx.ResponseCompleteTimestamp = time.Now()
-	reqCtx.ResponseSize = len(body)
 	reqCtx = s.HandleResponseBody(ctx, reqCtx, body, true)
 	if !modelStreaming {
 		// For non-streaming response, we send response back to envoy after receiving all the response body.
