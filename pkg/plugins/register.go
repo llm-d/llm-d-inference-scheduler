@@ -17,6 +17,7 @@ func RegisterAllPlugins() {
 	plugin.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
 	plugin.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
 	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
+	plugin.Register(prerequest.DPRankHeaderHandlerType, prerequest.DPRankHeaderHandlerFactory)
 	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
 	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory)
 	plugin.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)

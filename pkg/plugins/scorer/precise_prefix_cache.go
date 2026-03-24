@@ -25,6 +25,7 @@ import (
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
@@ -480,6 +481,23 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		}
 	}
 	debugLogger.Info("Got endpoint scores", "scores", scores)
+
+	// Strip DP rank suffixes from scoring keys (e.g., "10.0.0.1:8080@dp0" -> "10.0.0.1:8080").
+	// When multiple DP ranks exist for the same pod, the highest score is kept.
+	// For Internal/Hybrid LB modes, this collapses rank-level scores to pod/node level.
+	// The winning rank per pod is written to an internal header so the dp-rank-header-handler
+	// PreRequest plugin can inject the X-data-parallel-rank header after scheduling.
+	// For External LB mode, this is a no-op since each rank has a unique IP (no @dpN suffix).
+	scores, winningRanks := stripDPRankFromScores(scores)
+
+	// Write winning DP ranks as an internal header for the PreRequest plugin to consume.
+	// This avoids depending on CycleState (which is not available in PreRequest plugins)
+	// and works with any profile handler including the built-in single-profile-handler.
+	if len(winningRanks) > 0 {
+		if encoded, err := common.EncodeWinningRanks(winningRanks); err == nil {
+			request.Headers[common.DPWinningRanksHeader] = encoded
+		}
+	}
 
 	// Track scoring statistics
 	span.SetAttributes(
