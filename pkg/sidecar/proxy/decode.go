@@ -29,7 +29,20 @@ func (s *Server) sendDecodeRequest(w http.ResponseWriter, r *http.Request, compl
 	if s.forwardDataParallel && s.dataParallelHandler(w, r) {
 		return
 	}
-	if !s.config.EnableChunkedDecode {
+
+	// legacy completion API does not support chunked decode, so we only run it for chat completions
+	// TODO: consider supporting chunked decode for legacy completion API as well, which would require changes to the request/response format since they don't have the messages structure
+	// Try:
+	// 	{
+	//   "model": "your-model",
+	//   "prompt": "User: Tell me how transformers work.\nAssistant: Sure, transformers work by",
+	// }
+	if !s.config.EnableChunkedDecode || !strings.HasPrefix(r.URL.Path, ChatCompletionsPath) {
+		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
+		if completionRequest == nil {
+			s.decoderProxy.ServeHTTP(w, r)
+			return
+		}
 		dreq, err := setRequestBody(r, completionRequest)
 		if err != nil {
 			if err := errorJSONInvalid(err, w); err != nil {
@@ -37,10 +50,7 @@ func (s *Server) sendDecodeRequest(w http.ResponseWriter, r *http.Request, compl
 			}
 			return
 		}
-
-		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
 		s.decoderProxy.ServeHTTP(w, dreq)
-
 		return
 	}
 	s.sendChunkedDecodeRequest(w, r, completionRequest)
@@ -100,15 +110,27 @@ func (s *Server) sendChunkedDecodeRequest(w http.ResponseWriter, r *http.Request
 			if err := errorJSONInvalid(err, w); err != nil {
 				s.logger.Error(err, "failed to send error response to client")
 			}
+			s.logger.Error(err, "-------- failed to marshal chunked decode request body")
 			return
 		}
+
+		s.logger.V(4).Info("------- request is ready")
+		dbody, err := json.Marshal(completionRequest)
+		if err != nil {
+			s.logger.Error(err, "----- failed to marshal request body for debug logging")
+			return
+		}
+		s.logger.Info("--------- request body", "body", string(dbody))
 
 		rec := httptest.NewRecorder()
 		s.decoderProxy.ServeHTTP(rec, dreq)
 		resp := rec.Result()
 		defer resp.Body.Close()
 
+		s.logger.V(4).Info("------- first response returned", "status", resp.StatusCode)
+
 		respBody, _ = io.ReadAll(resp.Body) // TODO: handle error
+		s.logger.V(4).Info("----- decoder response body", "body", string(respBody))
 		var parsed ChatCompletionResponse
 		if err := json.Unmarshal(respBody, &parsed); err != nil {
 			s.logger.Error(err, "failed to decode response")
@@ -140,6 +162,17 @@ func (s *Server) sendChunkedDecodeRequest(w http.ResponseWriter, r *http.Request
 
 		// Do not pull KV cache next time
 		delete(completionRequest, requestFieldKVTransferParams)
+
+		// TODO: continue_final_message is not supported by SGLang
+		// For SGLang set continue_last_assistant :
+		// 	{
+		//   "model": "your-model",
+		//   "messages": [...],
+		//   "extra_body": {
+		//     "chat_template_kwargs": {
+		//       "continue_last_assistant": true
+		//     }
+		// If not set, it's up to the model to decide whether to continue the last assistant message
 
 		completionRequest["continue_final_message"] = true
 		completionRequest["add_generation_prompt"] = false

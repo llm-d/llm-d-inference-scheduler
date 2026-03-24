@@ -59,7 +59,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 
 		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
 			if s.config.EnableChunkedDecode {
-				s.sendChunkedDecodeRequest(w, r, nil) // currently supported for vLLM only
+				s.sendChunkedDecodeRequest(w, r, nil)
 				return
 			}
 			s.decoderProxy.ServeHTTP(w, r)

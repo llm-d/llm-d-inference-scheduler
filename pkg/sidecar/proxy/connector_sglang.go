@@ -96,7 +96,8 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	}()
 
 	// Send decode request synchronously
-	s.decoderProxy.ServeHTTP(w, decodeReq)
+	//s.decoderProxy.ServeHTTP(w, decodeReq)
+	s.sendDecodeRequest(w, decodeReq, nil)
 }
 
 func cloneWithJSONBody(r *http.Request, body []byte) *http.Request {
