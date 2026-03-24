@@ -1034,7 +1034,8 @@ plugins:
     nonCachedTokens: 16
 - type: disagg-profile-handler
   parameters:
-    prefillDeciderPluginName: prefix-based-pd-decider
+    deciders:
+      prefill: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill
   plugins:

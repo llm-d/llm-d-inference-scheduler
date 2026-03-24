@@ -31,24 +31,70 @@ const (
 
 // ── Factory & constructor ────────────────────────────────────────────────────
 
+type disaggProfilesParameters struct {
+	Decode  string `json:"decode,omitempty"`
+	Prefill string `json:"prefill,omitempty"`
+	Encode  string `json:"encode,omitempty"`
+}
+
+type disaggDecidersParameters struct {
+	Prefill string `json:"prefill,omitempty"`
+	Encode  string `json:"encode,omitempty"`
+}
+
 type disaggProfileHandlerParameters struct {
-	DecodeProfile            string `json:"decodeProfile"`
-	PrefillProfile           string `json:"prefillProfile"`
-	EncodeProfile            string `json:"encodeProfile"`
-	PrefillDeciderPluginName string `json:"prefillDeciderPluginName"`
-	EncodeDeciderPluginName  string `json:"encodeDeciderPluginName"`
+	Profiles disaggProfilesParameters `json:"profiles"`
+	Deciders disaggDecidersParameters `json:"deciders"`
+
+	// Deprecated flat fields - kept for backward compatibility.
+	// If set, they are promoted to Profiles/Deciders when the nested fields are absent.
+	DeprecatedDecodeProfile            string `json:"decodeProfile,omitempty"`
+	DeprecatedPrefillProfile           string `json:"prefillProfile,omitempty"`
+	DeprecatedEncodeProfile            string `json:"encodeProfile,omitempty"`
+	DeprecatedPrefillDeciderPluginName string `json:"prefillDeciderPluginName,omitempty"`
+	DeprecatedEncodeDeciderPluginName  string `json:"encodeDeciderPluginName,omitempty"`
+	// DeprecatedDeciderPluginName is a legacy alias from pd-profile-handler, maps to deciders.prefill.
+	DeprecatedDeciderPluginName string `json:"deciderPluginName,omitempty"`
+}
+
+// applyDeprecatedFields promotes flat legacy fields into the nested Profiles/Deciders
+// fields when the nested fields are absent, and logs a deprecation warning for each
+// legacy field in use.
+func (p *disaggProfileHandlerParameters) applyDeprecatedFields(logger interface{ Info(string, ...any) }) {
+	if p.DeprecatedDecodeProfile != "" && p.Profiles.Decode == "" {
+		logger.Info("Deprecated parameter 'decodeProfile', use 'profiles.decode' instead")
+		p.Profiles.Decode = p.DeprecatedDecodeProfile
+	}
+	if p.DeprecatedPrefillProfile != "" && p.Profiles.Prefill == "" {
+		logger.Info("Deprecated parameter 'prefillProfile', use 'profiles.prefill' instead")
+		p.Profiles.Prefill = p.DeprecatedPrefillProfile
+	}
+	if p.DeprecatedEncodeProfile != "" && p.Profiles.Encode == "" {
+		logger.Info("Deprecated parameter 'encodeProfile', use 'profiles.encode' instead")
+		p.Profiles.Encode = p.DeprecatedEncodeProfile
+	}
+	if p.DeprecatedPrefillDeciderPluginName != "" && p.Deciders.Prefill == "" {
+		logger.Info("Deprecated parameter 'prefillDeciderPluginName', use 'deciders.prefill' instead")
+		p.Deciders.Prefill = p.DeprecatedPrefillDeciderPluginName
+	}
+	if p.DeprecatedDeciderPluginName != "" && p.Deciders.Prefill == "" {
+		logger.Info("Deprecated parameter 'deciderPluginName', use 'deciders.prefill' instead")
+		p.Deciders.Prefill = p.DeprecatedDeciderPluginName
+	}
+	if p.DeprecatedEncodeDeciderPluginName != "" && p.Deciders.Encode == "" {
+		logger.Info("Deprecated parameter 'encodeDeciderPluginName', use 'deciders.encode' instead")
+		p.Deciders.Encode = p.DeprecatedEncodeDeciderPluginName
+	}
 }
 
 // DisaggProfileHandlerFactory is the unified factory for all disaggregation profile handlers.
 //
-//	if rawParameters include PrefillDeciderPluginName - P disaggregation will be supported
-//	if rawParameters include EncodeDeciderPluginName - E disaggregation will be supported
+//	if parameters.deciders.prefill is set - P disaggregation will be supported
+//	if parameters.deciders.encode is set - E disaggregation will be supported
 func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	parameters := disaggProfileHandlerParameters{
-		DecodeProfile:  defaultDecodeProfile,
-		PrefillProfile: defaultPrefillProfile,
-		EncodeProfile:  defaultEncodeProfile,
-	}
+	// Initialize without profile defaults so applyDeprecatedFields can detect
+	// whether the nested fields were explicitly provided.
+	parameters := disaggProfileHandlerParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
@@ -57,39 +103,53 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 
 	logger := log.FromContext(handle.Context())
 
+	// Promote any deprecated flat fields that are still in use.
+	parameters.applyDeprecatedFields(logger)
+
+	// Apply profile name defaults for any fields still unset.
+	if parameters.Profiles.Decode == "" {
+		parameters.Profiles.Decode = defaultDecodeProfile
+	}
+	if parameters.Profiles.Prefill == "" {
+		parameters.Profiles.Prefill = defaultPrefillProfile
+	}
+	if parameters.Profiles.Encode == "" {
+		parameters.Profiles.Encode = defaultEncodeProfile
+	}
+
 	// Resolve PD decider (optional).
 	var pdDecider deciderPlugin
-	if parameters.PrefillDeciderPluginName != "" {
-		p := handle.Plugin(parameters.PrefillDeciderPluginName)
+	if parameters.Deciders.Prefill != "" {
+		p := handle.Plugin(parameters.Deciders.Prefill)
 		if p == nil {
-			return nil, fmt.Errorf("prefillDeciderPluginName not found: %s", parameters.PrefillDeciderPluginName)
+			return nil, fmt.Errorf("deciders.prefill plugin not found: %s", parameters.Deciders.Prefill)
 		}
 		var ok bool
 		pdDecider, ok = p.(deciderPlugin)
 		if !ok {
-			return nil, fmt.Errorf("plugin %s does not implement prefillDeciderPlugin", parameters.PrefillDeciderPluginName)
+			return nil, fmt.Errorf("plugin %s does not implement prefillDeciderPlugin", parameters.Deciders.Prefill)
 		}
 	} else {
-		logger.Info("No prefillDeciderPluginName configured, P/D disaggregation disabled")
+		logger.Info("No deciders.prefill configured, P/D disaggregation disabled")
 	}
 	// Resolve encode decider (optional).
 	var encodeDecider deciderPlugin
-	if parameters.EncodeDeciderPluginName != "" {
-		ep := handle.Plugin(parameters.EncodeDeciderPluginName)
+	if parameters.Deciders.Encode != "" {
+		ep := handle.Plugin(parameters.Deciders.Encode)
 		if ep == nil {
-			return nil, fmt.Errorf("encodeDeciderPluginName not found: %s", parameters.EncodeDeciderPluginName)
+			return nil, fmt.Errorf("deciders.encode plugin not found: %s", parameters.Deciders.Encode)
 		}
 		var ok bool
 		encodeDecider, ok = ep.(deciderPlugin)
 		if !ok {
-			return nil, fmt.Errorf("plugin %s does not implement encodeDeciderPlugin", parameters.EncodeDeciderPluginName)
+			return nil, fmt.Errorf("plugin %s does not implement encodeDeciderPlugin", parameters.Deciders.Encode)
 		}
 	} else {
-		logger.Info("No encodeDeciderPluginName configured, E disaggregation disabled")
+		logger.Info("No deciders.encode configured, E disaggregation disabled")
 	}
 	// Create handler
 	handler := NewDisaggProfileHandler(
-		parameters.DecodeProfile, parameters.PrefillProfile, parameters.EncodeProfile,
+		parameters.Profiles.Decode, parameters.Profiles.Prefill, parameters.Profiles.Encode,
 		pdDecider, encodeDecider,
 	)
 	return handler.WithName(name), nil
@@ -201,7 +261,7 @@ func (h *DisaggProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleStat
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_encode"))
 				return map[string]scheduling.SchedulerProfile{h.encodeProfile: profiles[h.encodeProfile]}
 			}
-			// Decider rejected encode — mark as evaluated so we don't re-run the decider.
+			// Decider rejected encode - mark as evaluated so we don't re-run the decider.
 			profileResults[h.encodeProfile] = nil
 			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_encode"))
 		}
@@ -214,7 +274,7 @@ func (h *DisaggProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleStat
 				span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "run_prefill"))
 				return map[string]scheduling.SchedulerProfile{h.prefillProfile: profiles[h.prefillProfile]}
 			}
-			// Decider rejected prefill — mark as evaluated so we don't re-run the decider.
+			// Decider rejected prefill - mark as evaluated so we don't re-run the decider.
 			profileResults[h.prefillProfile] = nil
 			span.SetAttributes(attribute.String("llm_d.profile_handler.decision", "skip_prefill"))
 		}

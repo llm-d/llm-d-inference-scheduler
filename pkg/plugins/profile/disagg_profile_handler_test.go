@@ -183,38 +183,128 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 
 		// P/D style (prefill + decode)
 		{"PD style", map[string]any{
-			"prefillProfile":           "prefill",
-			"prefillDeciderPluginName": AlwaysDisaggPDDeciderPluginType,
+			"deciders": map[string]any{"prefill": AlwaysDisaggPDDeciderPluginType},
 		}, false},
 		{"PD custom profiles", map[string]any{
-			"decodeProfile": "my-decode", "prefillProfile": "my-prefill",
-			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
+			"profiles": map[string]any{"decode": "my-decode", "prefill": "my-prefill"},
+			"deciders": map[string]any{"prefill": PrefixBasedPDDeciderPluginType},
 		}, false},
 
 		// E/PD style (encode + decode)
 		{"EPD style", map[string]any{
-			"encodeProfile": "encode",
+			"profiles": map[string]any{"encode": "encode"},
 		}, false},
 		{"EPD with encode decider", map[string]any{
-			"encodeProfile":           "encode",
-			"encodeDeciderPluginName": AlwaysDisaggMulimodalPluginType,
+			"profiles": map[string]any{"encode": "encode"},
+			"deciders": map[string]any{"encode": AlwaysDisaggMulimodalPluginType},
 		}, false},
 
 		// E/P/D style (all three)
 		{"full EPD", map[string]any{
-			"prefillProfile":           "prefill",
-			"encodeProfile":            "encode",
-			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
-			"encodeDeciderPluginName":  AlwaysDisaggMulimodalPluginType,
+			"profiles": map[string]any{"prefill": "prefill", "encode": "encode"},
+			"deciders": map[string]any{
+				"prefill": PrefixBasedPDDeciderPluginType,
+				"encode":  AlwaysDisaggMulimodalPluginType,
+			},
 		}, false},
 
 		// decider errors
-		{"prefill without pdDecider is ok (stage inactive)", map[string]any{"prefillProfile": "prefill"}, false},
+		{"prefill without pdDecider is ok (stage inactive)", map[string]any{
+			"profiles": map[string]any{"prefill": "prefill"},
+		}, false},
 		{"unknown pdDecider", map[string]any{
-			"prefillProfile": "prefill", "prefillDeciderPluginName": "INVALID",
+			"profiles": map[string]any{"prefill": "prefill"},
+			"deciders": map[string]any{"prefill": "INVALID"},
 		}, true},
 		{"unknown encodeDecider", map[string]any{
-			"encodeDeciderPluginName": "INVALID",
+			"deciders": map[string]any{"encode": "INVALID"},
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := json.Marshal(tt.params)
+			p, err := DisaggProfileHandlerFactory("h", b, handle)
+			if tt.expectErr {
+				assert.Error(t, err)
+				assert.Nil(t, p)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, p)
+			}
+		})
+	}
+}
+
+func TestDisaggProfileHandlerFactory_DeprecatedFlatParams(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handle := handleWithDeciders(ctx)
+
+	tests := []struct {
+		name      string
+		params    map[string]any
+		expectErr bool
+	}{
+		{"deprecated prefillDeciderPluginName", map[string]any{
+			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
+		}, false},
+		{"deprecated encodeDeciderPluginName", map[string]any{
+			"encodeDeciderPluginName": AlwaysDisaggMulimodalPluginType,
+		}, false},
+		{"deprecated custom profile names", map[string]any{
+			"decodeProfile":            "my-decode",
+			"prefillProfile":           "my-prefill",
+			"encodeProfile":            "my-encode",
+			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
+		}, false},
+		{"deprecated fields overridden by nested", map[string]any{
+			"decodeProfile": "ignored-decode",
+			"profiles":      map[string]any{"decode": "my-decode"},
+			"deciders":      map[string]any{"prefill": AlwaysDisaggPDDeciderPluginType},
+		}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := json.Marshal(tt.params)
+			p, err := DisaggProfileHandlerFactory("h", b, handle)
+			if tt.expectErr {
+				assert.Error(t, err)
+				assert.Nil(t, p)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, p)
+			}
+		})
+	}
+}
+
+// TestDisaggProfileHandlerFactory_PdProfileHandlerParams verifies that
+// DisaggProfileHandler accepts the exact parameter format of the deprecated
+// pd-profile-handler, enabling a zero-change migration between the two types.
+func TestDisaggProfileHandlerFactory_PdProfileHandlerParams(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handle := handleWithDeciders(ctx)
+
+	tests := []struct {
+		name      string
+		params    map[string]any
+		expectErr bool
+	}{
+		{"pd-profile-handler defaults (no params)", map[string]any{}, false},
+		{"pd-profile-handler with deciderPluginName", map[string]any{
+			"decodeProfile":     "decode",
+			"prefillProfile":    "prefill",
+			"deciderPluginName": PrefixBasedPDDeciderPluginType,
+		}, false},
+		{"pd-profile-handler with all params including ignored fields", map[string]any{
+			"decodeProfile":     "decode",
+			"prefillProfile":    "prefill",
+			"deciderPluginName": PrefixBasedPDDeciderPluginType,
+			"prefixPluginType":  "prefix-cache-scorer", // ignored by DisaggProfileHandler
+			"prefixPluginName":  "prefix-cache-scorer", // ignored by DisaggProfileHandler
+			"primaryPort":       8080,                  // ignored by DisaggProfileHandler
+		}, false},
+		{"pd-profile-handler unknown deciderPluginName", map[string]any{
+			"deciderPluginName": "INVALID",
 		}, true},
 	}
 	for _, tt := range tests {
@@ -235,7 +325,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 func TestDisaggProfileHandlerFactory_InvalidJSON(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := handleWithDeciders(ctx)
-	for _, raw := range []string{`{"prefillDeciderPluginName": `} {
+	for _, raw := range []string{`{"deciders": `} {
 		p, err := DisaggProfileHandlerFactory("h", json.RawMessage(raw), handle)
 		assert.Error(t, err)
 		assert.Nil(t, p)
@@ -1149,24 +1239,23 @@ func TestDisaggProfileHandler_Factory_NilDeciders(t *testing.T) {
 		{
 			name: "prefillProfile set, no pdDecider → valid (decider optional)",
 			params: map[string]any{
-				"prefillProfile": "prefill",
+				"profiles": map[string]any{"prefill": "prefill"},
 			},
 			expectErr:   false,
-			description: "Should allow prefillProfile without pdDecider",
+			description: "Should allow profiles.prefill without deciders.prefill",
 		},
 		{
 			name: "encodeProfile set, no encodeDecider → valid (decider optional)",
 			params: map[string]any{
-				"encodeProfile": "encode",
+				"profiles": map[string]any{"encode": "encode"},
 			},
 			expectErr:   false,
-			description: "Should allow encodeProfile without encodeDecider",
+			description: "Should allow profiles.encode without deciders.encode",
 		},
 		{
 			name: "both profiles set, no deciders → valid",
 			params: map[string]any{
-				"prefillProfile": "prefill",
-				"encodeProfile":  "encode",
+				"profiles": map[string]any{"prefill": "prefill", "encode": "encode"},
 			},
 			expectErr:   false,
 			description: "Should allow both profiles without any deciders",

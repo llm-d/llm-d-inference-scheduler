@@ -216,15 +216,41 @@ Selects the profiles to use when running with disaggregation
 
 - **Type**: `disagg-profile-handler`
 - **Parameters**:
-  - `decodeProfile`: specifies the name of the profile used for the decode scheduling. Only needed if the decode profile is not named `decode`.
-  - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-  - `encodeProfile`: specifies the name of the profile used for the encode scheduling. Only needed if the encode profile is not named `encode`.
-  - `encodeDeciderPluginName`: specifies the name of the encode decider plugin. Decider determines whether disaggregated Encode should be executed
-  - `prefillDeciderPluginName`: specifies the name of the prefill decider plugin. Decider determines whether disaggregated PD should be executed
+  - `profiles` (optional): names of scheduling profiles to use. Defaults match the profile names.
+    - `decode`: name of the decode scheduling profile. Defaults to `decode`.
+    - `prefill`: name of the prefill scheduling profile. Defaults to `prefill`.
+    - `encode`: name of the encode scheduling profile. Defaults to `encode`.
+  - `deciders` (optional): decider plugins that control whether each disaggregation stage runs.
+    - `prefill`: name of the prefill decider plugin. When set, enables P/D disaggregation.
+    - `encode`: name of the encode decider plugin. When set, enables E disaggregation.
 
 
 > [!NOTE]
 > When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
+
+**Examples**
+
+Decode-only (no disaggregation):
+```yaml
+- type: disagg-profile-handler
+```
+
+P/D disaggregation:
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+```
+
+E/P/D disaggregation:
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+      encode: always-disagg-multimodal-decider
+```
 
 ---
 
@@ -249,7 +275,8 @@ plugins:
     nonCachedTokens: 4
 - type: disagg-profile-handler
   parameters:
-    prefillDeciderPluginName: prefix-based-pd-decider
+    deciders:
+      prefill: prefix-based-pd-decider
 ```
 
 ---
@@ -569,7 +596,8 @@ plugins:
       nonCachedTokens: 8
 - type: disagg-profile-handler
   parameters:
-    prefillDeciderPluginName: prefix-based-pd-decider
+    deciders:
+      prefill: prefix-based-pd-decider
 schedulingProfiles:
 - name: prefill
   plugins:

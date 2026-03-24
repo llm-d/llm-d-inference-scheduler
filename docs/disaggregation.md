@@ -283,9 +283,11 @@ plugins:
       nonCachedTokens: 8
   - type: disagg-profile-handler
     parameters:
-      prefillProfile: prefill
-      decodeProfile: decode
-      prefillDeciderPluginName: prefix-based-pd-decider
+      profiles:
+        prefill: prefill
+        decode: decode
+      deciders:
+        prefill: prefix-based-pd-decider
 schedulingProfiles:
   - name: prefill
     plugins:
@@ -342,11 +344,13 @@ plugins:
       nonCachedTokens: 8
   - type: disagg-profile-handler
     parameters:
-      encodeProfile: encode
-      prefillProfile: prefill
-      decodeProfile: decode
-      encodeDeciderPluginName: always-disagg-multimodal-decider
-      prefillDeciderPluginName: prefix-based-pd-decider
+      profiles:
+        encode: encode
+        prefill: prefill
+        decode: decode
+      deciders:
+        encode: always-disagg-multimodal-decider
+        prefill: prefix-based-pd-decider
 schedulingProfiles:
   - name: encode
     plugins:
@@ -445,6 +449,72 @@ The `always-disagg-multimodal-decider` triggers encode disaggregation whenever t
 > This plugin accepts no parameters.
 
 It checks for the presence of `image_url`, `video_url`, or `input_audio` content blocks in the chat-completions request body. If any multimodal content is found, the encode stage is activated.
+
+---
+
+## Profile Handler Configuration
+
+The `disagg-profile-handler` plugin is the entry point for all disaggregation topologies. Active stages are determined by which deciders are configured.
+
+### Parameters
+
+- `profiles` (optional): names of the scheduling profiles to use.
+  - `decode` (default: `decode`)
+  - `prefill` (default: `prefill`)
+  - `encode` (default: `encode`)
+- `deciders` (optional): decider plugins that control whether each stage runs.
+  - `prefill`: enables P/D disaggregation when set.
+  - `encode`: enables E disaggregation when set.
+
+### Examples
+
+#### Decode-only (no disaggregation)
+
+No deciders are configured -- all requests are handled by the decode profile alone.
+
+```yaml
+- type: disagg-profile-handler
+```
+
+#### P/D (Prefill/Decode)
+
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+```
+
+Custom profile names (if your scheduling profiles are not named `decode`/`prefill`):
+
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    profiles:
+      decode: my-decode
+      prefill: my-prefill
+    deciders:
+      prefill: prefix-based-pd-decider
+```
+
+#### E/PD (Encode/Prefill-Decode)
+
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      encode: always-disagg-multimodal-decider
+```
+
+#### E/P/D (Encode/Prefill/Decode)
+
+```yaml
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+      encode: always-disagg-multimodal-decider
+```
 
 ---
 
