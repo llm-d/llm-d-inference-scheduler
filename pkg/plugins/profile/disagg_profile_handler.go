@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
@@ -126,6 +127,11 @@ func (h *DisaggProfileHandler) TypedName() plugin.TypedName { return h.typedName
 func (h *DisaggProfileHandler) WithName(name string) *DisaggProfileHandler {
 	h.typedName.Name = name
 	return h
+}
+
+// Consumes defines data types consumed by this plugin (through the PD decider).
+func (*DisaggProfileHandler) Consumes() map[string]any {
+	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
 }
 
 func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *DisaggProfileHandler {

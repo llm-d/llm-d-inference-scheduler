@@ -147,11 +147,6 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *schedu
 	return true
 }
 
-// Consumes defines data types consumed by this plugin
-func (*PrefixBasedPDDecider) Consumes() map[string]any {
-	return map[string]any{prefix.PrefixCacheMatchInfoKey: prefix.PrefixCacheMatchInfo{}}
-}
-
 // getUserInputLenInTokens returns an estimated token count for the user input.
 func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
 	if request == nil || request.Body == nil {
