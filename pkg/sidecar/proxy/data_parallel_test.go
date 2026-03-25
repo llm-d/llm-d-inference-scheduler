@@ -55,7 +55,7 @@ var _ = Describe("Data Parallel support", func() {
 			Expect(err).ToNot(HaveOccurred())
 			cfg := Config{
 				Port:             strconv.Itoa(fakeProxyPort),
-				TargetURL:        decodeURL,
+				DecoderURL:       decodeURL,
 				KVConnector:      KVConnectorNIXLV2,
 				DataParallelSize: testDataParallelSize,
 			}
@@ -74,7 +74,7 @@ var _ = Describe("Data Parallel support", func() {
 			rank0Server := httptest.NewServer(&rank0Handler)
 			tempURL, err = url.Parse(rank0Server.URL)
 			Expect(err).ToNot(HaveOccurred())
-			theProxy.config.TargetURL = tempURL
+			theProxy.config.DecoderURL = tempURL
 
 			proxyHandler := theProxy.createRoutes()
 			req := httptest.NewRequest("POST", "/v1/completions", nil)

@@ -41,7 +41,7 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 	if err != nil {
 		return err
 	}
-	baseDecoderPort, err := strconv.Atoi(s.config.TargetURL.Port())
+	baseDecoderPort, err := strconv.Atoi(s.config.DecoderURL.Port())
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 		decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
 		rankPort := strconv.Itoa(basePort + idx + 1)
 		hostPort := net.JoinHostPort(podIP, rankPort)
-		decoderURL, err := url.Parse(s.config.TargetURL.Scheme + "://localhost:" + decoderPort)
+		decoderURL, err := url.Parse(s.config.DecoderURL.Scheme + "://localhost:" + decoderPort)
 		if err != nil {
 			return err
 		}
@@ -64,7 +64,7 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 		grp.Go(func() error {
 			rankPort := strconv.Itoa(basePort + idx + 1)
 			decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
-			decoderURL, err := url.Parse(s.config.TargetURL.Scheme + "://localhost:" + decoderPort)
+			decoderURL, err := url.Parse(s.config.DecoderURL.Scheme + "://localhost:" + decoderPort)
 			if err != nil {
 				return err
 			}
@@ -72,7 +72,7 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 			clone := s.Clone()
 			clone.logger = log.FromContext(ctx).WithName("proxy server on port " + rankPort)
 			clone.config.Port = rankPort
-			clone.config.TargetURL = decoderURL
+			clone.config.DecoderURL = decoderURL
 			clone.forwardDataParallel = false
 			// Configure handlers
 			clone.handler = clone.createRoutes()

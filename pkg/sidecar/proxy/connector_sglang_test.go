@@ -137,7 +137,7 @@ var _ = Describe("SGLang Connector", func() {
 		// Re-initialize proxy to fetch the new mock addresses
 		cfg := Config{
 			Port:        "0",
-			TargetURL:   testInfo.decodeURL,
+			DecoderURL:  testInfo.decodeURL,
 			KVConnector: KVConnectorSGLang,
 		}
 		testInfo.proxy = NewProxy(cfg)

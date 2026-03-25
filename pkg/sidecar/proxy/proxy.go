@@ -83,8 +83,8 @@ const (
 type Config struct {
 	// Port is the port the sidecar is listening on.
 	Port string
-	// TargetURL is the URL of the local decoder (vLLM) instance.
-	TargetURL *url.URL
+	// DecoderURL is the URL of the local decoder (vLLM) instance.
+	DecoderURL *url.URL
 
 	// KVConnector is the name of the KV protocol between prefiller and decoder.
 	KVConnector string
@@ -126,20 +126,20 @@ type Config struct {
 }
 
 // MarshalJSON implements json.Marshaler for Config.
-// It overrides the default marshaling of TargetURL (*url.URL) to serialize it as a string.
+// It overrides the default marshaling of DecoderURL (*url.URL) to serialize it as a string.
 func (c Config) MarshalJSON() ([]byte, error) {
 	// alias avoids infinite recursion when calling json.Marshal below
 	type alias Config
-	targetURL := ""
-	if c.TargetURL != nil {
-		targetURL = c.TargetURL.String()
+	decoderURL := ""
+	if c.DecoderURL != nil {
+		decoderURL = c.DecoderURL.String()
 	}
 	return json.Marshal(struct {
 		alias
-		TargetURL string `json:"TargetURL"`
+		DecoderURL string
 	}{
-		alias:     alias(c),
-		TargetURL: targetURL,
+		alias:      alias(c),
+		DecoderURL: decoderURL,
 	})
 }
 
@@ -305,7 +305,7 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
 	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
 
-	s.decoderProxy = s.createDecoderProxyHandler(s.config.TargetURL, s.config.InsecureSkipVerifyForDecoder)
+	s.decoderProxy = s.createDecoderProxyHandler(s.config.DecoderURL, s.config.InsecureSkipVerifyForDecoder)
 
 	mux.Handle("/", s.decoderProxy)
 

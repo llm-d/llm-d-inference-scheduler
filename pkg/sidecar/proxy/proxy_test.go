@@ -66,7 +66,7 @@ var _ = Describe("Reverse Proxy", func() {
 
 				cfg := Config{
 					Port:          "0",
-					TargetURL:     targetURL,
+					DecoderURL:    targetURL,
 					SecureServing: secureProxy,
 				}
 				proxy := NewProxy(cfg)
@@ -161,7 +161,7 @@ var _ = Describe("Reverse Proxy", func() {
 			var proxy *Server
 
 			BeforeEach(func() {
-				cfg := Config{Port: "0", TargetURL: decodeURL, KVConnector: KVConnectorNIXLV2}
+				cfg := Config{Port: "0", DecoderURL: decodeURL, KVConnector: KVConnectorNIXLV2}
 				proxy = NewProxy(cfg)
 
 				decodeHandler.Connector = KVConnectorNIXLV2

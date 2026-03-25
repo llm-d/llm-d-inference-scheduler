@@ -54,7 +54,7 @@ func TestValidateConnector(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := NewOptions()
-			opts.Connector = tt.connector
+			opts.connector = tt.connector
 			_ = opts.Complete() // Complete must be called before Validate
 			err := opts.Validate()
 			if (err != nil) != tt.wantErr {
@@ -80,7 +80,7 @@ func TestValidateTLSStages(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := NewOptions()
-			opts.EnableTLS = tt.enableTLS
+			opts.enableTLS = tt.enableTLS
 			_ = opts.Complete() // Complete must be called before Validate
 			err := opts.Validate()
 			if (err != nil) != tt.wantErr {
@@ -156,7 +156,7 @@ func TestCompleteInferencePoolParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := NewOptions()
-			opts.InferencePool = tt.inferencePool
+			opts.inferencePool = tt.inferencePool
 
 			err := opts.Complete()
 			if err != nil {
@@ -183,7 +183,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 		deprecatedPrefillerInsecure  bool
 		deprecatedDecoderInsecure    bool
 		vllmPort                     string
-		expectedTargetURL            string
+		expectedDecoderURL           string
 		expectedUseTLSForPrefiller   bool
 		expectedUseTLSForDecoder     bool
 		expectedInsecureForPrefiller bool
@@ -194,7 +194,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			enableTLS:                    []string{},
 			tlsInsecureSkipVerify:        []string{},
 			vllmPort:                     "8001",
-			expectedTargetURL:            "http://localhost:8001",
+			expectedDecoderURL:           "http://localhost:8001",
 			expectedUseTLSForPrefiller:   false,
 			expectedUseTLSForDecoder:     false,
 			expectedInsecureForPrefiller: false,
@@ -205,7 +205,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			enableTLS:                    []string{"prefiller"},
 			tlsInsecureSkipVerify:        []string{},
 			vllmPort:                     "8001",
-			expectedTargetURL:            "http://localhost:8001",
+			expectedDecoderURL:           "http://localhost:8001",
 			expectedUseTLSForPrefiller:   true,
 			expectedUseTLSForDecoder:     false,
 			expectedInsecureForPrefiller: false,
@@ -216,7 +216,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			enableTLS:                    []string{"decoder"},
 			tlsInsecureSkipVerify:        []string{},
 			vllmPort:                     "8001",
-			expectedTargetURL:            "https://localhost:8001",
+			expectedDecoderURL:           "https://localhost:8001",
 			expectedUseTLSForPrefiller:   false,
 			expectedUseTLSForDecoder:     true,
 			expectedInsecureForPrefiller: false,
@@ -227,7 +227,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			enableTLS:                    []string{"prefiller", "decoder"},
 			tlsInsecureSkipVerify:        []string{},
 			vllmPort:                     "9000",
-			expectedTargetURL:            "https://localhost:9000",
+			expectedDecoderURL:           "https://localhost:9000",
 			expectedUseTLSForPrefiller:   true,
 			expectedUseTLSForDecoder:     true,
 			expectedInsecureForPrefiller: false,
@@ -238,7 +238,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			enableTLS:                    []string{"prefiller", "decoder"},
 			tlsInsecureSkipVerify:        []string{"prefiller", "decoder"},
 			vllmPort:                     "8001",
-			expectedTargetURL:            "https://localhost:8001",
+			expectedDecoderURL:           "https://localhost:8001",
 			expectedUseTLSForPrefiller:   true,
 			expectedUseTLSForDecoder:     true,
 			expectedInsecureForPrefiller: true,
@@ -253,7 +253,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			deprecatedPrefillerInsecure:  true,
 			deprecatedDecoderInsecure:    true,
 			vllmPort:                     "8001",
-			expectedTargetURL:            "https://localhost:8001",
+			expectedDecoderURL:           "https://localhost:8001",
 			expectedUseTLSForPrefiller:   true,
 			expectedUseTLSForDecoder:     true,
 			expectedInsecureForPrefiller: true,
@@ -266,7 +266,7 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			deprecatedDecoderUseTLS:      true,
 			deprecatedDecoderInsecure:    true,
 			vllmPort:                     "8001",
-			expectedTargetURL:            "https://localhost:8001",
+			expectedDecoderURL:           "https://localhost:8001",
 			expectedUseTLSForPrefiller:   true,
 			expectedUseTLSForDecoder:     true,
 			expectedInsecureForPrefiller: false,
@@ -277,13 +277,13 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := NewOptions()
-			opts.EnableTLS = tt.enableTLS
-			opts.TLSInsecureSkipVerify = tt.tlsInsecureSkipVerify
-			opts.PrefillerUseTLS = tt.deprecatedPrefillerUseTLS
-			opts.DecoderUseTLS = tt.deprecatedDecoderUseTLS
-			opts.PrefillerInsecureSkipVerify = tt.deprecatedPrefillerInsecure
-			opts.DecoderInsecureSkipVerify = tt.deprecatedDecoderInsecure
-			opts.VLLMPort = tt.vllmPort
+			opts.enableTLS = tt.enableTLS
+			opts.tlsInsecureSkipVerify = tt.tlsInsecureSkipVerify
+			opts.prefillerUseTLS = tt.deprecatedPrefillerUseTLS
+			opts.decoderUseTLS = tt.deprecatedDecoderUseTLS
+			opts.prefillerInsecureSkipVerify = tt.deprecatedPrefillerInsecure
+			opts.decoderInsecureSkipVerify = tt.deprecatedDecoderInsecure
+			opts.vllmPort = tt.vllmPort
 
 			err := opts.Complete()
 			if err != nil {
@@ -303,8 +303,8 @@ func TestCompleteTLSConfiguration(t *testing.T) {
 			if opts.InsecureSkipVerifyForDecoder != tt.expectedInsecureForDecoder {
 				t.Errorf("InsecureSkipVerifyForDecoder = %v, want %v", opts.InsecureSkipVerifyForDecoder, tt.expectedInsecureForDecoder)
 			}
-			if opts.TargetURL == nil || opts.TargetURL.String() != tt.expectedTargetURL {
-				t.Errorf("TargetURL = %v, want %v", opts.TargetURL, tt.expectedTargetURL)
+			if opts.DecoderURL == nil || opts.DecoderURL.String() != tt.expectedDecoderURL {
+				t.Errorf("TargetURL = %v, want %v", opts.DecoderURL, tt.expectedDecoderURL)
 			}
 
 		})

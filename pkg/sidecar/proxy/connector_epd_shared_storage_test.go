@@ -271,7 +271,7 @@ func TestFanoutEncoderPrimerDeduplication(t *testing.T) {
 
 	encoderURL, err := url.Parse(encoderBackend.URL)
 	assert.NoError(t, err)
-	srv := NewProxy(Config{Port: "0", TargetURL: encoderURL})
+	srv := NewProxy(Config{Port: "0", DecoderURL: encoderURL})
 	srv.logger = log.Log
 
 	encoderHostPort := encoderURL.Host

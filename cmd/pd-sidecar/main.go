@@ -19,7 +19,6 @@ import (
 	"github.com/spf13/pflag"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/proxy"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version"
@@ -34,7 +33,7 @@ func main() {
 	opts.AddFlags(pflag.CommandLine)
 	pflag.Parse()
 
-	logger := zap.New(zap.UseFlagOptions(&opts.LoggingOptions))
+	logger := opts.NewLogger()
 	log.SetLogger(logger)
 
 	ctx := ctrl.SetupSignalHandler()
@@ -67,11 +66,9 @@ func main() {
 	}
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
-
 	logger.Info("Proxy configuration", "config", opts.Config)
 
 	proxyServer := proxy.NewProxy(opts.Config)
-
 	if err := proxyServer.Start(ctx); err != nil {
 		logger.Error(err, "failed to start proxy server")
 	}

@@ -200,7 +200,7 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	url, err := url.Parse(testInfo.decodeBackend.URL)
 	Expect(err).ToNot(HaveOccurred())
 	testInfo.decodeURL = url
-	cfg := Config{Port: "0", TargetURL: testInfo.decodeURL, KVConnector: connector}
+	cfg := Config{Port: "0", DecoderURL: testInfo.decodeURL, KVConnector: connector}
 	testInfo.proxy = NewProxy(cfg)
 
 	return &testInfo
