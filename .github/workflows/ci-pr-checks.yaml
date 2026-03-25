@@ -4,9 +4,14 @@ on:
   push:
     branches:
       - main
+      - 'release-*'
   pull_request:
     branches:
       - main
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   check-changes:
@@ -82,6 +87,59 @@ jobs:
         shell: bash
         run: make coverage-compare BASELINE_DIR=coverage/baseline
 
+      # Find the latest release-* branch (by SemVer) and download its coverage
+      # artifact so the PR can compare against the most recent release.
+      - name: Find latest release branch
+        if: github.event_name == 'pull_request'
+        id: find-releases
+        shell: bash
+        run: |
+          gh api "repos/${{ github.repository }}/branches" \
+            --paginate \
+            --jq '[.[] | select(.name | startswith("release-")) | .name][]' \
+            | sort -V | tail -1 > /tmp/release_branches.txt
+          echo "Release branches found:"
+          cat /tmp/release_branches.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download and compare release coverage baselines
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          if [[ ! -s /tmp/release_branches.txt ]]; then
+            echo "No release branches found, skipping."
+            exit 0
+          fi
+          while IFS= read -r branch; do
+            [[ -z "$branch" ]] && continue
+            echo "Looking up latest successful run for branch: $branch"
+            run_id=$(gh run list \
+              --repo "${{ github.repository }}" \
+              --branch "$branch" \
+              --workflow "CI - PR Checks" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')
+            if [[ -z "$run_id" ]]; then
+              echo "No successful run found for $branch, skipping."
+              continue
+            fi
+            dest="coverage/release-baselines/$branch"
+            mkdir -p "$dest"
+            if gh run download "$run_id" \
+                --repo "${{ github.repository }}" \
+                --name "coverage-baseline-$branch" \
+                --dir "$dest"; then
+              make coverage-compare BASELINE_DIR="$dest" COVERAGE_LABEL="$branch"
+            else
+              echo "No coverage artifact for $branch in run $run_id, skipping."
+            fi
+          done < /tmp/release_branches.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       # Copy the freshly generated profiles into coverage/baseline so that
       # the saved path matches the restored path on future PR runs.
       - name: Stage coverage baseline for caching
@@ -97,6 +155,19 @@ jobs:
         with:
           path: coverage/baseline
           key: coverage-main
+
+      # Upload coverage profiles as a named artifact for release branches.
+      # Retrieved by PRs to compare against the most recent release.
+      - name: Upload coverage artifact (release branches)
+        if: >-
+          github.event_name == 'push' &&
+          startsWith(github.ref, 'refs/heads/release-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline-${{ github.ref_name }}
+          path: coverage/*.out
+          retention-days: 400
+          overwrite: true
 
       - name: Run make test-e2e
         shell: bash
