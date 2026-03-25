@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
@@ -53,10 +54,11 @@ const (
 
 var (
 	// --- Common Label Sets ---
-	modelLabels     = []string{"model_name", "target_model_name"}
-	modelTypeLabels = []string{"model_name", "target_model_name", "type"}
-	poolLabels      = []string{"name"}
-	endpointLabels  = []string{"pod_name", "namespace", "port"}
+	modelLabels             = []string{"model_name", "target_model_name"}
+	modelWithPriorityLabels = []string{"model_name", "target_model_name", "priority"}
+	modelTypeLabels         = []string{"model_name", "target_model_name", "type"}
+	poolLabels              = []string{"name"}
+	endpointLabels          = []string{"pod_name", "namespace", "port"}
 
 	// --- Common Buckets ---
 
@@ -88,7 +90,7 @@ var (
 			Name:      "request_total",
 			Help:      metricsutil.HelpMsgWithStability("Counter of inference objective requests broken out for each model and target model.", compbasemetrics.ALPHA),
 		},
-		modelLabels,
+		modelWithPriorityLabels,
 	)
 
 	requestErrCounter = prometheus.NewCounterVec(
@@ -553,8 +555,8 @@ func Reset() {
 }
 
 // RecordRequestCounter records the number of requests.
-func RecordRequestCounter(modelName, targetModelName string) {
-	requestCounter.WithLabelValues(modelName, targetModelName).Inc()
+func RecordRequestCounter(modelName, targetModelName string, priority int) {
+	requestCounter.WithLabelValues(modelName, targetModelName, strconv.Itoa(priority)).Inc()
 }
 
 // RecordRequestErrCounter records the number of error requests.

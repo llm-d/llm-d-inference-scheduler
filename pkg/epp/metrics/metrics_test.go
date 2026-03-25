@@ -94,7 +94,7 @@ func TestRecordRequestCounterandSizes(t *testing.T) {
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			for _, req := range scenario.reqs {
-				RecordRequestCounter(req.modelName, req.targetModelName)
+				RecordRequestCounter(req.modelName, req.targetModelName, 0)
 				RecordRequestSizes(req.modelName, req.targetModelName, req.reqSize)
 			}
 			wantRequestTotal, err := os.Open("testdata/request_total_metric")

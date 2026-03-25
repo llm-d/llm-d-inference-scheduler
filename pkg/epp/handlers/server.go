@@ -86,6 +86,7 @@ type RequestContext struct {
 	TargetModelName           string
 	FairnessID                string
 	ObjectiveKey              string
+	Priority                  int
 	RequestReceivedTimestamp  time.Time
 	ResponseCompleteTimestamp time.Time
 	RequestSize               int
@@ -246,8 +247,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 				reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
 				reqCtx.reqBodyResp = envoy.GenerateRequestBodyResponses(reqCtx.Request.RawBody)
-
-				metrics.RecordRequestCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName)
+				metrics.RecordRequestCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Priority)
 				metrics.RecordRequestSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.RequestSize)
 			}
 		case *extProcPb.ProcessingRequest_RequestTrailers:
@@ -282,14 +282,14 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			} else {
 				body = append(body, chunk...)
 				if endOfStream {
-					s.finishResponse(ctx, reqCtx, body, reqCtx.modelServerStreaming)
+					s.finishResponse(ctx, reqCtx, body, reqCtx.modelServerStreaming, true)
 				}
 			}
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
 			// For HTTP, the response trailer is not sent. Thus, this case will not be triggered.
 			// For gRPC(over HTTP2), the protocol relies on responseTrialers to determine whether a response is complete.
 			// More info: https://chromium.googlesource.com/external/github.com/grpc/grpc/+/HEAD/doc/PROTOCOL-HTTP2.md#responses
-			s.finishResponse(ctx, reqCtx, body, reqCtx.modelServerStreaming)
+			s.finishResponse(ctx, reqCtx, body, reqCtx.modelServerStreaming, false)
 			reqCtx.respTrailerResp = &extProcPb.ProcessingResponse{
 				Response: &extProcPb.ProcessingResponse_ResponseTrailers{
 					ResponseTrailers: &extProcPb.TrailersResponse{},
@@ -323,7 +323,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 // finishResponse ensures all post-response logic, such as metric recording
 // and state updates, is executed exactly once for the request lifecycle.
-func (s *StreamingServer) finishResponse(ctx context.Context, reqCtx *RequestContext, body []byte, modelStreaming bool) {
+func (s *StreamingServer) finishResponse(ctx context.Context, reqCtx *RequestContext, body []byte, modelStreaming bool, setEos bool) {
 	// Return early if the response has already been finished to prevent
 	// duplicate execution of side effects and metrics.
 	if reqCtx.ResponseComplete {
@@ -335,7 +335,7 @@ func (s *StreamingServer) finishResponse(ctx context.Context, reqCtx *RequestCon
 	reqCtx = s.HandleResponseBody(ctx, reqCtx, body, true)
 	if !modelStreaming {
 		// For non-streaming response, we send response back to envoy after receiving all the response body.
-		reqCtx.respBodyResp = generateResponseBodyResponses(body, true, reqCtx.Response.DynamicMetadata)
+		reqCtx.respBodyResp = generateResponseBodyResponses(body, setEos, reqCtx.Response.DynamicMetadata)
 	}
 }
 
@@ -398,6 +398,8 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		// Trailers in requests are not guaranteed
 		if err := srv.Send(r.respTrailerResp); err != nil {
 			return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
+		} else {
+			logger.V(logutil.DEBUG).Info("EPP sent trailer back to proxy")
 		}
 	}
 	return nil
