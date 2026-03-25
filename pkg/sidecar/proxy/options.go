@@ -26,6 +26,7 @@ import (
 
 	"github.com/spf13/pflag"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/yaml"
 )
 
 // Options holds all configuration options for the pd-sidecar proxy.
@@ -48,6 +49,8 @@ type Options struct {
 	InsecureSkipVerifyForPrefiller bool     // InsecureSkipVerifyForPrefiller configures the proxy to skip TLS verification for requests to prefiller (set from TLSInsecureSkipVerify)
 	InsecureSkipVerifyForEncoder   bool     // InsecureSkipVerifyForEncoder configures the proxy to skip TLS verification for requests to encoder (set from TLSInsecureSkipVerify)
 	InsecureSkipVerifyForDecoder   bool     // InsecureSkipVerifyForDecoder configures the proxy to skip TLS verification for requests to decoder (set from TLSInsecureSkipVerify)
+	Configuration                  string   // Configuration is sidecar configuration in YAML provided as inline specification. Example `--configuration={port: 8085, vllm-port: 8203}`
+	ConfigurationFile              string   // ConfigurationFile is path to file which contains sidecar configuration in YAML. Example `--configuration-file=/etc/config/sidecar-config.yaml`
 
 	// Deprecated flag fields (kept for backward compatibility)
 	PrefillerUseTLS             bool   // Deprecated: Use EnableTLS instead. PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers
@@ -65,13 +68,19 @@ type Options struct {
 	EnablePrefillerSampling bool        // EnablePrefillerSampling enables random selection of prefill instances
 	PoolGroup               string      // PoolGroup is the group of the InferencePool this Endpoint Picker is associated with
 	LoggingOptions          zap.Options // LoggingOptions holds the zap logging configuration
+	FlagSet                 *pflag.FlagSet
 }
+
+type configurationMap map[string]any
 
 const (
 	// TLS stages
-	prefillStage = "prefiller"
-	decodeStage  = "decoder"
-	encodeStage  = "encoder"
+	prefillStage            = "prefiller"
+	decodeStage             = "decoder"
+	encodeStage             = "encoder"
+	defaultPort             = "8000"
+	defaultvLLMPort         = "8001"
+	defaultDataParallelSize = 1
 )
 
 var (
@@ -118,9 +127,9 @@ func NewOptions() *Options {
 	}
 
 	return &Options{
-		Port:                    "8000",
-		VLLMPort:                "8001",
-		DataParallelSize:        1,
+		Port:                    defaultPort,
+		VLLMPort:                defaultvLLMPort,
+		DataParallelSize:        defaultDataParallelSize,
 		KVConnector:             "",
 		ECConnector:             "",
 		Connector:               KVConnectorNIXLV2,
@@ -154,6 +163,8 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 
 	fs.StringSliceVar(&opts.EnableTLS, "enable-tls", opts.EnableTLS, "stages to enable TLS for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
 	fs.StringSliceVar(&opts.TLSInsecureSkipVerify, "tls-insecure-skip-verify", opts.TLSInsecureSkipVerify, "stages to skip TLS verification for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
+	fs.StringVar(&opts.Configuration, "configuration", "", "Sidecar configuration in YAML provided as inline specification. Example `--configuration={port: 8085, vllm-port: 8203}`")
+	fs.StringVar(&opts.ConfigurationFile, "configuration-file", "", "Path to file which contains sidecar configuration in YAML. Example `--configuration-file=/etc/config/sidecar-config.yaml`")
 
 	// Deprecated flags - kept for backward compatibility
 	fs.StringVar(&opts.Connector, "connector", opts.Connector, "Deprecated: use --kv-connector instead. The P/D connector being used. Supported: "+supportedKVConnectorNamesStr)
@@ -192,9 +203,13 @@ func validateStages(stages []string, supportedStages map[string]struct{}, flagNa
 }
 
 // Complete performs post-processing of parsed command-line arguments.
-// This handles migration from deprecated boolean flags to new StringSlice flags,
+// This handles migration from deprecated boolean flags to new StringSlice flags, extracts YAML configuration,
 // parses the InferencePool field, sets configuration fields from flag fields, and computes the target URL.
 func (opts *Options) Complete() error {
+	if err := opts.extractYAMLConfiguration(opts.Configuration, opts.ConfigurationFile); err != nil {
+		return err
+	}
+
 	// Migrate deprecated Connector flag to KVConnector
 	if opts.Connector != "" && opts.KVConnector == "" {
 		opts.KVConnector = opts.Connector
@@ -309,5 +324,277 @@ func (opts *Options) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// extractYAMLConfiguration extracts sidecar configuration (if provided)
+// from `--configuration` and `--configuration-file` parameters
+func (opts *Options) extractYAMLConfiguration(configuration string, configurationFile string) error {
+	var configurationMap1, configurationMap2 configurationMap
+	var err error
+	if configuration != "" {
+		configurationMap1, err = YAMLConfigurationFromInlineSpecification(configuration)
+		if err != nil {
+			return err
+		}
+	}
+	if configurationFile != "" {
+		configurationMap2, err = YAMLConfigurationFromFile(configurationFile)
+		if err != nil {
+			return err
+		}
+	}
+	switch {
+	case configurationMap1 != nil && configurationMap2 != nil:
+		opts.updateSidecarConfiguration(mergeYAMLConfigurations(configurationMap2, configurationMap1))
+	case configurationMap1 != nil && configurationMap2 == nil:
+		opts.updateSidecarConfiguration(configurationMap1)
+	case configurationMap1 == nil && configurationMap2 != nil:
+		opts.updateSidecarConfiguration(configurationMap2)
+	default:
+		break
+	}
+	return nil
+}
+
+// isDefault checks if flag contains default or parsed value
+func (o *Options) isDefault(parameter string) bool {
+	flag := o.FlagSet.Lookup(parameter)
+	return flag == nil || !flag.Changed
+}
+
+// YAMLConfigurationFromInlineSpecification extracts YAML configuration provided as inline specification
+// "--configuration={port: 8085, vllm-port: 8203}"
+func YAMLConfigurationFromInlineSpecification(config string) (map[string]any, error) {
+	var temp map[string]any
+	if err := yaml.Unmarshal([]byte(config), &temp); err != nil {
+		return nil, errors.New("Failed to unmarshal sidecar configuration")
+	}
+	return temp, nil
+
+}
+
+// YAMLConfigurationFromFile extracts YAML configuration from file path
+// "--configuration-file=/etc/config/sidecar-config.yaml"
+func YAMLConfigurationFromFile(configFile string) (map[string]any, error) {
+	var temp map[string]any
+	rawFile, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, errors.New("Failed to read sidecar configuration")
+	}
+	if err := yaml.Unmarshal(rawFile, &temp); err != nil {
+		return nil, errors.New("Failed to unmarshal sidecar configuration")
+
+	}
+	return temp, nil
+}
+
+// mergeYAMLConfigurations merges following:
+// 1. YAML configuration from file path `--configuration-file`
+// 2. YAML configuration provided as inline specification `--configuration“,
+// and gives higher priority to configuration provided in inline specification `--configuration`
+func mergeYAMLConfigurations(fileYAML, parameterYAML map[string]any) map[string]any {
+	for parameterKey, parameterValue := range parameterYAML {
+		if fileYAMLValue, ok := fileYAML[parameterKey]; ok {
+			fileYAMLMap, fileYAMLOk := fileYAMLValue.(map[string]any)
+			parameterYAMLMap, parameterYAMLOk := parameterValue.(map[string]any)
+			if fileYAMLOk && parameterYAMLOk {
+				fileYAML[parameterKey] = mergeYAMLConfigurations(fileYAMLMap, parameterYAMLMap)
+				continue
+			}
+		}
+		fileYAML[parameterKey] = parameterValue
+	}
+	return fileYAML
+}
+
+// updateSidecarConfiguration updates value from YAML only when:
+// 1. YAML configuration contains non-zero value
+// 2. sidecar configuration contains value not explicitely set by flag
+// i.e. gives higher priority to configuration provided individually through flags (e.g. `--port`, `--vllm-port`) over configuration provided through YAML
+func (opts *Options) updateSidecarConfiguration(configurationMap configurationMap) error {
+	if configurationMap["port"] != nil {
+		if v, ok := configurationMap["port"].(float64); ok {
+			if opts.isDefault("port") {
+				opts.Port = strconv.Itoa(int(v))
+			}
+		} else {
+			return errors.New("Type assertion failed for port: " + fmt.Sprintf("%v", configurationMap["port"]))
+		}
+	}
+	if configurationMap["vllm-port"] != nil {
+		if v, ok := configurationMap["vllm-port"].(float64); ok {
+			if opts.isDefault("vllm-port") {
+				opts.VLLMPort = strconv.Itoa(int(v))
+			}
+		} else {
+			return errors.New("Type assertion failed for vllm-port: " + fmt.Sprintf("%v", configurationMap["vllm-port"]))
+		}
+	}
+	if configurationMap["data-parallel-size"] != nil {
+		if v, ok := configurationMap["data-parallel-size"].(float64); ok {
+			if opts.isDefault("data-parallel-size") {
+				opts.DataParallelSize = int(v)
+			}
+		} else {
+			return errors.New("Type assertion failed for data-parallel-size: " + fmt.Sprintf("%v", configurationMap["data-parallel-size"]))
+		}
+	}
+	if configurationMap["connector"] != nil {
+		if v, ok := configurationMap["connector"].(string); ok {
+			if opts.isDefault("connector") {
+				opts.Connector = v
+			}
+		} else {
+			return errors.New("Type assertion failed for connector: " + fmt.Sprintf("%v", configurationMap["connector"]))
+		}
+	}
+	if configurationMap["kv-connector"] != nil {
+		if v, ok := configurationMap["kv-connector"].(string); ok {
+			if opts.isDefault("kv-connector") {
+				opts.KVConnector = v
+			}
+		} else {
+			return errors.New("Type assertion failed for kv-connector: " + fmt.Sprintf("%v", configurationMap["kv-connector"]))
+		}
+	}
+	if configurationMap["ec-connector"] != nil {
+		if v, ok := configurationMap["ec-connector"].(string); ok {
+			if opts.isDefault("ec-connector") {
+				opts.ECConnector = v
+			}
+		} else {
+			return errors.New("Type assertion failed for ec-connector: " + fmt.Sprintf("%v", configurationMap["ec-connector"]))
+		}
+	}
+	if configurationMap["enable-tls"] != nil {
+		switch v := configurationMap["enable-tls"].(type) {
+		case string:
+			opts.EnableTLS = append(opts.EnableTLS, strings.Split(v, ",")...)
+		case []any:
+			for _, val := range v {
+				opts.EnableTLS = append(opts.EnableTLS, fmt.Sprintf("%v", val))
+			}
+		default:
+			return errors.New("Type assertion failed for enable-tls: " + fmt.Sprintf("%v", configurationMap["enable-tls"]))
+		}
+	}
+	if configurationMap["prefiller-use-tls"] != nil {
+		if v, ok := configurationMap["prefiller-use-tls"].(bool); ok {
+			if opts.isDefault("prefiller-use-tls") {
+				opts.PrefillerUseTLS = v
+			}
+		} else {
+			return errors.New("Type assertion failed for prefiller-use-tls: " + fmt.Sprintf("%v", configurationMap["prefiller-use-tls"]))
+		}
+	}
+	if configurationMap["decoder-use-tls"] != nil {
+		if v, ok := configurationMap["decoder-use-tls"].(bool); ok {
+			if opts.isDefault("decoder-use-tls") {
+				opts.DecoderUseTLS = v
+			}
+		} else {
+			return errors.New("Type assertion failed for decoder-use-tls: " + fmt.Sprintf("%v", configurationMap["decoder-use-tls"]))
+		}
+	}
+	if configurationMap["tls-insecure-skip-verify"] != nil {
+		if v, ok := configurationMap["tls-insecure-skip-verify"].(bool); ok {
+			if opts.isDefault("tls-insecure-skip-verify") {
+				opts.PrefillerInsecureSkipVerify = v
+			}
+		} else {
+			return errors.New("Type assertion failed for tls-insecure-skip-verify: " + fmt.Sprintf("%v", configurationMap["tls-insecure-skip-verify"]))
+		}
+	}
+	if configurationMap["prefiller-tls-insecure-skip-verify"] != nil {
+		if v, ok := configurationMap["prefiller-tls-insecure-skip-verify"].(bool); ok {
+			if opts.isDefault("prefiller-tls-insecure-skip-verify") {
+				opts.PrefillerInsecureSkipVerify = v
+			}
+		} else {
+			return errors.New("Type assertion failed for prefiller-tls-insecure-skip-verify: " + fmt.Sprintf("%v", configurationMap["prefiller-tls-insecure-skip-verify"]))
+		}
+	}
+	if configurationMap["decoder-tls-insecure-skip-verify"] != nil {
+		if v, ok := configurationMap["decoder-tls-insecure-skip-verify"].(bool); ok {
+			if opts.isDefault("decoder-tls-insecure-skip-verify") {
+				opts.DecoderInsecureSkipVerify = v
+			}
+		} else {
+			return errors.New("Type assertion failed for decoder-tls-insecure-skip-verify: " + fmt.Sprintf("%v", configurationMap["decoder-tls-insecure-skip-verify"]))
+		}
+	}
+	if configurationMap["secure-proxy"] != nil {
+		if v, ok := configurationMap["secure-proxy"].(bool); ok {
+			if opts.isDefault("secure-proxy") {
+				opts.SecureProxy = v
+			}
+		} else {
+			return errors.New("Type assertion failed for secure-proxy: " + fmt.Sprintf("%v", configurationMap["secure-proxy"]))
+		}
+	}
+	if configurationMap["cert-path"] != nil {
+		if v, ok := configurationMap["cert-path"].(string); ok {
+			if opts.isDefault("cert-path") {
+				opts.CertPath = v
+			}
+		} else {
+			return errors.New("Type assertion failed for cert-path: " + fmt.Sprintf("%v", configurationMap["cert-path"]))
+		}
+	}
+	if configurationMap["enable-ssrf-protection"] != nil {
+		if v, ok := configurationMap["enable-ssrf-protection"].(bool); ok {
+			if opts.isDefault("enable-ssrf-protection") {
+				opts.EnableSSRFProtection = v
+			}
+		} else {
+			return errors.New("Type assertion failed for enable-ssrf-protection: " + fmt.Sprintf("%v", configurationMap["enable-ssrf-protection"]))
+		}
+	}
+	if configurationMap["inference-pool"] != nil {
+		if v, ok := configurationMap["inference-pool"].(string); ok {
+			if opts.isDefault("inference-pool") {
+				opts.InferencePool = v
+			}
+		} else {
+			return errors.New("Type assertion failed for inference-pool: " + fmt.Sprintf("%v", configurationMap["inference-pool"]))
+		}
+	}
+	if configurationMap["inference-pool-namespace"] != nil {
+		if v, ok := configurationMap["inference-pool-namespace"].(string); ok {
+			if opts.isDefault("inference-pool-namespace") {
+				opts.InferencePoolNamespace = v
+			}
+		} else {
+			return errors.New("Type assertion failed for inference-pool-namespace: " + fmt.Sprintf("%v", configurationMap["inference-pool-namespace"]))
+		}
+	}
+	if configurationMap["inference-pool-name"] != nil {
+		if v, ok := configurationMap["inference-pool-name"].(string); ok {
+			if opts.isDefault("inference-pool-name") {
+				opts.InferencePoolName = v
+			}
+		} else {
+			return errors.New("Type assertion failed for inference-pool-name: " + fmt.Sprintf("%v", configurationMap["inference-pool-name"]))
+		}
+	}
+	if configurationMap["enable-prefiller-sampling"] != nil {
+		if v, ok := configurationMap["enable-prefiller-sampling"].(bool); ok {
+			if opts.isDefault("enable-prefiller-sampling") {
+				opts.EnablePrefillerSampling = v
+			}
+		} else {
+			return errors.New("Type assertion failed for enable-prefiller-sampling: " + fmt.Sprintf("%v", configurationMap["enable-prefiller-sampling"]))
+		}
+	}
+	if configurationMap["pool-group"] != nil {
+		if v, ok := configurationMap["pool-group"].(string); ok {
+			if opts.isDefault("pool-group") {
+				opts.PoolGroup = v
+			}
+		} else {
+			return errors.New("Type assertion failed for pool-group: " + fmt.Sprintf("%v", configurationMap["pool-group"]))
+		}
+	}
 	return nil
 }
