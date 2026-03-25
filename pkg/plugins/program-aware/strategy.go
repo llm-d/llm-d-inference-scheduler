@@ -44,9 +44,9 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 	switch cfg.Strategy {
 	case "", "ewma":
 		return &EWMAStrategy{
-			weightHeadWait:        floatOr(cfg.WeightHeadWait, defaultEWMAWeightHeadWait),
-			weightAvgWait:         floatOr(cfg.WeightAvgWait, defaultEWMAWeightAvgWait),
-			weightTotalDispatched: floatOr(cfg.WeightTotalDispatched, defaultEWMAWeightTotalDispatched),
+			weightHeadWait:  floatOr(cfg.WeightHeadWait, defaultEWMAWeightHeadWait),
+			weightAvgWait:   floatOr(cfg.WeightAvgWait, defaultEWMAWeightAvgWait),
+			weightAvgTokens: floatOr(cfg.WeightAvgTokens, defaultEWMAWeightAvgTokens),
 		}, nil
 	case "drr":
 		return &DRRStrategy{
@@ -90,29 +90,30 @@ func rangeNormalize(v, min, max float64) float64 {
 
 // EWMA dimension indices.
 const (
-	ewmaDimHeadWait        = 0
-	ewmaDimAvgWait         = 1
-	ewmaDimTotalDispatched = 2
-	ewmaNumDimensions      = 3
+	ewmaDimHeadWait   = 0
+	ewmaDimAvgWait    = 1
+	ewmaDimAvgTokens  = 2
+	ewmaNumDimensions = 3
 )
 
 // Default EWMA strategy weights.
 const (
-	defaultEWMAWeightHeadWait        = 0.5
-	defaultEWMAWeightAvgWait         = 0.3
-	defaultEWMAWeightTotalDispatched = 0.2
+	defaultEWMAWeightHeadWait  = 0.5
+	defaultEWMAWeightAvgWait   = 0.3
+	defaultEWMAWeightAvgTokens = 0.2
 )
 
 // EWMAStrategy scores queues using three normalized signals:
 //   - headWait: age of the oldest request — rate-neutral starvation guard.
 //   - avgWait: EWMA of historical wait times — accumulated fairness debt.
-//   - dispatched (penalty): anti-monopoly signal based on request count.
+//   - avgTokens (penalty): EWMA of per-request token usage — penalizes programs
+//     whose recent requests are token-heavy, so lighter programs get fair access.
 //
 // Weights are configurable via the plugin config; defaults are 0.5/0.3/0.2.
 type EWMAStrategy struct {
-	weightHeadWait        float64
-	weightAvgWait         float64
-	weightTotalDispatched float64
+	weightHeadWait  float64
+	weightAvgWait   float64
+	weightAvgTokens float64
 }
 
 // Name returns "ewma".
@@ -124,13 +125,13 @@ func (s *EWMAStrategy) OnPickStart(_ string, _ int, _ *ProgramMetrics) {}
 // NumDimensions returns 3 (headWait, avgWait, totalDispatched).
 func (s *EWMAStrategy) NumDimensions() int { return ewmaNumDimensions }
 
-// CollectRaw extracts unnormalized [headWaitMs, avgWaitMs, totalDispatched].
+// CollectRaw extracts unnormalized [headWaitMs, avgWaitMs, avgTokens].
 func (s *EWMAStrategy) CollectRaw(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) []float64 {
 	raw := make([]float64, ewmaNumDimensions)
 
 	if metrics != nil {
 		raw[ewmaDimAvgWait] = metrics.AverageWaitTime()
-		raw[ewmaDimTotalDispatched] = float64(metrics.DispatchedCount())
+		raw[ewmaDimAvgTokens] = metrics.AverageTokens()
 	}
 
 	if head := queue.PeekHead(); head != nil {
@@ -146,17 +147,21 @@ func (s *EWMAStrategy) NormalizeDimension(_ int, raw, min, max float64) float64 
 }
 
 // Score computes the final score using the stronger of the two starvation signals
-// (headWait, avgWait) minus a dispatch-count penalty.
+// (headWait, avgWait) minus a token-cost penalty.
 //
 // headWait and avgWait are correlated: a starved flow has both high head-of-queue
 // age AND high EWMA wait. Using max() instead of addition prevents double-counting
 // and ensures new flows (avgWait=0) score the same as existing flows with identical
 // queue age, eliminating the cold-start disadvantage.
+//
+// The avgTokens penalty is an EWMA of per-request token usage (input+output),
+// so programs with recently heavy requests are penalized more than those with
+// historically heavy but recently light requests.
 func (s *EWMAStrategy) Score(normalized []float64) float64 {
 	return max(
 		s.weightHeadWait*normalized[ewmaDimHeadWait],
 		s.weightAvgWait*normalized[ewmaDimAvgWait],
-	) - s.weightTotalDispatched*normalized[ewmaDimTotalDispatched]
+	) - s.weightAvgTokens*normalized[ewmaDimAvgTokens]
 }
 
 // OnCompleted is a no-op for EWMA; token usage is not tracked in this strategy.

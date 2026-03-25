@@ -47,9 +47,9 @@ type Config struct {
 	// Default: 0.3.
 	WeightAvgWait *float64 `json:"weightAvgWait,omitempty"`
 
-	// WeightTotalDispatched is the penalty weight for dispatch count (anti-monopoly).
-	// Default: 0.2.
-	WeightTotalDispatched *float64 `json:"weightTotalDispatched,omitempty"`
+	// WeightAvgTokens is the penalty weight for EWMA per-request token usage.
+	// Programs with heavier recent requests are penalized more. Default: 0.2.
+	WeightAvgTokens *float64 `json:"weightAvgTokens,omitempty"`
 
 	// --- DRR weights (only used when strategy == "drr") ---
 
@@ -129,9 +129,9 @@ func (p *ProgramAwarePlugin) TypedName() plugin.TypedName {
 func (p *ProgramAwarePlugin) getStrategy() ScoringStrategy {
 	if p.strategy == nil {
 		return &EWMAStrategy{
-			weightHeadWait:        defaultEWMAWeightHeadWait,
-			weightAvgWait:         defaultEWMAWeightAvgWait,
-			weightTotalDispatched: defaultEWMAWeightTotalDispatched,
+			weightHeadWait:  defaultEWMAWeightHeadWait,
+			weightAvgWait:   defaultEWMAWeightAvgWait,
+			weightAvgTokens: defaultEWMAWeightAvgTokens,
 		}
 	}
 	return p.strategy
