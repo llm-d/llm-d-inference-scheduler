@@ -14,9 +14,9 @@ import (
 // testEWMA returns an EWMAStrategy with default weights for tests.
 func testEWMA() *EWMAStrategy {
 	return &EWMAStrategy{
-		weightHeadWait:        defaultEWMAWeightHeadWait,
-		weightAvgWait:         defaultEWMAWeightAvgWait,
-		weightTotalDispatched: defaultEWMAWeightTotalDispatched,
+		weightHeadWait:  defaultEWMAWeightHeadWait,
+		weightAvgWait:   defaultEWMAWeightAvgWait,
+		weightAvgTokens: defaultEWMAWeightAvgTokens,
 	}
 }
 
@@ -99,9 +99,7 @@ func TestEWMAStrategy_CollectRaw(t *testing.T) {
 
 	m := &ProgramMetrics{}
 	m.RecordWaitTime(500)
-	for range 10 {
-		m.IncrementDispatched()
-	}
+	m.RecordTokens(800, 200) // 1000 total tokens → averageTokens = 1000
 
 	enqueueTime := time.Now().Add(-200 * time.Millisecond)
 	queue := &fcmocks.MockFlowQueueAccessor{
@@ -113,7 +111,7 @@ func TestEWMAStrategy_CollectRaw(t *testing.T) {
 	require.Len(t, raw, 3)
 	assert.Greater(t, raw[ewmaDimHeadWait], 190.0, "headWaitMs should reflect enqueue age")
 	assert.InDelta(t, 500.0, raw[ewmaDimAvgWait], 0.01)
-	assert.InDelta(t, 10.0, raw[ewmaDimTotalDispatched], 0.01)
+	assert.InDelta(t, 1000.0, raw[ewmaDimAvgTokens], 0.01)
 }
 
 func TestEWMAStrategy_CollectRaw_NilMetrics(t *testing.T) {
@@ -129,7 +127,7 @@ func TestEWMAStrategy_CollectRaw_NilMetrics(t *testing.T) {
 	require.Len(t, raw, 3)
 	assert.Greater(t, raw[ewmaDimHeadWait], 90.0)
 	assert.InDelta(t, 0.0, raw[ewmaDimAvgWait], 0.01)
-	assert.InDelta(t, 0.0, raw[ewmaDimTotalDispatched], 0.01)
+	assert.InDelta(t, 0.0, raw[ewmaDimAvgTokens], 0.01)
 }
 
 func TestEWMAStrategy_NormalizeDimension(t *testing.T) {

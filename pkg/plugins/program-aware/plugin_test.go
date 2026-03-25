@@ -195,15 +195,13 @@ func TestPick_PrefersHigherAvgWaitTime(t *testing.T) {
 	assert.Equal(t, queueA, queue, "should prefer the program with higher average wait time")
 }
 
-func TestPick_PenalizesHighDispatchCount(t *testing.T) {
+func TestPick_PenalizesHighTokenUsage(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	// prog-a has dispatched 500 requests, prog-b has dispatched 0.
-	// Give them identical queue state so only the dispatch penalty differs.
+	// prog-a has heavy recent token usage, prog-b has none.
+	// Give them identical queue state so only the token penalty differs.
 	metricsA := &ProgramMetrics{}
-	for range 500 {
-		metricsA.IncrementDispatched()
-	}
+	metricsA.RecordTokens(5000, 5000) // 10K tokens per request
 	p.programMetrics.Store("prog-a", metricsA)
 
 	now := time.Now()
@@ -231,7 +229,7 @@ func TestPick_PenalizesHighDispatchCount(t *testing.T) {
 
 	queue, err := p.Pick(context.Background(), band)
 	assert.NoError(t, err)
-	assert.Equal(t, queueB, queue, "should prefer the queue with lower dispatch count")
+	assert.Equal(t, queueB, queue, "should prefer the queue with lower token usage")
 }
 
 // --- PrepareRequestData tests ---
@@ -464,16 +462,14 @@ func TestComputeFairnessIndex_NoWaitData(t *testing.T) {
 
 // --- Two-pass scoring tests ---
 
-func TestPick_DispatchPenaltyViaFullCycle(t *testing.T) {
-	// Verify that dispatch count acts as a penalty through the full Pick() cycle.
-	// Two programs with identical avgWait and headWait, but prog-a has many dispatches.
+func TestPick_TokenPenaltyViaFullCycle(t *testing.T) {
+	// Verify that token usage acts as a penalty through the full Pick() cycle.
+	// Two programs with identical avgWait and headWait, but prog-a has heavy token usage.
 	p := &ProgramAwarePlugin{}
 
 	metricsA := &ProgramMetrics{}
 	metricsA.RecordWaitTime(2500)
-	for range 500 {
-		metricsA.IncrementDispatched()
-	}
+	metricsA.RecordTokens(5000, 5000) // 10K tokens per request
 	p.programMetrics.Store("prog-a", metricsA)
 
 	metricsB := &ProgramMetrics{}
@@ -507,7 +503,7 @@ func TestPick_DispatchPenaltyViaFullCycle(t *testing.T) {
 
 	queue, err := p.Pick(context.Background(), band)
 	assert.NoError(t, err)
-	assert.Equal(t, queueB, queue, "prog-b (no dispatches) should be preferred over prog-a (500 dispatches)")
+	assert.Equal(t, queueB, queue, "prog-b (no token usage) should be preferred over prog-a (heavy token usage)")
 }
 
 func TestPick_AllIdenticalMetrics(t *testing.T) {

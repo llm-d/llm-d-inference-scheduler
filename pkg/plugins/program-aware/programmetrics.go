@@ -16,6 +16,8 @@ type ProgramMetrics struct {
 	waitCount         int64   // number of wait time observations
 	hasWaitData       bool
 
+	averageTokens float64 // EWMA of per-request token usage (input+output)
+
 	totalRequests     atomic.Int64
 	dispatchedCount   atomic.Int64
 	totalInputTokens  atomic.Int64
@@ -77,10 +79,27 @@ func (m *ProgramMetrics) TotalAverageWaitTime() float64 {
 	return m.accumulatedWaitMs / float64(m.waitCount)
 }
 
-// RecordTokens adds token counts from a completed request.
+// RecordTokens adds token counts from a completed request and updates the
+// EWMA of per-request token usage so recent heavy/light requests carry more weight.
 func (m *ProgramMetrics) RecordTokens(input, output int64) {
 	m.totalInputTokens.Add(input)
 	m.totalOutputTokens.Add(output)
+
+	cost := float64(input + output)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.averageTokens == 0 {
+		m.averageTokens = cost
+	} else {
+		m.averageTokens = ewmaAlpha*cost + (1-ewmaAlpha)*m.averageTokens
+	}
+}
+
+// AverageTokens returns the EWMA of per-request token usage.
+func (m *ProgramMetrics) AverageTokens() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.averageTokens
 }
 
 // TotalRequests returns the total number of requests seen for this program.
