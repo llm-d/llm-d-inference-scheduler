@@ -1020,7 +1020,7 @@ kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
 plugins:
-- type: prefill-header-handler
+- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     blockSizeTokens: 16
