@@ -22,12 +22,12 @@ THRESHOLD="${3:-0}"
 # extract_total <profile.out> → percentage as a bare number, e.g. "72.4"
 extract_total() {
     local profile="$1"
-    if [[ ! -f "$profile" ]]; then
+    if [[ ! -s "$profile" ]]; then
         echo ""
         return
     fi
     go tool cover -func="$profile" 2>/dev/null \
-        | awk '/^total:/{gsub(/%/,"",$NF); print $NF}'
+        | awk '/^total:/{gsub(/%/,"",$NF); print $NF}' || true
 }
 
 # delta_str <base> <cur> → e.g. "+1.2" or "-0.5" or "0.0"
