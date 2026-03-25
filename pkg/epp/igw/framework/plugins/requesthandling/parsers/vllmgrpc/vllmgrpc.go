@@ -1,0 +1,203 @@
+/*
+Copyright 2025 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package vllmgrpc
+
+import (
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"google.golang.org/protobuf/proto"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	pb "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/gen"
+)
+
+const (
+	VllmGRPCParserType = "vllmgrpc-parser"
+
+	gRPCPayloadHeaderLen = 5
+)
+
+// compile-time type validation
+var _ fwkrh.Parser = &VllmGRPCParser{}
+
+// VllmGRPCParser implements the fwkrh.Parser interface for vLLM gRPC.
+type VllmGRPCParser struct {
+	typedName fwkplugin.TypedName
+}
+
+// NewVllmGRPCParser creates a new VllmGRPCParser.
+func NewVllmGRPCParser() *VllmGRPCParser {
+	return &VllmGRPCParser{
+		typedName: fwkplugin.TypedName{
+			Type: VllmGRPCParserType,
+			Name: VllmGRPCParserType,
+		},
+	}
+}
+
+func VllmGRPCParserPluginFactory(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
+	return NewVllmGRPCParser().WithName(name), nil
+}
+
+func (p *VllmGRPCParser) WithName(name string) *VllmGRPCParser {
+	p.typedName.Name = name
+	return p
+}
+
+// TypedName returns the type and name tuple of this plugin instance.
+func (p *VllmGRPCParser) TypedName() fwkplugin.TypedName {
+	return p.typedName
+}
+
+// ParseRequest parses the gRPC request body and headers and returns an LLMRequestBody.
+func (p *VllmGRPCParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*scheduling.LLMRequestBody, error) {
+	logger := log.FromContext(ctx)
+
+	extractedBody, err := convertToLLMRequestBody(body)
+	if err != nil {
+		return nil, fmt.Errorf("parsing gRPC payload: %w", err)
+	}
+	logger.V(logutil.TRACE).Info("parsed GenerateRequest")
+	return extractedBody, nil
+}
+
+// ParseResponse parses the response body and returns a ParsedResponse
+func (p *VllmGRPCParser) ParseResponse(ctx context.Context, body []byte, headers map[string]string, endofStream bool) (*fwkrh.ParsedResponse, error) {
+	logger := log.FromContext(ctx)
+	resp := &pb.GenerateResponse{}
+	if err := toGenerateResponse(body, resp); err != nil {
+		return nil, fmt.Errorf("failed to parse gRPC response payload: %w", err)
+	}
+
+	result := &fwkrh.ParsedResponse{}
+
+	if resp.Response == nil {
+		return nil, errors.New("missing response in GenerateResponse")
+	}
+
+	switch v := resp.Response.(type) {
+	case *pb.GenerateResponse_Chunk:
+		logger.V(logutil.DEBUG).Info("parsed GenerateResponse_Chunk", "tokenLength", len(v.Chunk.TokenIds))
+		// Only populate Usage if the chunk actually contains token data.
+		// Streaming chunks often leave this empty until the final chunk.
+		promptToken, completionToken, cahcedToken := int(v.Chunk.PromptTokens), int(v.Chunk.CompletionTokens), int(v.Chunk.CachedTokens)
+		if promptToken > 0 || completionToken > 0 {
+			result.Usage = requestControlUsage(promptToken, completionToken, cahcedToken)
+		}
+
+	case *pb.GenerateResponse_Complete:
+		logger.V(logutil.DEBUG).Info("parsed GenerateResponse_Complete", "finishReason", v.Complete.FinishReason)
+		// Populate Usage for complete, non-streaming responses.
+		promptToken, completionToken, cahcedToken := int(v.Complete.PromptTokens), int(v.Complete.CompletionTokens), int(v.Complete.CachedTokens)
+		if promptToken > 0 || completionToken > 0 {
+			result.Usage = requestControlUsage(promptToken, completionToken, cahcedToken)
+		}
+
+	default:
+		return nil, errors.New("unrecognized response type in GenerateResponse")
+	}
+
+	return result, nil
+}
+
+func requestControlUsage(promptToken, completionToken, cachedToken int) *requestcontrol.Usage {
+	return &requestcontrol.Usage{
+		PromptTokens:     promptToken,
+		CompletionTokens: completionToken,
+		TotalTokens:      promptToken + completionToken,
+		PromptTokenDetails: &requestcontrol.PromptTokenDetails{
+			CachedTokens: cachedToken,
+		},
+	}
+}
+
+func toGenerateResponse(payload []byte, resp *pb.GenerateResponse) error {
+	parsedPayload, compressed, err := parseGrpcPayload(payload)
+	if err != nil {
+		return errors.New("not able to parse payload")
+	}
+	if compressed {
+		// TODO(#2635): handle compressed payload.
+		return errors.New("compressed vllmgrpc payload is not supported")
+	}
+
+	return proto.Unmarshal(parsedPayload, resp)
+}
+
+func convertToLLMRequestBody(payload []byte) (*scheduling.LLMRequestBody, error) {
+	pbReq := &pb.GenerateRequest{}
+	if err := toGenerateRequest(payload, pbReq); err != nil {
+		return nil, err
+	}
+	switch pbReq.Input.(type) {
+	case *pb.GenerateRequest_Text:
+		return &scheduling.LLMRequestBody{
+			Completions: &scheduling.CompletionsRequest{
+				Prompt: pbReq.GetText(),
+			},
+			ParsedBody: pbReq,
+		}, nil
+	case *pb.GenerateRequest_Tokenized:
+		return &scheduling.LLMRequestBody{
+			Completions: &scheduling.CompletionsRequest{
+				Prompt: pbReq.GetTokenized().OriginalText,
+			},
+			ParsedBody: pbReq,
+		}, nil
+	}
+	return nil, errors.New("not supported request inputType")
+}
+
+// parseGrpcPayload extracts the message payload and its compression status from a gRPC frame.
+// A standard gRPC frame consists of a 1-byte compression flag, a 4-byte message length,
+// and the actual message payload.
+func parseGrpcPayload(data []byte) ([]byte, bool, error) {
+	if len(data) < gRPCPayloadHeaderLen {
+		return nil, false, fmt.Errorf("invalid gRPC frame: expected at least %d bytes for header, got %d", gRPCPayloadHeaderLen, len(data))
+	}
+
+	// gRPC frame header: [Compression Flag (1 byte)] [Message Length (4 bytes)]
+	// Compression Flag 0 = uncompressed, 1 = compressed
+	isCompressed := data[0] == 1
+	msgLen := binary.BigEndian.Uint32(data[1:5])
+
+	if uint32(len(data)) < gRPCPayloadHeaderLen+msgLen {
+		return nil, false, fmt.Errorf("incomplete gRPC payload: header indicates %d bytes, but only %d bytes are available", msgLen, uint32(len(data))-gRPCPayloadHeaderLen)
+	}
+	return data[gRPCPayloadHeaderLen : gRPCPayloadHeaderLen+msgLen], isCompressed, nil
+}
+
+func toGenerateRequest(payload []byte, req *pb.GenerateRequest) error {
+	parsedPayload, compressed, err := parseGrpcPayload(payload)
+	if err != nil {
+		return errors.New("not able to parse payload")
+	}
+	if compressed {
+		// TODO(#2635): handle compressed payload.
+		return errors.New("compressed vllmgrpc payload is not supported")
+	}
+
+	return proto.Unmarshal(parsedPayload, req)
+}
