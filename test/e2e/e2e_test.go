@@ -26,27 +26,33 @@ const (
 	simDeployment = "./yaml/vllm-sim.yaml"
 	// simPDDeployment references the YAML file for the deployment
 	// running the vLLM simulator with PD (connector type is configurable via ${CONNECTOR_TYPE})
-	simPDDeployment = "./yaml/vllm-sim-pd.yaml"
+	simPDDeployment = "./yaml/vllm-p-d-disagg.yaml"
 	// simDPDeployment references  the YAML file for the deployment
 	// running the vLLM simulator with Data Parallel
 	simDPDeployment = "./yaml/vllm-sim-dp.yaml"
 	// simEDDeployment references the YAML file for the deployment
 	// running the vLLM simulator with ED (encode + decode, no prefill)
-	simEDDeployment = "./yaml/vllm-sim-ed.yaml"
+	simEDDeployment = "./yaml/vllm-sim-e-pd-disagg.yaml"
 	// simEPDDeployment references the YAML file for the deployment
 	// running the vLLM simulator with EPD (encode + prefill + decode)
-	simEPDDeployment = "./yaml/vllm-sim-epd.yaml"
+	simEPDDeployment = "./yaml/vllm-sim-e-p-d-disagg.yaml"
+	// simEPDUnifiedDeployment references the YAML file for the deployment
+	// running the vLLM simulator with a single deployment handling all EPD stages
+	// (encode + prefill + decode in one deployment via the encode-prefill-decode role label)
+	simEPDUnifiedDeployment = "./yaml/vllm-sim-epd-unified.yaml"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
 )
 
 var (
-	poolName        = simModelName + "-inference-pool"
-	podSelector     = map[string]string{"app": poolName}
-	prefillSelector = map[string]string{"llm-d.ai/role": "prefill"}
-	decodeSelector  = map[string]string{"llm-d.ai/role": "decode"}
-	encodeSelector  = map[string]string{"llm-d.ai/role": "encode"}
+	poolName              = simModelName + "-inference-pool"
+	podSelector           = map[string]string{"app": poolName}
+	prefillSelector       = map[string]string{"llm-d.ai/role": "prefill"}
+	decodeSelector        = map[string]string{"llm-d.ai/role": "decode"}
+	prefillDecodeSelector = map[string]string{"llm-d.ai/role": "prefill-decode"}
+	encodeSelector        = map[string]string{"llm-d.ai/role": "encode"}
+	epdSingleSelector     = map[string]string{"llm-d.ai/role": "encode-prefill-decode"}
 )
 
 var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
@@ -411,7 +417,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
-	ginkgo.When("Running an EPD (encode-decode) configuration with disagg-profile-handler", func() {
+	ginkgo.When("Running an encode/prefill-decode (two deployments) configuration", func() {
 		ginkgo.It("should route multimodal requests through encode and decode pods", func() {
 			infPoolObjects = createInferencePool(1, true)
 
@@ -427,19 +433,19 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			}
 
 			encodePods := getPodNames(encodeSelector)
-			decodePods := getPodNames(decodeSelector)
+			prefillDecodePods := getPodNames(prefillDecodeSelector)
 			gomega.Expect(encodePods).Should(gomega.HaveLen(encodeReplicas))
-			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+			gomega.Expect(prefillDecodePods).Should(gomega.HaveLen(decodeReplicas))
 
-			// Multimodal request: triggers encode stage
+			// Multimodal request: triggers encode stage, decode handled by prefill-decode pod
 			nsHdr, podHdr := runChatCompletionWithImage("http://example.com/test.jpg")
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
 			// Second multimodal request
 			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/other.jpg")
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
 			// Metrics: encode-decode decisions recorded
 			labelFilter := fmt.Sprintf(`decision_type="encode-decode",model_name="%s"`, simModelName)
@@ -451,7 +457,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
-	ginkgo.When("Running an EPD (encode-prefill-decode) configuration with disagg-profile-handler", func() {
+	ginkgo.When("Running an encode/prefill/decode (three deployments) configuration", func() {
 		ginkgo.It("should route multimodal requests through encode, prefill, and decode pods", func() {
 			infPoolObjects = createInferencePool(1, true)
 
@@ -488,6 +494,35 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			epdLabelFilter := fmt.Sprintf(`decision_type="encode-prefill-decode",model_name="%s"`, simModelName)
 			epdCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", epdLabelFilter)
 			gomega.Expect(epdCount).Should(gomega.BeNumerically(">=", 1))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
+	ginkgo.When("Running an encode-prefill-decode (single deployment) configuration", func() {
+		ginkgo.It("should route text and multimodal requests to the single deployment", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			// Single deployment labeled encode-prefill-decode: matches encode-filter, prefill-filter,
+			// and decode-filter, so all EPD stages are handled by the same deployment.
+			replicas := 1
+			modelServers := createModelServersEPDUnified(replicas)
+
+			epp := createEndPointPicker(epdConfig)
+
+			epdPods := getPodNames(epdSingleSelector)
+			gomega.Expect(epdPods).Should(gomega.HaveLen(replicas))
+
+			// Text request: no encode disaggregation triggered, routes to decode profile → single deployment
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
+
+			// Multimodal request: encode and decode profiles both resolve to the same single deployment
+			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/test.jpg")
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -737,6 +772,26 @@ func createModelServersEPD(encodeReplicas, prefillReplicas, decodeReplicas int) 
 			"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
 			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
+			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
+		})
+
+	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
+	podsInDeploymentsReady(objects)
+	return objects
+}
+
+// createModelServersEPDSingle creates a single model server pod with the
+// encode-prefill-decode role label, which matches all three role filters
+// (encode-filter, prefill-filter, decode-filter). This simulates a configuration
+// where one deployment handles all EPD stages without disaggregation.
+func createModelServersEPDUnified(replicas int) []string {
+	manifests := testutils.ReadYaml(simEPDUnifiedDeployment)
+	manifests = substituteMany(manifests,
+		map[string]string{
+			"${MODEL_NAME}":           simModelName,
+			"${MODEL_NAME_SAFE}":      simModelName,
+			"${POOL_NAME}":            poolName,
+			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(replicas),
 			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
 		})
 
@@ -1188,7 +1243,8 @@ plugins:
 - type: always-disagg-encode-decider
 - type: disagg-profile-handler
   parameters:
-    encodeDeciderPluginName: always-disagg-encode-decider
+    deciders:
+      encode: always-disagg-encode-decider
 schedulingProfiles:
 - name: encode
   plugins:
@@ -1223,8 +1279,9 @@ plugins:
     nonCachedTokens: 16
 - type: disagg-profile-handler
   parameters:
-    encodeDeciderPluginName: always-disagg-encode-decider
-    prefillDeciderPluginName: prefix-based-pd-decider
+    deciders:
+      encode: always-disagg-encode-decider
+      prefill: prefix-based-pd-decider
 schedulingProfiles:
 - name: encode
   plugins:

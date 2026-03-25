@@ -82,7 +82,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${MODEL_NAME_SAFE}-vllm-sim-d
+  name: ${MODEL_NAME_SAFE}-vllm-sim-pd
   labels:
     app: ${POOL_NAME}
 spec:
@@ -94,7 +94,7 @@ spec:
     metadata:
       labels:
         app: ${POOL_NAME}
-        llm-d.ai/role: decode
+        llm-d.ai/role: prefill-decode
     spec:
       initContainers:
       - name: routing-sidecar

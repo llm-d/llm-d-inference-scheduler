@@ -155,6 +155,25 @@ KIND_GATEWAY_HOST_PORT=<selected-port> make env-dev-kind
 **Where:** &lt;selected-port&gt; is the port on your local machine you want to use to
 access the inference gatyeway.
 
+### Prefill/Decode Disaggregation
+
+To deploy with Prefill/Decode (P/D) disaggregation, where prefill and decode run on separate pods:
+
+```bash
+PD_ENABLED=true make env-dev-kind
+```
+
+### Encode/Prefill/Decode Disaggregation
+
+To deploy with Encode/Prefill/Decode (E/P/D) disaggregation, where a dedicated encoder pod handles
+multimodal embedding, a prefill pod runs the prefill stage, and decode pods run inference:
+
+```bash
+EPD_ENABLED=true make env-dev-kind
+```
+
+For a detailed description of disaggregation modes and pod role labels, see [docs/disaggregation.md](docs/disaggregation.md).
+
 ### Prometheus Monitoring
 
 To deploy Prometheus alongside the dev environment:
