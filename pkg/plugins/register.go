@@ -3,7 +3,7 @@ package plugins
 import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/datalayer/models"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
-	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/multi/precise_prefix_cache"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/multi/preciseprefixcache"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"

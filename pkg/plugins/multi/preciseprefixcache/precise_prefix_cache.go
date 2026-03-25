@@ -121,9 +121,7 @@ func (s *precisePluginState) Clone() plugin.StateData {
 
 // PluginFactory defines the factory function for creating
 // a new instance of the PrecisePrefixCacheScorer plugin.
-func PluginFactory(name string, rawParameters json.RawMessage,
-	handle plugin.Handle,
-) (plugin.Plugin, error) {
+func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	indexerConfig, err := kvcache.NewDefaultConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize indexer config: %w", err)
