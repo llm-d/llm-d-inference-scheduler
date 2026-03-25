@@ -73,6 +73,24 @@ var (
 			Help:      metricsutil.HelpMsgWithStability("Jain's fairness index over EWMA wait times across active programs (1.0 = perfectly fair)", compbasemetrics.ALPHA),
 		},
 	)
+
+	ewmaWaitTimeMs = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: programAwareSubsystem,
+			Name:      "ewma_wait_time_milliseconds",
+			Help:      metricsutil.HelpMsgWithStability("Exponentially weighted moving average of flow control queue wait time per program in milliseconds", compbasemetrics.ALPHA),
+		},
+		[]string{"program_id"},
+	)
+
+	queueScore = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: programAwareSubsystem,
+			Name:      "queue_score",
+			Help:      metricsutil.HelpMsgWithStability("Scheduling priority score computed by the scoring strategy for each program queue during Pick()", compbasemetrics.ALPHA),
+		},
+		[]string{"program_id"},
+	)
 )
 
 // GetCollectors returns all Prometheus collectors for the program-aware plugin.
@@ -86,5 +104,7 @@ func GetCollectors() []prometheus.Collector {
 		outputTokensTotal,
 		pickLatencyUs,
 		fairnessIndex,
+		ewmaWaitTimeMs,
+		queueScore,
 	}
 }
