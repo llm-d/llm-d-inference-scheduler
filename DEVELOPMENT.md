@@ -55,8 +55,23 @@ make coverage-compare   # builds a baseline from main in a temp worktree, then d
 To compare against a different ref:
 
 ```bash
-make coverage-compare BASE_REF=release-0.5
+make coverage-compare BASE_REF=release-0.6
 ```
+
+To compare against multiple baselines in one session:
+
+```bash
+make test-unit
+make coverage-compare                                              # vs main
+make coverage-compare BASE_REF=release-0.6 COVERAGE_LABEL=release-0.6
+```
+
+If a worktree for the target ref already exists locally it is reused and not removed afterwards. A newly created worktree is always cleaned up after the comparison.
+
+> [!NOTE]
+> CI runs the same comparison automatically on every PR: one report against `main`
+> and one against the most recent `release-*` branch. Both appear in the GitHub
+> Actions Job Summary for the run.
 
 ### Integration Tests
 
