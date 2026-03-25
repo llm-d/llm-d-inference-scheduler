@@ -33,7 +33,8 @@ func main() {
 	opts := proxy.NewOptions()
 
 	// Add options flags (including logging flags)
-	opts.AddFlags(pflag.CommandLine)
+	opts.FlagSet = pflag.CommandLine
+	opts.AddFlags(opts.FlagSet)
 	pflag.Parse()
 
 	logger := zap.New(zap.UseFlagOptions(&opts.LoggingOptions))
