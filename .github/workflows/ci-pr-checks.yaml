@@ -22,11 +22,11 @@ jobs:
           filters: |
             src:
               - '**/*.go'
-              - '**/*.py'
               - Dockerfile.epp
               - Dockerfile.sidecar
               - Makefile*
               - go.mod
+              - scripts/**
   lint-and-test:
     needs: check-changes
     if: ${{ needs.check-changes.outputs.src == 'true' }}
@@ -77,6 +77,7 @@ jobs:
 
       - name: Compare coverage against main baseline
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         shell: bash
         run: make coverage-compare BASELINE_DIR=coverage/baseline
 

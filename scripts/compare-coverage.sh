@@ -57,7 +57,7 @@ for f in "$BASELINE_DIR"/*.out "$CURRENT_DIR"/*.out; do
     [[ -f "$f" ]] || continue
     name=$(basename "$f" .out)
     # deduplicate
-    if [[ ! " ${all_names[*]} " =~ " ${name} " ]]; then
+    if [[ ! " ${all_names[*]-} " =~ " ${name} " ]]; then
         all_names+=("$name")
     fi
 done
