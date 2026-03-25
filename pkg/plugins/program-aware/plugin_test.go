@@ -303,7 +303,7 @@ func TestPreRequest_RecordsWaitTime(t *testing.T) {
 func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
-	p.requestTimestamps.Store("req-1", time.Now())
+	p.requestTimestamps.Store("req-1", time.Now().Add(-100*time.Millisecond))
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-1",
@@ -326,6 +326,9 @@ func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
 	// Timestamp should be cleaned up.
 	_, ok := p.requestTimestamps.Load("req-1")
 	assert.False(t, ok)
+
+	// Throughput: 150 tokens / ~0.1s ≈ 1500 tokens/sec.
+	assert.Greater(t, metrics.AverageThroughput(), 0.0, "throughput should be recorded")
 }
 
 func TestResponseComplete_NoFairnessHeader_StillCleansTimestamp(t *testing.T) {
@@ -407,36 +410,36 @@ func TestFullLifecycle(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// --- fairness index tests ---
+// --- fairness index tests (throughput-based) ---
 
-func TestComputeFairnessIndex_EqualWaitTimes(t *testing.T) {
+func TestComputeFairnessIndex_EqualThroughput(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	mA := &ProgramMetrics{}
-	mA.RecordWaitTime(100)
+	mA.RecordThroughput(500.0) // 500 tokens/sec
 	p.programMetrics.Store("prog-a", mA)
 
 	mB := &ProgramMetrics{}
-	mB.RecordWaitTime(100)
+	mB.RecordThroughput(500.0)
 	p.programMetrics.Store("prog-b", mB)
 
-	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "equal wait times → perfect fairness")
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "equal throughput → perfect fairness")
 }
 
-func TestComputeFairnessIndex_SkewedWaitTimes(t *testing.T) {
+func TestComputeFairnessIndex_SkewedThroughput(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	mA := &ProgramMetrics{}
-	mA.RecordWaitTime(100)
+	mA.RecordThroughput(1000.0) // 1000 tokens/sec
 	p.programMetrics.Store("prog-a", mA)
 
 	mB := &ProgramMetrics{}
-	mB.RecordWaitTime(10)
+	mB.RecordThroughput(100.0) // 100 tokens/sec
 	p.programMetrics.Store("prog-b", mB)
 
 	idx := p.computeFairnessIndex()
-	// J = (100+10)^2 / (2 * (100^2 + 10^2)) = 12100 / 20200 ≈ 0.599
-	assert.Less(t, idx, 1.0, "skewed wait times should produce index < 1")
+	// J = (1000+100)^2 / (2 * (1000^2 + 100^2)) = 1210000 / 2020000 ≈ 0.599
+	assert.Less(t, idx, 1.0, "skewed throughput should produce index < 1")
 	assert.InDelta(t, 0.599, idx, 0.01)
 }
 
@@ -444,20 +447,20 @@ func TestComputeFairnessIndex_SingleProgram(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	m := &ProgramMetrics{}
-	m.RecordWaitTime(500)
+	m.RecordThroughput(500.0)
 	p.programMetrics.Store("prog-a", m)
 
 	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "single program → trivially fair")
 }
 
-func TestComputeFairnessIndex_NoWaitData(t *testing.T) {
+func TestComputeFairnessIndex_NoThroughputData(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	// Programs exist but have no wait data yet.
+	// Programs exist but have no throughput data yet.
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
 	p.programMetrics.Store("prog-b", &ProgramMetrics{})
 
-	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "no wait data → 1.0")
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "no throughput data → 1.0")
 }
 
 // --- Two-pass scoring tests ---

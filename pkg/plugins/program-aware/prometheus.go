@@ -70,8 +70,17 @@ var (
 		prometheus.GaugeOpts{
 			Subsystem: programAwareSubsystem,
 			Name:      "jains_fairness_index",
-			Help:      metricsutil.HelpMsgWithStability("Jain's fairness index over EWMA wait times across active programs (1.0 = perfectly fair)", compbasemetrics.ALPHA),
+			Help:      metricsutil.HelpMsgWithStability("Jain's fairness index over average throughput (tokens/sec) across active programs (1.0 = perfectly fair)", compbasemetrics.ALPHA),
 		},
+	)
+
+	throughputTokensPerSec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: programAwareSubsystem,
+			Name:      "throughput_tokens_per_second",
+			Help:      metricsutil.HelpMsgWithStability("Average per-request throughput (tokens/sec) per program", compbasemetrics.ALPHA),
+		},
+		[]string{"program_id"},
 	)
 
 	ewmaWaitTimeMs = prometheus.NewGaugeVec(
@@ -104,6 +113,7 @@ func GetCollectors() []prometheus.Collector {
 		outputTokensTotal,
 		pickLatencyUs,
 		fairnessIndex,
+		throughputTokensPerSec,
 		ewmaWaitTimeMs,
 		queueScore,
 	}
