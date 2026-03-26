@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
@@ -41,12 +40,13 @@ const (
 	TokenizerPluginType = "tokenizer"
 
 	// TokenizedPromptKey is the data key advertised by this plugin to indicate
-	// that it produces a TokenizedPrompt on the LLMRequest.
+	// that it produces tokenized prompt data.
 	TokenizedPromptKey = "TokenizedPrompt"
-)
 
-// compile-time type assertion.
-var _ requestcontrol.PrepareDataPlugin = &TokenizerPlugin{}
+	// TokenizedPromptStateKey is the CycleState key used by the tokenizer scorer
+	// to store tokenized prompt data for downstream consumers.
+	TokenizedPromptStateKey = plugin.StateKey(TokenizedPromptKey)
+)
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
 type tokenizerPluginConfig struct {
@@ -92,8 +92,26 @@ func NewTokenizerPlugin(ctx context.Context, config *tokenizerPluginConfig) (*To
 	}, nil
 }
 
-// TokenizerPlugin tokenizes the prompt in the incoming request and attaches
-// the result to the LLMRequest for downstream consumers.
+// TokenizedPromptState holds the tokenization result for a single request,
+// stored in CycleState for consumption by downstream scorers.
+// This follows the standard IGW pattern where scorers share data via CycleState
+// (same as NoHitLRU reading from prefix-cache scorer).
+type TokenizedPromptState struct {
+	TokenIDs []uint32
+}
+
+// Clone implements plugin.StateData.
+func (t *TokenizedPromptState) Clone() plugin.StateData {
+	if t == nil {
+		return nil
+	}
+	ids := make([]uint32, len(t.TokenIDs))
+	copy(ids, t.TokenIDs)
+	return &TokenizedPromptState{TokenIDs: ids}
+}
+
+// TokenizerPlugin tokenizes the prompt in the incoming request and stores
+// the result in CycleState for downstream consumers (scorers).
 type TokenizerPlugin struct {
 	typedName plugin.TypedName
 	tokenizer tokenizer
@@ -110,28 +128,10 @@ func (p *TokenizerPlugin) WithName(name string) *TokenizerPlugin {
 	return p
 }
 
-// Produces returns the data keys this plugin produces.
-func (p *TokenizerPlugin) Produces() map[string]any {
-	return map[string]any{TokenizedPromptKey: scheduling.TokenizedPrompt{}}
-}
-
-// Consumes returns the data keys this plugin requires.
-func (p *TokenizerPlugin) Consumes() map[string]any {
-	return nil
-}
-
-// PrepareRequestData tokenizes the request prompt and stores the result
-// on the LLMRequest so that scorers and filters can use it.
-// If the request already contains tokenized data, tokenization is skipped.
-// This method is fail-open: errors are logged and TokenizedPrompt is left nil.
-func (p *TokenizerPlugin) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, pods []scheduling.Endpoint) error {
+// tokenize extracts token IDs from the request. Returns nil on error or unsupported type.
+func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) []uint32 {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
-
-	if request.TokenizedPrompt != nil {
-		traceLogger.Info("TokenizedPrompt already set, skipping")
-		return nil
-	}
 
 	if request.Body == nil {
 		traceLogger.Info("Request body is nil, skipping tokenization")
@@ -164,11 +164,7 @@ func (p *TokenizerPlugin) PrepareRequestData(ctx context.Context, request *sched
 	}
 
 	traceLogger.Info("Tokenization succeeded", "tokenCount", len(tokenIDs))
-	request.TokenizedPrompt = &scheduling.TokenizedPrompt{
-		TokenIDs: tokenIDs,
-	}
-
-	return nil
+	return tokenIDs
 }
 
 // chatCompletionsToRenderChatRequest converts a ChatCompletionsRequest to a
