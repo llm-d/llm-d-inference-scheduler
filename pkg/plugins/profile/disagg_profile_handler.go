@@ -2,7 +2,6 @@
 package profile
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 
+	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
@@ -64,7 +64,7 @@ type legacyDisaggProfileHandlerParameters struct {
 
 // toDisaggParams copies legacy flat fields into the nested format, logging a
 // deprecation warning for each field in use.
-func (l *legacyDisaggProfileHandlerParameters) toDisaggParams(logger interface{ Info(string, ...any) }) disaggProfileHandlerParameters {
+func (l *legacyDisaggProfileHandlerParameters) toDisaggParams(logger logr.Logger) disaggProfileHandlerParameters {
 	p := disaggProfileHandlerParameters{}
 	if l.DecodeProfile != "" {
 		logger.Info("Deprecated parameter 'decodeProfile', use 'profiles.decode' instead")
@@ -103,22 +103,24 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 
 	parameters := disaggProfileHandlerParameters{}
 	if rawParameters != nil {
-		// Try current nested format first (strict: unknown fields are rejected).
-		dec := json.NewDecoder(bytes.NewReader(rawParameters))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&parameters); err != nil {
-			// Fall back to deprecated flat format.
-			legacy := legacyDisaggProfileHandlerParameters{}
-			if legacyErr := json.Unmarshal(rawParameters, &legacy); legacyErr != nil {
-				return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
-			}
-			// Detect mixed format: also check whether any nested fields were present.
-			var nested disaggProfileHandlerParameters
-			if _ = json.Unmarshal(rawParameters, &nested); nested.Profiles != (disaggProfilesParameters{}) || nested.Deciders != (disaggDecidersParameters{}) {
+		legacy := legacyDisaggProfileHandlerParameters{}
+
+		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
+		}
+		if err := json.Unmarshal(rawParameters, &legacy); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
+		}
+
+		if parameters.Profiles != (disaggProfilesParameters{}) ||
+			parameters.Deciders != (disaggDecidersParameters{}) {
+			// Make sure the legacy parameters were not used
+			if legacy != (legacyDisaggProfileHandlerParameters{}) {
 				return nil, errors.New("cannot mix deprecated flat parameters (decodeProfile, prefillProfile, encodeProfile, " +
 					"deciderPluginName, prefillDeciderPluginName, encodeDeciderPluginName) " +
 					"with nested parameters (profiles, deciders): use one format or the other")
 			}
+		} else {
 			logger.Info("Deprecated: using flat parameter format, migrate to nested profiles/deciders format")
 			parameters = legacy.toDisaggParams(logger)
 		}
