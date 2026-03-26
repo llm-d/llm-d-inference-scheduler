@@ -101,7 +101,7 @@ func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *sche
 			enqueueTime := enqueueTimeRaw.(time.Time)
 			durationSec := time.Since(enqueueTime).Seconds()
 			if durationSec > 0 {
-				totalTokens := float64(promptTokens + completionTokens)
+				totalTokens := float64(weightInputToken*promptTokens + weightOutputToken*completionTokens)
 				tokensPerSec := totalTokens / durationSec
 				metrics.RecordThroughput(tokensPerSec)
 				throughputTokensPerSec.WithLabelValues(programID).Set(metrics.AverageThroughput())
