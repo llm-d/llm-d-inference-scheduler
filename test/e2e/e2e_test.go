@@ -411,7 +411,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			epp := createEndPointPicker(kvConfig)
 
 			modelServers := createModelServers(false, true, false, 1, 0, 0)
-			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
+			waitForEPPToDiscoverPods(kvModelName)
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
@@ -435,7 +435,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			epp := createEndPointPicker(kvExternalTokenizerConfig)
 
 			modelServers := createModelServers(false, true, false, 1, 0, 0)
-			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
+			waitForEPPToDiscoverPods(kvModelName)
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
@@ -658,7 +658,8 @@ func createEndPointPicker(eppConfig string) []string {
 		return err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING
 	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
 	ginkgo.By("EPP reports that it is serving")
-	time.Sleep(2 * time.Second)
+
+	waitForEPPToDiscoverPods(simModelName)
 
 	return objects
 }
