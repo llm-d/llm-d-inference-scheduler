@@ -17,8 +17,9 @@ func RegisterAllPlugins() {
 	plugin.Register(filter.EncodeRoleType, filter.EncodeRoleFactory)
 	plugin.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
 	plugin.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
-	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.PrefillHeaderHandlerFactory)
-	plugin.Register(prerequest.EncodeHeaderHandlerType, prerequest.EncodeHeaderHandlerFactory)
+	plugin.Register(prerequest.DisaggHeadersHandlerType, prerequest.DisaggHeadersHandlerFactory)
+	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
+	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.DisaggHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
 	plugin.Register(profile.DisaggProfileHandlerType, profile.DisaggProfileHandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
