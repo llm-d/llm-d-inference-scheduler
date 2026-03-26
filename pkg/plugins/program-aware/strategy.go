@@ -54,8 +54,13 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 			weightHeadWait: floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
 			quantumTokens:  int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
 		}, nil
+	case "throughput":
+		return &ThroughputStrategy{
+			weightThroughput: floatOr(cfg.WeightThroughput, defaultThroughputWeightThroughput),
+			weightHeadWait:   floatOr(cfg.WeightThroughputHeadWait, defaultThroughputWeightHeadWait),
+		}, nil
 	default:
-		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"ewma\", \"drr\"", cfg.Strategy)
+		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"ewma\", \"drr\", \"throughput\"", cfg.Strategy)
 	}
 }
 
@@ -98,9 +103,9 @@ const (
 
 // Default EWMA strategy weights.
 const (
-	defaultEWMAWeightHeadWait  = 0.5
-	defaultEWMAWeightAvgWait   = 0.3
-	defaultEWMAWeightAvgTokens = 0.2
+	defaultEWMAWeightHeadWait  = 0.3
+	defaultEWMAWeightAvgWait   = 0.2
+	defaultEWMAWeightAvgTokens = 0.5
 )
 
 // EWMAStrategy scores queues using three normalized signals:
@@ -269,3 +274,76 @@ func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, complet
 	// and be deprioritized in future rounds until quanta restore parity.
 	metrics.DeductTokens(promptTokens + completionTokens)
 }
+
+// =============================================================================
+// Throughput Strategy
+// =============================================================================
+
+// Throughput dimension indices.
+const (
+	throughputDimThroughput = 0
+	throughputDimHeadWait   = 1
+	throughputNumDimensions = 2
+)
+
+// Default Throughput strategy weights.
+const (
+	defaultThroughputWeightThroughput float64 = 0.8
+	defaultThroughputWeightHeadWait   float64 = 0.2
+)
+
+// ThroughputStrategy scores queues by equalizing observed throughput (tokens/sec)
+// across programs. Programs with lower average throughput receive higher scores,
+// directly optimizing the metric that Jain's fairness index measures.
+//
+//   - throughput (inverted): average tokens/sec — lower throughput → higher score.
+//   - headWait: age of the oldest request — tiebreaker for cold start when
+//     multiple programs have no throughput data yet.
+//
+// Weights are configurable via the plugin config; defaults are 0.8/0.2.
+type ThroughputStrategy struct {
+	weightThroughput float64
+	weightHeadWait   float64
+}
+
+// Name returns "throughput".
+func (s *ThroughputStrategy) Name() string { return "throughput" }
+
+// OnPickStart is a no-op for Throughput; state is derived from completed request metrics.
+func (s *ThroughputStrategy) OnPickStart(_ string, _ int, _ *ProgramMetrics) {}
+
+// NumDimensions returns 2 (throughput, headWait).
+func (s *ThroughputStrategy) NumDimensions() int { return throughputNumDimensions }
+
+// CollectRaw extracts unnormalized [avgThroughput, headWaitMs].
+func (s *ThroughputStrategy) CollectRaw(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) []float64 {
+	raw := make([]float64, throughputNumDimensions)
+
+	if metrics != nil {
+		raw[throughputDimThroughput] = metrics.AverageThroughput()
+	}
+
+	if head := queue.PeekHead(); head != nil {
+		raw[throughputDimHeadWait] = float64(time.Since(head.EnqueueTime()).Milliseconds())
+	}
+
+	return raw
+}
+
+// NormalizeDimension performs range normalization, inverting the throughput
+// dimension so that lower throughput maps to a higher normalized score.
+func (s *ThroughputStrategy) NormalizeDimension(dim int, raw, min, max float64) float64 {
+	if dim == throughputDimThroughput {
+		return 1 - rangeNormalize(raw, min, max)
+	}
+	return rangeNormalize(raw, min, max)
+}
+
+// Score computes the weighted combination of (inverted) throughput and head wait.
+func (s *ThroughputStrategy) Score(normalized []float64) float64 {
+	return s.weightThroughput*normalized[throughputDimThroughput] +
+		s.weightHeadWait*normalized[throughputDimHeadWait]
+}
+
+// OnCompleted is a no-op; throughput is recorded by the ResponseComplete hook.
+func (s *ThroughputStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}
