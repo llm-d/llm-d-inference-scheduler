@@ -24,7 +24,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
@@ -58,15 +57,14 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, validator)
+					testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+					err := testInfo.proxy.Start(testInfo.ctx)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
 				}()
 
-				time.Sleep(1 * time.Second)
-				Expect(testInfo.proxy.addr).ToNot(BeNil())
+				<-testInfo.proxy.readyCh
 				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 				By("sending a /v1/chat/completions request with max_completion_tokens set")
@@ -120,15 +118,14 @@ var _ = Describe("Common Connector tests", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
-					err := testInfo.proxy.Start(testInfo.ctx, validator)
+					testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+					err := testInfo.proxy.Start(testInfo.ctx)
 					Expect(err).ToNot(HaveOccurred())
 
 					testInfo.stoppedCh <- struct{}{}
 				}()
 
-				time.Sleep(1 * time.Second)
-				Expect(testInfo.proxy.addr).ToNot(BeNil())
+				<-testInfo.proxy.readyCh
 				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 				By("sending a /v1/chat/completions request without max_completion_tokens")
@@ -203,8 +200,8 @@ func sidecarConnectionTestSetup(connector string) *sidecarTestInfo {
 	url, err := url.Parse(testInfo.decodeBackend.URL)
 	Expect(err).ToNot(HaveOccurred())
 	testInfo.decodeURL = url
-	cfg := Config{KVConnector: connector}
-	testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg) // port 0 to automatically choose one that's available.
+	cfg := Config{Port: "0", DecoderURL: testInfo.decodeURL, KVConnector: connector}
+	testInfo.proxy = NewProxy(cfg)
 
 	return &testInfo
 }

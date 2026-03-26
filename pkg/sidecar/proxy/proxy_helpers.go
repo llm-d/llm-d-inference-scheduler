@@ -24,12 +24,13 @@ func (s *Server) startHTTP(ctx context.Context) error {
 		return err
 	}
 
-	ln, err := net.Listen("tcp", ":"+s.port)
+	ln, err := net.Listen("tcp", ":"+s.config.Port)
 	if err != nil {
 		s.logger.Error(err, "Failed to start")
 		return err
 	}
 	s.addr = ln.Addr()
+	close(s.readyCh)
 
 	// Wrap handler with OpenTelemetry middleware to extract trace context from incoming requests
 	handler := otelhttp.NewHandler(s.handler, "llm-d-pd-proxy",
@@ -155,13 +156,13 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 		switch {
 		case errors.Is(err, syscall.ECONNREFUSED):
 			s.logger.Error(err, "failed to connect to vLLM decoder",
-				"decoderURL", s.decoderURL.String())
+				"decoderURL", s.config.DecoderURL.String())
 			res.WriteHeader(http.StatusServiceUnavailable)
 			_, writeError = res.Write(decoderServiceUnavailableResponseJSON)
 
 		default:
 			s.logger.Error(err, "http: proxy error",
-				"decoderURL", s.decoderURL.String())
+				"decoderURL", s.config.DecoderURL.String())
 			writeError = errorBadGateway(err, res)
 		}
 		if writeError != nil {

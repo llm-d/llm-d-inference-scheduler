@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"math/rand"
 	"net"
 	"net/http"
@@ -78,41 +79,75 @@ const (
 	LegacyPoolGroup = "inference.networking.x-k8s.io"
 )
 
-// Config represents the proxy server configuration
+// Config represents the complete runtime configuration for the proxy server.
 type Config struct {
-	// KVConnector is the name of the KV protocol between Prefiller and Decoder.
-	KVConnector string
+	// Port is the port the sidecar is listening on.
+	Port string
+	// DecoderURL is the URL of the local decoder (vLLM) instance.
+	DecoderURL *url.URL
 
-	// ECConnector is the name of the EC protocol between Encoder and Prefiller (for EPD mode).
+	// KVConnector is the name of the KV protocol between prefiller and decoder.
+	KVConnector string
+	// ECConnector is the name of the EC protocol between encoder and prefiller (for EPD mode).
 	// If empty, encoder stage is skipped.
 	ECConnector string
-
-	// PrefillerUseTLS indicates whether to use TLS when sending requests to prefillers.
-	PrefillerUseTLS bool
-
-	// EncoderUseTLS indicates whether to use TLS when sending requests to encoders.
-	EncoderUseTLS bool
-
-	// PrefillerInsecureSkipVerify configure the proxy to skip TLS verification for requests to prefiller.
-	PrefillerInsecureSkipVerify bool
-
-	// EncoderInsecureSkipVerify configure the proxy to skip TLS verification for requests to encoder.
-	EncoderInsecureSkipVerify bool
-
-	// DecoderInsecureSkipVerify configure the proxy to skip TLS verification for requests to decoder.
-	DecoderInsecureSkipVerify bool
-
-	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE command line argument
+	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE argument.
 	DataParallelSize int
-
 	// EnablePrefillerSampling configures the proxy to randomly choose from the set
 	// of provided prefill hosts instead of always using the first one.
 	EnablePrefillerSampling bool
 
+	// UseTLSForPrefiller indicates whether to use TLS when sending requests to prefillers.
+	UseTLSForPrefiller bool
+	// UseTLSForDecoder indicates whether to use TLS when sending requests to the decoder.
+	UseTLSForDecoder bool
+	// UseTLSForEncoder indicates whether to use TLS when sending requests to encoders.
+	UseTLSForEncoder bool
+	// InsecureSkipVerifyForPrefiller configures the proxy to skip TLS verification for requests to the prefiller.
+	InsecureSkipVerifyForPrefiller bool
+	// InsecureSkipVerifyForEncoder configures the proxy to skip TLS verification for requests to the encoder.
+	InsecureSkipVerifyForEncoder bool
+	// InsecureSkipVerifyForDecoder configures the proxy to skip TLS verification for requests to the decoder.
+	InsecureSkipVerifyForDecoder bool
+
+	// SecureServing enables TLS for the sidecar server itself.
+	SecureServing bool
 	// CertPath is the path to TLS certificates for the sidecar server.
 	CertPath string
-	// SecureServing enables TLS for the sidecar server.
-	SecureServing bool
+
+	// EnableSSRFProtection enables SSRF protection using InferencePool allowlisting.
+	EnableSSRFProtection bool
+	// InferencePoolNamespace is the Kubernetes namespace of the InferencePool to watch.
+	InferencePoolNamespace string
+	// InferencePoolName is the name of the InferencePool to watch.
+	InferencePoolName string
+	// PoolGroup is the API group of the InferencePool resource.
+	PoolGroup string
+}
+
+// MarshalJSON implements json.Marshaler for Config.
+// It overrides the default marshaling of DecoderURL (*url.URL) to serialize it as a string.
+func (c Config) MarshalJSON() ([]byte, error) {
+	// alias avoids infinite recursion when calling json.Marshal below
+	type alias Config
+	decoderURL := ""
+	if c.DecoderURL != nil {
+		decoderURL = c.DecoderURL.String()
+	}
+	return json.Marshal(struct {
+		alias
+		DecoderURL string
+	}{
+		alias:      alias(c),
+		DecoderURL: decoderURL,
+	})
+}
+
+// String returns a JSON representation of Config for logging and debugging.
+// It implements fmt.Stringer.
+func (c Config) String() string {
+	b, _ := json.Marshal(c)
+	return string(b)
 }
 
 type protocolRunner func(http.ResponseWriter, *http.Request, string)
@@ -121,10 +156,9 @@ type epdProtocolRunner func(http.ResponseWriter, *http.Request, string, []string
 // Server is the reverse proxy server
 type Server struct {
 	logger                  logr.Logger
-	addr                    net.Addr     // the proxy TCP address
-	port                    string       // the proxy TCP port
-	decoderURL              *url.URL     // the local decoder URL
-	handler                 http.Handler // the handler function. either a Mux or a proxy
+	addr                    net.Addr      // the proxy TCP address
+	readyCh                 chan struct{} // closed once addr is set and server is listening
+	handler                 http.Handler  // the handler function. either a Mux or a proxy
 	allowlistValidator      *AllowlistValidator
 	runPDConnectorProtocol  protocolRunner    // the handler for running the Prefiller-Decoder protocol
 	runEPDConnectorProtocol epdProtocolRunner // the handler for running the Encoder-Prefiller-Decoder protocol
@@ -142,14 +176,13 @@ type Server struct {
 	config Config
 }
 
-// NewProxy creates a new routing reverse proxy
-func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
+// NewProxy creates a new routing reverse proxy from the given Config.
+func NewProxy(config Config) *Server {
 	prefillerCache, _ := lru.New[string, http.Handler](16) // nolint:all
 	encoderCache, _ := lru.New[string, http.Handler](16)   // nolint:all
 
 	server := &Server{
-		port:                port,
-		decoderURL:          decodeURL,
+		readyCh:             make(chan struct{}),
 		prefillerProxies:    prefillerCache,
 		encoderProxies:      encoderCache,
 		prefillerURLPrefix:  "http://",
@@ -161,13 +194,13 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 	}
 
 	server.setKVConnector()
-	if config.PrefillerUseTLS {
+	if config.UseTLSForPrefiller {
 		server.prefillerURLPrefix = "https://"
 	}
 
 	if config.ECConnector != "" {
 		server.setECConnector()
-		if config.EncoderUseTLS {
+		if config.UseTLSForEncoder {
 			server.encoderURLPrefix = "https://"
 		}
 	}
@@ -176,10 +209,22 @@ func NewProxy(port string, decodeURL *url.URL, config Config) *Server {
 }
 
 // Start the HTTP reverse proxy.
-func (s *Server) Start(ctx context.Context, allowlistValidator *AllowlistValidator) error {
-	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.port)
+// allowlistValidator is constructed from s.config on first call; inject an alternative before calling Start to override.
+func (s *Server) Start(ctx context.Context) error {
+	s.logger = log.FromContext(ctx).WithName("proxy server on port " + s.config.Port)
 
-	s.allowlistValidator = allowlistValidator
+	if s.allowlistValidator == nil {
+		var err error
+		s.allowlistValidator, err = NewAllowlistValidator(
+			s.config.EnableSSRFProtection,
+			s.config.PoolGroup,
+			s.config.InferencePoolNamespace,
+			s.config.InferencePoolName,
+		)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Configure handlers
 	s.handler = s.createRoutes()
@@ -196,17 +241,17 @@ func (s *Server) Start(ctx context.Context, allowlistValidator *AllowlistValidat
 	return grp.Wait()
 }
 
-// Clone returns a clone of the current Server struct
+// Clone returns a clone of the current Server struct.
+// Note: decoderURL and decoderProxy are intentionally not copied — callers (e.g. startDataParallel)
+// always set them explicitly after cloning.
 func (s *Server) Clone() *Server {
 	return &Server{
 		addr:                    s.addr,
-		port:                    s.port,
-		decoderURL:              s.decoderURL,
+		readyCh:                 make(chan struct{}),
 		handler:                 s.handler,
 		allowlistValidator:      s.allowlistValidator,
 		runPDConnectorProtocol:  s.runPDConnectorProtocol,
 		runEPDConnectorProtocol: s.runEPDConnectorProtocol,
-		decoderProxy:            s.decoderProxy,
 		prefillerURLPrefix:      s.prefillerURLPrefix,
 		encoderURLPrefix:        s.encoderURLPrefix,
 		prefillerProxies:        s.prefillerProxies,
@@ -260,7 +305,7 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
 	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
 
-	s.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.DecoderInsecureSkipVerify)
+	s.decoderProxy = s.createDecoderProxyHandler(s.config.DecoderURL, s.config.InsecureSkipVerifyForDecoder)
 
 	mux.Handle("/", s.decoderProxy)
 
@@ -317,7 +362,7 @@ func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
 		hostPort,
 		s.prefillerProxies,
 		s.prefillerURLPrefix,
-		s.config.PrefillerInsecureSkipVerify,
+		s.config.InsecureSkipVerifyForPrefiller,
 	)
 }
 
@@ -326,6 +371,6 @@ func (s *Server) encoderProxyHandler(hostPort string) (http.Handler, error) {
 		hostPort,
 		s.encoderProxies,
 		s.encoderURLPrefix,
-		s.config.EncoderInsecureSkipVerify,
+		s.config.InsecureSkipVerifyForEncoder,
 	)
 }

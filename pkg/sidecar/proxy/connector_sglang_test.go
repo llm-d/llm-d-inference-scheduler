@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -43,16 +44,14 @@ var _ = Describe("SGLang Connector", func() {
 		go func() {
 			defer GinkgoRecover()
 
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, validator)
+			testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+			err := testInfo.proxy.Start(testInfo.ctx)
 			Expect(err).ToNot(HaveOccurred())
 
 			testInfo.stoppedCh <- struct{}{}
 		}()
 
-		// Wait for proxy to start
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
+		<-testInfo.proxy.readyCh
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/chat/completions request with prefill header")
@@ -120,12 +119,12 @@ var _ = Describe("SGLang Connector", func() {
 		testInfo.decodeBackend.Close()
 		testInfo.prefillBackend.Close()
 
-		var prefillFinished bool
+		var prefillFinished atomic.Bool
 
 		slowPrefill := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			testInfo.prefillHandler.ServeHTTP(w, r)
 			time.Sleep(300 * time.Millisecond) // Simulated load delay on KV Cache
-			prefillFinished = true
+			prefillFinished.Store(true)
 		})
 		testInfo.prefillBackend = httptest.NewServer(slowPrefill)
 
@@ -137,19 +136,21 @@ var _ = Describe("SGLang Connector", func() {
 
 		// Re-initialize proxy to fetch the new mock addresses
 		cfg := Config{
+			Port:        "0",
+			DecoderURL:  testInfo.decodeURL,
 			KVConnector: KVConnectorSGLang,
 		}
-		testInfo.proxy = NewProxy("0", testInfo.decodeURL, cfg)
+		testInfo.proxy = NewProxy(cfg)
 
 		go func() {
 			defer GinkgoRecover()
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, validator)
+			testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+			err := testInfo.proxy.Start(testInfo.ctx)
 			Expect(err).ToNot(HaveOccurred())
 			testInfo.stoppedCh <- struct{}{}
 		}()
 
-		time.Sleep(1 * time.Second)
+		<-testInfo.proxy.readyCh
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		body := `{"model": "Qwen", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 50}`
@@ -167,7 +168,7 @@ var _ = Describe("SGLang Connector", func() {
 		// The original panicking goroutine takes 300ms total. Give it time to attempt finishing up!
 		time.Sleep(500 * time.Millisecond)
 
-		Expect(prefillFinished).To(BeTrue())
+		Expect(prefillFinished.Load()).To(BeTrue())
 		Expect(testInfo.prefillHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 

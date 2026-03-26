@@ -23,6 +23,54 @@ Documentation for developing the inference scheduler.
 > are also performed as part of a GitHub action, but running locally can save time
 > and an iteration.
 
+## Running Tests
+
+### Unit Tests
+
+Coverage and race detection are always enabled.
+
+```bash
+make test-unit          # run all unit tests (epp + sidecar)
+make test-unit-epp      # epp only
+make test-unit-sidecar  # sidecar only
+```
+
+Coverage profiles are written to `coverage/` (gitignored). To generate
+an HTML report and open it in a browser:
+
+```bash
+make coverage-report
+open coverage/epp.html
+```
+
+### Comparing Coverage Against a Baseline
+
+To see how your changes affect coverage relative to `main`:
+
+```bash
+make test-unit          # run tests on your branch first
+make coverage-compare   # builds a baseline from main in a temp worktree, then diffs
+```
+
+To compare against a different ref:
+
+```bash
+make coverage-compare BASE_REF=release-0.5
+```
+
+### Integration Tests
+
+```bash
+make test-integration   # coverage and race detection always enabled
+```
+
+### Filtered Tests
+
+```bash
+make test-filter PATTERN=TestName           # epp tests matching pattern
+make test-filter PATTERN=TestName TYPE=sidecar
+```
+
 ## Tokenization Architecture
 
 > [!NOTE]

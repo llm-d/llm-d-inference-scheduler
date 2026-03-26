@@ -157,8 +157,11 @@ test-unit: test-unit-epp test-unit-sidecar ## Run unit tests
 
 .PHONY: test-unit-%
 test-unit-%: ## Run unit tests
+	@mkdir -p $(COVERAGE_DIR)
 	@printf "\033[33;1m==== Running Unit Tests ====\033[0m\n"
-	@go test -v $$($($*_TEST_FILES) | tr '\n' ' ')
+	@go test -v -race -coverprofile=$(COVERAGE_DIR)/$*.out -covermode=atomic \
+	    $$($($*_TEST_FILES) | tr '\n' ' ')
+	@go tool cover -func=$(COVERAGE_DIR)/$*.out | tail -1
 
 .PHONY: test-filter
 test-filter: ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
@@ -176,8 +179,12 @@ test-filter: ## Run filtered unit tests (usage: make test-filter PATTERN=TestNam
 
 .PHONY: test-integration
 test-integration: ## Run integration tests
+	@mkdir -p $(COVERAGE_DIR)
 	@printf "\033[33;1m==== Running Integration Tests ====\033[0m\n"
-	go test -v -tags=integration_tests ./test/integration/
+	@go test -v -race -tags=integration_tests \
+	    -coverprofile=$(COVERAGE_DIR)/integration.out -covermode=atomic \
+	    ./test/integration/
+	@go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1
 
 .PHONY: test-e2e
 test-e2e: image-build image-pull ## Run end-to-end tests against a new kind cluster
@@ -195,6 +202,44 @@ bench-tokenizer: ## Run external tokenizer + scorer benchmark (requires kind clu
 post-deploy-test: ## Run post deployment tests
 	echo Success!
 	@echo "Post-deployment tests passed."
+
+
+##@ Coverage
+
+COVERAGE_DIR       ?= $(shell pwd)/coverage
+COVERAGE_THRESHOLD ?= 0
+BASE_REF           ?= main
+
+.PHONY: test-coverage
+test-coverage: test-unit-epp test-unit-sidecar ## Run all unit tests with coverage (alias for test-unit)
+
+.PHONY: test-coverage-integration
+test-coverage-integration: test-integration ## Run integration tests with coverage (alias for test-integration)
+
+.PHONY: coverage-report
+coverage-report: ## Generate HTML coverage reports (open coverage/*.html in browser)
+	@for f in $(COVERAGE_DIR)/*.out; do \
+	    name=$$(basename "$$f" .out); \
+	    go tool cover -html="$$f" -o "$(COVERAGE_DIR)/$$name.html"; \
+	    printf "  $$name → $(COVERAGE_DIR)/$$name.html\n"; \
+	done
+
+.PHONY: coverage-compare
+coverage-compare: ## Compare coverage vs baseline (BASELINE_DIR=path or BASE_REF=git-ref, default main)
+	@if [ -n "$(BASELINE_DIR)" ]; then \
+	    ./scripts/compare-coverage.sh "$(BASELINE_DIR)" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \
+	else \
+	    printf "\033[33;1m==== Building Baseline Coverage from $(BASE_REF) ====\033[0m\n"; \
+	    WORKTREE=$$(mktemp -d); \
+	    git worktree add --quiet "$$WORKTREE" "$(BASE_REF)"; \
+	    ( cd "$$WORKTREE" && mkdir -p "$(COVERAGE_DIR)/baseline" && \
+	        go test -race -coverprofile="$(COVERAGE_DIR)/baseline/epp.out" -covermode=atomic \
+	            $$($(epp_TEST_FILES) | tr '\n' ' ') && \
+	        go test -race -coverprofile="$(COVERAGE_DIR)/baseline/sidecar.out" -covermode=atomic \
+	            $$($(sidecar_TEST_FILES) | tr '\n' ' ') ); \
+	    git worktree remove --force "$$WORKTREE"; \
+	    ./scripts/compare-coverage.sh "$(COVERAGE_DIR)/baseline" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \
+	fi
 
 
 ##@ Build
