@@ -106,7 +106,7 @@ func TestTokenizerPlugin_ProducesAndConsumes(t *testing.T) {
 	produces := p.Produces()
 	require.NotNil(t, produces)
 	assert.Contains(t, produces, TokenizedPromptKey)
-	assert.IsType(t, scheduling.TokenizedPrompt{}, produces[TokenizedPromptKey])
+	assert.IsType(t, (*scheduling.TokenizedPrompt)(nil), produces[TokenizedPromptKey])
 
 	assert.Nil(t, p.Consumes())
 }

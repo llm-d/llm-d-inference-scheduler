@@ -3,6 +3,7 @@ package plugins
 import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/datalayer/models"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/multi/preciseprefixcache"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
@@ -25,7 +26,7 @@ func RegisterAllPlugins() {
 	// Legacy aliases - existing YAML configs continue to work.
 	// golangci-lint v2 only accepts linter names (lowercase) in //nolint directives, not individual check IDs like SA1019
 	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
-	plugin.Register(scorer.PrecisePrefixCachePluginType, scorer.PrecisePrefixCachePluginFactory)
+	plugin.Register(preciseprefixcache.PluginType, preciseprefixcache.PluginFactory)
 	plugin.Register(scorer.LoadAwareType, scorer.LoadAwareFactory)
 	plugin.Register(scorer.SessionAffinityType, scorer.SessionAffinityFactory)
 	plugin.Register(scorer.ActiveRequestType, scorer.ActiveRequestFactory)

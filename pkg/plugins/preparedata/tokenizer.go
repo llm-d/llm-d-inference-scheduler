@@ -112,7 +112,7 @@ func (p *TokenizerPlugin) WithName(name string) *TokenizerPlugin {
 
 // Produces returns the data keys this plugin produces.
 func (p *TokenizerPlugin) Produces() map[string]any {
-	return map[string]any{TokenizedPromptKey: scheduling.TokenizedPrompt{}}
+	return map[string]any{TokenizedPromptKey: (*scheduling.TokenizedPrompt)(nil)}
 }
 
 // Consumes returns the data keys this plugin requires.

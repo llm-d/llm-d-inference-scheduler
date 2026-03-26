@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scorer
+package preciseprefixcache
 
 import (
 	"context"
@@ -34,8 +34,9 @@ import (
 )
 
 type mockKVCacheIndexer struct {
-	getPodScoresFunc func(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
-	scoreTokensFunc  func(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	getPodScoresFunc     func(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
+	scoreTokensFunc      func(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	computeBlockKeysFunc func(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
 }
 
 func (m *mockKVCacheIndexer) GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error) {
@@ -53,6 +54,9 @@ func (m *mockKVCacheIndexer) ScoreTokens(ctx context.Context, tokens []uint32, m
 }
 
 func (m *mockKVCacheIndexer) ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error) {
+	if m.computeBlockKeysFunc != nil {
+		return m.computeBlockKeysFunc(ctx, renderReq, prompt, modelName)
+	}
 	return nil, nil
 }
 
@@ -85,8 +89,8 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 	var capturedTokens []uint32
 	var capturedModel string
 
-	scorer := &PrecisePrefixCacheScorer{
-		typedName:      plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
+	scorer := &Plugin{
+		typedName:      plugin.TypedName{Type: PluginType, Name: "test"},
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
@@ -116,8 +120,8 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	fromTokensCalled := false
 
-	scorer := &PrecisePrefixCacheScorer{
-		typedName:      plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
+	scorer := &Plugin{
+		typedName:      plugin.TypedName{Type: PluginType, Name: "test"},
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
@@ -144,4 +148,95 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 
 	scorer.Score(ctx, scheduling.NewCycleState(), request, testEndpoints)
 	assert.False(t, fromTokensCalled, "ScoreTokens should not be called with empty TokenIDs")
+}
+
+// mockTokenProcessor implements kvblock.TokenProcessor for testing.
+type mockTokenProcessor struct {
+	tokensToKVBlockKeysFunc func(parentKey kvblock.BlockHash, tokens []uint32, modelName string) []kvblock.BlockHash
+}
+
+func (m *mockTokenProcessor) TokensToKVBlockKeys(parentKey kvblock.BlockHash, tokens []uint32, modelName string) []kvblock.BlockHash {
+	if m.tokensToKVBlockKeysFunc != nil {
+		return m.tokensToKVBlockKeysFunc(parentKey, tokens, modelName)
+	}
+	return nil
+}
+
+func TestComputeBlockKeys_UsesTokenizedPrompt(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	tokenIDs := []uint32{10, 20, 30, 40, 50}
+	expectedBlockKeys := []kvblock.BlockHash{kvblock.BlockHash(111), kvblock.BlockHash(222)}
+
+	var capturedTokens []uint32
+	var capturedModel string
+
+	scorer := &Plugin{
+		typedName: plugin.TypedName{Type: PluginType, Name: "test"},
+		tokenProcessor: &mockTokenProcessor{
+			tokensToKVBlockKeysFunc: func(parentKey kvblock.BlockHash, tokens []uint32, modelName string) []kvblock.BlockHash {
+				capturedTokens = tokens
+				capturedModel = modelName
+				assert.Equal(t, kvblock.EmptyBlockHash, parentKey)
+				return expectedBlockKeys
+			},
+		},
+		kvCacheIndexer: &mockKVCacheIndexer{},
+	}
+
+	request := &scheduling.LLMRequest{
+		RequestId:   "test-compute-block-keys",
+		TargetModel: "test-model",
+		TokenizedPrompt: &scheduling.TokenizedPrompt{
+			TokenIDs: tokenIDs,
+		},
+	}
+
+	blockKeys, err := scorer.computeBlockKeys(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, expectedBlockKeys, blockKeys)
+	require.Equal(t, tokenIDs, capturedTokens)
+	require.Equal(t, "test-model", capturedModel)
+}
+
+func TestComputeBlockKeys_FallsBackWithoutTokenizedPrompt(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	expectedBlockKeys := []kvblock.BlockHash{kvblock.BlockHash(333)}
+	computeBlockKeysCalled := false
+
+	scorer := &Plugin{
+		typedName: plugin.TypedName{Type: PluginType, Name: "test"},
+		tokenProcessor: &mockTokenProcessor{
+			tokensToKVBlockKeysFunc: func(_ kvblock.BlockHash, _ []uint32, _ string) []kvblock.BlockHash {
+				t.Fatal("tokenProcessor should not be called without TokenizedPrompt")
+				return nil
+			},
+		},
+		kvCacheIndexer: &mockKVCacheIndexer{
+			computeBlockKeysFunc: func(_ context.Context, _ *types.RenderChatRequest, _ string, _ string) ([]kvblock.BlockHash, error) {
+				computeBlockKeysCalled = true
+				return expectedBlockKeys, nil
+			},
+		},
+	}
+
+	request := &scheduling.LLMRequest{
+		RequestId:   "test-fallback",
+		TargetModel: "test-model",
+		Body: &scheduling.LLMRequestBody{
+			Completions: &scheduling.CompletionsRequest{Prompt: "hello world"},
+		},
+	}
+
+	blockKeys, err := scorer.computeBlockKeys(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, expectedBlockKeys, blockKeys)
+	require.True(t, computeBlockKeysCalled, "ComputeBlockKeys should be called as fallback")
+}
+
+func TestConsumes_DeclaresTokenizedPromptKey(t *testing.T) {
+	scorer := &Plugin{}
+	consumes := scorer.Consumes()
+	require.NotNil(t, consumes)
+	assert.Contains(t, consumes, "TokenizedPrompt")
+	assert.IsType(t, (*scheduling.TokenizedPrompt)(nil), consumes["TokenizedPrompt"])
 }
