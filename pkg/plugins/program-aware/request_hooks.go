@@ -84,8 +84,8 @@ func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *sche
 		programID = defaultFairnessID
 	}
 
-	// Load and delete the enqueue timestamp (needed for throughput before cleanup).
-	enqueueTimeRaw, hasTimestamp := p.requestTimestamps.LoadAndDelete(request.RequestId)
+	// Clean up the enqueue timestamp stored by Pick().
+	p.requestTimestamps.Delete(request.RequestId)
 
 	if response != nil {
 		metrics := p.getOrCreateMetrics(programID)
@@ -96,25 +96,14 @@ func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *sche
 		inputTokensTotal.WithLabelValues(programID).Add(float64(promptTokens))
 		outputTokensTotal.WithLabelValues(programID).Add(float64(completionTokens))
 
-		// Compute per-request throughput: tokens/sec from enqueue to response completion.
-		if hasTimestamp {
-			enqueueTime := enqueueTimeRaw.(time.Time)
-			durationSec := time.Since(enqueueTime).Seconds()
-			if durationSec > 0 {
-				totalTokens := float64(weightInputToken*promptTokens + weightOutputToken*completionTokens)
-				tokensPerSec := totalTokens / durationSec
-				metrics.RecordThroughput(tokensPerSec)
-				throughputTokensPerSec.WithLabelValues(programID).Set(metrics.AverageThroughput())
-			}
-		}
-
-		// Strategy hook: deduct actual token cost from per-flow accounting (DRR),
+		// Strategy hook: accumulate attained service (Service), deduct deficit (DRR),
 		// or no-op (EWMA).
 		p.getStrategy().OnCompleted(metrics, promptTokens, completionTokens)
+		attainedServiceTokens.WithLabelValues(programID).Set(metrics.AttainedService())
 
 		log.FromContext(ctx).V(logutil.TRACE).Info("ResponseComplete: recorded tokens",
 			"requestId", request.RequestId, "programId", programID,
 			"promptTokens", promptTokens, "completionTokens", completionTokens,
-			"avgThroughput", metrics.AverageThroughput())
+			"attainedService", metrics.AttainedService())
 	}
 }

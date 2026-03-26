@@ -38,9 +38,9 @@ func TestNewStrategy_Valid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "drr", s.Name())
 
-	s, err = newStrategy(Config{Strategy: "throughput"})
+	s, err = newStrategy(Config{Strategy: "service"})
 	require.NoError(t, err)
-	assert.Equal(t, "throughput", s.Name())
+	assert.Equal(t, "service", s.Name())
 
 	s, err = newStrategy(Config{Strategy: ""})
 	require.NoError(t, err)
@@ -377,49 +377,53 @@ func TestDRR_Pick_TokenHeavyProgramDeprioritized(t *testing.T) {
 }
 
 // =============================================================================
-// Throughput Strategy tests
+// Service Strategy tests
 // =============================================================================
 
-// testThroughput returns a ThroughputStrategy with default weights for tests.
-func testThroughput() *ThroughputStrategy {
-	return &ThroughputStrategy{
-		weightThroughput: defaultThroughputWeightThroughput,
-		weightHeadWait:   defaultThroughputWeightHeadWait,
+// testService returns a ServiceStrategy with default weights for tests.
+func testService() *ServiceStrategy {
+	return &ServiceStrategy{
+		weightService:  defaultServiceWeightService,
+		weightHeadWait: defaultServiceWeightHeadWait,
+		decayFactor:    defaultServiceDecayFactor,
 	}
 }
 
-func TestThroughputStrategy_Name(t *testing.T) {
-	s := testThroughput()
-	assert.Equal(t, "throughput", s.Name())
+func TestServiceStrategy_Name(t *testing.T) {
+	s := testService()
+	assert.Equal(t, "service", s.Name())
 }
 
-func TestThroughputStrategy_NumDimensions(t *testing.T) {
-	s := testThroughput()
+func TestServiceStrategy_NumDimensions(t *testing.T) {
+	s := testService()
 	assert.Equal(t, 2, s.NumDimensions())
 }
 
-func TestThroughputStrategy_OnPickStart_IsNoop(t *testing.T) {
-	s := testThroughput()
+func TestServiceStrategy_OnPickStart_DecaysService(t *testing.T) {
+	s := testService()
 	m := &ProgramMetrics{}
-	m.AddDeficit(500)
+	m.AddService(1000.0)
 
 	s.OnPickStart("prog", 5, m)
-	assert.Equal(t, int64(500), m.Deficit(), "Throughput OnPickStart must not modify deficit")
+	assert.InDelta(t, 1000.0*defaultServiceDecayFactor, m.AttainedService(), 0.01,
+		"OnPickStart should decay attained service")
 }
 
-func TestThroughputStrategy_OnCompleted_IsNoop(t *testing.T) {
-	s := testThroughput()
+func TestServiceStrategy_OnCompleted_AddsService(t *testing.T) {
+	s := testService()
 	m := &ProgramMetrics{}
 
+	// 100 input + 50 output → weighted: 100*1 + 50*2 = 200
 	s.OnCompleted(m, 100, 50)
-	assert.Equal(t, int64(0), m.Deficit(), "Throughput OnCompleted must not modify deficit")
+	assert.InDelta(t, 200.0, m.AttainedService(), 0.01,
+		"OnCompleted should add weighted token cost to attained service")
 }
 
-func TestThroughputStrategy_CollectRaw(t *testing.T) {
-	s := testThroughput()
+func TestServiceStrategy_CollectRaw(t *testing.T) {
+	s := testService()
 
 	m := &ProgramMetrics{}
-	m.RecordThroughput(500.0) // 500 tokens/sec
+	m.AddService(5000.0)
 
 	enqueueTime := time.Now().Add(-200 * time.Millisecond)
 	queue := &fcmocks.MockFlowQueueAccessor{
@@ -429,12 +433,12 @@ func TestThroughputStrategy_CollectRaw(t *testing.T) {
 
 	raw := s.CollectRaw(queue, m)
 	require.Len(t, raw, 2)
-	assert.InDelta(t, 500.0, raw[throughputDimThroughput], 0.01)
-	assert.Greater(t, raw[throughputDimHeadWait], 190.0, "headWaitMs should reflect enqueue age")
+	assert.InDelta(t, 5000.0, raw[serviceDimService], 0.01)
+	assert.Greater(t, raw[serviceDimHeadWait], 190.0, "headWaitMs should reflect enqueue age")
 }
 
-func TestThroughputStrategy_CollectRaw_NilMetrics(t *testing.T) {
-	s := testThroughput()
+func TestServiceStrategy_CollectRaw_NilMetrics(t *testing.T) {
+	s := testService()
 
 	enqueueTime := time.Now().Add(-100 * time.Millisecond)
 	queue := &fcmocks.MockFlowQueueAccessor{
@@ -444,34 +448,34 @@ func TestThroughputStrategy_CollectRaw_NilMetrics(t *testing.T) {
 
 	raw := s.CollectRaw(queue, nil)
 	require.Len(t, raw, 2)
-	assert.InDelta(t, 0.0, raw[throughputDimThroughput], 0.01)
-	assert.Greater(t, raw[throughputDimHeadWait], 90.0)
+	assert.InDelta(t, 0.0, raw[serviceDimService], 0.01)
+	assert.Greater(t, raw[serviceDimHeadWait], 90.0)
 }
 
-func TestThroughputStrategy_NormalizeDimension(t *testing.T) {
-	s := testThroughput()
+func TestServiceStrategy_NormalizeDimension(t *testing.T) {
+	s := testService()
 
-	// Throughput dim is inverted: lowest raw → 1.0, highest raw → 0.0.
-	assert.InDelta(t, 1.0, s.NormalizeDimension(throughputDimThroughput, 0, 0, 100), 0.001)
-	assert.InDelta(t, 0.5, s.NormalizeDimension(throughputDimThroughput, 50, 0, 100), 0.001)
-	assert.InDelta(t, 0.0, s.NormalizeDimension(throughputDimThroughput, 100, 0, 100), 0.001)
+	// Service dim is inverted: lowest service → 1.0, highest → 0.0.
+	assert.InDelta(t, 1.0, s.NormalizeDimension(serviceDimService, 0, 0, 100), 0.001)
+	assert.InDelta(t, 0.5, s.NormalizeDimension(serviceDimService, 50, 0, 100), 0.001)
+	assert.InDelta(t, 0.0, s.NormalizeDimension(serviceDimService, 100, 0, 100), 0.001)
 
 	// min == max → rangeNormalize returns 0.5 → inverted = 0.5.
-	assert.InDelta(t, 0.5, s.NormalizeDimension(throughputDimThroughput, 42, 42, 42), 0.001)
+	assert.InDelta(t, 0.5, s.NormalizeDimension(serviceDimService, 42, 42, 42), 0.001)
 
 	// HeadWait dim is standard (not inverted).
-	assert.InDelta(t, 0.0, s.NormalizeDimension(throughputDimHeadWait, 0, 0, 100), 0.001)
-	assert.InDelta(t, 1.0, s.NormalizeDimension(throughputDimHeadWait, 100, 0, 100), 0.001)
+	assert.InDelta(t, 0.0, s.NormalizeDimension(serviceDimHeadWait, 0, 0, 100), 0.001)
+	assert.InDelta(t, 1.0, s.NormalizeDimension(serviceDimHeadWait, 100, 0, 100), 0.001)
 }
 
-func TestThroughputStrategy_Score(t *testing.T) {
-	s := testThroughput()
+func TestServiceStrategy_Score(t *testing.T) {
+	s := testService()
 
-	// Lowest throughput (norm=1.0), no headWait: 0.8*1.0 + 0.2*0.0 = 0.8
+	// Lowest service (norm=1.0), no headWait: 0.8*1.0 + 0.2*0.0 = 0.8
 	score := s.Score([]float64{1.0, 0.0})
 	assert.InDelta(t, 0.8, score, 0.001)
 
-	// Highest throughput (norm=0.0), max headWait: 0.8*0.0 + 0.2*1.0 = 0.2
+	// Highest service (norm=0.0), max headWait: 0.8*0.0 + 0.2*1.0 = 0.2
 	score = s.Score([]float64{0.0, 1.0})
 	assert.InDelta(t, 0.2, score, 0.001)
 
@@ -480,16 +484,16 @@ func TestThroughputStrategy_Score(t *testing.T) {
 	assert.InDelta(t, 0.5, score, 0.001)
 }
 
-func TestThroughputStrategy_PreferLowThroughput(t *testing.T) {
-	// End-to-end: two queues — one with low throughput, one with high.
-	s := testThroughput()
+func TestServiceStrategy_PreferLowService(t *testing.T) {
+	// End-to-end: two queues — one underserved, one overserved.
+	s := testService()
 	now := time.Now()
 
 	mLow := &ProgramMetrics{}
-	mLow.RecordThroughput(100.0) // starved: 100 tok/s
+	mLow.AddService(100.0) // underserved
 
 	mHigh := &ProgramMetrics{}
-	mHigh.RecordThroughput(1000.0) // well-served: 1000 tok/s
+	mHigh.AddService(10000.0) // overserved
 
 	queueLow := &fcmocks.MockFlowQueueAccessor{
 		FlowKeyV:  flowcontrol.FlowKey{ID: "low"},
@@ -522,16 +526,16 @@ func TestThroughputStrategy_PreferLowThroughput(t *testing.T) {
 	scoreHigh := s.Score(normHigh)
 
 	assert.Greater(t, scoreLow, scoreHigh,
-		"low-throughput queue (score=%.4f) should outscore high-throughput queue (score=%.4f)",
+		"underserved queue (score=%.4f) should outscore overserved queue (score=%.4f)",
 		scoreLow, scoreHigh)
 }
 
-func TestThroughputStrategy_ColdStartUsesHeadWait(t *testing.T) {
-	// Both programs have zero throughput data; headWait should break the tie.
-	s := testThroughput()
+func TestServiceStrategy_ColdStartUsesHeadWait(t *testing.T) {
+	// Both programs have zero attained service; headWait should break the tie.
+	s := testService()
 
-	mOld := &ProgramMetrics{} // no throughput data
-	mNew := &ProgramMetrics{} // no throughput data
+	mOld := &ProgramMetrics{}
+	mNew := &ProgramMetrics{}
 
 	queueOld := &fcmocks.MockFlowQueueAccessor{
 		FlowKeyV:  flowcontrol.FlowKey{ID: "old"},
@@ -564,21 +568,35 @@ func TestThroughputStrategy_ColdStartUsesHeadWait(t *testing.T) {
 	scoreNew := s.Score(normNew)
 
 	assert.Greater(t, scoreOld, scoreNew,
-		"with zero throughput data, longer-waiting queue (score=%.4f) should outscore newer queue (score=%.4f)",
+		"with zero service, longer-waiting queue (score=%.4f) should outscore newer queue (score=%.4f)",
 		scoreOld, scoreNew)
 }
 
-func TestNewStrategy_Throughput(t *testing.T) {
-	s, err := newStrategy(Config{Strategy: "throughput"})
-	require.NoError(t, err)
-	assert.Equal(t, "throughput", s.Name())
+func TestServiceStrategy_DecayForgetsOldService(t *testing.T) {
+	s := testService()
+	m := &ProgramMetrics{}
+	m.AddService(1000.0)
+
+	// After many decay cycles, service should approach 0.
+	for range 1000 {
+		s.OnPickStart("prog", 1, m)
+	}
+	// 1000 * 0.995^1000 ≈ 6.7 — verify significant decay occurred.
+	assert.Less(t, m.AttainedService(), 10.0,
+		"after 1000 decay cycles, attained service should be nearly forgotten")
 }
 
-func TestFactory_ThroughputStrategy(t *testing.T) {
-	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"throughput"}`), nil)
+func TestNewStrategy_Service(t *testing.T) {
+	s, err := newStrategy(Config{Strategy: "service"})
+	require.NoError(t, err)
+	assert.Equal(t, "service", s.Name())
+}
+
+func TestFactory_ServiceStrategy(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"service"}`), nil)
 	require.NoError(t, err)
 	plugin := p.(*ProgramAwarePlugin)
-	assert.Equal(t, "throughput", plugin.strategy.Name())
+	assert.Equal(t, "service", plugin.strategy.Name())
 }
 
 func TestDRR_Pick_QuantumAllocatedDuringPick(t *testing.T) {
