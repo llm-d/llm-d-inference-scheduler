@@ -54,13 +54,14 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 			weightHeadWait: floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
 			quantumTokens:  int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
 		}, nil
-	case "throughput":
-		return &ThroughputStrategy{
-			weightThroughput: floatOr(cfg.WeightThroughput, defaultThroughputWeightThroughput),
-			weightHeadWait:   floatOr(cfg.WeightThroughputHeadWait, defaultThroughputWeightHeadWait),
+	case "service":
+		return &ServiceStrategy{
+			weightService:  floatOr(cfg.WeightService, defaultServiceWeightService),
+			weightHeadWait: floatOr(cfg.WeightServiceHeadWait, defaultServiceWeightHeadWait),
+			decayFactor:    floatOr(cfg.ServiceDecayFactor, defaultServiceDecayFactor),
 		}, nil
 	default:
-		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"ewma\", \"drr\", \"throughput\"", cfg.Strategy)
+		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"ewma\", \"drr\", \"service\"", cfg.Strategy)
 	}
 }
 
@@ -276,74 +277,93 @@ func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, complet
 }
 
 // =============================================================================
-// Throughput Strategy
+// Service Strategy
 // =============================================================================
 
-// Throughput dimension indices.
+// Service dimension indices.
 const (
-	throughputDimThroughput = 0
-	throughputDimHeadWait   = 1
-	throughputNumDimensions = 2
+	serviceDimService  = 0
+	serviceDimHeadWait = 1
+	serviceNumDims     = 2
 )
 
-// Default Throughput strategy weights.
+// Default Service strategy values.
 const (
-	defaultThroughputWeightThroughput float64 = 0.8
-	defaultThroughputWeightHeadWait   float64 = 0.2
+	defaultServiceWeightService  float64 = 0.8
+	defaultServiceWeightHeadWait float64 = 0.2
+	defaultServiceDecayFactor    float64 = 0.995
 )
 
-// ThroughputStrategy scores queues by equalizing observed throughput (tokens/sec)
-// across programs. Programs with lower average throughput receive higher scores,
-// directly optimizing the metric that Jain's fairness index measures.
+// ServiceStrategy scores queues by equalizing attained service (weighted tokens
+// consumed) across programs. Programs with lower attained service receive higher
+// scores, directly targeting fair resource allocation.
 //
-//   - throughput (inverted): average tokens/sec — lower throughput → higher score.
+//   - attainedService (inverted): time-decayed accumulator of weighted tokens
+//     consumed — lower service → higher score (underserved programs promoted).
 //   - headWait: age of the oldest request — tiebreaker for cold start when
-//     multiple programs have no throughput data yet.
+//     all programs have zero attained service.
 //
-// Weights are configurable via the plugin config; defaults are 0.8/0.2.
-type ThroughputStrategy struct {
-	weightThroughput float64
-	weightHeadWait   float64
+// On each Pick() cycle, every queue's attained service is decayed by decayFactor,
+// causing old service to be gradually forgotten. On each completion, the actual
+// weighted token cost is added to the program's attained service.
+//
+// Weights and decay factor are configurable via the plugin config.
+type ServiceStrategy struct {
+	weightService float64
+	weightHeadWait float64
+	decayFactor    float64
 }
 
-// Name returns "throughput".
-func (s *ThroughputStrategy) Name() string { return "throughput" }
+// Name returns "service".
+func (s *ServiceStrategy) Name() string { return "service" }
 
-// OnPickStart is a no-op for Throughput; state is derived from completed request metrics.
-func (s *ThroughputStrategy) OnPickStart(_ string, _ int, _ *ProgramMetrics) {}
+// OnPickStart decays the attained service counter for active queues,
+// causing old service to be gradually forgotten.
+func (s *ServiceStrategy) OnPickStart(_ string, _ int, metrics *ProgramMetrics) {
+	if metrics == nil {
+		return
+	}
+	metrics.DecayService(s.decayFactor)
+}
 
-// NumDimensions returns 2 (throughput, headWait).
-func (s *ThroughputStrategy) NumDimensions() int { return throughputNumDimensions }
+// NumDimensions returns 2 (attainedService, headWait).
+func (s *ServiceStrategy) NumDimensions() int { return serviceNumDims }
 
-// CollectRaw extracts unnormalized [avgThroughput, headWaitMs].
-func (s *ThroughputStrategy) CollectRaw(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) []float64 {
-	raw := make([]float64, throughputNumDimensions)
+// CollectRaw extracts unnormalized [attainedService, headWaitMs].
+func (s *ServiceStrategy) CollectRaw(queue flowcontrol.FlowQueueAccessor, metrics *ProgramMetrics) []float64 {
+	raw := make([]float64, serviceNumDims)
 
 	if metrics != nil {
-		raw[throughputDimThroughput] = metrics.AverageThroughput()
+		raw[serviceDimService] = metrics.AttainedService()
 	}
 
 	if head := queue.PeekHead(); head != nil {
-		raw[throughputDimHeadWait] = float64(time.Since(head.EnqueueTime()).Milliseconds())
+		raw[serviceDimHeadWait] = float64(time.Since(head.EnqueueTime()).Milliseconds())
 	}
 
 	return raw
 }
 
-// NormalizeDimension performs range normalization, inverting the throughput
-// dimension so that lower throughput maps to a higher normalized score.
-func (s *ThroughputStrategy) NormalizeDimension(dim int, raw, min, max float64) float64 {
-	if dim == throughputDimThroughput {
+// NormalizeDimension performs range normalization, inverting the service
+// dimension so that lower attained service maps to a higher normalized score.
+func (s *ServiceStrategy) NormalizeDimension(dim int, raw, min, max float64) float64 {
+	if dim == serviceDimService {
 		return 1 - rangeNormalize(raw, min, max)
 	}
 	return rangeNormalize(raw, min, max)
 }
 
-// Score computes the weighted combination of (inverted) throughput and head wait.
-func (s *ThroughputStrategy) Score(normalized []float64) float64 {
-	return s.weightThroughput*normalized[throughputDimThroughput] +
-		s.weightHeadWait*normalized[throughputDimHeadWait]
+// Score computes the weighted combination of (inverted) attained service and head wait.
+func (s *ServiceStrategy) Score(normalized []float64) float64 {
+	return s.weightService*normalized[serviceDimService] +
+		s.weightHeadWait*normalized[serviceDimHeadWait]
 }
 
-// OnCompleted is a no-op; throughput is recorded by the ResponseComplete hook.
-func (s *ThroughputStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}
+// OnCompleted accumulates the weighted token cost into the program's attained service.
+func (s *ServiceStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
+	if metrics == nil {
+		return
+	}
+	cost := float64(weightInputToken*promptTokens + weightOutputToken*completionTokens)
+	metrics.AddService(cost)
+}
