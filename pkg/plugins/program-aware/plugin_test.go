@@ -327,8 +327,8 @@ func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
 	_, ok := p.requestTimestamps.Load("req-1")
 	assert.False(t, ok)
 
-	// Throughput: 150 tokens / ~0.1s ≈ 1500 tokens/sec.
-	assert.Greater(t, metrics.AverageThroughput(), 0.0, "throughput should be recorded")
+	// EWMA token cost should be recorded: 100*1 + 50*2 = 200 weighted tokens.
+	assert.Greater(t, metrics.AverageTokens(), 0.0, "token usage should be recorded")
 }
 
 func TestResponseComplete_NoFairnessHeader_StillCleansTimestamp(t *testing.T) {
@@ -410,36 +410,36 @@ func TestFullLifecycle(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// --- fairness index tests (throughput-based) ---
+// --- fairness index tests (attained-service-based) ---
 
-func TestComputeFairnessIndex_EqualThroughput(t *testing.T) {
+func TestComputeFairnessIndex_EqualService(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	mA := &ProgramMetrics{}
-	mA.RecordThroughput(500.0) // 500 tokens/sec
+	mA.AddService(5000.0)
 	p.programMetrics.Store("prog-a", mA)
 
 	mB := &ProgramMetrics{}
-	mB.RecordThroughput(500.0)
+	mB.AddService(5000.0)
 	p.programMetrics.Store("prog-b", mB)
 
-	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "equal throughput → perfect fairness")
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "equal service → perfect fairness")
 }
 
-func TestComputeFairnessIndex_SkewedThroughput(t *testing.T) {
+func TestComputeFairnessIndex_SkewedService(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	mA := &ProgramMetrics{}
-	mA.RecordThroughput(1000.0) // 1000 tokens/sec
+	mA.AddService(10000.0)
 	p.programMetrics.Store("prog-a", mA)
 
 	mB := &ProgramMetrics{}
-	mB.RecordThroughput(100.0) // 100 tokens/sec
+	mB.AddService(1000.0)
 	p.programMetrics.Store("prog-b", mB)
 
 	idx := p.computeFairnessIndex()
-	// J = (1000+100)^2 / (2 * (1000^2 + 100^2)) = 1210000 / 2020000 ≈ 0.599
-	assert.Less(t, idx, 1.0, "skewed throughput should produce index < 1")
+	// J = (10000+1000)^2 / (2 * (10000^2 + 1000^2)) = 121000000 / 202000000 ≈ 0.599
+	assert.Less(t, idx, 1.0, "skewed service should produce index < 1")
 	assert.InDelta(t, 0.599, idx, 0.01)
 }
 
@@ -447,20 +447,20 @@ func TestComputeFairnessIndex_SingleProgram(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	m := &ProgramMetrics{}
-	m.RecordThroughput(500.0)
+	m.AddService(5000.0)
 	p.programMetrics.Store("prog-a", m)
 
 	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "single program → trivially fair")
 }
 
-func TestComputeFairnessIndex_NoThroughputData(t *testing.T) {
+func TestComputeFairnessIndex_NoServiceData(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	// Programs exist but have no throughput data yet.
+	// Programs exist but have no service data yet.
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
 	p.programMetrics.Store("prog-b", &ProgramMetrics{})
 
-	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "no throughput data → 1.0")
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "no service data → 1.0")
 }
 
 // --- Two-pass scoring tests ---

@@ -31,7 +31,7 @@ const (
 // Config holds the JSON-decoded configuration for the plugin.
 type Config struct {
 	// Strategy selects the fairness scoring algorithm used by Pick().
-	// Valid values: "ewma" (default), "drr", "throughput".
+	// Valid values: "ewma" (default), "drr", "service".
 	//
 	//   "ewma" — head-of-queue age + EWMA historical wait + dispatch-count penalty.
 	//            Practical heuristic; strong starvation prevention.
@@ -70,15 +70,20 @@ type Config struct {
 	// Default: 1000.
 	QuantumTokens *int64 `json:"quantumTokens,omitempty"`
 
-	// --- Throughput weights (only used when strategy == "throughput") ---
+	// --- Service weights (only used when strategy == "service") ---
 
-	// WeightThroughput is the weight for the inverted average throughput signal.
-	// Programs with lower throughput score higher. Default: 0.8.
-	WeightThroughput *float64 `json:"weightThroughput,omitempty"`
+	// WeightService is the weight for the inverted attained service signal.
+	// Programs with lower attained service score higher. Default: 0.8.
+	WeightService *float64 `json:"weightService,omitempty"`
 
-	// WeightThroughputHeadWait is the weight for head-of-queue age in throughput strategy.
+	// WeightServiceHeadWait is the weight for head-of-queue age in service strategy.
 	// Acts as a tiebreaker for cold start. Default: 0.2.
-	WeightThroughputHeadWait *float64 `json:"weightThroughputHeadWait,omitempty"`
+	WeightServiceHeadWait *float64 `json:"weightServiceHeadWait,omitempty"`
+
+	// ServiceDecayFactor controls how quickly old service is forgotten.
+	// Applied to each program's attained service every Pick() cycle.
+	// Higher values (closer to 1.0) = longer memory. Default: 0.995.
+	ServiceDecayFactor *float64 `json:"serviceDecayFactor,omitempty"`
 }
 
 // Compile-time interface assertions.
@@ -270,16 +275,15 @@ func (p *ProgramAwarePlugin) getOrCreateMetrics(programID string) *ProgramMetric
 	return actual.(*ProgramMetrics)
 }
 
-// computeFairnessIndex returns Jain's Fairness Index over the average per-request
-// throughput (tokens/sec) for each program. Throughput directly measures what each
-// program is getting from the system, making it a better fairness signal than wait time.
-// Returns 1.0 when fewer than 2 programs have throughput data.
+// computeFairnessIndex returns Jain's Fairness Index over the attained service
+// for each program. Equal attained service across programs = perfect fairness.
+// Returns 1.0 when fewer than 2 programs have service data.
 func (p *ProgramAwarePlugin) computeFairnessIndex() float64 {
 	var sum, sumSq float64
 	var n float64
 	p.programMetrics.Range(func(_, value any) bool {
 		m := value.(*ProgramMetrics)
-		x := m.AverageThroughput()
+		x := m.AttainedService()
 		if x == 0 {
 			return true
 		}

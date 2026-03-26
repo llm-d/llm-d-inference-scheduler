@@ -24,9 +24,9 @@ type ProgramMetrics struct {
 
 	averageTokens float64 // EWMA of per-request token usage (input+output)
 
-	// Per-request throughput tracking: EWMA of tokens/sec per completed request.
-	averageThroughput float64 // EWMA of per-request tokens/sec
-	hasThroughputData bool
+	// Attained service: time-decayed accumulator of weighted tokens consumed.
+	// Increased on each completion, decayed on each Pick() cycle.
+	attainedService float64
 
 	totalRequests     atomic.Int64
 	dispatchedCount   atomic.Int64
@@ -112,24 +112,26 @@ func (m *ProgramMetrics) AverageTokens() float64 {
 	return m.averageTokens
 }
 
-// RecordThroughput records a per-request throughput observation (tokens/sec) using EWMA.
-func (m *ProgramMetrics) RecordThroughput(tokensPerSec float64) {
+// AddService accumulates weighted token cost into the attained service counter.
+func (m *ProgramMetrics) AddService(weightedTokens float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.hasThroughputData {
-		m.averageThroughput = tokensPerSec
-		m.hasThroughputData = true
-	} else {
-		m.averageThroughput = ewmaAlpha*tokensPerSec + (1-ewmaAlpha)*m.averageThroughput
-	}
+	m.attainedService += weightedTokens
 }
 
-// AverageThroughput returns the EWMA of per-request throughput (tokens/sec).
-// Returns 0 if no data.
-func (m *ProgramMetrics) AverageThroughput() float64 {
+// DecayService multiplies the attained service counter by the given factor,
+// causing old service to be gradually forgotten.
+func (m *ProgramMetrics) DecayService(factor float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.averageThroughput
+	m.attainedService *= factor
+}
+
+// AttainedService returns the current time-decayed attained service value.
+func (m *ProgramMetrics) AttainedService() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.attainedService
 }
 
 // TotalRequests returns the total number of requests seen for this program.
