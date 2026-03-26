@@ -603,6 +603,30 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:    "chat completions request body with stream",
+			headers: map[string]string{":path": "/v1/chat/completions"},
+			body: map[string]any{
+				"model": "test",
+				"messages": []any{
+					map[string]any{"role": "user", "content": "hello"},
+				},
+				"stream": true,
+			},
+			want: &scheduling.LLMRequestBody{
+				ChatCompletions: &scheduling.ChatCompletionsRequest{
+					Messages: []scheduling.Message{{Role: "user", Content: scheduling.Content{Raw: "hello"}}},
+				},
+				ParsedBody: map[string]any{
+					"model": "test",
+					"messages": []any{
+						map[string]any{"role": "user", "content": "hello"},
+					},
+					"stream": true,
+				},
+				Stream: true,
+			},
+		},
 		// Embeddings API tests
 		{
 			name:    "embeddings request body with string input",

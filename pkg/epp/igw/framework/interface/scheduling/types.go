@@ -68,7 +68,7 @@ func (r *LLMRequest) String() string {
 		return nilString
 	}
 
-	return fmt.Sprintf("RequestID: %s, TargetModel: %s, Body: %s, Headers: %v",
+	return fmt.Sprintf("RequestID: %s, TargetModel: %s, Body: %v, Headers: %v",
 		r.RequestId, r.TargetModel, r.Body, r.Headers)
 }
 
@@ -90,6 +90,10 @@ type LLMRequestBody struct {
 	// Note: Because this handles multiple protocols, this field is strictly expected
 	// to be either a map[string]any (for HTTP/JSON) or a proto.Message (for gRPC).
 	ParsedBody any `json:"-"`
+
+	// Stream indicates whether the request specifies a streaming response (e.g., via a stream field).
+	// This typically implies the model server's response will be streamed.
+	Stream bool `json:"-"`
 }
 
 // PromptText returns a plain-text representation of the prompt from whichever

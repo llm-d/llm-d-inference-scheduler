@@ -151,23 +151,27 @@ func convertToLLMRequestBody(payload []byte) (*scheduling.LLMRequestBody, error)
 	if err := toGenerateRequest(payload, pbReq); err != nil {
 		return nil, err
 	}
+	var body *scheduling.LLMRequestBody
 	switch pbReq.Input.(type) {
 	case *pb.GenerateRequest_Text:
-		return &scheduling.LLMRequestBody{
+		body = &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
 				Prompt: pbReq.GetText(),
 			},
 			ParsedBody: pbReq,
-		}, nil
+		}
 	case *pb.GenerateRequest_Tokenized:
-		return &scheduling.LLMRequestBody{
+		body = &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
 				Prompt: pbReq.GetTokenized().OriginalText,
 			},
 			ParsedBody: pbReq,
-		}, nil
+		}
+	default:
+		return nil, errors.New("not supported request inputType")
 	}
-	return nil, errors.New("not supported request inputType")
+	body.Stream = pbReq.GetStream()
+	return body, nil
 }
 
 // parseGrpcPayload extracts the message payload and its compression status from a gRPC frame.

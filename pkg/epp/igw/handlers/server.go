@@ -244,6 +244,10 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					break
 				}
 
+				if reqCtx.SchedulingRequest != nil && reqCtx.SchedulingRequest.Body != nil {
+					reqCtx.modelServerStreaming = reqCtx.SchedulingRequest.Body.Stream
+				}
+
 				reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
 				reqCtx.reqBodyResp = envoy.GenerateRequestBodyResponses(reqCtx.Request.RawBody)
 				metrics.RecordRequestCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.Priority)

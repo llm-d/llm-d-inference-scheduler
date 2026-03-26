@@ -146,6 +146,27 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 			reqMsg:  &pb.GenerateRequest{},
 			wantErr: true,
 		},
+		{
+			name: "Valid Text Request with Stream",
+			reqMsg: &pb.GenerateRequest{
+				Input: &pb.GenerateRequest_Text{
+					Text: "Hello world",
+				},
+				Stream: true,
+			},
+			want: &scheduling.LLMRequestBody{
+				Completions: &scheduling.CompletionsRequest{
+					Prompt: "Hello world",
+				},
+				ParsedBody: &pb.GenerateRequest{
+					Input: &pb.GenerateRequest_Text{
+						Text: "Hello world",
+					},
+					Stream: true,
+				},
+				Stream: true,
+			},
+		},
 	}
 
 	parser := NewVllmGRPCParser()
