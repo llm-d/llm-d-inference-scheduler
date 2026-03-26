@@ -103,7 +103,7 @@ func TestEWMAStrategy_CollectRaw(t *testing.T) {
 
 	m := &ProgramMetrics{}
 	m.RecordWaitTime(500)
-	m.RecordTokens(800, 200) // 1000 total tokens → averageTokens = 1000
+	m.RecordTokens(800, 200) // weighted cost: 800*1 + 200*2 = 1200
 
 	enqueueTime := time.Now().Add(-200 * time.Millisecond)
 	queue := &fcmocks.MockFlowQueueAccessor{
@@ -115,7 +115,7 @@ func TestEWMAStrategy_CollectRaw(t *testing.T) {
 	require.Len(t, raw, 3)
 	assert.Greater(t, raw[ewmaDimHeadWait], 190.0, "headWaitMs should reflect enqueue age")
 	assert.InDelta(t, 500.0, raw[ewmaDimAvgWait], 0.01)
-	assert.InDelta(t, 1000.0, raw[ewmaDimAvgTokens], 0.01)
+	assert.InDelta(t, 1200.0, raw[ewmaDimAvgTokens], 0.01)
 }
 
 func TestEWMAStrategy_CollectRaw_NilMetrics(t *testing.T) {
@@ -209,8 +209,8 @@ func TestDRRStrategy_OnCompleted_DeductsTokens(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddDeficit(defaultDRRQuantumTokens) // one round of quantum
 
-	s.OnCompleted(m, 700, 300) // 1000 tokens total
-	assert.Equal(t, int64(0), m.Deficit(), "1000-token request should consume full quantum")
+	s.OnCompleted(m, 700, 300) // weighted cost: 700*1 + 300*2 = 1300
+	assert.Equal(t, int64(-300), m.Deficit(), "weighted 1300-token cost against 1000 quantum")
 }
 
 func TestDRRStrategy_OnCompleted_GoesNegativeOnOveruse(t *testing.T) {
@@ -218,8 +218,8 @@ func TestDRRStrategy_OnCompleted_GoesNegativeOnOveruse(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddDeficit(defaultDRRQuantumTokens) // 1000 tokens
 
-	s.OnCompleted(m, 1500, 500) // 2000 tokens — overserved
-	assert.Equal(t, int64(-1000), m.Deficit(), "deficit should be negative after overuse")
+	s.OnCompleted(m, 1500, 500) // weighted cost: 1500*1 + 500*2 = 2500
+	assert.Equal(t, int64(-1500), m.Deficit(), "deficit should be negative after overuse")
 }
 
 func TestDRRStrategy_NumDimensions(t *testing.T) {

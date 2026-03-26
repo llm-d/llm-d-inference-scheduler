@@ -272,7 +272,7 @@ func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, complet
 	// Deduct actual token cost from the deficit counter.
 	// Programs that consumed more than their quantum will have a negative deficit
 	// and be deprioritized in future rounds until quanta restore parity.
-	metrics.DeductTokens(promptTokens + completionTokens)
+	metrics.DeductTokens(weightInputToken*promptTokens + weightOutputToken*completionTokens)
 }
 
 // =============================================================================
