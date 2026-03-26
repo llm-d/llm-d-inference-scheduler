@@ -31,7 +31,7 @@ const (
 // Config holds the JSON-decoded configuration for the plugin.
 type Config struct {
 	// Strategy selects the fairness scoring algorithm used by Pick().
-	// Valid values: "ewma" (default), "drr".
+	// Valid values: "ewma" (default), "drr", "throughput".
 	//
 	//   "ewma" — head-of-queue age + EWMA historical wait + dispatch-count penalty.
 	//            Practical heuristic; strong starvation prevention.
@@ -69,6 +69,16 @@ type Config struct {
 	// QuantumTokens is the token budget added to each non-empty queue per Pick() cycle.
 	// Default: 1000.
 	QuantumTokens *int64 `json:"quantumTokens,omitempty"`
+
+	// --- Throughput weights (only used when strategy == "throughput") ---
+
+	// WeightThroughput is the weight for the inverted average throughput signal.
+	// Programs with lower throughput score higher. Default: 0.8.
+	WeightThroughput *float64 `json:"weightThroughput,omitempty"`
+
+	// WeightThroughputHeadWait is the weight for head-of-queue age in throughput strategy.
+	// Acts as a tiebreaker for cold start. Default: 0.2.
+	WeightThroughputHeadWait *float64 `json:"weightThroughputHeadWait,omitempty"`
 }
 
 // Compile-time interface assertions.

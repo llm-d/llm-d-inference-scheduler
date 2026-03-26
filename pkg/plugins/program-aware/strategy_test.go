@@ -38,6 +38,10 @@ func TestNewStrategy_Valid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "drr", s.Name())
 
+	s, err = newStrategy(Config{Strategy: "throughput"})
+	require.NoError(t, err)
+	assert.Equal(t, "throughput", s.Name())
+
 	s, err = newStrategy(Config{Strategy: ""})
 	require.NoError(t, err)
 	assert.Equal(t, "ewma", s.Name())
@@ -370,6 +374,211 @@ func TestDRR_Pick_TokenHeavyProgramDeprioritized(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "light", queue.FlowKey().ID,
 		"light program (fair deficit) should be preferred over token-heavy program")
+}
+
+// =============================================================================
+// Throughput Strategy tests
+// =============================================================================
+
+// testThroughput returns a ThroughputStrategy with default weights for tests.
+func testThroughput() *ThroughputStrategy {
+	return &ThroughputStrategy{
+		weightThroughput: defaultThroughputWeightThroughput,
+		weightHeadWait:   defaultThroughputWeightHeadWait,
+	}
+}
+
+func TestThroughputStrategy_Name(t *testing.T) {
+	s := testThroughput()
+	assert.Equal(t, "throughput", s.Name())
+}
+
+func TestThroughputStrategy_NumDimensions(t *testing.T) {
+	s := testThroughput()
+	assert.Equal(t, 2, s.NumDimensions())
+}
+
+func TestThroughputStrategy_OnPickStart_IsNoop(t *testing.T) {
+	s := testThroughput()
+	m := &ProgramMetrics{}
+	m.AddDeficit(500)
+
+	s.OnPickStart("prog", 5, m)
+	assert.Equal(t, int64(500), m.Deficit(), "Throughput OnPickStart must not modify deficit")
+}
+
+func TestThroughputStrategy_OnCompleted_IsNoop(t *testing.T) {
+	s := testThroughput()
+	m := &ProgramMetrics{}
+
+	s.OnCompleted(m, 100, 50)
+	assert.Equal(t, int64(0), m.Deficit(), "Throughput OnCompleted must not modify deficit")
+}
+
+func TestThroughputStrategy_CollectRaw(t *testing.T) {
+	s := testThroughput()
+
+	m := &ProgramMetrics{}
+	m.RecordThroughput(500.0) // 500 tokens/sec
+
+	enqueueTime := time.Now().Add(-200 * time.Millisecond)
+	queue := &fcmocks.MockFlowQueueAccessor{
+		FlowKeyV:  flowcontrol.FlowKey{ID: "prog"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: enqueueTime},
+	}
+
+	raw := s.CollectRaw(queue, m)
+	require.Len(t, raw, 2)
+	assert.InDelta(t, 500.0, raw[throughputDimThroughput], 0.01)
+	assert.Greater(t, raw[throughputDimHeadWait], 190.0, "headWaitMs should reflect enqueue age")
+}
+
+func TestThroughputStrategy_CollectRaw_NilMetrics(t *testing.T) {
+	s := testThroughput()
+
+	enqueueTime := time.Now().Add(-100 * time.Millisecond)
+	queue := &fcmocks.MockFlowQueueAccessor{
+		FlowKeyV:  flowcontrol.FlowKey{ID: "prog"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: enqueueTime},
+	}
+
+	raw := s.CollectRaw(queue, nil)
+	require.Len(t, raw, 2)
+	assert.InDelta(t, 0.0, raw[throughputDimThroughput], 0.01)
+	assert.Greater(t, raw[throughputDimHeadWait], 90.0)
+}
+
+func TestThroughputStrategy_NormalizeDimension(t *testing.T) {
+	s := testThroughput()
+
+	// Throughput dim is inverted: lowest raw → 1.0, highest raw → 0.0.
+	assert.InDelta(t, 1.0, s.NormalizeDimension(throughputDimThroughput, 0, 0, 100), 0.001)
+	assert.InDelta(t, 0.5, s.NormalizeDimension(throughputDimThroughput, 50, 0, 100), 0.001)
+	assert.InDelta(t, 0.0, s.NormalizeDimension(throughputDimThroughput, 100, 0, 100), 0.001)
+
+	// min == max → rangeNormalize returns 0.5 → inverted = 0.5.
+	assert.InDelta(t, 0.5, s.NormalizeDimension(throughputDimThroughput, 42, 42, 42), 0.001)
+
+	// HeadWait dim is standard (not inverted).
+	assert.InDelta(t, 0.0, s.NormalizeDimension(throughputDimHeadWait, 0, 0, 100), 0.001)
+	assert.InDelta(t, 1.0, s.NormalizeDimension(throughputDimHeadWait, 100, 0, 100), 0.001)
+}
+
+func TestThroughputStrategy_Score(t *testing.T) {
+	s := testThroughput()
+
+	// Lowest throughput (norm=1.0), no headWait: 0.8*1.0 + 0.2*0.0 = 0.8
+	score := s.Score([]float64{1.0, 0.0})
+	assert.InDelta(t, 0.8, score, 0.001)
+
+	// Highest throughput (norm=0.0), max headWait: 0.8*0.0 + 0.2*1.0 = 0.2
+	score = s.Score([]float64{0.0, 1.0})
+	assert.InDelta(t, 0.2, score, 0.001)
+
+	// Both mid: 0.8*0.5 + 0.2*0.5 = 0.5
+	score = s.Score([]float64{0.5, 0.5})
+	assert.InDelta(t, 0.5, score, 0.001)
+}
+
+func TestThroughputStrategy_PreferLowThroughput(t *testing.T) {
+	// End-to-end: two queues — one with low throughput, one with high.
+	s := testThroughput()
+	now := time.Now()
+
+	mLow := &ProgramMetrics{}
+	mLow.RecordThroughput(100.0) // starved: 100 tok/s
+
+	mHigh := &ProgramMetrics{}
+	mHigh.RecordThroughput(1000.0) // well-served: 1000 tok/s
+
+	queueLow := &fcmocks.MockFlowQueueAccessor{
+		FlowKeyV:  flowcontrol.FlowKey{ID: "low"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
+	}
+	queueHigh := &fcmocks.MockFlowQueueAccessor{
+		FlowKeyV:  flowcontrol.FlowKey{ID: "high"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
+	}
+
+	rawLow := s.CollectRaw(queueLow, mLow)
+	rawHigh := s.CollectRaw(queueHigh, mHigh)
+
+	numDims := s.NumDimensions()
+	dimMin := make([]float64, numDims)
+	dimMax := make([]float64, numDims)
+	for d := range numDims {
+		dimMin[d] = min(rawLow[d], rawHigh[d])
+		dimMax[d] = max(rawLow[d], rawHigh[d])
+	}
+
+	normLow := make([]float64, numDims)
+	normHigh := make([]float64, numDims)
+	for d := range numDims {
+		normLow[d] = s.NormalizeDimension(d, rawLow[d], dimMin[d], dimMax[d])
+		normHigh[d] = s.NormalizeDimension(d, rawHigh[d], dimMin[d], dimMax[d])
+	}
+
+	scoreLow := s.Score(normLow)
+	scoreHigh := s.Score(normHigh)
+
+	assert.Greater(t, scoreLow, scoreHigh,
+		"low-throughput queue (score=%.4f) should outscore high-throughput queue (score=%.4f)",
+		scoreLow, scoreHigh)
+}
+
+func TestThroughputStrategy_ColdStartUsesHeadWait(t *testing.T) {
+	// Both programs have zero throughput data; headWait should break the tie.
+	s := testThroughput()
+
+	mOld := &ProgramMetrics{} // no throughput data
+	mNew := &ProgramMetrics{} // no throughput data
+
+	queueOld := &fcmocks.MockFlowQueueAccessor{
+		FlowKeyV:  flowcontrol.FlowKey{ID: "old"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: time.Now().Add(-500 * time.Millisecond)},
+	}
+	queueNew := &fcmocks.MockFlowQueueAccessor{
+		FlowKeyV:  flowcontrol.FlowKey{ID: "new"},
+		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: time.Now()},
+	}
+
+	rawOld := s.CollectRaw(queueOld, mOld)
+	rawNew := s.CollectRaw(queueNew, mNew)
+
+	numDims := s.NumDimensions()
+	dimMin := make([]float64, numDims)
+	dimMax := make([]float64, numDims)
+	for d := range numDims {
+		dimMin[d] = min(rawOld[d], rawNew[d])
+		dimMax[d] = max(rawOld[d], rawNew[d])
+	}
+
+	normOld := make([]float64, numDims)
+	normNew := make([]float64, numDims)
+	for d := range numDims {
+		normOld[d] = s.NormalizeDimension(d, rawOld[d], dimMin[d], dimMax[d])
+		normNew[d] = s.NormalizeDimension(d, rawNew[d], dimMin[d], dimMax[d])
+	}
+
+	scoreOld := s.Score(normOld)
+	scoreNew := s.Score(normNew)
+
+	assert.Greater(t, scoreOld, scoreNew,
+		"with zero throughput data, longer-waiting queue (score=%.4f) should outscore newer queue (score=%.4f)",
+		scoreOld, scoreNew)
+}
+
+func TestNewStrategy_Throughput(t *testing.T) {
+	s, err := newStrategy(Config{Strategy: "throughput"})
+	require.NoError(t, err)
+	assert.Equal(t, "throughput", s.Name())
+}
+
+func TestFactory_ThroughputStrategy(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"throughput"}`), nil)
+	require.NoError(t, err)
+	plugin := p.(*ProgramAwarePlugin)
+	assert.Equal(t, "throughput", plugin.strategy.Name())
 }
 
 func TestDRR_Pick_QuantumAllocatedDuringPick(t *testing.T) {
