@@ -83,7 +83,14 @@ type Config struct {
 	// ServiceDecayFactor controls how quickly old service is forgotten.
 	// Applied to each program's attained service every Pick() cycle.
 	// Higher values (closer to 1.0) = longer memory. Default: 0.995.
+	// Ignored when ServiceHalfLifeSeconds is set.
 	ServiceDecayFactor *float64 `json:"serviceDecayFactor,omitempty"`
+
+	// ServiceHalfLifeSeconds enables time-based decay for the service strategy.
+	// Defines the half-life in seconds: service decays to 50% after this duration.
+	// When set (> 0), overrides ServiceDecayFactor with wall-clock based decay.
+	// Example: 30 = service halves every 30s regardless of Pick() frequency.
+	ServiceHalfLifeSeconds *float64 `json:"serviceHalfLifeSeconds,omitempty"`
 }
 
 // Compile-time interface assertions.

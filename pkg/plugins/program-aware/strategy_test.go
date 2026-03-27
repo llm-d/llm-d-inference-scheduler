@@ -599,6 +599,76 @@ func TestFactory_ServiceStrategy(t *testing.T) {
 	assert.Equal(t, "service", plugin.strategy.Name())
 }
 
+func testServiceTimed(halfLife float64) *ServiceStrategy {
+	return &ServiceStrategy{
+		weightService:   defaultServiceWeightService,
+		weightHeadWait:  defaultServiceWeightHeadWait,
+		halfLifeSeconds: halfLife,
+	}
+}
+
+func TestServiceStrategy_TimedDecay_FirstCallNoDecay(t *testing.T) {
+	m := &ProgramMetrics{}
+	m.AddService(1000.0)
+
+	// First call should set lastDecayTime but not decay.
+	m.DecayServiceTimed(30.0, time.Now())
+	assert.InDelta(t, 1000.0, m.AttainedService(), 0.01,
+		"first timed decay call should not reduce service")
+}
+
+func TestServiceStrategy_TimedDecay_HalvesAtHalfLife(t *testing.T) {
+	m := &ProgramMetrics{}
+	m.AddService(1000.0)
+
+	now := time.Now()
+	m.DecayServiceTimed(30.0, now)              // initialize lastDecayTime
+	m.DecayServiceTimed(30.0, now.Add(30*time.Second)) // exactly one half-life later
+
+	assert.InDelta(t, 500.0, m.AttainedService(), 1.0,
+		"service should halve after exactly one half-life")
+}
+
+func TestServiceStrategy_TimedDecay_ConsistentWindow(t *testing.T) {
+	// Whether we call DecayServiceTimed once after 30s or 100 times over 30s,
+	// the result should be the same.
+	m1 := &ProgramMetrics{}
+	m1.AddService(1000.0)
+	now := time.Now()
+	m1.DecayServiceTimed(30.0, now)
+	m1.DecayServiceTimed(30.0, now.Add(30*time.Second))
+	singleCall := m1.AttainedService()
+
+	m2 := &ProgramMetrics{}
+	m2.AddService(1000.0)
+	m2.DecayServiceTimed(30.0, now)
+	for i := 1; i <= 100; i++ {
+		m2.DecayServiceTimed(30.0, now.Add(time.Duration(i)*300*time.Millisecond))
+	}
+	manyCalls := m2.AttainedService()
+
+	assert.InDelta(t, singleCall, manyCalls, 1.0,
+		"time-based decay should produce same result regardless of call frequency")
+}
+
+func TestServiceStrategy_OnPickStart_UsesTimedDecay(t *testing.T) {
+	s := testServiceTimed(30.0)
+	m := &ProgramMetrics{}
+	m.AddService(1000.0)
+
+	// First call initializes timer.
+	s.OnPickStart("prog", 1, m)
+	assert.InDelta(t, 1000.0, m.AttainedService(), 0.01)
+}
+
+func TestFactory_ServiceHalfLifeSeconds(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"service","serviceHalfLifeSeconds":30}`), nil)
+	require.NoError(t, err)
+	plugin := p.(*ProgramAwarePlugin)
+	svc := plugin.strategy.(*ServiceStrategy)
+	assert.Equal(t, 30.0, svc.halfLifeSeconds)
+}
+
 func TestDRR_Pick_QuantumAllocatedDuringPick(t *testing.T) {
 	p := &ProgramAwarePlugin{strategy: testDRR()}
 
