@@ -56,9 +56,10 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 		}, nil
 	case "service":
 		return &ServiceStrategy{
-			weightService:  floatOr(cfg.WeightService, defaultServiceWeightService),
-			weightHeadWait: floatOr(cfg.WeightServiceHeadWait, defaultServiceWeightHeadWait),
-			decayFactor:    floatOr(cfg.ServiceDecayFactor, defaultServiceDecayFactor),
+			weightService:   floatOr(cfg.WeightService, defaultServiceWeightService),
+			weightHeadWait:  floatOr(cfg.WeightServiceHeadWait, defaultServiceWeightHeadWait),
+			decayFactor:     floatOr(cfg.ServiceDecayFactor, defaultServiceDecayFactor),
+			halfLifeSeconds: floatOr(cfg.ServiceHalfLifeSeconds, 0),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"ewma\", \"drr\", \"service\"", cfg.Strategy)
@@ -309,9 +310,10 @@ const (
 //
 // Weights and decay factor are configurable via the plugin config.
 type ServiceStrategy struct {
-	weightService float64
-	weightHeadWait float64
-	decayFactor    float64
+	weightService   float64
+	weightHeadWait  float64
+	decayFactor     float64
+	halfLifeSeconds float64 // if > 0, use time-based decay instead of per-cycle decayFactor
 }
 
 // Name returns "service".
@@ -319,11 +321,16 @@ func (s *ServiceStrategy) Name() string { return "service" }
 
 // OnPickStart decays the attained service counter for active queues,
 // causing old service to be gradually forgotten.
+// Uses time-based decay if halfLifeSeconds is configured, otherwise per-cycle decayFactor.
 func (s *ServiceStrategy) OnPickStart(_ string, _ int, metrics *ProgramMetrics) {
 	if metrics == nil {
 		return
 	}
-	metrics.DecayService(s.decayFactor)
+	if s.halfLifeSeconds > 0 {
+		metrics.DecayServiceTimed(s.halfLifeSeconds, time.Now())
+	} else {
+		metrics.DecayService(s.decayFactor)
+	}
 }
 
 // NumDimensions returns 2 (attainedService, headWait).
