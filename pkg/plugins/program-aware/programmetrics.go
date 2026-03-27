@@ -1,8 +1,10 @@
 package programaware
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const ewmaAlpha = 0.5
@@ -27,6 +29,7 @@ type ProgramMetrics struct {
 	// Attained service: time-decayed accumulator of weighted tokens consumed.
 	// Increased on each completion, decayed on each Pick() cycle.
 	attainedService float64
+	lastDecayTime   time.Time // last wall-clock time DecayServiceTimed was called
 
 	totalRequests     atomic.Int64
 	dispatchedCount   atomic.Int64
@@ -125,6 +128,25 @@ func (m *ProgramMetrics) DecayService(factor float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.attainedService *= factor
+}
+
+// DecayServiceTimed applies time-based exponential decay using a half-life.
+// The decay factor is computed as 0.5^(elapsed/halfLifeSeconds), so service
+// halves every halfLifeSeconds regardless of how frequently this is called.
+func (m *ProgramMetrics) DecayServiceTimed(halfLifeSeconds float64, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastDecayTime.IsZero() {
+		m.lastDecayTime = now
+		return
+	}
+	elapsed := now.Sub(m.lastDecayTime).Seconds()
+	if elapsed <= 0 {
+		return
+	}
+	factor := math.Pow(0.5, elapsed/halfLifeSeconds)
+	m.attainedService *= factor
+	m.lastDecayTime = now
 }
 
 // AttainedService returns the current time-decayed attained service value.
