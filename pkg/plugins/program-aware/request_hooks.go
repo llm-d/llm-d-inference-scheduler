@@ -101,6 +101,11 @@ func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *sche
 		p.getStrategy().OnCompleted(metrics, promptTokens, completionTokens)
 		attainedServiceTokens.WithLabelValues(programID).Set(metrics.AttainedService())
 
+		// Update service rate for fairness index (weighted tokens/sec EWMA).
+		cost := float64(weightInputToken*promptTokens + weightOutputToken*completionTokens)
+		metrics.RecordServiceRate(cost, time.Now())
+		serviceRateTokensPerSec.WithLabelValues(programID).Set(metrics.ServiceRate())
+
 		log.FromContext(ctx).V(logutil.TRACE).Info("ResponseComplete: recorded tokens",
 			"requestId", request.RequestId, "programId", programID,
 			"promptTokens", promptTokens, "completionTokens", completionTokens,

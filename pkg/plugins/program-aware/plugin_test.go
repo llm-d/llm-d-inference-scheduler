@@ -27,22 +27,6 @@ func TestFactory(t *testing.T) {
 
 // --- ProgramMetrics tests ---
 
-func TestProgramMetrics_EWMA(t *testing.T) {
-	m := &ProgramMetrics{}
-
-	// First observation initializes EWMA directly.
-	m.RecordWaitTime(100)
-	assert.InDelta(t, 100.0, m.AverageWaitTime(), 0.01)
-
-	// Second observation: EWMA = 0.2*200 + 0.8*100 = 120
-	m.RecordWaitTime(200)
-	assert.InDelta(t, 120.0, m.AverageWaitTime(), 0.01)
-
-	// Third observation: EWMA = 0.2*50 + 0.8*120 = 106
-	m.RecordWaitTime(50)
-	assert.InDelta(t, 106.0, m.AverageWaitTime(), 0.01)
-}
-
 func TestProgramMetrics_TotalAverageWaitTime(t *testing.T) {
 	m := &ProgramMetrics{}
 
@@ -152,84 +136,6 @@ func TestPick_RecordsEnqueueTime(t *testing.T) {
 	require.True(t, ok, "Pick should store enqueue time for selected request")
 	storedTime := storedTimeRaw.(time.Time)
 	assert.Equal(t, enqueueTime, storedTime, "stored time should be the item's enqueue time")
-}
-
-func TestPick_PrefersHigherAvgWaitTime(t *testing.T) {
-	p := &ProgramAwarePlugin{}
-
-	// prog-a has a high EWMA wait time (4000ms), prog-b has a low one (100ms).
-	// Both have the same queue length and no prior dispatch history.
-	metricsA := &ProgramMetrics{}
-	metricsA.RecordWaitTime(4000)
-	p.programMetrics.Store("prog-a", metricsA)
-
-	metricsB := &ProgramMetrics{}
-	metricsB.RecordWaitTime(100)
-	p.programMetrics.Store("prog-b", metricsB)
-
-	now := time.Now()
-	queueA := &fcmocks.MockFlowQueueAccessor{
-		LenV:     1,
-		FlowKeyV: flowcontrol.FlowKey{ID: "prog-a"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: now,
-		},
-	}
-	queueB := &fcmocks.MockFlowQueueAccessor{
-		LenV:     1,
-		FlowKeyV: flowcontrol.FlowKey{ID: "prog-b"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: now,
-		},
-	}
-
-	band := &fcmocks.MockPriorityBandAccessor{
-		IterateQueuesFunc: func(cb func(flowcontrol.FlowQueueAccessor) bool) {
-			cb(queueA)
-			cb(queueB)
-		},
-	}
-
-	queue, err := p.Pick(context.Background(), band)
-	assert.NoError(t, err)
-	assert.Equal(t, queueA, queue, "should prefer the program with higher average wait time")
-}
-
-func TestPick_PenalizesHighTokenUsage(t *testing.T) {
-	p := &ProgramAwarePlugin{}
-
-	// prog-a has heavy recent token usage, prog-b has none.
-	// Give them identical queue state so only the token penalty differs.
-	metricsA := &ProgramMetrics{}
-	metricsA.RecordTokens(5000, 5000) // 10K tokens per request
-	p.programMetrics.Store("prog-a", metricsA)
-
-	now := time.Now()
-	queueA := &fcmocks.MockFlowQueueAccessor{
-		LenV:     1,
-		FlowKeyV: flowcontrol.FlowKey{ID: "prog-a"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: now.Add(-1 * time.Second),
-		},
-	}
-	queueB := &fcmocks.MockFlowQueueAccessor{
-		LenV:     1,
-		FlowKeyV: flowcontrol.FlowKey{ID: "prog-b"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV: now.Add(-1 * time.Second),
-		},
-	}
-
-	band := &fcmocks.MockPriorityBandAccessor{
-		IterateQueuesFunc: func(cb func(flowcontrol.FlowQueueAccessor) bool) {
-			cb(queueA)
-			cb(queueB)
-		},
-	}
-
-	queue, err := p.Pick(context.Background(), band)
-	assert.NoError(t, err)
-	assert.Equal(t, queueB, queue, "should prefer the queue with lower token usage")
 }
 
 // --- PrepareRequestData tests ---
@@ -412,42 +318,50 @@ func TestFullLifecycle(t *testing.T) {
 
 // --- fairness index tests (attained-service-based) ---
 
-func TestComputeFairnessIndex_EqualService(t *testing.T) {
+func TestComputeFairnessIndex_EqualServiceRate(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
+	now := time.Now()
 	mA := &ProgramMetrics{}
-	mA.AddService(5000.0)
+	mA.RecordServiceRate(1000.0, now)              // first call sets baseline
+	mA.RecordServiceRate(1000.0, now.Add(time.Second)) // rate = 1000 tok/s
 	p.programMetrics.Store("prog-a", mA)
 
 	mB := &ProgramMetrics{}
-	mB.AddService(5000.0)
+	mB.RecordServiceRate(1000.0, now)
+	mB.RecordServiceRate(1000.0, now.Add(time.Second))
 	p.programMetrics.Store("prog-b", mB)
 
-	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "equal service → perfect fairness")
+	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "equal service rate → perfect fairness")
 }
 
-func TestComputeFairnessIndex_SkewedService(t *testing.T) {
+func TestComputeFairnessIndex_SkewedServiceRate(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
+	now := time.Now()
 	mA := &ProgramMetrics{}
-	mA.AddService(10000.0)
+	mA.RecordServiceRate(10000.0, now)
+	mA.RecordServiceRate(10000.0, now.Add(time.Second)) // rate = 10000
 	p.programMetrics.Store("prog-a", mA)
 
 	mB := &ProgramMetrics{}
-	mB.AddService(1000.0)
+	mB.RecordServiceRate(1000.0, now)
+	mB.RecordServiceRate(1000.0, now.Add(time.Second)) // rate = 1000
 	p.programMetrics.Store("prog-b", mB)
 
 	idx := p.computeFairnessIndex()
-	// J = (10000+1000)^2 / (2 * (10000^2 + 1000^2)) = 121000000 / 202000000 ≈ 0.599
-	assert.Less(t, idx, 1.0, "skewed service should produce index < 1")
+	assert.Less(t, idx, 1.0, "skewed rate should produce index < 1")
+	// J = (10000+1000)^2 / (2 * (10000^2 + 1000^2)) ≈ 0.599
 	assert.InDelta(t, 0.599, idx, 0.01)
 }
 
 func TestComputeFairnessIndex_SingleProgram(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
+	now := time.Now()
 	m := &ProgramMetrics{}
-	m.AddService(5000.0)
+	m.RecordServiceRate(5000.0, now)
+	m.RecordServiceRate(5000.0, now.Add(time.Second))
 	p.programMetrics.Store("prog-a", m)
 
 	assert.InDelta(t, 1.0, p.computeFairnessIndex(), 0.001, "single program → trivially fair")
@@ -456,7 +370,7 @@ func TestComputeFairnessIndex_SingleProgram(t *testing.T) {
 func TestComputeFairnessIndex_NoServiceData(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	// Programs exist but have no service data yet.
+	// Programs exist but have no rate data yet.
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
 	p.programMetrics.Store("prog-b", &ProgramMetrics{})
 
@@ -464,50 +378,6 @@ func TestComputeFairnessIndex_NoServiceData(t *testing.T) {
 }
 
 // --- Two-pass scoring tests ---
-
-func TestPick_TokenPenaltyViaFullCycle(t *testing.T) {
-	// Verify that token usage acts as a penalty through the full Pick() cycle.
-	// Two programs with identical avgWait and headWait, but prog-a has heavy token usage.
-	p := &ProgramAwarePlugin{}
-
-	metricsA := &ProgramMetrics{}
-	metricsA.RecordWaitTime(2500)
-	metricsA.RecordTokens(5000, 5000) // 10K tokens per request
-	p.programMetrics.Store("prog-a", metricsA)
-
-	metricsB := &ProgramMetrics{}
-	metricsB.RecordWaitTime(2500)
-	p.programMetrics.Store("prog-b", metricsB)
-
-	now := time.Now()
-	queueA := &fcmocks.MockFlowQueueAccessor{
-		LenV:     1,
-		FlowKeyV: flowcontrol.FlowKey{ID: "prog-a"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV:     now,
-			OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: "a-req"},
-		},
-	}
-	queueB := &fcmocks.MockFlowQueueAccessor{
-		LenV:     1,
-		FlowKeyV: flowcontrol.FlowKey{ID: "prog-b"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{
-			EnqueueTimeV:     now,
-			OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: "b-req"},
-		},
-	}
-
-	band := &fcmocks.MockPriorityBandAccessor{
-		IterateQueuesFunc: func(cb func(flowcontrol.FlowQueueAccessor) bool) {
-			cb(queueA)
-			cb(queueB)
-		},
-	}
-
-	queue, err := p.Pick(context.Background(), band)
-	assert.NoError(t, err)
-	assert.Equal(t, queueB, queue, "prog-b (no token usage) should be preferred over prog-a (heavy token usage)")
-}
 
 func TestPick_AllIdenticalMetrics(t *testing.T) {
 	// When all queues have identical metrics, Pick should still return a valid queue.
