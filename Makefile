@@ -208,6 +208,7 @@ post-deploy-test: ## Run post deployment tests
 
 COVERAGE_DIR       ?= $(shell pwd)/coverage
 COVERAGE_THRESHOLD ?= 0
+COVERAGE_LABEL     ?= main
 BASE_REF           ?= main
 
 .PHONY: test-coverage
@@ -225,20 +226,27 @@ coverage-report: ## Generate HTML coverage reports (open coverage/*.html in brow
 	done
 
 .PHONY: coverage-compare
-coverage-compare: ## Compare coverage vs baseline (BASELINE_DIR=path or BASE_REF=git-ref, default main)
+coverage-compare: ## Compare coverage vs baseline (BASELINE_DIR=path or BASE_REF=git-ref, default main; COVERAGE_LABEL=label)
 	@if [ -n "$(BASELINE_DIR)" ]; then \
-	    ./scripts/compare-coverage.sh "$(BASELINE_DIR)" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \
+	    ./scripts/compare-coverage.sh "$(BASELINE_DIR)" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)" "$(COVERAGE_LABEL)"; \
 	else \
 	    printf "\033[33;1m==== Building Baseline Coverage from $(BASE_REF) ====\033[0m\n"; \
-	    WORKTREE=$$(mktemp -d); \
-	    git worktree add --quiet "$$WORKTREE" "$(BASE_REF)"; \
+	    EXISTING=$$(git worktree list --porcelain \
+	        | awk '/^worktree /{wt=$$2} /^branch refs\/heads\/$(BASE_REF)$$/{print wt}'); \
+	    if [ -n "$$EXISTING" ]; then \
+	        WORKTREE="$$EXISTING"; CLEANUP=0; \
+	    else \
+	        WORKTREE=$$(mktemp -u /tmp/cov-baseline-XXXXXX); \
+	        git worktree add --quiet "$$WORKTREE" "$(BASE_REF)"; \
+	        CLEANUP=1; \
+	    fi; \
 	    ( cd "$$WORKTREE" && mkdir -p "$(COVERAGE_DIR)/baseline" && \
 	        go test -race -coverprofile="$(COVERAGE_DIR)/baseline/epp.out" -covermode=atomic \
 	            $$($(epp_TEST_FILES) | tr '\n' ' ') && \
 	        go test -race -coverprofile="$(COVERAGE_DIR)/baseline/sidecar.out" -covermode=atomic \
 	            $$($(sidecar_TEST_FILES) | tr '\n' ' ') ); \
-	    git worktree remove --force "$$WORKTREE"; \
-	    ./scripts/compare-coverage.sh "$(COVERAGE_DIR)/baseline" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \
+	    [ "$$CLEANUP" -eq 1 ] && git worktree remove --force "$$WORKTREE"; \
+	    ./scripts/compare-coverage.sh "$(COVERAGE_DIR)/baseline" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)" "$(COVERAGE_LABEL)"; \
 	fi
 
 
