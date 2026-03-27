@@ -92,6 +92,15 @@ var (
 		[]string{"program_id"},
 	)
 
+	serviceRateTokensPerSec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: programAwareSubsystem,
+			Name:      "service_rate_tokens_per_second",
+			Help:      metricsutil.HelpMsgWithStability("EWMA of weighted tokens per second per program (used for Jain's fairness index)", compbasemetrics.ALPHA),
+		},
+		[]string{"program_id"},
+	)
+
 	queueScore = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Subsystem: programAwareSubsystem,
@@ -115,6 +124,7 @@ func GetCollectors() []prometheus.Collector {
 		fairnessIndex,
 		attainedServiceTokens,
 		ewmaWaitTimeMs,
+		serviceRateTokensPerSec,
 		queueScore,
 	}
 }

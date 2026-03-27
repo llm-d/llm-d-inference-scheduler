@@ -31,30 +31,17 @@ const (
 // Config holds the JSON-decoded configuration for the plugin.
 type Config struct {
 	// Strategy selects the fairness scoring algorithm used by Pick().
-	// Valid values: "ewma" (default), "drr", "service".
+	// Valid values: "service" (default), "drr".
 	//
-	//   "ewma" — head-of-queue age + EWMA historical wait + dispatch-count penalty.
-	//            Practical heuristic; strong starvation prevention.
+	//   "service" — attained service fairness: tracks time-decayed weighted tokens
+	//              consumed per program. Programs with lower attained service are
+	//              promoted. Directly targets fair resource allocation.
 	//
-	//   "drr"  — Deficit Round Robin adapted for tokens [Shreedhar & Varghese 1995].
-	//            Each round every active queue earns a token quantum; actual token
-	//            usage is deducted at response completion. Provides provably
-	//            proportional fairness independent of request rate or size.
+	//   "drr"    — Deficit Round Robin adapted for tokens [Shreedhar & Varghese 1995].
+	//              Each round every active queue earns a token quantum; actual token
+	//              usage is deducted at response completion. Provides provably
+	//              proportional fairness independent of request rate or size.
 	Strategy string `json:"strategy"`
-
-	// --- EWMA weights (only used when strategy == "ewma") ---
-
-	// WeightHeadWait is the weight for head-of-queue age (starvation guard).
-	// Default: 0.5.
-	WeightHeadWait *float64 `json:"weightHeadWait,omitempty"`
-
-	// WeightAvgWait is the weight for EWMA historical wait time (fairness debt).
-	// Default: 0.3.
-	WeightAvgWait *float64 `json:"weightAvgWait,omitempty"`
-
-	// WeightAvgTokens is the penalty weight for EWMA per-request token usage.
-	// Programs with heavier recent requests are penalized more. Default: 0.2.
-	WeightAvgTokens *float64 `json:"weightAvgTokens,omitempty"`
 
 	// --- DRR weights (only used when strategy == "drr") ---
 
@@ -106,7 +93,7 @@ var (
 //
 //nolint:revive
 func ProgramAwarePluginFactory(name string, rawCfg json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	cfg := Config{Strategy: "ewma"}
+	cfg := Config{Strategy: "service"}
 	if len(rawCfg) > 0 {
 		if err := json.Unmarshal(rawCfg, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid config for %s plugin %q: %w", ProgramAwarePluginType, name, err)
@@ -151,14 +138,14 @@ func (p *ProgramAwarePlugin) TypedName() plugin.TypedName {
 	}
 }
 
-// getStrategy returns the configured strategy, falling back to EWMA for zero-value
+// getStrategy returns the configured strategy, falling back to Service for zero-value
 // plugin instances constructed directly in tests.
 func (p *ProgramAwarePlugin) getStrategy() ScoringStrategy {
 	if p.strategy == nil {
-		return &EWMAStrategy{
-			weightHeadWait:  defaultEWMAWeightHeadWait,
-			weightAvgWait:   defaultEWMAWeightAvgWait,
-			weightAvgTokens: defaultEWMAWeightAvgTokens,
+		return &ServiceStrategy{
+			weightService:  defaultServiceWeightService,
+			weightHeadWait: defaultServiceWeightHeadWait,
+			decayFactor:    defaultServiceDecayFactor,
 		}
 	}
 	return p.strategy
@@ -282,15 +269,15 @@ func (p *ProgramAwarePlugin) getOrCreateMetrics(programID string) *ProgramMetric
 	return actual.(*ProgramMetrics)
 }
 
-// computeFairnessIndex returns Jain's Fairness Index over the attained service
-// for each program. Equal attained service across programs = perfect fairness.
-// Returns 1.0 when fewer than 2 programs have service data.
+// computeFairnessIndex returns Jain's Fairness Index over the service rate
+// (weighted tokens/sec) for each program. Equal service rates = perfect fairness.
+// Returns 1.0 when fewer than 2 programs have rate data.
 func (p *ProgramAwarePlugin) computeFairnessIndex() float64 {
 	var sum, sumSq float64
 	var n float64
 	p.programMetrics.Range(func(_, value any) bool {
 		m := value.(*ProgramMetrics)
-		x := m.AttainedService()
+		x := m.ServiceRate()
 		if x == 0 {
 			return true
 		}
