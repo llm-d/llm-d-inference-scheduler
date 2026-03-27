@@ -45,7 +45,8 @@ const (
 
 	// TokenizedPromptStateKey is the CycleState key used by the tokenizer scorer
 	// to store tokenized prompt data for downstream consumers.
-	TokenizedPromptStateKey = plugin.StateKey(TokenizedPromptKey)
+	// Namespaced by TokenizerPluginType to avoid collisions with other plugins.
+	TokenizedPromptStateKey = plugin.StateKey(TokenizerPluginType + "." + TokenizedPromptKey)
 )
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.

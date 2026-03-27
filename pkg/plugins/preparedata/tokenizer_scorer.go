@@ -37,9 +37,8 @@ func (p *TokenizerPlugin) Category() scheduling.ScorerCategory {
 }
 
 // Score implements scheduling.Scorer. It tokenizes the request prompt, writes
-// the result to CycleState using the plugin's TypedName as key (standard IGW
-// pattern — same as how NoHitLRU reads prefix-cache scorer data), and returns
-// zero scores for all endpoints since this scorer only produces data.
+// the result to CycleState under the TokenizedPromptStateKey constant, and
+// returns zero scores for all endpoints since this scorer only produces data.
 func (p *TokenizerPlugin) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, pods []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)

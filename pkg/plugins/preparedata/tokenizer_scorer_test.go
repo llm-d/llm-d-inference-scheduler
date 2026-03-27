@@ -155,8 +155,15 @@ func TestTokenizerScorer_SkipsWhenAlreadyInCycleState(t *testing.T) {
 	existing := &TokenizedPromptState{TokenIDs: []uint32{1, 2, 3}}
 	cycleState.Write(TokenizedPromptStateKey, existing)
 
-	// Use nil tokenizer — would panic if called.
-	p := newTestPlugin(nil)
+	// Use a recording mock to assert tokenizer is never called.
+	tokenizerCalled := false
+	tok := &mockTokenizer{
+		renderFunc: func(string) ([]uint32, []tokenizerTypes.Offset, error) {
+			tokenizerCalled = true
+			return nil, nil, nil
+		},
+	}
+	p := newTestPlugin(tok)
 
 	request := &scheduling.LLMRequest{
 		RequestId: "already-tokenized",
@@ -166,6 +173,8 @@ func TestTokenizerScorer_SkipsWhenAlreadyInCycleState(t *testing.T) {
 	}
 
 	p.Score(ctx, cycleState, request, testEndpoints)
+
+	assert.False(t, tokenizerCalled, "tokenizer should not be called when CycleState already has data")
 
 	// Original data should remain unchanged.
 	stored, err := scheduling.ReadCycleStateKey[*TokenizedPromptState](

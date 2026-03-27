@@ -677,9 +677,8 @@ func (s *PrecisePrefixCacheScorer) getBlockSizeTokens() int {
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
 // based on the provided LLM request.
-// If the request already has TokenizedPrompt set (e.g. by an external tokenizer
-// PrepareData plugin), it calls ScoreTokens directly, bypassing
-// prompt/chat tokenization.
+// If tokenized prompt data is found in CycleState (written by the tokenizer
+// scorer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
 // Otherwise, chat completions and regular completions are tokenized internally.
 func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
