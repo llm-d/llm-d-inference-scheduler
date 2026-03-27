@@ -31,6 +31,11 @@ type ProgramMetrics struct {
 	attainedService float64
 	lastDecayTime   time.Time // last wall-clock time DecayServiceTimed was called
 
+	// Service rate: EWMA of weighted tokens per second, updated on each completion.
+	// Used for Jain's fairness index (equalizing rates across programs = fair).
+	serviceRate        float64
+	lastCompletionTime time.Time
+
 	totalRequests     atomic.Int64
 	dispatchedCount   atomic.Int64
 	totalInputTokens  atomic.Int64
@@ -38,7 +43,7 @@ type ProgramMetrics struct {
 
 	// deficitTokens is the DRR deficit counter: positive means the program is owed
 	// service; negative means it has been overserved relative to its quantum.
-	// Only used by DRRStrategy; ignored by EWMAStrategy.
+	// Only used by DRRStrategy.
 	deficitTokens atomic.Int64
 }
 
@@ -147,6 +152,35 @@ func (m *ProgramMetrics) DecayServiceTimed(halfLifeSeconds float64, now time.Tim
 	factor := math.Pow(0.5, elapsed/halfLifeSeconds)
 	m.attainedService *= factor
 	m.lastDecayTime = now
+}
+
+// RecordServiceRate updates the EWMA of service rate (weighted tokens/sec)
+// using the elapsed time since the last completion.
+func (m *ProgramMetrics) RecordServiceRate(weightedTokens float64, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastCompletionTime.IsZero() {
+		m.lastCompletionTime = now
+		return // no rate from a single point
+	}
+	elapsed := now.Sub(m.lastCompletionTime).Seconds()
+	if elapsed <= 0 {
+		return
+	}
+	instantRate := weightedTokens / elapsed
+	if m.serviceRate == 0 {
+		m.serviceRate = instantRate
+	} else {
+		m.serviceRate = ewmaAlpha*instantRate + (1-ewmaAlpha)*m.serviceRate
+	}
+	m.lastCompletionTime = now
+}
+
+// ServiceRate returns the EWMA of weighted tokens per second.
+func (m *ProgramMetrics) ServiceRate() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.serviceRate
 }
 
 // AttainedService returns the current time-decayed attained service value.
