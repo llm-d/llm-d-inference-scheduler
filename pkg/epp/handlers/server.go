@@ -171,7 +171,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	// error metrics. This doesn't cover the error "Cannot receive stream request" because
 	// such errors might happen even though response is processed.
 	var err error
-	defer func(error, *RequestContext) {
+	defer func() {
 		if reqCtx.ResponseStatusCode != "" {
 			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.ResponseStatusCode)
 		} else if err != nil {
@@ -189,7 +189,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			cleanupCtx := log.IntoContext(context.Background(), logger)
 			s.director.HandleResponseBody(cleanupCtx, reqCtx, true)
 		}
-	}(err, reqCtx)
+	}()
 
 	for {
 		select {
