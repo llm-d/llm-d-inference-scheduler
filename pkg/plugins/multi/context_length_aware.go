@@ -29,7 +29,7 @@ const (
 	charToTokenMultiplier = 0.25
 )
 
-type contextLengthAwareParams struct {
+type contextLengthAwareParameters struct {
 	// Label is the pod label name to check for context length range.
 	// Format expected: "min-max" (e.g., "0-2048" or "2048-8192"), where min and max are positive integers.
 	Label string `json:"label"`
@@ -52,7 +52,7 @@ var _ scheduling.Scorer = &ContextLengthAware{} // validate interface conformanc
 
 // ContextLengthAwareFactory defines the factory function for the ContextLengthAware plugin.
 func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	parameters := &contextLengthAwareParams{
+	parameters := &contextLengthAwareParameters{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: false,
 	}
@@ -71,7 +71,7 @@ func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plu
 }
 
 // NewContextLengthAware creates and returns an instance of the ContextLengthAware plugin.
-func NewContextLengthAware(name string, params *contextLengthAwareParams) *ContextLengthAware {
+func NewContextLengthAware(name string, params *contextLengthAwareParameters) *ContextLengthAware {
 	return &ContextLengthAware{
 		typedName:       plugin.TypedName{Type: ContextLengthAwareType, Name: name},
 		labelName:       params.Label,
@@ -119,17 +119,19 @@ func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.
 	contextLength, usedTokenizer := p.getContextLength(ctx, cycleState, request)
 	logger.V(logutil.TRACE).Info("Filtering endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
 
-	var filteredEndpoints []scheduling.Endpoint
+	filteredEndpoints := []scheduling.Endpoint{}
 
 	for _, endpoint := range endpoints {
 		metadata := endpoint.GetMetadata()
 		if metadata == nil {
+			// Endpoints without metadata are included (treated as no-label).
+			filteredEndpoints = append(filteredEndpoints, endpoint)
 			continue
 		}
 
 		rangeStr, hasLabel := metadata.Labels[p.labelName]
 		if !hasLabel {
-			// Endpoints without the label are included (they accept any context length)
+			// Endpoints without the label are included (they accept any context length).
 			filteredEndpoints = append(filteredEndpoints, endpoint)
 			continue
 		}
@@ -276,31 +278,36 @@ func parseContextRange(rangeStr string) (contextRange, error) {
 // calculateRangeScore calculates a score for how well a pod's context range matches the request.
 //
 // Scoring tiers (higher tier always wins over lower):
-//   - In-range match (0.5–1.0): exact or tight matches score highest, wide ranges lower.
-//   - Out-of-range fallback (0.0–0.3): scored by proximity to the nearest boundary,
-//     so the pod with the largest max is preferred for oversized requests.
+//   - In-range match (0.3–1.0]: tighter ranges and more headroom score higher.
+//     The minimum in-range score is strictly above maxFallbackScore, so an in-range
+//     match always beats any out-of-range fallback.
+//   - Out-of-range fallback [0.0–0.3): scored by proximity to the nearest boundary,
+//     so the pod closest to the request is preferred for out-of-range requests.
 //
 // This ensures that out-of-range requests still get routed to the most reasonable pod
 // rather than being scored equally (0.0) and selected arbitrarily.
 func calculateRangeScore(contextLength int, r contextRange) float64 {
-	// In-range match
+	const maxFallbackScore = 0.3
+
+	// In-range match: score in (maxFallbackScore, 1.0].
 	if contextLength >= r.min && contextLength <= r.max {
 		rangeWidth := r.max - r.min
 		if rangeWidth == 0 {
 			return 1.0
 		}
 
+		// rawScore is in [0.0, 1.0]: tighter ranges and more headroom score higher.
 		widthScore := 1.0 / (1.0 + float64(rangeWidth)/10000.0)
 		headroom := float64(r.max - contextLength)
 		positionScore := headroom / float64(rangeWidth)
+		rawScore := 0.7*widthScore + 0.3*positionScore
 
-		return 0.7*widthScore + 0.3*positionScore
+		// Map rawScore from [0.0, 1.0] into (maxFallbackScore, 1.0].
+		return maxFallbackScore + rawScore*(1.0-maxFallbackScore)
 	}
 
 	// Out-of-range fallback: score by proximity to the nearest range boundary.
-	// Capped at 0.3 so a fallback never outscores an in-range match.
-	const maxFallbackScore = 0.3
-
+	// Strictly below maxFallbackScore so a fallback never outscores an in-range match.
 	var distance int
 	if contextLength > r.max {
 		distance = contextLength - r.max

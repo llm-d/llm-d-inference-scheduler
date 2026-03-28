@@ -99,7 +99,7 @@ func TestContextLengthAwareFilter(t *testing.T) {
 			map[string]string{}),
 	}
 
-	params := &contextLengthAwareParams{
+	params := &contextLengthAwareParameters{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: true,
 	}
@@ -136,7 +136,7 @@ func TestContextLengthAwareScore(t *testing.T) {
 			map[string]string{}),
 	}
 
-	params := &contextLengthAwareParams{
+	params := &contextLengthAwareParameters{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: false,
 	}
@@ -146,13 +146,15 @@ func TestContextLengthAwareScore(t *testing.T) {
 	scores := plugin.Score(ctx, nil, request, endpoints)
 
 	// With context length 0:
-	// - tight-range (0-20): should score high (in-range match)
-	// - wide-range (0-10000): should score lower than tight (in-range but wide)
-	// - no-match (500-1000): out-of-range fallback, scored by proximity (0 < score <= 0.3)
-	// - no-label: should score 0.5 (neutral)
+	// - tight-range (0-20): in-range, should score high (> 0.3)
+	// - wide-range (0-10000): in-range but wide, should score lower than tight but still > 0.3
+	// - no-match (500-1000): out-of-range fallback (0 < score < 0.3)
+	// - no-label: neutral (0.5)
 	assert.Greater(t, scores[endpoints[0]], scores[endpoints[1]], "tight range should score higher than wide range")
+	assert.Greater(t, scores[endpoints[0]], 0.3, "in-range score must be strictly above 0.3")
+	assert.Greater(t, scores[endpoints[1]], 0.3, "in-range score must be strictly above 0.3")
 	assert.Greater(t, scores[endpoints[2]], 0.0, "out-of-range should get a fallback score > 0")
-	assert.LessOrEqual(t, scores[endpoints[2]], 0.3, "out-of-range fallback should not exceed 0.3")
+	assert.Less(t, scores[endpoints[2]], 0.3, "out-of-range fallback must be strictly below 0.3")
 	assert.Greater(t, scores[endpoints[1]], scores[endpoints[2]], "in-range match should outscore out-of-range fallback")
 	assert.Equal(t, 0.5, scores[endpoints[3]], "no label should score 0.5")
 }
@@ -210,9 +212,9 @@ func TestCalculateRangeScoreFallback(t *testing.T) {
 		largeMax := calculateRangeScore(9000, contextRange{min: 0, max: 8192})
 
 		assert.Greater(t, smallMax, 0.0)
-		assert.LessOrEqual(t, smallMax, 0.3)
+		assert.Less(t, smallMax, 0.3)
 		assert.Greater(t, largeMax, 0.0)
-		assert.LessOrEqual(t, largeMax, 0.3)
+		assert.Less(t, largeMax, 0.3)
 		assert.Greater(t, largeMax, smallMax, "pod with larger max should score higher")
 	})
 
@@ -221,10 +223,20 @@ func TestCalculateRangeScoreFallback(t *testing.T) {
 		closeMin := calculateRangeScore(50, contextRange{min: 100, max: 1024})
 
 		assert.Greater(t, farMin, 0.0)
-		assert.LessOrEqual(t, farMin, 0.3)
+		assert.Less(t, farMin, 0.3)
 		assert.Greater(t, closeMin, 0.0)
-		assert.LessOrEqual(t, closeMin, 0.3)
+		assert.Less(t, closeMin, 0.3)
 		assert.Greater(t, closeMin, farMin, "pod with smaller min should score higher")
+	})
+
+	t.Run("in-range always beats out-of-range for wide ranges", func(t *testing.T) {
+		// Regression: wide ranges (e.g. 0-32000) at the top of the range used to score below 0.3.
+		wideInRange := calculateRangeScore(14999, contextRange{min: 0, max: 15000})
+		outOfRange := calculateRangeScore(14999, contextRange{min: 15001, max: 20000})
+
+		assert.Greater(t, wideInRange, 0.3, "in-range score must be strictly above 0.3")
+		assert.Less(t, outOfRange, 0.3, "out-of-range score must be strictly below 0.3")
+		assert.Greater(t, wideInRange, outOfRange, "in-range must beat out-of-range")
 	})
 }
 
@@ -244,7 +256,7 @@ func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
 			map[string]string{DefaultContextLengthLabel: fmt.Sprintf("%d-%d", tokenCount+100, tokenCount+200)}),
 	}
 
-	params := &contextLengthAwareParams{
+	params := &contextLengthAwareParameters{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: true,
 	}
@@ -291,7 +303,7 @@ func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
 			map[string]string{DefaultContextLengthLabel: "100-200"}),
 	}
 
-	params := &contextLengthAwareParams{
+	params := &contextLengthAwareParameters{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: true,
 	}

@@ -578,9 +578,10 @@ schedulingProfiles:
 
 #### ContextLengthAware
 
-A multi-purpose plugin that can operate as both a **Filter** and a **Scorer** to route inference requests
-based on context length (token count). This enables optimized resource allocation by directing requests to
-pods configured for specific context length ranges.
+A **Scorer** plugin that routes inference requests based on context length (token count), with optional
+**filtering** gated behind `enableFiltering`. Scoring is always applied; filtering is off by default.
+This enables optimized resource allocation by directing requests to pods configured for specific
+context length ranges.
 
 **Use Cases:**
 - Route short prompts to pods with smaller GPU memory
@@ -589,11 +590,11 @@ pods configured for specific context length ranges.
 - Support heterogeneous deployments with different GPU configurations
 
 The plugin scores all pods based on how well their ranges match the request:
-- **In-range match (0.5–1.0):** Higher scores for tighter/more specific ranges (specialized pods), lower scores for very wide ranges (generalist pods)
-- **Out-of-range fallback (0.0–0.3):** When no range matches, pods are ranked by proximity to the request. For example, a 9000-token request prefers a pod with `max=8192` over one with `max=2048`. Fallback scores never exceed 0.3, so an in-range match always wins.
-- **Neutral score (0.5):** Pods without the context length label
+- **In-range match (0.3–1.0]:** Higher scores for tighter/more specific ranges (specialized pods), lower scores for very wide ranges (generalist pods). In-range scores are always strictly above 0.3, guaranteeing they beat any out-of-range fallback.
+- **Out-of-range fallback [0.0–0.3):** When no range matches, pods are ranked by proximity to the request. For example, a 9000-token request prefers a pod with `max=8192` over one with `max=2048`.
+- **Neutral score (0.5):** Pods without the context length label.
 
-If `enableFiltering` is set to true, the plugin also filters out pods that do not match the request's context length.
+When `enableFiltering` is set to true, the plugin also filters out pods whose range does not contain the request's context length.
 
 **Configuration:**
 
@@ -620,13 +621,13 @@ When the tokenizer scorer is not configured, the plugin falls back to character-
 
 **Label Format:**
 
-Each pod should be labeled with a single context length range using the format `"min-max"`, where _min_ and _max_ are both positive integers:
+Pods should be labeled with context length ranges using the format `"min-max"`, where _min_ and _max_ are both positive integers:
 
 ```yaml
 llm-d.ai/context-length-range: "0-2048"
 ```
 
-**Example - Scorer with Precise Tokenization:**
+**Example Configuration - Scorer:**
 
 ```yaml
 plugins:
@@ -652,7 +653,7 @@ schedulingProfiles:
       - pluginRef: max-score-picker
 ```
 
-**Example - Filter with Estimation Fallback (no tokenizer):**
+**Example Configuration - Scorer with Filtering Enabled:**
 
 ```yaml
 plugins:
