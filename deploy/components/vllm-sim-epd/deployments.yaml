@@ -26,7 +26,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm-sim-encoder
+  name: vllm-sim-e
   labels:
     app: ${POOL_NAME}
 spec:
@@ -57,13 +57,13 @@ spec:
           containerPort: 8082
         livenessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8082
           initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8082
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -159,13 +159,13 @@ spec:
           containerPort: 8082
         livenessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8082
           initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8082
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -259,13 +259,13 @@ spec:
           containerPort: 8082
         livenessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8082
           initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8082
           initialDelaySeconds: 5
           periodSeconds: 5

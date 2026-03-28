@@ -27,7 +27,6 @@ spec:
             - "--block-size=16"
             - "--zmq-endpoint=tcp://e2e-epp.default.svc.cluster.local:5557"
             - "--event-batch-size=16"
-            - "--tokenizers-cache-dir=/tokenizer-cache"
           ports:
             - name: http
               containerPort: 8000

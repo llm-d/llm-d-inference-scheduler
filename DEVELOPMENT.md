@@ -141,7 +141,7 @@ kubectl --context kind-llm-d-inference-scheduler-dev get service inference-gatew
 You can now make requests matching the IP:port of one of the access mode above:
 
 ```bash
-curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 By default the created inference gateway, can be accessed on port 30080. This can
@@ -170,6 +170,41 @@ multimodal embedding, a prefill pod runs the prefill stage, and decode pods run 
 
 ```bash
 EPD_ENABLED=true make env-dev-kind
+```
+
+To test the EPD setup, first port-forward the gateway:
+
+```bash
+kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
+```
+
+Then send a multimodal request (required to trigger the encode stage):
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  --max-time 1000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"
+            }
+          },
+          {
+            "type": "text",
+            "text": "What is in this image?"
+          }
+        ]
+      }
+    ],
+    "max_tokens": 100
+  }'
 ```
 
 For a detailed description of disaggregation modes and pod role labels, see [docs/disaggregation.md](docs/disaggregation.md).
@@ -244,7 +279,7 @@ Then do a rollout of the EPP `Deployment` so that your recent changes are
 reflected:
 
 ```bash
-kubectl rollout restart deployment food-review-endpoint-picker
+kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
 ```
 
 ## Kubernetes Development Environment

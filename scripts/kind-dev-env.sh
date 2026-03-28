@@ -36,8 +36,12 @@ export EPP_TAG="${EPP_TAG:-dev}"
 EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
-# Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
+# Set the model name to deploy (EPD defaults to a multimodal model)
+if [ -z "${MODEL_NAME}" ] && [ "${EPD_ENABLED}" == "true" ]; then
+  export MODEL_NAME="Qwen/Qwen3-VL-2B-Instruct"
+else
+  export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
+fi
 # Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
 export MODEL_FAMILY="${MODEL_NAME%%/*}"
 # Extract model ID (e.g., "Llama-3.1-8B-Instruct")
@@ -79,6 +83,11 @@ export PROM_ENABLED="${PROM_ENABLED:-false}"
 
 # By default we are not setting up for EPD (Encode/Prefill/Decode)
 export EPD_ENABLED="\"${EPD_ENABLED:-false}\""
+
+if [ "${PD_ENABLED}" == "\"true\"" ] && [ "${EPD_ENABLED}" == "\"true\"" ]; then
+  echo "Error: PD_ENABLED and EPD_ENABLED cannot both be set to true." >&2
+  exit 1
+fi
 
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
@@ -235,7 +244,7 @@ set -x
 
 # Hotfix for https://github.com/kubernetes-sigs/kind/issues/3880
 CONTAINER_NAME="${CLUSTER_NAME}-control-plane"
-${CONTAINER_RUNTIME} exec -it ${CONTAINER_NAME} /bin/bash -c "sysctl net.ipv4.conf.all.arp_ignore=0"
+${CONTAINER_RUNTIME} exec ${CONTAINER_NAME} /bin/bash -c "sysctl net.ipv4.conf.all.arp_ignore=0"
 
 # Wait for all pods to be ready
 kubectl --context ${KUBE_CONTEXT} -n kube-system wait --for=condition=Ready --all pods --timeout=300s
