@@ -49,7 +49,7 @@ const (
 
 type kvCacheIndexer interface {
 	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
-	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
 	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
 }
@@ -633,7 +633,7 @@ func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
 		for i, msg := range request.Body.ChatCompletions.Messages {
 			conversations[i] = types.Conversation{
 				Role:    msg.Role,
-				Content: msg.Content.Raw,
+				Content: types.Content{Raw: msg.Content.Raw},
 			}
 		}
 
@@ -693,7 +693,14 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *sc
 		cycleState, preparedata.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
 		traceLogger.Info("tokens found in CycleState, skipping tokenization")
 
-		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tp.TokenIDs, request.TargetModel, nil)
+		var extraFeatures []*kvblock.BlockExtraFeatures
+		if tp.MMFeatures != nil {
+			extraFeatures = kvblock.ComputeBlockExtraFeatures(
+				tp.MMFeatures.MMHashes, tp.MMFeatures.MMPlaceholders,
+				s.blockSizeTokens, len(tp.TokenIDs))
+		}
+
+		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tp.TokenIDs, request.TargetModel, nil, extraFeatures)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
 		}
@@ -712,7 +719,7 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *sc
 		for i, msg := range request.Body.ChatCompletions.Messages {
 			conversations[i] = types.Conversation{
 				Role:    msg.Role,
-				Content: msg.Content.Raw,
+				Content: types.Content{Raw: msg.Content.Raw},
 			}
 		}
 

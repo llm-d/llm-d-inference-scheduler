@@ -47,7 +47,7 @@ func (p *TokenizerPlugin) PrepareRequestData(ctx context.Context, request *sched
 		return nil
 	}
 
-	tokenIDs := p.tokenize(ctx, request)
+	tokenIDs, _ := p.tokenize(ctx, request)
 	if tokenIDs == nil {
 		return nil
 	}
