@@ -228,19 +228,9 @@ func TestCalculateRangeScoreFallback(t *testing.T) {
 	})
 }
 
-func TestContextLengthAwareConsumes(t *testing.T) {
-	params := &contextLengthAwareParams{Label: DefaultContextLengthLabel}
-	plugin := NewContextLengthAware("test-consumes", params)
+// TokenizedPrompt tests — plugin reads tokens from CycleState (written by the tokenizer scorer)
 
-	consumed := plugin.Consumes()
-	require.NotNil(t, consumed)
-	assert.Contains(t, consumed, preparedata.TokenizedPromptKey)
-	assert.IsType(t, scheduling.TokenizedPrompt{}, consumed[preparedata.TokenizedPromptKey])
-}
-
-// TokenizedPrompt tests — plugin consumes tokens from the tokenizer PrepareData plugin
-
-func TestContextLengthAwareWithTokenizedPrompt(t *testing.T) {
+func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	tokenCount := 42
@@ -260,18 +250,20 @@ func TestContextLengthAwareWithTokenizedPrompt(t *testing.T) {
 	}
 	plugin := NewContextLengthAware("test-tokenized", params)
 
-	// Simulate tokenizer PrepareData plugin having set TokenizedPrompt
+	// Simulate tokenizer scorer having written TokenizedPromptState to CycleState
 	tokenIDs := make([]uint32, tokenCount)
 	for i := range tokenIDs {
 		tokenIDs[i] = uint32(i + 1)
 	}
 
+	cycleState := scheduling.NewCycleState()
+	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+		TokenIDs: tokenIDs,
+	})
+
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-request",
 		TargetModel: "test-model",
-		TokenizedPrompt: &scheduling.TokenizedPrompt{
-			TokenIDs: tokenIDs,
-		},
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
 				Prompt: "some prompt text",
@@ -279,7 +271,7 @@ func TestContextLengthAwareWithTokenizedPrompt(t *testing.T) {
 		},
 	}
 
-	filteredEndpoints := plugin.Filter(ctx, nil, request, endpoints)
+	filteredEndpoints := plugin.Filter(ctx, cycleState, request, endpoints)
 	assert.Equal(t, 1, len(filteredEndpoints))
 	assert.Equal(t, "tight-match", filteredEndpoints[0].GetMetadata().NamespacedName.Name)
 }

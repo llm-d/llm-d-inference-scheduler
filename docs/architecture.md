@@ -606,15 +606,17 @@ If `enableFiltering` is set to true, the plugin also filters out pods that do no
 
 **Token Counting:**
 
-This plugin consumes `TokenizedPrompt` from the request, which is produced by the `tokenizer`
-PrepareData plugin. When the tokenizer plugin is configured, the context-length-aware plugin uses
-the exact token count (`len(TokenizedPrompt.TokenIDs)`) for routing decisions. This avoids
-double-tokenization with other plugins that also consume tokens (e.g., `precise-prefix-cache-scorer`).
+This plugin reads tokenized prompt data from CycleState, as written by the `tokenizer` plugin.
+When the tokenizer plugin is configured in the same scheduling profile, the context-length-aware plugin
+uses the exact token count for routing decisions. This avoids double-tokenization with other plugins
+that also consume tokens (e.g., `precise-prefix-cache-scorer`).
 
-When the tokenizer PrepareData plugin is not configured, the plugin falls back to character-based
-estimation (characters × 0.25).
+When the tokenizer scorer is not configured, the plugin falls back to character-based estimation
+(characters × 0.25).
 
-**Note:** The `prepareDataPlugins` feature gate must be enabled for precise tokenization.
+> [!NOTE]
+> The `tokenizer` plugin must appear **before** `context-length-aware` in the scheduling profile
+> so that CycleState is populated before scoring runs.
 
 **Label Format:**
 
@@ -627,8 +629,6 @@ llm-d.ai/context-length-range: "0-2048"
 **Example - Scorer with Precise Tokenization:**
 
 ```yaml
-featureGates:
-- prepareDataPlugins
 plugins:
   - type: tokenizer
     parameters:
@@ -643,6 +643,8 @@ plugins:
 schedulingProfiles:
   - name: default
     plugins:
+      - pluginRef: tokenizer
+        weight: 1
       - pluginRef: context-length-aware
         weight: 3
       - pluginRef: load-aware-scorer

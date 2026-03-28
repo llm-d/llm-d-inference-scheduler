@@ -47,9 +47,8 @@ type contextRange struct {
 	max int
 }
 
-var _ scheduling.Filter = &ContextLengthAware{}     // validate interface conformance
-var _ scheduling.Scorer = &ContextLengthAware{}     // validate interface conformance
-var _ plugin.ConsumerPlugin = &ContextLengthAware{} // validate interface conformance
+var _ scheduling.Filter = &ContextLengthAware{} // validate interface conformance
+var _ scheduling.Scorer = &ContextLengthAware{} // validate interface conformance
 
 // ContextLengthAwareFactory defines the factory function for the ContextLengthAware plugin.
 func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
@@ -86,9 +85,9 @@ func NewContextLengthAware(name string, params *contextLengthAwareParams) *Conte
 // If filtering is enabled, endpoints that don't support the request's context length are filtered out.
 // Additionally, it scores endpoints based on how well their context length ranges match the request.
 //
-// For precise token counting, this plugin consumes TokenizedPrompt from the request, which is
-// produced by the tokenizer PrepareData plugin. When TokenizedPrompt is not available (tokenizer
-// plugin not configured), it falls back to character-based estimation.
+// For precise token counting, this plugin reads TokenizedPromptState from CycleState, which is
+// written by the tokenizer scorer plugin. When tokens are not available (tokenizer plugin not
+// configured), it falls back to character-based estimation.
 type ContextLengthAware struct {
 	// typedName defines the plugin typed name
 	typedName plugin.TypedName
@@ -111,13 +110,13 @@ func (p *ContextLengthAware) WithName(name string) *ContextLengthAware {
 
 // Filter filters out endpoints that don't have a context length range matching the request.
 // This is only active when enableFiltering is true.
-func (p *ContextLengthAware) Filter(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	if !p.enableFiltering {
 		return endpoints // pass through if not in filter mode
 	}
 
 	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware.Filter")
-	contextLength, usedTokenizer := p.getContextLength(ctx, request)
+	contextLength, usedTokenizer := p.getContextLength(ctx, cycleState, request)
 	logger.V(logutil.TRACE).Info("Filtering endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
 
 	var filteredEndpoints []scheduling.Endpoint
@@ -153,9 +152,9 @@ func (p *ContextLengthAware) Filter(ctx context.Context, _ *scheduling.CycleStat
 
 // Score scores endpoints based on how well their context length ranges match the request.
 // Endpoints with tighter/more specific ranges matching the request get higher scores.
-func (p *ContextLengthAware) Score(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+func (p *ContextLengthAware) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware.Score")
-	contextLength, usedTokenizer := p.getContextLength(ctx, request)
+	contextLength, usedTokenizer := p.getContextLength(ctx, cycleState, request)
 	logger.V(logutil.TRACE).Info("Scoring endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
 
 	scoredEndpoints := make(map[scheduling.Endpoint]float64)
@@ -194,28 +193,25 @@ func (p *ContextLengthAware) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
-// Consumes declares that this plugin reads TokenizedPrompt from the request,
-// as produced by the tokenizer PrepareData plugin.
-func (p *ContextLengthAware) Consumes() map[string]any {
-	return map[string]any{preparedata.TokenizedPromptKey: scheduling.TokenizedPrompt{}}
-}
-
 // getContextLength returns the context length (token count) for the request.
-// It uses the pre-computed TokenizedPrompt (set by the tokenizer PrepareData plugin) if available,
-// otherwise falls back to character-based estimation.
+// It reads tokenized data from CycleState (written by the tokenizer scorer plugin).
+// When tokens are not available, it falls back to character-based estimation.
 // Returns the token count and a boolean indicating whether precise tokenization was used.
-func (p *ContextLengthAware) getContextLength(ctx context.Context, request *scheduling.LLMRequest) (int, bool) {
+func (p *ContextLengthAware) getContextLength(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (int, bool) {
 	if request == nil || request.Body == nil {
 		return 0, false
 	}
 
-	// Use pre-computed tokens from the tokenizer PrepareData plugin
-	if request.TokenizedPrompt != nil && len(request.TokenizedPrompt.TokenIDs) > 0 {
-		return len(request.TokenizedPrompt.TokenIDs), true
+	// Read tokenized prompt from CycleState, written by the tokenizer scorer plugin.
+	if cycleState != nil {
+		if tp, err := scheduling.ReadCycleStateKey[*preparedata.TokenizedPromptState](
+			cycleState, preparedata.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
+			return len(tp.TokenIDs), true
+		}
 	}
 
 	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware")
-	logger.Info("TokenizedPrompt not available, falling back to character-based estimation")
+	logger.Info("TokenizedPrompt not available in CycleState, falling back to character-based estimation")
 
 	// Fall back to character-based estimation
 	return estimateContextLength(request), false
