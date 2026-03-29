@@ -1,5 +1,5 @@
 # Go build stage
-FROM quay.io/projectquay/golang:1.25 AS go-builder
+FROM --platform=${BUILDPLATFORM} quay.io/projectquay/golang:1.25 AS go-builder
 
 ARG TARGETOS
 ARG TARGETARCH
