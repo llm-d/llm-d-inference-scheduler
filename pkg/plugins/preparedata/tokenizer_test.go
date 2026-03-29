@@ -124,3 +124,101 @@ func TestChatCompletionsToRenderChatRequest(t *testing.T) {
 	assert.False(t, result.ContinueFinalMessage)
 	assert.True(t, result.ReturnAssistantTokensMask)
 }
+
+func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []scheduling.Message
+		wantConv []tokenizerTypes.Conversation
+	}{
+		{
+			name: "single image with text",
+			messages: []scheduling.Message{
+				{Role: "user", Content: scheduling.Content{
+					Structured: []scheduling.ContentBlock{
+						{Type: "text", Text: "Describe this image"},
+						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,abc123"}},
+					},
+				}},
+			},
+			wantConv: []tokenizerTypes.Conversation{
+				{Role: "user", Content: tokenizerTypes.Content{
+					Structured: []tokenizerTypes.ContentBlock{
+						{Type: "text", Text: "Describe this image"},
+						{Type: "image_url", ImageURL: tokenizerTypes.ImageBlock{URL: "data:image/png;base64,abc123"}},
+					},
+				}},
+			},
+		},
+		{
+			name: "system text message plus multimodal user message",
+			messages: []scheduling.Message{
+				{Role: "system", Content: scheduling.Content{Raw: "You are a visual analyst."}},
+				{Role: "user", Content: scheduling.Content{
+					Structured: []scheduling.ContentBlock{
+						{Type: "text", Text: "Compare these two images"},
+						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,img1"}},
+						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,img2"}},
+					},
+				}},
+			},
+			wantConv: []tokenizerTypes.Conversation{
+				{Role: "system", Content: tokenizerTypes.Content{Raw: "You are a visual analyst."}},
+				{Role: "user", Content: tokenizerTypes.Content{
+					Structured: []tokenizerTypes.ContentBlock{
+						{Type: "text", Text: "Compare these two images"},
+						{Type: "image_url", ImageURL: tokenizerTypes.ImageBlock{URL: "data:image/png;base64,img1"}},
+						{Type: "image_url", ImageURL: tokenizerTypes.ImageBlock{URL: "data:image/png;base64,img2"}},
+					},
+				}},
+			},
+		},
+		{
+			name: "multi-turn with image in history",
+			messages: []scheduling.Message{
+				{Role: "user", Content: scheduling.Content{
+					Structured: []scheduling.ContentBlock{
+						{Type: "text", Text: "What is in this image?"},
+						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "https://example.com/img.jpg"}},
+					},
+				}},
+				{Role: "assistant", Content: scheduling.Content{Raw: "I see a dog."}},
+				{Role: "user", Content: scheduling.Content{Raw: "What breed is it?"}},
+			},
+			wantConv: []tokenizerTypes.Conversation{
+				{Role: "user", Content: tokenizerTypes.Content{
+					Structured: []tokenizerTypes.ContentBlock{
+						{Type: "text", Text: "What is in this image?"},
+						{Type: "image_url", ImageURL: tokenizerTypes.ImageBlock{URL: "https://example.com/img.jpg"}},
+					},
+				}},
+				{Role: "assistant", Content: tokenizerTypes.Content{Raw: "I see a dog."}},
+				{Role: "user", Content: tokenizerTypes.Content{Raw: "What breed is it?"}},
+			},
+		},
+		{
+			name: "text-only messages produce no Structured field",
+			messages: []scheduling.Message{
+				{Role: "user", Content: scheduling.Content{Raw: "Hello!"}},
+			},
+			wantConv: []tokenizerTypes.Conversation{
+				{Role: "user", Content: tokenizerTypes.Content{Raw: "Hello!"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chat := &scheduling.ChatCompletionsRequest{Messages: tt.messages}
+			result := chatCompletionsToRenderChatRequest(chat)
+			require.Len(t, result.Conversation, len(tt.wantConv))
+			for i, want := range tt.wantConv {
+				got := result.Conversation[i]
+				assert.Equal(t, want.Role, got.Role)
+				assert.Equal(t, want.Content.Raw, got.Content.Raw)
+				assert.Equal(t, want.Content.Structured, got.Content.Structured,
+					"message %d: Structured content mismatch", i)
+			}
+		})
+	}
+}
