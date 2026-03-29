@@ -40,6 +40,39 @@ spec:
         app: ${POOL_NAME}
         llm-d.ai/role: encode
     spec:
+      initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       containers:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
@@ -72,12 +105,17 @@ spec:
         volumeMounts:
         - mountPath: /shared-ec-cache
           name: ec-cache
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       volumes:
       - name: ec-cache
         persistentVolumeClaim:
           claimName: ec-cache-pvc
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -97,6 +135,38 @@ spec:
         llm-d.ai/role: prefill-decode
     spec:
       initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -144,9 +214,14 @@ spec:
         volumeMounts:
         - mountPath: /shared-ec-cache
           name: ec-cache
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       volumes:
       - name: ec-cache
         persistentVolumeClaim:
           claimName: ec-cache-pvc
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}

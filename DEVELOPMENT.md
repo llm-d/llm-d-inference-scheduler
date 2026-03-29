@@ -155,30 +155,39 @@ KIND_GATEWAY_HOST_PORT=<selected-port> make env-dev-kind
 **Where:** &lt;selected-port&gt; is the port on your local machine you want to use to
 access the inference gatyeway.
 
-### Prefill/Decode Disaggregation
+### Inference Disaggregation Modes
 
-To deploy with Prefill/Decode (P/D) disaggregation, where prefill and decode run on separate pods:
+You can deploy the inference stack in disaggregated modes to optimize performance by separating specific stages of the LLM pipeline into dedicated pods.
+
+#### 1. Prefill/Decode (P/D) Disaggregation
+
+In this mode, Prefill and Decode run on independent deployments.
+
+To deploy a P/D-enabled Kind environment:
 
 ```bash
 PD_ENABLED=true make env-dev-kind
 ```
 
-### Encode/Prefill/Decode Disaggregation
+#### 2. Encode/Prefill/Decode (E/P/D) Disaggregation
 
-To deploy with Encode/Prefill/Decode (E/P/D) disaggregation, where a dedicated encoder pod handles
-multimodal embedding, a prefill pod runs the prefill stage, and decode pods run inference:
+This mode is designed for multimodal workloads. It introduces a dedicated Encoder pod to process embeddings (e.g., images or video), alongside specialized deployments for the Prefill and Decode stages.
+
+To deploy an E/P/D-enabled Kind environment:
 
 ```bash
 EPD_ENABLED=true make env-dev-kind
 ```
 
-To test the EPD setup, first port-forward the gateway:
+##### Testing the E/P/D Setup
+
+Port-forward the Gateway:
 
 ```bash
 kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
 ```
 
-Then send a multimodal request (required to trigger the encode stage):
+Send a Multimodal Request — trigger the full E/P/D pipeline by submitting an image-based chat completion request:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -190,16 +199,8 @@ curl http://localhost:8080/v1/chat/completions \
       {
         "role": "user",
         "content": [
-          {
-            "type": "image_url",
-            "image_url": {
-              "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"
-            }
-          },
-          {
-            "type": "text",
-            "text": "What is in this image?"
-          }
+          { "type": "image_url", "image_url": { "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg" } },
+          { "type": "text", "text": "What is in this image?" }
         ]
       }
     ],
@@ -207,7 +208,7 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-For a detailed description of disaggregation modes and pod role labels, see [docs/disaggregation.md](docs/disaggregation.md).
+For technical details on the advanced disaggregation strategies, refer to [docs/disaggregation.md](docs/disaggregation.md).
 
 ### Prometheus Monitoring
 
