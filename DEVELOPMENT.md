@@ -141,7 +141,7 @@ kubectl --context kind-llm-d-inference-scheduler-dev get service inference-gatew
 You can now make requests matching the IP:port of one of the access mode above:
 
 ```bash
-curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
 By default the created inference gateway, can be accessed on port 30080. This can
