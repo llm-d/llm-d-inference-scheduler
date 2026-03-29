@@ -631,7 +631,7 @@ func TestRenderChat_MultimodalContent_UDS(t *testing.T) {
 				Role: "user",
 				Content: types.Content{
 					Structured: []types.ContentBlock{
-						{Type: "image_url", ImageURL: types.ImageBlock{URL: "https://example.com/cat.jpg"}},
+						{Type: "image_url", ImageURL: types.ImageBlock{URL: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg=="}},
 						{Type: "text", Text: "What do you see in this image? Please describe it in detail."},
 					},
 				},
@@ -748,7 +748,7 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 				Role: "user",
 				Content: types.Content{
 					Structured: []types.ContentBlock{
-						{Type: "image_url", ImageURL: types.ImageBlock{URL: "https://example.com/photo.png"}},
+						{Type: "image_url", ImageURL: types.ImageBlock{URL: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg=="}},
 						{Type: "text", Text: "Describe the contents of this photograph."},
 					},
 				},
