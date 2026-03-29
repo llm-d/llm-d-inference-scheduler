@@ -65,9 +65,11 @@ var _ = Describe("Reverse Proxy", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				cfg := Config{
+					Port:          "0",
+					DecoderURL:    targetURL,
 					SecureServing: secureProxy,
 				}
-				proxy := NewProxy("0", targetURL, cfg) // port 0 to automatically choose one that's available.
+				proxy := NewProxy(cfg)
 
 				ctx, cancelFn := context.WithCancel(ctx)
 				stoppedCh := make(chan struct{})
@@ -75,8 +77,8 @@ var _ = Describe("Reverse Proxy", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
-					err := proxy.Start(ctx, validator)
+					proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx)
 					Expect(err).ToNot(HaveOccurred())
 					stoppedCh <- struct{}{}
 				}()
@@ -159,8 +161,8 @@ var _ = Describe("Reverse Proxy", func() {
 			var proxy *Server
 
 			BeforeEach(func() {
-				cfg := Config{KVConnector: KVConnectorNIXLV2}
-				proxy = NewProxy("0", decodeURL, cfg) // port 0 to automatically choose one that's available.
+				cfg := Config{Port: "0", DecoderURL: decodeURL, KVConnector: KVConnectorNIXLV2}
+				proxy = NewProxy(cfg)
 
 				decodeHandler.Connector = KVConnectorNIXLV2
 				prefillHandler.Connector = KVConnectorNIXLV2
@@ -174,8 +176,8 @@ var _ = Describe("Reverse Proxy", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
-					err := proxy.Start(ctx, validator)
+					proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx)
 					Expect(err).ToNot(HaveOccurred())
 					stoppedCh <- struct{}{}
 				}()
@@ -247,8 +249,8 @@ var _ = Describe("Reverse Proxy", func() {
 				go func() {
 					defer GinkgoRecover()
 
-					validator := &AllowlistValidator{enabled: false}
-					err := proxy.Start(ctx, validator)
+					proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+					err := proxy.Start(ctx)
 					Expect(err).ToNot(HaveOccurred())
 					stoppedCh <- struct{}{}
 				}()

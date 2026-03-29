@@ -152,7 +152,7 @@ func (s *Server) sendSGLangConcurrentRequests(w http.ResponseWriter, r *http.Req
 	decodeDuration := time.Since(decodeStart)
 	decodeSpan.SetAttributes(
 		attribute.Float64("llm_d.pd_proxy.decode.duration_ms", float64(decodeDuration.Milliseconds())),
-		attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host),
+		attribute.String("llm_d.pd_proxy.decode.target", s.config.DecoderURL.Host),
 	)
 
 	// Calculate end-to-end P/D timing metrics for concurrent P/D.

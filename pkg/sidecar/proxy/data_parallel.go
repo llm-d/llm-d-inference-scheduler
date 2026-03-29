@@ -37,17 +37,16 @@ func (s *Server) dataParallelHandler(w http.ResponseWriter, r *http.Request) boo
 
 func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) error {
 	podIP := os.Getenv("POD_IP")
-	basePort, err := strconv.Atoi(s.port)
+	basePort, err := strconv.Atoi(s.config.Port)
 	if err != nil {
 		return err
 	}
-	baseDecoderPort, err := strconv.Atoi(s.decoderURL.Port())
+	baseDecoderPort, err := strconv.Atoi(s.config.DecoderURL.Port())
 	if err != nil {
 		return err
 	}
-	decoderScheme := s.decoderURL.Scheme // capture before goroutines launch
-
-	s.dataParallelProxies[net.JoinHostPort(podIP, s.port)] = s.decoderProxy
+	decoderScheme := s.config.DecoderURL.Scheme // capture before goroutines launch
+	s.dataParallelProxies[net.JoinHostPort(podIP, s.config.Port)] = s.decoderProxy
 
 	// Fill in map of proxies, thus avoiding locks
 	for idx := range s.config.DataParallelSize - 1 {
@@ -58,24 +57,25 @@ func (s *Server) startDataParallel(ctx context.Context, grp *errgroup.Group) err
 		if err != nil {
 			return err
 		}
-		handler := s.createDecoderProxyHandler(decoderURL, s.config.DecoderInsecureSkipVerify)
+		handler := s.createDecoderProxyHandler(decoderURL, s.config.InsecureSkipVerifyForDecoder)
 		s.dataParallelProxies[hostPort] = handler
 	}
 
 	for idx := range s.config.DataParallelSize - 1 {
-		grp.Go(func() error {
-			rankPort := strconv.Itoa(basePort + idx + 1)
-			decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
-			decoderURL, err := url.Parse(decoderScheme + "://localhost:" + decoderPort)
-			if err != nil {
-				return err
-			}
+		rankPort := strconv.Itoa(basePort + idx + 1)
+		decoderPort := strconv.Itoa(baseDecoderPort + idx + 1)
+		decoderURL, err := url.Parse(decoderScheme + "://localhost:" + decoderPort)
+		if err != nil {
+			return err
+		}
 
-			clone := s.Clone()
+		clone := s.Clone()
+		clone.config.Port = rankPort
+		clone.config.DecoderURL = decoderURL
+		clone.forwardDataParallel = false
+
+		grp.Go(func() error {
 			clone.logger = log.FromContext(ctx).WithName("proxy server on port " + rankPort)
-			clone.port = rankPort
-			clone.decoderURL = decoderURL
-			clone.forwardDataParallel = false
 			// Configure handlers
 			clone.handler = clone.createRoutes()
 			clone.setKVConnector()

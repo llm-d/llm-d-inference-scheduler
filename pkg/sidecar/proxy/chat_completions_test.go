@@ -113,7 +113,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 
 		for i := 0; i < maxAttempts; i++ {
 			t.Run(fmt.Sprintf("%s_%d", tt.name, i), func(t *testing.T) {
-				s := NewProxy("8000", nil, Config{EnablePrefillerSampling: tt.sampling})
+				s := NewProxy(Config{Port: "8000", EnablePrefillerSampling: tt.sampling})
 				s.allowlistValidator = &AllowlistValidator{}
 				// return a predictable sequence of values
 				s.prefillSamplerFn = func(n int) int { return i % n }

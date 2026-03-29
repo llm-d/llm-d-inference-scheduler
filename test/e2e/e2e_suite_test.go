@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +62,7 @@ var (
 
 	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppImage          = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
-	vllmSimImage      = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:latest", ginkgo.GinkgoLogr)
+	vllmSimImage      = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:v0.8.1", ginkgo.GinkgoLogr)
 	sideCarImage      = env.GetEnvString("SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:dev", ginkgo.GinkgoLogr)
 	udsTokenizerImage = env.GetEnvString("UDS_TOKENIZER_IMAGE", "ghcr.io/llm-d/llm-d-uds-tokenizer:dev", ginkgo.GinkgoLogr)
 	// nsName is the namespace in which the K8S objects will be created
@@ -176,28 +175,10 @@ func setupK8sCluster() {
 }
 
 func kindLoadImage(image string) {
-	tempDir := ginkgo.GinkgoT().TempDir()
-	target := tempDir + "/container.tar"
-
 	ginkgo.By(fmt.Sprintf("Loading %s into the cluster %s using %s", image, kindClusterName, containerRuntime))
 
-	_, err := exec.LookPath(containerRuntime)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", containerRuntime)
-
-	saveArgs := []string{"save", "--output", target}
-	if containerRuntime == "docker" {
-		// The platform flag is required for docker save to work but it is an unsupported flag for podman
-		saveArgs = append(saveArgs, "--platform", "linux/"+runtime.GOARCH)
-	}
-	saveArgs = append(saveArgs, image)
-
-	command := exec.Command(containerRuntime, saveArgs...)
+	command := exec.Command("kind", "--name", kindClusterName, "load", "docker-image", image)
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
-
-	command = exec.Command("kind", "--name", kindClusterName, "load", "image-archive", target)
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 }
@@ -285,11 +266,11 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	}
 
 	infPoolYaml := testutils.ReadYaml(inferExtManifest)
-	var b strings.Builder
+	var targetPortsBuilder strings.Builder
 	for idx := range numTargetPorts {
-		fmt.Fprintf(&b, "\n  - number: %d", 8000+idx)
+		fmt.Fprintf(&targetPortsBuilder, "\n  - number: %d", 8000+idx)
 	}
-	targetPorts := b.String()
+	targetPorts := targetPortsBuilder.String()
 	infPoolYaml = substituteMany(infPoolYaml,
 		map[string]string{
 			"${POOL_NAME}":    poolName,

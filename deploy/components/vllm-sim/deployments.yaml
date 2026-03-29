@@ -15,6 +15,9 @@ spec:
         app: ${POOL_NAME}
     spec:
       initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
       - name: uds-tokenizer
         image: ${UDS_TOKENIZER_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -43,7 +46,7 @@ spec:
           periodSeconds: 5
         volumeMounts:
         - name: uds-socket
-          mountPath: /tmp/tokenizer
+          mountPath: /tmp/tokenizer      
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent

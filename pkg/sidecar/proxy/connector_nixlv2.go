@@ -229,8 +229,8 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.data_parallel", dataParallelUsed))
 
 	if !dataParallelUsed {
-		s.logger.V(4).Info("sending request to decoder", "to", s.decoderURL.Host)
-		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.decoderURL.Host))
+		s.logger.V(4).Info("sending request to decoder", "to", s.config.DecoderURL.Host)
+		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.config.DecoderURL.Host))
 		s.decoderProxy.ServeHTTP(w, dreq)
 	}
 

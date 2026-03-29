@@ -256,9 +256,13 @@ func TestDisaggProfileHandlerFactory_DeprecatedFlatParams(t *testing.T) {
 			"encodeProfile":            "my-encode",
 			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,
 		}, false},
+		{"nested format with unknown extra fields is accepted", map[string]any{
+			"profiles":     map[string]any{"decode": "decode"},
+			"unknownField": "ignored",
+		}, false},
 		{"mixing deprecated and nested fields is an error", map[string]any{
 			"decodeProfile": "my-decode",
-			"profiles":      map[string]any{"decode": "my-decode"},
+			"profiles":      map[string]any{"decode": "other-decode"},
 		}, true},
 		{"mixing deprecated decider and nested deciders is an error", map[string]any{
 			"prefillDeciderPluginName": PrefixBasedPDDeciderPluginType,

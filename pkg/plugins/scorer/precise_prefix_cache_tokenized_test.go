@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -98,15 +99,18 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 		},
 	}
 
+	// Write tokenized prompt to CycleState (as the tokenizer scorer would).
+	cycleState := scheduling.NewCycleState()
+	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+		TokenIDs: tokenIDs,
+	})
+
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-tokenized",
 		TargetModel: "test-model",
-		TokenizedPrompt: &scheduling.TokenizedPrompt{
-			TokenIDs: tokenIDs,
-		},
 	}
 
-	scorer.Score(ctx, scheduling.NewCycleState(), request, testEndpoints)
+	scorer.Score(ctx, cycleState, request, testEndpoints)
 
 	require.Equal(t, tokenIDs, capturedTokens)
 	require.Equal(t, "test-model", capturedModel)
@@ -131,17 +135,20 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 		},
 	}
 
+	// Write empty token IDs to CycleState.
+	cycleState := scheduling.NewCycleState()
+	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+		TokenIDs: []uint32{},
+	})
+
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-skip-empty",
 		TargetModel: "test-model",
-		TokenizedPrompt: &scheduling.TokenizedPrompt{
-			TokenIDs: []uint32{},
-		},
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
 		},
 	}
 
-	scorer.Score(ctx, scheduling.NewCycleState(), request, testEndpoints)
+	scorer.Score(ctx, cycleState, request, testEndpoints)
 	assert.False(t, fromTokensCalled, "ScoreTokens should not be called with empty TokenIDs")
 }

@@ -25,6 +25,7 @@ import (
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
@@ -472,7 +473,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 	} else {
 		// Fallback: compute scores directly (backward compatible path).
 		var scoreErr error
-		scores, scoreErr = s.getScores(ctx, request)
+		scores, scoreErr = s.getScores(ctx, cycleState, request)
 		if scoreErr != nil {
 			logger.Error(scoreErr, "Failed to get endpoint scores")
 			span.SetStatus(codes.Error, scoreErr.Error())
@@ -676,11 +677,10 @@ func (s *PrecisePrefixCacheScorer) getBlockSizeTokens() int {
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
 // based on the provided LLM request.
-// If the request already has TokenizedPrompt set (e.g. by an external tokenizer
-// PrepareData plugin), it calls ScoreTokens directly, bypassing
-// prompt/chat tokenization.
+// If tokenized prompt data is found in CycleState (written by the tokenizer
+// scorer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
 // Otherwise, chat completions and regular completions are tokenized internally.
-func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *scheduling.LLMRequest) (map[string]float64, error) {
+func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 
@@ -688,10 +688,12 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"isCompletions", request.Body != nil && request.Body.Completions != nil)
 
-	if request.TokenizedPrompt != nil && len(request.TokenizedPrompt.TokenIDs) > 0 {
-		traceLogger.Info("tokens already in the request, skipping tokenization")
+	// Read tokenized prompt from CycleState, written by the tokenizer scorer plugin.
+	if tp, err := scheduling.ReadCycleStateKey[*preparedata.TokenizedPromptState](
+		cycleState, preparedata.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
+		traceLogger.Info("tokens found in CycleState, skipping tokenization")
 
-		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, request.TokenizedPrompt.TokenIDs, request.TargetModel, nil)
+		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tp.TokenIDs, request.TargetModel, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
 		}

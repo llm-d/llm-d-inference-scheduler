@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 
+	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
@@ -42,71 +43,55 @@ type disaggDecidersParameters struct {
 	Encode  string `json:"encode,omitempty"`
 }
 
+// disaggProfileHandlerParameters is the current parameter format using nested maps.
 type disaggProfileHandlerParameters struct {
 	Profiles disaggProfilesParameters `json:"profiles"`
 	Deciders disaggDecidersParameters `json:"deciders"`
-
-	// Deprecated flat fields - kept for backward compatibility.
-	// If set, they are promoted to Profiles/Deciders when the nested fields are absent.
-	DeprecatedDecodeProfile            string `json:"decodeProfile,omitempty"`
-	DeprecatedPrefillProfile           string `json:"prefillProfile,omitempty"`
-	DeprecatedEncodeProfile            string `json:"encodeProfile,omitempty"`
-	DeprecatedPrefillDeciderPluginName string `json:"prefillDeciderPluginName,omitempty"`
-	DeprecatedEncodeDeciderPluginName  string `json:"encodeDeciderPluginName,omitempty"`
-	// DeprecatedDeciderPluginName is a legacy alias from pd-profile-handler, maps to deciders.prefill.
-	DeprecatedDeciderPluginName string `json:"deciderPluginName,omitempty"`
 }
 
-// hasDeprecatedFields reports whether any deprecated flat field is set.
-func (p *disaggProfileHandlerParameters) hasDeprecatedFields() bool {
-	return p.DeprecatedDecodeProfile != "" ||
-		p.DeprecatedPrefillProfile != "" ||
-		p.DeprecatedEncodeProfile != "" ||
-		p.DeprecatedPrefillDeciderPluginName != "" ||
-		p.DeprecatedDeciderPluginName != "" ||
-		p.DeprecatedEncodeDeciderPluginName != ""
+// legacyDisaggProfileHandlerParameters is the deprecated flat parameter format.
+// Unknown fields (e.g. pd-profile-handler's prefixPluginType, primaryPort) are
+// silently ignored by json.Unmarshal, so they need not be declared here.
+type legacyDisaggProfileHandlerParameters struct {
+	DecodeProfile            string `json:"decodeProfile"`
+	PrefillProfile           string `json:"prefillProfile"`
+	EncodeProfile            string `json:"encodeProfile"`
+	PrefillDeciderPluginName string `json:"prefillDeciderPluginName"`
+	EncodeDeciderPluginName  string `json:"encodeDeciderPluginName"`
+	// DeciderPluginName is a legacy alias from pd-profile-handler, maps to deciders.prefill.
+	DeciderPluginName string `json:"deciderPluginName"`
 }
 
-// hasNestedFields reports whether any nested profiles/deciders field is set.
-func (p *disaggProfileHandlerParameters) hasNestedFields() bool {
-	return p.Profiles.Decode != "" || p.Profiles.Prefill != "" || p.Profiles.Encode != "" ||
-		p.Deciders.Prefill != "" || p.Deciders.Encode != ""
-}
-
-// validateAndApplyDeprecatedFields returns an error when both deprecated flat fields
-// and nested profiles/deciders fields are set simultaneously, otherwise promotes the
-// deprecated flat fields into their nested equivalents and logs a warning for each.
-func (p *disaggProfileHandlerParameters) validateAndApplyDeprecatedFields(logger interface{ Info(string, ...any) }) error {
-	if p.hasDeprecatedFields() && p.hasNestedFields() {
-		return errors.New("cannot mix deprecated flat parameters (decodeProfile, prefillProfile, encodeProfile, " +
-			"deciderPluginName, prefillDeciderPluginName, encodeDeciderPluginName) " +
-			"with nested parameters (profiles, deciders): use one format or the other")
-	}
-	if p.DeprecatedDecodeProfile != "" {
+// toDisaggParams copies legacy flat fields into the nested format, logging a
+// deprecation warning for each field in use.
+func (l *legacyDisaggProfileHandlerParameters) toDisaggParams(logger logr.Logger) disaggProfileHandlerParameters {
+	p := disaggProfileHandlerParameters{}
+	if l.DecodeProfile != "" {
 		logger.Info("Deprecated parameter 'decodeProfile', use 'profiles.decode' instead")
-		p.Profiles.Decode = p.DeprecatedDecodeProfile
+		p.Profiles.Decode = l.DecodeProfile
 	}
-	if p.DeprecatedPrefillProfile != "" {
+	if l.PrefillProfile != "" {
 		logger.Info("Deprecated parameter 'prefillProfile', use 'profiles.prefill' instead")
-		p.Profiles.Prefill = p.DeprecatedPrefillProfile
+		p.Profiles.Prefill = l.PrefillProfile
 	}
-	if p.DeprecatedEncodeProfile != "" {
+	if l.EncodeProfile != "" {
 		logger.Info("Deprecated parameter 'encodeProfile', use 'profiles.encode' instead")
-		p.Profiles.Encode = p.DeprecatedEncodeProfile
+		p.Profiles.Encode = l.EncodeProfile
 	}
-	if p.DeprecatedPrefillDeciderPluginName != "" {
+	if l.PrefillDeciderPluginName != "" {
 		logger.Info("Deprecated parameter 'prefillDeciderPluginName', use 'deciders.prefill' instead")
-		p.Deciders.Prefill = p.DeprecatedPrefillDeciderPluginName
+		p.Deciders.Prefill = l.PrefillDeciderPluginName
 	}
-	if p.DeprecatedDeciderPluginName != "" {
+	// DeciderPluginName is a lower-priority alias for prefill decider (from pd-profile-handler).
+	if l.DeciderPluginName != "" && p.Deciders.Prefill == "" {
 		logger.Info("Deprecated parameter 'deciderPluginName', use 'deciders.prefill' instead")
-		p.Deciders.Prefill = p.DeprecatedDeciderPluginName
+		p.Deciders.Prefill = l.DeciderPluginName
 	}
-	if p.DeprecatedEncodeDeciderPluginName != "" {
+	if l.EncodeDeciderPluginName != "" {
 		logger.Info("Deprecated parameter 'encodeDeciderPluginName', use 'deciders.encode' instead")
-		p.Deciders.Encode = p.DeprecatedEncodeDeciderPluginName
+		p.Deciders.Encode = l.EncodeDeciderPluginName
 	}
-	return nil
+	return p
 }
 
 // DisaggProfileHandlerFactory is the unified factory for all disaggregation profile handlers.
@@ -114,20 +99,31 @@ func (p *disaggProfileHandlerParameters) validateAndApplyDeprecatedFields(logger
 //	if parameters.deciders.prefill is set - P disaggregation will be supported
 //	if parameters.deciders.encode is set - E disaggregation will be supported
 func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	// Initialize without profile defaults so applyDeprecatedFields can detect
-	// whether the nested fields were explicitly provided.
+	logger := log.FromContext(handle.Context())
+
 	parameters := disaggProfileHandlerParameters{}
 	if rawParameters != nil {
+		legacy := legacyDisaggProfileHandlerParameters{}
+
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
 		}
-	}
+		if err := json.Unmarshal(rawParameters, &legacy); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters of the disagg-profile-handler - %w", err)
+		}
 
-	logger := log.FromContext(handle.Context())
-
-	// Promote any deprecated flat fields that are still in use.
-	if err := parameters.validateAndApplyDeprecatedFields(logger); err != nil {
-		return nil, err
+		if parameters.Profiles != (disaggProfilesParameters{}) ||
+			parameters.Deciders != (disaggDecidersParameters{}) {
+			// Make sure the legacy parameters were not used
+			if legacy != (legacyDisaggProfileHandlerParameters{}) {
+				return nil, errors.New("cannot mix deprecated flat parameters (decodeProfile, prefillProfile, encodeProfile, " +
+					"deciderPluginName, prefillDeciderPluginName, encodeDeciderPluginName) " +
+					"with nested parameters (profiles, deciders): use one format or the other")
+			}
+		} else {
+			logger.Info("Deprecated: using flat parameter format, migrate to nested profiles/deciders format")
+			parameters = legacy.toDisaggParams(logger)
+		}
 	}
 
 	// Apply profile name defaults for any fields still unset.
