@@ -203,10 +203,18 @@ func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMR
 func chatCompletionsToRenderChatRequest(chat *scheduling.ChatCompletionsRequest) *tokenizerTypes.RenderChatRequest {
 	conversation := make([]tokenizerTypes.Conversation, 0, len(chat.Messages))
 	for _, msg := range chat.Messages {
-		conversation = append(conversation, tokenizerTypes.Conversation{
+		conv := tokenizerTypes.Conversation{
 			Role:    msg.Role,
 			Content: tokenizerTypes.Content{Raw: msg.Content.Raw},
-		})
+		}
+		for _, block := range msg.Content.Structured {
+			conv.Content.Structured = append(conv.Content.Structured, tokenizerTypes.ContentBlock{
+				Type:     block.Type,
+				Text:     block.Text,
+				ImageURL: tokenizerTypes.ImageBlock{URL: block.ImageURL.Url},
+			})
+		}
+		conversation = append(conversation, conv)
 	}
 
 	return &tokenizerTypes.RenderChatRequest{

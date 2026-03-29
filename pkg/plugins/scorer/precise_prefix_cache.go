@@ -629,24 +629,7 @@ func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
 
 	// Chat completions path
 	if request.Body.ChatCompletions != nil {
-		conversations := make([]types.Conversation, len(request.Body.ChatCompletions.Messages))
-		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = types.Conversation{
-				Role:    msg.Role,
-				Content: types.Content{Raw: msg.Content.Raw},
-			}
-		}
-
-		renderReq := &types.RenderChatRequest{
-			Conversation:              conversations,
-			Tools:                     request.Body.ChatCompletions.Tools,
-			Documents:                 request.Body.ChatCompletions.Documents,
-			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
-		}
+		renderReq := convertChatCompletionsToRenderRequest(request.Body.ChatCompletions)
 
 		return s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
 	}
@@ -714,28 +697,10 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *sc
 			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
 		}
 
-		// Convert messages to conversation format
-		conversations := make([]types.Conversation, len(request.Body.ChatCompletions.Messages))
-		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = types.Conversation{
-				Role:    msg.Role,
-				Content: types.Content{Raw: msg.Content.Raw},
-			}
-		}
-
-		renderReq := &types.RenderChatRequest{
-			Conversation:              conversations,
-			Tools:                     request.Body.ChatCompletions.Tools,
-			Documents:                 request.Body.ChatCompletions.Documents,
-			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
-		}
+		renderReq := convertChatCompletionsToRenderRequest(request.Body.ChatCompletions)
 
 		traceLogger.Info("Processing chat completion request",
-			"messagesCount", len(conversations),
+			"messagesCount", len(renderReq.Conversation),
 			"toolsCount", len(renderReq.Tools),
 			"documentsCount", len(renderReq.Documents))
 
@@ -759,4 +724,35 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *sc
 	}
 
 	return nil, errors.New("no valid input found in request")
+}
+
+// convertChatCompletionsToRenderRequest converts a ChatCompletionsRequest to a
+// tokenization RenderChatRequest, including multimodal content blocks.
+func convertChatCompletionsToRenderRequest(chat *scheduling.ChatCompletionsRequest) *types.RenderChatRequest {
+	conversations := make([]types.Conversation, 0, len(chat.Messages))
+	for _, msg := range chat.Messages {
+		conv := types.Conversation{
+			Role:    msg.Role,
+			Content: types.Content{Raw: msg.Content.Raw},
+		}
+		for _, block := range msg.Content.Structured {
+			conv.Content.Structured = append(conv.Content.Structured, types.ContentBlock{
+				Type:     block.Type,
+				Text:     block.Text,
+				ImageURL: types.ImageBlock{URL: block.ImageURL.Url},
+			})
+		}
+		conversations = append(conversations, conv)
+	}
+
+	return &types.RenderChatRequest{
+		Conversation:              conversations,
+		Tools:                     chat.Tools,
+		Documents:                 chat.Documents,
+		ChatTemplate:              chat.ChatTemplate,
+		ReturnAssistantTokensMask: chat.ReturnAssistantTokensMask,
+		ContinueFinalMessage:      chat.ContinueFinalMessage,
+		AddGenerationPrompt:       chat.AddGenerationPrompt,
+		ChatTemplateKWArgs:        chat.ChatTemplateKWArgs,
+	}
 }
