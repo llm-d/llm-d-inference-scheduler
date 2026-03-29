@@ -24,22 +24,22 @@ const (
 	// simDeployment references the YAML file for the deployment
 	// running the vLLM simulator without PD
 	simDeployment = "./yaml/vllm-sim.yaml"
-	// simPDDeployment references the YAML file for the deployment
+	// sim_P_D_DisaggDeployment references the YAML file for the deployment
 	// running the vLLM simulator with PD (connector type is configurable via ${CONNECTOR_TYPE})
-	simPDDeployment = "./yaml/vllm-p-d-disagg.yaml"
-	// simDPDeployment references  the YAML file for the deployment
+	sim_P_D_DisaggDeployment = "./yaml/vllm-p-d-disagg.yaml"
+	// sim_DP_Deployment references  the YAML file for the deployment
 	// running the vLLM simulator with Data Parallel
-	simDPDeployment = "./yaml/vllm-sim-dp.yaml"
-	// simEDDeployment references the YAML file for the deployment
-	// running the vLLM simulator with ED (encode + decode, no prefill)
-	simEDDeployment = "./yaml/vllm-sim-e-pd-disagg.yaml"
-	// simEPDDeployment references the YAML file for the deployment
+	sim_DP_Deployment = "./yaml/vllm-sim-dp.yaml"
+	// sim_E_PD_DisaggDeployment references the YAML file for the deployment
+	// running the vLLM simulator with E-PD (encode + decode/prefill)
+	sim_E_PD_DisaggDeployment = "./yaml/vllm-sim-e-pd-disagg.yaml"
+	// sim_E_P_D_DisaggDeployment references the YAML file for the deployment
 	// running the vLLM simulator with EPD (encode + prefill + decode)
-	simEPDDeployment = "./yaml/vllm-sim-e-p-d-disagg.yaml"
-	// simEPDUnifiedDeployment references the YAML file for the deployment
+	sim_E_P_D_DisaggDeployment = "./yaml/vllm-sim-e-p-d-disagg.yaml"
+	// sim_EPD_UnifiedDeployment references the YAML file for the deployment
 	// running the vLLM simulator with a single deployment handling all EPD stages
 	// (encode + prefill + decode in one deployment via the encode-prefill-decode role label)
-	simEPDUnifiedDeployment = "./yaml/vllm-sim-epd-unified.yaml"
+	sim_EPD_UnifiedDeployment = "./yaml/vllm-sim-epd-unified.yaml"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
@@ -710,9 +710,9 @@ func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, 
 	}
 	yaml := simDeployment
 	if withPD {
-		yaml = simPDDeployment
+		yaml = sim_P_D_DisaggDeployment
 	} else if withDP {
-		yaml = simDPDeployment
+		yaml = sim_DP_Deployment
 	}
 
 	manifests := testutils.ReadYaml(yaml)
@@ -740,7 +740,7 @@ func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, 
 // createModelServersED creates model server resources for ED (encode + decode, no prefill) testing.
 // The decode sidecar uses only the EC connector (no KV connector).
 func createModelServersED(encodeReplicas, decodeReplicas int) []string {
-	manifests := testutils.ReadYaml(simEDDeployment)
+	manifests := testutils.ReadYaml(sim_E_PD_DisaggDeployment)
 	manifests = substituteMany(manifests,
 		map[string]string{
 			"${MODEL_NAME}":           simModelName,
@@ -761,7 +761,7 @@ func createModelServersED(encodeReplicas, decodeReplicas int) []string {
 // createModelServersEPD creates model server resources for EPD (encode + prefill + decode) testing.
 // Uses the shared-storage connector for the decode sidecar.
 func createModelServersEPD(encodeReplicas, prefillReplicas, decodeReplicas int) []string {
-	manifests := testutils.ReadYaml(simEPDDeployment)
+	manifests := testutils.ReadYaml(sim_E_P_D_DisaggDeployment)
 	manifests = substituteMany(manifests,
 		map[string]string{
 			"${MODEL_NAME}":           simModelName,
@@ -786,7 +786,7 @@ func createModelServersEPD(encodeReplicas, prefillReplicas, decodeReplicas int) 
 // (encode-filter, prefill-filter, decode-filter). This simulates a configuration
 // where one deployment handles all EPD stages without disaggregation.
 func createModelServersEPDUnified(replicas int) []string {
-	manifests := testutils.ReadYaml(simEPDUnifiedDeployment)
+	manifests := testutils.ReadYaml(sim_EPD_UnifiedDeployment)
 	manifests = substituteMany(manifests,
 		map[string]string{
 			"${MODEL_NAME}":           simModelName,
