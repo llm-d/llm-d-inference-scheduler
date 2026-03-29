@@ -53,8 +53,14 @@ GO_BUILD_CACHE_VOL ?= llm-d-gobuildcache
 
 # Common flags for running the builder container: mounts source, Go caches, and runs as current user.
 # Podman rootless requires --userns=keep-id to correctly map host UID; docker uses -u directly.
+# Rootful Podman (e.g. Podman machine on macOS) does not support --userns=keep-id with --network=host.
 ifeq ($(CONTAINER_RUNTIME),podman)
+PODMAN_ROOTLESS := $(shell podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null)
+ifeq ($(PODMAN_ROOTLESS),true)
 BUILDER_USER_FLAGS = --userns=keep-id
+else
+BUILDER_USER_FLAGS =
+endif
 else
 BUILDER_USER_FLAGS = -u $$(id -u):$$(id -g)
 endif
@@ -72,10 +78,11 @@ BUILDER_CLUSTER_FLAGS = --network=host \
 # Mount the container runtime socket and set CONTAINER_HOST so podman --remote
 # inside the builder can talk to the host's container runtime.
 ifeq ($(CONTAINER_RUNTIME),podman)
-CONTAINER_SOCK ?= $(or $(shell podman info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null),/run/podman/podman.sock)
+CONTAINER_SOCK ?= $(or $(shell podman info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null | sed 's|^unix://||'),/run/podman/podman.sock)
 BUILDER_SOCK_FLAGS = --security-opt label=disable \
 	-v $(CONTAINER_SOCK):$(CONTAINER_SOCK) \
 	-e CONTAINER_HOST=unix://$(CONTAINER_SOCK) \
+	-e DOCKER_HOST=unix://$(CONTAINER_SOCK) \
 	-e CONTAINER_RUNTIME=podman \
 	-e KIND_EXPERIMENTAL_PROVIDER=podman
 else
