@@ -113,7 +113,8 @@ func (t *TokenizedPromptState) Clone() plugin.StateData {
 	return &TokenizedPromptState{TokenIDs: ids, MMFeatures: cloneMMFeatures(t.MMFeatures)}
 }
 
-// cloneMMFeatures returns a deep copy of MultiModalFeatures.
+// cloneMMFeatures deep-copies the maps/slices so cloned CycleState entries
+// are fully independent and safe from concurrent mutation.
 func cloneMMFeatures(src *tokenization.MultiModalFeatures) *tokenization.MultiModalFeatures {
 	if src == nil {
 		return nil
