@@ -4,28 +4,30 @@ Documentation for developing the inference scheduler.
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Requirements](#requirements)
-- [Kind Development Environment](#kind-development-environment)
-  - [Accessing the Gateway](#accessing-the-gateway)
-  - [Prometheus Monitoring](#prometheus-monitoring)
-  - [Grafana Dashboard](#grafana-dashboard)
-  - [Development Cycle](#development-cycle)
-  - [Cleanup](#cleanup)
-- [Running Tests](#running-tests)
-  - [Unit Tests](#unit-tests)
-  - [Integration Tests](#integration-tests)
-  - [Filtered Tests](#filtered-tests)
-  - [Coverage](#coverage)
-- [Tokenization Architecture](#tokenization-architecture)
-- [Kubernetes Development Environment](#kubernetes-development-environment)
-  - [Infrastructure Setup](#infrastructure-setup)
-  - [RBAC and Permissions](#rbac-and-permissions)
-  - [Developer Setup](#developer-setup)
-  - [Environment Configuration](#environment-configuration)
-  - [Deploying Changes](#deploying-changes)
-  - [Cleanup Environment](#cleanup-environment)
-- [Submitting Changes](#submitting-changes)
+- [Development](#development)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Requirements](#requirements)
+  - [Kind Development Environment](#kind-development-environment)
+    - [Accessing the Gateway](#accessing-the-gateway)
+    - [Prometheus Monitoring](#prometheus-monitoring)
+    - [Grafana Dashboard](#grafana-dashboard)
+    - [Development Cycle](#development-cycle)
+    - [Cleanup](#cleanup)
+  - [Running Tests](#running-tests)
+    - [Unit Tests](#unit-tests)
+    - [Integration Tests](#integration-tests)
+    - [Filtered Tests](#filtered-tests)
+    - [Coverage](#coverage)
+  - [Tokenization Architecture](#tokenization-architecture)
+  - [Kubernetes Development Environment](#kubernetes-development-environment)
+    - [Infrastructure Setup](#infrastructure-setup)
+    - [RBAC and Permissions](#rbac-and-permissions)
+    - [Developer Setup](#developer-setup)
+    - [Environment Configuration](#environment-configuration)
+    - [Deploying Changes](#deploying-changes)
+    - [Cleanup Environment](#cleanup-environment)
+  - [Submitting Changes](#submitting-changes)
 
 ## Overview
 
@@ -51,10 +53,6 @@ A real Kubernetes cluster setup is covered later for shared or production-like t
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
 [Kubectl]:https://kubectl.docs.kubernetes.io/installation/kubectl/
-
-> [!NOTE]
-> On macOS with Apple Silicon, set `GOOS=linux` when running make targets that build
-> Linux container images.
 
 ## Kind Development Environment
 
@@ -82,7 +80,8 @@ kubectl --context kind-llm-d-inference-scheduler-dev \
   port-forward service/inference-gateway-istio 8080:80
 ```
 
-The simulator runs with a model named `food-review`. To confirm what model is available:
+The simulator runs with a model named `TinyLlama/TinyLlama-1.1B-Chat-v1.0`.
+To confirm what model is available:
 
 ```bash
 curl -s http://localhost:8080/v1/models | jq
