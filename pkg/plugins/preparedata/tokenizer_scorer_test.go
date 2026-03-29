@@ -22,6 +22,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,7 +51,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 		renderFunc: func(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
 			return fakeTokenIDs, nil, nil
 		},
-		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error) {
+		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
 			return fakeTokenIDs, nil, nil
 		},
 	}
@@ -181,6 +182,74 @@ func TestTokenizerScorer_SkipsWhenAlreadyInCycleState(t *testing.T) {
 		cycleState, TokenizedPromptStateKey)
 	require.NoError(t, err)
 	assert.Equal(t, []uint32{1, 2, 3}, stored.TokenIDs)
+}
+
+func TestTokenizerScorer_RenderChat_WritesMMFeaturesToCycleState(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	fakeTokenIDs := []uint32{10, 20, 30, 40}
+	fakeMMFeatures := &tokenization.MultiModalFeatures{
+		MMHashes: map[string][]string{
+			"image": {"hash1", "hash2"},
+		},
+	}
+
+	tok := &mockTokenizer{
+		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+			return fakeTokenIDs, fakeMMFeatures, nil
+		},
+	}
+	p := newTestPlugin(tok)
+	cycleState := scheduling.NewCycleState()
+
+	request := &scheduling.LLMRequest{
+		RequestId: "mm-chat",
+		Body: &scheduling.LLMRequestBody{
+			ChatCompletions: &scheduling.ChatCompletionsRequest{
+				Messages: []scheduling.Message{
+					{Role: "user", Content: scheduling.Content{Raw: "Describe this image"}},
+				},
+			},
+		},
+	}
+
+	p.Score(ctx, cycleState, request, testEndpoints)
+
+	stored, err := scheduling.ReadCycleStateKey[*TokenizedPromptState](
+		cycleState, TokenizedPromptStateKey)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, fakeTokenIDs, stored.TokenIDs)
+	require.NotNil(t, stored.MMFeatures, "MMFeatures should be stored in CycleState")
+	assert.Equal(t, fakeMMFeatures.MMHashes, stored.MMFeatures.MMHashes)
+}
+
+func TestTokenizerScorer_Render_NilMMFeatures(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	fakeTokenIDs := []uint32{10, 20, 30}
+
+	tok := &mockTokenizer{
+		renderFunc: func(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
+			return fakeTokenIDs, nil, nil
+		},
+	}
+	p := newTestPlugin(tok)
+	cycleState := scheduling.NewCycleState()
+
+	request := &scheduling.LLMRequest{
+		RequestId: "text-completions",
+		Body: &scheduling.LLMRequestBody{
+			Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
+		},
+	}
+
+	p.Score(ctx, cycleState, request, testEndpoints)
+
+	stored, err := scheduling.ReadCycleStateKey[*TokenizedPromptState](
+		cycleState, TokenizedPromptStateKey)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, fakeTokenIDs, stored.TokenIDs)
+	assert.Nil(t, stored.MMFeatures, "MMFeatures should be nil for text-only completions")
 }
 
 func TestTokenizerScorer_Category(t *testing.T) {

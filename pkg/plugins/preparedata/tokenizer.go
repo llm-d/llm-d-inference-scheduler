@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -32,7 +33,7 @@ import (
 
 type tokenizer interface {
 	Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
-	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error)
+	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error)
 }
 
 const (
@@ -98,7 +99,8 @@ func NewTokenizerPlugin(ctx context.Context, config *tokenizerPluginConfig) (*To
 // This follows the standard IGW pattern where scorers share data via CycleState
 // (same as NoHitLRU reading from prefix-cache scorer).
 type TokenizedPromptState struct {
-	TokenIDs []uint32
+	TokenIDs   []uint32
+	MMFeatures *tokenization.MultiModalFeatures
 }
 
 // Clone implements plugin.StateData.
@@ -108,7 +110,33 @@ func (t *TokenizedPromptState) Clone() plugin.StateData {
 	}
 	ids := make([]uint32, len(t.TokenIDs))
 	copy(ids, t.TokenIDs)
-	return &TokenizedPromptState{TokenIDs: ids}
+	return &TokenizedPromptState{TokenIDs: ids, MMFeatures: cloneMMFeatures(t.MMFeatures)}
+}
+
+// cloneMMFeatures deep-copies the maps/slices so cloned CycleState entries
+// are fully independent and safe from concurrent mutation.
+func cloneMMFeatures(src *tokenization.MultiModalFeatures) *tokenization.MultiModalFeatures {
+	if src == nil {
+		return nil
+	}
+	dst := &tokenization.MultiModalFeatures{}
+	if src.MMHashes != nil {
+		dst.MMHashes = make(map[string][]string, len(src.MMHashes))
+		for k, v := range src.MMHashes {
+			cp := make([]string, len(v))
+			copy(cp, v)
+			dst.MMHashes[k] = cp
+		}
+	}
+	if src.MMPlaceholders != nil {
+		dst.MMPlaceholders = make(map[string][]kvblock.PlaceholderRange, len(src.MMPlaceholders))
+		for k, v := range src.MMPlaceholders {
+			cp := make([]kvblock.PlaceholderRange, len(v))
+			copy(cp, v)
+			dst.MMPlaceholders[k] = cp
+		}
+	}
+	return dst
 }
 
 // TokenizerPlugin tokenizes the prompt in the incoming request and stores
@@ -129,14 +157,15 @@ func (p *TokenizerPlugin) WithName(name string) *TokenizerPlugin {
 	return p
 }
 
-// tokenize extracts token IDs from the request. Returns nil on error or unsupported type.
-func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) []uint32 {
+// tokenize extracts token IDs and optional multimodal features from the request.
+// Returns (nil, nil) on error or unsupported type.
+func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) ([]uint32, *tokenization.MultiModalFeatures) {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 
 	if request.Body == nil {
 		traceLogger.Info("Request body is nil, skipping tokenization")
-		return nil
+		return nil, nil
 	}
 
 	traceLogger.Info("Request body present",
@@ -144,6 +173,7 @@ func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMR
 		"hasChatCompletions", request.Body.ChatCompletions != nil)
 
 	var tokenIDs []uint32
+	var mmFeatures *tokenization.MultiModalFeatures
 	var err error
 
 	switch {
@@ -153,19 +183,19 @@ func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMR
 	case request.Body.ChatCompletions != nil:
 		renderReq := chatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))
-		tokenIDs, _, err = p.tokenizer.RenderChat(renderReq)
+		tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(renderReq)
 	default:
 		traceLogger.Info("Unsupported request type, skipping tokenization")
-		return nil
+		return nil, nil
 	}
 
 	if err != nil {
 		logger.Error(err, "Tokenization failed, skipping")
-		return nil
+		return nil, nil
 	}
 
 	traceLogger.Info("Tokenization succeeded", "tokenCount", len(tokenIDs))
-	return tokenIDs
+	return tokenIDs, mmFeatures
 }
 
 // chatCompletionsToRenderChatRequest converts a ChatCompletionsRequest to a
@@ -175,7 +205,7 @@ func chatCompletionsToRenderChatRequest(chat *scheduling.ChatCompletionsRequest)
 	for _, msg := range chat.Messages {
 		conversation = append(conversation, tokenizerTypes.Conversation{
 			Role:    msg.Role,
-			Content: msg.Content.Raw,
+			Content: tokenizerTypes.Content{Raw: msg.Content.Raw},
 		})
 	}
 
