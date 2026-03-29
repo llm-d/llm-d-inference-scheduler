@@ -181,7 +181,7 @@ func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMR
 		traceLogger.Info("Calling Render for completions", "prompt", request.Body.Completions.Prompt)
 		tokenIDs, _, err = p.tokenizer.Render(request.Body.Completions.Prompt)
 	case request.Body.ChatCompletions != nil:
-		renderReq := chatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
+		renderReq := ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))
 		tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(renderReq)
 	default:
@@ -198,9 +198,9 @@ func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMR
 	return tokenIDs, mmFeatures
 }
 
-// chatCompletionsToRenderChatRequest converts a ChatCompletionsRequest to a
-// tokenization RenderChatRequest.
-func chatCompletionsToRenderChatRequest(chat *scheduling.ChatCompletionsRequest) *tokenizerTypes.RenderChatRequest {
+// ChatCompletionsToRenderChatRequest converts a ChatCompletionsRequest to a
+// tokenization RenderChatRequest, including multimodal content blocks.
+func ChatCompletionsToRenderChatRequest(chat *scheduling.ChatCompletionsRequest) *tokenizerTypes.RenderChatRequest {
 	conversation := make([]tokenizerTypes.Conversation, 0, len(chat.Messages))
 	for _, msg := range chat.Messages {
 		conv := tokenizerTypes.Conversation{

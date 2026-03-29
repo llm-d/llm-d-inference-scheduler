@@ -629,7 +629,7 @@ func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
 
 	// Chat completions path
 	if request.Body.ChatCompletions != nil {
-		renderReq := convertChatCompletionsToRenderRequest(request.Body.ChatCompletions)
+		renderReq := preparedata.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 
 		return s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
 	}
@@ -697,7 +697,7 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *sc
 			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
 		}
 
-		renderReq := convertChatCompletionsToRenderRequest(request.Body.ChatCompletions)
+		renderReq := preparedata.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 
 		traceLogger.Info("Processing chat completion request",
 			"messagesCount", len(renderReq.Conversation),
@@ -724,35 +724,4 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *sc
 	}
 
 	return nil, errors.New("no valid input found in request")
-}
-
-// convertChatCompletionsToRenderRequest converts a ChatCompletionsRequest to a
-// tokenization RenderChatRequest, including multimodal content blocks.
-func convertChatCompletionsToRenderRequest(chat *scheduling.ChatCompletionsRequest) *types.RenderChatRequest {
-	conversations := make([]types.Conversation, 0, len(chat.Messages))
-	for _, msg := range chat.Messages {
-		conv := types.Conversation{
-			Role:    msg.Role,
-			Content: types.Content{Raw: msg.Content.Raw},
-		}
-		for _, block := range msg.Content.Structured {
-			conv.Content.Structured = append(conv.Content.Structured, types.ContentBlock{
-				Type:     block.Type,
-				Text:     block.Text,
-				ImageURL: types.ImageBlock{URL: block.ImageURL.Url},
-			})
-		}
-		conversations = append(conversations, conv)
-	}
-
-	return &types.RenderChatRequest{
-		Conversation:              conversations,
-		Tools:                     chat.Tools,
-		Documents:                 chat.Documents,
-		ChatTemplate:              chat.ChatTemplate,
-		ReturnAssistantTokensMask: chat.ReturnAssistantTokensMask,
-		ContinueFinalMessage:      chat.ContinueFinalMessage,
-		AddGenerationPrompt:       chat.AddGenerationPrompt,
-		ChatTemplateKWArgs:        chat.ChatTemplateKWArgs,
-	}
 }

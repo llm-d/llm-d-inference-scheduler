@@ -112,7 +112,7 @@ func TestChatCompletionsToRenderChatRequest(t *testing.T) {
 		ReturnAssistantTokensMask: true,
 	}
 
-	result := chatCompletionsToRenderChatRequest(chat)
+	result := ChatCompletionsToRenderChatRequest(chat)
 
 	require.Len(t, result.Conversation, 2)
 	assert.Equal(t, "system", result.Conversation[0].Role)
@@ -210,7 +210,7 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chat := &scheduling.ChatCompletionsRequest{Messages: tt.messages}
-			result := chatCompletionsToRenderChatRequest(chat)
+			result := ChatCompletionsToRenderChatRequest(chat)
 			require.Len(t, result.Conversation, len(tt.wantConv))
 			for i, want := range tt.wantConv {
 				got := result.Conversation[i]

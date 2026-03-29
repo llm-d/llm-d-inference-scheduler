@@ -7,9 +7,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 )
 
-func TestConvertChatCompletionsToRenderRequest_MultimodalContent(t *testing.T) {
+// TestChatCompletionsToRenderRequest_MultimodalContent verifies that the shared
+// conversion used by both the tokenizer plugin and the prefix cache scorer
+// correctly forwards multimodal structured content blocks.
+func TestChatCompletionsToRenderRequest_MultimodalContent(t *testing.T) {
 	tests := []struct {
 		name     string
 		chat     *scheduling.ChatCompletionsRequest
@@ -78,7 +83,7 @@ func TestConvertChatCompletionsToRenderRequest_MultimodalContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := convertChatCompletionsToRenderRequest(tt.chat)
+			result := preparedata.ChatCompletionsToRenderChatRequest(tt.chat)
 			require.Len(t, result.Conversation, len(tt.wantConv))
 			for i, want := range tt.wantConv {
 				got := result.Conversation[i]
