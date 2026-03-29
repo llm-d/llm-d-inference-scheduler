@@ -99,6 +99,16 @@ func getPods(labels map[string]string) []corev1.Pod {
 	return pods
 }
 
+// getPodNames returns the names of all running pods matching the given label selector.
+func getPodNames(labels map[string]string) []string {
+	pods := getPods(labels)
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+	return names
+}
+
 func podsInDeploymentsReady(objects []string) {
 	isDeploymentReady := func(deploymentName string) bool {
 		var deployment appsv1.Deployment

@@ -24,22 +24,34 @@ const (
 	// simDeployment references the YAML file for the deployment
 	// running the vLLM simulator without PD
 	simDeployment = "./yaml/vllm-sim.yaml"
-	// simPDDeployment references the YAML file for the deployment
+	// simPDDisaggDeployment references the YAML file for the deployment
 	// running the vLLM simulator with PD (connector type is configurable via ${CONNECTOR_TYPE})
-	simPDDeployment = "./yaml/vllm-sim-pd.yaml"
+	simPDDisaggDeployment = "./yaml/vllm-sim-p-d-disagg.yaml"
 	// simDPDeployment references  the YAML file for the deployment
 	// running the vLLM simulator with Data Parallel
 	simDPDeployment = "./yaml/vllm-sim-dp.yaml"
+	// simEpDDisaggDeployment references the YAML file for the deployment
+	// running the vLLM simulator with E/PD (Encode/Prefill-Decode)
+	simEpDDisaggDeployment = "./yaml/vllm-sim-e-pd-disagg.yaml"
+	// simEPDDisaggDeployment references the YAML file for the deployment
+	// running the vLLM simulator with E/P/D (Encode/Prefill/Decode)
+	simEPDDisaggDeployment = "./yaml/vllm-sim-e-p-d-disagg.yaml"
+	// simEPDUnifiedDeployment references the YAML file for the deployment
+	// running the vLLM simulator with EPD (no disaggregation)
+	simEPDUnifiedDeployment = "./yaml/vllm-sim-epd-unified.yaml"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
 )
 
 var (
-	poolName        = simModelName + "-inference-pool"
-	podSelector     = map[string]string{"app": poolName}
-	prefillSelector = map[string]string{"llm-d.ai/role": "prefill"}
-	decodeSelector  = map[string]string{"llm-d.ai/role": "decode"}
+	poolName              = simModelName + "-inference-pool"
+	podSelector           = map[string]string{"app": poolName}
+	prefillSelector       = map[string]string{"llm-d.ai/role": "prefill"}
+	decodeSelector        = map[string]string{"llm-d.ai/role": "decode"}
+	prefillDecodeSelector = map[string]string{"llm-d.ai/role": "prefill-decode"}
+	encodeSelector        = map[string]string{"llm-d.ai/role": "encode"}
+	epdSingleSelector     = map[string]string{"llm-d.ai/role": "encode-prefill-decode"}
 )
 
 var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
@@ -76,7 +88,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			decodeReplicas := 4
 			modelServers := createModelServers(true, false, false, 0, prefillReplicas, decodeReplicas)
 
-			epp := createEndPointPicker(pdConfig)
+			epp := createEndPointPicker(deprecatedPdConfig)
 
 			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
 
@@ -138,8 +150,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		name   string
 		config string
 	}{
-		{"pd-profile-handler", pdConfig},
-		{"disagg-profile-handler", pdDisaggConfig},
+		{"pd-profile-handler", deprecatedPdConfig},
+		{"disagg-profile-handler", pdConfig},
 	} {
 		config := tc.config // capture for closure
 		ginkgo.When("Running a PD configuration with shared-storage connector using "+tc.name, func() {
@@ -321,7 +333,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			decodeReplicas := 4
 			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
 
-			epp := createEndPointPicker(pdDisaggConfig)
+			epp := createEndPointPicker(pdConfig)
 
 			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
 
@@ -398,6 +410,118 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			nsHdr, podHdr, _ = runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
+	ginkgo.When("Running an E/PD (Encode/Prefill-Decode) configuration", func() {
+		ginkgo.It("should route multimodal requests through encode and decode pods", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			encodeReplicas := 1
+			decodeReplicas := 2
+			modelServers := createModelServersEpD(encodeReplicas, decodeReplicas)
+
+			epp := createEndPointPicker(epdEncodeDecodeConfig)
+
+			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
+			if k8sContext != "" {
+				startEPPMetricsPortForward()
+			}
+
+			encodePods := getPodNames(encodeSelector)
+			prefillDecodePods := getPodNames(prefillDecodeSelector)
+			gomega.Expect(encodePods).Should(gomega.HaveLen(encodeReplicas))
+			gomega.Expect(prefillDecodePods).Should(gomega.HaveLen(decodeReplicas))
+
+			// Multimodal request: triggers encode stage, decode handled by prefill-decode pod
+			nsHdr, podHdr := runChatCompletionWithImage("http://example.com/test.jpg")
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
+
+			// Second multimodal request
+			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/other.jpg")
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
+
+			// Metrics: encode-decode decisions recorded
+			labelFilter := fmt.Sprintf(`decision_type="encode-decode",model_name="%s"`, simModelName)
+			encodeDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", labelFilter)
+			gomega.Expect(encodeDecodeCount).Should(gomega.Equal(2))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
+	ginkgo.When("Running an E/P/D (encode/prefill/decode) configuration", func() {
+		ginkgo.It("should route multimodal requests through encode, prefill, and decode pods", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			encodeReplicas := 1
+			prefillReplicas := 1
+			decodeReplicas := 2
+			modelServers := createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas)
+
+			epp := createEndPointPicker(epdConfig)
+
+			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
+			if k8sContext != "" {
+				startEPPMetricsPortForward()
+			}
+
+			encodePods := getPodNames(encodeSelector)
+			prefillPods := getPodNames(prefillSelector)
+			decodePods := getPodNames(decodeSelector)
+			gomega.Expect(encodePods).Should(gomega.HaveLen(encodeReplicas))
+			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
+			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+
+			// First multimodal request: encode + prefill + decode
+			nsHdr, podHdr := runChatCompletionWithImage("http://example.com/test.jpg")
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Second multimodal request with same image (prefix cache may skip prefill)
+			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/test.jpg")
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Metrics: at least one encode-prefill-decode decision recorded
+			epdLabelFilter := fmt.Sprintf(`decision_type="encode-prefill-decode",model_name="%s"`, simModelName)
+			epdCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", epdLabelFilter)
+			gomega.Expect(epdCount).Should(gomega.BeNumerically(">=", 1))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
+	ginkgo.When("Running an EPD (no disaggregation) configuration", func() {
+		ginkgo.It("should route text and multimodal requests to the single deployment", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			// Single deployment labeled encode-prefill-decode: matches encode-filter, prefill-filter,
+			// and decode-filter, so all EPD stages are handled by the same deployment.
+			replicas := 1
+			modelServers := createModelServersEPDUnified(replicas)
+
+			epp := createEndPointPicker(epdConfig)
+
+			epdPods := getPodNames(epdSingleSelector)
+			gomega.Expect(epdPods).Should(gomega.HaveLen(replicas))
+
+			// Text request: no encode disaggregation triggered, routes to decode profile → single deployment
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
+
+			// Multimodal request: encode and decode profiles both resolve to the same single deployment
+			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/test.jpg")
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -585,7 +709,7 @@ func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, 
 	}
 	yaml := simDeployment
 	if withPD {
-		yaml = simPDDeployment
+		yaml = simPDDisaggDeployment
 	} else if withDP {
 		yaml = simDPDeployment
 	}
@@ -609,6 +733,68 @@ func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, 
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
 
+	return objects
+}
+
+// createModelServersEpD creates model server resources for E/PD (encode + prefill/decode) testing.
+func createModelServersEpD(encodeReplicas, decodeReplicas int) []string {
+	manifests := testutils.ReadYaml(simEpDDisaggDeployment)
+	manifests = substituteMany(manifests,
+		map[string]string{
+			"${MODEL_NAME}":           simModelName,
+			"${MODEL_NAME_SAFE}":      simModelName,
+			"${POOL_NAME}":            poolName,
+			"${EC_CONNECTOR_TYPE}":    "ec-example",
+			"${SIDECAR_IMAGE}":        sideCarImage,
+			"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
+			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
+			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
+			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
+		})
+
+	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
+	podsInDeploymentsReady(objects)
+	return objects
+}
+
+// createModelServersEPDDisagg creates model server resources for E/P/D (encode/prefill/decode) testing.
+func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas int) []string {
+	manifests := testutils.ReadYaml(simEPDDisaggDeployment)
+	manifests = substituteMany(manifests,
+		map[string]string{
+			"${MODEL_NAME}":           simModelName,
+			"${MODEL_NAME_SAFE}":      simModelName,
+			"${POOL_NAME}":            poolName,
+			"${KV_CONNECTOR_TYPE}":    "shared-storage",
+			"${EC_CONNECTOR_TYPE}":    "ec-example",
+			"${SIDECAR_IMAGE}":        sideCarImage,
+			"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
+			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
+			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
+			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
+			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
+		})
+
+	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
+	podsInDeploymentsReady(objects)
+	return objects
+}
+
+// createModelServersEPDUnified creates a model server resources for EPD (one pod for encode/prefill/decode) testing.
+func createModelServersEPDUnified(replicas int) []string {
+	manifests := testutils.ReadYaml(simEPDUnifiedDeployment)
+	manifests = substituteMany(manifests,
+		map[string]string{
+			"${MODEL_NAME}":           simModelName,
+			"${MODEL_NAME_SAFE}":      simModelName,
+			"${POOL_NAME}":            poolName,
+			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(replicas),
+			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
+			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
+		})
+
+	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
+	podsInDeploymentsReady(objects)
 	return objects
 }
 
@@ -715,6 +901,32 @@ func runChatCompletion(prompt, modelName string) (string, string, string) {
 	podPort := httpResp.Header.Get("x-inference-port")
 
 	return namespaceHeader, podHeader, podPort
+}
+
+// runChatCompletionWithImage sends a multimodal chat completion request with an image_url content block.
+// Returns the namespace, pod name, and port from the response headers.
+func runChatCompletionWithImage(imageURL string) (string, string) {
+	ginkgo.By("Sending Multimodal Chat Completion Request with image: " + imageURL)
+
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":%q}},{"type":"text","text":"What is in this image?"}]}]}`,
+		simModelName, imageURL)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	_, err = io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	return resp.Header.Get("x-inference-namespace"),
+		resp.Header.Get("x-inference-pod")
 }
 
 // getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
@@ -980,7 +1192,8 @@ schedulingProfiles:
 `
 
 // EPP configuration for running with P/D
-const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+// Uses deprecated pd-profile-handler
+const deprecatedPdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
@@ -1015,8 +1228,76 @@ schedulingProfiles:
     weight: 2
 `
 
+// epdEncodeDecodeConfig configures E/PD (encode + P/D) using disagg-profile-handler.
+// The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
+const epdEncodeDecodeConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: disagg-headers-handler
+- type: encode-filter
+- type: decode-filter
+- type: max-score-picker
+- type: always-disagg-multimodal-decider
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      encode: always-disagg-multimodal-decider
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+`
+
+// epdConfig configures E/P/D (encode + prefill + decode) using disagg-profile-handler.
+// The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
+const epdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: prefill-header-handler
+- type: encode-filter
+- type: prefill-filter
+- type: decode-filter
+- type: prefix-cache-scorer
+  parameters:
+    blockSizeTokens: 16
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: max-score-picker
+- type: always-disagg-multimodal-decider
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      encode: always-disagg-multimodal-decider
+      prefill: prefix-based-pd-decider
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
 // EPP configuration for running with P/D using the unified disagg-profile-handler
-const pdDisaggConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins

@@ -13,6 +13,7 @@ Documentation for developing the inference scheduler.
     - [Prometheus Monitoring](#prometheus-monitoring)
     - [Grafana Dashboard](#grafana-dashboard)
     - [Development Cycle](#development-cycle)
+    - [Inference Disaggregation Modes](#inference-disaggregation-modes)
     - [Cleanup](#cleanup)
   - [Running Tests](#running-tests)
     - [Unit Tests](#unit-tests)
@@ -183,6 +184,61 @@ kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
 > ```bash
 > VLLM_SIMULATOR_TAG=<tag> make env-dev-kind
 > ```
+
+### Inference Disaggregation Modes
+
+You can deploy the inference stack in disaggregated modes to optimize performance by separating specific stages of the LLM pipeline into dedicated pods.
+
+#### 1. Prefill/Decode (P/D) Disaggregation
+
+In this mode, Prefill and Decode run on independent deployments.
+
+To deploy a P/D-enabled Kind environment:
+
+```bash
+PD_ENABLED=true make env-dev-kind
+```
+
+#### 2. Encode/Prefill/Decode (E/P/D) Disaggregation
+
+This mode is designed for multimodal workloads. It introduces a dedicated Encoder pod to process embeddings (e.g., images or video), alongside specialized deployments for the Prefill and Decode stages.
+
+To deploy an E/P/D-enabled Kind environment:
+
+```bash
+EPD_ENABLED=true make env-dev-kind
+```
+
+##### Testing the E/P/D Setup
+
+Port-forward the Gateway:
+
+```bash
+kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
+```
+
+Send a Multimodal Request — trigger the full E/P/D pipeline by submitting an image-based chat completion request:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  --max-time 1000 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "image_url", "image_url": { "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg" } },
+          { "type": "text", "text": "What is in this image?" }
+        ]
+      }
+    ],
+    "max_tokens": 100
+  }'
+```
+
+For technical details on the advanced disaggregation strategies, refer to [docs/disaggregation.md](docs/disaggregation.md).
 
 ### Cleanup
 
