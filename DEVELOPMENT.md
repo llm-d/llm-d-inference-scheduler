@@ -89,6 +89,24 @@ E2E_KEEP_CLUSTER_ON_FAILURE=true make test-e2e
 
 When set, a successful run still cleans up normally — the cluster is only kept if there is at least one test failure.
 
+**Accessing the cluster after a failure**
+
+E2E tests do not update the host's kubeconfig to point at the `e2e-tests` Kind cluster. After a preserved failure, export the kubeconfig manually:
+
+```bash
+# Merge into the default kubeconfig ($HOME/.kube/config or $KUBECONFIG)
+kind export kubeconfig --name e2e-tests
+
+# Or write to a specific file
+kind export kubeconfig --name e2e-tests --kubeconfig /path/to/kubeconfig
+```
+
+Then use it as normal:
+
+```bash
+kubectl --context kind-e2e-tests get pods
+```
+
 **Other e2e environment variables**
 
 | Variable | Default | Description |
