@@ -146,9 +146,16 @@ func substituteMany(inputs []string, substitutions map[string]string) []string {
 // dumpPodsAndLogs dumps all pod statuses and their logs to the Ginkgo writer.
 // Call this before cleanup so the information is available when CI tests fail.
 func dumpPodsAndLogs() {
+	if testConfig == nil || testConfig.KubeCli == nil {
+		ginkgo.GinkgoWriter.Println("Skipping pod dump: cluster not initialized")
+		return
+	}
+
 	ginkgo.GinkgoWriter.Printf("\n=== Dumping pod states and logs (namespace: %s) ===\n", nsName)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(testConfig.Context, 30*time.Second)
+	defer cancel()
+
 	pods, err := testConfig.KubeCli.CoreV1().Pods(nsName).List(ctx, v1.ListOptions{})
 	if err != nil {
 		ginkgo.GinkgoWriter.Printf("Failed to list pods: %v\n", err)
