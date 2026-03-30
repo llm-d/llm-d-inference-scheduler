@@ -181,7 +181,7 @@ func dumpPodsAndLogs() {
 func printContainerStatus(kind string, cs corev1.ContainerStatus) {
 	status := fmt.Sprintf("  [%s] %s | ready=%v restarts=%d", kind, cs.Name, cs.Ready, cs.RestartCount)
 	if cs.State.Waiting != nil {
-		status += fmt.Sprintf(" | Waiting: %s", cs.State.Waiting.Reason)
+		status += " | Waiting: " + cs.State.Waiting.Reason
 	}
 	if cs.State.Terminated != nil {
 		status += fmt.Sprintf(" | Terminated: %s (exit %d)", cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
