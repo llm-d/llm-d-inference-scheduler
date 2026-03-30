@@ -107,16 +107,21 @@ Then use it as normal:
 kubectl --context kind-e2e-tests get pods
 ```
 
-**Other e2e environment variables**
+**Environment variables**
 
 | Variable | Default | Description |
 |---|---|---|
+| `E2E_KEEP_CLUSTER_ON_FAILURE` | `false` | Preserve the Kind cluster (or Kubernetes objects) when the suite fails |
 | `E2E_PORT` | `30080` | Host port mapped to the gateway NodePort |
 | `E2E_METRICS_PORT` | `32090` | Host port mapped to the EPP metrics NodePort |
 | `K8S_CONTEXT` | _(empty)_ | Use an existing cluster context instead of creating a Kind cluster |
 | `NAMESPACE` | `default` | Namespace to deploy test resources into |
 | `CONTAINER_RUNTIME` | `docker` | Container runtime used to load images into Kind (`docker` or `podman`) |
 | `READY_TIMEOUT` | `3m` | How long to wait for resources to become ready |
+| `EPP_IMAGE` | `ghcr.io/llm-d/llm-d-inference-scheduler:dev` | EPP image loaded into the Kind cluster |
+| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.1` | vLLM simulator image loaded into the Kind cluster |
+| `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
+| `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
 
 ## Tokenization Architecture
 

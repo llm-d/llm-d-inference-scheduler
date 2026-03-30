@@ -60,10 +60,9 @@ var (
 
 	testConfig *testutils.TestConfig
 
-	// keepClusterOnFailure skips kind cluster deletion when tests fail.
+	// keepClusterOnFailure skips kind cluster deletion when the suite fails.
 	// Set E2E_KEEP_CLUSTER_ON_FAILURE=true to enable.
 	keepClusterOnFailure = env.GetEnvString("E2E_KEEP_CLUSTER_ON_FAILURE", "false", ginkgo.GinkgoLogr) == "true"
-	suiteFailed          bool
 
 	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppImage          = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
@@ -98,12 +97,6 @@ func TestEndToEnd(t *testing.T) {
 	)
 }
 
-var _ = ginkgo.AfterEach(func() {
-	if ginkgo.CurrentSpecReport().Failed() {
-		suiteFailed = true
-	}
-})
-
 var _ = ginkgo.BeforeSuite(func() {
 	if k8sContext == "" {
 		setupK8sCluster()
@@ -122,9 +115,25 @@ var _ = ginkgo.BeforeSuite(func() {
 })
 
 var _ = ginkgo.AfterSuite(func() {
+	// Stop port-forwards when using an existing cluster context; they must be
+	// terminated before the process exits regardless of pass/fail status.
+	if k8sContext != "" {
+		if portForwardSession != nil {
+			portForwardSession.Terminate()
+		}
+		if eppPortForwardSession != nil {
+			eppPortForwardSession.Terminate()
+		}
+	}
+})
+
+// ReportAfterSuite receives the full suite report, including failures in
+// BeforeSuite/AfterSuite, so keepClusterOnFailure works for all failure modes.
+var _ = ginkgo.ReportAfterSuite("cleanup", func(report ginkgo.Report) {
+	shouldKeep := keepClusterOnFailure && !report.SuiteSucceeded
 	if k8sContext == "" {
-		if keepClusterOnFailure && suiteFailed {
-			ginkgo.By("Keeping kind cluster " + kindClusterName + " due to test failures (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
+		if shouldKeep {
+			ginkgo.By("Keeping kind cluster " + kindClusterName + " due to suite failure (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
 		} else {
 			// delete kind cluster we created
 			ginkgo.By("Deleting kind cluster " + kindClusterName)
@@ -138,19 +147,9 @@ var _ = ginkgo.AfterSuite(func() {
 		}
 	} else {
 		// Used an existing Kubernetes context, clean up created resources
-		// Stop port-forward
-		if portForwardSession != nil {
-			portForwardSession.Terminate()
-		}
-
-		if eppPortForwardSession != nil {
-			eppPortForwardSession.Terminate()
-		}
-
-		if keepClusterOnFailure && suiteFailed {
-			ginkgo.By("Keeping created Kubernetes objects due to test failures (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
+		if shouldKeep {
+			ginkgo.By("Keeping created Kubernetes objects due to suite failure (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
 		} else {
-			// cleanup created objects
 			ginkgo.By("Deleting created Kubernetes objects")
 			testutils.DeleteObjects(testConfig, infPoolObjects)
 			testutils.DeleteObjects(testConfig, serviceObjects)
