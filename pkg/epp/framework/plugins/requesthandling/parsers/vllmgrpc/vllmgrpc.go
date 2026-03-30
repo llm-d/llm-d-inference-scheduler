@@ -158,14 +158,14 @@ func convertToLLMRequestBody(payload []byte) (*scheduling.LLMRequestBody, error)
 			Completions: &scheduling.CompletionsRequest{
 				Prompt: pbReq.GetText(),
 			},
-			ParsedBody: pbReq,
+			Payload: scheduling.PayloadProto{Message: pbReq},
 		}
 	case *pb.GenerateRequest_Tokenized:
 		body = &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
 				Prompt: pbReq.GetTokenized().OriginalText,
 			},
-			ParsedBody: pbReq,
+			Payload: scheduling.PayloadProto{Message: pbReq},
 		}
 	default:
 		return nil, errors.New("not supported request inputType")

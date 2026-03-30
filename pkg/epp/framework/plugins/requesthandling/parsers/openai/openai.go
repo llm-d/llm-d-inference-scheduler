@@ -96,7 +96,7 @@ func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers ma
 	if err != nil {
 		return nil, err
 	}
-	extractedBody.ParsedBody = bodyMap
+	extractedBody.Payload = scheduling.PayloadMap(bodyMap)
 	if stream, ok := bodyMap["stream"].(bool); ok && stream {
 		extractedBody.Stream = true
 	}

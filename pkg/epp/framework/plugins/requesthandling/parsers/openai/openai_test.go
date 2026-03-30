@@ -63,7 +63,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				Completions: &scheduling.CompletionsRequest{
 					Prompt: "test prompt",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model":  "test",
 					"prompt": "test prompt",
 				},
@@ -90,7 +90,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 						{Role: "user", Content: scheduling.Content{Raw: "hello"}},
 					},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "test",
 					"messages": []any{
 						map[string]any{
@@ -152,7 +152,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 						}},
 					},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "test",
 					"messages": []any{
 						map[string]any{
@@ -221,7 +221,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 						}},
 					},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "test",
 					"messages": []any{
 						map[string]any{
@@ -273,7 +273,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 					AddGenerationPrompt:       true,
 					ChatTemplateKWArgs:        map[string]any{"key": "value"},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "test",
 					"messages": []any{
 						map[string]any{"role": "user", "content": "hello"},
@@ -448,7 +448,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 					Prompt:    "test prompt",
 					CacheSalt: "Z3V2bmV3aGxza3ZubGFoZ3Zud3V3ZWZ2bmd0b3V2bnZmc2xpZ3RoZ2x2aQ==",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model":      "test",
 					"prompt":     "test prompt",
 					"cache_salt": "Z3V2bmV3aGxza3ZubGFoZ3Zud3V3ZWZ2bmd0b3V2bnZmc2xpZ3RoZ2x2aQ==",
@@ -478,7 +478,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 					},
 					CacheSalt: "Z3V2bmV3aGxza3ZubGFoZ3Zud3V3ZWZ2bmd0b3V2bnZmc2xpZ3RoZ2x2aQ==",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "test",
 					"messages": []any{
 						map[string]any{
@@ -505,7 +505,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 					Input:        "How do I check if a Python object is an instance of a class?",
 					Instructions: "You are a coding assistant that talks like a pirate.",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model":        "gpt-4o",
 					"input":        "How do I check if a Python object is an instance of a class?",
 					"instructions": "You are a coding assistant that talks like a pirate.",
@@ -525,7 +525,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 					Input:     "test input",
 					CacheSalt: "abc123",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model":      "gpt-4o",
 					"input":      "test input",
 					"cache_salt": "abc123",
@@ -557,7 +557,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 						{Type: "message", Role: "user", Content: "Hello"},
 					},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "gpt-4o",
 					"items": []any{map[string]any{"type": "message", "role": "user", "content": "Hello"}},
 				},
@@ -578,7 +578,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 						{Type: "message", Role: "user", Content: "Hello"},
 					},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "gpt-4o",
 					"items": []any{
 						map[string]any{"type": "message", "role": "user", "content": "Hello"},
@@ -597,7 +597,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				Completions: &scheduling.CompletionsRequest{
 					Prompt: "test prompt",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model":  "gpt-4o",
 					"prompt": "test prompt",
 				},
@@ -617,7 +617,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				ChatCompletions: &scheduling.ChatCompletionsRequest{
 					Messages: []scheduling.Message{{Role: "user", Content: scheduling.Content{Raw: "hello"}}},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "test",
 					"messages": []any{
 						map[string]any{"role": "user", "content": "hello"},
@@ -639,7 +639,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				Embeddings: &scheduling.EmbeddingsRequest{
 					Input: "The food was delicious and the waiter...",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "text-embedding-3-small",
 					"input": "The food was delicious and the waiter...",
 				},
@@ -656,7 +656,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				Embeddings: &scheduling.EmbeddingsRequest{
 					Input: []any{"First document", "Second document"},
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "text-embedding-3-small",
 					"input": []any{"First document", "Second document"},
 				},
@@ -675,7 +675,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 					Input:     "embed this text",
 					CacheSalt: "embeddings-salt-123",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model":      "text-embedding-3-small",
 					"input":      "embed this text",
 					"cache_salt": "embeddings-salt-123",
@@ -693,7 +693,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				Embeddings: &scheduling.EmbeddingsRequest{
 					Input: "text to embed",
 				},
-				ParsedBody: map[string]any{
+				Payload: scheduling.PayloadMap{
 					"model": "text-embedding-3-small",
 					"input": "text to embed",
 				},
