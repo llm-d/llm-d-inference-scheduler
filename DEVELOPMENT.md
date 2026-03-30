@@ -101,19 +101,14 @@ curl -s -w '\n' http://localhost:8080/v1/completions \
 
 **NodePort**
 
-The gateway is also exposed as a NodePort on port 30080 by default. Override this at
+The gateway is also exposed as a NodePort and is exposed on your development machine on port 30080 by default. Override this at
 cluster creation time with any free port in the range 30000-32767:
 
 ```bash
 KIND_GATEWAY_HOST_PORT=<selected-port> make env-dev-kind
 ```
 
-To find the worker node address:
-
-```bash
-kubectl --context kind-llm-d-inference-scheduler-dev get node -o yaml | grep address
-# The service is accessible over port 80 of the worker IP address.
-```
+The service is then accessible at `http://localhost:30080`.
 
 **LoadBalancer**
 
