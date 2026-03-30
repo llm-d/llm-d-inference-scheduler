@@ -3,6 +3,7 @@ package plugins
 import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/datalayer/models"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/multi"
 	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/pre-request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"
@@ -38,4 +39,5 @@ func RegisterAllPlugins() {
 	plugin.Register(preparedata.TokenizerPluginType, preparedata.TokenizerPluginFactory)
 	// ep decider plugins
 	plugin.Register(profile.AlwaysDisaggMulimodalPluginType, profile.AlwaysDisaggMulimodalDeciderPluginFactory)
+	plugin.Register(multi.ContextLengthAwareType, multi.ContextLengthAwareFactory)
 }

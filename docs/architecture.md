@@ -576,6 +576,119 @@ schedulingProfiles:
 
 ---
 
+#### ContextLengthAware
+
+A **Scorer** plugin that routes inference requests based on context length (token count), with optional
+**filtering** gated behind `enableFiltering`. Scoring is always applied; filtering is off by default.
+This enables optimized resource allocation by directing requests to pods configured for specific
+context length ranges.
+
+**Use Cases:**
+- Route short prompts to pods with smaller GPU memory
+- Direct long-context requests to specialized high-memory pods
+- Optimize performance by matching workload characteristics to hardware capabilities
+- Support heterogeneous deployments with different GPU configurations
+
+The plugin scores all pods based on how well their ranges match the request:
+- **In-range match (0.3–1.0]:** Higher scores for tighter/more specific ranges (specialized pods), lower scores for very wide ranges (generalist pods). In-range scores are always strictly above 0.3, guaranteeing they beat any out-of-range fallback.
+- **Out-of-range fallback [0.0–0.3):** When no range matches, pods are ranked by proximity to the request. For example, a 9000-token request prefers a pod with `max=8192` over one with `max=2048`.
+- **Neutral score (0.5):** Pods without the context length label.
+
+When `enableFiltering` is set to true, the plugin also filters out pods whose range does not contain the request's context length.
+
+**Configuration:**
+
+- **Type**: `context-length-aware`
+- **Parameters**:
+  - `label` (optional): Pod label name containing context length range(s).
+    Default: `llm-d.ai/context-length-range`
+  - `enableFiltering` (optional): If true, the plugin operates as a filter, excluding non-matching pods.
+    Default: false
+
+**Token Counting:**
+
+This plugin reads tokenized prompt data from CycleState, as written by the `tokenizer` plugin.
+When the tokenizer plugin is configured in the same scheduling profile, the context-length-aware plugin
+uses the exact token count for routing decisions. This avoids double-tokenization with other plugins
+that also consume tokens (e.g., `precise-prefix-cache-scorer`).
+
+When the tokenizer scorer is not configured, the plugin falls back to character-based estimation
+(characters × 0.25).
+
+> [!NOTE]
+> The `tokenizer` plugin must appear **before** `context-length-aware` in the scheduling profile
+> so that CycleState is populated before scoring runs.
+
+**Label Format:**
+
+Pods should be labeled with context length ranges using the format `"min-max"`, where _min_ and _max_ are both positive integers:
+
+```yaml
+llm-d.ai/context-length-range: "0-2048"
+```
+
+**Example Configuration - Scorer:**
+
+```yaml
+plugins:
+  - type: tokenizer
+    parameters:
+      modelName: meta-llama/Llama-3.1-8B-Instruct
+      udsTokenizerConfig:
+        socketFile: /tmp/tokenizer/tokenizer-uds.socket
+  - type: context-length-aware
+    parameters:
+      label: llm-d.ai/context-length-range
+  - type: load-aware-scorer
+  - type: max-score-picker
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: tokenizer
+        weight: 1
+      - pluginRef: context-length-aware
+        weight: 3
+      - pluginRef: load-aware-scorer
+        weight: 1
+      - pluginRef: max-score-picker
+```
+
+**Example Configuration - Scorer with Filtering Enabled:**
+
+```yaml
+plugins:
+  - type: context-length-aware
+    parameters:
+      enableFiltering: true
+      label: llm-d.ai/context-length-range
+  - type: max-score-picker
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: context-length-aware
+      - pluginRef: max-score-picker
+```
+
+**Example Pod Labels:**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-short-context
+  labels:
+    llm-d.ai/context-length-range: "0-2048"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-long-context
+  labels:
+    llm-d.ai/context-length-range: "2048-8192"
+```
+
+---
+
 ### Sample Disaggregated Prefill/Decode Configuration
 
 The following is an example of what a configuration for disaggregated Prefill/Decode might look like:

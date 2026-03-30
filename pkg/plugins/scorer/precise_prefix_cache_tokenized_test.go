@@ -22,6 +22,7 @@ import (
 
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,12 +31,13 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/preparedata"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 type mockKVCacheIndexer struct {
 	getPodScoresFunc func(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
-	scoreTokensFunc  func(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	scoreTokensFunc  func(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
 }
 
 func (m *mockKVCacheIndexer) GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error) {
@@ -45,9 +47,9 @@ func (m *mockKVCacheIndexer) GetPodScores(ctx context.Context, renderReq *types.
 	return map[string]float64{}, nil
 }
 
-func (m *mockKVCacheIndexer) ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error) {
+func (m *mockKVCacheIndexer) ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
 	if m.scoreTokensFunc != nil {
-		return m.scoreTokensFunc(ctx, tokens, modelName, podIdentifiers)
+		return m.scoreTokensFunc(ctx, tokens, modelName, podIdentifiers, extraFeatures)
 	}
 	return map[string]float64{}, nil
 }
@@ -90,7 +92,7 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
-			scoreTokensFunc: func(_ context.Context, tokens []uint32, modelName string, _ []string) (map[string]float64, error) {
+			scoreTokensFunc: func(_ context.Context, tokens []uint32, modelName string, _ []string, _ []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
 				capturedTokens = tokens
 				capturedModel = modelName
 				return map[string]float64{"10.0.0.1:8080": 1.0}, nil
@@ -98,18 +100,101 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 		},
 	}
 
+	// Write tokenized prompt to CycleState (as the tokenizer scorer would).
+	cycleState := scheduling.NewCycleState()
+	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+		TokenIDs: tokenIDs,
+	})
+
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-tokenized",
 		TargetModel: "test-model",
-		TokenizedPrompt: &scheduling.TokenizedPrompt{
-			TokenIDs: tokenIDs,
-		},
 	}
 
-	scorer.Score(ctx, scheduling.NewCycleState(), request, testEndpoints)
+	scorer.Score(ctx, cycleState, request, testEndpoints)
 
 	require.Equal(t, tokenIDs, capturedTokens)
 	require.Equal(t, "test-model", capturedModel)
+}
+
+func TestPrecisePrefixCacheScorer_PassesExtraFeaturesToScoreTokens(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	tokenIDs := []uint32{10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160}
+	var capturedExtraFeatures []*kvblock.BlockExtraFeatures
+
+	scorer := &PrecisePrefixCacheScorer{
+		typedName:       plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
+		kvEventsConfig:  &kvevents.Config{},
+		pluginState:     plugin.NewPluginState(ctx),
+		blockSizeTokens: 16,
+		kvCacheIndexer: &mockKVCacheIndexer{
+			scoreTokensFunc: func(_ context.Context, _ []uint32, _ string, _ []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
+				capturedExtraFeatures = extraFeatures
+				return map[string]float64{"10.0.0.1:8080": 1.0}, nil
+			},
+		},
+	}
+
+	mmFeatures := &tokenization.MultiModalFeatures{
+		MMHashes: map[string][]string{
+			"image": {"abc123"},
+		},
+		MMPlaceholders: map[string][]kvblock.PlaceholderRange{
+			"image": {{Offset: 2, Length: 4}},
+		},
+	}
+
+	cycleState := scheduling.NewCycleState()
+	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+		TokenIDs:   tokenIDs,
+		MMFeatures: mmFeatures,
+	})
+
+	request := &scheduling.LLMRequest{
+		RequestId:   "test-mm",
+		TargetModel: "test-model",
+	}
+
+	scorer.Score(ctx, cycleState, request, testEndpoints)
+
+	require.NotNil(t, capturedExtraFeatures, "extraFeatures should be passed to ScoreTokens when MMFeatures present")
+}
+
+func TestPrecisePrefixCacheScorer_NilExtraFeaturesForTextOnly(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	tokenIDs := []uint32{10, 20, 30, 40, 50}
+	var capturedExtraFeatures []*kvblock.BlockExtraFeatures
+	called := false
+
+	scorer := &PrecisePrefixCacheScorer{
+		typedName:       plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
+		kvEventsConfig:  &kvevents.Config{},
+		pluginState:     plugin.NewPluginState(ctx),
+		blockSizeTokens: 16,
+		kvCacheIndexer: &mockKVCacheIndexer{
+			scoreTokensFunc: func(_ context.Context, _ []uint32, _ string, _ []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
+				called = true
+				capturedExtraFeatures = extraFeatures
+				return map[string]float64{"10.0.0.1:8080": 1.0}, nil
+			},
+		},
+	}
+
+	cycleState := scheduling.NewCycleState()
+	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+		TokenIDs:   tokenIDs,
+		MMFeatures: nil,
+	})
+
+	request := &scheduling.LLMRequest{
+		RequestId:   "test-text-only",
+		TargetModel: "test-model",
+	}
+
+	scorer.Score(ctx, cycleState, request, testEndpoints)
+
+	require.True(t, called, "ScoreTokens should have been called")
+	assert.Nil(t, capturedExtraFeatures, "extraFeatures should be nil for text-only requests")
 }
 
 func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
@@ -121,7 +206,7 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
-			scoreTokensFunc: func(_ context.Context, _ []uint32, _ string, _ []string) (map[string]float64, error) {
+			scoreTokensFunc: func(_ context.Context, _ []uint32, _ string, _ []string, _ []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
 				fromTokensCalled = true
 				return map[string]float64{}, nil
 			},
@@ -131,17 +216,20 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 		},
 	}
 
+	// Write empty token IDs to CycleState.
+	cycleState := scheduling.NewCycleState()
+	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+		TokenIDs: []uint32{},
+	})
+
 	request := &scheduling.LLMRequest{
 		RequestId:   "test-skip-empty",
 		TargetModel: "test-model",
-		TokenizedPrompt: &scheduling.TokenizedPrompt{
-			TokenIDs: []uint32{},
-		},
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
 		},
 	}
 
-	scorer.Score(ctx, scheduling.NewCycleState(), request, testEndpoints)
+	scorer.Score(ctx, cycleState, request, testEndpoints)
 	assert.False(t, fromTokensCalled, "ScoreTokens should not be called with empty TokenIDs")
 }

@@ -236,7 +236,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				for idx, msg := range req.ChatCompletions.Messages {
 					conversations[idx] = preprocessing.Conversation{
 						Role:    msg.Role,
-						Content: msg.Content.Raw,
+						Content: types.Content{Raw: msg.Content.Raw},
 					}
 				}
 

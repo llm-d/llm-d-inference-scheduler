@@ -603,6 +603,7 @@ func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, 
 			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
+			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
 		})
 
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)

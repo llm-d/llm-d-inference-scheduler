@@ -16,6 +16,38 @@ spec:
         llm-d.ai/role: decode
     spec:
       initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer 
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -67,3 +99,10 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: metadata.namespace
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
+      volumes:
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}
