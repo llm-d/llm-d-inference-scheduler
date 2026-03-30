@@ -9,13 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/http"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/http"
 )
 
 func TestDatasource(t *testing.T) {
-	source := http.NewHTTPDataSource("https", "/models", true, ModelsDataSourceType,
+	source, err := http.NewHTTPDataSource("https", "/models", true, ModelsDataSourceType,
 		"models-data-source", parseModels, ModelsResponseType)
+	assert.Nil(t, err, "failed to create http datasource")
 	extractor, err := NewModelExtractor()
 	assert.Nil(t, err, "failed to create extractor")
 
@@ -44,6 +45,6 @@ func TestDatasource(t *testing.T) {
 	endpoint := factory.NewEndpoint(ctx, pod, nil)
 	assert.NotNil(t, endpoint, "failed to create endpoint")
 
-	err = source.Collect(ctx, endpoint)
+	err = source.Poll(ctx, endpoint)
 	assert.NotNil(t, err, "expected to fail to collect metrics")
 }

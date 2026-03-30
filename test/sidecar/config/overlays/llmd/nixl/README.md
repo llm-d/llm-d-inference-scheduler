@@ -3,5 +3,5 @@
 To deploy:
 
 ```
-$ kustomize build test/config/overlays/llmd/nixl | kubectl apply -f -
+$ kubectl kustomize test/config/overlays/llmd/nixl | kubectl apply -f -
 ```

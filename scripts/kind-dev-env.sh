@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${IMAGE_REGISTRY:=ghcr.io/llm-d}"
 
 # Set a default VLLM_SIMULATOR_TAG if not provided
-export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-latest}"
+export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.8.1}"
 
 # Set a default VLLM_SIMULATOR_IMAGE if not provided
 VLLM_SIMULATOR_IMAGE="${VLLM_SIMULATOR_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-sim:${VLLM_SIMULATOR_TAG}}"
@@ -71,8 +71,18 @@ export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 # By default we are not setting up for PD
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
+# By default we are not deploying Prometheus monitoring
+export PROM_ENABLED="${PROM_ENABLED:-false}"
+
+# Set the host port to map to the Prometheus NodePort (30090)
+: "${PROM_HOST_PORT:=30090}"
+
+
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
+
+# By default we are not setting up for external tokenizer
+export EXTERNAL_TOKENIZER_ENABLED="${EXTERNAL_TOKENIZER_ENABLED:-false}"
 
 # Replica counts for P and D
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
@@ -90,25 +100,16 @@ if [ "${KV_CACHE_ENABLED}" == "true" ]; then
   fi
 fi
 
-# Set PRIMARY_PORT based on PD mode with data parallelism
-if [ "${PD_ENABLED}" == "\"true\"" ] && [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-  PRIMARY_PORT="8000"
-else
-  PRIMARY_PORT="0"
-fi
-export PRIMARY_PORT
-
 # Determine EPP config file based on feature flags
-if [ "${KV_CACHE_ENABLED}" == "true" ]; then
+if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
+  # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
+elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
   # KV cache mode (simple mode only)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   # Prefill-Decode mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-  # Data Parallel mode (only needed for Istio pre-1.28.1)
-  # Not really called in kind(docker.io/istio/pilot:1.28.1) by "make env-dev-kind"
-  DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
 else
   # Simple mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
@@ -142,6 +143,19 @@ for cmd in kind kubectl ${CONTAINER_RUNTIME}; do
     fi
 done
 
+# Prometheus config-reloader needs sufficient inotify resources
+if [ "${PROM_ENABLED}" == "true" ]; then
+  INOTIFY_INSTANCES=$(cat /proc/sys/fs/inotify/max_user_instances)
+  if [ "${INOTIFY_INSTANCES}" -lt 512 ]; then
+    echo "Error: fs.inotify.max_user_instances is ${INOTIFY_INSTANCES} (need >= 512) for Prometheus."
+    echo ""
+    echo "  sudo sysctl -w fs.inotify.max_user_instances=512"
+    echo ""
+    echo "To persist: echo 'fs.inotify.max_user_instances=512' | sudo tee /etc/sysctl.d/99-inotify.conf"
+    exit 1
+  fi
+fi
+
 TARGET_PORTS="8000"
 
 NEW_LINE=$'\n'
@@ -160,6 +174,13 @@ export TARGET_PORTS
 if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "Cluster '${CLUSTER_NAME}' already exists, re-using"
 else
+    EXTRA_PORT_MAPPINGS=""
+    if [ "${PROM_ENABLED}" == "true" ]; then
+      EXTRA_PORT_MAPPINGS="  - containerPort: 30090
+    hostPort: ${PROM_HOST_PORT}
+    protocol: TCP"
+    fi
+
     kind create cluster --name "${CLUSTER_NAME}" --config - << EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -169,6 +190,7 @@ nodes:
   - containerPort: 30080
     hostPort: ${GATEWAY_HOST_PORT}
     protocol: TCP
+${EXTRA_PORT_MAPPINGS}
 EOF
 fi
 
@@ -195,38 +217,21 @@ kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Rea
 # Load Container Images
 # ------------------------------------------------------------------------------
 
-# Load the vllm simulator image into the cluster (only if it's a locally built image)
-if [ -n "$(${CONTAINER_RUNTIME} images -q "${VLLM_SIMULATOR_IMAGE}")" ]; then
-    if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-        podman save ${VLLM_SIMULATOR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-    else
-        if docker image inspect "${VLLM_SIMULATOR_IMAGE}" > /dev/null 2>&1; then
-            echo "INFO: Loading image into KIND cluster..."
-            kind --name ${CLUSTER_NAME} load docker-image ${VLLM_SIMULATOR_IMAGE}
-        fi
-    fi
+LINUX_ARCH="$(uname -m)"
+case "${LINUX_ARCH}" in
+    x86_64) LINUX_ARCH="amd64" ;;
+    aarch64|arm64) LINUX_ARCH="arm64" ;;
+esac
+
+PLATFORM_ARGS=()
+if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
+    PLATFORM_ARGS=("--platform" "linux/${LINUX_ARCH}")
 fi
 
-# Load the ext_proc endpoint-picker image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${EPP_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${EPP_IMAGE}
-fi
-
-# Load the sidecar image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${SIDECAR_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${SIDECAR_IMAGE}
-fi
-
-# Load the UDS tokenizer image into the cluster
-if [ "${CONTAINER_RUNTIME}" == "podman" ]; then
-	podman save ${UDS_TOKENIZER_IMAGE} -o /dev/stdout | kind --name ${CLUSTER_NAME} load image-archive /dev/stdin
-else
-	kind --name ${CLUSTER_NAME} load docker-image ${UDS_TOKENIZER_IMAGE}
-fi
+for IMAGE in "${VLLM_SIMULATOR_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_IMAGE}"; do
+    echo "Loading ${IMAGE} into kind cluster..."
+    "${CONTAINER_RUNTIME}" save "${PLATFORM_ARGS[@]}" "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+done
 
 # ------------------------------------------------------------------------------
 # CRD Deployment (Gateway API + GIE)
@@ -257,7 +262,7 @@ TEMP_FILE=$(mktemp)
 trap "rm -f \"${TEMP_FILE}\"" EXIT
 
 kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
-envsubst '$PRIMARY_PORT' < ${EPP_CONFIG} > ${TEMP_FILE}
+envsubst '$MODEL_NAME' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
 kubectl kustomize --enable-helm  ${KUSTOMIZE_DIR} \
@@ -278,6 +283,41 @@ kubectl --context ${KUBE_CONTEXT} -n default wait --for=condition=available --ti
 
 # Wait for the gateway to be ready
 kubectl --context ${KUBE_CONTEXT} wait gateway/inference-gateway --for=condition=Programmed --timeout=300s
+
+# ------------------------------------------------------------------------------
+# Prometheus Monitoring (optional)
+# ------------------------------------------------------------------------------
+
+if [ "${PROM_ENABLED}" == "true" ]; then
+  echo "Deploying Prometheus monitoring stack..."
+
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
+  helm repo update prometheus-community
+
+  # Install kube-prometheus-stack (Prometheus only)
+  helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+    --namespace monitoring --create-namespace \
+    --set grafana.enabled=false \
+    --set alertmanager.enabled=false \
+    --set kubeControllerManager.enabled=false \
+    --set kubeEtcd.enabled=false \
+    --set kubeProxy.enabled=false \
+    --set kubeScheduler.enabled=false \
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.resources.requests.memory=512Mi \
+    --set prometheus.prometheusSpec.resources.limits.memory=1Gi \
+    --set prometheus.service.type=NodePort \
+    --set prometheus.service.nodePort=30090 \
+    --kube-context ${KUBE_CONTEXT} \
+    --wait --timeout 300s
+
+  kubectl kustomize deploy/components/monitoring \
+    | envsubst '${EPP_NAME} ${POOL_NAME}' \
+    | kubectl --context ${KUBE_CONTEXT} apply -f -
+
+  echo "Prometheus monitoring deployed."
+fi
 
 cat <<EOF
 -----------------------------------------
@@ -304,3 +344,13 @@ See DEVELOPMENT.md for additional access methods if the above fails.
 
 -----------------------------------------
 EOF
+
+if [ "${PROM_ENABLED}" == "true" ]; then
+cat <<EOF
+
+Monitoring:
+
+* Prometheus: http://localhost:${PROM_HOST_PORT}
+
+EOF
+fi

@@ -9,12 +9,12 @@ import (
 )
 
 const (
-	// AlwaysDisaggDeciderPluginType is the type-name of the alwaysDisaggPDDecider plugin.
-	AlwaysDisaggDeciderPluginType = "always-disagg-pd-decider"
+	// AlwaysDisaggPDDeciderPluginType is the type-name of the alwaysDisaggPDDecider plugin.
+	AlwaysDisaggPDDeciderPluginType = "always-disagg-pd-decider"
 )
 
 // compile-time type assertion
-var _ pdDeciderPlugin = &AlwaysDisaggPDDecider{}
+var _ deciderPlugin = &AlwaysDisaggPDDecider{}
 
 // AlwaysDisaggPDDecider is a PD decider plugin which always decide to disaggregate PD
 type AlwaysDisaggPDDecider struct {
@@ -29,7 +29,9 @@ func AlwaysDisaggPDDeciderPluginFactory(name string, _ json.RawMessage,
 }
 
 func newAlwaysDisaggPDDecider() *AlwaysDisaggPDDecider {
-	return &AlwaysDisaggPDDecider{}
+	return &AlwaysDisaggPDDecider{
+		typedName: plugin.TypedName{Type: AlwaysDisaggPDDeciderPluginType},
+	}
 }
 
 // TypedName returns the typed name of the plugin.
@@ -43,6 +45,6 @@ func (d *AlwaysDisaggPDDecider) WithName(name string) *AlwaysDisaggPDDecider {
 	return d
 }
 
-func (d *AlwaysDisaggPDDecider) disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
+func (d *AlwaysDisaggPDDecider) disaggregate(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
 	return true
 }

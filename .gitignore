@@ -39,3 +39,6 @@ vendor
 
 # Build output
 /build
+
+# Coverage reports (HTML; .out files are already covered by *.out above)
+/coverage

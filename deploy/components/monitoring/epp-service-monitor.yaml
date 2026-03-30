@@ -1,0 +1,14 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: epp-metrics
+  labels:
+    app: epp-metrics
+spec:
+  selector:
+    matchLabels:
+      app: ${EPP_NAME}
+  endpoints:
+  - port: metrics
+    interval: 15s
+    path: /metrics

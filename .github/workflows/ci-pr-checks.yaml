@@ -16,66 +16,88 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
             src:
               - '**/*.go'
-              - '**/*.py'
-              - Dockerfile.epp
-              - Dockerfile.sidecar
+              - Dockerfile.*
               - Makefile*
               - go.mod
+              - scripts/**
   lint-and-test:
     needs: check-changes
     if: ${{ needs.check-changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-
       - name: Checkout source
         uses: actions/checkout@v6
 
       - name: Sanity check repo contents
         run: ls -la
 
-      - name: Extract Go version from go.mod
-        run: sed -En 's/^go (.*)$/GO_VERSION=\1/p' go.mod >> $GITHUB_ENV
-
-      - name: Set up Go with cache
-        uses: actions/setup-go@v6
-        with:
-          go-version: "${{ env.GO_VERSION }}"
-          cache-dependency-path: ./go.sum
-
-      - name: Configure CGO for ZMQ
+      - name: Create and resolve Go cache volumes
+        id: go-cache
         run: |
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig" >> $GITHUB_ENV
+          docker volume create llm-d-gomodcache
+          docker volume create llm-d-gobuildcache
+          echo "mod=$(docker volume inspect llm-d-gomodcache -f '{{.Mountpoint}}')" >> $GITHUB_OUTPUT
+          echo "build=$(docker volume inspect llm-d-gobuildcache -f '{{.Mountpoint}}')" >> $GITHUB_OUTPUT
 
-      - name: Install dependencies
-        run: |
-          go mod tidy
-          sudo -E env "PATH=$PATH" make install-dependencies
-
-      - name: Run lint checks
-        uses: golangci/golangci-lint-action@v9
+      - name: Cache Go modules and build cache
+        uses: actions/cache@v4
         with:
-          version: "v2.8.0"
-          args: "--config=./.golangci.yml"
-          skip-cache: true
-        env:
-          CGO_ENABLED: ${{ env.CGO_ENABLED }}
-          PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
+          path: |
+            ${{ steps.go-cache.outputs.mod }}
+            ${{ steps.go-cache.outputs.build }}
+          key: go-cache-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-cache-
+
+      - name: Run make lint
+        run: make lint
 
       - name: Run make build
         shell: bash
         run: make build
 
-      - name: Run make test
+      # Restore the baseline saved from the last main push so the compare step
+      # can diff against it. Missing cache (first PR ever) is not an error;
+      # compare-coverage.sh reports all components as "new" and exits 0.
+      - name: Restore main branch coverage baseline
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: coverage/baseline
+          key: coverage-main
+
+      - name: Run unit tests
         shell: bash
-        run: make test
+        run: make test-unit
+
+      - name: Compare coverage against main baseline
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        shell: bash
+        run: make coverage-compare BASELINE_DIR=coverage/baseline
+
+      # Copy the freshly generated profiles into coverage/baseline so that
+      # the saved path matches the restored path on future PR runs.
+      - name: Stage coverage baseline for caching
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        run: |
+          mkdir -p coverage/baseline
+          cp coverage/*.out coverage/baseline/
+
+      - name: Save coverage baseline (main branch only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: coverage/baseline
+          key: coverage-main
+
+      - name: Run make test-e2e
+        shell: bash
+        run: make test-e2e

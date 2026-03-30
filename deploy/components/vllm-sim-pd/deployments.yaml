@@ -15,6 +15,39 @@ spec:
         app: ${POOL_NAME}
         llm-d.ai/role: prefill
     spec:
+      initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer          
       containers:
       - name: vllm
         image: ${VLLM_SIMULATOR_IMAGE}
@@ -51,6 +84,13 @@ spec:
         env:
         - name: PORT
           value: "8000"
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
+      volumes:
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -70,13 +110,45 @@ spec:
         llm-d.ai/role: decode
     spec:
       initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8000"
         - "--vllm-port=8200"
-        - "--connector=nixlv2"
+        - "--kv-connector=nixlv2"
         - "--secure-proxy=false"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
@@ -146,3 +218,10 @@ spec:
         env:
         - name: PORT
           value: "8200"
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
+      volumes:
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}

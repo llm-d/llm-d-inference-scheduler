@@ -7,15 +7,19 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/plugins/approximateprefix"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
 
 const (
 	// PrefixBasedPDDeciderPluginType is the type-name of the prefixBasedPDDecider plugin.
 	PrefixBasedPDDeciderPluginType = "prefix-based-pd-decider"
+
+	// AverageCharactersPerToken is an estimated average characters per token,
+	// used since the request we cache is not tokenized.
+	AverageCharactersPerToken = 4
 )
 
 // PrefixBasedPDDeciderConfig holds the configuration for the prefixBasedPDDecider plugin.
@@ -33,7 +37,7 @@ func (p PrefixBasedPDDeciderConfig) validate() error {
 }
 
 // compile-time type assertion
-var _ pdDeciderPlugin = &PrefixBasedPDDecider{}
+var _ deciderPlugin = &PrefixBasedPDDecider{}
 
 // PrefixBasedPDDecider is a PD decider plugin which decision is based prefix aware
 type PrefixBasedPDDecider struct {
@@ -70,8 +74,13 @@ func NewPrefixBasedPDDecider(config PrefixBasedPDDeciderConfig) (*PrefixBasedPDD
 		return nil, err
 	}
 
+	if config.NonCachedTokens == 0 {
+		log.Log.Info("Prefix-based PD disabled (NonCachedTokens=0)")
+	}
+
 	return &PrefixBasedPDDecider{
-		config: config,
+		typedName: plugin.TypedName{Type: PrefixBasedPDDeciderPluginType},
+		config:    config,
 	}, nil
 }
 
@@ -86,29 +95,36 @@ func (d *PrefixBasedPDDecider) WithName(name string) *PrefixBasedPDDecider {
 	return d
 }
 
-func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool {
+func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	if d.config.NonCachedTokens <= 0 { // always use disaggregation in case of non cached tokens number is 0
-		return true
+	// NonCachedTokens defines the minimum number of non-cached tokens required
+	// to trigger disaggregated PD. A value of 0 disables disaggregation.
+	if d.config.NonCachedTokens == 0 {
+		return false
 	}
 	if endpoint == nil {
 		logger.Error(nil, "prefix decider: endpoint is nil")
+		return false
+	}
+	inputTokens, err := getUserInputLenInTokens(request)
+	if err != nil {
+		logger.Error(err, "prefix decider: failed to get user input length in tokens")
 		return false
 	}
 	if inputTokens < d.config.NonCachedTokens {
 		debugLogger.Info("Input is shorter than the nonCachedToken, no disaggregated PD")
 		return false
 	}
-	// inspect the decode endpoint to decide if prefill should run or not.
+	// inspect the decode endpoint to disaggregate if prefill should run or not.
 	// if the non-cached part is short enough - no disaggregation.
-	prefixInfoRaw, ok := endpoint.Get(approximateprefix.PrefixCacheMatchInfoKey)
+	prefixInfoRaw, ok := endpoint.Get(prefix.PrefixCacheMatchInfoKey)
 	if !ok || prefixInfoRaw == nil {
 		logger.Error(nil, "unable to read prefix cache state")
 		return false
 	}
-	prefixCacheMatchInfo, ok := prefixInfoRaw.(*approximateprefix.PrefixCacheMatchInfo)
+	prefixCacheMatchInfo, ok := prefixInfoRaw.(*prefix.PrefixCacheMatchInfo)
 	if !ok {
 		logger.Error(nil, "wrong type of prefix cache match info")
 		return false
@@ -131,7 +147,20 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, inputTokens int
 	return true
 }
 
-// Consumes defines data types consumed by this plugin
-func (*PrefixBasedPDDecider) Consumes() map[string]any {
-	return map[string]any{approximateprefix.PrefixCacheMatchInfoKey: approximateprefix.PrefixCacheMatchInfo{}}
+// getUserInputLenInTokens returns an estimated token count for the user input.
+func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
+	if request == nil || request.Body == nil {
+		return 0, errors.New("request or request body is nil")
+	}
+	if request.Body.Completions != nil {
+		return len(request.Body.Completions.Prompt) / AverageCharactersPerToken, nil
+	}
+	if request.Body.ChatCompletions == nil {
+		return 0, errors.New("request has neither completions nor chat completions body")
+	}
+	prompt, err := json.Marshal(request.Body.ChatCompletions.Messages)
+	if err != nil {
+		return 0, err
+	}
+	return len(prompt) / AverageCharactersPerToken, nil
 }

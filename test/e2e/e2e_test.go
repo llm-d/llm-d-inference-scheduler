@@ -36,7 +36,7 @@ const (
 )
 
 var (
-	poolName        = modelName + "-inference-pool"
+	poolName        = simModelName + "-inference-pool"
 	podSelector     = map[string]string{"app": poolName}
 	prefillSelector = map[string]string{"llm-d.ai/role": "prefill"}
 	decodeSelector  = map[string]string{"llm-d.ai/role": "decode"}
@@ -55,11 +55,11 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
-			nsHdr, podHdr, _ := runCompletion(simplePrompt, modelName)
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
-			nsHdr, podHdr, _ = runChatCompletion(simplePrompt)
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
@@ -89,41 +89,41 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
-			nsHdr, podHdrCompletion, _ := runCompletion(simplePrompt, modelName)
+			nsHdr, podHdrCompletion, _ := runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrCompletion).Should(gomega.BeElementOf(decodePods))
 
-			nsHdr, podHdrChat, _ := runChatCompletion(simplePrompt)
+			nsHdr, podHdrChat, _ := runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrChat).Should(gomega.BeElementOf(decodePods))
 
 			// Do an extra completion call with a different prompt
-			nsHdr, podHdr, _ := runCompletion(extraPrompt, modelName)
+			nsHdr, podHdr, _ := runCompletion(extraPrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Run completion with the original prompt
-			nsHdr, podHdr, _ = runCompletion(simplePrompt, modelName)
+			nsHdr, podHdr, _ = runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrCompletion))
 
 			// Do an extra chat completion call with a different prompt
-			nsHdr, podHdr, _ = runChatCompletion(extraPrompt)
+			nsHdr, podHdr, _ = runChatCompletion(extraPrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Run chat completion with the original prompt
-			nsHdr, podHdr, _ = runChatCompletion(simplePrompt)
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
 
 			// Metrics Validation
-			labelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, modelName)
+			labelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, simModelName)
 			prefillDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter)
 
-			labelFilter2 := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, modelName)
+			labelFilter2 := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
 			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_pd_decision_total", labelFilter2)
 
 			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(4))
@@ -134,170 +134,270 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
-	ginkgo.When("Running a PD configuration with shared-storage connector", func() {
-		ginkgo.It("should run regular (non-streaming) requests successfully", func() {
+	for _, tc := range []struct {
+		name   string
+		config string
+	}{
+		{"pd-profile-handler", pdConfig},
+		{"disagg-profile-handler", pdDisaggConfig},
+	} {
+		config := tc.config // capture for closure
+		ginkgo.When("Running a PD configuration with shared-storage connector using "+tc.name, func() {
+			ginkgo.It("should run regular (non-streaming) requests successfully", func() {
+				infPoolObjects = createInferencePool(1, true)
+
+				prefillReplicas := 1
+				decodeReplicas := 2
+				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+
+				epp := createEndPointPicker(config)
+
+				prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
+				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+
+				// Test regular completion request
+				nsHdr, podHdrCompletion, _ := runCompletion(simplePrompt, simModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdrCompletion).Should(gomega.BeElementOf(decodePods))
+
+				// Test regular chat completion request
+				nsHdr, podHdrChat, _ := runChatCompletion(simplePrompt, simModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdrChat).Should(gomega.BeElementOf(decodePods))
+
+				// Run completion with a different prompt
+				nsHdr, podHdr, _ := runCompletion(extraPrompt, simModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+				// Run completion with original prompt (should go to same pod due to prefix cache)
+				nsHdr, podHdr, _ = runCompletion(simplePrompt, simModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+				gomega.Expect(podHdr).Should(gomega.Equal(podHdrCompletion))
+
+				testutils.DeleteObjects(testConfig, epp)
+				testutils.DeleteObjects(testConfig, modelServers)
+			})
+
+			ginkgo.It("should run streaming requests successfully", func() {
+				infPoolObjects = createInferencePool(1, true)
+
+				prefillReplicas := 1
+				decodeReplicas := 2
+				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+
+				epp := createEndPointPicker(config)
+
+				prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
+				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+
+				// Test streaming completion request
+				nsHdr, podHdr := runStreamingCompletion(simplePrompt, simModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+				// Test streaming chat completion request
+				nsHdr, podHdr = runStreamingChatCompletion(simplePrompt)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+				// Run streaming completion with a different prompt
+				nsHdr, podHdr = runStreamingCompletion(extraPrompt, simModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+				testutils.DeleteObjects(testConfig, epp)
+				testutils.DeleteObjects(testConfig, modelServers)
+			})
+
+			ginkgo.It("should handle decode-first success scenario with cache_hit_threshold", func() {
+				// This test verifies the decode-first optimization:
+				// When cache_hit_threshold is set and the decode succeeds (cache hit),
+				// the request should complete without falling back to P/D.
+				// IMPORTANT: The prefill pod should NOT process any requests in this scenario.
+				infPoolObjects = createInferencePool(1, true)
+
+				prefillReplicas := 1
+				decodeReplicas := 2
+				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+
+				epp := createEndPointPicker(config)
+
+				prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
+				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+
+				// Get prefill request count BEFORE the test
+				prefillCountBefore := getPrefillRequestCount(prefillPods[0])
+				ginkgo.By(fmt.Sprintf("Prefill request count before decode-first test: %d", prefillCountBefore))
+
+				// Test decode-first success: cache_hit_threshold is set, but simulator returns "stop"
+				// (without X-Cache-Threshold header), meaning decode succeeded without prefill
+				nsHdr, podHdr, finishReason := runCompletionWithCacheThreshold(simplePrompt, 0.5, false)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+				gomega.Expect(finishReason).ShouldNot(gomega.Equal("cache_threshold"))
+
+				// Test streaming decode-first success
+				nsHdr, podHdr, finishReason = runStreamingCompletionWithCacheThreshold(simplePrompt, 0.5, false)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+				gomega.Expect(finishReason).ShouldNot(gomega.Equal("cache_threshold"))
+
+				// Get prefill request count AFTER the test
+				prefillCountAfter := getPrefillRequestCount(prefillPods[0])
+				ginkgo.By(fmt.Sprintf("Prefill request count after decode-first test: %d", prefillCountAfter))
+
+				// VERIFY: Prefill pod should NOT have processed any new requests
+				// (decode-first succeeded, so no P/D fallback occurred)
+				gomega.Expect(prefillCountAfter).Should(gomega.Equal(prefillCountBefore),
+					"Prefill pod should NOT process requests when cache threshold is met (decode-first success)")
+
+				testutils.DeleteObjects(testConfig, epp)
+				testutils.DeleteObjects(testConfig, modelServers)
+			})
+
+			ginkgo.It("should handle decode-first fallback to P/D when cache threshold not met", func() {
+				// This test verifies the decode-first fallback scenario:
+				// When cache_hit_threshold is set and the decode returns cache_threshold finish_reason,
+				// the sidecar should fall back to P/D disaggregation.
+				// IMPORTANT: The prefill pod SHOULD process requests in this scenario.
+				infPoolObjects = createInferencePool(1, true)
+
+				prefillReplicas := 1
+				decodeReplicas := 2
+				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+
+				epp := createEndPointPicker(config)
+
+				prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
+				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+
+				// Get prefill request count BEFORE the test
+				prefillCountBefore := getPrefillRequestCount(prefillPods[0])
+				ginkgo.By(fmt.Sprintf("Prefill request count before P/D fallback test: %d", prefillCountBefore))
+
+				// Test decode-first fallback: cache_hit_threshold is set AND X-Cache-Threshold header
+				// forces simulator to return "cache_threshold" finish_reason, triggering P/D fallback
+				nsHdr, podHdr, finishReason := runCompletionWithCacheThreshold(simplePrompt, 0.5, true)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+				// The sidecar completes the P/D flow but returns cache_threshold as the finish_reason
+				// from the initial decode attempt (which triggered the fallback)
+				gomega.Expect(finishReason).Should(gomega.Equal("cache_threshold"))
+
+				// Test streaming decode-first fallback
+				nsHdr, podHdr, finishReason = runStreamingCompletionWithCacheThreshold(extraPrompt, 0.5, true)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+				gomega.Expect(finishReason).Should(gomega.Equal("cache_threshold"))
+
+				// Get prefill request count AFTER the test
+				prefillCountAfter := getPrefillRequestCount(prefillPods[0])
+				ginkgo.By(fmt.Sprintf("Prefill request count after P/D fallback test: %d", prefillCountAfter))
+
+				// VERIFY: Prefill pod SHOULD have processed 2 new requests (1 regular + 1 streaming)
+				// (decode-first failed, so P/D fallback occurred and prefill was invoked)
+				gomega.Expect(prefillCountAfter).Should(gomega.BeNumerically(">", prefillCountBefore),
+					"Prefill pod SHOULD process requests when cache threshold is NOT met (P/D fallback)")
+				gomega.Expect(prefillCountAfter-prefillCountBefore).Should(gomega.Equal(2),
+					"Prefill pod should have processed exactly 2 requests (1 regular + 1 streaming)")
+
+				testutils.DeleteObjects(testConfig, epp)
+				testutils.DeleteObjects(testConfig, modelServers)
+			})
+		})
+	}
+
+	ginkgo.When("Running a PD configuration with disagg-profile-handler and metrics validation", func() {
+		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 
 			prefillReplicas := 1
-			decodeReplicas := 2
+			decodeReplicas := 4
 			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
 
-			epp := createEndPointPicker(pdConfig)
+			epp := createEndPointPicker(pdDisaggConfig)
+
+			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
+
+			if k8sContext != "" {
+				// Use port-forward to access the EPP pod's metrics endpoint.
+				startEPPMetricsPortForward()
+			}
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
-			// Test regular completion request
-			nsHdr, podHdrCompletion, _ := runCompletion(simplePrompt, modelName)
+			nsHdr, podHdrCompletion, _ := runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrCompletion).Should(gomega.BeElementOf(decodePods))
 
-			// Test regular chat completion request
-			nsHdr, podHdrChat, _ := runChatCompletion(simplePrompt)
+			nsHdr, podHdrChat, _ := runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdrChat).Should(gomega.BeElementOf(decodePods))
 
-			// Run completion with a different prompt
-			nsHdr, podHdr, _ := runCompletion(extraPrompt, modelName)
+			// Do an extra completion call with a different prompt
+			nsHdr, podHdr, _ := runCompletion(extraPrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
-			// Run completion with original prompt (should go to same pod due to prefix cache)
-			nsHdr, podHdr, _ = runCompletion(simplePrompt, modelName)
+			// Run completion with the original prompt
+			nsHdr, podHdr, _ = runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrCompletion))
 
-			testutils.DeleteObjects(testConfig, epp)
-			testutils.DeleteObjects(testConfig, modelServers)
-		})
-
-		ginkgo.It("should run streaming requests successfully", func() {
-			infPoolObjects = createInferencePool(1, true)
-
-			prefillReplicas := 1
-			decodeReplicas := 2
-			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
-
-			epp := createEndPointPicker(pdConfig)
-
-			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
-			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
-			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
-
-			// Test streaming completion request
-			nsHdr, podHdr := runStreamingCompletion(simplePrompt, modelName)
+			// Do an extra chat completion call with a different prompt
+			nsHdr, podHdr, _ = runChatCompletion(extraPrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
-			// Test streaming chat completion request
-			nsHdr, podHdr = runStreamingChatCompletion(simplePrompt)
+			// Run chat completion with the original prompt
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
 
-			// Run streaming completion with a different prompt
-			nsHdr, podHdr = runStreamingCompletion(extraPrompt, modelName)
-			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+			// Metrics Validation
+			labelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, simModelName)
+			prefillDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", labelFilter)
+
+			labelFilter2 := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
+			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", labelFilter2)
+
+			gomega.Expect(prefillDecodeCount).Should(gomega.Equal(4))
+			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(2))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
 		})
+	})
 
-		ginkgo.It("should handle decode-first success scenario with cache_hit_threshold", func() {
-			// This test verifies the decode-first optimization:
-			// When cache_hit_threshold is set and the decode succeeds (cache hit),
-			// the request should complete without falling back to P/D.
-			// IMPORTANT: The prefill pod should NOT process any requests in this scenario.
+	ginkgo.When("Running simple non-PD configuration with disagg-profile-handler", func() {
+		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			prefillReplicas := 1
-			decodeReplicas := 2
-			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+			modelServers := createModelServers(false, false, false, 1, 0, 0)
 
-			epp := createEndPointPicker(pdConfig)
+			epp := createEndPointPicker(disaggDecodeOnlyConfig)
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
-			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
-			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
+			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
+			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
-			// Get prefill request count BEFORE the test
-			prefillCountBefore := getPrefillRequestCount(prefillPods[0])
-			ginkgo.By(fmt.Sprintf("Prefill request count before decode-first test: %d", prefillCountBefore))
-
-			// Test decode-first success: cache_hit_threshold is set, but simulator returns "stop"
-			// (without X-Cache-Threshold header), meaning decode succeeded without prefill
-			nsHdr, podHdr, finishReason := runCompletionWithCacheThreshold(simplePrompt, 0.5, false)
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
-			gomega.Expect(finishReason).ShouldNot(gomega.Equal("cache_threshold"))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
-			// Test streaming decode-first success
-			nsHdr, podHdr, finishReason = runStreamingCompletionWithCacheThreshold(simplePrompt, 0.5, false)
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
-			gomega.Expect(finishReason).ShouldNot(gomega.Equal("cache_threshold"))
-
-			// Get prefill request count AFTER the test
-			prefillCountAfter := getPrefillRequestCount(prefillPods[0])
-			ginkgo.By(fmt.Sprintf("Prefill request count after decode-first test: %d", prefillCountAfter))
-
-			// VERIFY: Prefill pod should NOT have processed any new requests
-			// (decode-first succeeded, so no P/D fallback occurred)
-			gomega.Expect(prefillCountAfter).Should(gomega.Equal(prefillCountBefore),
-				"Prefill pod should NOT process requests when cache threshold is met (decode-first success)")
-
-			testutils.DeleteObjects(testConfig, epp)
-			testutils.DeleteObjects(testConfig, modelServers)
-		})
-
-		ginkgo.It("should handle decode-first fallback to P/D when cache threshold not met", func() {
-			// This test verifies the decode-first fallback scenario:
-			// When cache_hit_threshold is set and the decode returns cache_threshold finish_reason,
-			// the sidecar should fall back to P/D disaggregation.
-			// IMPORTANT: The prefill pod SHOULD process requests in this scenario.
-			infPoolObjects = createInferencePool(1, true)
-
-			prefillReplicas := 1
-			decodeReplicas := 2
-			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
-
-			epp := createEndPointPicker(pdConfig)
-
-			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
-			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
-			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
-
-			// Get prefill request count BEFORE the test
-			prefillCountBefore := getPrefillRequestCount(prefillPods[0])
-			ginkgo.By(fmt.Sprintf("Prefill request count before P/D fallback test: %d", prefillCountBefore))
-
-			// Test decode-first fallback: cache_hit_threshold is set AND X-Cache-Threshold header
-			// forces simulator to return "cache_threshold" finish_reason, triggering P/D fallback
-			nsHdr, podHdr, finishReason := runCompletionWithCacheThreshold(simplePrompt, 0.5, true)
-			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
-			// The sidecar completes the P/D flow but returns cache_threshold as the finish_reason
-			// from the initial decode attempt (which triggered the fallback)
-			gomega.Expect(finishReason).Should(gomega.Equal("cache_threshold"))
-
-			// Test streaming decode-first fallback
-			nsHdr, podHdr, finishReason = runStreamingCompletionWithCacheThreshold(extraPrompt, 0.5, true)
-			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
-			gomega.Expect(finishReason).Should(gomega.Equal("cache_threshold"))
-
-			// Get prefill request count AFTER the test
-			prefillCountAfter := getPrefillRequestCount(prefillPods[0])
-			ginkgo.By(fmt.Sprintf("Prefill request count after P/D fallback test: %d", prefillCountAfter))
-
-			// VERIFY: Prefill pod SHOULD have processed 2 new requests (1 regular + 1 streaming)
-			// (decode-first failed, so P/D fallback occurred and prefill was invoked)
-			gomega.Expect(prefillCountAfter).Should(gomega.BeNumerically(">", prefillCountBefore),
-				"Prefill pod SHOULD process requests when cache threshold is NOT met (P/D fallback)")
-			gomega.Expect(prefillCountAfter-prefillCountBefore).Should(gomega.Equal(2),
-				"Prefill pod should have processed exactly 2 requests (1 regular + 1 streaming)")
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -328,6 +428,41 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
+	ginkgo.When("Running KV configuration with external tokenizer PrepareData plugin", func() {
+		ginkgo.It("should run successfully", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			epp := createEndPointPicker(kvExternalTokenizerConfig)
+
+			modelServers := createModelServers(false, true, false, 1, 0, 0)
+			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
+
+			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
+			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
+
+			// Test completions
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, kvModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			// Test chat completions
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt, kvModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			// Repeat to verify prefix cache affinity with pre-tokenized prompts
+			for range 3 {
+				nsHdr, podHdr, _ = runCompletion(simplePrompt, kvModelName)
+				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+			}
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
 	ginkgo.When("Scaling up and down the model servers", func() {
 		ginkgo.It("should distribute inference requests across all model servers", func() {
 			infPoolObjects = createInferencePool(1, true)
@@ -342,7 +477,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			var nsHdr, podHdr string
 			for range 5 {
-				nsHdr, podHdr, _ = runCompletion(simplePrompt, modelName)
+				nsHdr, podHdr, _ = runCompletion(simplePrompt, simModelName)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 			}
@@ -356,7 +491,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			var scaledNsHdr, scaledPodHdr string
 			// Run inference multiple times until one is scheduled on the new pod
 			for range 30 {
-				scaledNsHdr, scaledPodHdr, _ = runCompletion(extraPrompt, modelName)
+				scaledNsHdr, scaledPodHdr, _ = runCompletion(extraPrompt, simModelName)
 				gomega.Expect(scaledNsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(scaledPodHdr).Should(gomega.BeElementOf(scaledUpDecodePods))
 				if scaledPodHdr != podHdr {
@@ -374,7 +509,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			// Run multiple times and insure that they are scheduled on the remaining pod
 			for range 5 {
-				nsHdr, podHdr, _ = runCompletion(simplePrompt, modelName)
+				nsHdr, podHdr, _ = runCompletion(simplePrompt, simModelName)
 				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(podHdr).Should(gomega.Equal(scaledDownDecodePods[0]))
 			}
@@ -396,7 +531,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
-			nsHdr, podHdr, portHdr := runCompletion(simplePrompt, modelName)
+			nsHdr, podHdr, portHdr := runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
@@ -404,7 +539,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			// Run inference multiple times until one is scheduled on the other port
 			for range 30 {
-				parallelNsHdr, parallelPodHdr, parallelPortHdr = runCompletion(extraPrompt, modelName)
+				parallelNsHdr, parallelPodHdr, parallelPortHdr = runCompletion(extraPrompt, simModelName)
 				gomega.Expect(parallelNsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(parallelPodHdr).Should(gomega.Equal(decodePods[0]))
 				if parallelPortHdr != portHdr {
@@ -413,13 +548,13 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			}
 			gomega.Expect(parallelPortHdr).ShouldNot(gomega.Equal(portHdr))
 
-			nsHdr, podHdr, portHdr = runChatCompletion(simplePrompt)
+			nsHdr, podHdr, portHdr = runChatCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 
 			// Run inference multiple times until one is scheduled on the other port
 			for range 30 {
-				parallelNsHdr, parallelPodHdr, parallelPortHdr = runChatCompletion(extraPrompt)
+				parallelNsHdr, parallelPodHdr, parallelPortHdr = runChatCompletion(extraPrompt, simModelName)
 				gomega.Expect(parallelNsHdr).Should(gomega.Equal(nsName))
 				gomega.Expect(parallelPodHdr).Should(gomega.Equal(decodePods[0]))
 				if parallelPortHdr != portHdr {
@@ -442,8 +577,8 @@ func createModelServers(withPD, withKV, withDP bool, vllmReplicas, prefillReplic
 
 // createModelServersWithConnector creates model server resources with a specific connector type.
 func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, prefillReplicas, decodeReplicas int, connector string) []string {
-	theModelName := modelName
-	theSafeModelName := modelName
+	theModelName := simModelName
+	theSafeModelName := simModelName
 	if withKV {
 		theModelName = kvModelName
 		theSafeModelName = safeKvModelName
@@ -468,6 +603,7 @@ func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, 
 			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
+			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
 		})
 
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
@@ -500,7 +636,7 @@ func createEndPointPicker(eppConfig string) []string {
 			"${EPP_IMAGE}":           eppImage,
 			"${UDS_TOKENIZER_IMAGE}": udsTokenizerImage,
 			"${NAMESPACE}":           nsName,
-			"${POOL_NAME}":           modelName + "-inference-pool",
+			"${POOL_NAME}":           simModelName + "-inference-pool",
 		})
 
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)
@@ -557,7 +693,7 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 	return namespaceHeader, podHeader, podPort
 }
 
-func runChatCompletion(prompt string) (string, string, string) {
+func runChatCompletion(prompt, modelName string) (string, string, string) {
 	var httpResp *http.Response
 	openaiclient := openai.NewClient(
 		option.WithBaseURL(fmt.Sprintf("http://localhost:%s/v1", port)))
@@ -582,6 +718,8 @@ func runChatCompletion(prompt string) (string, string, string) {
 }
 
 // getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+//
+//nolint:unparam // metricName may vary in future test cases
 func getCounterMetric(metricsURL, metricName, labelMatch string) int {
 	resp, err := http.Get(metricsURL)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
@@ -642,7 +780,7 @@ func runStreamingChatCompletion(prompt string) (string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Streaming Chat Completion Request: (port %s)", port))
 
 	// Use raw HTTP for streaming to capture headers
-	body := fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"%s"}],"stream":true}`, modelName, prompt)
+	body := fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"%s"}],"stream":true}`, simModelName, prompt)
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
@@ -674,7 +812,7 @@ func runStreamingChatCompletion(prompt string) (string, string) {
 func runCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, forceCacheThresholdFinishReason bool) (string, string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Completion Request with cache_hit_threshold=%v, forceCacheThreshold=%v", cacheHitThreshold, forceCacheThresholdFinishReason))
 
-	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"cache_hit_threshold":%v}`, modelName, prompt, cacheHitThreshold)
+	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"cache_hit_threshold":%v}`, simModelName, prompt, cacheHitThreshold)
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/completions", port), strings.NewReader(body))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
@@ -712,7 +850,7 @@ func runCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, f
 func runStreamingCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, forceCacheThresholdFinishReason bool) (string, string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Streaming Completion Request with cache_hit_threshold=%v, forceCacheThreshold=%v", cacheHitThreshold, forceCacheThresholdFinishReason))
 
-	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"stream":true,"cache_hit_threshold":%v}`, modelName, prompt, cacheHitThreshold)
+	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"stream":true,"cache_hit_threshold":%v}`, simModelName, prompt, cacheHitThreshold)
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/completions", port), strings.NewReader(body))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
@@ -827,7 +965,6 @@ kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer
   parameters:
-    hashBlockSize: 10
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 256
 - type: decode-filter
@@ -878,6 +1015,64 @@ schedulingProfiles:
     weight: 2
 `
 
+// EPP configuration for running with P/D using the unified disagg-profile-handler
+const pdDisaggConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: disagg-headers-handler
+- type: prefix-cache-scorer
+  parameters:
+    blockSizeTokens: 16
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: prefill-filter
+- type: decode-filter
+- type: max-score-picker
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
+// EPP configuration for running decode-only using disagg-profile-handler (no prefill, no encode)
+const disaggDecodeOnlyConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefix-cache-scorer
+  parameters:
+    hashBlockSize: 10
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: decode-filter
+- type: max-score-picker
+- type: disagg-profile-handler
+schedulingProfiles:
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
 // EPP config for running with precise prefix scoring (i.e. KV events)
 // Uses UDS tokenizer sidecar for tokenization
 const kvConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
@@ -900,6 +1095,45 @@ plugins:
       kvBlockIndexConfig:
         enableMetrics: false                  # enable kv-block index metrics (prometheus)
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: precise-prefix-cache-scorer
+    weight: 10
+`
+
+// EPP config for running with precise prefix scoring and external tokenizer PrepareData plugin.
+// The tokenizer plugin runs in the PrepareData phase (before scoring) and attaches
+// pre-computed token IDs to the request, so the scorer skips internal tokenization.
+const kvExternalTokenizerConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: tokenizer
+  parameters:
+    modelName: Qwen/Qwen2.5-1.5B-Instruct
+- type: precise-prefix-cache-scorer
+  parameters:
+    tokenProcessorConfig:
+      blockSize: 16
+      hashSeed: "42"
+    kvEventsConfig:
+      zmqEndpoint: tcp://0.0.0.0:5557
+    indexerConfig:
+      prefixStoreConfig:
+        blockSize: 16
+      tokenizersPoolConfig:
+        modelName: Qwen/Qwen2.5-1.5B-Instruct
+        uds:
+          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
+      kvBlockIndexConfig:
+        enableMetrics: false
 - type: decode-filter
 - type: max-score-picker
 - type: single-profile-handler
