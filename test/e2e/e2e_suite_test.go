@@ -62,7 +62,7 @@ var (
 
 	// keepClusterOnFailure skips kind cluster deletion when the suite fails.
 	// Set E2E_KEEP_CLUSTER_ON_FAILURE=true to enable.
-	keepClusterOnFailure = env.GetEnvString("E2E_KEEP_CLUSTER_ON_FAILURE", "false", ginkgo.GinkgoLogr) == "true"
+	keepClusterOnFailure = env.GetEnvBool("E2E_KEEP_CLUSTER_ON_FAILURE", false, ginkgo.GinkgoLogr)
 
 	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppImage          = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
