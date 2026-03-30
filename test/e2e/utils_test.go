@@ -1,7 +1,10 @@
 package e2e
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -138,4 +141,71 @@ func substituteMany(inputs []string, substitutions map[string]string) []string {
 		outputs[idx] = output
 	}
 	return outputs
+}
+
+// dumpPodsAndLogs dumps all pod statuses and their logs to the Ginkgo writer.
+// Call this before cleanup so the information is available when CI tests fail.
+func dumpPodsAndLogs() {
+	ginkgo.GinkgoWriter.Printf("\n=== Dumping pod states and logs (namespace: %s) ===\n", nsName)
+
+	ctx := context.Background()
+	pods, err := testConfig.KubeCli.CoreV1().Pods(nsName).List(ctx, v1.ListOptions{})
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("Failed to list pods: %v\n", err)
+		return
+	}
+
+	ginkgo.GinkgoWriter.Printf("Total pods found: %d\n\n", len(pods.Items))
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		ginkgo.GinkgoWriter.Printf("--- Pod: %s | Phase: %s | Node: %s ---\n",
+			pod.Name, pod.Status.Phase, pod.Spec.NodeName)
+
+		for _, cs := range pod.Status.InitContainerStatuses {
+			printContainerStatus("init", cs)
+		}
+		for _, cs := range pod.Status.ContainerStatuses {
+			printContainerStatus("container", cs)
+		}
+
+		for _, c := range pod.Spec.InitContainers {
+			dumpContainerLogs(ctx, pod.Name, c.Name)
+		}
+		for _, c := range pod.Spec.Containers {
+			dumpContainerLogs(ctx, pod.Name, c.Name)
+		}
+	}
+	ginkgo.GinkgoWriter.Println("=== End of pod dump ===")
+}
+
+func printContainerStatus(kind string, cs corev1.ContainerStatus) {
+	status := fmt.Sprintf("  [%s] %s | ready=%v restarts=%d", kind, cs.Name, cs.Ready, cs.RestartCount)
+	if cs.State.Waiting != nil {
+		status += fmt.Sprintf(" | Waiting: %s", cs.State.Waiting.Reason)
+	}
+	if cs.State.Terminated != nil {
+		status += fmt.Sprintf(" | Terminated: %s (exit %d)", cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
+	}
+	ginkgo.GinkgoWriter.Println(status)
+}
+
+func dumpContainerLogs(ctx context.Context, podName, containerName string) {
+	tailLines := int64(100)
+	req := testConfig.KubeCli.CoreV1().Pods(nsName).GetLogs(podName, &corev1.PodLogOptions{
+		Container: containerName,
+		TailLines: &tailLines,
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to stream logs: %v\n", podName, containerName, err)
+		return
+	}
+	defer stream.Close() //nolint:errcheck
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, stream); err != nil {
+		ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to read logs: %v\n", podName, containerName, err)
+		return
+	}
+	ginkgo.GinkgoWriter.Printf("  [logs] %s/%s (last 100 lines):\n%s\n", podName, containerName, buf.String())
 }

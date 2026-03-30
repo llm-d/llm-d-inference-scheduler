@@ -130,6 +130,10 @@ var _ = ginkgo.AfterSuite(func() {
 // ReportAfterSuite receives the full suite report, including failures in
 // BeforeSuite/AfterSuite, so keepClusterOnFailure works for all failure modes.
 var _ = ginkgo.ReportAfterSuite("cleanup", func(report ginkgo.Report) {
+	if !report.SuiteSucceeded {
+		dumpPodsAndLogs()
+	}
+
 	shouldKeep := keepClusterOnFailure && !report.SuiteSucceeded
 	if k8sContext == "" {
 		if shouldKeep {
