@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os/exec"
 	"strings"
 	"time"
@@ -20,6 +22,31 @@ import (
 const (
 	deploymentKind = "deployment"
 )
+
+// waitForEPPToDiscoverPods polls the EPP's completions endpoint until it no
+// longer returns "failed to find candidate pods", indicating the InferencePool
+// controller has finished its initial pod discovery.
+// This is necessary because the EPP sets its health status to SERVING as soon
+// as the gRPC server starts, before pod discovery is complete.
+func waitForEPPToDiscoverPods(modelName string) {
+	ginkgo.By("Waiting for EPP to discover pool members")
+	gomega.Eventually(func() bool {
+		resp, err := http.Post(
+			fmt.Sprintf("http://localhost:%s/v1/completions", port),
+			"application/json",
+			strings.NewReader(`{"model":"`+modelName+`","prompt":"warmup"}`),
+		)
+		if err != nil {
+			return false
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			return true
+		}
+		body, _ := io.ReadAll(resp.Body)
+		return !strings.Contains(string(body), "failed to find candidate pods")
+	}, 30*time.Second, time.Second).Should(gomega.BeTrue())
+}
 
 func scaleDeployment(objects []string, increment int) {
 	direction := "up"
