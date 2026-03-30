@@ -144,7 +144,7 @@ func substituteMany(inputs []string, substitutions map[string]string) []string {
 }
 
 // dumpPodsAndLogs dumps all pod statuses and their logs to the Ginkgo writer.
-// Call this before cleanup so the information is available when CI tests fail.
+// Call this before cleanup to insure the information is available when CI tests fail.
 func dumpPodsAndLogs() {
 	if testConfig == nil || testConfig.KubeCli == nil {
 		ginkgo.GinkgoWriter.Println("Skipping pod dump: cluster not initialized")
@@ -175,11 +175,29 @@ func dumpPodsAndLogs() {
 			printContainerStatus("container", cs)
 		}
 
+		restarted := map[string]bool{}
+		for _, cs := range pod.Status.InitContainerStatuses {
+			if cs.RestartCount > 0 {
+				restarted[cs.Name] = true
+			}
+		}
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.RestartCount > 0 {
+				restarted[cs.Name] = true
+			}
+		}
+
 		for _, c := range pod.Spec.InitContainers {
-			dumpContainerLogs(ctx, pod.Name, c.Name)
+			if restarted[c.Name] {
+				dumpContainerLogs(ctx, pod.Name, c.Name, true)
+			}
+			dumpContainerLogs(ctx, pod.Name, c.Name, false)
 		}
 		for _, c := range pod.Spec.Containers {
-			dumpContainerLogs(ctx, pod.Name, c.Name)
+			if restarted[c.Name] {
+				dumpContainerLogs(ctx, pod.Name, c.Name, true)
+			}
+			dumpContainerLogs(ctx, pod.Name, c.Name, false)
 		}
 	}
 	ginkgo.GinkgoWriter.Println("=== End of pod dump ===")
@@ -196,23 +214,32 @@ func printContainerStatus(kind string, cs corev1.ContainerStatus) {
 	ginkgo.GinkgoWriter.Println(status)
 }
 
-func dumpContainerLogs(ctx context.Context, podName, containerName string) {
+func dumpContainerLogs(ctx context.Context, podName, containerName string, previous bool) {
 	tailLines := int64(100)
 	req := testConfig.KubeCli.CoreV1().Pods(nsName).GetLogs(podName, &corev1.PodLogOptions{
 		Container: containerName,
 		TailLines: &tailLines,
+		Previous:  previous,
 	})
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to stream logs: %v\n", podName, containerName, err)
 		return
 	}
-	defer stream.Close() //nolint:errcheck
+	defer func() {
+		if err := stream.Close(); err != nil {
+			ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to close log stream: %v\n", podName, containerName, err)
+		}
+	}()
 
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, stream); err != nil {
 		ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to read logs: %v\n", podName, containerName, err)
 		return
 	}
-	ginkgo.GinkgoWriter.Printf("  [logs] %s/%s (last 100 lines):\n%s\n", podName, containerName, buf.String())
+	label := "last 100 lines"
+	if previous {
+		label = "previous instance, last 100 lines"
+	}
+	ginkgo.GinkgoWriter.Printf("  [logs] %s/%s (%s):\n%s\n", podName, containerName, label, buf.String())
 }
