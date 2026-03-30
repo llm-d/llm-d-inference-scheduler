@@ -187,7 +187,7 @@ kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
 
 ### Inference Disaggregation Modes
 
-You can deploy the inference stack in disaggregated modes to optimize performance by separating specific stages of the LLM pipeline into dedicated pods.
+You can deploy the inference stack in disaggregated modes to optimize performance by separating specific stages of the LLM pipeline into dedicated pods. For technical details on the advanced disaggregation strategies, refer to [docs/disaggregation.md](docs/disaggregation.md).
 
 #### 1. Prefill/Decode (P/D) Disaggregation
 
@@ -201,7 +201,7 @@ PD_ENABLED=true make env-dev-kind
 
 #### 2. Encode/Prefill/Decode (E/P/D) Disaggregation
 
-This mode is designed for multimodal workloads. It introduces a dedicated Encoder pod to process embeddings (e.g., images or video), alongside specialized deployments for the Prefill and Decode stages.
+This multimodal configuration introduces a standalone Encoder pod for compute-intensive image and video embeddings, while decoupling Prefill and Decode into specialized deployments.
 
 To deploy an E/P/D-enabled Kind environment:
 
@@ -209,19 +209,19 @@ To deploy an E/P/D-enabled Kind environment:
 EPD_ENABLED=true make env-dev-kind
 ```
 
-##### Testing the E/P/D Setup
+<details>
+<summary>E/P/D Setup Verification</summary>
 
-Port-forward the Gateway:
+1. Port-forward the Gateway:
 
 ```bash
 kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
 ```
-
-Send a Multimodal Request — trigger the full E/P/D pipeline by submitting an image-based chat completion request:
+2. Test the Pipeline:
+Run an image-based inference request to ensure the E/P/D components are communicating correctly:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
-  --max-time 1000 \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen3-VL-2B-Instruct",
@@ -237,8 +237,9 @@ curl http://localhost:8080/v1/chat/completions \
     "max_tokens": 100
   }'
 ```
+</details>
 
-For technical details on the advanced disaggregation strategies, refer to [docs/disaggregation.md](docs/disaggregation.md).
+</details>
 
 ### Cleanup
 
