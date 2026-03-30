@@ -98,14 +98,16 @@ BUILDER_SOCK_FLAGS = --group-add $(DOCKER_SOCK_GID) \
 	-e CONTAINER_RUNTIME=docker
 endif
 
-# Image env vars to forward into containers (e.g. e2e tests).
-# Add new images here so they are automatically passed through.
-IMAGE_ENV_VARS = EPP_IMAGE VLLM_SIMULATOR_IMAGE SIDECAR_IMAGE UDS_TOKENIZER_IMAGE
-BUILDER_IMAGE_ENV_FLAGS = $(foreach v,$(IMAGE_ENV_VARS),-e $(v)=$($(v)))
+# Env vars forwarded into the e2e test container.
+# Add new image vars here so they are automatically passed through.
+# Should we pass ALL env vars here?
+E2E_ENV_VARS = EPP_IMAGE VLLM_SIMULATOR_IMAGE SIDECAR_IMAGE UDS_TOKENIZER_IMAGE \
+               E2E_KEEP_CLUSTER_ON_FAILURE E2E_PORT E2E_METRICS_PORT NAMESPACE K8S_CONTEXT READY_TIMEOUT
+BUILDER_E2E_ENV_FLAGS = $(foreach v,$(E2E_ENV_VARS),$(if $($(v)),-e $(v)=$($(v))))
 
 # E2e tests create their own kind cluster, need host network (for NodePort access)
 # and the container socket (for kind), but not the host kubeconfig.
-BUILDER_E2E_FLAGS = --network=host $(BUILDER_SOCK_FLAGS) $(BUILDER_IMAGE_ENV_FLAGS)
+BUILDER_E2E_FLAGS = --network=host $(BUILDER_SOCK_FLAGS) $(BUILDER_E2E_ENV_FLAGS)
 
 # Builder container invocations. Always use sh -c so commands with shell expansions
 # (pipes, $(), etc.) run inside the container, not on the host.
