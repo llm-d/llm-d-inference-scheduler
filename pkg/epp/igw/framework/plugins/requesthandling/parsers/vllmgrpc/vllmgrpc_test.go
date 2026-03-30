@@ -102,11 +102,12 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 				Completions: &scheduling.CompletionsRequest{
 					Prompt: "Hello world",
 				},
-				ParsedBody: &pb.GenerateRequest{
-					Input: &pb.GenerateRequest_Text{
-						Text: "Hello world",
-					},
-				},
+				Payload: scheduling.PayloadProto{
+					Message: &pb.GenerateRequest{
+						Input: &pb.GenerateRequest_Text{
+							Text: "Hello world",
+						},
+					}},
 			},
 		},
 		{
@@ -122,13 +123,14 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 				Completions: &scheduling.CompletionsRequest{
 					Prompt: "Tokenized hello",
 				},
-				ParsedBody: &pb.GenerateRequest{
-					Input: &pb.GenerateRequest_Tokenized{
-						Tokenized: &pb.TokenizedInput{
-							OriginalText: "Tokenized hello",
+				Payload: scheduling.PayloadProto{
+					Message: &pb.GenerateRequest{
+						Input: &pb.GenerateRequest_Tokenized{
+							Tokenized: &pb.TokenizedInput{
+								OriginalText: "Tokenized hello",
+							},
 						},
-					},
-				},
+					}},
 			},
 		},
 		{
@@ -158,12 +160,13 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 				Completions: &scheduling.CompletionsRequest{
 					Prompt: "Hello world",
 				},
-				ParsedBody: &pb.GenerateRequest{
-					Input: &pb.GenerateRequest_Text{
-						Text: "Hello world",
-					},
-					Stream: true,
-				},
+				Payload: scheduling.PayloadProto{
+					Message: &pb.GenerateRequest{
+						Input: &pb.GenerateRequest_Text{
+							Text: "Hello world",
+						},
+						Stream: true,
+					}},
 				Stream: true,
 			},
 		},

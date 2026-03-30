@@ -30,7 +30,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/protobuf/proto"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
@@ -214,14 +213,16 @@ func (d *Director) processRequestBody(ctx context.Context, reqCtx *handlers.Requ
 		return nil, errcommon.Error{Code: errcommon.BadRequest, Msg: err.Error()}
 	}
 
-	switch v := llmRequestBody.ParsedBody.(type) {
-	case proto.Message:
+	switch v := llmRequestBody.Payload.(type) {
+	case fwksched.PayloadProto:
 		// Protos are not currently mutated, return as-is.
 		reqCtx.RequestSize = len(reqCtx.Request.RawBody)
-	case map[string]any:
+	case fwksched.PayloadMap:
 		if err := d.mutateAndRepackage(ctx, reqCtx, v); err != nil {
 			return nil, err
 		}
+	case fwksched.RawPayload:
+		reqCtx.RequestSize = len(reqCtx.Request.RawBody)
 	default:
 		return nil, errcommon.Error{Code: errcommon.BadRequest, Msg: "Unsupported llmRequest parsedBody"}
 	}
