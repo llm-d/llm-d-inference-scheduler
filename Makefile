@@ -108,9 +108,21 @@ ifneq ($(filter command line environment,$(origin NAMESPACE)),)
 BUILDER_E2E_ENV_FLAGS += -e NAMESPACE=$(NAMESPACE)
 endif
 
+# When K8S_CONTEXT is set, mount the host kubeconfig so the e2e suite can call
+# config.GetConfigWithContext(K8S_CONTEXT) against an existing cluster instead of
+# creating a new kind cluster.
+ifdef K8S_CONTEXT
+# Respect host KUBECONFIG if set; fall back to ~/.kube/config.
+# Note: if KUBECONFIG is a colon-separated list, only the first file is mounted.
+HOST_KUBECONFIG := $(or $(KUBECONFIG),$(HOME)/.kube/config)
+BUILDER_E2E_KUBECONFIG_FLAGS = -v $(HOST_KUBECONFIG):/.kube/config:ro -e KUBECONFIG=/.kube/config
+else
+BUILDER_E2E_KUBECONFIG_FLAGS =
+endif
+
 # E2e tests create their own kind cluster, need host network (for NodePort access)
 # and the container socket (for kind), but not the host kubeconfig.
-BUILDER_E2E_FLAGS = --network=host $(BUILDER_SOCK_FLAGS) $(BUILDER_E2E_ENV_FLAGS)
+BUILDER_E2E_FLAGS = --network=host $(BUILDER_SOCK_FLAGS) $(BUILDER_E2E_ENV_FLAGS) $(BUILDER_E2E_KUBECONFIG_FLAGS)
 
 # Builder container invocations. Always use sh -c so commands with shell expansions
 # (pipes, $(), etc.) run inside the container, not on the host.
