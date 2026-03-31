@@ -190,7 +190,7 @@ format: image-build-builder ## Format Go source files
 lint: image-build-builder ## Run lint (use LINT_NEW_ONLY=true to only check new code)
 	$(eval LINT_ARGS := --config=./.golangci.yml$(if $(filter true,$(LINT_NEW_ONLY)), --new))
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	$(BUILDER_RUN) 'golangci-lint run $(LINT_ARGS) && typos'
+	$(BUILDER_RUN) 'GOFLAGS=-buildvcs=false golangci-lint run $(LINT_ARGS) && typos'
 
 .PHONY: test
 test: test-unit test-e2e ## Run all tests (unit and e2e)

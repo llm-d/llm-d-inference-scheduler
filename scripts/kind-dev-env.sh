@@ -229,6 +229,10 @@ if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
 fi
 
 for IMAGE in "${VLLM_SIMULATOR_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_IMAGE}"; do
+    if ! "${CONTAINER_RUNTIME}" image inspect "${IMAGE}" > /dev/null 2>&1; then
+        echo "Image ${IMAGE} not found locally, pulling..."
+        "${CONTAINER_RUNTIME}" pull "${PLATFORM_ARGS[@]}" "${IMAGE}"
+    fi
     echo "Loading ${IMAGE} into kind cluster..."
     "${CONTAINER_RUNTIME}" save "${PLATFORM_ARGS[@]}" "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
 done
