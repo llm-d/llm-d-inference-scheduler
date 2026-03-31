@@ -113,6 +113,9 @@ func InstantiateAndConfigure(
 	if err != nil {
 		return nil, fmt.Errorf("data layer config build failed: %w", err)
 	}
+	if featureGates[datalayer.ExperimentalDatalayerFeatureGate] && len(dataConfig.Sources) == 0 {
+		logger.Info("data layer enabled with no sources configured, no metrics will be collected")
+	}
 
 	var flowControlConfig *flowcontrol.Config
 	if featureGates[flowcontrol.FeatureGate] {
