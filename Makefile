@@ -70,9 +70,13 @@ BUILDER_RUN_FLAGS = --rm $(BUILDER_USER_FLAGS) \
 	-v $(GO_MOD_CACHE_VOL):/go/pkg/mod \
 	-v $(GO_BUILD_CACHE_VOL):/go/cache
 
+# Respect host KUBECONFIG if set; fall back to ~/.kube/config.
+# Note: if KUBECONFIG is a colon-separated list, only the first file is mounted.
+HOST_KUBECONFIG ?= $(or $(KUBECONFIG),$(HOME)/.kube/config)
+
 # Flags for targets that need host network and kubeconfig (integration tests, benchmarks).
 BUILDER_CLUSTER_FLAGS = --network=host \
-	-v $${HOME}/.kube:/.kube:ro \
+	-v $(HOST_KUBECONFIG):/.kube/config:ro \
 	-e KUBECONFIG=/.kube/config
 
 # Mount the container runtime socket and set CONTAINER_HOST so podman --remote
@@ -112,9 +116,6 @@ endif
 # config.GetConfigWithContext(K8S_CONTEXT) against an existing cluster instead of
 # creating a new kind cluster.
 ifdef K8S_CONTEXT
-# Respect host KUBECONFIG if set; fall back to ~/.kube/config.
-# Note: if KUBECONFIG is a colon-separated list, only the first file is mounted.
-HOST_KUBECONFIG := $(or $(KUBECONFIG),$(HOME)/.kube/config)
 BUILDER_E2E_KUBECONFIG_FLAGS = -v $(HOST_KUBECONFIG):/.kube/config:ro -e KUBECONFIG=/.kube/config
 else
 BUILDER_E2E_KUBECONFIG_FLAGS =
