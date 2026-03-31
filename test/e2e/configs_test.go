@@ -1,0 +1,283 @@
+package e2e
+
+// Simple EPP configuration for running without P/D
+const simpleConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefix-cache-scorer
+  parameters:
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
+// EPP configuration for running with P/D
+// Uses deprecated pd-profile-handler
+const deprecatedPdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: prefill-header-handler
+- type: prefix-cache-scorer
+  parameters:
+    blockSizeTokens: 16
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: prefill-filter
+- type: decode-filter
+- type: max-score-picker
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+- type: pd-profile-handler
+  parameters:
+    deciderPluginName: prefix-based-pd-decider
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
+// epdEncodeDecodeConfig configures E/PD (encode + P/D) using disagg-profile-handler.
+// The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
+const epdEncodeDecodeConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: disagg-headers-handler
+- type: encode-filter
+- type: decode-filter
+- type: max-score-picker
+- type: always-disagg-multimodal-decider
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      encode: always-disagg-multimodal-decider
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+`
+
+// epdConfig configures E/P/D (encode + prefill + decode) using disagg-profile-handler.
+// The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
+const epdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: prefill-header-handler
+- type: encode-filter
+- type: prefill-filter
+- type: decode-filter
+- type: prefix-cache-scorer
+  parameters:
+    blockSizeTokens: 16
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: max-score-picker
+- type: always-disagg-multimodal-decider
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      encode: always-disagg-multimodal-decider
+      prefill: prefix-based-pd-decider
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
+// EPP configuration for running with P/D using the unified disagg-profile-handler
+const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: disagg-headers-handler
+- type: prefix-cache-scorer
+  parameters:
+    blockSizeTokens: 16
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: prefill-filter
+- type: decode-filter
+- type: max-score-picker
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
+// EPP configuration for running decode-only using disagg-profile-handler (no prefill, no encode)
+const disaggDecodeOnlyConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: prefix-cache-scorer
+  parameters:
+    hashBlockSize: 10
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 256
+- type: decode-filter
+- type: max-score-picker
+- type: disagg-profile-handler
+schedulingProfiles:
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+`
+
+// EPP config for running with precise prefix scoring (i.e. KV events)
+// Uses UDS tokenizer sidecar for tokenization
+const kvConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: precise-prefix-cache-scorer
+  parameters:
+    tokenProcessorConfig:
+      blockSize: 16
+      hashSeed: "42"
+    kvEventsConfig:
+      zmqEndpoint: tcp://0.0.0.0:5557
+    indexerConfig:
+      prefixStoreConfig:
+        blockSize: 16
+      tokenizersPoolConfig:
+        modelName: Qwen/Qwen2.5-1.5B-Instruct
+        uds:
+          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
+      kvBlockIndexConfig:
+        enableMetrics: false                  # enable kv-block index metrics (prometheus)
+        metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: precise-prefix-cache-scorer
+    weight: 10
+`
+
+// EPP config for running with precise prefix scoring and external tokenizer PrepareData plugin.
+// The tokenizer plugin runs in the PrepareData phase (before scoring) and attaches
+// pre-computed token IDs to the request, so the scorer skips internal tokenization.
+const kvExternalTokenizerConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: tokenizer
+  parameters:
+    modelName: Qwen/Qwen2.5-1.5B-Instruct
+- type: precise-prefix-cache-scorer
+  parameters:
+    tokenProcessorConfig:
+      blockSize: 16
+      hashSeed: "42"
+    kvEventsConfig:
+      zmqEndpoint: tcp://0.0.0.0:5557
+    indexerConfig:
+      prefixStoreConfig:
+        blockSize: 16
+      tokenizersPoolConfig:
+        modelName: Qwen/Qwen2.5-1.5B-Instruct
+        uds:
+          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
+      kvBlockIndexConfig:
+        enableMetrics: false
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: precise-prefix-cache-scorer
+    weight: 10
+`
+
+// EPP configuration for running scale model server test
+const scaleConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: max-score-picker
+`
+
+// EPP configuration for running with vLLM Data Parallel support
+const dataParallelConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: decode-filter
+- type: max-score-picker
+- type: data-parallel-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+`
