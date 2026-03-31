@@ -42,6 +42,10 @@ const (
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
+
+	// testImageURL and testImageURL2 are publicly accessible images used in multimodal e2e tests.
+	testImageURL  = "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg"
+	testImageURL2 = "https://images.dog.ceo/breeds/labrador/n02099712_4323.jpg"
 )
 
 var (
@@ -421,7 +425,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			infPoolObjects = createInferencePool(1, true)
 
 			encodeReplicas := 1
-			decodeReplicas := 2
+			decodeReplicas := 1
 			modelServers := createModelServersEpD(encodeReplicas, decodeReplicas)
 
 			epp := createEndPointPicker(epdEncodeDecodeConfig)
@@ -436,20 +440,35 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(encodePods).Should(gomega.HaveLen(encodeReplicas))
 			gomega.Expect(prefillDecodePods).Should(gomega.HaveLen(decodeReplicas))
 
+			// Text request: encode stage skipped, routed directly to a prefill-decode pod
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
+
 			// Multimodal request: triggers encode stage, decode handled by prefill-decode pod
-			nsHdr, podHdr := runChatCompletionWithImage("http://example.com/test.jpg")
+			nsHdr, podHdr = runChatCompletionWithImage()
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
 			// Second multimodal request
-			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/other.jpg")
+			nsHdr, podHdr = runChatCompletionWithImage()
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
-			// Metrics: encode-decode decisions recorded
+			// Multi-image request: two images in one request, triggers encode stage
+			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
+
+			// Metrics: text request recorded as decode-only (encode skipped)
+			decodeOnlyFilter := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
+			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", decodeOnlyFilter)
+			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(1))
+
+			// Metrics: encode-decode decisions recorded (2 single-image + 1 multi-image)
 			labelFilter := fmt.Sprintf(`decision_type="encode-decode",model_name="%s"`, simModelName)
 			encodeDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", labelFilter)
-			gomega.Expect(encodeDecodeCount).Should(gomega.Equal(2))
+			gomega.Expect(encodeDecodeCount).Should(gomega.Equal(3))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -462,7 +481,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			encodeReplicas := 1
 			prefillReplicas := 1
-			decodeReplicas := 2
+			decodeReplicas := 1
 			modelServers := createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas)
 
 			epp := createEndPointPicker(epdConfig)
@@ -479,15 +498,32 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
+			// Text request: encode stage skipped, prefill triggered by prefix-based-pd-decider
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
 			// First multimodal request: encode + prefill + decode
-			nsHdr, podHdr := runChatCompletionWithImage("http://example.com/test.jpg")
+			nsHdr, podHdr = runChatCompletionWithImage()
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Second multimodal request with same image (prefix cache may skip prefill)
-			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/test.jpg")
+			nsHdr, podHdr = runChatCompletionWithImage()
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Multi-image request: two images in one request, encode + prefill + decode
+			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Metrics: text request recorded as decode-only or prefill-decode (encode skipped)
+			pdLabelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, simModelName)
+			doLabelFilter := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
+			pdCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", pdLabelFilter)
+			doCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", doLabelFilter)
+			gomega.Expect(pdCount + doCount).Should(gomega.BeNumerically(">=", 1))
 
 			// Metrics: at least one encode-prefill-decode decision recorded
 			epdLabelFilter := fmt.Sprintf(`decision_type="encode-prefill-decode",model_name="%s"`, simModelName)
@@ -510,16 +546,38 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			epp := createEndPointPicker(epdConfig)
 
+			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
+			if k8sContext != "" {
+				startEPPMetricsPortForward()
+			}
+
 			epdPods := getPodNames(epdSingleSelector)
 			gomega.Expect(epdPods).Should(gomega.HaveLen(replicas))
 
-			// Text request: no encode disaggregation triggered, routes to decode profile → single deployment
+			// Text completion: encode skipped, routes to decode profile → single deployment
 			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
+			// Text chat completion: same routing as above
+			nsHdr, podHdr, _ = runChatCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
+
+			// Metrics: text requests recorded as decode-only or prefill-decode (encode skipped)
+			pdLabelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, simModelName)
+			doLabelFilter := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
+			pdCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", pdLabelFilter)
+			doCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", doLabelFilter)
+			gomega.Expect(pdCount + doCount).Should(gomega.BeNumerically(">=", 2))
+
 			// Multimodal request: encode and decode profiles both resolve to the same single deployment
-			nsHdr, podHdr = runChatCompletionWithImage("http://example.com/test.jpg")
+			nsHdr, podHdr = runChatCompletionWithImage()
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
+
+			// Multi-image request: all stages handled by single deployment
+			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
@@ -905,11 +963,43 @@ func runChatCompletion(prompt, modelName string) (string, string, string) {
 
 // runChatCompletionWithImage sends a multimodal chat completion request with an image_url content block.
 // Returns the namespace, pod name, and port from the response headers.
-func runChatCompletionWithImage(imageURL string) (string, string) {
-	ginkgo.By("Sending Multimodal Chat Completion Request with image: " + imageURL)
+func runChatCompletionWithImage() (string, string) {
+	ginkgo.By("Sending Multimodal Chat Completion Request with image: " + testImageURL)
 
 	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":%q}},{"type":"text","text":"What is in this image?"}]}]}`,
-		simModelName, imageURL)
+		simModelName, testImageURL)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	_, err = io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	return resp.Header.Get("x-inference-namespace"),
+		resp.Header.Get("x-inference-pod")
+}
+
+// runChatCompletionWithMultipleImages sends a multimodal chat completion request with multiple image_url
+// content blocks. Each image is assigned a uuid derived from its index. Returns the namespace and pod name.
+func runChatCompletionWithMultipleImages(imageURLs []string) (string, string) {
+	ginkgo.By(fmt.Sprintf("Sending Multimodal Chat Completion Request with %d images", len(imageURLs)))
+
+	var sb strings.Builder
+	for i, url := range imageURLs {
+		sb.WriteString(fmt.Sprintf(`{"type":"image_url","image_url":{"url":%q},"uuid":"multi-image-%d"},`, url, i))
+	}
+	imageBlocks := sb.String()
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[%s{"type":"text","text":"Compare these images and describe what you see."}]}],"max_tokens":150}`,
+		simModelName, imageBlocks)
+
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
