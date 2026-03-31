@@ -46,6 +46,8 @@ const (
 	// testImageURL and testImageURL2 are publicly accessible images used in multimodal e2e tests.
 	testImageURL  = "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg"
 	testImageURL2 = "https://images.dog.ceo/breeds/labrador/n02099712_4323.jpg"
+	// testVideoURL is a publicly accessible video used in multimodal e2e tests.
+	testVideoURL = "https://www.w3schools.com/html/mov_bbb.mp4"
 )
 
 var (
@@ -460,15 +462,20 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
+			// Video request: video_url triggers encode stage, decode handled by prefill-decode pod
+			nsHdr, podHdr = runChatCompletionWithVideo()
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
+
 			// Metrics: text request recorded as decode-only (encode skipped)
 			decodeOnlyFilter := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
 			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", decodeOnlyFilter)
 			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(1))
 
-			// Metrics: encode-decode decisions recorded (2 single-image + 1 multi-image)
+			// Metrics: encode-decode decisions recorded (2 single-image + 1 multi-image + 1 video)
 			labelFilter := fmt.Sprintf(`decision_type="encode-decode",model_name="%s"`, simModelName)
 			encodeDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", labelFilter)
-			gomega.Expect(encodeDecodeCount).Should(gomega.Equal(3))
+			gomega.Expect(encodeDecodeCount).Should(gomega.Equal(4))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -515,6 +522,11 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			// Multi-image request: two images in one request, encode + prefill + decode
 			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Video request: video_url triggers encode stage, decode handled by decode pod
+			nsHdr, podHdr = runChatCompletionWithVideo()
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
@@ -578,6 +590,11 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			// Multi-image request: all stages handled by single deployment
 			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
+
+			// Video request: all stages handled by single deployment
+			nsHdr, podHdr = runChatCompletionWithVideo()
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
@@ -968,6 +985,32 @@ func runChatCompletionWithImage() (string, string) {
 
 	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":%q}},{"type":"text","text":"What is in this image?"}]}]}`,
 		simModelName, testImageURL)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	_, err = io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	return resp.Header.Get("x-inference-namespace"),
+		resp.Header.Get("x-inference-pod")
+}
+
+// runChatCompletionWithVideo sends a multimodal chat completion request with a video_url content block.
+// Returns the namespace and pod name from the response headers.
+func runChatCompletionWithVideo() (string, string) {
+	ginkgo.By("Sending Multimodal Chat Completion Request with video: " + testVideoURL)
+
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"text","text":"What is happening in this video?"},{"type":"video_url","video_url":{"url":%q}}]}]}`,
+		simModelName, testVideoURL)
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
