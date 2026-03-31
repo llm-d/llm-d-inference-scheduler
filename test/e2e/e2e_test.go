@@ -48,6 +48,12 @@ const (
 	testImageURL2 = "https://images.dog.ceo/breeds/labrador/n02099712_4323.jpg"
 	// testVideoURL is a publicly accessible video used in multimodal e2e tests.
 	testVideoURL = "https://www.w3schools.com/html/mov_bbb.mp4"
+	// testImageEmbeds is a small dummy base64-encoded tensor used to test image_embeds requests.
+	// The actual bytes are not processed by the simulator; only routing behaviour is validated.
+	testImageEmbeds = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+	// testAudioData is a minimal base64-encoded WAV clip (44-byte header, no samples).
+	// The actual bytes are not processed by the simulator; only routing behaviour is validated.
+	testAudioData = "UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA="
 )
 
 var (
@@ -426,7 +432,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should route multimodal requests through encode and decode pods", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			encodeReplicas := 1
+			encodeReplicas := 2
 			decodeReplicas := 1
 			modelServers := createModelServersEpD(encodeReplicas, decodeReplicas)
 
@@ -467,15 +473,25 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
-			// Metrics: text request recorded as decode-only (encode skipped)
+			// Audio request: input_audio triggers encode stage, decode handled by prefill-decode pod
+			nsHdr, podHdr = runChatCompletionWithAudio()
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
+
+			// image_embeds request: pre-encoded tensor, encode stage skipped, routes to prefill-decode pod
+			nsHdr, podHdr = runChatCompletionWithImageEmbeds()
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
+
+			// Metrics: text + image_embeds requests recorded as decode-only (encode skipped)
 			decodeOnlyFilter := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
 			decodeOnlyCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", decodeOnlyFilter)
-			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(1))
+			gomega.Expect(decodeOnlyCount).Should(gomega.Equal(2))
 
-			// Metrics: encode-decode decisions recorded (2 single-image + 1 multi-image + 1 video)
+			// Metrics: encode-decode decisions recorded (2 single-image + 1 multi-image + 1 video + 1 audio)
 			labelFilter := fmt.Sprintf(`decision_type="encode-decode",model_name="%s"`, simModelName)
 			encodeDecodeCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", labelFilter)
-			gomega.Expect(encodeDecodeCount).Should(gomega.Equal(4))
+			gomega.Expect(encodeDecodeCount).Should(gomega.Equal(5))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -486,7 +502,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should route multimodal requests through encode, prefill, and decode pods", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			encodeReplicas := 1
+			encodeReplicas := 2
 			prefillReplicas := 1
 			decodeReplicas := 1
 			modelServers := createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas)
@@ -530,12 +546,17 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
-			// Metrics: text request recorded as decode-only or prefill-decode (encode skipped)
+			// image_embeds request: pre-encoded tensor, encode stage skipped, routes to decode pod
+			nsHdr, podHdr = runChatCompletionWithImageEmbeds()
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
+
+			// Metrics: text + image_embeds requests recorded as decode-only or prefill-decode (encode skipped)
 			pdLabelFilter := fmt.Sprintf(`decision_type="prefill-decode",model_name="%s"`, simModelName)
 			doLabelFilter := fmt.Sprintf(`decision_type="decode-only",model_name="%s"`, simModelName)
 			pdCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", pdLabelFilter)
 			doCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", doLabelFilter)
-			gomega.Expect(pdCount + doCount).Should(gomega.BeNumerically(">=", 1))
+			gomega.Expect(pdCount + doCount).Should(gomega.BeNumerically(">=", 2))
 
 			// Metrics: at least one encode-prefill-decode decision recorded
 			epdLabelFilter := fmt.Sprintf(`decision_type="encode-prefill-decode",model_name="%s"`, simModelName)
@@ -595,6 +616,11 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			// Video request: all stages handled by single deployment
 			nsHdr, podHdr = runChatCompletionWithVideo()
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
+
+			// image_embeds request: encode skipped, routes to single deployment
+			nsHdr, podHdr = runChatCompletionWithImageEmbeds()
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
@@ -1011,6 +1037,61 @@ func runChatCompletionWithVideo() (string, string) {
 
 	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"text","text":"What is happening in this video?"},{"type":"video_url","video_url":{"url":%q}}]}]}`,
 		simModelName, testVideoURL)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	_, err = io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	return resp.Header.Get("x-inference-namespace"),
+		resp.Header.Get("x-inference-pod")
+}
+
+// runChatCompletionWithImageEmbeds sends a chat completion request with an image_embeds content block
+// carrying a pre-encoded tensor. image_embeds is not a recognised multimodal type for encode
+// disaggregation, so the request routes like a text request (decode-only or prefill-decode).
+// Returns the namespace and pod name from the response headers.
+func runChatCompletionWithImageEmbeds() (string, string) {
+	ginkgo.By("Sending Chat Completion Request with image_embeds")
+
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"text","text":"Describe this embedded image:"},{"type":"image_embeds","image_embeds":%q,"uuid":"embedded-image-1"}]}]}`,
+		simModelName, testImageEmbeds)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err := resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	_, err = io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	return resp.Header.Get("x-inference-namespace"),
+		resp.Header.Get("x-inference-pod")
+}
+
+// runChatCompletionWithAudio sends a chat completion request with an input_audio content block.
+// input_audio is a recognised multimodal type so it triggers the encode stage.
+// Returns the namespace and pod name from the response headers.
+func runChatCompletionWithAudio() (string, string) {
+	ginkgo.By("Sending Chat Completion Request with input_audio")
+
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"text","text":"What is being said in this audio clip?"},{"type":"input_audio","input_audio":{"data":%q,"format":"wav"}}]}],"max_tokens":100}`,
+		simModelName, testAudioData)
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	req.Header.Set("Content-Type", "application/json")
