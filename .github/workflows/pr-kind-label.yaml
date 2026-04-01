@@ -1,0 +1,36 @@
+name: Apply kind labels from PR body
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+    branches:
+      - main
+
+jobs:
+  kind-labels:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Sync kind labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Remove existing kind/* labels
+          gh pr view "$PR_NUMBER" --repo "$REPO" --json labels \
+            -q '.labels[].name | select(startswith("kind/"))' | \
+            while IFS= read -r label; do
+              gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$label"
+            done
+
+          # Extract /kind values from PR body and apply labels
+          printf '%s' "$PR_BODY" | tr -d '\r' | grep '^/kind ' | \
+            sed 's|^/kind ||' | sort -u | \
+            while IFS= read -r kind; do
+              [ -z "$kind" ] && continue
+              gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "kind/$kind" || \
+                echo "::warning::Label 'kind/$kind' not found in repository"
+            done
