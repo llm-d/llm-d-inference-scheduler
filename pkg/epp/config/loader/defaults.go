@@ -25,13 +25,13 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/registry"
 	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	framework "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/picker"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/profile"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/saturationdetector/framework/plugins/utilizationdetector"
 )
 
 // DefaultScorerWeight is the weight used for scorers referenced in the configuration without explicit weights.
@@ -243,17 +243,17 @@ func ensureSaturationDetector(
 	sdConfig := cfg.SaturationDetector
 	if sdConfig == nil {
 		sdConfig = &configapi.SaturationDetectorConfig{
-			PluginRef: utilizationdetector.UtilizationDetectorType,
+			PluginRef: utilization.UtilizationDetectorType,
 		}
 		cfg.SaturationDetector = sdConfig
 	}
 	if sdConfig.PluginRef == "" {
-		sdConfig.PluginRef = utilizationdetector.UtilizationDetectorType
+		sdConfig.PluginRef = utilization.UtilizationDetectorType
 	}
 
-	if sdConfig.PluginRef == utilizationdetector.UtilizationDetectorType {
+	if sdConfig.PluginRef == utilization.UtilizationDetectorType {
 		if _, ok := allPlugins[sdConfig.PluginRef]; !ok {
-			if err := registerDefaultPlugin(cfg, handle, utilizationdetector.UtilizationDetectorType); err != nil {
+			if err := registerDefaultPlugin(cfg, handle, utilization.UtilizationDetectorType); err != nil {
 				return err
 			}
 		}
