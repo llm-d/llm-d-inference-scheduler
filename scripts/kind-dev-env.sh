@@ -81,7 +81,7 @@ export PROM_ENABLED="${PROM_ENABLED:-false}"
 # Set the host port to map to the Prometheus NodePort (30090)
 : "${PROM_HOST_PORT:=30090}"
 
-# By default we are not setting up for EPD (Encode/Prefill/Decode)
+# By default we are not setting up for E/P/D (separate Encode, Prefill, and Decode deployments)
 export EPD_ENABLED="\"${EPD_ENABLED:-false}\""
 
 if [ "${PD_ENABLED}" == "\"true\"" ] && [ "${EPD_ENABLED}" == "\"true\"" ]; then
@@ -108,17 +108,9 @@ fi
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
 # Validate configuration compatibility
-if [ "${KV_CACHE_ENABLED}" == "true" ] && ([ "${PD_ENABLED}" == "\"true\"" ] || [ "${EPD_ENABLED}" == "\"true\"" ]); then
-  echo "Error: KV_CACHE_ENABLED=true is not supported with PD_ENABLED=true or EPD_ENABLED=true" >&2
+if [ "${KV_CACHE_ENABLED}" == "true" ] && ([ "${PD_ENABLED}" == "\"true\"" ] || [ "${EPD_ENABLED}" == "\"true\"" ] || [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]); then
+  echo "Error: KV_CACHE_ENABLED=true is not supported with PD_ENABLED=true, EPD_ENABLED=true, or VLLM_DATA_PARALLEL_SIZE != 1." >&2
   exit 1
-fi
-
-if [ "${KV_CACHE_ENABLED}" == "true" ]; then
-  # KV cache requires simple mode: no PD/EPD and DP size must be 1
-  if [ "${PD_ENABLED}" == "\"true\"" ] || [ "${EPD_ENABLED}" == "\"true\"" ] || [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-    echo "Error: KV_CACHE_ENABLED=true is not supported with PD, EPD, or Data Parallelism."
-    exit 1
-  fi
 fi
 
 
@@ -128,12 +120,13 @@ PRIMARY_PORT="0"
 if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
   # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
+
 elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
   # KV cache mode (simple mode only)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
 
 elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
-  # Encode-Prefill-Decode mode
+  # E/P/D mode (separate Encode, Prefill, and Decode deployments)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
   [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ] && PRIMARY_PORT="8000"
 

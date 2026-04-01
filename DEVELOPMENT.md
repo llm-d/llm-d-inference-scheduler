@@ -199,6 +199,8 @@ To deploy a P/D-enabled Kind environment:
 PD_ENABLED=true make env-dev-kind
 ```
 
+To verify the setup, follow the same steps described in the [Accessing the Gateway](#accessing-the-gateway) section above.
+
 #### 2. Encode/Prefill/Decode (E/P/D) Disaggregation
 
 This multimodal configuration introduces a standalone Encoder pod for compute-intensive image and video embeddings, while decoupling Prefill and Decode into specialized deployments.
@@ -237,8 +239,6 @@ curl http://localhost:8080/v1/chat/completions \
     "max_tokens": 100
   }'
 ```
-</details>
-
 </details>
 
 ### Cleanup

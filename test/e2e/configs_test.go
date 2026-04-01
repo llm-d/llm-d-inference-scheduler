@@ -171,6 +171,8 @@ plugins:
     hashBlockSize: 10
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 256
+- type: encode-filter
+- type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
 - type: disagg-profile-handler

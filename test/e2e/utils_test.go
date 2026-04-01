@@ -219,22 +219,21 @@ func extractFinishReasonFromStreaming(sseData string) string {
 	return lastFinishReason
 }
 
-// getPrefillRequestCount gets the total request count from a prefill pod's metrics endpoint.
-// This is used to verify whether a request was processed by the prefill pod.
-func getPrefillRequestCount(prefillPodName string) int {
-	ginkgo.By("Getting request count from prefill pod: " + prefillPodName)
+// getPodRequestCount gets the total vLLM request count from a pod's metrics endpoint.
+func getPodRequestCount(podName string) int {
+	ginkgo.By("Getting request count from pod: " + podName)
 
 	// Use Kubernetes API proxy to access the metrics endpoint
 	output, err := testConfig.KubeCli.CoreV1().RESTClient().
 		Get().
 		Namespace(nsName).
 		Resource("pods").
-		Name(prefillPodName + ":8000").
+		Name(podName + ":8000").
 		SubResource("proxy").
 		Suffix("metrics").
 		DoRaw(testConfig.Context)
 	if err != nil {
-		ginkgo.By(fmt.Sprintf("Warning: Could not get metrics from prefill pod %s: %v", prefillPodName, err))
+		ginkgo.By(fmt.Sprintf("Warning: Could not get metrics from pod %s: %v", podName, err))
 		return -1
 	}
 
