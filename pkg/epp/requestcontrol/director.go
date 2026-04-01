@@ -166,7 +166,6 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	logger.V(logutil.DEBUG).Info("LLM request assembled")
 
 	if err := d.admissionController.Admit(ctx, reqCtx, *infObjective.Spec.Priority); err != nil {
-		logger.V(logutil.DEFAULT).Info("Request rejected by admission control", "error", err)
 		return reqCtx, err
 	}
 	candidateEndpoints := d.podLocator.Locate(ctx, reqCtx.Request.Metadata)
@@ -182,12 +181,11 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	err = d.runPrepareDataPlugins(ctx, reqCtx.SchedulingRequest, candidateSnapshot)
 	if err != nil {
 		// Don't fail the request if PrepareData plugins fail.
-		logger.V(logutil.DEFAULT).Error(err, "failed to prepare per request data")
+		logger.Error(err, "failed to prepare per request data")
 	}
 
 	// Run admit request plugins
 	if !d.runAdmissionPlugins(ctx, reqCtx.SchedulingRequest, candidateSnapshot) {
-		logger.V(logutil.DEFAULT).Info("Request cannot be admitted")
 		return reqCtx, errcommon.Error{Code: errcommon.Internal, Msg: "request cannot be admitted"}
 	}
 
@@ -241,7 +239,7 @@ func (d *Director) mutateAndRepackage(ctx context.Context, reqCtx *handlers.Requ
 	// Marshal back to bytes so downstream ExtProc filters see the updated model
 	requestBodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
-		logger.V(logutil.DEFAULT).Error(err, "Error marshalling request body")
+		logger.Error(err, "Error marshalling request body")
 		return errcommon.Error{Code: errcommon.Internal, Msg: "Error marshalling request body"}
 	}
 
