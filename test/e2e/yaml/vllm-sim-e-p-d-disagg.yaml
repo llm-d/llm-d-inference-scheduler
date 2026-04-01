@@ -57,6 +57,8 @@ spec:
         - "--port=8000"
         - "--no-enable-prefix-caching"
         - "--mm-encoder-only"
+        # ec-transfer-config configures the encoded cache (EC) connector for transferring
+        # encoded embeddings between the encode and decode pods via shared storage.
         - "--ec-transfer-config"
         - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
         ports:
@@ -142,6 +144,8 @@ spec:
         - "--port=8000"
         - "--model=${MODEL_NAME}"
         - "--mode=echo"
+        # ec-transfer-config configures the encoded cache (EC) connector for transferring
+        # encoded embeddings between the encode and decode pods via shared storage.
         - "--ec-transfer-config"
         - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_consumer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
         ports:

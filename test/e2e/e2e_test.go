@@ -424,7 +424,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			encodeReplicas := 2
 			decodeReplicas := 1
-			modelServers := createModelServersEpD(encodeReplicas, decodeReplicas)
+			modelServers := createModelServersEpDDisagg(encodeReplicas, decodeReplicas)
 
 			epp := createEndPointPicker(epdEncodeDecodeConfig)
 

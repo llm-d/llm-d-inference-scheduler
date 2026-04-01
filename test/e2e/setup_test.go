@@ -57,8 +57,8 @@ func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, 
 	return objects
 }
 
-// createModelServersEpD creates model server resources for E/PD (encode + prefill/decode) testing.
-func createModelServersEpD(encodeReplicas, decodeReplicas int) []string {
+// createModelServersEpDDisagg creates model server resources for E/PD (encode + prefill/decode) testing.
+func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
 	manifests := testutils.ReadYaml(simEpDDisaggDeployment)
 	manifests = substituteMany(manifests,
 		map[string]string{
