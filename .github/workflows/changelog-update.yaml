@@ -1,0 +1,55 @@
+name: Update Changelog on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  update-changelog:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Extract release note and prepend to CHANGELOG.md
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+        run: |
+          RELEASE_NOTE=$(printf '%s' "$PR_BODY" | tr -d '\r' | awk '
+            /^```release-note/ { in_note=1; sep=""; next }
+            in_note && /^```/ { exit }
+            in_note { printf "%s%s", sep, $0; sep=" " }
+          ' | xargs)
+
+          if [ -z "$RELEASE_NOTE" ] || [[ "${RELEASE_NOTE,,}" == "none" ]]; then
+            echo "No release note found or marked NONE — skipping changelog update."
+            exit 0
+          fi
+
+          DATE="${PR_MERGED_AT:0:10}"
+          ENTRY="$DATE $PR_URL $RELEASE_NOTE"
+          echo "New entry: $ENTRY"
+
+          touch CHANGELOG.md
+          printf '%s\n%s\n' "$ENTRY" "$(cat CHANGELOG.md)" > CHANGELOG.md
+
+      - name: Commit and push updated CHANGELOG.md
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --staged --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "changelog: update from PR #${{ github.event.pull_request.number }}"
+            git push
+          fi
