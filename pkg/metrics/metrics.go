@@ -62,7 +62,7 @@ var (
 	// evaluation. This complements disagg_decision_total by exposing *why* the
 	// decider accepted or rejected disaggregation, enabling operators to
 	// distinguish threshold misses from errors or disabled configurations.
-	DeciderEvaluationCount = prometheus.NewCounterVec(
+	SchedulerDeciderEvaluationCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Subsystem: SchedulerSubsystem,
 			Name:      "decider_evaluation_total",
@@ -74,7 +74,7 @@ var (
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
-	return []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount, DeciderEvaluationCount}
+	return []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount, SchedulerDeciderEvaluationCount}
 }
 
 // RecordPDDecision increments the counter for a specific P/D routing decision.
@@ -120,5 +120,5 @@ func RecordDeciderEvaluation(modelName, decider, reason string) {
 	if modelName == "" {
 		modelName = "unknown"
 	}
-	DeciderEvaluationCount.WithLabelValues(modelName, decider, reason).Inc()
+	SchedulerDeciderEvaluationCount.WithLabelValues(modelName, decider, reason).Inc()
 }

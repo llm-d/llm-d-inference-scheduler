@@ -91,7 +91,7 @@ func TestDisaggDecisionType(t *testing.T) {
 }
 
 func TestRecordDeciderEvaluation(t *testing.T) {
-	DeciderEvaluationCount.Reset()
+	SchedulerDeciderEvaluationCount.Reset()
 
 	model := "test-model"
 	decider := "prefix-based-pd-decider"
@@ -115,14 +115,14 @@ func TestRecordDeciderEvaluation(t *testing.T) {
 		llm_d_inference_scheduler_decider_evaluation_total{decider="prefix-based-pd-decider",model_name="test-model",reason="suffix_cached"} 1
 	`
 
-	if err := testutil.CollectAndCompare(DeciderEvaluationCount, strings.NewReader(expected),
+	if err := testutil.CollectAndCompare(SchedulerDeciderEvaluationCount, strings.NewReader(expected),
 		"llm_d_inference_scheduler_decider_evaluation_total"); err != nil {
 		t.Errorf("RecordDeciderEvaluation() failed: %v", err)
 	}
 }
 
 func TestRecordDeciderEvaluationEmptyModel(t *testing.T) {
-	DeciderEvaluationCount.Reset()
+	SchedulerDeciderEvaluationCount.Reset()
 
 	RecordDeciderEvaluation("", "my-decider", DeciderReasonDisaggregated)
 
@@ -132,7 +132,7 @@ func TestRecordDeciderEvaluationEmptyModel(t *testing.T) {
 		llm_d_inference_scheduler_decider_evaluation_total{decider="my-decider",model_name="unknown",reason="disaggregated"} 1
 	`
 
-	if err := testutil.CollectAndCompare(DeciderEvaluationCount, strings.NewReader(expected),
+	if err := testutil.CollectAndCompare(SchedulerDeciderEvaluationCount, strings.NewReader(expected),
 		"llm_d_inference_scheduler_decider_evaluation_total"); err != nil {
 		t.Errorf("RecordDeciderEvaluation() with empty model failed: %v", err)
 	}
