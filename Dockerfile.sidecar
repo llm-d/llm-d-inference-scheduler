@@ -1,3 +1,10 @@
+# BASE_IMAGE can be overridden at build time, e.g.:
+#   --build-arg BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:9.7
+# Default is distroless/static which includes CA certs and has minimal CVE surface.
+# NOTE: if using scratch, CA certificates must be copied from the builder stage:
+#   COPY --from=builder /etc/ssl/certs/ca-bundle.crt /etc/ssl/certs/ca-bundle.crt
+ARG BASE_IMAGE=gcr.io/distroless/static:nonroot
+
 # Build Stage: using Go 1.25 image
 FROM --platform=${BUILDPLATFORM} quay.io/projectquay/golang:1.25 AS builder
 ARG TARGETOS
@@ -28,7 +35,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o bin/pd-sidec
        -ldflags="${LDFLAGS} -X github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version.CommitSHA=${COMMIT_SHA} -X github.com/llm-d/llm-d-inference-scheduler/pkg/sidecar/version.BuildRef=${BUILD_REF}" \
        cmd/cmd.go
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
+# Runtime stage
+FROM ${BASE_IMAGE}
+
 COPY --from=builder /workspace/bin/pd-sidecar /app/pd-sidecar
 USER 65532:65532
 
