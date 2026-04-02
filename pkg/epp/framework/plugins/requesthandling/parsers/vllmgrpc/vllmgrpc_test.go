@@ -109,7 +109,8 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 						Input: &pb.GenerateRequest_Text{
 							Text: "Hello world",
 						},
-					}},
+					},
+				},
 			},
 		},
 
