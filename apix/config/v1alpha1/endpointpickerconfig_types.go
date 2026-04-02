@@ -314,6 +314,12 @@ type FlowControlConfig struct {
 	// priority levels. Traffic matching these priorities will be handled according to these rules.
 	// If a priority band is not specified, it uses specific defaults.
 	PriorityBands []PriorityBandConfig `json:"priorityBands,omitempty"`
+
+	// +optional
+	// UsageLimitPolicyPluginRef specifies the UsageLimitPolicy plugin to use for adaptive capacity management.
+	// Must reference a named plugin instance defined in the top-level Plugins section.
+	// If omitted, a default static policy (threshold=1.0, no gating) is used.
+	UsageLimitPolicyPluginRef string `json:"usageLimitPolicyPluginRef,omitempty"`
 }
 
 func (fcc *FlowControlConfig) String() string {
@@ -338,6 +344,10 @@ func (fcc *FlowControlConfig) String() string {
 
 	if len(fcc.PriorityBands) > 0 {
 		parts = append(parts, fmt.Sprintf("PriorityBands: %v", fcc.PriorityBands))
+	}
+
+	if fcc.UsageLimitPolicyPluginRef != "" {
+		parts = append(parts, "UsageLimitPolicyRef: "+fcc.UsageLimitPolicyPluginRef)
 	}
 
 	return "{" + strings.Join(parts, ", ") + "}"
