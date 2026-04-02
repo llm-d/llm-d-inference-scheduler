@@ -24,8 +24,8 @@ RUN go mod download
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o bin/epp cmd/epp/main.go
 
 # Runtime stage
-# Use ubi9-micro as a minimal base image
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
+# Use distroless as a minimal base image
+FROM gcr.io/distroless/static-debian12:nonroot
 
 WORKDIR /
 
