@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/flowcontrol/fairness"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/flowcontrol/ordering"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/flowcontrol/usagelimits"
 )
 
 // --- Defaults ---
@@ -40,6 +41,8 @@ const (
 	DefaultOrderingPolicyRef string = ordering.FCFSOrderingPolicyType
 	// DefaultFairnessPolicyRef is the default policy for selecting which flow's queue to service next.
 	DefaultFairnessPolicyRef string = fairness.GlobalStrictFairnessPolicyType
+	// DefaultUsageLimitPolicyRef is the default policy to compute usage limit of a priority band dynamically.
+	DefaultUsageLimitPolicyRef string = usagelimits.StaticUsageLimitPolicyType
 )
 
 const (
