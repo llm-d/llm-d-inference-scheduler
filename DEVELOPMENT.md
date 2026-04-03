@@ -13,6 +13,7 @@ Documentation for developing the inference scheduler.
     - [Prometheus Monitoring](#prometheus-monitoring)
     - [Grafana Dashboard](#grafana-dashboard)
     - [Development Cycle](#development-cycle)
+    - [Inference Disaggregation Modes](#inference-disaggregation-modes)
     - [Cleanup](#cleanup)
   - [Running Tests](#running-tests)
     - [Unit Tests](#unit-tests)
@@ -183,6 +184,62 @@ kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
 > ```bash
 > VLLM_SIMULATOR_TAG=<tag> make env-dev-kind
 > ```
+
+### Inference Disaggregation Modes
+
+You can deploy the inference stack in disaggregated modes to optimize performance by separating specific stages of the LLM pipeline into dedicated pods. For technical details on the advanced disaggregation strategies, refer to [docs/disaggregation.md](docs/disaggregation.md).
+
+#### 1. Prefill/Decode (P/D) Disaggregation
+
+In this mode, Prefill and Decode run on independent deployments.
+
+To deploy a P/D-enabled Kind environment:
+
+```bash
+PD_ENABLED=true make env-dev-kind
+```
+
+To verify the setup, follow the same steps described in the [Accessing the Gateway](#accessing-the-gateway) section above.
+
+#### 2. Encode/Prefill/Decode (E/P/D) Disaggregation
+
+This multimodal configuration introduces a standalone Encoder pod for compute-intensive image and video embeddings, while decoupling Prefill and Decode into specialized deployments.
+
+To deploy an E/P/D-enabled Kind environment:
+
+```bash
+EPD_ENABLED=true make env-dev-kind
+```
+
+<details>
+<summary>E/P/D Setup Verification</summary>
+
+1. Port-forward the Gateway:
+
+```bash
+kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
+```
+2. Test the Pipeline:
+Run an image-based inference request to ensure the E/P/D components are communicating correctly:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "image_url", "image_url": { "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg" } },
+          { "type": "text", "text": "What is in this image?" }
+        ]
+      }
+    ],
+    "max_tokens": 100
+  }'
+```
+</details>
 
 ### Cleanup
 

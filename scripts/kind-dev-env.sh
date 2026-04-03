@@ -36,8 +36,12 @@ export EPP_TAG="${EPP_TAG:-dev}"
 EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
-# Set the model name to deploy
-export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
+# Set the model name to deploy (EPD defaults to a multimodal model)
+if [ -z "${MODEL_NAME}" ] && [ "${EPD_ENABLED}" == "true" ]; then
+  export MODEL_NAME="Qwen/Qwen3-VL-2B-Instruct"
+else
+  export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
+fi
 # Extract model family (e.g., "meta-llama" from "meta-llama/Llama-3.1-8B-Instruct")
 export MODEL_FAMILY="${MODEL_NAME%%/*}"
 # Extract model ID (e.g., "Llama-3.1-8B-Instruct")
@@ -65,10 +69,10 @@ export UDS_TOKENIZER_IMAGE
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 
-# vLLM replica count (without PD)
+# vLLM replica count (without PD/EPD)
 export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 
-# By default we are not setting up for PD
+# By default we are not setting up for PD (Prefill/Decode)
 export PD_ENABLED="\"${PD_ENABLED:-false}\""
 
 # By default we are not deploying Prometheus monitoring
@@ -77,6 +81,13 @@ export PROM_ENABLED="${PROM_ENABLED:-false}"
 # Set the host port to map to the Prometheus NodePort (30090)
 : "${PROM_HOST_PORT:=30090}"
 
+# By default we are not setting up for E/P/D (separate Encode, Prefill, and Decode deployments)
+export EPD_ENABLED="\"${EPD_ENABLED:-false}\""
+
+if [ "${PD_ENABLED}" == "\"true\"" ] && [ "${EPD_ENABLED}" == "\"true\"" ]; then
+  echo "Error: PD_ENABLED and EPD_ENABLED cannot both be set to true." >&2
+  exit 1
+fi
 
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
@@ -84,38 +95,58 @@ export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
 # By default we are not setting up for external tokenizer
 export EXTERNAL_TOKENIZER_ENABLED="${EXTERNAL_TOKENIZER_ENABLED:-false}"
 
-# Replica counts for P and D
+# Replica counts for E (Encode), P (Prefill), and D (Decode)
+export VLLM_REPLICA_COUNT_E="${VLLM_REPLICA_COUNT_E:-1}"
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
-export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
+if [ "${EPD_ENABLED}" == "\"true\"" ]; then
+  export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
+else
+  export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
+fi
 
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
-# Validate configuration constraints
-if [ "${KV_CACHE_ENABLED}" == "true" ]; then
-  # KV cache requires simple mode: no PD and DP size must be 1
-  if [ "${PD_ENABLED}" == "\"true\"" ] || [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-    echo "Invalid configuration: PD_ENABLED=true and KV_CACHE_ENABLED=true is not supported"
-    exit 1
-  fi
+# Validate configuration compatibility
+if [ "${KV_CACHE_ENABLED}" == "true" ] && ([ "${PD_ENABLED}" == "\"true\"" ] || [ "${EPD_ENABLED}" == "\"true\"" ] || [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]); then
+  echo "Error: KV_CACHE_ENABLED=true is not supported with PD_ENABLED=true, EPD_ENABLED=true, or VLLM_DATA_PARALLEL_SIZE != 1." >&2
+  exit 1
 fi
+
+
+PRIMARY_PORT="0"
 
 # Determine EPP config file based on feature flags
 if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
   # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
+
 elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
   # KV cache mode (simple mode only)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
+
+elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
+  # E/P/D mode (separate Encode, Prefill, and Decode deployments)
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
+  [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ] && PRIMARY_PORT="8000"
+
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   # Prefill-Decode mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
+  [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ] && PRIMARY_PORT="8000"
+
+elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
+  # Data Parallel mode (only needed for Istio pre-1.28.1)
+  # Not really called in kind(docker.io/istio/pilot:1.28.1) by "make env-dev-kind"
+  DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
+
 else
   # Simple mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
 fi
 
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
+export PRIMARY_PORT
 
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks
@@ -202,7 +233,7 @@ set -x
 
 # Hotfix for https://github.com/kubernetes-sigs/kind/issues/3880
 CONTAINER_NAME="${CLUSTER_NAME}-control-plane"
-${CONTAINER_RUNTIME} exec -it ${CONTAINER_NAME} /bin/bash -c "sysctl net.ipv4.conf.all.arp_ignore=0"
+${CONTAINER_RUNTIME} exec ${CONTAINER_NAME} /bin/bash -c "sysctl net.ipv4.conf.all.arp_ignore=0"
 
 # Wait for all pods to be ready
 kubectl --context ${KUBE_CONTEXT} -n kube-system wait --for=condition=Ready --all pods --timeout=300s
@@ -255,10 +286,12 @@ kubectl kustomize --enable-helm deploy/components/crds-istio |
 # ------------------------------------------------------------------------------
 
 # Deploy the environment to the "default" namespace
-if [ "${PD_ENABLED}" != "\"true\"" ]; then
-  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
-else
+if [ "${EPD_ENABLED}" == "\"true\"" ]; then
+  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-epd"
+elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
+else
+  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
 fi
 
 TEMP_FILE=$(mktemp)
@@ -272,7 +305,7 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 kubectl kustomize --enable-helm  ${KUSTOMIZE_DIR} \
 	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
-  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
+  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------

@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${MODEL_NAME_SAFE}-vllm-sim-epd
+  labels:
+    app: ${POOL_NAME}
+spec:
+  replicas: ${VLLM_REPLICA_COUNT}
+  selector:
+    matchLabels:
+      app: ${POOL_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${POOL_NAME}
+        llm-d.ai/role: encode-prefill-decode
+    spec:
+      initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
+      containers:
+      - name: vllm
+        image: ${VLLM_SIMULATOR_IMAGE}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--model=${MODEL_NAME}"
+        - "--port=8000"
+        - "--mode=echo"
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8000"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
+      volumes:
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
+        emptyDir: {}

@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +104,16 @@ func getPods(labels map[string]string) []corev1.Pod {
 	return pods
 }
 
+// getPodNames returns the names of all running pods matching the given label selector.
+func getPodNames(labels map[string]string) []string {
+	pods := getPods(labels)
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+	return names
+}
+
 func podsInDeploymentsReady(objects []string) {
 	isDeploymentReady := func(deploymentName string) bool {
 		var deployment appsv1.Deployment
@@ -141,6 +153,111 @@ func substituteMany(inputs []string, substitutions map[string]string) []string {
 		outputs[idx] = output
 	}
 	return outputs
+}
+
+// getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+//
+//nolint:unparam // metricName may vary in future test cases
+func getCounterMetric(metricsURL, metricName, labelMatch string) int {
+	resp, err := http.Get(metricsURL)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err = resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	body, err := io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	metricsText := string(body)
+	for _, line := range strings.Split(metricsText, "\n") {
+		if strings.HasPrefix(line, metricName) && strings.Contains(line, labelMatch) {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				valFloat, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+				return int(valFloat)
+			}
+		}
+	}
+	return 0
+}
+
+// extractFinishReason extracts the finish_reason field from a JSON response string.
+func extractFinishReason(jsonStr string) string {
+	// Simple extraction - look for "finish_reason":"value" pattern
+	idx := strings.Index(jsonStr, `"finish_reason":"`)
+	if idx == -1 {
+		// Try with null value
+		if strings.Contains(jsonStr, `"finish_reason":null`) {
+			return "null"
+		}
+		return ""
+	}
+	start := idx + len(`"finish_reason":"`)
+	end := strings.Index(jsonStr[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return jsonStr[start : start+end]
+}
+
+// extractFinishReasonFromStreaming extracts the finish_reason from the last SSE data chunk.
+func extractFinishReasonFromStreaming(sseData string) string {
+	// Find the last "finish_reason" that is not null
+	lines := strings.Split(sseData, "\n")
+	lastFinishReason := ""
+	for _, line := range lines {
+		if strings.HasPrefix(line, "data: ") && !strings.Contains(line, "[DONE]") {
+			fr := extractFinishReason(line)
+			if fr != "" && fr != "null" {
+				lastFinishReason = fr
+			}
+		}
+	}
+	return lastFinishReason
+}
+
+// getPodRequestCount gets the total vLLM request count from a pod's metrics endpoint.
+func getPodRequestCount(podName string) int {
+	ginkgo.By("Getting request count from pod: " + podName)
+
+	// Use Kubernetes API proxy to access the metrics endpoint
+	output, err := testConfig.KubeCli.CoreV1().RESTClient().
+		Get().
+		Namespace(nsName).
+		Resource("pods").
+		Name(podName + ":8000").
+		SubResource("proxy").
+		Suffix("metrics").
+		DoRaw(testConfig.Context)
+	if err != nil {
+		ginkgo.By(fmt.Sprintf("Warning: Could not get metrics from pod %s: %v", podName, err))
+		return -1
+	}
+
+	return parseRequestCountFromMetrics(string(output))
+}
+
+// parseRequestCountFromMetrics extracts the request count from Prometheus metrics output.
+func parseRequestCountFromMetrics(metricsOutput string) int {
+	// Look for vllm:e2e_request_latency_seconds_count{model_name="food-review"} <count>
+	lines := strings.Split(metricsOutput, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "vllm:e2e_request_latency_seconds_count") &&
+			strings.Contains(line, "food-review") {
+			// Extract the count value after the last space
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				count, err := strconv.Atoi(parts[len(parts)-1])
+				if err == nil {
+					return count
+				}
+			}
+		}
+	}
+	return 0
 }
 
 // dumpPodsAndLogs dumps all pod statuses and their logs to the Ginkgo writer.
