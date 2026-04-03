@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(1)
+			modelServers := createModelServersDecode(1)
 
 			epp := createEndPointPicker(simpleConfig)
 
@@ -397,7 +397,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(1)
+			modelServers := createModelServersDecode(1)
 
 			epp := createEndPointPicker(disaggDecodeOnlyConfig)
 
@@ -571,6 +571,8 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			replicas := 1
 			modelServers := createModelServersEPDUnified(replicas)
 
+			// Using epdConfig instead of disaggDecodeOnlyConfig to validate the EPD logic path within
+			// a single pod; multimodal stages will resolve to this same deployment.
 			epp := createEndPointPicker(epdConfig)
 
 			metricsURL := fmt.Sprintf("http://localhost:%s/metrics", metricsPort)
@@ -629,7 +631,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			epp := createEndPointPicker(kvConfig)
 
-			modelServers := createModelServersBasicKV(1)
+			modelServers := createModelServersDecodeKV(1)
 			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
@@ -653,7 +655,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			epp := createEndPointPicker(kvExternalTokenizerConfig)
 
-			modelServers := createModelServersBasicKV(1)
+			modelServers := createModelServersDecodeKV(1)
 			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
@@ -686,7 +688,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should distribute inference requests across all model servers", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(1)
+			modelServers := createModelServersDecode(1)
 
 			epp := createEndPointPicker(scaleConfig)
 
@@ -742,7 +744,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should schedule inference on all ranks", func() {
 			infPoolObjects = createInferencePool(2, true)
 
-			modelServers := createModelServersBasicDP(1)
+			modelServers := createModelServersDecodeDP(1)
 
 			epp := createEndPointPicker(dataParallelConfig)
 

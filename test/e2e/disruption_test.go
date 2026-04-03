@@ -87,7 +87,7 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 		ginkgo.It("should recover and route to surviving pods", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(2)
+			modelServers := createModelServersDecode(2)
 			ginkgo.DeferCleanup(testutils.DeleteObjects, testConfig, modelServers)
 
 			epp := createEndPointPicker(simpleConfig)
@@ -134,7 +134,7 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 		ginkgo.It("should not hang and should recover routing", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(2)
+			modelServers := createModelServersDecode(2)
 			ginkgo.DeferCleanup(testutils.DeleteObjects, testConfig, modelServers)
 
 			epp := createEndPointPicker(simpleConfig)
@@ -186,7 +186,7 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 		ginkgo.It("should return 503 to the client", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(1)
+			modelServers := createModelServersDecode(1)
 			ginkgo.DeferCleanup(testutils.DeleteObjects, testConfig, modelServers)
 
 			epp := createEndPointPicker(simpleConfig)
@@ -232,7 +232,7 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 		ginkgo.It("should recover and resume routing after restart", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(1)
+			modelServers := createModelServersDecode(1)
 			ginkgo.DeferCleanup(testutils.DeleteObjects, testConfig, modelServers)
 
 			epp := createEndPointPicker(simpleConfig)
@@ -281,7 +281,7 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 		ginkgo.It("should return 503s when empty and recover when scaled back", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServersBasic(1)
+			modelServers := createModelServersDecode(1)
 			ginkgo.DeferCleanup(testutils.DeleteObjects, testConfig, modelServers)
 
 			epp := createEndPointPicker(simpleConfig)

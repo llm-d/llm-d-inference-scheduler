@@ -32,14 +32,14 @@ func createModelServersFromYaml(yaml string, extra map[string]string) []string {
 	return objects
 }
 
-func createModelServersBasic(replicas int) []string {
+func createModelServersDecode(replicas int) []string {
 	return createModelServersFromYaml(simDeployment, map[string]string{
 		"${KV_CACHE_ENABLED}":   "false",
 		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
 	})
 }
 
-func createModelServersBasicKV(replicas int) []string {
+func createModelServersDecodeKV(replicas int) []string {
 	return createModelServersFromYaml(simDeployment, map[string]string{
 		"${MODEL_NAME}":         kvModelName,
 		"${MODEL_NAME_SAFE}":    safeKvModelName,
@@ -48,7 +48,7 @@ func createModelServersBasicKV(replicas int) []string {
 	})
 }
 
-func createModelServersBasicDP(replicas int) []string {
+func createModelServersDecodeDP(replicas int) []string {
 	return createModelServersFromYaml(simDPDeployment, map[string]string{
 		"${SIDECAR_IMAGE}":      sideCarImage,
 		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
