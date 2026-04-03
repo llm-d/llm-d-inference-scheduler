@@ -12,10 +12,41 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
+func newOpenAIClient() *openai.Client {
+	c := openai.NewClient(option.WithBaseURL(fmt.Sprintf("http://localhost:%s/v1", port)))
+	return &c
+}
+
+func extractInferenceHeaders(httpResp *http.Response) (string, string, string) {
+	return httpResp.Header.Get("x-inference-namespace"),
+		httpResp.Header.Get("x-inference-pod"),
+		httpResp.Header.Get("x-inference-port")
+}
+
+// doPost sends a POST request with a JSON body to the given path, asserts HTTP 200,
+// and returns the x-inference-namespace, x-inference-pod headers and the response body.
+func doPost(path, body string, extraHeaders map[string]string) (string, string, []byte) {
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s%s", port, path), strings.NewReader(body))
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		gomega.Expect(resp.Body.Close()).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	respBody, err := io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	return resp.Header.Get("x-inference-namespace"), resp.Header.Get("x-inference-pod"), respBody
+}
+
 func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (string, string, string) {
 	var httpResp *http.Response
-	openaiclient := openai.NewClient(
-		option.WithBaseURL(fmt.Sprintf("http://localhost:%s/v1", port)))
 
 	completionParams := openai.CompletionNewParams{
 		Prompt: openai.CompletionNewParamsPromptUnion{
@@ -26,7 +57,7 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 
 	ginkgo.By(fmt.Sprintf("Sending Completion Request: (port %s) %#v", port, completionParams))
 
-	resp, err := openaiclient.Completions.New(testConfig.Context, completionParams, option.WithResponseInto(&httpResp), option.WithRequestTimeout(readyTimeout))
+	resp, err := newOpenAIClient().Completions.New(testConfig.Context, completionParams, option.WithResponseInto(&httpResp), option.WithRequestTimeout(readyTimeout))
 
 	ginkgo.By(fmt.Sprintf("Verifying Completion Response: %#v", resp))
 
@@ -35,17 +66,11 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 	gomega.Expect(resp.Choices[0].FinishReason).Should(gomega.Equal(openai.CompletionChoiceFinishReasonStop))
 	gomega.Expect(resp.Choices[0].Text).Should(gomega.Equal(prompt))
 
-	namespaceHeader := httpResp.Header.Get("x-inference-namespace")
-	podHeader := httpResp.Header.Get("x-inference-pod")
-	podPort := httpResp.Header.Get("x-inference-port")
-
-	return namespaceHeader, podHeader, podPort
+	return extractInferenceHeaders(httpResp)
 }
 
 func runChatCompletion(prompt, modelName string) (string, string, string) {
 	var httpResp *http.Response
-	openaiclient := openai.NewClient(
-		option.WithBaseURL(fmt.Sprintf("http://localhost:%s/v1", port)))
 
 	params := openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
@@ -53,39 +78,20 @@ func runChatCompletion(prompt, modelName string) (string, string, string) {
 		},
 		Model: modelName,
 	}
-	resp, err := openaiclient.Chat.Completions.New(testConfig.Context, params, option.WithResponseInto(&httpResp))
+	resp, err := newOpenAIClient().Chat.Completions.New(testConfig.Context, params, option.WithResponseInto(&httpResp))
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Expect(resp.Choices).Should(gomega.HaveLen(1))
 	gomega.Expect(resp.Choices[0].FinishReason).Should(gomega.Equal("stop"))
 	gomega.Expect(resp.Choices[0].Message.Content).Should(gomega.Equal(prompt))
 
-	namespaceHeader := httpResp.Header.Get("x-inference-namespace")
-	podHeader := httpResp.Header.Get("x-inference-pod")
-	podPort := httpResp.Header.Get("x-inference-port")
-
-	return namespaceHeader, podHeader, podPort
+	return extractInferenceHeaders(httpResp)
 }
 
 // runRawChatCompletion POSTs the given JSON body to /v1/chat/completions and returns
 // the x-inference-namespace and x-inference-pod response headers.
 func runRawChatCompletion(body string) (string, string) {
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := resp.Body.Close()
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}()
-	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
-
-	_, err = io.ReadAll(resp.Body)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-
-	return resp.Header.Get("x-inference-namespace"),
-		resp.Header.Get("x-inference-pod")
+	ns, pod, _ := doPost("/v1/chat/completions", body, nil)
+	return ns, pod
 }
 
 // runChatCompletionWithImage sends a multimodal chat completion request with an image_url content block.
@@ -142,62 +148,18 @@ func runChatCompletionWithMultipleImages(imageURLs []string) (string, string) {
 
 func runStreamingCompletion(prompt string, theModel openai.CompletionNewParamsModel) (string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Streaming Completion Request: (port %s) model=%s", port, theModel))
-
-	// Use raw HTTP for streaming to capture headers
 	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":50,"stream":true}`, theModel, prompt)
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/completions", port), strings.NewReader(body))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := resp.Body.Close()
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}()
-
-	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
-
-	namespaceHeader := resp.Header.Get("x-inference-namespace")
-	podHeader := resp.Header.Get("x-inference-pod")
-
-	// Read and verify the streaming response
-	respBody, err := io.ReadAll(resp.Body)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-
+	ns, pod, respBody := doPost("/v1/completions", body, nil)
 	ginkgo.By(fmt.Sprintf("Streaming Completion received response length: %d bytes", len(respBody)))
-
-	return namespaceHeader, podHeader
+	return ns, pod
 }
 
 func runStreamingChatCompletion(prompt string) (string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Streaming Chat Completion Request: (port %s)", port))
-
-	// Use raw HTTP for streaming to capture headers
 	body := fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"%s"}],"stream":true}`, simModelName, prompt)
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/chat/completions", port), strings.NewReader(body))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := resp.Body.Close()
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}()
-
-	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
-
-	namespaceHeader := resp.Header.Get("x-inference-namespace")
-	podHeader := resp.Header.Get("x-inference-pod")
-
-	// Read and verify the streaming response
-	respBody, err := io.ReadAll(resp.Body)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-
+	ns, pod, respBody := doPost("/v1/chat/completions", body, nil)
 	ginkgo.By(fmt.Sprintf("Streaming Chat Completion received response length: %d bytes", len(respBody)))
-
-	return namespaceHeader, podHeader
+	return ns, pod
 }
 
 // runCompletionWithCacheThreshold sends a completion request with cache_hit_threshold parameter.
@@ -205,73 +167,29 @@ func runStreamingChatCompletion(prompt string) (string, string) {
 // Returns namespace header, pod header, and the finish reason from the response.
 func runCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, forceCacheThresholdFinishReason bool) (string, string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Completion Request with cache_hit_threshold=%v, forceCacheThreshold=%v", cacheHitThreshold, forceCacheThresholdFinishReason))
-
 	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"cache_hit_threshold":%v}`, simModelName, prompt, cacheHitThreshold)
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/completions", port), strings.NewReader(body))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	req.Header.Set("Content-Type", "application/json")
-
-	// Add X-Cache-Threshold header to force the simulator to return cache_threshold finish_reason
-	if forceCacheThresholdFinishReason {
-		req.Header.Set("X-Cache-Threshold-Finish-Reason", "true")
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := resp.Body.Close()
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}()
-
-	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
-
-	namespaceHeader := resp.Header.Get("x-inference-namespace")
-	podHeader := resp.Header.Get("x-inference-pod")
-
-	// Parse response to get finish_reason
-	respBody, err := io.ReadAll(resp.Body)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-
-	// Extract finish_reason from JSON response
+	extraHeaders := cacheThresholdHeaders(forceCacheThresholdFinishReason)
+	ns, pod, respBody := doPost("/v1/completions", body, extraHeaders)
 	finishReason := extractFinishReason(string(respBody))
-
-	ginkgo.By(fmt.Sprintf("Completion Response: ns=%s, pod=%s, finish_reason=%s", namespaceHeader, podHeader, finishReason))
-
-	return namespaceHeader, podHeader, finishReason
+	ginkgo.By(fmt.Sprintf("Completion Response: ns=%s, pod=%s, finish_reason=%s", ns, pod, finishReason))
+	return ns, pod, finishReason
 }
 
 // runStreamingCompletionWithCacheThreshold sends a streaming completion request with cache_hit_threshold.
 func runStreamingCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, forceCacheThresholdFinishReason bool) (string, string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Streaming Completion Request with cache_hit_threshold=%v, forceCacheThreshold=%v", cacheHitThreshold, forceCacheThresholdFinishReason))
-
 	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"stream":true,"cache_hit_threshold":%v}`, simModelName, prompt, cacheHitThreshold)
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/v1/completions", port), strings.NewReader(body))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	req.Header.Set("Content-Type", "application/json")
-
-	if forceCacheThresholdFinishReason {
-		req.Header.Set("X-Cache-Threshold-Finish-Reason", "true")
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := resp.Body.Close()
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}()
-
-	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
-
-	namespaceHeader := resp.Header.Get("x-inference-namespace")
-	podHeader := resp.Header.Get("x-inference-pod")
-
-	// Read streaming response and extract finish_reason from the last data chunk
-	respBody, err := io.ReadAll(resp.Body)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-
+	extraHeaders := cacheThresholdHeaders(forceCacheThresholdFinishReason)
+	ns, pod, respBody := doPost("/v1/completions", body, extraHeaders)
 	finishReason := extractFinishReasonFromStreaming(string(respBody))
+	ginkgo.By(fmt.Sprintf("Streaming Completion Response: ns=%s, pod=%s, finish_reason=%s", ns, pod, finishReason))
+	return ns, pod, finishReason
+}
 
-	ginkgo.By(fmt.Sprintf("Streaming Completion Response: ns=%s, pod=%s, finish_reason=%s", namespaceHeader, podHeader, finishReason))
-
-	return namespaceHeader, podHeader, finishReason
+func cacheThresholdHeaders(force bool) map[string]string {
+	if force {
+		// Forces the simulator to return cache_threshold as the finish_reason.
+		return map[string]string{"X-Cache-Threshold-Finish-Reason": "true"}
+	}
+	return nil
 }

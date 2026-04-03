@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServers(false, false, false, 1, 0, 0)
+			modelServers := createModelServersBasic(1)
 
 			epp := createEndPointPicker(simpleConfig)
 
@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			prefillReplicas := 1
 			decodeReplicas := 4
-			modelServers := createModelServers(true, false, false, 0, prefillReplicas, decodeReplicas)
+			modelServers := createModelServersPDNixl(prefillReplicas, decodeReplicas)
 
 			epp := createEndPointPicker(deprecatedPdConfig)
 
@@ -162,7 +162,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 				prefillReplicas := 1
 				decodeReplicas := 2
-				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+				modelServers := createModelServersPDSharedStorage(decodeReplicas)
 
 				epp := createEndPointPicker(config)
 
@@ -200,7 +200,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 				prefillReplicas := 1
 				decodeReplicas := 2
-				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+				modelServers := createModelServersPDSharedStorage(decodeReplicas)
 
 				epp := createEndPointPicker(config)
 
@@ -236,7 +236,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 				prefillReplicas := 1
 				decodeReplicas := 2
-				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+				modelServers := createModelServersPDSharedStorage(decodeReplicas)
 
 				epp := createEndPointPicker(config)
 
@@ -283,7 +283,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 				prefillReplicas := 1
 				decodeReplicas := 2
-				modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+				modelServers := createModelServersPDSharedStorage(decodeReplicas)
 
 				epp := createEndPointPicker(config)
 
@@ -333,7 +333,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			prefillReplicas := 1
 			decodeReplicas := 4
-			modelServers := createModelServersWithConnector(true, false, false, 0, prefillReplicas, decodeReplicas, "shared-storage")
+			modelServers := createModelServersPDSharedStorage(decodeReplicas)
 
 			epp := createEndPointPicker(pdConfig)
 
@@ -397,7 +397,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServers(false, false, false, 1, 0, 0)
+			modelServers := createModelServersBasic(1)
 
 			epp := createEndPointPicker(disaggDecodeOnlyConfig)
 
@@ -547,10 +547,15 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			doCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", doLabelFilter)
 			gomega.Expect(pdCount + doCount).Should(gomega.Equal(2))
 
-			// Metrics: at least one encode-prefill-decode decision recorded
+			// Metrics: 4 multimodal requests each produce either encode-prefill-decode or encode-decode
+			// (encode-decode occurs if the prefix cache hits on the second same-image request).
+			// The 3 requests with unique content (1st image, multi-image, video) always produce encode-prefill-decode.
 			epdLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metrics.DecisionTypeEncodePrefillDecode, simModelName)
+			edLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metrics.DecisionTypeEncodeDecode, simModelName)
 			epdCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", epdLabelFilter)
-			gomega.Expect(epdCount).Should(gomega.BeNumerically(">=", 1))
+			edCount := getCounterMetric(metricsURL, "llm_d_inference_scheduler_disagg_decision_total", edLabelFilter)
+			gomega.Expect(epdCount).Should(gomega.BeNumerically(">=", 3))
+			gomega.Expect(epdCount + edCount).Should(gomega.Equal(4))
 
 			testutils.DeleteObjects(testConfig, epp)
 			testutils.DeleteObjects(testConfig, modelServers)
@@ -624,7 +629,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			epp := createEndPointPicker(kvConfig)
 
-			modelServers := createModelServers(false, true, false, 1, 0, 0)
+			modelServers := createModelServersBasicKV(1)
 			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
@@ -648,7 +653,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			epp := createEndPointPicker(kvExternalTokenizerConfig)
 
-			modelServers := createModelServers(false, true, false, 1, 0, 0)
+			modelServers := createModelServersBasicKV(1)
 			time.Sleep(5 * time.Second) // wait for model server(s) to become ready
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
@@ -681,7 +686,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should distribute inference requests across all model servers", func() {
 			infPoolObjects = createInferencePool(1, true)
 
-			modelServers := createModelServers(false, false, false, 1, 0, 0)
+			modelServers := createModelServersBasic(1)
 
 			epp := createEndPointPicker(scaleConfig)
 
@@ -737,7 +742,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		ginkgo.It("should schedule inference on all ranks", func() {
 			infPoolObjects = createInferencePool(2, true)
 
-			modelServers := createModelServers(false, false, true, 1, 0, 0)
+			modelServers := createModelServersBasicDP(1)
 
 			epp := createEndPointPicker(dataParallelConfig)
 

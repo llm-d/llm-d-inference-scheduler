@@ -14,109 +14,93 @@ import (
 	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
-// createModelServers creates the model server resources used for testing from the given filePaths.
-// Uses the default connector (nixlv2) for P/D deployments.
-func createModelServers(withPD, withKV, withDP bool, vllmReplicas, prefillReplicas, decodeReplicas int) []string {
-	return createModelServersWithConnector(withPD, withKV, withDP, vllmReplicas, prefillReplicas, decodeReplicas, "nixlv2")
-}
-
-// createModelServersWithConnector creates model server resources with a specific connector type.
-func createModelServersWithConnector(withPD, withKV, withDP bool, vllmReplicas, prefillReplicas, decodeReplicas int, connector string) []string {
-	theModelName := simModelName
-	theSafeModelName := simModelName
-	if withKV {
-		theModelName = kvModelName
-		theSafeModelName = safeKvModelName
+func createModelServersFromYaml(yaml string, extra map[string]string) []string {
+	subs := map[string]string{
+		"${MODEL_NAME}":           simModelName,
+		"${MODEL_NAME_SAFE}":      simModelName,
+		"${POOL_NAME}":            poolName,
+		"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
+		"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
 	}
-	yaml := simDeployment
-	if withPD {
-		yaml = simPDDisaggDeployment
-	} else if withDP {
-		yaml = simDPDeployment
+	for k, v := range extra {
+		subs[k] = v
 	}
-
 	manifests := testutils.ReadYaml(yaml)
-	manifests = substituteMany(manifests,
-		map[string]string{
-			"${MODEL_NAME}":           theModelName,
-			"${MODEL_NAME_SAFE}":      theSafeModelName,
-			"${POOL_NAME}":            poolName,
-			"${KV_CACHE_ENABLED}":     strconv.FormatBool(withKV),
-			"${CONNECTOR_TYPE}":       connector,
-			"${SIDECAR_IMAGE}":        sideCarImage,
-			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(vllmReplicas),
-			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
-			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
-			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
-			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
-		})
-
+	manifests = substituteMany(manifests, subs)
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
-
 	return objects
+}
+
+func createModelServersBasic(replicas int) []string {
+	return createModelServersFromYaml(simDeployment, map[string]string{
+		"${KV_CACHE_ENABLED}":   "false",
+		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	})
+}
+
+func createModelServersBasicKV(replicas int) []string {
+	return createModelServersFromYaml(simDeployment, map[string]string{
+		"${MODEL_NAME}":         kvModelName,
+		"${MODEL_NAME_SAFE}":    safeKvModelName,
+		"${KV_CACHE_ENABLED}":   "true",
+		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	})
+}
+
+func createModelServersBasicDP(replicas int) []string {
+	return createModelServersFromYaml(simDPDeployment, map[string]string{
+		"${SIDECAR_IMAGE}":      sideCarImage,
+		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	})
+}
+
+func createModelServersPDWithConnector(prefillReplicas, decodeReplicas int, connector string) []string {
+	return createModelServersFromYaml(simPDDisaggDeployment, map[string]string{
+		"${KV_CACHE_ENABLED}":     "false",
+		"${CONNECTOR_TYPE}":       connector,
+		"${SIDECAR_IMAGE}":        sideCarImage,
+		"${VLLM_REPLICA_COUNT}":   "0",
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
+		"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
+	})
+}
+
+func createModelServersPDNixl(prefillReplicas, decodeReplicas int) []string {
+	return createModelServersPDWithConnector(prefillReplicas, decodeReplicas, "nixlv2")
+}
+
+func createModelServersPDSharedStorage(decodeReplicas int) []string {
+	return createModelServersPDWithConnector(1, decodeReplicas, "shared-storage")
 }
 
 // createModelServersEpDDisagg creates model server resources for E/PD (encode + prefill/decode) testing.
 func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
-	manifests := testutils.ReadYaml(simEpDDisaggDeployment)
-	manifests = substituteMany(manifests,
-		map[string]string{
-			"${MODEL_NAME}":           simModelName,
-			"${MODEL_NAME_SAFE}":      simModelName,
-			"${POOL_NAME}":            poolName,
-			"${EC_CONNECTOR_TYPE}":    "ec-example",
-			"${SIDECAR_IMAGE}":        sideCarImage,
-			"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
-			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
-			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
-			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
-		})
-
-	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
-	podsInDeploymentsReady(objects)
-	return objects
+	return createModelServersFromYaml(simEpDDisaggDeployment, map[string]string{
+		"${EC_CONNECTOR_TYPE}":    "ec-example",
+		"${SIDECAR_IMAGE}":        sideCarImage,
+		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
+	})
 }
 
 // createModelServersEPDDisagg creates model server resources for E/P/D (encode/prefill/decode) testing.
 func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas int) []string {
-	manifests := testutils.ReadYaml(simEPDDisaggDeployment)
-	manifests = substituteMany(manifests,
-		map[string]string{
-			"${MODEL_NAME}":           simModelName,
-			"${MODEL_NAME_SAFE}":      simModelName,
-			"${POOL_NAME}":            poolName,
-			"${KV_CONNECTOR_TYPE}":    "shared-storage",
-			"${EC_CONNECTOR_TYPE}":    "ec-example",
-			"${SIDECAR_IMAGE}":        sideCarImage,
-			"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
-			"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
-			"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
-			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
-			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
-		})
-
-	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
-	podsInDeploymentsReady(objects)
-	return objects
+	return createModelServersFromYaml(simEPDDisaggDeployment, map[string]string{
+		"${KV_CONNECTOR_TYPE}":    "shared-storage",
+		"${EC_CONNECTOR_TYPE}":    "ec-example",
+		"${SIDECAR_IMAGE}":        sideCarImage,
+		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
+		"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
+	})
 }
 
-// createModelServersEPDUnified creates a model server resources for EPD (one pod for encode/prefill/decode) testing.
+// createModelServersEPDUnified creates model server resources for EPD (one deployment for encode/prefill/decode) testing.
 func createModelServersEPDUnified(replicas int) []string {
-	manifests := testutils.ReadYaml(simEPDUnifiedDeployment)
-	manifests = substituteMany(manifests,
-		map[string]string{
-			"${MODEL_NAME}":           simModelName,
-			"${MODEL_NAME_SAFE}":      simModelName,
-			"${POOL_NAME}":            poolName,
-			"${VLLM_REPLICA_COUNT}":   strconv.Itoa(replicas),
-			"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
-			"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
-		})
-
-	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
-	podsInDeploymentsReady(objects)
-	return objects
+	return createModelServersFromYaml(simEPDUnifiedDeployment, map[string]string{
+		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	})
 }
 
 func createEndPointPicker(eppConfig string) []string {
