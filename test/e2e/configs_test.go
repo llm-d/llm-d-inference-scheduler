@@ -209,9 +209,9 @@ plugins:
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)
 - type: decode-filter
 - type: max-score-picker
-- type: single-profile-handler
+- type: disagg-profile-handler
 schedulingProfiles:
-- name: default
+- name: decode
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
@@ -248,9 +248,9 @@ plugins:
         enableMetrics: false
 - type: decode-filter
 - type: max-score-picker
-- type: single-profile-handler
+- type: disagg-profile-handler
 schedulingProfiles:
-- name: default
+- name: decode
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
