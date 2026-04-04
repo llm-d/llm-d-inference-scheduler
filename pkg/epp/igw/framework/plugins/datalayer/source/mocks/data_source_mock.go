@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -76,7 +77,9 @@ func (fds *MetricsDataSource) Poll(ctx context.Context, ep fwkdl.Endpoint) (any,
 	nn := ep.GetMetadata().Clone().NamespacedName
 	if metrics, ok := fds.metrics[nn]; ok {
 		if _, ok := fds.errors[nn]; !ok {
-			ep.UpdateMetrics(metrics)
+			clone := metrics.Clone()
+			clone.UpdateTime = time.Now()
+			ep.UpdateMetrics(clone)
 		}
 	}
 	return nil, nil
