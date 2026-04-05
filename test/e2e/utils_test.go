@@ -45,7 +45,10 @@ func waitForEPPToDiscoverPods(modelName string) {
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			return true
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return false
+		}
 		return !strings.Contains(string(body), "failed to find candidate pods")
 	}, 30*time.Second, time.Second).Should(gomega.BeTrue())
 }
