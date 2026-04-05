@@ -98,16 +98,18 @@ func (s *SessionAffinity) Score(ctx context.Context, _ *scheduling.CycleState, r
 	scoredEndpoints := make(map[scheduling.Endpoint]float64)
 	target := ""
 
-	// Extract session cookie from Cookie header
-	cookieHeader := request.Headers[CookieHeaderName]
-	if cookieHeader != "" {
-		sessionToken := extractCookieValue(cookieHeader, SessionCookieName)
-		if sessionToken != "" {
-			decodedBytes, err := base64.StdEncoding.DecodeString(sessionToken)
-			if err != nil {
-				log.FromContext(ctx).Error(err, "Error decoding session cookie")
-			} else {
-				target = string(decodedBytes)
+	// Extract session cookie from Cookie header, if request and headers are available.
+	if request != nil && request.Headers != nil {
+		cookieHeader := request.Headers[CookieHeaderName]
+		if cookieHeader != "" {
+			sessionToken := extractCookieValue(cookieHeader, SessionCookieName)
+			if sessionToken != "" {
+				decodedBytes, err := base64.StdEncoding.DecodeString(sessionToken)
+				if err != nil {
+					log.FromContext(ctx).Error(err, "Error decoding session cookie")
+				} else {
+					target = string(decodedBytes)
+				}
 			}
 		}
 	}
