@@ -517,7 +517,7 @@ Scores the candidate pods by giving a higher score to the pods that were previou
 
 - **Type**: `session-affinity-scorer`
 - **Parameters**: 
-  - `maxAge`: the cookie expiration time, in seconds. The default value is 0, which denotes a session cookie (expires when the browser is closed)."
+  - `maxAge`: the cookie expiration time, in seconds. The default value is 0, which denotes a session cookie (expires when the browser is closed).
 
 Example configuration with the above parameter set:
 
