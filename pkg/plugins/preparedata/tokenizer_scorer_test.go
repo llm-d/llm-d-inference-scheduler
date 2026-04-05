@@ -223,6 +223,60 @@ func TestTokenizerScorer_RenderChat_WritesMMFeaturesToCycleState(t *testing.T) {
 	assert.Equal(t, fakeMMFeatures.MMHashes, stored.MMFeatures.MMHashes)
 }
 
+func TestTokenizerScorer_RenderChat_ForwardsStructuredContent(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	fakeTokenIDs := []uint32{10, 20, 30, 40, 50}
+	fakeMMFeatures := &tokenization.MultiModalFeatures{
+		MMHashes: map[string][]string{"image": {"imghash1"}},
+	}
+
+	var capturedReq *tokenizerTypes.RenderChatRequest
+	tok := &mockTokenizer{
+		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+			capturedReq = req
+			return fakeTokenIDs, fakeMMFeatures, nil
+		},
+	}
+	p := newTestPlugin(tok)
+	cycleState := scheduling.NewCycleState()
+
+	request := &scheduling.LLMRequest{
+		RequestId: "mm-structured",
+		Body: &scheduling.LLMRequestBody{
+			ChatCompletions: &scheduling.ChatCompletionsRequest{
+				Messages: []scheduling.Message{
+					{Role: "system", Content: scheduling.Content{Raw: "You are a visual analyst."}},
+					{Role: "user", Content: scheduling.Content{
+						Structured: []scheduling.ContentBlock{
+							{Type: "text", Text: "Describe this image"},
+							{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,abc"}},
+						},
+					}},
+				},
+			},
+		},
+	}
+
+	p.Score(ctx, cycleState, request, testEndpoints)
+
+	// Verify the RenderChat request received structured content.
+	require.NotNil(t, capturedReq, "RenderChat should have been called")
+	require.Len(t, capturedReq.Conversation, 2)
+	assert.Equal(t, "You are a visual analyst.", capturedReq.Conversation[0].Content.Raw)
+	assert.Nil(t, capturedReq.Conversation[0].Content.Structured)
+	require.Len(t, capturedReq.Conversation[1].Content.Structured, 2)
+	assert.Equal(t, "text", capturedReq.Conversation[1].Content.Structured[0].Type)
+	assert.Equal(t, "image_url", capturedReq.Conversation[1].Content.Structured[1].Type)
+	assert.Equal(t, "data:image/png;base64,abc", capturedReq.Conversation[1].Content.Structured[1].ImageURL.URL)
+
+	// Verify MM features propagated to CycleState.
+	stored, err := scheduling.ReadCycleStateKey[*TokenizedPromptState](
+		cycleState, TokenizedPromptStateKey)
+	require.NoError(t, err)
+	require.NotNil(t, stored.MMFeatures)
+	assert.Equal(t, fakeMMFeatures.MMHashes, stored.MMFeatures.MMHashes)
+}
+
 func TestTokenizerScorer_Render_NilMMFeatures(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	fakeTokenIDs := []uint32{10, 20, 30}

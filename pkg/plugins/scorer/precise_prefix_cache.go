@@ -629,24 +629,7 @@ func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
 
 	// Chat completions path
 	if request.Body.ChatCompletions != nil {
-		conversations := make([]types.Conversation, len(request.Body.ChatCompletions.Messages))
-		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = types.Conversation{
-				Role:    msg.Role,
-				Content: types.Content{Raw: msg.Content.Raw},
-			}
-		}
-
-		renderReq := &types.RenderChatRequest{
-			Conversation:              conversations,
-			Tools:                     request.Body.ChatCompletions.Tools,
-			Documents:                 request.Body.ChatCompletions.Documents,
-			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
-		}
+		renderReq := preparedata.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 
 		return s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
 	}
@@ -714,28 +697,10 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *sc
 			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
 		}
 
-		// Convert messages to conversation format
-		conversations := make([]types.Conversation, len(request.Body.ChatCompletions.Messages))
-		for i, msg := range request.Body.ChatCompletions.Messages {
-			conversations[i] = types.Conversation{
-				Role:    msg.Role,
-				Content: types.Content{Raw: msg.Content.Raw},
-			}
-		}
-
-		renderReq := &types.RenderChatRequest{
-			Conversation:              conversations,
-			Tools:                     request.Body.ChatCompletions.Tools,
-			Documents:                 request.Body.ChatCompletions.Documents,
-			ChatTemplate:              request.Body.ChatCompletions.ChatTemplate,
-			ReturnAssistantTokensMask: request.Body.ChatCompletions.ReturnAssistantTokensMask,
-			ContinueFinalMessage:      request.Body.ChatCompletions.ContinueFinalMessage,
-			AddGenerationPrompt:       request.Body.ChatCompletions.AddGenerationPrompt,
-			ChatTemplateKWArgs:        request.Body.ChatCompletions.ChatTemplateKWArgs,
-		}
+		renderReq := preparedata.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 
 		traceLogger.Info("Processing chat completion request",
-			"messagesCount", len(conversations),
+			"messagesCount", len(renderReq.Conversation),
 			"toolsCount", len(renderReq.Tools),
 			"documentsCount", len(renderReq.Documents))
 

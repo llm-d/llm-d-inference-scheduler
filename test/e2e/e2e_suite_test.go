@@ -60,6 +60,10 @@ var (
 
 	testConfig *testutils.TestConfig
 
+	// keepClusterOnFailure skips kind cluster deletion when the suite fails.
+	// Set E2E_KEEP_CLUSTER_ON_FAILURE=true to enable.
+	keepClusterOnFailure = env.GetEnvBool("E2E_KEEP_CLUSTER_ON_FAILURE", false, ginkgo.GinkgoLogr)
+
 	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppImage          = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
 	vllmSimImage      = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:v0.8.1", ginkgo.GinkgoLogr)
@@ -111,40 +115,60 @@ var _ = ginkgo.BeforeSuite(func() {
 })
 
 var _ = ginkgo.AfterSuite(func() {
-	if k8sContext == "" {
-		// delete kind cluster we created
-		ginkgo.By("Deleting kind cluster " + kindClusterName)
-		command := exec.Command("kind", "delete", "cluster", "--name", kindClusterName)
-		session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-		if err != nil {
-			ginkgo.GinkgoLogr.Error(err, "Failed to delete kind cluster")
-		} else {
-			gomega.Eventually(session).WithTimeout(60 * time.Second).Should(gexec.Exit())
-		}
-	} else {
-		// Used an existing Kubernetes context, clean up created resources
-		// Stop port-forward
+	// Stop port-forwards when using an existing cluster context; they must be
+	// terminated before the process exits regardless of pass/fail status.
+	if k8sContext != "" {
 		if portForwardSession != nil {
 			portForwardSession.Terminate()
 		}
-
 		if eppPortForwardSession != nil {
 			eppPortForwardSession.Terminate()
 		}
+	}
+})
 
-		// cleanup created objects
-		ginkgo.By("Deleting created Kubernetes objects")
-		testutils.DeleteObjects(testConfig, infPoolObjects)
-		testutils.DeleteObjects(testConfig, serviceObjects)
-		testutils.DeleteObjects(testConfig, serviceAccountObjects)
-		testutils.DeleteObjects(testConfig, rbacObjects)
-		testutils.DeleteObjects(testConfig, envoyObjects)
-		testutils.DeleteObjects(testConfig, crdObjects)
+// ReportAfterSuite receives the full suite report and uses report.SuiteSucceeded
+// to detect any failure, including failures in BeforeSuite/AfterSuite.
+// This is preferred over a suiteFailed flag tracked via ReportAfterEach because
+// ReportAfterEach only fires for individual specs and would miss setup/teardown failures.
+var _ = ginkgo.ReportAfterSuite("cleanup", func(report ginkgo.Report) {
+	if !report.SuiteSucceeded {
+		dumpPodsAndLogs()
+	}
 
-		if createdNameSpace {
-			ginkgo.By("Deleting namespace " + nsName)
-			err := testConfig.KubeCli.CoreV1().Namespaces().Delete(testConfig.Context, nsName, metav1.DeleteOptions{})
-			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	shouldKeep := keepClusterOnFailure && !report.SuiteSucceeded
+	if k8sContext == "" {
+		if shouldKeep {
+			ginkgo.By("Keeping kind cluster " + kindClusterName + " due to suite failure (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
+		} else {
+			// delete kind cluster we created
+			ginkgo.By("Deleting kind cluster " + kindClusterName)
+			command := exec.Command("kind", "delete", "cluster", "--name", kindClusterName)
+			session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+			if err != nil {
+				ginkgo.GinkgoLogr.Error(err, "Failed to delete kind cluster")
+			} else {
+				gomega.Eventually(session).WithTimeout(60 * time.Second).Should(gexec.Exit())
+			}
+		}
+	} else {
+		// Used an existing Kubernetes context, clean up created resources
+		if shouldKeep {
+			ginkgo.By("Keeping created Kubernetes objects due to suite failure (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
+		} else {
+			ginkgo.By("Deleting created Kubernetes objects")
+			testutils.DeleteObjects(testConfig, infPoolObjects)
+			testutils.DeleteObjects(testConfig, serviceObjects)
+			testutils.DeleteObjects(testConfig, serviceAccountObjects)
+			testutils.DeleteObjects(testConfig, rbacObjects)
+			testutils.DeleteObjects(testConfig, envoyObjects)
+			testutils.DeleteObjects(testConfig, crdObjects)
+
+			if createdNameSpace {
+				ginkgo.By("Deleting namespace " + nsName)
+				err := testConfig.KubeCli.CoreV1().Namespaces().Delete(testConfig.Context, nsName, metav1.DeleteOptions{})
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			}
 		}
 	}
 })

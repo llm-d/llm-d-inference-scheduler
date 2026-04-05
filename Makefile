@@ -70,9 +70,13 @@ BUILDER_RUN_FLAGS = --rm $(BUILDER_USER_FLAGS) \
 	-v $(GO_MOD_CACHE_VOL):/go/pkg/mod \
 	-v $(GO_BUILD_CACHE_VOL):/go/cache
 
+# Respect host KUBECONFIG if set; fall back to ~/.kube/config.
+# Note: if KUBECONFIG is a colon-separated list, only the first file is mounted.
+HOST_KUBECONFIG ?= $(or $(KUBECONFIG),$(HOME)/.kube/config)
+
 # Flags for targets that need host network and kubeconfig (integration tests, benchmarks).
 BUILDER_CLUSTER_FLAGS = --network=host \
-	-v $${HOME}/.kube:/.kube:ro \
+	-v $(HOST_KUBECONFIG):/.kube/config:ro \
 	-e KUBECONFIG=/.kube/config
 
 # Mount the container runtime socket and set CONTAINER_HOST so podman --remote
@@ -98,14 +102,28 @@ BUILDER_SOCK_FLAGS = --group-add $(DOCKER_SOCK_GID) \
 	-e CONTAINER_RUNTIME=docker
 endif
 
-# Image env vars to forward into containers (e.g. e2e tests).
-# Add new images here so they are automatically passed through.
-IMAGE_ENV_VARS = EPP_IMAGE VLLM_SIMULATOR_IMAGE SIDECAR_IMAGE UDS_TOKENIZER_IMAGE
-BUILDER_IMAGE_ENV_FLAGS = $(foreach v,$(IMAGE_ENV_VARS),-e $(v)=$($(v)))
+# Env vars forwarded into the e2e test container.
+# Add new image vars here so they are automatically passed through.
+# Should we pass ALL env vars here?
+E2E_ENV_VARS = EPP_IMAGE VLLM_SIMULATOR_IMAGE SIDECAR_IMAGE UDS_TOKENIZER_IMAGE \
+               E2E_KEEP_CLUSTER_ON_FAILURE E2E_PORT E2E_METRICS_PORT K8S_CONTEXT READY_TIMEOUT
+BUILDER_E2E_ENV_FLAGS = $(foreach v,$(E2E_ENV_VARS),$(if $($(v)),-e $(v)=$($(v))))
+ifneq ($(filter command line environment,$(origin NAMESPACE)),)
+BUILDER_E2E_ENV_FLAGS += -e NAMESPACE=$(NAMESPACE)
+endif
+
+# When K8S_CONTEXT is set, mount the host kubeconfig so the e2e suite can call
+# config.GetConfigWithContext(K8S_CONTEXT) against an existing cluster instead of
+# creating a new kind cluster.
+ifdef K8S_CONTEXT
+BUILDER_E2E_KUBECONFIG_FLAGS = -v $(HOST_KUBECONFIG):/.kube/config:ro -e KUBECONFIG=/.kube/config
+else
+BUILDER_E2E_KUBECONFIG_FLAGS =
+endif
 
 # E2e tests create their own kind cluster, need host network (for NodePort access)
 # and the container socket (for kind), but not the host kubeconfig.
-BUILDER_E2E_FLAGS = --network=host $(BUILDER_SOCK_FLAGS) $(BUILDER_IMAGE_ENV_FLAGS)
+BUILDER_E2E_FLAGS = --network=host $(BUILDER_SOCK_FLAGS) $(BUILDER_E2E_ENV_FLAGS) $(BUILDER_E2E_KUBECONFIG_FLAGS)
 
 # Builder container invocations. Always use sh -c so commands with shell expansions
 # (pipes, $(), etc.) run inside the container, not on the host.
@@ -188,7 +206,7 @@ format: image-build-builder ## Format Go source files
 lint: image-build-builder ## Run lint (use LINT_NEW_ONLY=true to only check new code)
 	$(eval LINT_ARGS := --config=./.golangci.yml$(if $(filter true,$(LINT_NEW_ONLY)), --new))
 	@printf "\033[33;1m==== Running linting ====\033[0m\n"
-	$(BUILDER_RUN) 'golangci-lint run $(LINT_ARGS) && typos'
+	$(BUILDER_RUN) 'GOFLAGS=-buildvcs=false golangci-lint run $(LINT_ARGS) && typos'
 
 .PHONY: test
 test: test-unit test-e2e ## Run all tests (unit and e2e)
