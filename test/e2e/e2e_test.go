@@ -659,7 +659,9 @@ func createEndPointPicker(eppConfig string) []string {
 	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
 	ginkgo.By("EPP reports that it is serving")
 
-	waitForEPPToDiscoverPods(simModelName)
+	// Trigger EPP pod-discovery wait asynchronously so that createEndPointPicker
+	// does not block flows that create model servers after the EPP is created.
+	go waitForEPPToDiscoverPods(simModelName)
 
 	return objects
 }
