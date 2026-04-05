@@ -55,6 +55,9 @@ func SessionAffinityFactory(name string, rawConfig json.RawMessage, _ plugin.Han
 		}
 	}
 
+	if config.MaxAge < 0 {
+		return nil, fmt.Errorf("invalid session affinity config: maxAge must be >= 0, got %d", config.MaxAge)
+	}
 	return NewSessionAffinity(config.MaxAge).WithName(name), nil
 }
 
