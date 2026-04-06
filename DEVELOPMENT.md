@@ -69,7 +69,7 @@ Creates a new `kind` cluster (or reuses an existing one) in the `default` namesp
 > [!NOTE]
 > You can pre-pull external images to avoid slow downloads:
 > ```
-> docker pull ghcr.io/llm-d/llm-d-inference-sim:v0.7.1
+> docker pull ghcr.io/llm-d/llm-d-inference-sim:v0.8.2
 > docker pull ghcr.io/llm-d/llm-d-uds-tokenizer:dev
 > ```
 
@@ -326,7 +326,7 @@ kubectl --context kind-e2e-tests get pods
 | `CONTAINER_RUNTIME` | `docker` | Container runtime used to load images into Kind (`docker` or `podman`) |
 | `READY_TIMEOUT` | `3m` | How long to wait for resources to become ready |
 | `EPP_IMAGE` | `ghcr.io/llm-d/llm-d-inference-scheduler:dev` | EPP image loaded into the Kind cluster |
-| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.1` | vLLM simulator image loaded into the Kind cluster |
+| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM simulator image loaded into the Kind cluster |
 | `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
 | `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
 
