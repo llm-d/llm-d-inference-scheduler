@@ -153,8 +153,8 @@ func TestLoadRawConfiguration(t *testing.T) {
 						Type: kvcacheutilization.KvCacheUtilizationScorerType,
 					},
 					{
-						Name: prefix.PrefixCachePluginType,
-						Type: prefix.PrefixCachePluginType,
+						Name: prefix.PrefixCacheScorerPluginType,
+						Type: prefix.PrefixCacheScorerPluginType,
 					},
 					{
 						Name: sourcemetrics.MetricsDataSourceType,
@@ -178,7 +178,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 								Weight:    &kvCacheUtilizationScorerWeight,
 							},
 							{
-								PluginRef: prefix.PrefixCachePluginType,
+								PluginRef: prefix.PrefixCacheScorerPluginType,
 								Weight:    &prefixCacheScorerWeight,
 							},
 						},
