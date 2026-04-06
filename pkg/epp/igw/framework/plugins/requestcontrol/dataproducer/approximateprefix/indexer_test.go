@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package prefix
+package approximateprefix
 
 import (
 	"context"
@@ -25,48 +25,48 @@ import (
 )
 
 func TestIndexer_AddAndGet(t *testing.T) {
-	server := Server{
+	pod := server{
 		ServerID:       ServerID{Namespace: "default", Name: "server1"},
-		numOfGPUBlocks: 2,
+		NumOfGPUBlocks: 2,
 	}
-	i := newIndexer(context.Background(), 3) // Initialize with an lruSize greater than server.numOfGPUBlocks to verify server-defined limits take precedence.
+	i := newIndexer(context.Background(), 3).(*indexer) // Initialize with an lruSize greater than server.numOfGPUBlocks to verify server-defined limits take precedence.
 
-	hash1 := BlockHash(1)
+	hash1 := blockHash(1)
 	// Add an entry to the cache
-	i.Add([]BlockHash{hash1}, server)
+	i.Add([]blockHash{hash1}, pod)
 
 	// Retrieve the entry
-	assert.Equal(t, 1, i.podToLRU[server.ServerID].Len(), "Cache size should be 1 after adding an entry")
+	assert.Equal(t, 1, i.podToLRU[pod.ServerID].Len(), "Cache size should be 1 after adding an entry")
 	servers := i.Get(hash1)
-	assert.Contains(t, servers, server.ServerID, "Cache should contain the added server")
+	assert.Contains(t, servers, pod.ServerID, "Cache should contain the added server")
 
 	// Add another entry to the cache, the cache size should be incremented to 2.
-	i.Add([]BlockHash{BlockHash(2)}, server)
-	assert.Equal(t, 2, i.podToLRU[server.ServerID].Len(), "Cache size should  be 2 after adding an entry")
+	i.Add([]blockHash{blockHash(2)}, pod)
+	assert.Equal(t, 2, i.podToLRU[pod.ServerID].Len(), "Cache size should  be 2 after adding an entry")
 
 	// Add another entry to the cache, which should evict the first one due to max size.
-	i.Add([]BlockHash{BlockHash(3)}, server)
-	assert.Equal(t, 2, i.podToLRU[server.ServerID].Len(), "Cache size should still be 2 after adding an entry")
+	i.Add([]blockHash{blockHash(3)}, pod)
+	assert.Equal(t, 2, i.podToLRU[pod.ServerID].Len(), "Cache size should still be 2 after adding an entry")
 
-	servers = i.Get(BlockHash(4))
+	servers = i.Get(blockHash(4))
 	assert.Empty(t, servers, "Cache should not contain non-existent hash")
 }
 
 func TestIndexer_RemovePodAndEviction(t *testing.T) {
 	const indexerSize = 10
 
-	i := newIndexer(context.Background(), indexerSize)
+	i := newIndexer(context.Background(), indexerSize).(*indexer)
 
-	server1 := Server{ServerID: ServerID{Namespace: "default", Name: "server1"}}
-	server2 := Server{ServerID: ServerID{Namespace: "default", Name: "server2"}}
+	server1 := server{ServerID: ServerID{Namespace: "default", Name: "server1"}}
+	server2 := server{ServerID: ServerID{Namespace: "default", Name: "server2"}}
 
 	// Add indexerSize hashes to both servers
-	hashes := make([]BlockHash, 0, indexerSize)
+	hashes := make([]blockHash, 0, indexerSize)
 	for j := range indexerSize {
-		h := BlockHash(j)
+		h := blockHash(j)
 		hashes = append(hashes, h)
-		i.Add([]BlockHash{h}, server1)
-		i.Add([]BlockHash{h}, server2)
+		i.Add([]blockHash{h}, server1)
+		i.Add([]blockHash{h}, server2)
 	}
 
 	// Ensure all entries are added
@@ -81,15 +81,15 @@ func TestIndexer_RemovePodAndEviction(t *testing.T) {
 		assert.Contains(t, pods, server2.ServerID, "hash should be associated with server2")
 	}
 
-	// Add indexerSize hash to server1 → should evict BlockHash(0)
-	evictedHash := BlockHash(0)
-	newHash := BlockHash(indexerSize)
-	i.Add([]BlockHash{newHash}, server1)
+	// Add indexerSize hash to server1 → should evict blockHash(0)
+	evictedHash := blockHash(0)
+	newHash := blockHash(indexerSize)
+	i.Add([]blockHash{newHash}, server1)
 
 	// server1 LRU should still be at max capacity
 	assert.Equal(t, indexerSize, i.podToLRU[server1.ServerID].Len(), "server1 LRU should maintain max size")
 
-	// BlockHash(0) should no longer have server1 in hashToPods
+	// blockHash(0) should no longer have server1 in hashToPods
 	pods := i.Get(evictedHash)
 	assert.NotContains(t, pods, server1.ServerID, "server1 should be evicted from hashToPods for hash 0")
 	assert.Contains(t, pods, server2.ServerID, "server2 should still have hash 0")
@@ -115,12 +115,12 @@ func TestIndexer_RemovePodAndEviction(t *testing.T) {
 func TestIndexer_ConcurrentAddRemovePod(t *testing.T) {
 	lruSize := 10
 	for iter := range 100 {
-		i := newIndexer(context.Background(), lruSize)
-		pod := Server{ServerID: ServerID{Namespace: "default", Name: "pod1"}}
+		i := newIndexer(context.Background(), lruSize).(*indexer)
+		pod := server{ServerID: ServerID{Namespace: "default", Name: "pod1"}}
 
 		var wg sync.WaitGroup
 		wg.Add(2)
-		go func() { defer wg.Done(); i.Add([]BlockHash{1, 2, 3}, pod) }()
+		go func() { defer wg.Done(); i.Add([]blockHash{1, 2, 3}, pod) }()
 		go func() { defer wg.Done(); i.RemovePod(pod.ServerID) }()
 		wg.Wait()
 

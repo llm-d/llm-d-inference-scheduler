@@ -61,7 +61,7 @@ func loadDefaultConfig() *configapi.EndpointPickerConfig {
 				Type: kvcacheutilization.KvCacheUtilizationScorerType,
 			},
 			{
-				Type: prefix.PrefixCachePluginType,
+				Type: prefix.PrefixCacheScorerPluginType,
 			},
 			{
 				Type: sourcemetrics.MetricsDataSourceType,
@@ -83,7 +83,7 @@ func loadDefaultConfig() *configapi.EndpointPickerConfig {
 						Weight:    &kvCacheUtilizationScorerWeight,
 					},
 					{
-						PluginRef: prefix.PrefixCachePluginType,
+						PluginRef: prefix.PrefixCacheScorerPluginType,
 						Weight:    &prefixCacheScorerWeight,
 					},
 				},

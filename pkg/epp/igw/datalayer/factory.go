@@ -30,7 +30,6 @@ const (
 	// This gate is temporary and will be removed when the legacy path is deleted.
 	// To disable metrics collection without falling back to legacy, provide an empty data section in the config.
 	EnableLegacyMetricsFeatureGate = "enableLegacyMetrics"
-	PrepareDataPluginsFeatureGate  = "prepareDataPlugins"
 )
 
 // PoolInfo represents the DataStore information needed for endpoints.

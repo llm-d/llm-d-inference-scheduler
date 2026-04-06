@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package prefix
+package approximateprefix
 
 import (
 	"context"
@@ -28,39 +28,39 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
 )
 
-// An indexer maintains an LRU cache of prompt prefix hashes and the server(s) that might have that
-// prefix cached.
+// indexer implements the indexerInterface interface.
 type indexer struct {
 	mu             sync.RWMutex
-	hashToPods     map[BlockHash]podSet                         // the lookup data structure to find pods that have the BlockHash cached
-	podToLRU       map[ServerID]*lru.Cache[BlockHash, struct{}] // key is pod namespacedName, value is an LRU cache
+	hashToPods     map[blockHash]podSet                         // the lookup data structure to find pods that have the blockHash cached
+	podToLRU       map[ServerID]*lru.Cache[blockHash, struct{}] // key is pod namespacedName, value is an LRU cache
 	defaultLRUSize int
 }
 
 // newIndexer initializes an indexer with size limits and starts cache size reporting.
-func newIndexer(ctx context.Context, defaultLRUSize int) *indexer {
-	indexer := &indexer{
-		hashToPods:     make(map[BlockHash]podSet),
-		podToLRU:       make(map[ServerID]*lru.Cache[BlockHash, struct{}]),
+func newIndexer(ctx context.Context, defaultLRUSize int) indexerInterface {
+	i := &indexer{
+		hashToPods:     make(map[blockHash]podSet),
+		podToLRU:       make(map[ServerID]*lru.Cache[blockHash, struct{}]),
 		defaultLRUSize: defaultLRUSize,
 	}
 
-	go indexer.reportLRUSize(ctx, time.Second)
-	return indexer
+	go i.reportLRUSize(ctx, time.Second)
+	return i
 }
 
 // Add adds a list of prefix hashes to the cache, tied to the server.
-func (i *indexer) Add(hashes []BlockHash, pod Server) {
+func (i *indexer) Add(hashes []blockHash, pod server) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
 	// Check if the LRU pod exist
 	lruForPod, exists := i.podToLRU[pod.ServerID]
 	if !exists {
-		lruSize := pod.numOfGPUBlocks
+		lruSize := pod.NumOfGPUBlocks
 		if lruSize <= 0 {
 			lruSize = i.defaultLRUSize
 		}
+		// We ignore the error since the only possible error is if size <= 0.
 		newLRU, _ := lru.NewWithEvict(lruSize, i.makeEvictionFn(pod.ServerID))
 		i.podToLRU[pod.ServerID] = newLRU
 		lruForPod = newLRU
@@ -83,11 +83,15 @@ func (i *indexer) Add(hashes []BlockHash, pod Server) {
 }
 
 // Get returns a set of servers that have the given prefix hash cached.
-func (i *indexer) Get(hash BlockHash) podSet {
+func (i *indexer) Get(hash blockHash) podSet {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 
 	pods := i.hashToPods[hash]
+	if pods == nil {
+		return nil
+	}
+
 	res := make(podSet, len(pods))
 	for pod := range pods {
 		// Deep copy to avoid race condition.
@@ -98,8 +102,8 @@ func (i *indexer) Get(hash BlockHash) podSet {
 }
 
 // makeEvictionFn returns a per-pod LRU eviction callback that removes the pod from hashToPods on eviction.
-func (i *indexer) makeEvictionFn(pod ServerID) func(BlockHash, struct{}) {
-	return func(hash BlockHash, _ struct{}) {
+func (i *indexer) makeEvictionFn(pod ServerID) func(blockHash, struct{}) {
+	return func(hash blockHash, _ struct{}) {
 		// Remove the pod from the hash→pods map
 		if podSet, ok := i.hashToPods[hash]; ok {
 			delete(podSet, pod)
@@ -114,39 +118,49 @@ func (i *indexer) makeEvictionFn(pod ServerID) func(BlockHash, struct{}) {
 func (i *indexer) reportLRUSize(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
-		i.mu.RLock()
-		totalEntries := 0
-		maxPodEntries := 0
-		maxPodName := ServerID{}
-
-		for pod, lruCache := range i.podToLRU {
-			size := lruCache.Len()
-			totalEntries += size
-			if size > maxPodEntries {
-				maxPodEntries = size
-				maxPodName = pod
-			}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			i.reportOnce(ctx)
 		}
-
-		numPods := len(i.podToLRU)
-		avg := 0.0
-		if numPods > 0 {
-			avg = float64(totalEntries) / float64(numPods)
-		}
-
-		metrics.RecordPrefixCacheSize(int64(totalEntries))
-		log.FromContext(ctx).V(logutil.TRACE).Info("Prefix cache state",
-			"total entries", totalEntries,
-			"# pods", numPods,
-			"avg entries per pod", avg,
-			"pod with max cache", maxPodName,
-			"max pod size", maxPodEntries,
-			"global max LRU cache capacity per pod", i.defaultLRUSize,
-		)
-
-		i.mu.RUnlock()
 	}
+}
+
+func (i *indexer) reportOnce(ctx context.Context) {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+
+	totalEntries := 0
+	maxPodEntries := 0
+	var maxPodName ServerID
+
+	for pod, lruCache := range i.podToLRU {
+		size := lruCache.Len()
+		totalEntries += size
+		if size > maxPodEntries {
+			maxPodEntries = size
+			maxPodName = pod
+		}
+	}
+
+	numPods := len(i.podToLRU)
+	avg := 0.0
+	if numPods > 0 {
+		avg = float64(totalEntries) / float64(numPods)
+	}
+
+	metrics.RecordPrefixCacheSize(int64(totalEntries))
+
+	log.FromContext(ctx).V(logutil.TRACE).Info("Prefix cache state",
+		"total entries", totalEntries,
+		"# pods", numPods,
+		"avg entries per pod", avg,
+		"pod with max cache", maxPodName,
+		"max pod size", maxPodEntries,
+		"global max LRU cache capacity per pod", i.defaultLRUSize,
+	)
 }
 
 // RemovePod removes a pod and its associated entries from the indexer.
