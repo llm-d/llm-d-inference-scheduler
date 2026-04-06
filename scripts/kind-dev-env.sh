@@ -113,9 +113,6 @@ if [ "${KV_CACHE_ENABLED}" == "true" ] && ([ "${PD_ENABLED}" == "\"true\"" ] || 
   exit 1
 fi
 
-
-PRIMARY_PORT="0"
-
 # Determine EPP config file based on feature flags
 if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
   # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
@@ -128,12 +125,10 @@ elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
 elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
   # E/P/D mode (separate Encode, Prefill, and Decode deployments)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
-  [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ] && PRIMARY_PORT="8000"
 
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   # Prefill-Decode mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-  [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ] && PRIMARY_PORT="8000"
 
 elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
   # Data Parallel mode (only needed for Istio pre-1.28.1)
@@ -146,7 +141,6 @@ else
 fi
 
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
-export PRIMARY_PORT
 
 # ------------------------------------------------------------------------------
 # Setup & Requirement Checks

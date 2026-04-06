@@ -78,7 +78,6 @@ schedulingProfiles:
 - name: decode
   plugins:
   - pluginRef: decode-filter
-  - pluginRef: max-score-picker
 `
 
 // epdConfig configures E/P/D (encode + prefill + decode) using disagg-profile-handler.
