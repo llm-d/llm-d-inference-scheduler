@@ -162,7 +162,7 @@ schedulingProfiles:
 `
 
 // EPP configuration for running decode-only using disagg-profile-handler (no prefill, no encode)
-const disaggDecodeOnlyConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const decodeOnlyConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer

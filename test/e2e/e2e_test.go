@@ -399,7 +399,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 
 			modelServers := createModelServersDecode(1)
 
-			epp := createEndPointPicker(disaggDecodeOnlyConfig)
+			epp := createEndPointPicker(decodeOnlyConfig)
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
@@ -571,7 +571,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			replicas := 1
 			modelServers := createModelServersEPDUnified(replicas)
 
-			// Using epdConfig instead of disaggDecodeOnlyConfig to validate the EPD logic path within
+			// Using epdConfig instead of decodeOnlyConfig to validate the EPD logic path within
 			// a single pod; multimodal stages will resolve to this same deployment.
 			epp := createEndPointPicker(epdConfig)
 
