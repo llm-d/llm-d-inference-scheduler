@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/http"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/http"
 )
 
 const (
@@ -39,8 +39,11 @@ func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugin.Ha
 		return nil, fmt.Errorf("unsupported scheme: %s", cfg.Scheme)
 	}
 
-	ds := http.NewHTTPDataSource(cfg.Scheme, cfg.Path, cfg.InsecureSkipVerify, ModelsDataSourceType,
+	ds, err := http.NewHTTPDataSource(cfg.Scheme, cfg.Path, cfg.InsecureSkipVerify, ModelsDataSourceType,
 		name, parseModels, ModelsResponseType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP data source: %w", err)
+	}
 	return ds, nil
 }
 

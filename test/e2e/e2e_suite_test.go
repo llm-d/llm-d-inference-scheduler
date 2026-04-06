@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -37,8 +36,8 @@ const (
 	gieCrdsKustomize = "../../deploy/components/crds-gie"
 	// inferExtManifest is the manifest for the inference extension test resources.
 	inferExtManifest = "./yaml/inference-pools.yaml"
-	// modelName is the test model name.
-	modelName = "food-review"
+	// simModelName is the test model name.
+	simModelName = "food-review"
 	// kvModelName is the model name used in KV tests.
 	kvModelName = "Qwen/Qwen2.5-1.5B-Instruct"
 	// safeKvModelName is the safe form of the model name used in KV tests
@@ -61,9 +60,13 @@ var (
 
 	testConfig *testutils.TestConfig
 
+	// keepClusterOnFailure skips kind cluster deletion when the suite fails.
+	// Set E2E_KEEP_CLUSTER_ON_FAILURE=true to enable.
+	keepClusterOnFailure = env.GetEnvBool("E2E_KEEP_CLUSTER_ON_FAILURE", false, ginkgo.GinkgoLogr)
+
 	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppImage          = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
-	vllmSimImage      = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:latest", ginkgo.GinkgoLogr)
+	vllmSimImage      = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:v0.8.1", ginkgo.GinkgoLogr)
 	sideCarImage      = env.GetEnvString("SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:dev", ginkgo.GinkgoLogr)
 	udsTokenizerImage = env.GetEnvString("UDS_TOKENIZER_IMAGE", "ghcr.io/llm-d/llm-d-uds-tokenizer:dev", ginkgo.GinkgoLogr)
 	// nsName is the namespace in which the K8S objects will be created
@@ -112,40 +115,60 @@ var _ = ginkgo.BeforeSuite(func() {
 })
 
 var _ = ginkgo.AfterSuite(func() {
-	if k8sContext == "" {
-		// delete kind cluster we created
-		ginkgo.By("Deleting kind cluster " + kindClusterName)
-		command := exec.Command("kind", "delete", "cluster", "--name", kindClusterName)
-		session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-		if err != nil {
-			ginkgo.GinkgoLogr.Error(err, "Failed to delete kind cluster")
-		} else {
-			gomega.Eventually(session).WithTimeout(60 * time.Second).Should(gexec.Exit())
-		}
-	} else {
-		// Used an existing Kubernetes context, clean up created resources
-		// Stop port-forward
+	// Stop port-forwards when using an existing cluster context; they must be
+	// terminated before the process exits regardless of pass/fail status.
+	if k8sContext != "" {
 		if portForwardSession != nil {
 			portForwardSession.Terminate()
 		}
-
 		if eppPortForwardSession != nil {
 			eppPortForwardSession.Terminate()
 		}
+	}
+})
 
-		// cleanup created objects
-		ginkgo.By("Deleting created Kubernetes objects")
-		testutils.DeleteObjects(testConfig, infPoolObjects)
-		testutils.DeleteObjects(testConfig, serviceObjects)
-		testutils.DeleteObjects(testConfig, serviceAccountObjects)
-		testutils.DeleteObjects(testConfig, rbacObjects)
-		testutils.DeleteObjects(testConfig, envoyObjects)
-		testutils.DeleteObjects(testConfig, crdObjects)
+// ReportAfterSuite receives the full suite report and uses report.SuiteSucceeded
+// to detect any failure, including failures in BeforeSuite/AfterSuite.
+// This is preferred over a suiteFailed flag tracked via ReportAfterEach because
+// ReportAfterEach only fires for individual specs and would miss setup/teardown failures.
+var _ = ginkgo.ReportAfterSuite("cleanup", func(report ginkgo.Report) {
+	if !report.SuiteSucceeded {
+		dumpPodsAndLogs()
+	}
 
-		if createdNameSpace {
-			ginkgo.By("Deleting namespace " + nsName)
-			err := testConfig.KubeCli.CoreV1().Namespaces().Delete(testConfig.Context, nsName, metav1.DeleteOptions{})
-			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	shouldKeep := keepClusterOnFailure && !report.SuiteSucceeded
+	if k8sContext == "" {
+		if shouldKeep {
+			ginkgo.By("Keeping kind cluster " + kindClusterName + " due to suite failure (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
+		} else {
+			// delete kind cluster we created
+			ginkgo.By("Deleting kind cluster " + kindClusterName)
+			command := exec.Command("kind", "delete", "cluster", "--name", kindClusterName)
+			session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+			if err != nil {
+				ginkgo.GinkgoLogr.Error(err, "Failed to delete kind cluster")
+			} else {
+				gomega.Eventually(session).WithTimeout(60 * time.Second).Should(gexec.Exit())
+			}
+		}
+	} else {
+		// Used an existing Kubernetes context, clean up created resources
+		if shouldKeep {
+			ginkgo.By("Keeping created Kubernetes objects due to suite failure (E2E_KEEP_CLUSTER_ON_FAILURE=true)")
+		} else {
+			ginkgo.By("Deleting created Kubernetes objects")
+			testutils.DeleteObjects(testConfig, infPoolObjects)
+			testutils.DeleteObjects(testConfig, serviceObjects)
+			testutils.DeleteObjects(testConfig, serviceAccountObjects)
+			testutils.DeleteObjects(testConfig, rbacObjects)
+			testutils.DeleteObjects(testConfig, envoyObjects)
+			testutils.DeleteObjects(testConfig, crdObjects)
+
+			if createdNameSpace {
+				ginkgo.By("Deleting namespace " + nsName)
+				err := testConfig.KubeCli.CoreV1().Namespaces().Delete(testConfig.Context, nsName, metav1.DeleteOptions{})
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			}
 		}
 	}
 })
@@ -176,28 +199,10 @@ func setupK8sCluster() {
 }
 
 func kindLoadImage(image string) {
-	tempDir := ginkgo.GinkgoT().TempDir()
-	target := tempDir + "/container.tar"
-
 	ginkgo.By(fmt.Sprintf("Loading %s into the cluster %s using %s", image, kindClusterName, containerRuntime))
 
-	_, err := exec.LookPath(containerRuntime)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Could not find %s in PATH", containerRuntime)
-
-	saveArgs := []string{"save", "--output", target}
-	if containerRuntime == "docker" {
-		// The platform flag is required for docker save to work but it is an unsupported flag for podman
-		saveArgs = append(saveArgs, "--platform", "linux/"+runtime.GOARCH)
-	}
-	saveArgs = append(saveArgs, image)
-
-	command := exec.Command(containerRuntime, saveArgs...)
+	command := exec.Command("kind", "--name", kindClusterName, "load", "docker-image", image)
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
-
-	command = exec.Command("kind", "--name", kindClusterName, "load", "image-archive", target)
-	session, err = gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 }
@@ -277,7 +282,7 @@ func createEnvoy() {
 }
 
 func createInferencePool(numTargetPorts int, toDelete bool) []string {
-	poolName := modelName + "-inference-pool"
+	poolName := simModelName + "-inference-pool"
 
 	if toDelete {
 		objName := []string{"inferencepool/" + poolName}
@@ -285,11 +290,11 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	}
 
 	infPoolYaml := testutils.ReadYaml(inferExtManifest)
-	var b strings.Builder
+	var targetPortsBuilder strings.Builder
 	for idx := range numTargetPorts {
-		fmt.Fprintf(&b, "\n  - number: %d", 8000+idx)
+		fmt.Fprintf(&targetPortsBuilder, "\n  - number: %d", 8000+idx)
 	}
-	targetPorts := b.String()
+	targetPorts := targetPortsBuilder.String()
 	infPoolYaml = substituteMany(infPoolYaml,
 		map[string]string{
 			"${POOL_NAME}":    poolName,

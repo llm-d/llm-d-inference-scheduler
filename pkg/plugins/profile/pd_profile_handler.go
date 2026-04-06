@@ -10,12 +10,11 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -24,24 +23,13 @@ import (
 )
 
 const (
-	// PdProfileHandlerType is the type of the PdProfileHandler
-	PdProfileHandlerType = "pd-profile-handler"
-
-	defaultDecodeProfile     = "decode"
-	defaultPrefillProfile    = "prefill"
+	// PdProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
+	PdProfileHandlerType     = "pd-profile-handler"
 	defaultPrefixPluginType  = prefix.PrefixCachePluginType
-	defaultDeciderPluginName = AlwaysDisaggDeciderPluginType
-
-	// AverageCharactersPerToken is an estimated average characters per token, used since the request we cached is not tokenized.
-	AverageCharactersPerToken = 4
+	defaultDeciderPluginName = PrefixBasedPDDeciderPluginType
 )
 
 // pdDeciderPlugin interface for pd decider plugins
-type pdDeciderPlugin interface {
-	plugin.Plugin
-	// disaggregate checks if disaggregated PD is required for the given request and endpoint.
-	disaggregate(ctx context.Context, inputTokens int, endpoint scheduling.Endpoint) bool
-}
 
 type pdProfileHandlerParameters struct {
 	DecodeProfile     string `json:"decodeProfile"`
@@ -55,8 +43,11 @@ type pdProfileHandlerParameters struct {
 // compile-time type assertion
 var _ scheduling.ProfileHandler = &PdProfileHandler{}
 
-// PdProfileHandlerFactory defines the factory function for the PdProfileHandler
+// PdProfileHandlerFactory defines the factory function for the PdProfileHandler.
+//
+// Deprecated: Use DisaggProfileHandlerFactory instead.
 func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	log.FromContext(handle.Context()).Info("Deprecated: pd-profile-handler is deprecated, use disagg-profile-handler instead")
 	parameters := pdProfileHandlerParameters{
 		DecodeProfile:     defaultDecodeProfile,
 		PrefillProfile:    defaultPrefillProfile,
@@ -75,6 +66,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 	}
 
 	if parameters.PrimaryPort != 0 {
+		log.FromContext(handle.Context()).Info("Deprecated: primaryPort not needed with Istio >= 1.28.1")
 		if parameters.PrimaryPort < 1 || parameters.PrimaryPort > 65535 {
 			return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
 		}
@@ -89,7 +81,7 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 		return nil, fmt.Errorf("invalid decider plugin type: %s", parameters.DeciderPluginName)
 	}
 
-	deciderPlugin, ok := plugin.(pdDeciderPlugin)
+	deciderPlugin, ok := plugin.(deciderPlugin)
 	if !ok {
 		return nil, fmt.Errorf("decider plugin of type: %s does not implement pdDeciderPlugin", parameters.DeciderPluginName)
 	}
@@ -106,8 +98,10 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle 
 }
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
+//
+// Deprecated: Use NewDisaggProfileHandler instead.
 func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string,
-	primaryPort int, deciderPlugin pdDeciderPlugin) (*PdProfileHandler, error) {
+	primaryPort int, deciderPlugin deciderPlugin) (*PdProfileHandler, error) {
 	result := &PdProfileHandler{
 		typedName:             plugin.TypedName{Type: PdProfileHandlerType},
 		prefixPluginTypedName: plugin.TypedName{Type: prefixPluginType, Name: prefixPluginName},
@@ -123,13 +117,20 @@ func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefix
 }
 
 // PdProfileHandler handles scheduler profiles for PD.
+//
+// Deprecated: Use DisaggProfileHandler instead.
 type PdProfileHandler struct {
 	typedName             plugin.TypedName
 	prefixPluginTypedName plugin.TypedName
 	decodeProfile         string
 	prefillProfile        string
 	primaryPort           string
-	decider               pdDeciderPlugin
+	decider               deciderPlugin
+}
+
+// Consumes defines data types consumed by this plugin (through the PD decider).
+func (*PdProfileHandler) Consumes() map[string]any {
+	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
 }
 
 // TypedName returns the typed name of the plugin.
@@ -192,17 +193,8 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	inputTokens, err := getUserInputLenInTokens(request)
-	if err != nil {
-		log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input")
-		span.SetStatus(codes.Error, err.Error())
-		return nil
-	}
-
-	span.SetAttributes(attribute.Int("llm_d.profile_handler.input_tokens", inputTokens))
-
-	if h.decider != nil && h.decider.disaggregate(ctx, inputTokens, profileResults[h.decodeProfile].TargetEndpoints[0]) {
-		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
+	if h.decider != nil && h.decider.disaggregate(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
+		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode) //nolint:staticcheck // intentional: pd-profile-handler is itself deprecated
 		// run the prefill profile
 		span.SetAttributes(
 			attribute.String("llm_d.profile_handler.decision", "prefill_decode"),
@@ -213,7 +205,7 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		}
 	}
 
-	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
+	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly) //nolint:staticcheck // intentional: pd-profile-handler is itself deprecated
 	span.SetAttributes(
 		attribute.String("llm_d.profile_handler.decision", "decode_only"),
 	)
@@ -238,7 +230,7 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 		// Data Parallel is active
 
 		targetEndpoint := decodeRunResults.TargetEndpoints[0].GetMetadata()
-		request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
+		request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
 
 		updatedResult := scheduling.ProfileRunResult{
 			TargetEndpoints: []scheduling.Endpoint{},
@@ -265,20 +257,4 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 		PrimaryProfileName: h.decodeProfile,
 		ProfileResults:     updatedResults,
 	}, nil
-}
-
-// returns length of user input in tokens
-func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
-	if request.Body.Completions != nil { // assumed to be valid if not nil
-		return len([]byte(request.Body.Completions.Prompt)) / AverageCharactersPerToken, nil
-	}
-
-	// must be chat-completions request at this point, return bytes of entire messages
-	prompt, err := json.Marshal(request.Body.ChatCompletions.Messages)
-
-	if err != nil {
-		return 0, err
-	}
-
-	return len(prompt) / AverageCharactersPerToken, nil
 }

@@ -5,7 +5,6 @@ kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer
   parameters:
-    hashBlockSize: 5
     maxPrefixBlocksToMatch: 256
     lruCapacityPerServer: 31250
 - type: decode-filter

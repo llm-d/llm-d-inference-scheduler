@@ -2,255 +2,445 @@
 
 Documentation for developing the inference scheduler.
 
+## Table of Contents
+
+- [Development](#development)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Requirements](#requirements)
+  - [Kind Development Environment](#kind-development-environment)
+    - [Accessing the Gateway](#accessing-the-gateway)
+    - [Prometheus Monitoring](#prometheus-monitoring)
+    - [Grafana Dashboard](#grafana-dashboard)
+    - [Development Cycle](#development-cycle)
+    - [Cleanup](#cleanup)
+  - [Running Tests](#running-tests)
+    - [Unit Tests](#unit-tests)
+    - [Integration Tests](#integration-tests)
+    - [Filtered Tests](#filtered-tests)
+    - [End-to-End Tests](#end-to-end-tests)
+    - [Coverage](#coverage)
+  - [Tokenization Architecture](#tokenization-architecture)
+  - [Kubernetes Development Environment](#kubernetes-development-environment)
+    - [Infrastructure Setup](#infrastructure-setup)
+    - [RBAC and Permissions](#rbac-and-permissions)
+    - [Developer Setup](#developer-setup)
+    - [Environment Configuration](#environment-configuration)
+    - [Deploying Changes](#deploying-changes)
+    - [Cleanup Environment](#cleanup-environment)
+  - [Submitting Changes](#submitting-changes)
+
+## Overview
+
+This repo builds the **Endpoint Picker Plugin (EPP)**, the inference scheduling component
+that routes requests to vLLM backends. The EPP runs alongside a Gateway API implementation
+and picks backends based on KV cache state, prefill locality, and load. A second binary,
+the **P/D sidecar** (`cmd/pd-sidecar/`), handles prefill/decode disaggregation routing.
+
+The KIND environment is the easiest way to get started: one command, no cloud account.
+A real Kubernetes cluster setup is covered later for shared or production-like testing.
+
 ## Requirements
 
 - [Make] `v4`+
 - [Golang] `v1.24`+
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
-- [Kustomize]
-- [ZeroMQ]
+- [Kubectl] `v1.25`+
 
 [Make]:https://www.gnu.org/software/make/
 [Golang]:https://go.dev/
 [Docker]:https://www.docker.com/
 [Podman]:https://podman.io/
 [Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
-[Kustomize]:https://kubectl.docs.kubernetes.io/installation/kustomize/
-[ZeroMQ]:https://zeromq.org/
-
-> [!NOTE]
-> **Python is NOT required** as of v0.5.1. Tokenization is handled by a separate UDS (Unix Domain Socket) tokenizer sidecar container. Previous versions (< v0.5.1) used embedded Python tokenizers with daulet/tokenizers bindings, but these are now deprecated.
-
-## Tokenization Architecture
-
-The project uses **UDS (Unix Domain Socket)** tokenization. Tokenization is handled by a separate UDS tokenizer sidecar container, not by the EPP container itself. Previous embedded tokenizer approaches (daulet/tokenizers, direct Python/vLLM linking) are deprecated and no longer used.
-
-**Building the UDS tokenizer image:**
-
-```bash
-make image-build-uds-tokenizer
-```
-
-The image is tagged as `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` by default. Override with:
-
-```bash
-UDS_TOKENIZER_TAG=v1.0.0 make image-build-uds-tokenizer
-```
+[Kubectl]:https://kubectl.docs.kubernetes.io/installation/kubectl/
 
 ## Kind Development Environment
 
-The following deployment creates a [Kubernetes in Docker (KIND)] cluster with an inference scheduler using a Gateway API implementation, connected to the vLLM simulator.
-To run the deployment, use the following command:
+Deploys the EPP, vLLM simulator, and Gateway API implementation into a local KIND cluster:
 
 ```bash
 make env-dev-kind
 ```
 
-This will create a `kind` cluster (or re-use an existing one) using the system's
-local container runtime and deploy the development stack into the `default`
-namespace.
+Creates a new `kind` cluster (or reuses an existing one) in the `default` namespace.
 
 > [!NOTE]
-> You can download the image locally using `docker pull ghcr.io/llm-d/llm-d-inference-sim:latest`, and the script will load it from your local Docker registry.
+> You can pre-pull external images to avoid slow downloads:
+> ```
+> docker pull ghcr.io/llm-d/llm-d-inference-sim:v0.7.1
+> docker pull ghcr.io/llm-d/llm-d-uds-tokenizer:dev
+> ```
 
-There are several ways to access the gateway:
+### Accessing the Gateway
 
-**Port forward**:
+Use port-forward for local development:
 
 ```bash
-$ kubectl --context llm-d-inference-scheduler-dev port-forward service/inference-gateway 8080:80
+kubectl --context kind-llm-d-inference-scheduler-dev \
+  port-forward service/inference-gateway-istio 8080:80
 ```
+
+The simulator runs with a model named `TinyLlama/TinyLlama-1.1B-Chat-v1.0`.
+To confirm what model is available:
+
+```bash
+curl -s http://localhost:8080/v1/models | jq
+```
+
+Make a request:
+
+```bash
+curl -s -w '\n' http://localhost:8080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+```
+
+<details>
+<summary>Alternative access methods (NodePort, LoadBalancer)</summary>
 
 **NodePort**
 
-```bash
-# Determine the k8s node address
-$ kubectl --context llm-d-inference-scheduler-dev get node -o yaml | grep address
-# The service is accessible over port 80 of the worker IP address.
-```
-
-**LoadBalancer**
-
-```bash
-# Install and run cloud-provider-kind:
-$ go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
-$ kubectl --context llm-d-inference-scheduler-dev get service inference-gateway
-# Wait for the LoadBalancer External-IP to become available. The service is accessible over port 80.
-```
-
-You can now make requests matching the IP:port of one of the access mode above:
-
-```bash
-$ curl -s -w '\n' http://<IP:port>/v1/completions -H 'Content-Type: application/json' -d '{"model":"food-review","prompt":"hi","max_tokens":10,"temperature":0}' | jq
-```
-
-By default the created inference gateway, can be accessed on port 30080. This can
-be overridden to any free port in the range of 30000 to 32767, by running the above
-command as follows:
+The gateway is also exposed as a NodePort and is exposed on your development machine on port 30080 by default. Override this at
+cluster creation time with any free port in the range 30000-32767:
 
 ```bash
 KIND_GATEWAY_HOST_PORT=<selected-port> make env-dev-kind
 ```
 
-**Where:** &lt;selected-port&gt; is the port on your local machine you want to use to
-access the inference gatyeway.
+The service is then accessible at `http://localhost:30080`.
+
+**LoadBalancer**
+
+```bash
+# Install and run cloud-provider-kind:
+go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
+kubectl --context kind-llm-d-inference-scheduler-dev get service inference-gateway-istio
+# Wait for the LoadBalancer External-IP to become available.
+# The service is accessible over port 80.
+```
+
+</details>
+
+### Prometheus Monitoring
+
+To deploy Prometheus alongside the dev environment:
+
+```bash
+PROM_ENABLED=true make env-dev-kind
+```
+
+Prometheus will be accessible at `http://localhost:30090`. To use a different host port:
+
+```bash
+PROM_ENABLED=true KIND_PROM_HOST_PORT=30091 make env-dev-kind
+```
+
+### Grafana Dashboard
+
+The upstream [Inference Gateway dashboard] covers EPP, inference pool, and vLLM metrics.
+
+Add a Prometheus datasource at `http://localhost:30090`, then import the JSON via
+**Dashboards > New > Import**. See the
+[Grafana installation docs](https://grafana.com/docs/grafana/latest/setup-grafana/installation/)
+for setup.
+
+[Inference Gateway dashboard]:https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/tools/dashboards/inference_gateway.json
 
 > [!NOTE]
-> If you require significant customization of this environment beyond
-> what the standard deployment provides, you can use the `deploy/components`
-> with `kustomize` to build your own highly customized environment. You can use
-> the `deploy/environments/kind` deployment as a reference for your own.
-
-[Kubernetes in Docker (KIND)]:https://github.com/kubernetes-sigs/kind
+> For significant customization beyond the standard deployment, use the `deploy/components`
+> directory with `kubectl kustomize`. The `deploy/environments/kind` deployment is a useful
+> reference.
 
 ### Development Cycle
 
-To test your changes to `llm-d-inference-scheduler` in this environment, make your changes locally
-and then re-run the deployment:
+Edit your code, then rebuild and reload into the cluster:
 
 ```bash
 make env-dev-kind
 ```
 
-This will build images with your recent changes and load the new images to the
-cluster. By default the image tag will be `dev`. It will also load `llm-d-inference-sim` image.
-
-> [!NOTE]
->The built image tag can be specified via the `EPP_TAG` environment variable so it is used in the deployment. For example:
+This rebuilds the EPP image (tagged `dev` by default) and loads it into the cluster.
+To use a specific tag:
 
 ```bash
 EPP_TAG=0.0.4 make env-dev-kind
 ```
 
-> [!NOTE]
-> If you want to load a different tag of llm-d-inference-sim, you can use the environment variable `VLLM_SIMULATOR_TAG` to specify it.
-
-> [!NOTE]
-> If you are working on a MacOS with Apple Silicon, it is required to add the environment variable `GOOS=linux`.
-
-Then do a rollout of the EPP `Deployment` so that your recent changes are
-reflected:
+Then restart the deployment to pick up the new image:
 
 ```bash
-kubectl rollout restart deployment food-review-endpoint-picker
+kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
 ```
+
+> [!NOTE]
+> Images are built with debug symbols stripped (`-s -w`) by default. To produce a
+> debuggable image for use with `dlv`, override `LDFLAGS`:
+> ```bash
+> LDFLAGS="" make image-build-epp
+> ```
+> To load a different vLLM simulator tag, set `VLLM_SIMULATOR_TAG`:
+> ```bash
+> VLLM_SIMULATOR_TAG=<tag> make env-dev-kind
+> ```
+
+### Cleanup
+
+```bash
+make clean-env-dev-kind
+```
+
+> [!NOTE]
+> Port mappings (`KIND_GATEWAY_HOST_PORT`, `KIND_PROM_HOST_PORT`) are baked into the cluster
+> at creation time. To change them, run `make clean-env-dev-kind` first, then recreate.
+
+## Running Tests
+
+### Unit Tests
+
+Coverage and race detection are always enabled.
+
+```bash
+make test-unit          # run all unit tests (epp + sidecar)
+make test-unit-epp      # epp only
+make test-unit-sidecar  # sidecar only
+```
+
+### Integration Tests
+
+Requires the KIND development environment to be running (`make env-dev-kind`).
+
+```bash
+make test-integration   # coverage and race detection always enabled
+```
+
+### Filtered Tests
+
+```bash
+make test-filter PATTERN=TestName           # epp tests matching pattern
+make test-filter PATTERN=TestName TYPE=sidecar
+```
+
+### End-to-End Tests
+
+```bash
+make test-e2e
+```
+
+This creates a temporary Kind cluster named `e2e-tests`, runs the full test suite against it, and deletes the cluster on completion.
+
+**Keeping the cluster on failure**
+
+Set `E2E_KEEP_CLUSTER_ON_FAILURE=true` to preserve the cluster (and, when using a real cluster, all created Kubernetes objects) when any test fails. This is useful for inspecting pod logs, events, or cluster state after a failure.
+
+```bash
+E2E_KEEP_CLUSTER_ON_FAILURE=true make test-e2e
+```
+
+When set, a successful run still cleans up normally — the cluster is only kept if there is at least one test failure.
+
+**Accessing the cluster after a failure**
+
+E2E tests do not update the host's kubeconfig to point at the `e2e-tests` Kind cluster. After a preserved failure, export the kubeconfig manually:
+
+```bash
+# Merge into the default kubeconfig ($HOME/.kube/config or $KUBECONFIG)
+kind export kubeconfig --name e2e-tests
+
+# Or write to a specific file
+kind export kubeconfig --name e2e-tests --kubeconfig /path/to/kubeconfig
+```
+
+Then use it as normal:
+
+```bash
+kubectl --context kind-e2e-tests get pods
+```
+
+**Environment variables**
+
+| Variable | Default | Description |
+|---|---|---|
+| `E2E_KEEP_CLUSTER_ON_FAILURE` | `false` | Preserve the Kind cluster (or Kubernetes objects) when the suite fails |
+| `E2E_PORT` | `30080` | Host port mapped to the gateway NodePort |
+| `E2E_METRICS_PORT` | `32090` | Host port mapped to the EPP metrics NodePort |
+| `K8S_CONTEXT` | _(empty)_ | Use an existing cluster context instead of creating a Kind cluster |
+| `NAMESPACE` | `default` | Namespace to deploy test resources into |
+| `CONTAINER_RUNTIME` | `docker` | Container runtime used to load images into Kind (`docker` or `podman`) |
+| `READY_TIMEOUT` | `3m` | How long to wait for resources to become ready |
+| `EPP_IMAGE` | `ghcr.io/llm-d/llm-d-inference-scheduler:dev` | EPP image loaded into the Kind cluster |
+| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.1` | vLLM simulator image loaded into the Kind cluster |
+| `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
+| `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
+
+### Coverage
+
+Coverage profiles are written to `coverage/` (gitignored). To generate an HTML report:
+
+```bash
+make coverage-report
+open coverage/epp.html
+```
+
+To compare coverage against `main`:
+
+```bash
+make test-unit          # run tests on your branch first
+make coverage-compare   # builds a baseline from main in a temp worktree, then diffs
+```
+
+To compare against a different ref:
+
+```bash
+make coverage-compare BASE_REF=release-0.5
+```
+
+## Tokenization Architecture
+
+> [!NOTE]
+> **Python is NOT required**. Previous EPP versions (before v0.5.1) used embedded Python
+> tokenizers.
+
+The project uses **UDS (Unix Domain Socket)** tokenization. A separate UDS tokenizer
+sidecar container handles tokenization; the EPP itself does not. Previous approaches
+(daulet/tokenizers, direct Python/vLLM linking) are deprecated and no longer used.
+
+The UDS tokenizer image is built and published by the
+[llm-d-kv-cache](https://github.com/llm-d/llm-d-kv-cache) repository.
+Published images are available at `ghcr.io/llm-d/llm-d-uds-tokenizer:<tag>`
+
+- The `:dev` tag tracks the kv-cache `main` branch.
+- To pin a specific release, set `UDS_TOKENIZER_TAG` (or `UDS_TOKENIZER_IMAGE` for a
+  fully custom reference):
+
+  ```bash
+  UDS_TOKENIZER_TAG=v0.7.0 make env-dev-kind
+  ```
+
+- To use a different registry, set `IMAGE_REGISTRY` (shared with all other images):
+
+  ```bash
+  IMAGE_REGISTRY=quay.io/my-org make env-dev-kind
+  ```
+
+- To build the image from source, run `make image-build-uds` in the `llm-d-kv-cache` repo.
 
 ## Kubernetes Development Environment
 
-A Kubernetes cluster can be used for development and testing.
-The setup can be split in two:
+A real Kubernetes cluster can be used for development and testing. Setup has two layers:
 
-- cluster-level infrastructure deployment (e.g., CRDs), and
-- deployment of development environments on a per-namespace basis
+- **Cluster infrastructure**: CRDs and operators, installed once by a cluster admin.
+- **Developer environment**: your namespace and workloads.
 
-This enables cluster sharing by multiple developers. In case of private/personal
-clusters, the `default` namespace can be used directly.
+On a shared cluster, each developer uses a separate namespace. On a personal cluster,
+`default` works fine.
 
-### Setup - Infrastructure
+### Infrastructure Setup
 
 > [!CAUTION]
-> In shared cluster situations you should probably not be
-> running this unless you're the cluster admin and you're _certain_
-> that you should be running this, as this can be disruptive to other developers
-> in the cluster.
+> Only run this if you are the cluster admin. Applying CRDs and operators can be disruptive
+> to other developers sharing the cluster.
 
-The following will deploy all the infrastructure-level requirements (e.g. CRDs,
-Operators, etc.) to support the namespace-level development environments:
-
-Install Gateway API + GIE CRDs:
+Install Gateway API and GIE CRDs:
 
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/standard-install.yaml
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml
 ```
 
 Install kgateway:
+
 ```bash
 KGTW_VERSION=v2.0.2
-helm upgrade -i --create-namespace --namespace kgateway-system --version $KGTW_VERSION kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds
-helm upgrade -i --namespace kgateway-system --version $KGTW_VERSION kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --set inferenceExtension.enabled=true
+helm upgrade -i --create-namespace --namespace kgateway-system --version $KGTW_VERSION \
+  kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds
+helm upgrade -i --namespace kgateway-system --version $KGTW_VERSION \
+  kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway \
+  --set inferenceExtension.enabled=true
 ```
 
-For more details, see the Gateway API inference Extension [getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/)
+For more details, see the Gateway API Inference Extension
+[getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/).
 
-### Setup - Developer Environment
+### RBAC and Permissions
+
+EPP is namespace-scoped. Its `Role` grants `get/watch/list` on `inferencepools` and `pods`,
+plus `create` on `tokenreviews`/`subjectaccessreviews` for metrics auth
+(`--metrics-endpoint-auth=true`, the default). To disable metrics auth and avoid the
+cluster-scoped RBAC requirement, use `--metrics-endpoint-auth=false`.
+
+### Developer Setup
 
 > [!NOTE]
-> This setup is currently very manual in regards to container
-> images for the VLLM simulator and the EPP. It is expected that you build and
-> push images for both to your own private registry. In future iterations, we
-> will be providing automation around this to make it simpler.
+> This setup requires building and pushing container images to your own private registry.
 
-To deploy a development environment to the cluster, you'll need to explicitly
-provide a namespace. This can be `default` if this is your personal cluster,
-but on a shared cluster you should pick something unique. For example:
+**1. Set your namespace.**
 
 ```bash
-export NAMESPACE=annas-dev-environment
-```
-
-Create the namespace:
-
-```bash
+export NAMESPACE=your-dev-namespace
 kubectl create namespace ${NAMESPACE}
-```
-
-Set the default namespace for kubectl commands
-
-```bash
 kubectl config set-context --current --namespace="${NAMESPACE}"
 ```
 
 > [!NOTE]
-> If you are using OpenShift (oc CLI), you can use the following instead: `oc project "${NAMESPACE}"`
+> If you are using OpenShift, use `oc project "${NAMESPACE}"` instead.
 
-- Set Hugging Face token variable:
+**2. Set your Hugging Face token.**
 
-```bash
-export HF_TOKEN="<HF_TOKEN>"
-```
-
-Download the `llm-d-kv-cache` repository (the installation script and Helm chart to install the vLLM environment):
+Required to pull model weights. Get one at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens):
 
 ```bash
-cd .. && git clone git@github.com:llm-d/llm-d-kv-cache.git
+export HF_TOKEN="<your-token>"
 ```
 
-If you prefer to clone it into the `/tmp` directory, make sure to update the `VLLM_CHART_DIR` environment variable:
-`export VLLM_CHART_DIR=<tmp_dir>/llm-d-kv-cache/vllm-setup-helm`
+**3. Clone the `llm-d-kv-cache` repository.**
 
-Once all this is set up, you can deploy the environment:
+The Makefile expects it as a sibling of this repo at `../llm-d-kv-cache`:
+
+```bash
+git clone git@github.com:llm-d/llm-d-kv-cache.git ../llm-d-kv-cache
+```
+
+If you clone it elsewhere, set:
+
+```bash
+export VLLM_CHART_DIR=<path>/llm-d-kv-cache/vllm-setup-helm
+```
+
+**4. Deploy:**
 
 ```bash
 make env-dev-kubernetes
 ```
 
-This will deploy the entire stack to whatever namespace you chose.
 > [!NOTE]
-> The model and images of each component can  be replaced. See [Environment Configuration](#environment-configuration) for model settings.
+> The model and images of each component can be replaced. See
+> [Environment Configuration](#environment-configuration) for details.
 
-You can test by exposing the `inference gateway` via port-forward:
+**5. Test the deployment.**
+
+Expose the gateway via port-forward:
 
 ```bash
 kubectl port-forward service/inference-gateway 8080:80 -n "${NAMESPACE}"
 ```
 
-And making requests with `curl`:
+Make a request:
 
 ```bash
-curl -s -w '\n' http://localhost:8080/v1/completions -H 'Content-Type: application/json' \
-  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
+curl -s -w '\n' http://localhost:8080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' \
+  | jq
 ```
 
 > [!NOTE]
-> If the response is empty or contains an error, jq may output a cryptic error. You can run the command without jq to debug raw responses.
+> If the response is empty or contains an error, jq may output a cryptic message.
+> Drop the `| jq` to see the raw response.
 
-#### Environment Configurateion
+### Environment Configuration
 
-**1. Setting the EPP image registry and tag:**
-
-You can optionally set a custom image registry and tag (otherwise, defaults will be used):
+**1. EPP image registry and tag:**
 
 ```bash
 export IMAGE_REGISTRY="<YOUR_REGISTRY>"
@@ -258,25 +448,23 @@ export EPP_TAG="<YOUR_TAG>"
 ```
 
 > [!NOTE]
-> The full image reference will be constructed as `${EPP_IMAGE}`, where `EPP_IMAGE` defaults to `${IMAGE_REGISTRY}/llm-d-inference-scheduler:{EPP_TAG}`. For example, with `IMAGE_REGISTRY=quay.io/<my-id>` and `EPP_TAG=v1.0.0`, the final image will be `quay.io/<my-id>/llm-d-inference-scheduler:v1.0.0`.
+> The full image reference is `${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}`.
+> For example, with `IMAGE_REGISTRY=quay.io/<my-id>` and `EPP_TAG=v1.0.0`, the image
+> will be `quay.io/<my-id>/llm-d-inference-scheduler:v1.0.0`.
 
-**2. Setting the vLLM replicas:**
-
-You can optionally set the vllm replicas:
+**2. vLLM replica count:**
 
 ```bash
 export VLLM_REPLICA_COUNT=2
 ```
 
-**3. Setting the model name:**
-
-You can replace the model name that will be used in the system.
+**3. Model name:**
 
 ```bash
 export MODEL_NAME=mistralai/Mistral-7B-Instruct-v0.2
 ```
 
-If you need to deploy a larger model, update the vLLM-related parameters according to the model's requirements. For example:
+For larger models, set additional vLLM parameters:
 
 ```bash
 export MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
@@ -287,64 +475,61 @@ export VLLM_TENSOR_PARALLEL_SIZE=2
 export VLLM_GPU_COUNT_PER_INSTANCE=2
 ```
 
-**4. Additional environment settings:**
+**4. Additional settings:**
 
-More environment variable settings can be found in the `scripts/kubernetes-dev-env.sh`.
+More environment variables are documented in `scripts/kubernetes-dev-env.sh`.
 
-#### Development Cycle
+### Deploying Changes
 
-> [!Warning]
-> This is a very manual process at the moment. We expect to make
-> this more automated in future iterations.
+> [!WARNING]
+> This requires manual image builds and pushes to your private registry.
 
-Make your changes locally and commit them. Then select an image tag based on
-the `git` SHA and set your private registry:
+Build and push a new image:
 
 ```bash
 export EPP_TAG=$(git rev-parse HEAD)
 export IMAGE_REGISTRY="quay.io/<my-id>"
-```
-
-Build the image and tag the image for your private registry:
-
-```bash
 make image-build
-```
-
-and push it:
-
-```bash
 make image-push
 ```
 
-You can now re-deploy the environment with your changes (don't forget all of
-the required environment variables):
+Redeploy:
 
 ```bash
 make env-dev-kubernetes
 ```
 
-And test the changes.
+Test with a request:
+
+```bash
+kubectl port-forward service/inference-gateway 8080:80 -n "${NAMESPACE}"
+curl -s -w '\n' http://localhost:8080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' \
+  | jq
+```
 
 ### Cleanup Environment
 
-To clean up the development environment and remove all deployed resources in your namespace, run:
+Remove all deployed resources in your namespace:
 
 ```bash
 make clean-env-dev-kubernetes
 ```
 
-If you also want to remove the namespace entirely, run:
+To remove the namespace too:
 
 ```bash
 kubectl delete namespace ${NAMESPACE}
 ```
 
-To uninstall the infra-stracture development:
-Uninstal GIE CRDs:
+To uninstall the cluster infrastructure:
+
+Uninstall GIE CRDs:
 
 ```bash
-kubectl delete -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml --ignore-not-found
+kubectl delete -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml \
+  --ignore-not-found
 ```
 
 Uninstall kgateway:
@@ -354,4 +539,16 @@ helm uninstall kgateway -n kgateway-system
 helm uninstall kgateway-crds -n kgateway-system
 ```
 
-For more details, see the Gateway API inference Extension [getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/)
+For more details, see the Gateway API Inference Extension
+[getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/).
+
+## Submitting Changes
+
+Before opening a PR, run:
+
+```bash
+make presubmit
+```
+
+This runs the same lint, vet, and test checks as the CI pipeline. Fixing failures locally
+saves a round-trip through GitHub Actions.

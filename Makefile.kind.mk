@@ -4,7 +4,7 @@ KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
 KIND_GATEWAY_HOST_PORT ?= 30080
 
 .PHONY: env-dev-kind
-env-dev-kind: image-build ## Run under kind ($(KIND_CLUSTER_NAME))
+env-dev-kind: image-build image-pull ## Run under kind ($(KIND_CLUSTER_NAME))
 	@if [ "$$PD_ENABLED" = "true" ] && [ "$$KV_CACHE_ENABLED" = "true" ]; then \
 		echo "Error: Both PD_ENABLED and KV_CACHE_ENABLED are true. Skipping env-dev-kind."; \
 		exit 1; \

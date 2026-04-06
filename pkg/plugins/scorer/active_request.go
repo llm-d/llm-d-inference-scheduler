@@ -10,7 +10,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
@@ -34,6 +34,20 @@ type ActiveRequestParameters struct {
 	// be timed out and dropped.
 	// This field accepts duration strings like "30s", "1m", "2h".
 	RequestTimeout string `json:"requestTimeout"`
+
+	// IdleThreshold defines the maximum number of active requests for a pod
+	// to be considered "idle". Pods with request count <= idleThreshold
+	// will receive a score of 1.0.
+	// Default: 0 (only pods with zero requests are considered idle)
+	IdleThreshold int `json:"idleThreshold"`
+
+	// MaxBusyScore defines the maximum score that can be assigned to busy pods
+	// (pods with request count > idleThreshold). This creates a scoring gap
+	// between idle and busy pods.
+	// Range: 0.0 to 1.0
+	// Default: 1.0 (no gap, current behavior)
+	// Example: 0.5 means idle pods get 1.0, busiest pod gets 0.0, least busy gets 0.5
+	MaxBusyScore float64 `json:"maxBusyScore"`
 }
 
 // requestEntry represents a single request in the cache
@@ -97,11 +111,31 @@ func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *Act
 		ttlcache.WithDisableTouchOnHit[string, *requestEntry](),
 	)
 
+	// Set idle threshold (default: 0)
+	idleThreshold := 0
+	if params != nil && params.IdleThreshold >= 0 {
+		idleThreshold = params.IdleThreshold
+	}
+
+	// Set max busy score (default: 1.0)
+	maxBusyScore := 1.0
+	if params != nil && params.MaxBusyScore >= 0 && params.MaxBusyScore <= 1.0 {
+		maxBusyScore = params.MaxBusyScore
+	}
+
+	if idleThreshold != 0 || maxBusyScore != 1.0 {
+		logger.Info("Active request scorer configured with idle preference",
+			"idleThreshold", idleThreshold,
+			"maxBusyScore", maxBusyScore)
+	}
+
 	scorer := &ActiveRequest{
 		typedName:      plugin.TypedName{Type: ActiveRequestType},
 		requestCache:   requestCache,
 		endpointCounts: make(map[string]int),
 		mutex:          &sync.RWMutex{},
+		idleThreshold:  idleThreshold,
+		maxBusyScore:   maxBusyScore,
 	}
 	// callback to decrement count when requests expire
 	// most requests will be removed in ResponseComplete, but this ensures
@@ -131,6 +165,11 @@ type ActiveRequest struct {
 	// endpointCounts maintains fast lookup for request counts per endpoint
 	endpointCounts map[string]int
 	mutex          *sync.RWMutex
+
+	// idleThreshold defines the max request count to be considered idle
+	idleThreshold int
+	// maxBusyScore defines the maximum score for busy (non-idle) pods
+	maxBusyScore float64
 }
 
 // TypedName returns the typed name of the plugin.
@@ -169,15 +208,21 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *
 	scoredEndpointsMap := make(map[scheduling.Endpoint]float64, len(endpoints))
 	for _, endpoint := range endpoints {
 		endpointName := endpoint.GetMetadata().NamespacedName.String()
-		if count, exists := scoredEndpoints[endpointName]; exists {
-			if count == 0 || maxCount == 0 {
-				scoredEndpointsMap[endpoint] = 1.0 // no requests means highest score
-			} else {
-				scoredEndpointsMap[endpoint] = float64(maxCount-count) / float64(maxCount)
-			}
-		} else {
+		count, exists := scoredEndpoints[endpointName]
+		if !exists {
+			// Pod not tracked = no requests = idle
 			scoredEndpointsMap[endpoint] = 1.0
+			continue
 		}
+
+		// Check if pod is idle (count <= idleThreshold)
+		if count <= s.idleThreshold {
+			scoredEndpointsMap[endpoint] = 1.0 // Idle pods always get max score
+			continue
+		}
+
+		// Busy pod: scale from 0 to maxBusyScore
+		scoredEndpointsMap[endpoint] = float64(maxCount-count) / float64(maxCount) * s.maxBusyScore
 	}
 
 	log.FromContext(ctx).V(logutil.DEBUG).Info("Scored endpoints", "scores", endpointScores(scoredEndpointsMap))
