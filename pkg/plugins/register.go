@@ -36,7 +36,6 @@ func RegisterAllPlugins() {
 	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
 	// pd decider plugins
 	plugin.Register(profile.PrefixBasedPDDeciderPluginType, profile.PrefixBasedPDDeciderPluginFactory)
-	plugin.Register(profile.AlwaysDisaggDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(profile.AlwaysDisaggPDDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(preparedata.TokenizerPluginType, preparedata.TokenizerPluginFactory)
 	// ep decider plugins

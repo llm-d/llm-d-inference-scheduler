@@ -50,7 +50,9 @@ var (
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
-	return []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount, programaware.GetCollectors()...}
+	collectors := []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount}
+	collectors = append(collectors, programaware.GetCollectors()...)
+	return collectors
 }
 
 // RecordPDDecision increments the counter for a specific P/D routing decision.
