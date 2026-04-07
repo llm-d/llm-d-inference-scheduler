@@ -2,6 +2,8 @@ package programaware
 
 import (
 	"fmt"
+	"slices"
+	"sync"
 	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
@@ -37,6 +39,10 @@ type ScoringStrategy interface {
 
 	// OnCompleted is called when a response finishes with actual token usage.
 	OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64)
+
+	// OnPicked is called after Pick() selects a queue, allowing strategies
+	// to update internal state (e.g., round-robin cursor).
+	OnPicked(programID string)
 }
 
 // newStrategy constructs a ScoringStrategy from the plugin config.
@@ -55,8 +61,10 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 			decayFactor:     floatOr(cfg.ServiceDecayFactor, defaultServiceDecayFactor),
 			halfLifeSeconds: floatOr(cfg.ServiceHalfLifeSeconds, 0),
 		}, nil
+	case "rr":
+		return &RRStrategy{}, nil
 	default:
-		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"drr\", \"service\"", cfg.Strategy)
+		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"drr\", \"service\", \"rr\"", cfg.Strategy)
 	}
 }
 
@@ -177,6 +185,9 @@ func (s *DRRStrategy) Score(normalized []float64) float64 {
 		s.weightHeadWait*normalized[drrDimHeadWait]
 }
 
+// OnPicked is a no-op for DRR (cursor not needed).
+func (s *DRRStrategy) OnPicked(_ string) {}
+
 // OnCompleted deducts actual token usage from the deficit counter.
 func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
 	if metrics == nil {
@@ -277,6 +288,9 @@ func (s *ServiceStrategy) Score(normalized []float64) float64 {
 		s.weightHeadWait*normalized[serviceDimHeadWait]
 }
 
+// OnPicked is a no-op for Service (cursor not needed).
+func (s *ServiceStrategy) OnPicked(_ string) {}
+
 // OnCompleted accumulates the weighted token cost into the program's attained service.
 func (s *ServiceStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
 	if metrics == nil {
@@ -285,3 +299,109 @@ func (s *ServiceStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, com
 	cost := float64(weightInputToken*promptTokens + weightOutputToken*completionTokens)
 	metrics.AddService(cost)
 }
+
+// =============================================================================
+// RR (Round-Robin) Strategy
+// =============================================================================
+
+// RR dimension indices.
+const (
+	rrDimPosition    = 0
+	rrNumDimensions  = 1
+)
+
+// RRStrategy implements a simple round-robin scheduling strategy that matches
+// the upstream gateway-api-inference-extension round-robin fairness policy.
+//
+// It maintains a cursor (lastSelected) that tracks which program was last
+// dispatched. On each Pick() cycle, programs are sorted deterministically
+// and the one immediately after the cursor gets the highest score.
+// Empty queues are naturally skipped because Pick() only scores non-empty queues.
+type RRStrategy struct {
+	mu           sync.Mutex
+	lastSelected string   // program ID last picked
+	cycleKeys    []string // sorted program IDs collected during current cycle
+	cycleActive  bool     // true once OnPickStart has been called for this cycle
+}
+
+// Name returns "rr".
+func (s *RRStrategy) Name() string { return "rr" }
+
+// OnPickStart collects program IDs for deterministic ordering.
+// Called once per queue per Pick() cycle. On the first call of a new cycle,
+// resets the key list.
+func (s *RRStrategy) OnPickStart(programID string, _ int, _ *ProgramMetrics) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.cycleActive {
+		s.cycleKeys = s.cycleKeys[:0]
+		s.cycleActive = true
+	}
+	s.cycleKeys = append(s.cycleKeys, programID)
+}
+
+// NumDimensions returns 1 (position-based score).
+func (s *RRStrategy) NumDimensions() int { return rrNumDimensions }
+
+// CollectRaw computes a position-based score for the queue.
+// Queues closer to the cursor's "next" position get higher scores.
+func (s *RRStrategy) CollectRaw(queue flowcontrol.FlowQueueAccessor, _ *ProgramMetrics) []float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Sort keys for deterministic ordering (same as upstream).
+	keys := make([]string, len(s.cycleKeys))
+	copy(keys, s.cycleKeys)
+	slices.Sort(keys)
+
+	numFlows := len(keys)
+	if numFlows == 0 {
+		return []float64{0}
+	}
+
+	// Find the start index (next after lastSelected), matching upstream logic.
+	startIndex := 0
+	if s.lastSelected != "" {
+		if idx := slices.Index(keys, s.lastSelected); idx != -1 {
+			startIndex = (idx + 1) % numFlows
+		}
+	}
+
+	// Find this queue's position in the sorted list.
+	programID := queue.FlowKey().ID
+	queueIdx := slices.Index(keys, programID)
+	if queueIdx == -1 {
+		return []float64{0}
+	}
+
+	// Compute distance from startIndex (wrapping around).
+	// Distance 0 = highest priority, distance numFlows-1 = lowest.
+	distance := (queueIdx - startIndex + numFlows) % numFlows
+
+	// Convert to score: closer to cursor's next position = higher score.
+	score := float64(numFlows - distance)
+	return []float64{score}
+}
+
+// NormalizeDimension is a passthrough for RR — normalization is not meaningful
+// since the position-based scores already encode the correct ordering.
+func (s *RRStrategy) NormalizeDimension(_ int, raw, _, _ float64) float64 {
+	return raw
+}
+
+// Score returns the position score directly.
+func (s *RRStrategy) Score(normalized []float64) float64 {
+	return normalized[rrDimPosition]
+}
+
+// OnPicked updates the round-robin cursor and clears per-cycle state.
+func (s *RRStrategy) OnPicked(programID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSelected = programID
+	s.cycleKeys = s.cycleKeys[:0]
+	s.cycleActive = false
+}
+
+// OnCompleted is a no-op for round-robin (no token tracking needed).
+func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}

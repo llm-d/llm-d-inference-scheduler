@@ -31,7 +31,7 @@ const (
 // Config holds the JSON-decoded configuration for the plugin.
 type Config struct {
 	// Strategy selects the fairness scoring algorithm used by Pick().
-	// Valid values: "service" (default), "drr".
+	// Valid values: "service" (default), "drr", "rr".
 	//
 	//   "service" — attained service fairness: tracks time-decayed weighted tokens
 	//              consumed per program. Programs with lower attained service are
@@ -41,6 +41,10 @@ type Config struct {
 	//              Each round every active queue earns a token quantum; actual token
 	//              usage is deducted at response completion. Provides provably
 	//              proportional fairness independent of request rate or size.
+	//
+	//   "rr"     — Simple round-robin: cycles through program queues in sorted order,
+	//              skipping empty queues. Matches the upstream round-robin fairness
+	//              policy. No token or service tracking.
 	Strategy string `json:"strategy"`
 
 	// --- DRR weights (only used when strategy == "drr") ---
@@ -245,6 +249,14 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 			bestQueue = e.queue
 		}
 	}
+
+	// Notify the strategy that the Pick() cycle is complete.
+	// When no queue was selected, empty string resets cursor (matches upstream).
+	pickedID := ""
+	if bestQueue != nil {
+		pickedID = bestQueue.FlowKey().ID
+	}
+	strategy.OnPicked(pickedID)
 
 	// Record the selected item's enqueue time so PreRequest can compute
 	// the actual flow-control queue wait time (enqueue → dispatch).
