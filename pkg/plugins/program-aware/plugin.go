@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -163,20 +162,9 @@ func (p *ProgramAwarePlugin) NewState(_ context.Context) any {
 	return nil
 }
 
-// queueEntry holds collected data for a non-empty queue during the two-pass Pick.
-type queueEntry struct {
-	queue flowcontrol.FlowQueueAccessor
-	raw   []float64
-}
-
-// Pick selects which program queue to service next.
-//
-// Uses a two-pass approach for adaptive normalization:
-//  1. Pass 1: OnPickStart for all queues + CollectRaw for non-empty ones, tracking
-//     per-dimension min/max across all queues.
-//  2. Pass 2: Normalize using observed ranges, score, and select the best queue.
-//
-// This eliminates fixed normalization caps and adapts to any workload pattern.
+// Pick selects which program queue to service next by delegating to the
+// configured ScoringStrategy. The strategy receives all queues and returns
+// the selected queue plus per-queue scores for observability.
 func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBandAccessor) (flowcontrol.FlowQueueAccessor, error) {
 	start := time.Now()
 	defer func() {
@@ -188,75 +176,28 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 	}
 
 	strategy := p.getStrategy()
-	numDims := strategy.NumDimensions()
 
-	// --- Pass 1: OnPickStart + CollectRaw, track per-dimension min/max ---
-	var entries []queueEntry
-	dimMin := make([]float64, numDims)
-	dimMax := make([]float64, numDims)
-	first := true
-
+	// Build QueueInfo slice for the strategy.
+	var infos []QueueInfo
 	band.IterateQueues(func(queue flowcontrol.FlowQueueAccessor) (keepIterating bool) {
 		if queue == nil {
 			return true
 		}
-
-		queueLen := queue.Len()
-		metrics := p.getOrCreateMetrics(queue.FlowKey().ID)
-
-		// Strategy hook: runs for every queue, including empty ones.
-		// DRR: allocates quantum for active queues, resets deficit for idle queues.
-		// EWMA: no-op.
-		strategy.OnPickStart(queue.FlowKey().ID, queueLen, metrics)
-
-		if queueLen == 0 {
-			return true
-		}
-
-		raw := strategy.CollectRaw(queue, metrics)
-		entries = append(entries, queueEntry{queue: queue, raw: raw})
-
-		if first {
-			copy(dimMin, raw)
-			copy(dimMax, raw)
-			first = false
-		} else {
-			for d := range numDims {
-				if raw[d] < dimMin[d] {
-					dimMin[d] = raw[d]
-				}
-				if raw[d] > dimMax[d] {
-					dimMax[d] = raw[d]
-				}
-			}
-		}
+		infos = append(infos, QueueInfo{
+			Queue:   queue,
+			Metrics: p.getOrCreateMetrics(queue.FlowKey().ID),
+			Len:     queue.Len(),
+		})
 		return true
 	})
 
-	// --- Pass 2: Normalize + Score, select best ---
-	var bestQueue flowcontrol.FlowQueueAccessor
-	bestScore := math.Inf(-1)
+	// Strategy owns scoring, normalization, and internal bookkeeping.
+	bestQueue, scores := strategy.Pick(infos)
 
-	normalized := make([]float64, numDims)
-	for _, e := range entries {
-		for d := range numDims {
-			normalized[d] = strategy.NormalizeDimension(d, e.raw[d], dimMin[d], dimMax[d])
-		}
-		score := strategy.Score(normalized)
-		queueScore.WithLabelValues(e.queue.FlowKey().ID).Set(score)
-		if score > bestScore {
-			bestScore = score
-			bestQueue = e.queue
-		}
+	// Emit per-queue scores for observability.
+	for id, score := range scores {
+		queueScore.WithLabelValues(id).Set(score)
 	}
-
-	// Notify the strategy that the Pick() cycle is complete.
-	// When no queue was selected, empty string resets cursor (matches upstream).
-	pickedID := ""
-	if bestQueue != nil {
-		pickedID = bestQueue.FlowKey().ID
-	}
-	strategy.OnPicked(pickedID)
 
 	// Record the selected item's enqueue time so PreRequest can compute
 	// the actual flow-control queue wait time (enqueue → dispatch).
