@@ -164,13 +164,13 @@ func TestDRRStrategy_NormalizeDimension(t *testing.T) {
 func TestDRRStrategy_Score(t *testing.T) {
 	s := testDRR()
 
-	// deficit=1.0, headWait=0.0 → 0.7 + 0 = 0.7
+	// deficit=1.0, headWait=0.0 → 0.8 + 0 = 0.8
 	score := s.Score([]float64{1.0, 0.0})
-	assert.InDelta(t, 0.7, score, 0.001)
+	assert.InDelta(t, 0.8, score, 0.001)
 
-	// deficit=0.0, headWait=1.0 → 0 + 0.3 = 0.3
+	// deficit=0.0, headWait=1.0 → 0 + 0.2 = 0.2
 	score = s.Score([]float64{0.0, 1.0})
-	assert.InDelta(t, 0.3, score, 0.001)
+	assert.InDelta(t, 0.2, score, 0.001)
 }
 
 func TestDRRStrategy_PreferHighDeficit(t *testing.T) {
@@ -559,6 +559,186 @@ func TestFactory_ServiceHalfLifeSeconds(t *testing.T) {
 	plugin := p.(*ProgramAwarePlugin)
 	svc := plugin.strategy.(*ServiceStrategy)
 	assert.Equal(t, 30.0, svc.halfLifeSeconds)
+}
+
+// =============================================================================
+// RR (Round-Robin) Strategy tests
+// =============================================================================
+
+func TestNewStrategy_RR(t *testing.T) {
+	s, err := newStrategy(Config{Strategy: "rr"})
+	require.NoError(t, err)
+	assert.Equal(t, "rr", s.Name())
+}
+
+func TestFactory_RRStrategy(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"rr"}`), nil)
+	require.NoError(t, err)
+	plugin := p.(*ProgramAwarePlugin)
+	assert.Equal(t, "rr", plugin.strategy.Name())
+}
+
+func TestRRStrategy_NumDimensions(t *testing.T) {
+	s := &RRStrategy{}
+	assert.Equal(t, 1, s.NumDimensions())
+}
+
+// simulateRRCycle runs one Pick()-like cycle: OnPickStart for all queues,
+// CollectRaw for non-empty ones, scores them, calls OnPicked on the winner.
+// Returns the selected program ID (or "" if none).
+func simulateRRCycle(s *RRStrategy, allIDs []string, nonEmptyIDs []string) string {
+	now := time.Now()
+
+	// Pass 1: OnPickStart for ALL queues (including empty).
+	for _, id := range allIDs {
+		s.OnPickStart(id, 0, nil) // queueLen doesn't matter for RR
+	}
+
+	// Pass 2: CollectRaw + score for non-empty queues only.
+	bestID := ""
+	bestScore := -1.0
+	for _, id := range nonEmptyIDs {
+		queue := &fcmocks.MockFlowQueueAccessor{
+			FlowKeyV:  flowcontrol.FlowKey{ID: id},
+			PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
+		}
+		raw := s.CollectRaw(queue, nil)
+		score := s.Score(raw)
+		if score > bestScore {
+			bestScore = score
+			bestID = id
+		}
+	}
+
+	s.OnPicked(bestID)
+	return bestID
+}
+
+func TestRRStrategy_BasicCycle(t *testing.T) {
+	s := &RRStrategy{}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	// Sorted order: alpha, beta, gamma.
+	// With no lastSelected, startIndex=0 → alpha first.
+	picked := simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "alpha", picked, "first cycle should pick alpha (first in sorted order)")
+
+	// After alpha, cursor advances → beta.
+	picked = simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "beta", picked, "second cycle should pick beta")
+
+	// After beta → gamma.
+	picked = simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "gamma", picked, "third cycle should pick gamma")
+
+	// After gamma → wraps to alpha.
+	picked = simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "alpha", picked, "fourth cycle should wrap back to alpha")
+}
+
+func TestRRStrategy_SkipsEmptyQueues(t *testing.T) {
+	s := &RRStrategy{}
+	allIDs := []string{"alpha", "beta", "gamma"}
+	nonEmpty := []string{"alpha", "gamma"} // beta is empty
+
+	// Sorted: alpha, beta, gamma. startIndex=0 → alpha wins.
+	picked := simulateRRCycle(s, allIDs, nonEmpty)
+	assert.Equal(t, "alpha", picked)
+
+	// After alpha, startIndex=1 (beta). beta is empty.
+	// gamma: distance = (2-1+3)%3 = 1, score = 3-1 = 2
+	// alpha: distance = (0-1+3)%3 = 2, score = 3-2 = 1
+	// gamma wins.
+	picked = simulateRRCycle(s, allIDs, nonEmpty)
+	assert.Equal(t, "gamma", picked, "should skip empty beta and pick gamma")
+
+	// After gamma, startIndex=0 (wraps). alpha wins again.
+	picked = simulateRRCycle(s, allIDs, nonEmpty)
+	assert.Equal(t, "alpha", picked, "should wrap back to alpha")
+}
+
+func TestRRStrategy_WrapAround(t *testing.T) {
+	s := &RRStrategy{}
+	ids := []string{"a", "b", "c"}
+
+	// Set cursor to "c" (last in sorted order).
+	s.OnPicked("c")
+
+	// Next cycle: startIndex = (index_of_c + 1) % 3 = 0 → "a" should win.
+	picked := simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "a", picked, "should wrap from c to a")
+}
+
+func TestRRStrategy_SingleQueue(t *testing.T) {
+	s := &RRStrategy{}
+	ids := []string{"solo"}
+
+	for i := range 5 {
+		picked := simulateRRCycle(s, ids, ids)
+		assert.Equal(t, "solo", picked, "single queue should always be picked (iteration %d)", i)
+	}
+}
+
+func TestRRStrategy_OnPickedResetsCycle(t *testing.T) {
+	s := &RRStrategy{}
+
+	// Simulate a partial cycle.
+	s.OnPickStart("alpha", 1, nil)
+	s.OnPickStart("beta", 1, nil)
+	assert.True(t, s.cycleActive, "cycleActive should be true during cycle")
+	assert.Len(t, s.cycleKeys, 2)
+
+	// OnPicked should reset cycle state.
+	s.OnPicked("alpha")
+	assert.False(t, s.cycleActive, "cycleActive should be false after OnPicked")
+	assert.Empty(t, s.cycleKeys, "cycleKeys should be cleared after OnPicked")
+	assert.Equal(t, "alpha", s.lastSelected, "lastSelected should be updated")
+}
+
+func TestRRStrategy_NoQueues(t *testing.T) {
+	s := &RRStrategy{}
+
+	// Empty cycle — no queues at all.
+	picked := simulateRRCycle(s, nil, nil)
+	assert.Equal(t, "", picked, "no queues should yield empty pick")
+}
+
+func TestRR_Pick_CyclesThroughPrograms(t *testing.T) {
+	p := &ProgramAwarePlugin{strategy: &RRStrategy{}}
+
+	now := time.Now()
+	makeQueue := func(id string) *fcmocks.MockFlowQueueAccessor {
+		return &fcmocks.MockFlowQueueAccessor{
+			LenV:     1,
+			FlowKeyV: flowcontrol.FlowKey{ID: id},
+			PeekHeadV: &fcmocks.MockQueueItemAccessor{
+				EnqueueTimeV:     now,
+				OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: id + "-req"},
+			},
+		}
+	}
+
+	band := &fcmocks.MockPriorityBandAccessor{
+		IterateQueuesFunc: func(cb func(flowcontrol.FlowQueueAccessor) bool) {
+			cb(makeQueue("alpha"))
+			cb(makeQueue("beta"))
+			cb(makeQueue("gamma"))
+		},
+	}
+
+	// Three picks should cycle alpha → beta → gamma.
+	expected := []string{"alpha", "beta", "gamma"}
+	for i, want := range expected {
+		queue, err := p.Pick(context.Background(), band)
+		require.NoError(t, err)
+		assert.Equal(t, want, queue.FlowKey().ID,
+			"Pick #%d should select %s", i+1, want)
+	}
+
+	// Fourth pick wraps to alpha.
+	queue, err := p.Pick(context.Background(), band)
+	require.NoError(t, err)
+	assert.Equal(t, "alpha", queue.FlowKey().ID, "Pick #4 should wrap to alpha")
 }
 
 func TestDRR_Pick_QuantumAllocatedDuringPick(t *testing.T) {
