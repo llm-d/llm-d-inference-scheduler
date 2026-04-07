@@ -353,10 +353,8 @@ type RRStrategy struct {
 // Name returns "rr".
 func (s *RRStrategy) Name() string { return "rr" }
 
-// Pick selects the next queue in deterministic round-robin order.
-//
-// Collects all program IDs, sorts them, then scores non-empty queues by
-// proximity to the cursor's next position. Updates the cursor to the winner.
+// Pick selects the next non-empty queue in deterministic round-robin order.
+// Walks forward from the cursor and returns the first non-empty queue found.
 func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -368,47 +366,30 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 	}
 	slices.Sort(allKeys)
 
-	numFlows := len(allKeys)
-	if numFlows == 0 {
+	n := len(allKeys)
+	if n == 0 {
 		return nil, nil
 	}
 
 	// Find the start index (next after lastSelected).
-	startIndex := 0
+	start := 0
 	if s.lastSelected != "" {
 		if idx := slices.Index(allKeys, s.lastSelected); idx != -1 {
-			startIndex = (idx + 1) % numFlows
+			start = (idx + 1) % n
 		}
 	}
 
-	// Score non-empty queues by distance from cursor's next position.
-	scores := make(map[string]float64)
-	var best flowcontrol.FlowQueueAccessor
-	bestScore := math.Inf(-1)
-
-	for i, id := range allKeys {
-		if queues[id].Len == 0 {
-			continue
-		}
-
-		distance := (i - startIndex + numFlows) % numFlows
-		score := float64(numFlows - distance)
-
-		scores[id] = score
-		if score > bestScore {
-			bestScore = score
-			best = queues[id].Queue
+	// Walk forward from start, pick the first non-empty queue.
+	for i := range n {
+		id := allKeys[(start+i)%n]
+		if queues[id].Len > 0 {
+			s.lastSelected = id
+			return queues[id].Queue, nil
 		}
 	}
 
-	// Update cursor.
-	if best != nil {
-		s.lastSelected = best.FlowKey().ID
-	} else {
-		s.lastSelected = ""
-	}
-
-	return best, scores
+	s.lastSelected = ""
+	return nil, nil
 }
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).
