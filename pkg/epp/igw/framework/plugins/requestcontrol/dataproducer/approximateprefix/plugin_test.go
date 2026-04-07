@@ -295,8 +295,8 @@ func TestPrefixPluginAutoTune(t *testing.T) {
 	podName := "pod-autotune"
 	endpoint := fwksched.NewEndpoint(&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: podName}},
 		&fwkdl.Metrics{
-			CacheBlockSize:    16,   // 16 tokens * 4 chars/token = 64 chars per block
-			CacheNumGPUBlocks: 1000, // 1000 blocks capacity
+			CacheBlockSize: 16,   // 16 tokens * 4 chars/token = 64 chars per block
+			CacheNumBlocks: 1000, // 1000 blocks capacity
 		}, fwkdl.NewAttributes())
 	endpoints := []fwksched.Endpoint{endpoint}
 

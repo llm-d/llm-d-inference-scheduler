@@ -199,8 +199,8 @@ func (p *prepareData) PreRequest(ctx context.Context, request *framework.LLMRequ
 
 func (p *prepareData) makeserver(targetEndpoint framework.Endpoint) server {
 	gpuBlocks := defaultLRUCapacityPerServer
-	if p.config.AutoTune && targetEndpoint.GetMetrics().CacheNumGPUBlocks > 0 {
-		gpuBlocks = targetEndpoint.GetMetrics().CacheNumGPUBlocks
+	if p.config.AutoTune && targetEndpoint.GetMetrics().CacheNumBlocks > 0 {
+		gpuBlocks = targetEndpoint.GetMetrics().CacheNumBlocks
 	}
 	return server{
 		ServerID:       ServerID(targetEndpoint.GetMetadata().NamespacedName),
