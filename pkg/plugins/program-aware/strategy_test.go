@@ -96,7 +96,7 @@ func TestDRRStrategy_Pick_AllocatesQuantum(t *testing.T) {
 	m := &ProgramMetrics{}
 	now := time.Now()
 
-	queues := []QueueInfo{makeQueueInfo("prog", 3, m, now)}
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 3, m, now)}
 	s.Pick(queues)
 
 	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit(), "non-empty queue should receive quantum")
@@ -108,7 +108,7 @@ func TestDRRStrategy_Pick_QuantumAccumulates(t *testing.T) {
 	now := time.Now()
 
 	for range 5 {
-		queues := []QueueInfo{makeQueueInfo("prog", 1, m, now)}
+		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
 		s.Pick(queues)
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*5, m.Deficit(), "deficit should accumulate across rounds")
@@ -121,13 +121,13 @@ func TestDRRStrategy_Pick_ResetsOnIdle(t *testing.T) {
 
 	// Accumulate 3 rounds of quantum.
 	for range 3 {
-		queues := []QueueInfo{makeQueueInfo("prog", 2, m, now)}
+		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 2, m, now)}
 		s.Pick(queues)
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit())
 
 	// Queue drains.
-	queues := []QueueInfo{makeEmptyQueueInfo("prog", m)}
+	queues := map[string]QueueInfo{"prog": makeEmptyQueueInfo("prog", m)}
 	s.Pick(queues)
 	assert.Equal(t, int64(0), m.Deficit(), "deficit must reset to 0 when queue drains")
 }
@@ -160,9 +160,9 @@ func TestDRRStrategy_Pick_PreferHighDeficit(t *testing.T) {
 	mLow := &ProgramMetrics{}
 	mLow.DeductTokens(20000)
 
-	queues := []QueueInfo{
-		makeQueueInfo("high", 1, mHigh, now),
-		makeQueueInfo("low", 1, mLow, now),
+	queues := map[string]QueueInfo{
+		"high": makeQueueInfo("high", 1, mHigh, now),
+		"low":  makeQueueInfo("low", 1, mLow, now),
 	}
 
 	selected, scores := s.Pick(queues)
@@ -244,7 +244,7 @@ func TestServiceStrategy_Pick_DecaysService(t *testing.T) {
 	m.AddService(1000.0)
 	now := time.Now()
 
-	queues := []QueueInfo{makeQueueInfo("prog", 5, m, now)}
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 5, m, now)}
 	s.Pick(queues)
 
 	assert.InDelta(t, 1000.0*defaultServiceDecayFactor, m.AttainedService(), 0.01,
@@ -271,9 +271,9 @@ func TestServiceStrategy_Pick_PreferLowService(t *testing.T) {
 	mHigh := &ProgramMetrics{}
 	mHigh.AddService(10000.0)
 
-	queues := []QueueInfo{
-		makeQueueInfo("low", 1, mLow, now),
-		makeQueueInfo("high", 1, mHigh, now),
+	queues := map[string]QueueInfo{
+		"low":  makeQueueInfo("low", 1, mLow, now),
+		"high": makeQueueInfo("high", 1, mHigh, now),
 	}
 
 	selected, scores := s.Pick(queues)
@@ -289,9 +289,9 @@ func TestServiceStrategy_Pick_ColdStartUsesHeadWait(t *testing.T) {
 	mOld := &ProgramMetrics{}
 	mNew := &ProgramMetrics{}
 
-	queues := []QueueInfo{
-		makeQueueInfo("old", 1, mOld, time.Now().Add(-500*time.Millisecond)),
-		makeQueueInfo("new", 1, mNew, time.Now()),
+	queues := map[string]QueueInfo{
+		"old": makeQueueInfo("old", 1, mOld, time.Now().Add(-500*time.Millisecond)),
+		"new": makeQueueInfo("new", 1, mNew, time.Now()),
 	}
 
 	selected, scores := s.Pick(queues)
@@ -309,7 +309,7 @@ func TestServiceStrategy_DecayForgetsOldService(t *testing.T) {
 
 	// After many decay cycles, service should approach 0.
 	for range 1000 {
-		queues := []QueueInfo{makeQueueInfo("prog", 1, m, now)}
+		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
 		s.Pick(queues)
 	}
 	// 1000 * 0.995^1000 ≈ 6.7 — verify significant decay occurred.
@@ -389,7 +389,7 @@ func TestServiceStrategy_Pick_UsesTimedDecay(t *testing.T) {
 	now := time.Now()
 
 	// First Pick initializes timer.
-	queues := []QueueInfo{makeQueueInfo("prog", 1, m, now)}
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
 	s.Pick(queues)
 	assert.InDelta(t, 1000.0, m.AttainedService(), 0.01)
 }
@@ -424,18 +424,18 @@ func TestFactory_RRStrategy(t *testing.T) {
 func simulateRRCycle(s *RRStrategy, allIDs []string, nonEmptyIDs []string) string {
 	now := time.Now()
 
-	// Build QueueInfo slice: empty queues for IDs not in nonEmptyIDs.
+	// Build QueueInfo map: empty queues for IDs not in nonEmptyIDs.
 	nonEmptySet := make(map[string]bool, len(nonEmptyIDs))
 	for _, id := range nonEmptyIDs {
 		nonEmptySet[id] = true
 	}
 
-	var queues []QueueInfo
+	queues := make(map[string]QueueInfo, len(allIDs))
 	for _, id := range allIDs {
 		if nonEmptySet[id] {
-			queues = append(queues, makeQueueInfo(id, 1, nil, now))
+			queues[id] = makeQueueInfo(id, 1, nil, now)
 		} else {
-			queues = append(queues, makeEmptyQueueInfo(id, nil))
+			queues[id] = makeEmptyQueueInfo(id, nil)
 		}
 	}
 
@@ -516,9 +516,9 @@ func TestRRStrategy_SingleQueue(t *testing.T) {
 func TestRRStrategy_Pick_UpdatesCursor(t *testing.T) {
 	s := &RRStrategy{}
 
-	queues := []QueueInfo{
-		makeQueueInfo("alpha", 1, nil, time.Now()),
-		makeQueueInfo("beta", 1, nil, time.Now()),
+	queues := map[string]QueueInfo{
+		"alpha": makeQueueInfo("alpha", 1, nil, time.Now()),
+		"beta":  makeQueueInfo("beta", 1, nil, time.Now()),
 	}
 
 	selected, _ := s.Pick(queues)
