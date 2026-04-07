@@ -33,11 +33,11 @@ const (
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
 
-	// testImageURL and testImageURL2 are publicly accessible images used in multimodal e2e tests.
-	testImageURL  = "https://upload.wikimedia.org/wikipedia/commons/a/a7/Camponotus_flavomarginatus_ant.jpg"
-	testImageURL2 = "https://images.dog.ceo/breeds/labrador/n02099712_4323.jpg"
+	// testImageURL and testImageURL2 are architecture diagrams stored in docs/images/ and served via GitHub raw content.
+	testImageURL  = "https://vllm-public-assets.s3.us-west-2.amazonaws.com/multimodal_asset/cat_snow.jpg"
+	testImageURL2 = "https://vllm-public-assets.s3.us-west-2.amazonaws.com/multimodal_asset/flycatcher.jpeg"
 	// testVideoURL is a publicly accessible video used in multimodal e2e tests.
-	testVideoURL = "https://www.w3schools.com/html/mov_bbb.mp4"
+	testVideoURL = "https://www.bogotobogo.com/python/OpenCV_Python/images/mean_shift_tracking/slow_traffic_small.mp4"
 	// testImageEmbeds is a small dummy base64-encoded tensor used to test image_embeds requests.
 	// The actual bytes are not processed by the simulator; only routing behaviour is validated.
 	testImageEmbeds = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
