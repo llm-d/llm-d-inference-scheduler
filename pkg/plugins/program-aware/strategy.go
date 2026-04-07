@@ -20,7 +20,7 @@ type ScoringStrategy interface {
 	// empty ones for bookkeeping) and returns the selected queue plus
 	// per-queue scores for observability. Returns (nil, nil) if no queue
 	// is eligible.
-	Pick(queues []QueueInfo) (selected flowcontrol.FlowQueueAccessor, scores map[string]float64)
+	Pick(queues map[string]QueueInfo) (selected flowcontrol.FlowQueueAccessor, scores map[string]float64)
 
 	// OnCompleted is called when a response finishes with actual token usage.
 	OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64)
@@ -124,21 +124,19 @@ func (s *DRRStrategy) Name() string { return "drr" }
 // For every queue: allocates a token quantum (non-empty) or resets deficit (empty).
 // Then uses two-pass adaptive normalization across non-empty queues to produce
 // a weighted combination of deficit and head-of-queue wait time.
-func (s *DRRStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
+func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
-		queue      flowcontrol.FlowQueueAccessor
-		id         string
 		deficit    float64
 		headWaitMs float64
 	}
 
 	// Pass 1: bookkeeping + collect raw values for non-empty queues.
-	var entries []entry
+	entries := make(map[string]entry)
 	minDeficit, maxDeficit := 0.0, 0.0
 	minWait, maxWait := 0.0, 0.0
 	first := true
 
-	for _, qi := range queues {
+	for id, qi := range queues {
 		if qi.Metrics == nil {
 			continue
 		}
@@ -154,13 +152,7 @@ func (s *DRRStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccessor, m
 			headWaitMs = float64(time.Since(head.EnqueueTime()).Milliseconds())
 		}
 
-		e := entry{
-			queue:      qi.Queue,
-			id:         qi.Queue.FlowKey().ID,
-			deficit:    deficit,
-			headWaitMs: headWaitMs,
-		}
-		entries = append(entries, e)
+		entries[id] = entry{deficit: deficit, headWaitMs: headWaitMs}
 
 		if first {
 			minDeficit, maxDeficit = deficit, deficit
@@ -191,14 +183,14 @@ func (s *DRRStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccessor, m
 	var best flowcontrol.FlowQueueAccessor
 	bestScore := math.Inf(-1)
 
-	for _, e := range entries {
+	for id, e := range entries {
 		nd := rangeNormalize(e.deficit, minDeficit, maxDeficit)
 		nw := rangeNormalize(e.headWaitMs, minWait, maxWait)
 		score := s.weightDeficit*nd + s.weightHeadWait*nw
-		scores[e.id] = score
+		scores[id] = score
 		if score > bestScore {
 			bestScore = score
-			best = e.queue
+			best = queues[id].Queue
 		}
 	}
 
@@ -253,22 +245,20 @@ func (s *ServiceStrategy) Name() string { return "service" }
 // First decays every queue's attained service, then uses two-pass adaptive
 // normalization across non-empty queues. The service dimension is inverted
 // so that lower attained service maps to a higher score.
-func (s *ServiceStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
+func (s *ServiceStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
-		queue      flowcontrol.FlowQueueAccessor
-		id         string
 		service    float64
 		headWaitMs float64
 	}
 
 	// Pass 1: decay service for all queues, collect raw values for non-empty.
-	var entries []entry
+	entries := make(map[string]entry)
 	minService, maxService := 0.0, 0.0
 	minWait, maxWait := 0.0, 0.0
 	first := true
 	now := time.Now()
 
-	for _, qi := range queues {
+	for id, qi := range queues {
 		if qi.Metrics == nil {
 			continue
 		}
@@ -289,13 +279,7 @@ func (s *ServiceStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccesso
 			headWaitMs = float64(time.Since(head.EnqueueTime()).Milliseconds())
 		}
 
-		e := entry{
-			queue:      qi.Queue,
-			id:         qi.Queue.FlowKey().ID,
-			service:    service,
-			headWaitMs: headWaitMs,
-		}
-		entries = append(entries, e)
+		entries[id] = entry{service: service, headWaitMs: headWaitMs}
 
 		if first {
 			minService, maxService = service, service
@@ -326,15 +310,15 @@ func (s *ServiceStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccesso
 	var best flowcontrol.FlowQueueAccessor
 	bestScore := math.Inf(-1)
 
-	for _, e := range entries {
+	for id, e := range entries {
 		// Invert service: lower attained service → higher normalized score.
 		ns := 1 - rangeNormalize(e.service, minService, maxService)
 		nw := rangeNormalize(e.headWaitMs, minWait, maxWait)
 		score := s.weightService*ns + s.weightHeadWait*nw
-		scores[e.id] = score
+		scores[id] = score
 		if score > bestScore {
 			bestScore = score
-			best = e.queue
+			best = queues[id].Queue
 		}
 	}
 
@@ -373,20 +357,14 @@ func (s *RRStrategy) Name() string { return "rr" }
 //
 // Collects all program IDs, sorts them, then scores non-empty queues by
 // proximity to the cursor's next position. Updates the cursor to the winner.
-func (s *RRStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
+func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Collect all program IDs for deterministic ordering.
+	// Sort all program IDs for deterministic ordering.
 	allKeys := make([]string, 0, len(queues))
-	queueByID := make(map[string]QueueInfo, len(queues))
-	for _, qi := range queues {
-		if qi.Queue == nil {
-			continue
-		}
-		id := qi.Queue.FlowKey().ID
+	for id := range queues {
 		allKeys = append(allKeys, id)
-		queueByID[id] = qi
 	}
 	slices.Sort(allKeys)
 
@@ -408,20 +386,18 @@ func (s *RRStrategy) Pick(queues []QueueInfo) (flowcontrol.FlowQueueAccessor, ma
 	var best flowcontrol.FlowQueueAccessor
 	bestScore := math.Inf(-1)
 
-	for _, id := range allKeys {
-		qi := queueByID[id]
-		if qi.Len == 0 {
+	for i, id := range allKeys {
+		if queues[id].Len == 0 {
 			continue
 		}
 
-		queueIdx := slices.Index(allKeys, id)
-		distance := (queueIdx - startIndex + numFlows) % numFlows
+		distance := (i - startIndex + numFlows) % numFlows
 		score := float64(numFlows - distance)
 
 		scores[id] = score
 		if score > bestScore {
 			bestScore = score
-			best = qi.Queue
+			best = queues[id].Queue
 		}
 	}
 

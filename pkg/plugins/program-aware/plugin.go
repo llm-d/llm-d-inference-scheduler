@@ -177,17 +177,18 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 
 	strategy := p.getStrategy()
 
-	// Build QueueInfo slice for the strategy.
-	var infos []QueueInfo
+	// Build QueueInfo map for the strategy.
+	infos := make(map[string]QueueInfo)
 	band.IterateQueues(func(queue flowcontrol.FlowQueueAccessor) (keepIterating bool) {
 		if queue == nil {
 			return true
 		}
-		infos = append(infos, QueueInfo{
+		id := queue.FlowKey().ID
+		infos[id] = QueueInfo{
 			Queue:   queue,
-			Metrics: p.getOrCreateMetrics(queue.FlowKey().ID),
+			Metrics: p.getOrCreateMetrics(id),
 			Len:     queue.Len(),
-		})
+		}
 		return true
 	})
 
