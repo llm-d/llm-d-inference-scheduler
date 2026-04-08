@@ -226,7 +226,7 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 		RequestId:   "test-skip-empty",
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
+			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "hello"}},
 		},
 	}
 

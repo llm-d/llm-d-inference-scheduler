@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requestcontrol/dataproducer/approximateprefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 )
 
@@ -66,7 +67,7 @@ func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugin.H
 	}
 
 	if parameters.PrefixPluginName == "" {
-		parameters.PrefixPluginName = prefix.PrefixCachePluginType
+		parameters.PrefixPluginName = prefix.PrefixCacheScorerPluginType
 	}
 
 	// Note: We don't enforce that the prefix plugin exists here
@@ -77,8 +78,8 @@ func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugin.H
 
 // NewNoHitLRU creates a new NoHitLRU scorer
 func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
-	prefixPluginType := prefix.PrefixCachePluginType
-	prefixPluginName := prefix.PrefixCachePluginType
+	prefixPluginType := prefix.PrefixCacheScorerPluginType
+	prefixPluginName := prefix.PrefixCacheScorerPluginType
 	lruSize := defaultLRUSize
 
 	if params != nil {
@@ -140,7 +141,7 @@ func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *scheduling.Cyc
 
 	// Read prefix cache state to determine if this is a cold request
 	// This is treated as an optimization - if the state isn't available, we assume cold request
-	prefixState, err := scheduling.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugin.StateKey(s.prefixPluginTypedName.String()))
+	prefixState, err := scheduling.ReadCycleStateKey[*approximateprefix.SchedulingContextState](cycleState, plugin.StateKey(s.prefixPluginTypedName.String()))
 
 	if err != nil {
 		logger.Info("No prefix cache state found, treating as cold request for LRU optimization", "error", err)

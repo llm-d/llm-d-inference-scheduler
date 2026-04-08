@@ -12,6 +12,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requestcontrol/dataproducer/approximateprefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
@@ -82,7 +83,6 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 			name: "prefix plugin present - should work",
 			handle: func() *fakeHandle {
 				h := newFakeHandle(utils.NewTestContext(t))
-				h.AddPlugin(prefix.PrefixCachePluginType, &stubPlugin{name: plugin.TypedName{Type: prefix.PrefixCachePluginType, Name: prefix.PrefixCachePluginType}})
 				return h
 			}(),
 			expectError: false,
@@ -142,7 +142,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		scorer      scheduling.Scorer
 		req         *scheduling.LLMRequest
 		input       []scheduling.Endpoint
-		prefixState *prefix.SchedulingContextState
+		prefixState *approximateprefix.SchedulingContextState
 		wantScores  map[scheduling.Endpoint]float64
 		description string
 	}{
@@ -153,8 +153,8 @@ func TestNoHitLRUScorer(t *testing.T) {
 				TargetModel: "test-model",
 			},
 			input: []scheduling.Endpoint{endpointA, endpointB, endpointC},
-			prefixState: &prefix.SchedulingContextState{
-				PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
+			prefixState: &approximateprefix.SchedulingContextState{
+				PrefixCacheServers: make(map[approximateprefix.ServerID]int), // empty = cold request
 			},
 			wantScores: map[scheduling.Endpoint]float64{
 				endpointA: 1.0, // All never-used endpoints get high scores
@@ -170,8 +170,8 @@ func TestNoHitLRUScorer(t *testing.T) {
 				TargetModel: "test-model",
 			},
 			input: []scheduling.Endpoint{endpointA, endpointB, endpointC},
-			prefixState: &prefix.SchedulingContextState{
-				PrefixCacheServers: map[prefix.ServerID]int{
+			prefixState: &approximateprefix.SchedulingContextState{
+				PrefixCacheServers: map[approximateprefix.ServerID]int{
 					{Name: "server1", Namespace: "default"}: 5, // non-empty = cache hit
 				},
 			},
@@ -189,8 +189,8 @@ func TestNoHitLRUScorer(t *testing.T) {
 				TargetModel: "test-model",
 			},
 			input: []scheduling.Endpoint{endpointA},
-			prefixState: &prefix.SchedulingContextState{
-				PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
+			prefixState: &approximateprefix.SchedulingContextState{
+				PrefixCacheServers: make(map[approximateprefix.ServerID]int), // empty = cold request
 			},
 			wantScores: map[scheduling.Endpoint]float64{
 				endpointA: 1.0, // Single endpoint gets max score
@@ -204,8 +204,8 @@ func TestNoHitLRUScorer(t *testing.T) {
 			// Create cycle state and set prefix state
 			cycleState := &scheduling.CycleState{}
 			if test.prefixState != nil {
-				cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
-					Name: prefix.PrefixCachePluginType}.String()), test.prefixState)
+				cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCacheScorerPluginType,
+					Name: prefix.PrefixCacheScorerPluginType}.String()), test.prefixState)
 			}
 
 			got := test.scorer.Score(utils.NewTestContext(t), cycleState, test.req, test.input)
@@ -236,12 +236,12 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 	endpoints := []scheduling.Endpoint{endpointA, endpointB}
 
 	// Test basic scoring for cold request (no crashes, returns valid scores)
-	coldPrefixState := &prefix.SchedulingContextState{
-		PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
+	coldPrefixState := &approximateprefix.SchedulingContextState{
+		PrefixCacheServers: make(map[approximateprefix.ServerID]int), // empty = cold request
 	}
 	cycleState := &scheduling.CycleState{}
-	cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
-		Name: prefix.PrefixCachePluginType}.String()), coldPrefixState)
+	cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCacheScorerPluginType,
+		Name: prefix.PrefixCacheScorerPluginType}.String()), coldPrefixState)
 
 	scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, endpoints)
 
@@ -304,10 +304,10 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	endpoints := []scheduling.Endpoint{endpointA, endpointB, endpointC}
 
 	primaryProfile := "primary-profile"
-	toPrefixState := func(entries map[prefix.ServerID]int) *scheduling.CycleState {
+	toPrefixState := func(entries map[approximateprefix.ServerID]int) *scheduling.CycleState {
 		cycle := &scheduling.CycleState{}
-		cycle.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
-			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{PrefixCacheServers: entries})
+		cycle.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCacheScorerPluginType,
+			Name: prefix.PrefixCacheScorerPluginType}.String()), &approximateprefix.SchedulingContextState{PrefixCacheServers: entries})
 		return cycle
 	}
 
@@ -326,7 +326,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	assertHighestScoredPod := func(expectedEndpoint scheduling.Endpoint, testName string) {
 		t.Helper()
 		coldReq := &scheduling.LLMRequest{RequestId: testName + "-scoring-check"}
-		scores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReq, endpoints)
+		scores := scorer.Score(ctx, toPrefixState(make(map[approximateprefix.ServerID]int)), coldReq, endpoints)
 
 		highestScore := -1.0
 		var highestEndpoint scheduling.Endpoint
@@ -348,7 +348,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 
 	t.Run("initial cold request seeds cache", func(_ *testing.T) {
 		coldReqA := &scheduling.LLMRequest{RequestId: "cold-1"}
-		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqA, endpoints)
+		scorer.Score(ctx, toPrefixState(make(map[approximateprefix.ServerID]int)), coldReqA, endpoints)
 		scorer.PreRequest(ctx, coldReqA, requestToEndpoint(endpointA))
 		// After endpointA handles a cold request, other endpoints should score higher for new cold requests
 		assertHighestScoredPod(endpointB, "after-endpointA-used")
@@ -356,7 +356,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 
 	t.Run("unused endpoints rank above existing ones", func(t *testing.T) {
 		coldReqCheck := &scheduling.LLMRequest{RequestId: "cold-check"}
-		coldScores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqCheck, endpoints)
+		coldScores := scorer.Score(ctx, toPrefixState(make(map[approximateprefix.ServerID]int)), coldReqCheck, endpoints)
 		if coldScores[endpointB] <= coldScores[endpointA] {
 			t.Fatalf("expected endpoint-b to outrank endpoint-a after endpoint-a handled previous cold request, scores=%+v", coldScores)
 		}
@@ -370,7 +370,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 
 	t.Run("warm request leaves LRU untouched", func(t *testing.T) {
 		warmReq := &scheduling.LLMRequest{RequestId: "warm-1"}
-		warmState := map[prefix.ServerID]int{
+		warmState := map[approximateprefix.ServerID]int{
 			{Name: "server1", Namespace: "default"}: 1,
 		}
 		warmScores := scorer.Score(ctx, toPrefixState(warmState), warmReq, endpoints)
@@ -381,7 +381,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 		}
 		scorer.PreRequest(ctx, warmReq, requestToEndpoint(endpointB))
 		postWarmReq := &scheduling.LLMRequest{RequestId: "cold-after-warm"}
-		postWarmScores := scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), postWarmReq, endpoints)
+		postWarmScores := scorer.Score(ctx, toPrefixState(make(map[approximateprefix.ServerID]int)), postWarmReq, endpoints)
 		if postWarmScores[endpointB] <= postWarmScores[endpointA] {
 			t.Fatalf("expected warm request to leave ordering unchanged, scores=%+v", postWarmScores)
 		}
@@ -390,7 +390,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	t.Run("second cold request rotates to endpointB", func(_ *testing.T) {
 		// Simulate endpointB handling a cold request
 		coldReqB := &scheduling.LLMRequest{RequestId: "cold-2"}
-		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqB, endpoints)
+		scorer.Score(ctx, toPrefixState(make(map[approximateprefix.ServerID]int)), coldReqB, endpoints)
 		scorer.PreRequest(ctx, coldReqB, requestToEndpoint(endpointB))
 		// Now endpointC should score highest since both endpointA and endpointB have been used
 		assertHighestScoredPod(endpointC, "after-endpointB-used")
@@ -399,7 +399,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	t.Run("third cold request rotates back to endpointA", func(_ *testing.T) {
 		// Simulate endpointC handling a cold request
 		coldReqC := &scheduling.LLMRequest{RequestId: "cold-3"}
-		scorer.Score(ctx, toPrefixState(make(map[prefix.ServerID]int)), coldReqC, endpoints)
+		scorer.Score(ctx, toPrefixState(make(map[approximateprefix.ServerID]int)), coldReqC, endpoints)
 		scorer.PreRequest(ctx, coldReqC, requestToEndpoint(endpointC))
 		// Now endpointA should score highest again (LRU rotation)
 		assertHighestScoredPod(endpointA, "after-endpointC-used")
@@ -419,9 +419,9 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	t.Run("empty endpoints list", func(t *testing.T) {
 		emptyEndpoints := []scheduling.Endpoint{}
 		cycleState := &scheduling.CycleState{}
-		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
-			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
-			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
+		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCacheScorerPluginType,
+			Name: prefix.PrefixCacheScorerPluginType}.String()), &approximateprefix.SchedulingContextState{
+			PrefixCacheServers: make(map[approximateprefix.ServerID]int), // cold request
 		})
 
 		scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, emptyEndpoints)
@@ -433,9 +433,9 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 
 	t.Run("nil endpoints list", func(t *testing.T) {
 		cycleState := &scheduling.CycleState{}
-		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
-			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
-			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
+		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCacheScorerPluginType,
+			Name: prefix.PrefixCacheScorerPluginType}.String()), &approximateprefix.SchedulingContextState{
+			PrefixCacheServers: make(map[approximateprefix.ServerID]int), // cold request
 		})
 
 		scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, nil)
@@ -451,9 +451,9 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 	t.Run("single endpoint returns 1.0", func(t *testing.T) {
 		endpoints := []scheduling.Endpoint{endpointA}
 		cycleState := &scheduling.CycleState{}
-		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCachePluginType,
-			Name: prefix.PrefixCachePluginType}.String()), &prefix.SchedulingContextState{
-			PrefixCacheServers: make(map[prefix.ServerID]int), // cold request
+		cycleState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCacheScorerPluginType,
+			Name: prefix.PrefixCacheScorerPluginType}.String()), &approximateprefix.SchedulingContextState{
+			PrefixCacheServers: make(map[approximateprefix.ServerID]int), // cold request
 		})
 
 		scores := scorer.Score(ctx, cycleState, &scheduling.LLMRequest{}, endpoints)
@@ -493,8 +493,9 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 	decodeEndpoints := []scheduling.Endpoint{decodeEndpointA, decodeEndpointB}
 
 	coldPrefixState := &scheduling.CycleState{}
-	coldPrefixState.Write(plugin.StateKey(prefix.PrefixCachePluginType), &prefix.SchedulingContextState{
-		PrefixCacheServers: make(map[prefix.ServerID]int), // empty = cold request
+	coldPrefixState.Write(plugin.StateKey(plugin.TypedName{Type: prefix.PrefixCacheScorerPluginType,
+		Name: prefix.PrefixCacheScorerPluginType}.String()), &approximateprefix.SchedulingContextState{
+		PrefixCacheServers: make(map[approximateprefix.ServerID]int), // empty = cold request
 	})
 
 	ctx := context.Background()

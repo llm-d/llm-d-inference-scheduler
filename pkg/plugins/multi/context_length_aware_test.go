@@ -278,7 +278,7 @@ func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
-				Prompt: "some prompt text",
+				Prompt: scheduling.Prompt{Raw: "some prompt text"},
 			},
 		},
 	}
@@ -314,7 +314,7 @@ func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
-				Prompt: prompt,
+				Prompt: scheduling.Prompt{Raw: prompt},
 			},
 		},
 	}
