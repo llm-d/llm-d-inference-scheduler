@@ -21,8 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	attrlatency "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/latency"
-	attrprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	attrlatency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/datalayer/attribute/latency"
+	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/datalayer/attribute/prefix"
 )
 
 func TestProducesConsumes(t *testing.T) {

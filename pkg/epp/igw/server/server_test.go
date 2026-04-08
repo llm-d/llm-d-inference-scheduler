@@ -28,12 +28,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requesthandling/parsers/openai"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
-	testutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/requesthandling/parsers/openai"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/handlers"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/metadata"
+	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/testing"
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 

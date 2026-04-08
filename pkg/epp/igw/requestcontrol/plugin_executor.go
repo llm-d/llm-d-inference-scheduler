@@ -21,8 +21,8 @@ import (
 	"errors"
 	"time"
 
-	fwk "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	fwk "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/requestcontrol"
+	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 // executePluginsAsDAG executes PrepareData plugins as a DAG based on their dependencies asynchronously.

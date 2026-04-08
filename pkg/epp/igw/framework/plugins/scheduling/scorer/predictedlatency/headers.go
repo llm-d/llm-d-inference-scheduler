@@ -21,7 +21,7 @@ import (
 	"strconv"
 
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
-	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 // parseFloatHeader retrieves a header by name, parses it as a float64,

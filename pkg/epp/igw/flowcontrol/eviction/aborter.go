@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
 )
 
 // Aborter handles aborting an in-flight request on a model server.

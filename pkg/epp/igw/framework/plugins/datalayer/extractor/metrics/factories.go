@@ -24,7 +24,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/plugin"
 )
 
 const (

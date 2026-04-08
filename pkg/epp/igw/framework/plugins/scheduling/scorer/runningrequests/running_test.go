@@ -22,8 +22,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	fwksched "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 func TestRunningRequestsSizeScorer(t *testing.T) {

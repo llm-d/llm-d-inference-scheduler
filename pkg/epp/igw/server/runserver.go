@@ -36,14 +36,14 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/internal/runnable"
 	tlsutil "sigs.k8s.io/gateway-api-inference-extension/internal/tls"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/controller"
-	datalayerlogger "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/logger"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
-	fwkflowcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/requestcontrol"
+	backendmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/backend/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/controller"
+	datalayerlogger "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datalayer/logger"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datastore"
+	fwkflowcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/handlers"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/requestcontrol"
 )
 
 // ExtProcServerRunner provides methods to manage an external process server.

@@ -21,7 +21,7 @@ import (
 	compbasemetrics "k8s.io/component-base/metrics"
 
 	metricsutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datastore"
 )
 
 var (

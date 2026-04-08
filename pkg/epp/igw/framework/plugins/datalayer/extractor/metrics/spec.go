@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 
-	sourcemetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/metrics"
+	sourcemetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/datalayer/source/metrics"
 )
 
 // Spec represents a single metric's specification.

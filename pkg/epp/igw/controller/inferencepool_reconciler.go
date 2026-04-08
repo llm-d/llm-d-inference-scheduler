@@ -27,8 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
-	pooltuil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pool"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datastore"
+	pooltuil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/pool"
 )
 
 // InferencePoolReconciler utilizes the controller runtime to reconcile Instance Gateway resources

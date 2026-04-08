@@ -28,9 +28,9 @@ import (
 	"k8s.io/utils/clock"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/framework/plugins/queue"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/contracts"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/framework/plugins/queue"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
 )
 
 // propagateStatsDeltaFunc defines the callback function used to propagate statistics changes (deltas) up the hierarchy

@@ -26,13 +26,13 @@ import (
 
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts/mocks"
-	fctypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
+	backendmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/backend/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/contracts/mocks"
+	fctypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/types"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
+	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/handlers"
 )
 
 // --- Mocks ---

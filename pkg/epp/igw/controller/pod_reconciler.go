@@ -29,8 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
-	podutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pod"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datastore"
+	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/pod"
 )
 
 type PodReconciler struct {

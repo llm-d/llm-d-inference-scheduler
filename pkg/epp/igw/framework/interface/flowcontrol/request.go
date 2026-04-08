@@ -19,7 +19,7 @@ package flowcontrol
 import (
 	"time"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 // FlowControlRequest is the contract for an incoming request submitted to the `controller.FlowController`. It

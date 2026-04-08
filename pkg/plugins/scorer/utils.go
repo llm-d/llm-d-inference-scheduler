@@ -3,7 +3,7 @@ package scorer
 import (
 	"math"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 // endpointToKey is a function type that converts a Pod to a string key.

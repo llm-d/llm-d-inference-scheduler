@@ -17,11 +17,11 @@ limitations under the License.
 package config
 
 import (
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol"
-	fwkflowcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol"
+	fwkflowcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/handlers"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/scheduling"
 )
 
 // Config is the configuration loaded from the text based configuration

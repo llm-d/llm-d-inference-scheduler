@@ -23,11 +23,11 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	fwkfcmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol/mocks"
-	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	fwkrc "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	fwksch "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol/mocks"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/plugin"
+	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/requestcontrol"
+	fwksch "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 const mockProducedDataKey = "mockProducedData"

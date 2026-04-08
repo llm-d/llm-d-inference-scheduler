@@ -28,9 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/types"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer/mocks"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	datasourcemocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/mocks"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datalayer/mocks"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	datasourcemocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/datalayer/source/mocks"
 )
 
 // errSource is a test stub that returns a configurable error from Poll.

@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
 )
 
 // BindNotificationSource registers a watcher/reconciler for the source's GVK.

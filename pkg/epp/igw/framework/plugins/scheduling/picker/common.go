@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	types "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	types "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 const (

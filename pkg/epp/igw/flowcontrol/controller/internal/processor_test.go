@@ -33,15 +33,15 @@ import (
 	testclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/flowcontrol/usagelimits"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/flowcontrol/usagelimits"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts/mocks"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	fwmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol/mocks"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/backend/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/contracts"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/contracts/mocks"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/types"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
+	fwmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol/mocks"
 )
 
 const (

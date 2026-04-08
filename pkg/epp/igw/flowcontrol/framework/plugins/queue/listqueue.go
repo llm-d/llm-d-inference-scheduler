@@ -23,8 +23,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/contracts"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
 )
 
 // ListQueueName is the name of the list-based queue implementation.

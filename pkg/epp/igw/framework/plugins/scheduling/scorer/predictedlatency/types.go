@@ -18,7 +18,7 @@ limitations under the License.
 package predictedlatency
 
 import (
-	fwksched "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
 )
 
 type headroomStrategy string

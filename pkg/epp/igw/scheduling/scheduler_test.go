@@ -27,14 +27,14 @@ import (
 
 	// Import config for thresholds
 
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	fwksched "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/picker"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/profile"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/loraaffinity"
-	schedprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/picker"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/profile"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/scorer/kvcacheutilization"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/scorer/loraaffinity"
+	schedprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/scorer/prefix"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/scorer/queuedepth"
 )
 
 // Tests the default scheduler configuration and expected behavior.

@@ -25,12 +25,12 @@ import (
 
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
-	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/contracts"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/types"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/handlers"
+	requtil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/request"
 )
 
 // AdmissionController defines the interface for making admission control decisions.

@@ -26,8 +26,8 @@ import (
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 
 	envoy "sigs.k8s.io/gateway-api-inference-extension/pkg/common/envoy"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/request"
 )
 
 // HandleResponseBody processes response data for both streaming and non-streaming models.

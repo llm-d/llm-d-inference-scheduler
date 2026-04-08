@@ -36,9 +36,9 @@ import (
 
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	podutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pod"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datalayer"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/pod"
 )
 
 var (

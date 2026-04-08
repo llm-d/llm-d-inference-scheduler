@@ -39,12 +39,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/mocks"
-	pooltuil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pool"
-	testutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
+	backendmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/backend/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datalayer"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/datalayer/source/mocks"
+	pooltuil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/pool"
+	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/testing"
 )
 
 func TestPoolGet_NoDeadlockWithConcurrentWrite(t *testing.T) {

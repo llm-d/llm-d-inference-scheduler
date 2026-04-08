@@ -25,9 +25,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/types"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/metrics"
 )
 
 // FinalState encapsulates the terminal outcome of a FlowItem's lifecycle.

@@ -21,9 +21,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requestcontrol/test"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/requestcontrol/test"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/metadata"
 )
 
 func TestDestinationEndpointServedVerifier_ResponseReceived(t *testing.T) {

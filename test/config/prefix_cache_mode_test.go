@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config/loader"
-	giePlugins "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/config/loader"
+	giePlugins "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"

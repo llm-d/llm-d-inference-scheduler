@@ -27,9 +27,9 @@ import (
 	"testing"
 	"time"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/controller"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/types"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/controller"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/flowcontrol/types"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/flowcontrol"
 )
 
 // BenchmarkFlowController_PerformanceMatrix evaluates throughput across a matrix of variables.

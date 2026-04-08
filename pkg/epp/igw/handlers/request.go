@@ -30,8 +30,8 @@ import (
 
 	envoy "sigs.k8s.io/gateway-api-inference-extension/pkg/common/envoy"
 	errcommon "sigs.k8s.io/gateway-api-inference-extension/pkg/common/error"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/metadata"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/request"
 )
 
 func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *RequestContext, req *extProcPb.ProcessingRequest_RequestHeaders) error {

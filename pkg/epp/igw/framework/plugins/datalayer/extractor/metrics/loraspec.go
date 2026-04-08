@@ -21,7 +21,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 
-	sourcemetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/source/metrics"
+	sourcemetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/datalayer/source/metrics"
 )
 
 // LoRASpec extends the standard Spec to allow special case

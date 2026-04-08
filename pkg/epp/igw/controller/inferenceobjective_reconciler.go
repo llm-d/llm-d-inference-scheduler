@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datastore"
 )
 
 type InferenceObjectiveReconciler struct {

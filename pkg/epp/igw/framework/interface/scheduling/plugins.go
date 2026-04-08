@@ -19,7 +19,7 @@ package scheduling
 import (
 	"context"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/plugin"
 )
 
 // ScorerCategory marks the preference a scorer applies when scoring candidate endpoints.

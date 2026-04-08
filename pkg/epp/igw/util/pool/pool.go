@@ -18,7 +18,7 @@ package pool
 
 import (
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/datalayer"
 )
 
 func InferencePoolToEndpointPool(inferencePool *v1.InferencePool) *datalayer.EndpointPool {
