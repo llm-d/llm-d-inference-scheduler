@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 
 	// Note: Adjust these imports if your local aliases differ
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	fwkrc "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
@@ -374,5 +375,16 @@ func TestVllmGRPCParser_ParseResponse(t *testing.T) {
 				t.Errorf("ParseResponse() mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestVllmGRPCParser_SupportedAppProtocols(t *testing.T) {
+	parser := NewVllmGRPCParser()
+
+	supported := parser.SupportedAppProtocols()
+	want := []v1.AppProtocol{v1.AppProtocolH2C}
+
+	if diff := cmp.Diff(want, supported); diff != "" {
+		t.Errorf("SupportedAppProtocols() mismatch (-want +got):\n%s", diff)
 	}
 }

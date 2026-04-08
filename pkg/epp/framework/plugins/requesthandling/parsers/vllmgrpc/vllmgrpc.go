@@ -25,6 +25,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
@@ -73,6 +74,10 @@ func (p *VllmGRPCParser) WithName(name string) *VllmGRPCParser {
 // TypedName returns the type and name tuple of this plugin instance.
 func (p *VllmGRPCParser) TypedName() fwkplugin.TypedName {
 	return p.typedName
+}
+
+func (p *VllmGRPCParser) SupportedAppProtocols() []v1.AppProtocol {
+	return []v1.AppProtocol{v1.AppProtocolH2C}
 }
 
 // ParseRequest parses the gRPC request body and headers and returns an LLMRequestBody.

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	fwkrc "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
@@ -76,6 +77,10 @@ func NewOpenAIParser() *OpenAIParser {
 // TypedName returns the type and name tuple of this plugin instance.
 func (p *OpenAIParser) TypedName() fwkplugin.TypedName {
 	return p.typedName
+}
+
+func (p *OpenAIParser) SupportedAppProtocols() []v1.AppProtocol {
+	return []v1.AppProtocol{v1.AppProtocolH2C, v1.AppProtocolHTTP}
 }
 
 func OpenAIParserPluginFactory(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {

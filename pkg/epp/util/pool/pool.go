@@ -39,6 +39,7 @@ func InferencePoolToEndpointPool(inferencePool *v1.InferencePool) *datalayer.End
 		TargetPorts: targetPorts,
 		Namespace:   inferencePool.Namespace,
 		Name:        inferencePool.Name,
+		AppProtocol: inferencePool.Spec.AppProtocol,
 	}
 	return endpointPool
 }

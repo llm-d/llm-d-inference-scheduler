@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
 	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
@@ -990,6 +991,16 @@ func TestOpenAIParser_ParseResponse_Streaming(t *testing.T) {
 				t.Errorf("ParseStreamResponse() mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestOpenAIParser_SupportedAppProtocols(t *testing.T) {
+	parser := NewOpenAIParser()
+	supported := parser.SupportedAppProtocols()
+	want := []v1.AppProtocol{v1.AppProtocolH2C, v1.AppProtocolHTTP}
+
+	if diff := cmp.Diff(want, supported); diff != "" {
+		t.Errorf("SupportedAppProtocols() mismatch (-want +got):\n%s", diff)
 	}
 }
 
