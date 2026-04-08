@@ -568,7 +568,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
 				IndexerConfig:  kvcacheConfig,
 				KVEventsConfig: kvevents.DefaultConfig(),
-			})
+			}, nil)
 			require.NoError(t, err)
 			require.NotNil(t, prefixCacheScorer)
 
@@ -625,7 +625,7 @@ func newTestScorer(t *testing.T) *PrecisePrefixCacheScorer {
 		KVEventsConfig:      kvevents.DefaultConfig(),
 		SpeculativeIndexing: true,
 		SpeculativeTTL:      "5s",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, scorer)
 	return scorer
@@ -862,7 +862,7 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 		KVEventsConfig:      kvevents.DefaultConfig(),
 		SpeculativeIndexing: true,
 		SpeculativeTTL:      "200ms",
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
