@@ -42,8 +42,8 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 			weightHeadWait: floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
 			quantumTokens:  int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
 		}, nil
-	case "", "service":
-		return &ServiceStrategy{
+	case "", "las":
+		return &LASStrategy{
 			weightService:   floatOr(cfg.WeightService, defaultServiceWeightService),
 			weightHeadWait:  floatOr(cfg.WeightServiceHeadWait, defaultServiceWeightHeadWait),
 			decayFactor:     floatOr(cfg.ServiceDecayFactor, defaultServiceDecayFactor),
@@ -52,7 +52,7 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 	case "rr":
 		return &RRStrategy{}, nil
 	default:
-		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"drr\", \"service\", \"rr\"", cfg.Strategy)
+		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"drr\", \"las\", \"rr\"", cfg.Strategy)
 	}
 }
 
@@ -184,9 +184,9 @@ func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 	bestScore := math.Inf(-1)
 
 	for id, e := range entries {
-		nd := rangeNormalize(e.deficit, minDeficit, maxDeficit)
-		nw := rangeNormalize(e.headWaitMs, minWait, maxWait)
-		score := s.weightDeficit*nd + s.weightHeadWait*nw
+		normDeficit := rangeNormalize(e.deficit, minDeficit, maxDeficit)
+		normWait := rangeNormalize(e.headWaitMs, minWait, maxWait)
+		score := s.weightDeficit*normDeficit + s.weightHeadWait*normWait
 		scores[id] = score
 		if score > bestScore {
 			bestScore = score
@@ -206,17 +206,17 @@ func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, complet
 }
 
 // =============================================================================
-// Service Strategy
+// LAS (Least Attained Service) Strategy
 // =============================================================================
 
-// Default Service strategy values.
+// Default LAS strategy values.
 const (
 	defaultServiceWeightService  float64 = 0.8
 	defaultServiceWeightHeadWait float64 = 0.2
 	defaultServiceDecayFactor    float64 = 0.995
 )
 
-// ServiceStrategy scores queues by equalizing attained service (weighted tokens
+// LASStrategy scores queues by equalizing attained service (weighted tokens
 // consumed) across programs. Programs with lower attained service receive higher
 // scores, directly targeting fair resource allocation.
 //
@@ -230,7 +230,7 @@ const (
 // weighted token cost is added to the program's attained service.
 //
 // Weights and decay factor are configurable via the plugin config.
-type ServiceStrategy struct {
+type LASStrategy struct {
 	weightService   float64
 	weightHeadWait  float64
 	decayFactor     float64
@@ -238,14 +238,14 @@ type ServiceStrategy struct {
 }
 
 // Name returns "service".
-func (s *ServiceStrategy) Name() string { return "service" }
+func (s *LASStrategy) Name() string { return "las" }
 
 // Pick selects the queue with the lowest attained service (highest need).
 //
 // First decays every queue's attained service, then uses two-pass adaptive
 // normalization across non-empty queues. The service dimension is inverted
 // so that lower attained service maps to a higher score.
-func (s *ServiceStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
+func (s *LASStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
 		service    float64
 		headWaitMs float64
@@ -312,9 +312,9 @@ func (s *ServiceStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQue
 
 	for id, e := range entries {
 		// Invert service: lower attained service → higher normalized score.
-		ns := 1 - rangeNormalize(e.service, minService, maxService)
-		nw := rangeNormalize(e.headWaitMs, minWait, maxWait)
-		score := s.weightService*ns + s.weightHeadWait*nw
+		normService := 1 - rangeNormalize(e.service, minService, maxService)
+		normWait := rangeNormalize(e.headWaitMs, minWait, maxWait)
+		score := s.weightService*normService + s.weightHeadWait*normWait
 		scores[id] = score
 		if score > bestScore {
 			bestScore = score
@@ -326,7 +326,7 @@ func (s *ServiceStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQue
 }
 
 // OnCompleted accumulates the weighted token cost into the program's attained service.
-func (s *ServiceStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
+func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
 	if metrics == nil {
 		return
 	}

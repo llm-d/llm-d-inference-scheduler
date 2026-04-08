@@ -25,13 +25,13 @@ func TestNewStrategy_Valid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "drr", s.Name())
 
-	s, err = newStrategy(Config{Strategy: "service"})
+	s, err = newStrategy(Config{Strategy: "las"})
 	require.NoError(t, err)
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 
 	s, err = newStrategy(Config{Strategy: ""})
 	require.NoError(t, err)
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 }
 
 func TestNewStrategy_Invalid(t *testing.T) {
@@ -51,7 +51,7 @@ func TestFactory_DefaultStrategy(t *testing.T) {
 	p, err := ProgramAwarePluginFactory("test", nil, nil)
 	require.NoError(t, err)
 	plugin := p.(*ProgramAwarePlugin)
-	assert.Equal(t, "service", plugin.strategy.Name())
+	assert.Equal(t, "las", plugin.strategy.Name())
 }
 
 func TestFactory_InvalidStrategy(t *testing.T) {
@@ -221,24 +221,24 @@ func TestDRR_Pick_TokenHeavyProgramDeprioritized(t *testing.T) {
 }
 
 // =============================================================================
-// Service Strategy tests
+// LAS Strategy tests
 // =============================================================================
 
-// testService returns a ServiceStrategy with default weights for tests.
-func testService() *ServiceStrategy {
-	return &ServiceStrategy{
+// testService returns a LASStrategy with default weights for tests.
+func testService() *LASStrategy {
+	return &LASStrategy{
 		weightService:  defaultServiceWeightService,
 		weightHeadWait: defaultServiceWeightHeadWait,
 		decayFactor:    defaultServiceDecayFactor,
 	}
 }
 
-func TestServiceStrategy_Name(t *testing.T) {
+func TestLASStrategy_Name(t *testing.T) {
 	s := testService()
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 }
 
-func TestServiceStrategy_Pick_DecaysService(t *testing.T) {
+func TestLASStrategy_Pick_DecaysService(t *testing.T) {
 	s := testService()
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
@@ -251,7 +251,7 @@ func TestServiceStrategy_Pick_DecaysService(t *testing.T) {
 		"Pick should decay attained service")
 }
 
-func TestServiceStrategy_OnCompleted_AddsService(t *testing.T) {
+func TestLASStrategy_OnCompleted_AddsService(t *testing.T) {
 	s := testService()
 	m := &ProgramMetrics{}
 
@@ -261,7 +261,7 @@ func TestServiceStrategy_OnCompleted_AddsService(t *testing.T) {
 		"OnCompleted should add weighted token cost to attained service")
 }
 
-func TestServiceStrategy_Pick_PreferLowService(t *testing.T) {
+func TestLASStrategy_Pick_PreferLowService(t *testing.T) {
 	s := testService()
 	now := time.Now()
 
@@ -283,7 +283,7 @@ func TestServiceStrategy_Pick_PreferLowService(t *testing.T) {
 		"underserved queue should outscore overserved queue")
 }
 
-func TestServiceStrategy_Pick_ColdStartUsesHeadWait(t *testing.T) {
+func TestLASStrategy_Pick_ColdStartUsesHeadWait(t *testing.T) {
 	s := testService()
 
 	mOld := &ProgramMetrics{}
@@ -301,7 +301,7 @@ func TestServiceStrategy_Pick_ColdStartUsesHeadWait(t *testing.T) {
 		"with zero service, longer-waiting queue should outscore newer queue")
 }
 
-func TestServiceStrategy_DecayForgetsOldService(t *testing.T) {
+func TestLASStrategy_DecayForgetsOldService(t *testing.T) {
 	s := testService()
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
@@ -317,28 +317,28 @@ func TestServiceStrategy_DecayForgetsOldService(t *testing.T) {
 		"after 1000 decay cycles, attained service should be nearly forgotten")
 }
 
-func TestNewStrategy_Service(t *testing.T) {
-	s, err := newStrategy(Config{Strategy: "service"})
+func TestNewStrategy_LAS(t *testing.T) {
+	s, err := newStrategy(Config{Strategy: "las"})
 	require.NoError(t, err)
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 }
 
-func TestFactory_ServiceStrategy(t *testing.T) {
-	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"service"}`), nil)
+func TestFactory_LASStrategy(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"las"}`), nil)
 	require.NoError(t, err)
 	plugin := p.(*ProgramAwarePlugin)
-	assert.Equal(t, "service", plugin.strategy.Name())
+	assert.Equal(t, "las", plugin.strategy.Name())
 }
 
-func testServiceTimed(halfLife float64) *ServiceStrategy {
-	return &ServiceStrategy{
+func testServiceTimed(halfLife float64) *LASStrategy {
+	return &LASStrategy{
 		weightService:   defaultServiceWeightService,
 		weightHeadWait:  defaultServiceWeightHeadWait,
 		halfLifeSeconds: halfLife,
 	}
 }
 
-func TestServiceStrategy_TimedDecay_FirstCallNoDecay(t *testing.T) {
+func TestLASStrategy_TimedDecay_FirstCallNoDecay(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
 
@@ -348,19 +348,19 @@ func TestServiceStrategy_TimedDecay_FirstCallNoDecay(t *testing.T) {
 		"first timed decay call should not reduce service")
 }
 
-func TestServiceStrategy_TimedDecay_HalvesAtHalfLife(t *testing.T) {
+func TestLASStrategy_TimedDecay_HalvesAtHalfLife(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
 
 	now := time.Now()
-	m.DecayServiceTimed(30.0, now)                        // initialize lastDecayTime
+	m.DecayServiceTimed(30.0, now)                     // initialize lastDecayTime
 	m.DecayServiceTimed(30.0, now.Add(30*time.Second)) // exactly one half-life later
 
 	assert.InDelta(t, 500.0, m.AttainedService(), 1.0,
 		"service should halve after exactly one half-life")
 }
 
-func TestServiceStrategy_TimedDecay_ConsistentWindow(t *testing.T) {
+func TestLASStrategy_TimedDecay_ConsistentWindow(t *testing.T) {
 	// Whether we call DecayServiceTimed once after 30s or 100 times over 30s,
 	// the result should be the same.
 	m1 := &ProgramMetrics{}
@@ -382,7 +382,7 @@ func TestServiceStrategy_TimedDecay_ConsistentWindow(t *testing.T) {
 		"time-based decay should produce same result regardless of call frequency")
 }
 
-func TestServiceStrategy_Pick_UsesTimedDecay(t *testing.T) {
+func TestLASStrategy_Pick_UsesTimedDecay(t *testing.T) {
 	s := testServiceTimed(30.0)
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
@@ -395,10 +395,10 @@ func TestServiceStrategy_Pick_UsesTimedDecay(t *testing.T) {
 }
 
 func TestFactory_ServiceHalfLifeSeconds(t *testing.T) {
-	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"service","serviceHalfLifeSeconds":30}`), nil)
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"las","serviceHalfLifeSeconds":30}`), nil)
 	require.NoError(t, err)
 	plugin := p.(*ProgramAwarePlugin)
-	svc := plugin.strategy.(*ServiceStrategy)
+	svc := plugin.strategy.(*LASStrategy)
 	assert.Equal(t, 30.0, svc.halfLifeSeconds)
 }
 
