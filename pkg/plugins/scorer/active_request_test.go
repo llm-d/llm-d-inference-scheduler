@@ -164,25 +164,53 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	})
 }
 
-func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
+func TestActiveRequestScorer_ResponseBody(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := NewActiveRequest(ctx, nil)
-
 	endpointA := newTestEndpoint("pod-a", 2)
-	request := newTestRequest("test-request-1")
 
-	// Setup initial state: add request through PreRequest
-	schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
-		"test-profile": endpointA,
-	})
-	scorer.PreRequest(ctx, request, schedulingResult)
+	tests := []struct {
+		name            string
+		requestID       string
+		endOfStream     bool
+		wantInCache     bool
+		wantHasPodCount bool
+		wantPodCount    int
+	}{
+		{
+			name:            "Response complete (EndOfStream=true)",
+			requestID:       "test-request-1",
+			endOfStream:     true,
+			wantInCache:     false,
+			wantHasPodCount: false,
+		},
+		{
+			name:            "Response incomplete (EndOfStream=false)",
+			requestID:       "test-request-2",
+			endOfStream:     false,
+			wantInCache:     true,
+			wantHasPodCount: true,
+			wantPodCount:    1,
+		},
+	}
 
-	// Call ResponseComplete
-	scorer.ResponseComplete(ctx, request, &requestcontrol.Response{}, endpointA.GetMetadata())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scorer := NewActiveRequest(ctx, nil)
+			request := newTestRequest(tt.requestID)
+			schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
+				"test-profile": endpointA,
+			})
+			scorer.PreRequest(ctx, request, schedulingResult)
 
-	assert.False(t, scorer.requestCache.Has(request.RequestId))
-	assert.False(t, scorer.hasPodCount(endpointA.GetMetadata().NamespacedName.String()),
-		"Pod count should be removed after decrement to zero")
+			scorer.ResponseBody(ctx, request, &requestcontrol.Response{EndOfStream: tt.endOfStream}, endpointA.GetMetadata())
+
+			assert.Equal(t, tt.wantInCache, scorer.requestCache.Has(request.RequestId))
+			assert.Equal(t, tt.wantHasPodCount, scorer.hasPodCount(endpointA.GetMetadata().NamespacedName.String()))
+			if tt.wantHasPodCount {
+				assert.Equal(t, tt.wantPodCount, scorer.getPodCount(endpointA.GetMetadata().NamespacedName.String()))
+			}
+		})
+	}
 }
 
 func TestActiveRequestScorer_TTLExpiration(t *testing.T) {

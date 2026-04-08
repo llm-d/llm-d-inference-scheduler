@@ -76,7 +76,7 @@ func (s endpointScores) MarshalLog() interface{} {
 // compile-time type assertion
 var _ scheduling.Scorer = &ActiveRequest{}
 var _ requestcontrol.PreRequest = &ActiveRequest{}
-var _ requestcontrol.ResponseComplete = &ActiveRequest{}
+var _ requestcontrol.ResponseBody = &ActiveRequest{}
 
 // ActiveRequestFactory defines the factory function for the ActiveRequest scorer.
 func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
@@ -260,18 +260,22 @@ func (s *ActiveRequest) PreRequest(
 	s.requestCache.Set(request.RequestId, &requestEntry{PodNames: endpointNames, RequestID: request.RequestId}, 0) // Use default TTL
 }
 
-// ResponseComplete is called after a response is sent to the client.
+// ResponseBody is called after a response is sent to the client.
 // It removes the specific request entry from the cache and decrements
 // the endpoint count.
-func (s *ActiveRequest) ResponseComplete(
+func (s *ActiveRequest) ResponseBody(
 	ctx context.Context,
 	request *scheduling.LLMRequest,
-	_ *requestcontrol.Response,
+	resp *requestcontrol.Response,
 	targetPod *datalayer.EndpointMetadata,
 ) {
-	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.ResponseComplete")
+	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.ResponseBody")
+	if !resp.EndOfStream {
+		debugLogger.Info("Skipping ResponseBody because EndOfStream is false")
+		return
+	}
 	if targetPod == nil {
-		debugLogger.Info("Skipping ResponseComplete because targetPod is nil")
+		debugLogger.Info("Skipping ResponseBody because targetPod is nil")
 		return
 	}
 
