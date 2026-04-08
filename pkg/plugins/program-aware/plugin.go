@@ -1,5 +1,5 @@
 // Package programaware implements a flow-control fairness policy that schedules
-// programs using their accumulated metrics using scoring strategies (EWMA or DRR).
+// programs using their accumulated metrics using scoring strategies (LAS, DRR, or RR).
 package programaware
 
 import (
@@ -30,9 +30,9 @@ const (
 // Config holds the JSON-decoded configuration for the plugin.
 type Config struct {
 	// Strategy selects the fairness scoring algorithm used by Pick().
-	// Valid values: "service" (default), "drr", "rr".
+	// Valid values: "las" (default), "drr", "rr".
 	//
-	//   "service" — attained service fairness: tracks time-decayed weighted tokens
+	//   "las"    — attained service fairness: tracks time-decayed weighted tokens
 	//              consumed per program. Programs with lower attained service are
 	//              promoted. Directly targets fair resource allocation.
 	//
@@ -60,7 +60,7 @@ type Config struct {
 	// Default: 1000.
 	QuantumTokens *int64 `json:"quantumTokens,omitempty"`
 
-	// --- Service weights (only used when strategy == "service") ---
+	// --- Service weights (only used when strategy == "las") ---
 
 	// WeightService is the weight for the inverted attained service signal.
 	// Programs with lower attained service score higher. Default: 0.8.
@@ -96,7 +96,7 @@ var (
 //
 //nolint:revive
 func ProgramAwarePluginFactory(name string, rawCfg json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	cfg := Config{Strategy: "service"}
+	cfg := Config{Strategy: "las"}
 	if len(rawCfg) > 0 {
 		if err := json.Unmarshal(rawCfg, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid config for %s plugin %q: %w", ProgramAwarePluginType, name, err)
@@ -115,7 +115,7 @@ func ProgramAwarePluginFactory(name string, rawCfg json.RawMessage, _ plugin.Han
 // ProgramAwarePlugin implements a FairnessPolicy that selects which program's
 // queue to service next, and request lifecycle hooks that track per-program metrics.
 //
-// Fairness behaviour is determined by the configured ScoringStrategy (default: EWMA).
+// Fairness behaviour is determined by the configured ScoringStrategy (default: LAS).
 // Program identity comes from the x-gateway-inference-fairness-id request header.
 //
 //nolint:revive
@@ -141,11 +141,11 @@ func (p *ProgramAwarePlugin) TypedName() plugin.TypedName {
 	}
 }
 
-// getStrategy returns the configured strategy, falling back to Service for zero-value
+// getStrategy returns the configured strategy, falling back to LAS for zero-value
 // plugin instances constructed directly in tests.
 func (p *ProgramAwarePlugin) getStrategy() ScoringStrategy {
 	if p.strategy == nil {
-		return &ServiceStrategy{
+		return &LASStrategy{
 			weightService:  defaultServiceWeightService,
 			weightHeadWait: defaultServiceWeightHeadWait,
 			decayFactor:    defaultServiceDecayFactor,
