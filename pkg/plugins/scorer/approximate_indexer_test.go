@@ -3,6 +3,7 @@ package scorer
 import (
 	"sync"
 	"testing"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/assert"
@@ -14,7 +15,7 @@ func newTestIndexer(size int) *approximateIndexer {
 	// Create indexer without background goroutine for tests.
 	return &approximateIndexer{
 		hashToPods:     make(map[ApproximateBlockHash]podSet),
-		podToLRU:       make(map[ApproximateServerID]*lru.Cache[ApproximateBlockHash, struct{}]),
+		podToLRU:       make(map[ApproximateServerID]*lru.Cache[ApproximateBlockHash, time.Time]),
 		defaultLRUSize: size,
 	}
 }
@@ -310,4 +311,79 @@ func TestApproxIndexer_GetReturnsCopy(t *testing.T) {
 	// Original should be intact
 	ps2 := idx.Get(1)
 	assert.Contains(t, ps2, server)
+}
+
+func TestApproxIndexer_GetWithTimestamp(t *testing.T) {
+	idx := newTestIndexer(100)
+	server := serverID("pod-a")
+
+	before := time.Now()
+	idx.Add([]ApproximateBlockHash{1}, server, 0)
+	after := time.Now()
+
+	ts := idx.GetWithTimestamp(1)
+	require.Len(t, ts, 1)
+	assert.True(t, !ts[server].Before(before) && !ts[server].After(after),
+		"timestamp should be between before and after Add()")
+
+	// Non-existent hash
+	assert.Nil(t, idx.GetWithTimestamp(999))
+}
+
+func TestApproxIndexer_MatchLongestPrefixWeighted(t *testing.T) {
+	idx := newTestIndexer(100)
+	server := serverID("pod-a")
+
+	// Add hashes with known timestamps
+	idx.Add([]ApproximateBlockHash{1, 2, 3}, server, 0)
+
+	now := time.Now()
+	halfLife := 30 * time.Second
+
+	// All entries are fresh (just added) → weights should be close to 1.0 each
+	result := idx.MatchLongestPrefixWeighted([]ApproximateBlockHash{1, 2, 3}, now, halfLife)
+	// 3 blocks, each ~1.0 weight → total ~3.0
+	assert.InDelta(t, 3.0, result[server], 0.1,
+		"fresh entries should have weights close to 1.0 each")
+}
+
+func TestApproxIndexer_MatchLongestPrefixWeighted_Decay(t *testing.T) {
+	idx := newTestIndexer(100)
+	server := serverID("pod-a")
+
+	idx.Add([]ApproximateBlockHash{1, 2, 3}, server, 0)
+
+	// Simulate scoring 30 seconds later (exactly one half-life)
+	futureNow := time.Now().Add(30 * time.Second)
+	halfLife := 30 * time.Second
+
+	result := idx.MatchLongestPrefixWeighted([]ApproximateBlockHash{1, 2, 3}, futureNow, halfLife)
+	// age ≈ 30s, halfLife = 30s → weight per block ≈ 0.5
+	// total ≈ 3 * 0.5 = 1.5
+	assert.InDelta(t, 1.5, result[server], 0.1,
+		"at exactly one half-life, each block should contribute ~0.5")
+}
+
+func TestApproxIndexer_MatchLongestPrefixWeighted_Empty(t *testing.T) {
+	idx := newTestIndexer(100)
+	result := idx.MatchLongestPrefixWeighted(nil, time.Now(), 30*time.Second)
+	assert.Empty(t, result)
+
+	result = idx.MatchLongestPrefixWeighted([]ApproximateBlockHash{1}, time.Now(), 0)
+	assert.Empty(t, result, "zero half-life should return empty")
+}
+
+func TestApproxIndexer_MatchLongestPrefixWeighted_MidStreamJoin(t *testing.T) {
+	idx := newTestIndexer(100)
+	serverA := serverID("pod-a")
+	serverC := serverID("pod-c")
+
+	idx.Add([]ApproximateBlockHash{1, 2, 3}, serverA, 0)
+	idx.Add([]ApproximateBlockHash{2, 3}, serverC, 0) // missing first hash
+
+	result := idx.MatchLongestPrefixWeighted(
+		[]ApproximateBlockHash{1, 2, 3}, time.Now(), 30*time.Second)
+
+	assert.Greater(t, result[serverA], 0.0, "serverA should have score")
+	assert.Equal(t, 0.0, result[serverC], "serverC missing first hash should have 0")
 }

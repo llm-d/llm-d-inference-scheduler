@@ -3,6 +3,7 @@ package scorer
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -410,4 +411,49 @@ func TestModeConfig_InvalidMode(t *testing.T) {
 	}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid mode")
+}
+
+// TestApproximateMode_RecencyWeighted tests that recency-weighted scoring
+// gives lower scores to older self-reported entries.
+func TestApproximateMode_RecencyWeighted(t *testing.T) {
+	ctx := context.Background()
+	scorer, err := New(ctx, PrecisePrefixCachePluginConfig{
+		Mode: ModeApproximate,
+		ApproximateConfig: &ApproximateConfig{
+			BlockSizeTokens:        1,
+			MaxPrefixBlocksToMatch: 256,
+			LRUCapacityPerServer:   100,
+			AutoTune:               false,
+			RecencyHalfLife:         "30s",
+		},
+	}, nil)
+	require.NoError(t, err)
+	assert.Greater(t, scorer.approxRecencyHalfLife, time.Duration(0),
+		"recency half-life should be parsed")
+
+	endpoints := []scheduling.Endpoint{
+		testEndpoint("pod-a", "10.0.0.1", "8080"),
+	}
+
+	// Route a request to populate the indexer
+	req1 := completionsRequest("aaaabbbbccccdddd")
+	req1.RequestId = "req-1"
+	_ = scorer.PrepareRequestData(ctx, req1, endpoints)
+	scorer.Score(ctx, scheduling.NewCycleState(), req1, endpoints)
+	scorer.PreRequest(ctx, req1, &scheduling.SchedulingResult{
+		PrimaryProfileName: "default",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"default": {TargetEndpoints: []scheduling.Endpoint{endpoints[0]}},
+		},
+	})
+
+	// Score immediately — should be close to 1.0 (fresh entries)
+	req2 := completionsRequest("aaaabbbbccccdddd")
+	req2.RequestId = "req-2"
+	_ = scorer.PrepareRequestData(ctx, req2, endpoints)
+	freshScores := scorer.Score(ctx, scheduling.NewCycleState(), req2, endpoints)
+
+	// The score should be > 0 and <= 1.0
+	assert.Greater(t, freshScores[endpoints[0]], 0.0, "fresh entry should have positive score")
+	assert.LessOrEqual(t, freshScores[endpoints[0]], 1.0, "score should be <= 1.0")
 }

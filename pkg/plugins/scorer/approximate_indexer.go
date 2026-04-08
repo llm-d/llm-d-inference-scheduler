@@ -2,6 +2,7 @@ package scorer
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 
@@ -32,7 +33,7 @@ type podSet = map[ApproximateServerID]struct{}
 type approximateIndexer struct {
 	mu             sync.RWMutex
 	hashToPods     map[ApproximateBlockHash]podSet
-	podToLRU       map[ApproximateServerID]*lru.Cache[ApproximateBlockHash, struct{}]
+	podToLRU       map[ApproximateServerID]*lru.Cache[ApproximateBlockHash, time.Time]
 	defaultLRUSize int
 }
 
@@ -41,7 +42,7 @@ type approximateIndexer struct {
 func newApproximateIndexer(ctx context.Context, defaultLRUSize int) *approximateIndexer {
 	idx := &approximateIndexer{
 		hashToPods:     make(map[ApproximateBlockHash]podSet),
-		podToLRU:       make(map[ApproximateServerID]*lru.Cache[ApproximateBlockHash, struct{}]),
+		podToLRU:       make(map[ApproximateServerID]*lru.Cache[ApproximateBlockHash, time.Time]),
 		defaultLRUSize: defaultLRUSize,
 	}
 	go idx.reportLRUSize(ctx)
@@ -73,7 +74,7 @@ func (idx *approximateIndexer) Add(hashes []ApproximateBlockHash, server Approxi
 	}
 
 	for _, hash := range hashes {
-		podLRU.Add(hash, struct{}{})
+		podLRU.Add(hash, time.Now())
 		if _, ok := idx.hashToPods[hash]; !ok {
 			idx.hashToPods[hash] = make(podSet)
 		}
@@ -95,6 +96,27 @@ func (idx *approximateIndexer) Get(hash ApproximateBlockHash) podSet {
 	result := make(podSet, len(ps))
 	for k, v := range ps {
 		result[k] = v
+	}
+	return result
+}
+
+// GetWithTimestamp returns the set of servers with their recorded timestamps
+// for the given hash. Returns nil if no server has it.
+func (idx *approximateIndexer) GetWithTimestamp(hash ApproximateBlockHash) map[ApproximateServerID]time.Time {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	ps, exists := idx.hashToPods[hash]
+	if !exists {
+		return nil
+	}
+	result := make(map[ApproximateServerID]time.Time, len(ps))
+	for server := range ps {
+		if podLRU, ok := idx.podToLRU[server]; ok {
+			if ts, ok := podLRU.Peek(hash); ok {
+				result[server] = ts
+			}
+		}
 	}
 	return result
 }
@@ -129,6 +151,58 @@ func (idx *approximateIndexer) MatchLongestPrefix(hashes []ApproximateBlockHash)
 		for server := range active {
 			if _, has := cachedServers[server]; has {
 				result[server]++
+			} else {
+				delete(active, server)
+			}
+		}
+		if len(active) == 0 {
+			break
+		}
+	}
+	return result
+}
+
+// MatchLongestPrefixWeighted finds the longest contiguous prefix match per server
+// and returns a recency-weighted score instead of a raw block count.
+//
+// Each matched block contributes a weight based on how recently it was recorded:
+//
+//	weight = exp(-age * ln2 / halfLife)
+//
+// where age = time since the block was self-reported, and halfLife controls how
+// fast old entries decay. A halfLife of 30s means an entry recorded 30s ago
+// contributes exactly 50% of a fresh entry's weight.
+//
+// This improves scoring accuracy because older self-reported entries are more
+// likely to have been evicted from the actual GPU cache.
+func (idx *approximateIndexer) MatchLongestPrefixWeighted(hashes []ApproximateBlockHash, now time.Time, halfLife time.Duration) map[ApproximateServerID]float64 {
+	result := make(map[ApproximateServerID]float64)
+	if len(hashes) == 0 || halfLife <= 0 {
+		return result
+	}
+
+	// Initialize candidates from the first hash.
+	firstServers := idx.GetWithTimestamp(hashes[0])
+	if len(firstServers) == 0 {
+		return result
+	}
+	halfLifeSec := halfLife.Seconds()
+	active := make(map[ApproximateServerID]bool, len(firstServers))
+	for server, ts := range firstServers {
+		age := now.Sub(ts).Seconds()
+		result[server] = math.Exp(-age * math.Ln2 / halfLifeSec)
+		active[server] = true
+	}
+
+	for _, hash := range hashes[1:] {
+		serverTimestamps := idx.GetWithTimestamp(hash)
+		if len(serverTimestamps) == 0 {
+			break
+		}
+		for server := range active {
+			if ts, has := serverTimestamps[server]; has {
+				age := now.Sub(ts).Seconds()
+				result[server] += math.Exp(-age * math.Ln2 / halfLifeSec)
 			} else {
 				delete(active, server)
 			}
@@ -187,8 +261,8 @@ func (idx *approximateIndexer) TotalEntries() int64 {
 // during Add(), RemovePod(), or Resize() calls, all of which hold
 // idx.mu.Lock(). Therefore the callback must NOT acquire idx.mu (it's
 // already held by the caller).
-func (idx *approximateIndexer) makeEvictionFn(server ApproximateServerID) func(ApproximateBlockHash, struct{}) {
-	return func(key ApproximateBlockHash, _ struct{}) {
+func (idx *approximateIndexer) makeEvictionFn(server ApproximateServerID) func(ApproximateBlockHash, time.Time) {
+	return func(key ApproximateBlockHash, _ time.Time) {
 		if ps, ok := idx.hashToPods[key]; ok {
 			delete(ps, server)
 			if len(ps) == 0 {
