@@ -25,13 +25,13 @@ func TestNewStrategy_Valid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "drr", s.Name())
 
-	s, err = newStrategy(Config{Strategy: "service"})
+	s, err = newStrategy(Config{Strategy: "las"})
 	require.NoError(t, err)
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 
 	s, err = newStrategy(Config{Strategy: ""})
 	require.NoError(t, err)
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 }
 
 func TestNewStrategy_Invalid(t *testing.T) {
@@ -51,7 +51,7 @@ func TestFactory_DefaultStrategy(t *testing.T) {
 	p, err := ProgramAwarePluginFactory("test", nil, nil)
 	require.NoError(t, err)
 	plugin := p.(*ProgramAwarePlugin)
-	assert.Equal(t, "service", plugin.strategy.Name())
+	assert.Equal(t, "las", plugin.strategy.Name())
 }
 
 func TestFactory_InvalidStrategy(t *testing.T) {
@@ -63,36 +63,72 @@ func TestFactory_InvalidStrategy(t *testing.T) {
 // DRR Strategy tests
 // =============================================================================
 
-func TestDRRStrategy_OnPickStart_AllocatesQuantum(t *testing.T) {
+// makeQueueInfo builds a QueueInfo with a mock queue for testing.
+func makeQueueInfo(id string, queueLen int, metrics *ProgramMetrics, enqueueTime time.Time) QueueInfo {
+	return QueueInfo{
+		Queue: &fcmocks.MockFlowQueueAccessor{
+			LenV:     queueLen,
+			FlowKeyV: flowcontrol.FlowKey{ID: id},
+			PeekHeadV: &fcmocks.MockQueueItemAccessor{
+				EnqueueTimeV:     enqueueTime,
+				OriginalRequestV: &fcmocks.MockFlowControlRequest{IDV: id + "-req"},
+			},
+		},
+		Metrics: metrics,
+		Len:     queueLen,
+	}
+}
+
+// makeEmptyQueueInfo builds a QueueInfo for an empty queue.
+func makeEmptyQueueInfo(id string, metrics *ProgramMetrics) QueueInfo {
+	return QueueInfo{
+		Queue: &fcmocks.MockFlowQueueAccessor{
+			LenV:     0,
+			FlowKeyV: flowcontrol.FlowKey{ID: id},
+		},
+		Metrics: metrics,
+		Len:     0,
+	}
+}
+
+func TestDRRStrategy_Pick_AllocatesQuantum(t *testing.T) {
 	s := testDRR()
 	m := &ProgramMetrics{}
+	now := time.Now()
 
-	s.OnPickStart("prog", 3, m) // non-empty queue
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 3, m, now)}
+	s.Pick(queues)
+
 	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit(), "non-empty queue should receive quantum")
 }
 
-func TestDRRStrategy_OnPickStart_QuantumAccumulates(t *testing.T) {
+func TestDRRStrategy_Pick_QuantumAccumulates(t *testing.T) {
 	s := testDRR()
 	m := &ProgramMetrics{}
+	now := time.Now()
 
 	for range 5 {
-		s.OnPickStart("prog", 1, m)
+		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
+		s.Pick(queues)
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*5, m.Deficit(), "deficit should accumulate across rounds")
 }
 
-func TestDRRStrategy_OnPickStart_ResetsOnIdle(t *testing.T) {
+func TestDRRStrategy_Pick_ResetsOnIdle(t *testing.T) {
 	s := testDRR()
 	m := &ProgramMetrics{}
+	now := time.Now()
 
 	// Accumulate 3 rounds of quantum.
 	for range 3 {
-		s.OnPickStart("prog", 2, m)
+		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 2, m, now)}
+		s.Pick(queues)
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit())
 
 	// Queue drains.
-	s.OnPickStart("prog", 0, m)
+	queues := map[string]QueueInfo{"prog": makeEmptyQueueInfo("prog", m)}
+	s.Pick(queues)
 	assert.Equal(t, int64(0), m.Deficit(), "deficit must reset to 0 when queue drains")
 }
 
@@ -114,67 +150,7 @@ func TestDRRStrategy_OnCompleted_GoesNegativeOnOveruse(t *testing.T) {
 	assert.Equal(t, int64(-1500), m.Deficit(), "deficit should be negative after overuse")
 }
 
-func TestDRRStrategy_NumDimensions(t *testing.T) {
-	s := testDRR()
-	assert.Equal(t, 2, s.NumDimensions())
-}
-
-func TestDRRStrategy_CollectRaw(t *testing.T) {
-	s := testDRR()
-
-	m := &ProgramMetrics{}
-	m.AddDeficit(5000)
-
-	enqueueTime := time.Now().Add(-300 * time.Millisecond)
-	queue := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "prog"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: enqueueTime},
-	}
-
-	raw := s.CollectRaw(queue, m)
-	require.Len(t, raw, 2)
-	assert.InDelta(t, 5000.0, raw[drrDimDeficit], 0.01)
-	assert.Greater(t, raw[drrDimHeadWait], 290.0)
-}
-
-func TestDRRStrategy_CollectRaw_NilMetrics(t *testing.T) {
-	s := testDRR()
-
-	queue := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "prog"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: time.Now()},
-	}
-
-	raw := s.CollectRaw(queue, nil)
-	require.Len(t, raw, 2)
-	assert.InDelta(t, 0.0, raw[drrDimDeficit], 0.01)
-}
-
-func TestDRRStrategy_NormalizeDimension(t *testing.T) {
-	s := testDRR()
-
-	// Deficit range [-5000, +3000]: value -5000 → 0.0, +3000 → 1.0.
-	assert.InDelta(t, 0.0, s.NormalizeDimension(drrDimDeficit, -5000, -5000, 3000), 0.001)
-	assert.InDelta(t, 1.0, s.NormalizeDimension(drrDimDeficit, 3000, -5000, 3000), 0.001)
-
-	// min == max → 0.5.
-	assert.InDelta(t, 0.5, s.NormalizeDimension(drrDimDeficit, 100, 100, 100), 0.001)
-}
-
-func TestDRRStrategy_Score(t *testing.T) {
-	s := testDRR()
-
-	// deficit=1.0, headWait=0.0 → 0.8 + 0 = 0.8
-	score := s.Score([]float64{1.0, 0.0})
-	assert.InDelta(t, 0.8, score, 0.001)
-
-	// deficit=0.0, headWait=1.0 → 0 + 0.2 = 0.2
-	score = s.Score([]float64{0.0, 1.0})
-	assert.InDelta(t, 0.2, score, 0.001)
-}
-
-func TestDRRStrategy_PreferHighDeficit(t *testing.T) {
-	// End-to-end: two queues with different deficits, verify via CollectRaw + Normalize + Score.
+func TestDRRStrategy_Pick_PreferHighDeficit(t *testing.T) {
 	s := testDRR()
 	now := time.Now()
 
@@ -184,40 +160,16 @@ func TestDRRStrategy_PreferHighDeficit(t *testing.T) {
 	mLow := &ProgramMetrics{}
 	mLow.DeductTokens(20000)
 
-	queueHigh := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "high"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
-	}
-	queueLow := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "low"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
+	queues := map[string]QueueInfo{
+		"high": makeQueueInfo("high", 1, mHigh, now),
+		"low":  makeQueueInfo("low", 1, mLow, now),
 	}
 
-	rawHigh := s.CollectRaw(queueHigh, mHigh)
-	rawLow := s.CollectRaw(queueLow, mLow)
-
-	// Compute min/max across both.
-	numDims := s.NumDimensions()
-	dimMin := make([]float64, numDims)
-	dimMax := make([]float64, numDims)
-	for d := range numDims {
-		dimMin[d] = min(rawHigh[d], rawLow[d])
-		dimMax[d] = max(rawHigh[d], rawLow[d])
-	}
-
-	normHigh := make([]float64, numDims)
-	normLow := make([]float64, numDims)
-	for d := range numDims {
-		normHigh[d] = s.NormalizeDimension(d, rawHigh[d], dimMin[d], dimMax[d])
-		normLow[d] = s.NormalizeDimension(d, rawLow[d], dimMin[d], dimMax[d])
-	}
-
-	scoreHigh := s.Score(normHigh)
-	scoreLow := s.Score(normLow)
-
-	assert.Greater(t, scoreHigh, scoreLow,
-		"high-deficit queue (score=%.4f) should outscore overserved queue (score=%.4f)",
-		scoreHigh, scoreLow)
+	selected, scores := s.Pick(queues)
+	require.NotNil(t, selected)
+	assert.Equal(t, "high", selected.FlowKey().ID)
+	assert.Greater(t, scores["high"], scores["low"],
+		"high-deficit queue should outscore overserved queue")
 }
 
 // =============================================================================
@@ -269,39 +221,37 @@ func TestDRR_Pick_TokenHeavyProgramDeprioritized(t *testing.T) {
 }
 
 // =============================================================================
-// Service Strategy tests
+// LAS Strategy tests
 // =============================================================================
 
-// testService returns a ServiceStrategy with default weights for tests.
-func testService() *ServiceStrategy {
-	return &ServiceStrategy{
+// testService returns a LASStrategy with default weights for tests.
+func testService() *LASStrategy {
+	return &LASStrategy{
 		weightService:  defaultServiceWeightService,
 		weightHeadWait: defaultServiceWeightHeadWait,
 		decayFactor:    defaultServiceDecayFactor,
 	}
 }
 
-func TestServiceStrategy_Name(t *testing.T) {
+func TestLASStrategy_Name(t *testing.T) {
 	s := testService()
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 }
 
-func TestServiceStrategy_NumDimensions(t *testing.T) {
-	s := testService()
-	assert.Equal(t, 2, s.NumDimensions())
-}
-
-func TestServiceStrategy_OnPickStart_DecaysService(t *testing.T) {
+func TestLASStrategy_Pick_DecaysService(t *testing.T) {
 	s := testService()
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
+	now := time.Now()
 
-	s.OnPickStart("prog", 5, m)
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 5, m, now)}
+	s.Pick(queues)
+
 	assert.InDelta(t, 1000.0*defaultServiceDecayFactor, m.AttainedService(), 0.01,
-		"OnPickStart should decay attained service")
+		"Pick should decay attained service")
 }
 
-func TestServiceStrategy_OnCompleted_AddsService(t *testing.T) {
+func TestLASStrategy_OnCompleted_AddsService(t *testing.T) {
 	s := testService()
 	m := &ProgramMetrics{}
 
@@ -311,195 +261,84 @@ func TestServiceStrategy_OnCompleted_AddsService(t *testing.T) {
 		"OnCompleted should add weighted token cost to attained service")
 }
 
-func TestServiceStrategy_CollectRaw(t *testing.T) {
-	s := testService()
-
-	m := &ProgramMetrics{}
-	m.AddService(5000.0)
-
-	enqueueTime := time.Now().Add(-200 * time.Millisecond)
-	queue := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "prog"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: enqueueTime},
-	}
-
-	raw := s.CollectRaw(queue, m)
-	require.Len(t, raw, 2)
-	assert.InDelta(t, 5000.0, raw[serviceDimService], 0.01)
-	assert.Greater(t, raw[serviceDimHeadWait], 190.0, "headWaitMs should reflect enqueue age")
-}
-
-func TestServiceStrategy_CollectRaw_NilMetrics(t *testing.T) {
-	s := testService()
-
-	enqueueTime := time.Now().Add(-100 * time.Millisecond)
-	queue := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "prog"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: enqueueTime},
-	}
-
-	raw := s.CollectRaw(queue, nil)
-	require.Len(t, raw, 2)
-	assert.InDelta(t, 0.0, raw[serviceDimService], 0.01)
-	assert.Greater(t, raw[serviceDimHeadWait], 90.0)
-}
-
-func TestServiceStrategy_NormalizeDimension(t *testing.T) {
-	s := testService()
-
-	// Service dim is inverted: lowest service → 1.0, highest → 0.0.
-	assert.InDelta(t, 1.0, s.NormalizeDimension(serviceDimService, 0, 0, 100), 0.001)
-	assert.InDelta(t, 0.5, s.NormalizeDimension(serviceDimService, 50, 0, 100), 0.001)
-	assert.InDelta(t, 0.0, s.NormalizeDimension(serviceDimService, 100, 0, 100), 0.001)
-
-	// min == max → rangeNormalize returns 0.5 → inverted = 0.5.
-	assert.InDelta(t, 0.5, s.NormalizeDimension(serviceDimService, 42, 42, 42), 0.001)
-
-	// HeadWait dim is standard (not inverted).
-	assert.InDelta(t, 0.0, s.NormalizeDimension(serviceDimHeadWait, 0, 0, 100), 0.001)
-	assert.InDelta(t, 1.0, s.NormalizeDimension(serviceDimHeadWait, 100, 0, 100), 0.001)
-}
-
-func TestServiceStrategy_Score(t *testing.T) {
-	s := testService()
-
-	// Lowest service (norm=1.0), no headWait: 0.8*1.0 + 0.2*0.0 = 0.8
-	score := s.Score([]float64{1.0, 0.0})
-	assert.InDelta(t, 0.8, score, 0.001)
-
-	// Highest service (norm=0.0), max headWait: 0.8*0.0 + 0.2*1.0 = 0.2
-	score = s.Score([]float64{0.0, 1.0})
-	assert.InDelta(t, 0.2, score, 0.001)
-
-	// Both mid: 0.8*0.5 + 0.2*0.5 = 0.5
-	score = s.Score([]float64{0.5, 0.5})
-	assert.InDelta(t, 0.5, score, 0.001)
-}
-
-func TestServiceStrategy_PreferLowService(t *testing.T) {
-	// End-to-end: two queues — one underserved, one overserved.
+func TestLASStrategy_Pick_PreferLowService(t *testing.T) {
 	s := testService()
 	now := time.Now()
 
 	mLow := &ProgramMetrics{}
-	mLow.AddService(100.0) // underserved
+	mLow.AddService(100.0)
 
 	mHigh := &ProgramMetrics{}
-	mHigh.AddService(10000.0) // overserved
+	mHigh.AddService(10000.0)
 
-	queueLow := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "low"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
-	}
-	queueHigh := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "high"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
+	queues := map[string]QueueInfo{
+		"low":  makeQueueInfo("low", 1, mLow, now),
+		"high": makeQueueInfo("high", 1, mHigh, now),
 	}
 
-	rawLow := s.CollectRaw(queueLow, mLow)
-	rawHigh := s.CollectRaw(queueHigh, mHigh)
-
-	numDims := s.NumDimensions()
-	dimMin := make([]float64, numDims)
-	dimMax := make([]float64, numDims)
-	for d := range numDims {
-		dimMin[d] = min(rawLow[d], rawHigh[d])
-		dimMax[d] = max(rawLow[d], rawHigh[d])
-	}
-
-	normLow := make([]float64, numDims)
-	normHigh := make([]float64, numDims)
-	for d := range numDims {
-		normLow[d] = s.NormalizeDimension(d, rawLow[d], dimMin[d], dimMax[d])
-		normHigh[d] = s.NormalizeDimension(d, rawHigh[d], dimMin[d], dimMax[d])
-	}
-
-	scoreLow := s.Score(normLow)
-	scoreHigh := s.Score(normHigh)
-
-	assert.Greater(t, scoreLow, scoreHigh,
-		"underserved queue (score=%.4f) should outscore overserved queue (score=%.4f)",
-		scoreLow, scoreHigh)
+	selected, scores := s.Pick(queues)
+	require.NotNil(t, selected)
+	assert.Equal(t, "low", selected.FlowKey().ID)
+	assert.Greater(t, scores["low"], scores["high"],
+		"underserved queue should outscore overserved queue")
 }
 
-func TestServiceStrategy_ColdStartUsesHeadWait(t *testing.T) {
-	// Both programs have zero attained service; headWait should break the tie.
+func TestLASStrategy_Pick_ColdStartUsesHeadWait(t *testing.T) {
 	s := testService()
 
 	mOld := &ProgramMetrics{}
 	mNew := &ProgramMetrics{}
 
-	queueOld := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "old"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: time.Now().Add(-500 * time.Millisecond)},
-	}
-	queueNew := &fcmocks.MockFlowQueueAccessor{
-		FlowKeyV:  flowcontrol.FlowKey{ID: "new"},
-		PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: time.Now()},
+	queues := map[string]QueueInfo{
+		"old": makeQueueInfo("old", 1, mOld, time.Now().Add(-500*time.Millisecond)),
+		"new": makeQueueInfo("new", 1, mNew, time.Now()),
 	}
 
-	rawOld := s.CollectRaw(queueOld, mOld)
-	rawNew := s.CollectRaw(queueNew, mNew)
-
-	numDims := s.NumDimensions()
-	dimMin := make([]float64, numDims)
-	dimMax := make([]float64, numDims)
-	for d := range numDims {
-		dimMin[d] = min(rawOld[d], rawNew[d])
-		dimMax[d] = max(rawOld[d], rawNew[d])
-	}
-
-	normOld := make([]float64, numDims)
-	normNew := make([]float64, numDims)
-	for d := range numDims {
-		normOld[d] = s.NormalizeDimension(d, rawOld[d], dimMin[d], dimMax[d])
-		normNew[d] = s.NormalizeDimension(d, rawNew[d], dimMin[d], dimMax[d])
-	}
-
-	scoreOld := s.Score(normOld)
-	scoreNew := s.Score(normNew)
-
-	assert.Greater(t, scoreOld, scoreNew,
-		"with zero service, longer-waiting queue (score=%.4f) should outscore newer queue (score=%.4f)",
-		scoreOld, scoreNew)
+	selected, scores := s.Pick(queues)
+	require.NotNil(t, selected)
+	assert.Equal(t, "old", selected.FlowKey().ID)
+	assert.Greater(t, scores["old"], scores["new"],
+		"with zero service, longer-waiting queue should outscore newer queue")
 }
 
-func TestServiceStrategy_DecayForgetsOldService(t *testing.T) {
+func TestLASStrategy_DecayForgetsOldService(t *testing.T) {
 	s := testService()
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
+	now := time.Now()
 
 	// After many decay cycles, service should approach 0.
 	for range 1000 {
-		s.OnPickStart("prog", 1, m)
+		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
+		s.Pick(queues)
 	}
 	// 1000 * 0.995^1000 ≈ 6.7 — verify significant decay occurred.
 	assert.Less(t, m.AttainedService(), 10.0,
 		"after 1000 decay cycles, attained service should be nearly forgotten")
 }
 
-func TestNewStrategy_Service(t *testing.T) {
-	s, err := newStrategy(Config{Strategy: "service"})
+func TestNewStrategy_LAS(t *testing.T) {
+	s, err := newStrategy(Config{Strategy: "las"})
 	require.NoError(t, err)
-	assert.Equal(t, "service", s.Name())
+	assert.Equal(t, "las", s.Name())
 }
 
-func TestFactory_ServiceStrategy(t *testing.T) {
-	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"service"}`), nil)
+func TestFactory_LASStrategy(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"las"}`), nil)
 	require.NoError(t, err)
 	plugin := p.(*ProgramAwarePlugin)
-	assert.Equal(t, "service", plugin.strategy.Name())
+	assert.Equal(t, "las", plugin.strategy.Name())
 }
 
-func testServiceTimed(halfLife float64) *ServiceStrategy {
-	return &ServiceStrategy{
+func testServiceTimed(halfLife float64) *LASStrategy {
+	return &LASStrategy{
 		weightService:   defaultServiceWeightService,
 		weightHeadWait:  defaultServiceWeightHeadWait,
 		halfLifeSeconds: halfLife,
 	}
 }
 
-func TestServiceStrategy_TimedDecay_FirstCallNoDecay(t *testing.T) {
+func TestLASStrategy_TimedDecay_FirstCallNoDecay(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
 
@@ -509,19 +348,19 @@ func TestServiceStrategy_TimedDecay_FirstCallNoDecay(t *testing.T) {
 		"first timed decay call should not reduce service")
 }
 
-func TestServiceStrategy_TimedDecay_HalvesAtHalfLife(t *testing.T) {
+func TestLASStrategy_TimedDecay_HalvesAtHalfLife(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
 
 	now := time.Now()
-	m.DecayServiceTimed(30.0, now)              // initialize lastDecayTime
+	m.DecayServiceTimed(30.0, now)                     // initialize lastDecayTime
 	m.DecayServiceTimed(30.0, now.Add(30*time.Second)) // exactly one half-life later
 
 	assert.InDelta(t, 500.0, m.AttainedService(), 1.0,
 		"service should halve after exactly one half-life")
 }
 
-func TestServiceStrategy_TimedDecay_ConsistentWindow(t *testing.T) {
+func TestLASStrategy_TimedDecay_ConsistentWindow(t *testing.T) {
 	// Whether we call DecayServiceTimed once after 30s or 100 times over 30s,
 	// the result should be the same.
 	m1 := &ProgramMetrics{}
@@ -543,21 +382,23 @@ func TestServiceStrategy_TimedDecay_ConsistentWindow(t *testing.T) {
 		"time-based decay should produce same result regardless of call frequency")
 }
 
-func TestServiceStrategy_OnPickStart_UsesTimedDecay(t *testing.T) {
+func TestLASStrategy_Pick_UsesTimedDecay(t *testing.T) {
 	s := testServiceTimed(30.0)
 	m := &ProgramMetrics{}
 	m.AddService(1000.0)
+	now := time.Now()
 
-	// First call initializes timer.
-	s.OnPickStart("prog", 1, m)
+	// First Pick initializes timer.
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
+	s.Pick(queues)
 	assert.InDelta(t, 1000.0, m.AttainedService(), 0.01)
 }
 
 func TestFactory_ServiceHalfLifeSeconds(t *testing.T) {
-	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"service","serviceHalfLifeSeconds":30}`), nil)
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"las","serviceHalfLifeSeconds":30}`), nil)
 	require.NoError(t, err)
 	plugin := p.(*ProgramAwarePlugin)
-	svc := plugin.strategy.(*ServiceStrategy)
+	svc := plugin.strategy.(*LASStrategy)
 	assert.Equal(t, 30.0, svc.halfLifeSeconds)
 }
 
@@ -578,40 +419,31 @@ func TestFactory_RRStrategy(t *testing.T) {
 	assert.Equal(t, "rr", plugin.strategy.Name())
 }
 
-func TestRRStrategy_NumDimensions(t *testing.T) {
-	s := &RRStrategy{}
-	assert.Equal(t, 1, s.NumDimensions())
-}
-
-// simulateRRCycle runs one Pick()-like cycle: OnPickStart for all queues,
-// CollectRaw for non-empty ones, scores them, calls OnPicked on the winner.
+// simulateRRCycle runs one Pick() cycle on the RRStrategy directly.
 // Returns the selected program ID (or "" if none).
 func simulateRRCycle(s *RRStrategy, allIDs []string, nonEmptyIDs []string) string {
 	now := time.Now()
 
-	// Pass 1: OnPickStart for ALL queues (including empty).
-	for _, id := range allIDs {
-		s.OnPickStart(id, 0, nil) // queueLen doesn't matter for RR
-	}
-
-	// Pass 2: CollectRaw + score for non-empty queues only.
-	bestID := ""
-	bestScore := -1.0
+	// Build QueueInfo map: empty queues for IDs not in nonEmptyIDs.
+	nonEmptySet := make(map[string]bool, len(nonEmptyIDs))
 	for _, id := range nonEmptyIDs {
-		queue := &fcmocks.MockFlowQueueAccessor{
-			FlowKeyV:  flowcontrol.FlowKey{ID: id},
-			PeekHeadV: &fcmocks.MockQueueItemAccessor{EnqueueTimeV: now},
-		}
-		raw := s.CollectRaw(queue, nil)
-		score := s.Score(raw)
-		if score > bestScore {
-			bestScore = score
-			bestID = id
+		nonEmptySet[id] = true
+	}
+
+	queues := make(map[string]QueueInfo, len(allIDs))
+	for _, id := range allIDs {
+		if nonEmptySet[id] {
+			queues[id] = makeQueueInfo(id, 1, nil, now)
+		} else {
+			queues[id] = makeEmptyQueueInfo(id, nil)
 		}
 	}
 
-	s.OnPicked(bestID)
-	return bestID
+	selected, _ := s.Pick(queues)
+	if selected == nil {
+		return ""
+	}
+	return selected.FlowKey().ID
 }
 
 func TestRRStrategy_BasicCycle(t *testing.T) {
@@ -659,11 +491,13 @@ func TestRRStrategy_SkipsEmptyQueues(t *testing.T) {
 
 func TestRRStrategy_WrapAround(t *testing.T) {
 	s := &RRStrategy{}
+
+	// Set cursor to "c" (last in sorted order) by running a pick that selects "c".
+	s.mu.Lock()
+	s.lastSelected = "c"
+	s.mu.Unlock()
+
 	ids := []string{"a", "b", "c"}
-
-	// Set cursor to "c" (last in sorted order).
-	s.OnPicked("c")
-
 	// Next cycle: startIndex = (index_of_c + 1) % 3 = 0 → "a" should win.
 	picked := simulateRRCycle(s, ids, ids)
 	assert.Equal(t, "a", picked, "should wrap from c to a")
@@ -679,20 +513,20 @@ func TestRRStrategy_SingleQueue(t *testing.T) {
 	}
 }
 
-func TestRRStrategy_OnPickedResetsCycle(t *testing.T) {
+func TestRRStrategy_Pick_UpdatesCursor(t *testing.T) {
 	s := &RRStrategy{}
 
-	// Simulate a partial cycle.
-	s.OnPickStart("alpha", 1, nil)
-	s.OnPickStart("beta", 1, nil)
-	assert.True(t, s.cycleActive, "cycleActive should be true during cycle")
-	assert.Len(t, s.cycleKeys, 2)
+	queues := map[string]QueueInfo{
+		"alpha": makeQueueInfo("alpha", 1, nil, time.Now()),
+		"beta":  makeQueueInfo("beta", 1, nil, time.Now()),
+	}
 
-	// OnPicked should reset cycle state.
-	s.OnPicked("alpha")
-	assert.False(t, s.cycleActive, "cycleActive should be false after OnPicked")
-	assert.Empty(t, s.cycleKeys, "cycleKeys should be cleared after OnPicked")
-	assert.Equal(t, "alpha", s.lastSelected, "lastSelected should be updated")
+	selected, _ := s.Pick(queues)
+	require.NotNil(t, selected)
+
+	s.mu.Lock()
+	assert.Equal(t, selected.FlowKey().ID, s.lastSelected, "lastSelected should be updated after Pick")
+	s.mu.Unlock()
 }
 
 func TestRRStrategy_NoQueues(t *testing.T) {
@@ -774,7 +608,7 @@ func TestDRR_Pick_QuantumAllocatedDuringPick(t *testing.T) {
 	alphaMetrics, _ := p.programMetrics.Load("alpha")
 	betaMetrics, _ := p.programMetrics.Load("beta")
 
-	// Deficit after Pick() = quantumTokens (added by OnPickStart, not yet deducted)
+	// Deficit after Pick() = quantumTokens (added by strategy.Pick(), not yet deducted)
 	assert.Equal(t, defaultDRRQuantumTokens, alphaMetrics.(*ProgramMetrics).Deficit())
 	assert.Equal(t, defaultDRRQuantumTokens, betaMetrics.(*ProgramMetrics).Deficit())
 }
