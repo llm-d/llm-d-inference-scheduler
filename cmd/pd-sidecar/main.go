@@ -28,9 +28,10 @@ import (
 func main() {
 	// Initialize options with defaults
 	opts := proxy.NewOptions()
+	opts.FlagSet = pflag.CommandLine
 
 	// Add options flags (including logging flags)
-	opts.AddFlags(pflag.CommandLine)
+	opts.AddFlags(opts.FlagSet)
 	pflag.Parse()
 
 	logger := opts.NewLogger()
@@ -52,6 +53,8 @@ func main() {
 			}
 		}()
 	}
+	// GetConfigurationState calculates whether configuration is from default values, flags or environment variables
+	opts.GetConfigurationState()
 
 	// Complete options (handles migration from deprecated flags, populates Config)
 	if err := opts.Complete(); err != nil {
@@ -63,6 +66,27 @@ func main() {
 	if err := opts.Validate(); err != nil {
 		logger.Error(err, "Invalid configuration")
 		return
+	}
+
+	if len(opts.ConfigurationState.Defaults) != 0 {
+		logger.Info("Sidecar Configuration",
+			"Configuration with default values", opts.ConfigurationState.Defaults)
+	}
+	if len(opts.ConfigurationState.FromEnv) != 0 {
+		logger.Info("Sidecar Configuration",
+			"Configuration from environment variables", opts.ConfigurationState.FromEnv)
+	}
+	if len(opts.ConfigurationState.FromFlags) != 0 {
+		logger.Info("Sidecar Configuration",
+			"Configuration from flags", opts.ConfigurationState.FromFlags)
+	}
+	if len(opts.ConfigurationState.FromInline) != 0 {
+		logger.Info("Sidecar Configuration",
+			"Configuration from inline-specification i.e. `--configuration` flag", opts.ConfigurationState.FromInline)
+	}
+	if len(opts.ConfigurationState.FromFile) != 0 {
+		logger.Info("Sidecar Configuration",
+			"Configuration from file i.e. `--configuration-file` flag", opts.ConfigurationState.FromFile)
 	}
 
 	logger.Info("Proxy starting", "Built on", version.BuildRef, "From Git SHA", version.CommitSHA)
