@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	requestcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	scheduling "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
@@ -28,7 +29,7 @@ type ScoringStrategy interface {
 	OnPreRequest(metrics *ProgramMetrics, request *scheduling.LLMRequest)
 
 	// OnCompleted is called when a response finishes with actual token usage.
-	OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64)
+	OnCompleted(metrics *ProgramMetrics, request *scheduling.LLMRequest, response *requestcontrol.Response)
 }
 
 // QueueInfo bundles read-only data for each queue passed to Pick.
@@ -225,10 +226,12 @@ func (s *DRRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) 
 }
 
 // OnCompleted deducts actual token usage from the deficit counter.
-func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
-	if metrics == nil {
+func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequest, response *requestcontrol.Response) {
+	if metrics == nil || response == nil {
 		return
 	}
+	promptTokens := int64(response.Usage.PromptTokens)
+	completionTokens := int64(response.Usage.CompletionTokens)
 	metrics.DeductTokens(weightInputToken*promptTokens + weightOutputToken*completionTokens)
 }
 
@@ -357,10 +360,12 @@ func (s *LASStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 func (s *LASStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {}
 
 // OnCompleted accumulates the weighted token cost into the program's attained service.
-func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
-	if metrics == nil {
+func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequest, response *requestcontrol.Response) {
+	if metrics == nil || response == nil {
 		return
 	}
+	promptTokens := int64(response.Usage.PromptTokens)
+	completionTokens := int64(response.Usage.CompletionTokens)
 	cost := float64(weightInputToken*promptTokens + weightOutputToken*completionTokens)
 	metrics.AddService(cost)
 }
@@ -427,4 +432,4 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {}
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).
-func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}
+func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _ *scheduling.LLMRequest, _ *requestcontrol.Response) {}
