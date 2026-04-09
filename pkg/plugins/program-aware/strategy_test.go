@@ -13,11 +13,13 @@ import (
 
 // testDRR returns a DRRStrategy with default weights for tests.
 func testDRR() *DRRStrategy {
-	return &DRRStrategy{
+	s := &DRRStrategy{
 		weightDeficit:  defaultDRRWeightDeficit,
 		weightHeadWait: defaultDRRWeightHeadWait,
 		quantumTokens:  defaultDRRQuantumTokens,
 	}
+	s.addQuantum.Store(true)
+	return s
 }
 
 func TestNewStrategy_Valid(t *testing.T) {
@@ -110,6 +112,7 @@ func TestDRRStrategy_Pick_QuantumAccumulates(t *testing.T) {
 	for range 5 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
 		s.Pick(queues)
+		s.OnPreRequest(nil, nil) // reset for next dispatch cycle
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*5, m.Deficit(), "deficit should accumulate across rounds")
 }
@@ -123,6 +126,7 @@ func TestDRRStrategy_Pick_ResetsOnIdle(t *testing.T) {
 	for range 3 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 2, m, now)}
 		s.Pick(queues)
+		s.OnPreRequest(nil, nil)
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit())
 
@@ -170,6 +174,36 @@ func TestDRRStrategy_Pick_PreferHighDeficit(t *testing.T) {
 	assert.Equal(t, "high", selected.FlowKey().ID)
 	assert.Greater(t, scores["high"], scores["low"],
 		"high-deficit queue should outscore overserved queue")
+}
+
+func TestDRRStrategy_Pick_QuantumOncePerCycle(t *testing.T) {
+	s := testDRR()
+	m := &ProgramMetrics{}
+	now := time.Now()
+
+	// First Pick allocates quantum.
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 3, m, now)}
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit(), "first Pick should allocate quantum")
+
+	// Second Pick without OnPrerequest — same program already seen, no extra quantum.
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit(), "second Pick without OnPrerequest should not allocate again")
+}
+
+func TestDRRStrategy_OnPrerequest_ResetsQuantum(t *testing.T) {
+	s := testDRR()
+	m := &ProgramMetrics{}
+	now := time.Now()
+
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 3, m, now)}
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit())
+
+	// OnPrerequest resets the cycle — next Pick should allocate again.
+	s.OnPreRequest(nil, nil)
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens*2, m.Deficit(), "Pick after OnPrerequest should allocate quantum again")
 }
 
 // =============================================================================

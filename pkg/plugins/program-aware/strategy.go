@@ -5,9 +5,11 @@ import (
 	"math"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	scheduling "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
 // ScoringStrategy determines how program queues are prioritized for dispatch.
@@ -21,6 +23,9 @@ type ScoringStrategy interface {
 	// per-queue scores for observability. Returns (nil, nil) if no queue
 	// is eligible.
 	Pick(queues map[string]QueueInfo) (selected flowcontrol.FlowQueueAccessor, scores map[string]float64)
+
+	// OnPreRequest is called before each request dispatch to reset per-cycle state.
+	OnPreRequest(metrics *ProgramMetrics, request *scheduling.LLMRequest)
 
 	// OnCompleted is called when a response finishes with actual token usage.
 	OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64)
@@ -37,11 +42,13 @@ type QueueInfo struct {
 func newStrategy(cfg Config) (ScoringStrategy, error) {
 	switch cfg.Strategy {
 	case "drr":
-		return &DRRStrategy{
+		s := &DRRStrategy{
 			weightDeficit:  floatOr(cfg.WeightDeficit, defaultDRRWeightDeficit),
 			weightHeadWait: floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
 			quantumTokens:  int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
-		}, nil
+		}
+		s.addQuantum.Store(true)
+		return s, nil
 	case "", "las":
 		return &LASStrategy{
 			weightService:   floatOr(cfg.WeightService, defaultServiceWeightService),
@@ -114,6 +121,8 @@ type DRRStrategy struct {
 	weightDeficit  float64
 	weightHeadWait float64
 	quantumTokens  int64
+	addQuantum     atomic.Bool
+	seen           sync.Map
 }
 
 // Name returns "drr".
@@ -121,9 +130,10 @@ func (s *DRRStrategy) Name() string { return "drr" }
 
 // Pick selects the queue with the highest deficit-weighted score.
 //
-// For every queue: allocates a token quantum (non-empty) or resets deficit (empty).
-// Then uses two-pass adaptive normalization across non-empty queues to produce
-// a weighted combination of deficit and head-of-queue wait time.
+// Quantum allocation is cycle-aware: the first Pick() in a dispatch cycle
+// allocates quantum to all non-empty queues; subsequent Pick() calls in the
+// same cycle only allocate to programs not yet seen. addQuantum is cleared
+// at the end of Pick(); OnPrerequest() resets it for the next cycle.
 func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
 		deficit    float64
@@ -142,9 +152,20 @@ func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 		}
 		if qi.Len == 0 {
 			qi.Metrics.ResetDeficit()
+			s.seen.Delete(id)
 			continue
 		}
-		qi.Metrics.AddDeficit(s.quantumTokens)
+		if s.addQuantum.Load() {
+			// First Pick() in this dispatch cycle — allocate quantum unconditionally.
+			qi.Metrics.AddDeficit(s.quantumTokens)
+			s.seen.Store(id, true)
+		} else {
+			// Subsequent Pick() in the same cycle — only allocate to unseen programs.
+			if _, ok := s.seen.Load(id); !ok {
+				s.seen.Store(id, true)
+				qi.Metrics.AddDeficit(s.quantumTokens)
+			}
+		}
 
 		deficit := float64(qi.Metrics.Deficit())
 		var headWaitMs float64
@@ -194,7 +215,13 @@ func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 		}
 	}
 
+	s.addQuantum.Store(false)
 	return best, scores
+}
+
+// OnPreRequest resets the quantum flag so the next Pick() allocates quantum.
+func (s *DRRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {
+	s.addQuantum.Store(true)
 }
 
 // OnCompleted deducts actual token usage from the deficit counter.
@@ -204,6 +231,7 @@ func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, complet
 	}
 	metrics.DeductTokens(weightInputToken*promptTokens + weightOutputToken*completionTokens)
 }
+
 
 // =============================================================================
 // LAS (Least Attained Service) Strategy
@@ -325,6 +353,9 @@ func (s *LASStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 	return best, scores
 }
 
+// OnPreRequest is a no-op for LAS.
+func (s *LASStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {}
+
 // OnCompleted accumulates the weighted token cost into the program's attained service.
 func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, promptTokens, completionTokens int64) {
 	if metrics == nil {
@@ -391,6 +422,9 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 	s.lastSelected = ""
 	return nil, nil
 }
+
+// OnPreRequest is a no-op for round-robin.
+func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {}
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).
 func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _, _ int64) {}
