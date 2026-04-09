@@ -56,6 +56,8 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 	}
 
 	metrics := p.getOrCreateMetrics(programID)
+	p.getStrategy().OnPreRequest(metrics, request)
+
 	metrics.IncrementDispatched()
 	dispatchedTotal.WithLabelValues(programID).Inc()
 
