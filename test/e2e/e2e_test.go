@@ -444,16 +444,16 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
 			// Multimodal request: triggers encode stage, decode handled by prefill-decode pod
-			nsHdr, podHdr = runChatCompletionWithImage()
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
-			nsHdr, podHdr = runChatCompletionWithImage()
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
 			// Multi-image request: two images in one request, triggers encode stage
-			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL, testImageURL2)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
@@ -516,17 +516,17 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// First multimodal request: encode + prefill + decode
-			nsHdr, podHdr = runChatCompletionWithImage()
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Second multimodal request with same image (prefix cache may skip prefill)
-			nsHdr, podHdr = runChatCompletionWithImage()
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Multi-image request: two images in one request, encode + prefill + decode
-			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL, testImageURL2)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
@@ -601,12 +601,12 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 			gomega.Expect(pdCount + doCount).Should(gomega.Equal(2))
 
 			// Multimodal request: encode and decode profiles both resolve to the same single deployment
-			nsHdr, podHdr = runChatCompletionWithImage()
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
 			// Multi-image request: all stages handled by single deployment
-			nsHdr, podHdr = runChatCompletionWithMultipleImages([]string{testImageURL, testImageURL2})
+			nsHdr, podHdr = runChatCompletionWithImages(testImageURL, testImageURL2)
 			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
 			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 

@@ -94,12 +94,21 @@ func runRawChatCompletion(body string) (string, string) {
 	return ns, pod
 }
 
-// runChatCompletionWithImage sends a multimodal chat completion request with an image_url content block.
+// runChatCompletionWithImages sends a multimodal chat completion request with one or more image_url
+// content blocks. When called with no arguments it defaults to testImageURL (single image).
+// Each image is assigned a uuid derived from its index.
 // Returns the namespace and pod name from the response headers.
-func runChatCompletionWithImage() (string, string) {
-	ginkgo.By("Sending Multimodal Chat Completion Request with image: " + testImageURL)
-	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":%q}},{"type":"text","text":"What is in this image?"}]}]}`,
-		simModelName, testImageURL)
+func runChatCompletionWithImages(imageURLs ...string) (string, string) {
+	if len(imageURLs) == 0 {
+		imageURLs = []string{testImageURL}
+	}
+	ginkgo.By(fmt.Sprintf("Sending Multimodal Chat Completion Request with %d images", len(imageURLs)))
+	var sb strings.Builder
+	for i, url := range imageURLs {
+		sb.WriteString(fmt.Sprintf(`{"type":"image_url","image_url":{"url":%q},"uuid":"image-%d"},`, url, i))
+	}
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[%s{"type":"text","text":"Describe what you see."}]}],"max_tokens":150}`,
+		simModelName, sb.String())
 	return runRawChatCompletion(body)
 }
 
@@ -130,19 +139,6 @@ func runChatCompletionWithAudio() (string, string) {
 	ginkgo.By("Sending Chat Completion Request with input_audio")
 	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[{"type":"text","text":"What is being said in this audio clip?"},{"type":"input_audio","input_audio":{"data":%q,"format":"wav"}}]}],"max_tokens":100}`,
 		simModelName, testAudioData)
-	return runRawChatCompletion(body)
-}
-
-// runChatCompletionWithMultipleImages sends a multimodal chat completion request with multiple image_url
-// content blocks. Each image is assigned a uuid derived from its index. Returns the namespace and pod name.
-func runChatCompletionWithMultipleImages(imageURLs []string) (string, string) {
-	ginkgo.By(fmt.Sprintf("Sending Multimodal Chat Completion Request with %d images", len(imageURLs)))
-	var sb strings.Builder
-	for i, url := range imageURLs {
-		sb.WriteString(fmt.Sprintf(`{"type":"image_url","image_url":{"url":%q},"uuid":"multi-image-%d"},`, url, i))
-	}
-	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":[%s{"type":"text","text":"Compare these images and describe what you see."}]}],"max_tokens":150}`,
-		simModelName, sb.String())
 	return runRawChatCompletion(body)
 }
 

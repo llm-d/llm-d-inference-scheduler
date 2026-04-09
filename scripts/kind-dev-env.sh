@@ -37,8 +37,8 @@ EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
 # Set the model name to deploy (EPD defaults to a multimodal model)
-if [ -z "${MODEL_NAME}" ] && [ "${EPD_ENABLED}" == "true" ]; then
-  export MODEL_NAME="Qwen/Qwen3-VL-2B-Instruct"
+if [ "${EPD_ENABLED}" == "true" ]; then
+  export MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-VL-2B-Instruct}"
 else
   export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
 fi
@@ -129,11 +129,6 @@ elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
 elif [ "${PD_ENABLED}" == "\"true\"" ]; then
   # Prefill-Decode mode
   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-
-elif [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]; then
-  # Data Parallel mode (only needed for Istio pre-1.28.1)
-  # Not really called in kind(docker.io/istio/pilot:1.28.1) by "make env-dev-kind"
-  DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml"
 
 else
   # Simple mode
