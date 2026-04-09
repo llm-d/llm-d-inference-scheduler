@@ -575,6 +575,80 @@ func TestRRStrategy_NoQueues(t *testing.T) {
 	assert.Equal(t, "", picked, "no queues should yield empty pick")
 }
 
+func TestFactory_RRDeferCursor(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"rr","deferRRCursor":true}`), nil)
+	require.NoError(t, err)
+	plugin := p.(*ProgramAwarePlugin)
+	rr := plugin.strategy.(*RRStrategy)
+	assert.True(t, rr.deferCursor)
+}
+
+func TestRRStrategy_DeferCursor_PickDoesNotAdvance(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	picked := simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "alpha", picked)
+
+	s.mu.Lock()
+	assert.Equal(t, "", s.lastSelected, "lastSelected should NOT advance in Pick when deferCursor=true")
+	assert.Equal(t, "alpha", s.pendingCursor, "pendingCursor should hold the candidate")
+	s.mu.Unlock()
+}
+
+func TestRRStrategy_DeferCursor_OnPreRequestCommits(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	simulateRRCycle(s, ids, ids) // picks alpha, stores in pendingCursor
+	s.OnPreRequest(nil, nil)     // commits cursor
+
+	s.mu.Lock()
+	assert.Equal(t, "alpha", s.lastSelected, "OnPreRequest should commit pendingCursor")
+	assert.Equal(t, "", s.pendingCursor, "pendingCursor should be cleared")
+	s.mu.Unlock()
+
+	// Next pick should advance past alpha.
+	picked := simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "beta", picked)
+}
+
+func TestRRStrategy_DeferCursor_RepeatedPickWithoutDispatch(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	// Pick three times without OnPreRequest — cursor never advances.
+	for range 3 {
+		picked := simulateRRCycle(s, ids, ids)
+		assert.Equal(t, "alpha", picked, "without OnPreRequest, alpha is always picked")
+	}
+}
+
+func TestRRStrategy_DeferCursor_FullCycle(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	expected := []string{"alpha", "beta", "gamma", "alpha"}
+	for _, want := range expected {
+		picked := simulateRRCycle(s, ids, ids)
+		assert.Equal(t, want, picked)
+		s.OnPreRequest(nil, nil) // commit after dispatch
+	}
+}
+
+func TestRRStrategy_DeferCursor_AllEmpty(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	allIDs := []string{"alpha", "beta"}
+
+	picked := simulateRRCycle(s, allIDs, nil) // all empty
+	assert.Equal(t, "", picked)
+
+	s.mu.Lock()
+	assert.Equal(t, "", s.lastSelected)
+	assert.Equal(t, "", s.pendingCursor)
+	s.mu.Unlock()
+}
+
 func TestRR_Pick_CyclesThroughPrograms(t *testing.T) {
 	p := &ProgramAwarePlugin{strategy: &RRStrategy{}}
 

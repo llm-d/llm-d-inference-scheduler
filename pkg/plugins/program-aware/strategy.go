@@ -58,7 +58,9 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 			halfLifeSeconds: floatOr(cfg.ServiceHalfLifeSeconds, 0),
 		}, nil
 	case "rr":
-		return &RRStrategy{}, nil
+		return &RRStrategy{
+			deferCursor: boolOr(cfg.DeferRRCursor, false),
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"drr\", \"las\", \"rr\"", cfg.Strategy)
 	}
@@ -74,6 +76,14 @@ func floatOr(p *float64, def float64) float64 {
 
 // int64Or returns *p if non-nil, otherwise the default.
 func int64Or(p *int64, def int64) int64 {
+	if p != nil {
+		return *p
+	}
+	return def
+}
+
+// boolOr returns *p if non-nil, otherwise the default.
+func boolOr(p *bool, def bool) bool {
 	if p != nil {
 		return *p
 	}
@@ -382,8 +392,10 @@ func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequ
 // and the one immediately after the cursor gets the highest score.
 // Empty queues are naturally skipped because only non-empty queues are scored.
 type RRStrategy struct {
-	mu           sync.Mutex
-	lastSelected string // program ID last picked
+	mu            sync.Mutex
+	lastSelected  string // program ID last picked (committed cursor)
+	pendingCursor string // set by Pick when deferCursor=true, committed by OnPreRequest
+	deferCursor   bool   // when true, cursor advances in OnPreRequest instead of Pick
 }
 
 // Name returns "rr".
@@ -419,17 +431,32 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 	for i := range n {
 		id := allKeys[(start+i)%n]
 		if queues[id].Len > 0 {
-			s.lastSelected = id
+			if s.deferCursor {
+				s.pendingCursor = id
+			} else {
+				s.lastSelected = id
+			}
 			return queues[id].Queue, nil
 		}
 	}
 
 	s.lastSelected = ""
+	s.pendingCursor = ""
 	return nil, nil
 }
 
-// OnPreRequest is a no-op for round-robin.
-func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {}
+// OnPreRequest commits the deferred cursor when deferCursor is enabled.
+func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {
+	if !s.deferCursor {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingCursor != "" {
+		s.lastSelected = s.pendingCursor
+		s.pendingCursor = ""
+	}
+}
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).
 func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _ *scheduling.LLMRequest, _ *requestcontrol.Response) {}
