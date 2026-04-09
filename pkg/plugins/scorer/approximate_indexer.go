@@ -162,8 +162,15 @@ func (idx *approximateIndexer) MatchLongestPrefix(hashes []ApproximateBlockHash)
 	return result
 }
 
+// weightedPrefixResult holds both the weighted score (for scoring/normalization)
+// and the integer block count (for PrefixCacheMatchInfo and PrefixCacheServers).
+type weightedPrefixResult struct {
+	WeightedScore float64
+	BlockCount    int
+}
+
 // MatchLongestPrefixWeighted finds the longest contiguous prefix match per server
-// and returns a recency-weighted score instead of a raw block count.
+// and returns both a recency-weighted score and an integer block count.
 //
 // Each matched block contributes a weight based on how recently it was recorded:
 //
@@ -173,10 +180,10 @@ func (idx *approximateIndexer) MatchLongestPrefix(hashes []ApproximateBlockHash)
 // fast old entries decay. A halfLife of 30s means an entry recorded 30s ago
 // contributes exactly 50% of a fresh entry's weight.
 //
-// This improves scoring accuracy because older self-reported entries are more
-// likely to have been evicted from the actual GPU cache.
-func (idx *approximateIndexer) MatchLongestPrefixWeighted(hashes []ApproximateBlockHash, now time.Time, halfLife time.Duration) map[ApproximateServerID]float64 {
-	result := make(map[ApproximateServerID]float64)
+// The integer block count is always the true contiguous match length, unaffected
+// by decay. The weighted score is used for scoring/normalization only.
+func (idx *approximateIndexer) MatchLongestPrefixWeighted(hashes []ApproximateBlockHash, now time.Time, halfLife time.Duration) map[ApproximateServerID]weightedPrefixResult {
+	result := make(map[ApproximateServerID]weightedPrefixResult)
 	if len(hashes) == 0 || halfLife <= 0 {
 		return result
 	}
@@ -190,7 +197,10 @@ func (idx *approximateIndexer) MatchLongestPrefixWeighted(hashes []ApproximateBl
 	active := make(map[ApproximateServerID]bool, len(firstServers))
 	for server, ts := range firstServers {
 		age := now.Sub(ts).Seconds()
-		result[server] = math.Exp(-age * math.Ln2 / halfLifeSec)
+		result[server] = weightedPrefixResult{
+			WeightedScore: math.Exp(-age * math.Ln2 / halfLifeSec),
+			BlockCount:    1,
+		}
 		active[server] = true
 	}
 
@@ -202,7 +212,10 @@ func (idx *approximateIndexer) MatchLongestPrefixWeighted(hashes []ApproximateBl
 		for server := range active {
 			if ts, has := serverTimestamps[server]; has {
 				age := now.Sub(ts).Seconds()
-				result[server] += math.Exp(-age * math.Ln2 / halfLifeSec)
+				r := result[server]
+				r.WeightedScore += math.Exp(-age * math.Ln2 / halfLifeSec)
+				r.BlockCount++
+				result[server] = r
 			} else {
 				delete(active, server)
 			}

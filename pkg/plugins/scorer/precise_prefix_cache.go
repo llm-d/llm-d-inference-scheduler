@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -182,7 +181,8 @@ func (s *precisePluginState) Clone() plugin.StateData {
 // and PreRequest for approximate mode via PluginState.
 type approximatePluginState struct {
 	hashes       []ApproximateBlockHash
-	serverScores map[ApproximateServerID]float64 // server → score (block count or weighted)
+	serverScores map[ApproximateServerID]float64 // server → score (block count or weighted) for scoring
+	blockCounts  map[ApproximateServerID]int     // server → integer contiguous block count for match info
 	totalBlocks  int
 }
 
@@ -194,9 +194,14 @@ func (s *approximatePluginState) Clone() plugin.StateData {
 	for k, v := range s.serverScores {
 		scores[k] = v
 	}
+	counts := make(map[ApproximateServerID]int, len(s.blockCounts))
+	for k, v := range s.blockCounts {
+		counts[k] = v
+	}
 	return &approximatePluginState{
 		hashes:       hashes,
 		serverScores: scores,
+		blockCounts:  counts,
 		totalBlocks:  s.totalBlocks,
 	}
 }
@@ -635,17 +640,26 @@ func (s *PrecisePrefixCacheScorer) prepareDataApproximate(ctx context.Context,
 	// Match longest prefix in local LRU indexer.
 	// Use recency-weighted scoring when half-life is configured.
 	var serverScores map[ApproximateServerID]float64
+	var blockCounts map[ApproximateServerID]int
 	if s.approxRecencyHalfLife > 0 {
-		serverScores = s.approxIndexer.MatchLongestPrefixWeighted(hashes, time.Now(), s.approxRecencyHalfLife)
+		weighted := s.approxIndexer.MatchLongestPrefixWeighted(hashes, time.Now(), s.approxRecencyHalfLife)
+		serverScores = make(map[ApproximateServerID]float64, len(weighted))
+		blockCounts = make(map[ApproximateServerID]int, len(weighted))
+		for k, v := range weighted {
+			serverScores[k] = v.WeightedScore
+			blockCounts[k] = v.BlockCount
+		}
 	} else {
 		intScores := s.approxIndexer.MatchLongestPrefix(hashes)
 		serverScores = make(map[ApproximateServerID]float64, len(intScores))
+		blockCounts = make(map[ApproximateServerID]int, len(intScores))
 		for k, v := range intScores {
 			serverScores[k] = float64(v)
+			blockCounts[k] = v
 		}
 	}
 
-	// Store PrefixCacheMatchInfo on endpoints.
+	// Store PrefixCacheMatchInfo on endpoints using integer block counts.
 	// In unified mode, only overwrite if approximate has a better match
 	// (more cached tokens) than what precise already wrote.
 	for _, ep := range endpoints {
@@ -654,7 +668,7 @@ func (s *PrecisePrefixCacheScorer) prepareDataApproximate(ctx context.Context,
 			continue
 		}
 		sid := ApproximateServerID(md.NamespacedName)
-		matchLen := int(math.Round(serverScores[sid]))
+		matchLen := blockCounts[sid]
 		approxInfo := dl_prefix.NewPrefixCacheMatchInfo(matchLen, len(hashes), blockSize)
 
 		if s.mode == ModeUnified {
@@ -673,6 +687,7 @@ func (s *PrecisePrefixCacheScorer) prepareDataApproximate(ctx context.Context,
 	s.approxPluginState.Write(request.RequestId, approxStateKey, &approximatePluginState{
 		hashes:       hashes,
 		serverScores: serverScores,
+		blockCounts:  blockCounts,
 		totalBlocks:  len(hashes),
 	})
 
@@ -820,11 +835,13 @@ func (s *PrecisePrefixCacheScorer) scoreApproximate(ctx context.Context, cycleSt
 
 	// Try PluginState first (from PrepareRequestData)
 	var serverScores map[ApproximateServerID]float64
+	var blockCounts map[ApproximateServerID]int
 	var totalBlocks int
 
 	if state, err := plugin.ReadPluginStateKey[*approximatePluginState](
 		s.approxPluginState, request.RequestId, approxStateKey); err == nil {
 		serverScores = state.serverScores
+		blockCounts = state.blockCounts
 		totalBlocks = state.totalBlocks
 		logger.V(logutil.DEBUG).Info("Reusing pre-computed approximate scores")
 	} else {
@@ -836,12 +853,20 @@ func (s *PrecisePrefixCacheScorer) scoreApproximate(ctx context.Context, cycleSt
 		}
 
 		if s.approxRecencyHalfLife > 0 {
-			serverScores = s.approxIndexer.MatchLongestPrefixWeighted(hashes, time.Now(), s.approxRecencyHalfLife)
+			weighted := s.approxIndexer.MatchLongestPrefixWeighted(hashes, time.Now(), s.approxRecencyHalfLife)
+			serverScores = make(map[ApproximateServerID]float64, len(weighted))
+			blockCounts = make(map[ApproximateServerID]int, len(weighted))
+			for k, v := range weighted {
+				serverScores[k] = v.WeightedScore
+				blockCounts[k] = v.BlockCount
+			}
 		} else {
 			intScores := s.approxIndexer.MatchLongestPrefix(hashes)
 			serverScores = make(map[ApproximateServerID]float64, len(intScores))
+			blockCounts = make(map[ApproximateServerID]int, len(intScores))
 			for k, v := range intScores {
 				serverScores[k] = float64(v)
+				blockCounts[k] = v
 			}
 		}
 		totalBlocks = len(hashes)
@@ -850,6 +875,7 @@ func (s *PrecisePrefixCacheScorer) scoreApproximate(ctx context.Context, cycleSt
 		s.approxPluginState.Write(request.RequestId, approxStateKey, &approximatePluginState{
 			hashes:       hashes,
 			serverScores: serverScores,
+			blockCounts:  blockCounts,
 			totalBlocks:  totalBlocks,
 		})
 	}
@@ -858,7 +884,7 @@ func (s *PrecisePrefixCacheScorer) scoreApproximate(ctx context.Context, cycleSt
 		return nil
 	}
 
-	// Write prefix cache state to cycle state (same format as precise).
+	// Write prefix cache state to cycle state using integer block counts.
 	prefixCacheState := &prefix.SchedulingContextState{
 		PrefixHashes:       []prefix.BlockHash{},
 		PrefixCacheServers: map[prefix.ServerID]int{},
@@ -874,8 +900,8 @@ func (s *PrecisePrefixCacheScorer) scoreApproximate(ctx context.Context, cycleSt
 		score := serverScores[sid]
 		result[ep] = score / float64(totalBlocks)
 
-		if score > 0 {
-			prefixCacheState.PrefixCacheServers[prefix.ServerID(md.NamespacedName)] = int(math.Round(score))
+		if bc := blockCounts[sid]; bc >= 1 {
+			prefixCacheState.PrefixCacheServers[prefix.ServerID(md.NamespacedName)] = bc
 		}
 	}
 
@@ -954,14 +980,14 @@ func (s *PrecisePrefixCacheScorer) mergeApproxIntoCycleState(cycleState *schedul
 		return
 	}
 
-	// Merge approximate hits: take max of precise vs approximate per server.
+	// Merge approximate hits using integer block counts.
 	for _, ep := range endpoints {
 		md := ep.GetMetadata()
 		if md == nil {
 			continue
 		}
 		sid := prefix.ServerID(md.NamespacedName)
-		approxMatch := int(math.Round(state.serverScores[ApproximateServerID(md.NamespacedName)]))
+		approxMatch := state.blockCounts[ApproximateServerID(md.NamespacedName)]
 		if approxMatch > existing.PrefixCacheServers[sid] {
 			existing.PrefixCacheServers[sid] = approxMatch
 		}
@@ -1059,6 +1085,10 @@ func (s *PrecisePrefixCacheScorer) preRequestPrecise(ctx context.Context,
 // preRequestApproximate records the routing decision in the self-reported LRU indexer.
 func (s *PrecisePrefixCacheScorer) preRequestApproximate(ctx context.Context,
 	request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+	if request == nil || schedulingResult == nil || len(schedulingResult.ProfileResults) == 0 {
+		return
+	}
+
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 
 	state, err := plugin.ReadPluginStateKey[*approximatePluginState](

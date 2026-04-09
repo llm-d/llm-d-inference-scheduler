@@ -334,17 +334,16 @@ func TestApproxIndexer_MatchLongestPrefixWeighted(t *testing.T) {
 	idx := newTestIndexer(100)
 	server := serverID("pod-a")
 
-	// Add hashes with known timestamps
 	idx.Add([]ApproximateBlockHash{1, 2, 3}, server, 0)
 
 	now := time.Now()
 	halfLife := 30 * time.Second
 
-	// All entries are fresh (just added) → weights should be close to 1.0 each
 	result := idx.MatchLongestPrefixWeighted([]ApproximateBlockHash{1, 2, 3}, now, halfLife)
-	// 3 blocks, each ~1.0 weight → total ~3.0
-	assert.InDelta(t, 3.0, result[server], 0.1,
+	r := result[server]
+	assert.InDelta(t, 3.0, r.WeightedScore, 0.1,
 		"fresh entries should have weights close to 1.0 each")
+	assert.Equal(t, 3, r.BlockCount, "block count should be 3")
 }
 
 func TestApproxIndexer_MatchLongestPrefixWeighted_Decay(t *testing.T) {
@@ -353,15 +352,14 @@ func TestApproxIndexer_MatchLongestPrefixWeighted_Decay(t *testing.T) {
 
 	idx.Add([]ApproximateBlockHash{1, 2, 3}, server, 0)
 
-	// Simulate scoring 30 seconds later (exactly one half-life)
 	futureNow := time.Now().Add(30 * time.Second)
 	halfLife := 30 * time.Second
 
 	result := idx.MatchLongestPrefixWeighted([]ApproximateBlockHash{1, 2, 3}, futureNow, halfLife)
-	// age ≈ 30s, halfLife = 30s → weight per block ≈ 0.5
-	// total ≈ 3 * 0.5 = 1.5
-	assert.InDelta(t, 1.5, result[server], 0.1,
+	r := result[server]
+	assert.InDelta(t, 1.5, r.WeightedScore, 0.1,
 		"at exactly one half-life, each block should contribute ~0.5")
+	assert.Equal(t, 3, r.BlockCount, "block count should still be 3 regardless of decay")
 }
 
 func TestApproxIndexer_MatchLongestPrefixWeighted_Empty(t *testing.T) {
@@ -379,11 +377,13 @@ func TestApproxIndexer_MatchLongestPrefixWeighted_MidStreamJoin(t *testing.T) {
 	serverC := serverID("pod-c")
 
 	idx.Add([]ApproximateBlockHash{1, 2, 3}, serverA, 0)
-	idx.Add([]ApproximateBlockHash{2, 3}, serverC, 0) // missing first hash
+	idx.Add([]ApproximateBlockHash{2, 3}, serverC, 0)
 
 	result := idx.MatchLongestPrefixWeighted(
 		[]ApproximateBlockHash{1, 2, 3}, time.Now(), 30*time.Second)
 
-	assert.Greater(t, result[serverA], 0.0, "serverA should have score")
-	assert.Equal(t, 0.0, result[serverC], "serverC missing first hash should have 0")
+	assert.Greater(t, result[serverA].WeightedScore, 0.0, "serverA should have score")
+	assert.Equal(t, 3, result[serverA].BlockCount, "serverA should have 3 blocks")
+	assert.Zero(t, result[serverC].WeightedScore, "serverC missing first hash should have 0")
+	assert.Zero(t, result[serverC].BlockCount, "serverC should have 0 blocks")
 }

@@ -1,17 +1,15 @@
 package scorer
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 
 	"github.com/cespare/xxhash/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-
-	"context"
-
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
 // ApproximateBlockHash is an xxhash64-based block hash for approximate prefix matching.
