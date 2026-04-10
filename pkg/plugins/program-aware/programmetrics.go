@@ -44,7 +44,8 @@ type ProgramMetrics struct {
 	// deficitTokens is the DRR deficit counter: positive means the program is owed
 	// service; negative means it has been overserved relative to its quantum.
 	// Only used by DRRStrategy.
-	deficitTokens atomic.Int64
+	deficitTokens    atomic.Int64
+	lastDeficitDecay time.Time // last wall-clock time DecayDeficitTimed was called
 }
 
 // IncrementRequests atomically increments the total request counter.
@@ -230,4 +231,25 @@ func (m *ProgramMetrics) ResetDeficit() {
 // Deficit returns the current deficit counter value in tokens.
 func (m *ProgramMetrics) Deficit() int64 {
 	return m.deficitTokens.Load()
+}
+
+// DecayDeficitTimed applies time-based exponential decay to the deficit counter
+// using a half-life. The decay factor is 0.5^(elapsed/halfLifeSeconds), so the
+// deficit halves every halfLifeSeconds regardless of call frequency.
+func (m *ProgramMetrics) DecayDeficitTimed(halfLifeSeconds float64, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastDeficitDecay.IsZero() {
+		m.lastDeficitDecay = now
+		return
+	}
+	elapsed := now.Sub(m.lastDeficitDecay).Seconds()
+	if elapsed <= 0 {
+		return
+	}
+	factor := math.Pow(0.5, elapsed/halfLifeSeconds)
+	current := m.deficitTokens.Load()
+	decayed := int64(float64(current) * factor)
+	m.deficitTokens.Store(decayed)
+	m.lastDeficitDecay = now
 }

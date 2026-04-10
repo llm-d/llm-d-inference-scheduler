@@ -124,12 +124,12 @@ func TestDRRStrategy_Pick_QuantumAccumulates(t *testing.T) {
 	assert.Equal(t, defaultDRRQuantumTokens*5, m.Deficit(), "deficit should accumulate across rounds")
 }
 
-func TestDRRStrategy_Pick_IdleAccumulatesDeficit(t *testing.T) {
+func TestDRRStrategy_Pick_IdleNoQuantum(t *testing.T) {
 	s := testDRR()
 	m := &ProgramMetrics{}
 	now := time.Now()
 
-	// Accumulate 3 rounds of quantum.
+	// Accumulate 3 rounds of quantum while active.
 	for range 3 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 2, m, now)}
 		s.Pick(0, queues)
@@ -137,10 +137,10 @@ func TestDRRStrategy_Pick_IdleAccumulatesDeficit(t *testing.T) {
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit())
 
-	// Queue drains — deficit should still accumulate (quantum allocated to idle queues).
+	// Queue drains — deficit should NOT increase (no quantum for empty queues).
 	queues := map[string]QueueInfo{"prog": makeEmptyQueueInfo("prog", m)}
 	s.Pick(0, queues)
-	assert.Equal(t, defaultDRRQuantumTokens*4, m.Deficit(), "idle queues still receive quantum")
+	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit(), "idle queues do not receive quantum")
 }
 
 func TestDRRStrategy_OnCompleted_DeductsTokens(t *testing.T) {
@@ -213,6 +213,141 @@ func TestDRRStrategy_OnPrerequest_ResetsQuantum(t *testing.T) {
 	s.OnPreRequest(nil, testRequest(0))
 	s.Pick(0, queues)
 	assert.Equal(t, defaultDRRQuantumTokens*2, m.Deficit(), "Pick after OnPrerequest should allocate quantum again")
+}
+
+// =============================================================================
+// DRR deficit decay tests
+// =============================================================================
+
+func testDRRWithDecay(halfLife float64) *DRRStrategy {
+	return &DRRStrategy{
+		weightDeficit:          defaultDRRWeightDeficit,
+		weightHeadWait:         defaultDRRWeightHeadWait,
+		quantumTokens:          defaultDRRQuantumTokens,
+		deficitHalfLifeSeconds: halfLife,
+	}
+}
+
+func TestDRRStrategy_DecayDeficit_FirstCallNoDecay(t *testing.T) {
+	m := &ProgramMetrics{}
+	m.AddDeficit(10000)
+
+	m.DecayDeficitTimed(60.0, time.Now())
+	assert.Equal(t, int64(10000), m.Deficit(),
+		"first decay call should not reduce deficit (only sets timestamp)")
+}
+
+func TestDRRStrategy_DecayDeficit_HalvesAtHalfLife(t *testing.T) {
+	m := &ProgramMetrics{}
+	m.AddDeficit(10000)
+
+	now := time.Now()
+	m.DecayDeficitTimed(60.0, now)                     // initialize
+	m.DecayDeficitTimed(60.0, now.Add(60*time.Second)) // one half-life
+
+	assert.Equal(t, int64(5000), m.Deficit(),
+		"deficit should halve after exactly one half-life")
+}
+
+func TestDRRStrategy_DecayDeficit_NegativeDeficitDecays(t *testing.T) {
+	m := &ProgramMetrics{}
+	m.DeductTokens(10000) // deficit = -10000
+
+	now := time.Now()
+	m.DecayDeficitTimed(60.0, now)
+	m.DecayDeficitTimed(60.0, now.Add(60*time.Second))
+
+	assert.Equal(t, int64(-5000), m.Deficit(),
+		"negative deficit should also decay toward zero")
+}
+
+func TestDRRStrategy_DecayDeficit_ConsistentWindow(t *testing.T) {
+	// Single call over 60s vs many calls over 60s should yield same result.
+	m1 := &ProgramMetrics{}
+	m1.AddDeficit(10000)
+	now := time.Now()
+	m1.DecayDeficitTimed(60.0, now)
+	m1.DecayDeficitTimed(60.0, now.Add(60*time.Second))
+	single := m1.Deficit()
+
+	m2 := &ProgramMetrics{}
+	m2.AddDeficit(10000)
+	m2.DecayDeficitTimed(60.0, now)
+	for i := 1; i <= 100; i++ {
+		m2.DecayDeficitTimed(60.0, now.Add(time.Duration(i)*600*time.Millisecond))
+	}
+	many := m2.Deficit()
+
+	// Wider tolerance than LAS (which uses float64) because int64 truncation
+	// on each intermediate step compounds rounding error.
+	assert.InDelta(t, float64(single), float64(many), 50.0,
+		"time-based decay should be consistent regardless of call frequency")
+}
+
+func TestDRRStrategy_Pick_IdleDecaysDeficit(t *testing.T) {
+	s := testDRRWithDecay(60.0)
+	m := &ProgramMetrics{}
+	m.AddDeficit(10000)
+	now := time.Now()
+
+	// Initialize the decay timer.
+	m.DecayDeficitTimed(60.0, now)
+
+	// Simulate 60s later (one half-life) — deficit should halve.
+	m.DecayDeficitTimed(60.0, now.Add(60*time.Second))
+	assert.Equal(t, int64(5000), m.Deficit(),
+		"idle queue deficit should halve after one half-life")
+
+	// Verify Pick on non-empty queue adds quantum without decay.
+	m2 := &ProgramMetrics{}
+	m2.AddDeficit(10000)
+	queues2 := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m2, now)}
+	s.Pick(0, queues2)
+	assert.Equal(t, int64(10000+defaultDRRQuantumTokens), m2.Deficit(),
+		"non-empty queue should get quantum, no decay")
+}
+
+func TestDRRStrategy_Pick_NoDecayOnNonEmpty(t *testing.T) {
+	s := testDRRWithDecay(60.0)
+	m := &ProgramMetrics{}
+	now := time.Now()
+
+	for range 100 {
+		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
+		s.Pick(0, queues)
+		s.OnPreRequest(nil, testRequest(0))
+	}
+	// All 100 quanta should have accumulated — no decay on non-empty queues.
+	assert.Equal(t, defaultDRRQuantumTokens*100, m.Deficit(),
+		"non-empty queues should not be decayed")
+}
+
+func TestDRRStrategy_Pick_NoDecayWhenDisabled(t *testing.T) {
+	s := testDRR() // deficitHalfLifeSeconds = 0 (no decay)
+	m := &ProgramMetrics{}
+	m.AddDeficit(10000)
+
+	// Empty queue with decay disabled — deficit should not change.
+	queues := map[string]QueueInfo{"prog": makeEmptyQueueInfo("prog", m)}
+	s.Pick(0, queues)
+	assert.Equal(t, int64(10000), m.Deficit(),
+		"with deficitHalfLifeSeconds=0, no decay should occur")
+}
+
+func TestFactory_DeficitHalfLifeSeconds(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"drr","deficitHalfLifeSeconds":30}`), nil)
+	require.NoError(t, err)
+	plugin := p.(*ProgramAwarePlugin)
+	drr := plugin.strategy.(*DRRStrategy)
+	assert.Equal(t, 30.0, drr.deficitHalfLifeSeconds)
+}
+
+func TestFactory_DeficitHalfLifeSecondsDefault(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"drr"}`), nil)
+	require.NoError(t, err)
+	plugin := p.(*ProgramAwarePlugin)
+	drr := plugin.strategy.(*DRRStrategy)
+	assert.Equal(t, defaultDRRDeficitHalfLifeSeconds, drr.deficitHalfLifeSeconds)
 }
 
 // =============================================================================

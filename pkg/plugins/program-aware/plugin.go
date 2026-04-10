@@ -60,6 +60,12 @@ type Config struct {
 	// Default: 1000.
 	QuantumTokens *int64 `json:"quantumTokens,omitempty"`
 
+	// DeficitHalfLifeSeconds enables time-based decay for the DRR deficit counter.
+	// Defines the half-life in seconds: deficit decays to 50% after this duration.
+	// Prevents unbounded deficit accumulation for programs that stop sending requests.
+	// Default: 60 (deficit halves every 60s). Set to 0 to disable decay.
+	DeficitHalfLifeSeconds *float64 `json:"deficitHalfLifeSeconds,omitempty"`
+
 	// --- Service weights (only used when strategy == "las") ---
 
 	// WeightService is the weight for the inverted attained service signal.

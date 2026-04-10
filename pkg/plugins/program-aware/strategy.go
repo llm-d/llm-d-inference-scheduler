@@ -43,9 +43,10 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 	switch cfg.Strategy {
 	case "drr":
 		return &DRRStrategy{
-			weightDeficit:  floatOr(cfg.WeightDeficit, defaultDRRWeightDeficit),
-			weightHeadWait: floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
-			quantumTokens:  int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
+			weightDeficit:          floatOr(cfg.WeightDeficit, defaultDRRWeightDeficit),
+			weightHeadWait:         floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
+			quantumTokens:          int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
+			deficitHalfLifeSeconds: floatOr(cfg.DeficitHalfLifeSeconds, defaultDRRDeficitHalfLifeSeconds),
 		}, nil
 	case "", "las":
 		return &LASStrategy{
@@ -102,9 +103,10 @@ func rangeNormalize(v, min, max float64) float64 {
 
 // Default DRR strategy values.
 const (
-	defaultDRRQuantumTokens  int64   = 1000
-	defaultDRRWeightDeficit  float64 = 0.8
-	defaultDRRWeightHeadWait float64 = 0.2
+	defaultDRRQuantumTokens          int64   = 1000
+	defaultDRRWeightDeficit          float64 = 0.8
+	defaultDRRWeightHeadWait         float64 = 0.2
+	defaultDRRDeficitHalfLifeSeconds float64 = 60
 )
 
 // DRRStrategy implements Deficit Round Robin adapted for token-based LLM scheduling.
@@ -118,18 +120,19 @@ const (
 //   - "bytes"   = prompt + completion tokens (actual cost known at response completion)
 //   - "quantum" = quantumTokens added per Pick() cycle per non-empty queue
 //   - Actual token cost is deducted in OnCompleted() (ResponseComplete hook)
-//   - Idle queues continue to receive quantum so they accumulate deficit credit
-//     and aren't penalised when they return
+//   - Idle (empty) queues do not receive quantum; instead their deficit is
+//     time-decayed (half-life configurable) so stale credit shrinks toward zero
 //
 // headWaitMs is used as a secondary signal to prevent starvation of
 // new or returning programs that start with deficit=0.
 //
 // Weights and quantum are configurable via the plugin config; defaults are 0.8/0.2/1000.
 type DRRStrategy struct {
-	weightDeficit  float64
-	weightHeadWait float64
-	quantumTokens  int64
-	addQuantum     sync.Map // key: int (band priority) → bool
+	weightDeficit          float64
+	weightHeadWait         float64
+	quantumTokens          int64
+	deficitHalfLifeSeconds float64  // 0 = no decay
+	addQuantum             sync.Map // key: int (band priority) → bool
 }
 
 // Name returns "drr".
@@ -138,9 +141,10 @@ func (s *DRRStrategy) Name() string { return "drr" }
 // Pick selects the queue with the highest deficit-weighted score.
 //
 // Quantum allocation is per-band and cycle-aware: the first Pick() for a
-// given priority band allocates quantum to all queues in that band;
+// given priority band allocates quantum to non-empty queues in that band;
 // subsequent Pick() calls for the same band in the same cycle skip
 // allocation. OnPreRequest() resets the flag for the dispatched band.
+// Empty queues receive no quantum; instead their deficit is time-decayed.
 func (s *DRRStrategy) Pick(bandPriority int, queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
 		deficit    float64
@@ -159,20 +163,25 @@ func (s *DRRStrategy) Pick(bandPriority int, queues map[string]QueueInfo) (flowc
 	minDeficit, maxDeficit := 0.0, 0.0
 	minWait, maxWait := 0.0, 0.0
 	first := true
+	now := time.Now()
 
 	for id, qi := range queues {
 		if qi.Metrics == nil {
 			continue
 		}
-		// Allocate quantum once per cycle per band to all queues (including
-		// empty) so idle programs accumulate deficit credit.
-		if shouldAdd {
-			qi.Metrics.AddDeficit(s.quantumTokens)
+
+		if qi.Len == 0 {
+			// Empty queues: decay existing deficit so stale credit from
+			// long-idle programs does not accumulate unboundedly.
+			if s.deficitHalfLifeSeconds > 0 {
+				qi.Metrics.DecayDeficitTimed(s.deficitHalfLifeSeconds, now)
+			}
+			continue
 		}
 
-		// Only non-empty queues participate in scoring.
-		if qi.Len == 0 {
-			continue
+		// Non-empty queues: allocate quantum once per cycle per band.
+		if shouldAdd {
+			qi.Metrics.AddDeficit(s.quantumTokens)
 		}
 
 		deficit := float64(qi.Metrics.Deficit())
