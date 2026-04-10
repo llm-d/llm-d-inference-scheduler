@@ -161,21 +161,21 @@ func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 		if qi.Metrics == nil {
 			continue
 		}
-		if qi.Len == 0 {
-			qi.Metrics.ResetDeficit()
-			s.seen.Delete(id)
-			continue
-		}
+		// Allocate quantum to all queues (including empty) so idle programs
+		// accumulate deficit credit and aren't penalised when they return.
 		if s.addQuantum.Load() {
-			// First Pick() in this dispatch cycle — allocate quantum unconditionally.
 			qi.Metrics.AddDeficit(s.quantumTokens)
 			s.seen.Store(id, true)
 		} else {
-			// Subsequent Pick() in the same cycle — only allocate to unseen programs.
 			if _, ok := s.seen.Load(id); !ok {
 				s.seen.Store(id, true)
 				qi.Metrics.AddDeficit(s.quantumTokens)
 			}
+		}
+
+		// Only non-empty queues participate in scoring.
+		if qi.Len == 0 {
+			continue
 		}
 
 		deficit := float64(qi.Metrics.Deficit())
