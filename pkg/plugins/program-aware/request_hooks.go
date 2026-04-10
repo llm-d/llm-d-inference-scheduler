@@ -56,6 +56,8 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 	}
 
 	metrics := p.getOrCreateMetrics(programID)
+	p.getStrategy().OnPreRequest(metrics, request)
+
 	metrics.IncrementDispatched()
 	dispatchedTotal.WithLabelValues(programID).Inc()
 
@@ -96,9 +98,7 @@ func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *sche
 		inputTokensTotal.WithLabelValues(programID).Add(float64(promptTokens))
 		outputTokensTotal.WithLabelValues(programID).Add(float64(completionTokens))
 
-		// Strategy hook: accumulate attained service (Service), deduct deficit (DRR),
-		// or no-op (EWMA).
-		p.getStrategy().OnCompleted(metrics, promptTokens, completionTokens)
+		p.getStrategy().OnCompleted(metrics, request, response)
 		attainedServiceTokens.WithLabelValues(programID).Set(metrics.AttainedService())
 
 		// Update service rate for fairness index (weighted tokens/sec EWMA).

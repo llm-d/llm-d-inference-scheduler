@@ -81,6 +81,13 @@ type Config struct {
 	// When set (> 0), overrides ServiceDecayFactor with wall-clock based decay.
 	// Example: 30 = service halves every 30s regardless of Pick() frequency.
 	ServiceHalfLifeSeconds *float64 `json:"serviceHalfLifeSeconds,omitempty"`
+
+	// --- RR options (only used when strategy == "rr") ---
+
+	// DeferRRCursor controls whether the round-robin cursor advances in
+	// Pick() (false, default) or is deferred to OnPreRequest() so the
+	// cursor only moves after a real dispatch. Default: false.
+	DeferRRCursor *bool `json:"deferRRCursor,omitempty"`
 }
 
 // Compile-time interface assertions.

@@ -9,15 +9,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
 	fcmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol/mocks"
+	requestcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 )
 
 // testDRR returns a DRRStrategy with default weights for tests.
 func testDRR() *DRRStrategy {
-	return &DRRStrategy{
+	s := &DRRStrategy{
 		weightDeficit:  defaultDRRWeightDeficit,
 		weightHeadWait: defaultDRRWeightHeadWait,
 		quantumTokens:  defaultDRRQuantumTokens,
 	}
+	s.addQuantum.Store(true)
+	return s
 }
 
 func TestNewStrategy_Valid(t *testing.T) {
@@ -110,6 +113,7 @@ func TestDRRStrategy_Pick_QuantumAccumulates(t *testing.T) {
 	for range 5 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
 		s.Pick(queues)
+		s.OnPreRequest(nil, nil) // reset for next dispatch cycle
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*5, m.Deficit(), "deficit should accumulate across rounds")
 }
@@ -123,6 +127,7 @@ func TestDRRStrategy_Pick_ResetsOnIdle(t *testing.T) {
 	for range 3 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 2, m, now)}
 		s.Pick(queues)
+		s.OnPreRequest(nil, nil)
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit())
 
@@ -137,7 +142,8 @@ func TestDRRStrategy_OnCompleted_DeductsTokens(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddDeficit(defaultDRRQuantumTokens) // one round of quantum
 
-	s.OnCompleted(m, 700, 300) // weighted cost: 700*1 + 300*2 = 1300
+	resp := &requestcontrol.Response{Usage: requestcontrol.Usage{PromptTokens: 700, CompletionTokens: 300}}
+	s.OnCompleted(m, nil, resp) // weighted cost: 700*1 + 300*2 = 1300
 	assert.Equal(t, int64(-300), m.Deficit(), "weighted 1300-token cost against 1000 quantum")
 }
 
@@ -146,7 +152,8 @@ func TestDRRStrategy_OnCompleted_GoesNegativeOnOveruse(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddDeficit(defaultDRRQuantumTokens) // 1000 tokens
 
-	s.OnCompleted(m, 1500, 500) // weighted cost: 1500*1 + 500*2 = 2500
+	resp := &requestcontrol.Response{Usage: requestcontrol.Usage{PromptTokens: 1500, CompletionTokens: 500}}
+	s.OnCompleted(m, nil, resp) // weighted cost: 1500*1 + 500*2 = 2500
 	assert.Equal(t, int64(-1500), m.Deficit(), "deficit should be negative after overuse")
 }
 
@@ -170,6 +177,36 @@ func TestDRRStrategy_Pick_PreferHighDeficit(t *testing.T) {
 	assert.Equal(t, "high", selected.FlowKey().ID)
 	assert.Greater(t, scores["high"], scores["low"],
 		"high-deficit queue should outscore overserved queue")
+}
+
+func TestDRRStrategy_Pick_QuantumOncePerCycle(t *testing.T) {
+	s := testDRR()
+	m := &ProgramMetrics{}
+	now := time.Now()
+
+	// First Pick allocates quantum.
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 3, m, now)}
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit(), "first Pick should allocate quantum")
+
+	// Second Pick without OnPrerequest — same program already seen, no extra quantum.
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit(), "second Pick without OnPrerequest should not allocate again")
+}
+
+func TestDRRStrategy_OnPrerequest_ResetsQuantum(t *testing.T) {
+	s := testDRR()
+	m := &ProgramMetrics{}
+	now := time.Now()
+
+	queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 3, m, now)}
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit())
+
+	// OnPrerequest resets the cycle — next Pick should allocate again.
+	s.OnPreRequest(nil, nil)
+	s.Pick(queues)
+	assert.Equal(t, defaultDRRQuantumTokens*2, m.Deficit(), "Pick after OnPrerequest should allocate quantum again")
 }
 
 // =============================================================================
@@ -256,7 +293,8 @@ func TestLASStrategy_OnCompleted_AddsService(t *testing.T) {
 	m := &ProgramMetrics{}
 
 	// 100 input + 50 output → weighted: 100*1 + 50*2 = 200
-	s.OnCompleted(m, 100, 50)
+	resp := &requestcontrol.Response{Usage: requestcontrol.Usage{PromptTokens: 100, CompletionTokens: 50}}
+	s.OnCompleted(m, nil, resp)
 	assert.InDelta(t, 200.0, m.AttainedService(), 0.01,
 		"OnCompleted should add weighted token cost to attained service")
 }
@@ -535,6 +573,80 @@ func TestRRStrategy_NoQueues(t *testing.T) {
 	// Empty cycle — no queues at all.
 	picked := simulateRRCycle(s, nil, nil)
 	assert.Equal(t, "", picked, "no queues should yield empty pick")
+}
+
+func TestFactory_RRDeferCursor(t *testing.T) {
+	p, err := ProgramAwarePluginFactory("test", []byte(`{"strategy":"rr","deferRRCursor":true}`), nil)
+	require.NoError(t, err)
+	plugin := p.(*ProgramAwarePlugin)
+	rr := plugin.strategy.(*RRStrategy)
+	assert.True(t, rr.deferCursor)
+}
+
+func TestRRStrategy_DeferCursor_PickDoesNotAdvance(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	picked := simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "alpha", picked)
+
+	s.mu.Lock()
+	assert.Equal(t, "", s.lastSelected, "lastSelected should NOT advance in Pick when deferCursor=true")
+	assert.Equal(t, "alpha", s.pendingCursor, "pendingCursor should hold the candidate")
+	s.mu.Unlock()
+}
+
+func TestRRStrategy_DeferCursor_OnPreRequestCommits(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	simulateRRCycle(s, ids, ids) // picks alpha, stores in pendingCursor
+	s.OnPreRequest(nil, nil)     // commits cursor
+
+	s.mu.Lock()
+	assert.Equal(t, "alpha", s.lastSelected, "OnPreRequest should commit pendingCursor")
+	assert.Equal(t, "", s.pendingCursor, "pendingCursor should be cleared")
+	s.mu.Unlock()
+
+	// Next pick should advance past alpha.
+	picked := simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "beta", picked)
+}
+
+func TestRRStrategy_DeferCursor_RepeatedPickWithoutDispatch(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	// Pick three times without OnPreRequest — cursor never advances.
+	for range 3 {
+		picked := simulateRRCycle(s, ids, ids)
+		assert.Equal(t, "alpha", picked, "without OnPreRequest, alpha is always picked")
+	}
+}
+
+func TestRRStrategy_DeferCursor_FullCycle(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	ids := []string{"alpha", "beta", "gamma"}
+
+	expected := []string{"alpha", "beta", "gamma", "alpha"}
+	for _, want := range expected {
+		picked := simulateRRCycle(s, ids, ids)
+		assert.Equal(t, want, picked)
+		s.OnPreRequest(nil, nil) // commit after dispatch
+	}
+}
+
+func TestRRStrategy_DeferCursor_AllEmpty(t *testing.T) {
+	s := &RRStrategy{deferCursor: true}
+	allIDs := []string{"alpha", "beta"}
+
+	picked := simulateRRCycle(s, allIDs, nil) // all empty
+	assert.Equal(t, "", picked)
+
+	s.mu.Lock()
+	assert.Equal(t, "", s.lastSelected)
+	assert.Equal(t, "", s.pendingCursor)
+	s.mu.Unlock()
 }
 
 func TestRR_Pick_CyclesThroughPrograms(t *testing.T) {
