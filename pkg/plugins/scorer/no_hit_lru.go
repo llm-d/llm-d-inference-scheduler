@@ -8,10 +8,10 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/scorer/prefix"
 )
 
 const (

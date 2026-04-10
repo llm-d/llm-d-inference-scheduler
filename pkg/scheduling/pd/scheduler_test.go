@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log" // Import config for thresholds
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	fwkschd "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/picker"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/datalayer"
+	fwkschd "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/interface/scheduling"
+	dl_prefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/datalayer/attribute/prefix"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/picker"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/framework/plugins/scheduling/scorer/prefix"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/filter"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/profile"

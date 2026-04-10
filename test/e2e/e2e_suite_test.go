@@ -21,7 +21,7 @@ import (
 
 	infextv1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	infextv1a2 "sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/igw/util/env"
 	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
