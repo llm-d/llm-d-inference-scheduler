@@ -5,7 +5,6 @@ import (
 	"math"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
@@ -19,11 +18,11 @@ import (
 type ScoringStrategy interface {
 	Name() string
 
-	// Pick receives all queues in the band keyed by program ID (including
-	// empty ones for bookkeeping) and returns the selected queue plus
-	// per-queue scores for observability. Returns (nil, nil) if no queue
-	// is eligible.
-	Pick(queues map[string]QueueInfo) (selected flowcontrol.FlowQueueAccessor, scores map[string]float64)
+	// Pick receives the priority band and all queues in that band keyed by
+	// program ID (including empty ones for bookkeeping) and returns the
+	// selected queue plus per-queue scores for observability.
+	// Returns (nil, nil) if no queue is eligible.
+	Pick(bandPriority int, queues map[string]QueueInfo) (selected flowcontrol.FlowQueueAccessor, scores map[string]float64)
 
 	// OnPreRequest is called before each request dispatch to reset per-cycle state.
 	OnPreRequest(metrics *ProgramMetrics, request *scheduling.LLMRequest)
@@ -43,13 +42,11 @@ type QueueInfo struct {
 func newStrategy(cfg Config) (ScoringStrategy, error) {
 	switch cfg.Strategy {
 	case "drr":
-		s := &DRRStrategy{
+		return &DRRStrategy{
 			weightDeficit:  floatOr(cfg.WeightDeficit, defaultDRRWeightDeficit),
 			weightHeadWait: floatOr(cfg.WeightDRRHeadWait, defaultDRRWeightHeadWait),
 			quantumTokens:  int64Or(cfg.QuantumTokens, defaultDRRQuantumTokens),
-		}
-		s.addQuantum.Store(true)
-		return s, nil
+		}, nil
 	case "", "las":
 		return &LASStrategy{
 			weightService:   floatOr(cfg.WeightService, defaultServiceWeightService),
@@ -58,11 +55,9 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 			halfLifeSeconds: floatOr(cfg.ServiceHalfLifeSeconds, 0),
 		}, nil
 	case "rr":
-		s := &RRStrategy{
+		return &RRStrategy{
 			deferCursor: boolOr(cfg.DeferRRCursor, false),
-		}
-		s.moveCursor.Store(true)
-		return s, nil
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"drr\", \"las\", \"rr\"", cfg.Strategy)
 	}
@@ -123,8 +118,8 @@ const (
 //   - "bytes"   = prompt + completion tokens (actual cost known at response completion)
 //   - "quantum" = quantumTokens added per Pick() cycle per non-empty queue
 //   - Actual token cost is deducted in OnCompleted() (ResponseComplete hook)
-//   - Idle queues have their deficit reset to 0: standard DRR behavior prevents programs
-//     from accumulating unbounded credit while inactive
+//   - Idle queues continue to receive quantum so they accumulate deficit credit
+//     and aren't penalised when they return
 //
 // headWaitMs is used as a secondary signal to prevent starvation of
 // new or returning programs that start with deficit=0.
@@ -134,7 +129,7 @@ type DRRStrategy struct {
 	weightDeficit  float64
 	weightHeadWait float64
 	quantumTokens  int64
-	addQuantum     atomic.Bool
+	addQuantum     sync.Map // key: int (band priority) → bool
 }
 
 // Name returns "drr".
@@ -142,14 +137,21 @@ func (s *DRRStrategy) Name() string { return "drr" }
 
 // Pick selects the queue with the highest deficit-weighted score.
 //
-// Quantum allocation is cycle-aware: the first Pick() in a dispatch cycle
-// allocates quantum to all queues; subsequent Pick() calls in the same
-// cycle skip allocation entirely. addQuantum is cleared at the end of
-// Pick(); OnPreRequest() resets it for the next cycle.
-func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
+// Quantum allocation is per-band and cycle-aware: the first Pick() for a
+// given priority band allocates quantum to all queues in that band;
+// subsequent Pick() calls for the same band in the same cycle skip
+// allocation. OnPreRequest() resets the flag for the dispatched band.
+func (s *DRRStrategy) Pick(bandPriority int, queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
 		deficit    float64
 		headWaitMs float64
+	}
+
+	// Check whether quantum should be allocated for this band.
+	// Missing key means first call for this band — allocate.
+	shouldAdd := true
+	if v, ok := s.addQuantum.Load(bandPriority); ok {
+		shouldAdd = v.(bool)
 	}
 
 	// Pass 1: bookkeeping + collect raw values for non-empty queues.
@@ -162,9 +164,9 @@ func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 		if qi.Metrics == nil {
 			continue
 		}
-		// Allocate quantum once per cycle to all queues (including empty)
-		// so idle programs accumulate deficit credit.
-		if s.addQuantum.Load() {
+		// Allocate quantum once per cycle per band to all queues (including
+		// empty) so idle programs accumulate deficit credit.
+		if shouldAdd {
 			qi.Metrics.AddDeficit(s.quantumTokens)
 		}
 
@@ -221,13 +223,13 @@ func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 		}
 	}
 
-	s.addQuantum.Store(false)
+	s.addQuantum.Store(bandPriority, false)
 	return best, scores
 }
 
-// OnPreRequest resets the quantum flag so the next Pick() allocates quantum.
-func (s *DRRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {
-	s.addQuantum.Store(true)
+// OnPreRequest resets the quantum flag for the dispatched band.
+func (s *DRRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.LLMRequest) {
+	s.addQuantum.Store(request.Objectives.Priority, true)
 }
 
 // OnCompleted deducts actual token usage from the deficit counter.
@@ -281,7 +283,7 @@ func (s *LASStrategy) Name() string { return "las" }
 // First decays every queue's attained service, then uses two-pass adaptive
 // normalization across non-empty queues. The service dimension is inverted
 // so that lower attained service maps to a higher score.
-func (s *LASStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
+func (s *LASStrategy) Pick(_ int, queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
 		service    float64
 		headWaitMs float64
@@ -387,21 +389,17 @@ func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequ
 // and the one immediately after the cursor gets the highest score.
 // Empty queues are naturally skipped because only non-empty queues are scored.
 type RRStrategy struct {
-	mu           sync.Mutex
-	lastSelected string      // program ID last picked
-	moveCursor   atomic.Bool // when deferCursor=true, gates cursor advance to once per cycle
-	deferCursor  bool        // when true, cursor advances once per cycle (reset by OnPreRequest)
+	lastSelected sync.Map // key: int (band priority) → string (program ID)
+	moveCursor   sync.Map // key: int (band priority) → bool
+	deferCursor  bool     // when true, cursor advances once per cycle (reset by OnPreRequest)
 }
 
 // Name returns "rr".
 func (s *RRStrategy) Name() string { return "rr" }
 
 // Pick selects the next non-empty queue in deterministic round-robin order.
-// Walks forward from the cursor and returns the first non-empty queue found.
-func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+// Walks forward from the per-band cursor and returns the first non-empty queue found.
+func (s *RRStrategy) Pick(bandPriority int, queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	// Sort all program IDs for deterministic ordering.
 	allKeys := make([]string, 0, len(queues))
 	for id := range queues {
@@ -414,18 +412,30 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 		return nil, nil
 	}
 
+	// Load per-band cursor.
+	cursor := ""
+	if v, ok := s.lastSelected.Load(bandPriority); ok {
+		cursor = v.(string)
+	}
+
 	// When deferCursor is active and cursor already moved this cycle,
 	// return the same queue without advancing.
-	if s.deferCursor && !s.moveCursor.Load() && s.lastSelected != "" {
-		if qi, ok := queues[s.lastSelected]; ok && qi.Len > 0 {
-			return qi.Queue, nil
+	if s.deferCursor && cursor != "" {
+		canMove := true
+		if v, ok := s.moveCursor.Load(bandPriority); ok {
+			canMove = v.(bool)
+		}
+		if !canMove {
+			if qi, ok := queues[cursor]; ok && qi.Len > 0 {
+				return qi.Queue, nil
+			}
 		}
 	}
 
-	// Find the start index (next after lastSelected).
+	// Find the start index (next after cursor).
 	start := 0
-	if s.lastSelected != "" {
-		if idx := slices.Index(allKeys, s.lastSelected); idx != -1 {
+	if cursor != "" {
+		if idx := slices.Index(allKeys, cursor); idx != -1 {
 			start = (idx + 1) % n
 		}
 	}
@@ -434,24 +444,24 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 	for i := range n {
 		id := allKeys[(start+i)%n]
 		if queues[id].Len > 0 {
-			s.lastSelected = id
+			s.lastSelected.Store(bandPriority, id)
 			if s.deferCursor {
-				s.moveCursor.Store(false)
+				s.moveCursor.Store(bandPriority, false)
 			}
 			return queues[id].Queue, nil
 		}
 	}
 
-	s.lastSelected = ""
+	s.lastSelected.Delete(bandPriority)
 	return nil, nil
 }
 
-// OnPreRequest resets the moveCursor flag so the next Pick() can advance.
-func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {
+// OnPreRequest resets the moveCursor flag for the dispatched band.
+func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.LLMRequest) {
 	if !s.deferCursor {
 		return
 	}
-	s.moveCursor.Store(true)
+	s.moveCursor.Store(request.Objectives.Priority, true)
 }
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).

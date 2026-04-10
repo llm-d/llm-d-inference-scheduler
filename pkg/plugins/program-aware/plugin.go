@@ -200,7 +200,7 @@ func (p *ProgramAwarePlugin) Pick(_ context.Context, band flowcontrol.PriorityBa
 	})
 
 	// Strategy owns scoring, normalization, and internal bookkeeping.
-	bestQueue, scores := strategy.Pick(infos)
+	bestQueue, scores := strategy.Pick(band.Priority(), infos)
 
 	// Emit per-queue scores for observability.
 	for id, score := range scores {
