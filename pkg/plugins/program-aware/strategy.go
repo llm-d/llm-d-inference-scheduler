@@ -133,7 +133,6 @@ type DRRStrategy struct {
 	weightHeadWait float64
 	quantumTokens  int64
 	addQuantum     atomic.Bool
-	seen           sync.Map
 }
 
 // Name returns "drr".
@@ -142,9 +141,9 @@ func (s *DRRStrategy) Name() string { return "drr" }
 // Pick selects the queue with the highest deficit-weighted score.
 //
 // Quantum allocation is cycle-aware: the first Pick() in a dispatch cycle
-// allocates quantum to all non-empty queues; subsequent Pick() calls in the
-// same cycle only allocate to programs not yet seen. addQuantum is cleared
-// at the end of Pick(); OnPrerequest() resets it for the next cycle.
+// allocates quantum to all queues; subsequent Pick() calls in the same
+// cycle skip allocation entirely. addQuantum is cleared at the end of
+// Pick(); OnPreRequest() resets it for the next cycle.
 func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAccessor, map[string]float64) {
 	type entry struct {
 		deficit    float64
@@ -161,16 +160,10 @@ func (s *DRRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAc
 		if qi.Metrics == nil {
 			continue
 		}
-		// Allocate quantum to all queues (including empty) so idle programs
-		// accumulate deficit credit and aren't penalised when they return.
+		// Allocate quantum once per cycle to all queues (including empty)
+		// so idle programs accumulate deficit credit.
 		if s.addQuantum.Load() {
 			qi.Metrics.AddDeficit(s.quantumTokens)
-			s.seen.Store(id, true)
-		} else {
-			if _, ok := s.seen.Load(id); !ok {
-				s.seen.Store(id, true)
-				qi.Metrics.AddDeficit(s.quantumTokens)
-			}
 		}
 
 		// Only non-empty queues participate in scoring.
