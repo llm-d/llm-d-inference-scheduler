@@ -118,7 +118,7 @@ func TestDRRStrategy_Pick_QuantumAccumulates(t *testing.T) {
 	assert.Equal(t, defaultDRRQuantumTokens*5, m.Deficit(), "deficit should accumulate across rounds")
 }
 
-func TestDRRStrategy_Pick_ResetsOnIdle(t *testing.T) {
+func TestDRRStrategy_Pick_IdleAccumulatesDeficit(t *testing.T) {
 	s := testDRR()
 	m := &ProgramMetrics{}
 	now := time.Now()
@@ -131,10 +131,10 @@ func TestDRRStrategy_Pick_ResetsOnIdle(t *testing.T) {
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit())
 
-	// Queue drains.
+	// Queue drains — deficit should still accumulate (quantum allocated to idle queues).
 	queues := map[string]QueueInfo{"prog": makeEmptyQueueInfo("prog", m)}
 	s.Pick(queues)
-	assert.Equal(t, int64(0), m.Deficit(), "deficit must reset to 0 when queue drains")
+	assert.Equal(t, defaultDRRQuantumTokens*4, m.Deficit(), "idle queues still receive quantum")
 }
 
 func TestDRRStrategy_OnCompleted_DeductsTokens(t *testing.T) {
@@ -585,27 +585,31 @@ func TestFactory_RRDeferCursor(t *testing.T) {
 
 func TestRRStrategy_DeferCursor_PickDoesNotAdvance(t *testing.T) {
 	s := &RRStrategy{deferCursor: true}
+	s.moveCursor.Store(true)
 	ids := []string{"alpha", "beta", "gamma"}
 
 	picked := simulateRRCycle(s, ids, ids)
 	assert.Equal(t, "alpha", picked)
 
 	s.mu.Lock()
-	assert.Equal(t, "", s.lastSelected, "lastSelected should NOT advance in Pick when deferCursor=true")
-	assert.Equal(t, "alpha", s.pendingCursor, "pendingCursor should hold the candidate")
+	assert.Equal(t, "alpha", s.lastSelected, "first Pick advances lastSelected")
 	s.mu.Unlock()
+
+	// Second Pick without OnPreRequest returns same queue.
+	picked = simulateRRCycle(s, ids, ids)
+	assert.Equal(t, "alpha", picked, "repeated Pick without OnPreRequest returns same queue")
 }
 
 func TestRRStrategy_DeferCursor_OnPreRequestCommits(t *testing.T) {
 	s := &RRStrategy{deferCursor: true}
+	s.moveCursor.Store(true)
 	ids := []string{"alpha", "beta", "gamma"}
 
-	simulateRRCycle(s, ids, ids) // picks alpha, stores in pendingCursor
-	s.OnPreRequest(nil, nil)     // commits cursor
+	simulateRRCycle(s, ids, ids) // picks alpha, sets moveCursor=false
+	s.OnPreRequest(nil, nil)     // resets moveCursor=true
 
 	s.mu.Lock()
-	assert.Equal(t, "alpha", s.lastSelected, "OnPreRequest should commit pendingCursor")
-	assert.Equal(t, "", s.pendingCursor, "pendingCursor should be cleared")
+	assert.Equal(t, "alpha", s.lastSelected)
 	s.mu.Unlock()
 
 	// Next pick should advance past alpha.
@@ -615,6 +619,7 @@ func TestRRStrategy_DeferCursor_OnPreRequestCommits(t *testing.T) {
 
 func TestRRStrategy_DeferCursor_RepeatedPickWithoutDispatch(t *testing.T) {
 	s := &RRStrategy{deferCursor: true}
+	s.moveCursor.Store(true)
 	ids := []string{"alpha", "beta", "gamma"}
 
 	// Pick three times without OnPreRequest — cursor never advances.
@@ -626,6 +631,7 @@ func TestRRStrategy_DeferCursor_RepeatedPickWithoutDispatch(t *testing.T) {
 
 func TestRRStrategy_DeferCursor_FullCycle(t *testing.T) {
 	s := &RRStrategy{deferCursor: true}
+	s.moveCursor.Store(true)
 	ids := []string{"alpha", "beta", "gamma"}
 
 	expected := []string{"alpha", "beta", "gamma", "alpha"}
@@ -638,6 +644,7 @@ func TestRRStrategy_DeferCursor_FullCycle(t *testing.T) {
 
 func TestRRStrategy_DeferCursor_AllEmpty(t *testing.T) {
 	s := &RRStrategy{deferCursor: true}
+	s.moveCursor.Store(true)
 	allIDs := []string{"alpha", "beta"}
 
 	picked := simulateRRCycle(s, allIDs, nil) // all empty
@@ -645,7 +652,6 @@ func TestRRStrategy_DeferCursor_AllEmpty(t *testing.T) {
 
 	s.mu.Lock()
 	assert.Equal(t, "", s.lastSelected)
-	assert.Equal(t, "", s.pendingCursor)
 	s.mu.Unlock()
 }
 

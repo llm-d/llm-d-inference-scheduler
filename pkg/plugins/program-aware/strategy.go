@@ -58,9 +58,11 @@ func newStrategy(cfg Config) (ScoringStrategy, error) {
 			halfLifeSeconds: floatOr(cfg.ServiceHalfLifeSeconds, 0),
 		}, nil
 	case "rr":
-		return &RRStrategy{
+		s := &RRStrategy{
 			deferCursor: boolOr(cfg.DeferRRCursor, false),
-		}, nil
+		}
+		s.moveCursor.Store(true)
+		return s, nil
 	default:
 		return nil, fmt.Errorf("unknown scoring strategy %q: valid values are \"drr\", \"las\", \"rr\"", cfg.Strategy)
 	}
@@ -385,10 +387,10 @@ func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequ
 // and the one immediately after the cursor gets the highest score.
 // Empty queues are naturally skipped because only non-empty queues are scored.
 type RRStrategy struct {
-	mu            sync.Mutex
-	lastSelected  string // program ID last picked (committed cursor)
-	pendingCursor string // set by Pick when deferCursor=true, committed by OnPreRequest
-	deferCursor   bool   // when true, cursor advances in OnPreRequest instead of Pick
+	mu           sync.Mutex
+	lastSelected string      // program ID last picked
+	moveCursor   atomic.Bool // when deferCursor=true, gates cursor advance to once per cycle
+	deferCursor  bool        // when true, cursor advances once per cycle (reset by OnPreRequest)
 }
 
 // Name returns "rr".
@@ -412,6 +414,14 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 		return nil, nil
 	}
 
+	// When deferCursor is active and cursor already moved this cycle,
+	// return the same queue without advancing.
+	if s.deferCursor && !s.moveCursor.Load() && s.lastSelected != "" {
+		if qi, ok := queues[s.lastSelected]; ok && qi.Len > 0 {
+			return qi.Queue, nil
+		}
+	}
+
 	// Find the start index (next after lastSelected).
 	start := 0
 	if s.lastSelected != "" {
@@ -424,31 +434,24 @@ func (s *RRStrategy) Pick(queues map[string]QueueInfo) (flowcontrol.FlowQueueAcc
 	for i := range n {
 		id := allKeys[(start+i)%n]
 		if queues[id].Len > 0 {
+			s.lastSelected = id
 			if s.deferCursor {
-				s.pendingCursor = id
-			} else {
-				s.lastSelected = id
+				s.moveCursor.Store(false)
 			}
 			return queues[id].Queue, nil
 		}
 	}
 
 	s.lastSelected = ""
-	s.pendingCursor = ""
 	return nil, nil
 }
 
-// OnPreRequest commits the deferred cursor when deferCursor is enabled.
+// OnPreRequest resets the moveCursor flag so the next Pick() can advance.
 func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {
 	if !s.deferCursor {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.pendingCursor != "" {
-		s.lastSelected = s.pendingCursor
-		s.pendingCursor = ""
-	}
+	s.moveCursor.Store(true)
 }
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).
