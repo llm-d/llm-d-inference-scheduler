@@ -576,7 +576,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
 				IndexerConfig:  kvcacheConfig,
 				KVEventsConfig: kvevents.DefaultConfig(),
-			})
+			}, nil)
 			require.NoError(t, err)
 			require.NotNil(t, prefixCacheScorer)
 
@@ -790,7 +790,7 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 	prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
 		IndexerConfig:  kvcacheConfig,
 		KVEventsConfig: kvevents.DefaultConfig(),
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	// 4. Populate index with MM-tainted block keys.

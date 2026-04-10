@@ -749,6 +749,23 @@ Requires the `prepareDataPlugins` feature gate and KV events from vLLM engines.
 
 ---
 
+### Approximate Scoring Mode
+
+Approximate scoring enables prefix-cache-aware routing without KV events or a tokenizer. It uses xxhash-based prompt hashing and a self-reported LRU indexer (ported from the IGW `prefix-cache-scorer`). This is useful for model servers that don't support the KV event protocol.
+
+Enable via `precise-prefix-cache-scorer` parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mode` | string | `"precise"` | Scoring mode: `"precise"`, `"approximate"`, or `"unified"`. |
+| `approximateConfig.blockSizeTokens` | int | `16` | Block size in tokens (converted to characters via 4x multiplier). |
+| `approximateConfig.maxPrefixBlocksToMatch` | int | `256` | Maximum prefix blocks to hash per request. |
+| `approximateConfig.lruCapacityPerServer` | int | `31250` | LRU cache capacity per pod. |
+| `approximateConfig.autoTune` | bool | `true` | Dynamically adjust block size and LRU capacity from endpoint metrics. |
+| `approximateConfig.recencyHalfLife` | duration string | (disabled) | Half-life for recency-weighted scoring (e.g. `"30s"`). |
+
+---
+
 ## Metric Scraping
 
 - Scrapers collect metrics (e.g., memory usage, active adapters)
