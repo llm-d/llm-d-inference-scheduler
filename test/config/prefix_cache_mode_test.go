@@ -16,6 +16,10 @@ import (
 )
 
 func TestPrecisePrefixCacheScorer(t *testing.T) {
+	if _, err := os.Stat("/tmp/tokenizer/tokenizer-uds.socket"); os.IsNotExist(err) {
+		t.Skip("UDS tokenizer socket not available, skipping test")
+	}
+
 	tests := []struct {
 		name       string
 		pluginName string
@@ -33,6 +37,9 @@ plugins:
   parameters:
     kvEventsConfig:
       zmqEndpoint: "tcp://localhost:5557"
+    indexerConfig:
+      tokenizersPoolConfig:
+        modelName: "test-model"
 - name: profileHandler
   type: single-profile-handler
 schedulingProfiles:

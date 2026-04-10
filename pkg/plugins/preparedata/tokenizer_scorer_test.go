@@ -82,7 +82,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 				RequestId: "completions",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{
-						Prompt: "The quick brown fox",
+						Prompt: scheduling.Prompt{Raw: "The quick brown fox"},
 					},
 				},
 			},
@@ -109,7 +109,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 			request: &scheduling.LLMRequest{
 				RequestId: "fail-open",
 				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{Prompt: "fail"},
+					Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "fail"}},
 				},
 			},
 			tokenizer: &mockTokenizer{
@@ -169,7 +169,7 @@ func TestTokenizerScorer_SkipsWhenAlreadyInCycleState(t *testing.T) {
 	request := &scheduling.LLMRequest{
 		RequestId: "already-tokenized",
 		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
+			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "hello"}},
 		},
 	}
 
@@ -292,7 +292,7 @@ func TestTokenizerScorer_Render_NilMMFeatures(t *testing.T) {
 	request := &scheduling.LLMRequest{
 		RequestId: "text-completions",
 		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: "hello"},
+			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "hello"}},
 		},
 	}
 
