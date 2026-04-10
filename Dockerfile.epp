@@ -1,3 +1,10 @@
+# BASE_IMAGE can be overridden at build time, e.g.:
+#   --build-arg BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:9.7
+# Default is distroless/static which includes CA certs and has minimal CVE surface.
+# NOTE: if using scratch, CA certificates must be copied from the builder stage:
+#   COPY --from=go-builder /etc/ssl/certs/ca-bundle.crt /etc/ssl/certs/ca-bundle.crt
+ARG BASE_IMAGE=gcr.io/distroless/static:nonroot
+
 # Go build stage
 FROM --platform=${BUILDPLATFORM} quay.io/projectquay/golang:1.25 AS go-builder
 
@@ -24,8 +31,7 @@ RUN go mod download
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o bin/epp cmd/epp/main.go
 
 # Runtime stage
-# Use ubi9-micro as a minimal base image
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.7
+FROM ${BASE_IMAGE}
 
 WORKDIR /
 
