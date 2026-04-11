@@ -14,18 +14,25 @@ import (
 	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
-func createModelServersFromYaml(yaml string, extra map[string]string) []string {
+func createModelServersFromKustomize(kustomizeDir string, extra map[string]string) []string {
 	subs := map[string]string{
-		"${MODEL_NAME}":           simModelName,
-		"${MODEL_NAME_SAFE}":      simModelName,
-		"${POOL_NAME}":            poolName,
-		"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
-		"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
+		"${MODEL_NAME}":              simModelName,
+		"${MODEL_NAME_SAFE}":         simModelName,
+		"${POOL_NAME}":               poolName,
+		"${VLLM_IMAGE}":              vllmSimImage,
+		"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
+		"${SIDECAR_IMAGE}":           sideCarImage,
+		"${VLLM_DATA_PARALLEL_SIZE}": "1",
+		"${VLLM_MODE}":               "echo",
+		"${KV_CACHE_ENABLED}":        "false",
+		"${EPP_NAME}":                "e2e-epp",
+		"${NAMESPACE}":               nsName,
+		"${HF_TOKEN}":                "",
 	}
 	for k, v := range extra {
 		subs[k] = v
 	}
-	manifests := testutils.ReadYaml(yaml)
+	manifests := runKustomize(kustomizeDir)
 	manifests = substituteMany(manifests, subs)
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
@@ -33,34 +40,32 @@ func createModelServersFromYaml(yaml string, extra map[string]string) []string {
 }
 
 func createModelServersDecode(replicas int) []string {
-	return createModelServersFromYaml(simDeployment, map[string]string{
-		"${KV_CACHE_ENABLED}":   "false",
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
+		"${KV_CACHE_ENABLED}":     "false",
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
 	})
 }
 
 func createModelServersDecodeKV(replicas int) []string {
-	return createModelServersFromYaml(simDeployment, map[string]string{
-		"${MODEL_NAME}":         kvModelName,
-		"${MODEL_NAME_SAFE}":    safeKvModelName,
-		"${KV_CACHE_ENABLED}":   "true",
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
+		"${MODEL_NAME}":           kvModelName,
+		"${MODEL_NAME_SAFE}":      safeKvModelName,
+		"${KV_CACHE_ENABLED}":     "true",
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
 	})
 }
 
 func createModelServersDecodeDP(replicas int) []string {
-	return createModelServersFromYaml(simDPDeployment, map[string]string{
-		"${SIDECAR_IMAGE}":      sideCarImage,
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize(dpDeploymentDir, map[string]string{
+		"${VLLM_REPLICA_COUNT_D}":     strconv.Itoa(replicas),
+		"${VLLM_DATA_PARALLEL_SIZE}": "2",
 	})
 }
 
 func createModelServersPDWithConnector(prefillReplicas, decodeReplicas int, connector string) []string {
-	return createModelServersFromYaml(simPDDisaggDeployment, map[string]string{
+	return createModelServersFromKustomize(pdDisaggDir, map[string]string{
 		"${KV_CACHE_ENABLED}":     "false",
 		"${CONNECTOR_TYPE}":       connector,
-		"${SIDECAR_IMAGE}":        sideCarImage,
-		"${VLLM_REPLICA_COUNT}":   "0",
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 		"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 	})
@@ -76,9 +81,8 @@ func createModelServersPDSharedStorage(decodeReplicas int) []string {
 
 // createModelServersEpDDisagg creates model server resources for E/PD (encode + prefill/decode) testing.
 func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
-	return createModelServersFromYaml(simEpDDisaggDeployment, map[string]string{
+	return createModelServersFromKustomize(ePdDisaggDir, map[string]string{
 		"${EC_CONNECTOR_TYPE}":    "ec-example",
-		"${SIDECAR_IMAGE}":        sideCarImage,
 		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 	})
@@ -86,10 +90,9 @@ func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
 
 // createModelServersEPDDisagg creates model server resources for E/P/D (encode/prefill/decode) testing.
 func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas int) []string {
-	return createModelServersFromYaml(simEPDDisaggDeployment, map[string]string{
+	return createModelServersFromKustomize(ePDDisaggDir, map[string]string{
 		"${KV_CONNECTOR_TYPE}":    "shared-storage",
 		"${EC_CONNECTOR_TYPE}":    "ec-example",
-		"${SIDECAR_IMAGE}":        sideCarImage,
 		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
 		"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
@@ -98,8 +101,8 @@ func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas
 
 // createModelServersEPDUnified creates model server resources for EPD (one deployment for encode/prefill/decode) testing.
 func createModelServersEPDUnified(replicas int) []string {
-	return createModelServersFromYaml(simEPDUnifiedDeployment, map[string]string{
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize(epdUnifiedDir, map[string]string{
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
 	})
 }
 
@@ -124,10 +127,13 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_IMAGE}":           eppImage,
-			"${UDS_TOKENIZER_IMAGE}": udsTokenizerImage,
-			"${NAMESPACE}":           nsName,
-			"${POOL_NAME}":           simModelName + "-inference-pool",
+			"${EPP_NAME}":                "e2e-epp",
+			"${EPP_IMAGE}":               eppImage,
+			"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
+			"${NAMESPACE}":               nsName,
+			"${POOL_NAME}":               simModelName + "-inference-pool",
+			"${POOL_NAMESPACE}":          nsName,
+			"${METRICS_ENDPOINT_AUTH}":   "false",
 		})
 
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)

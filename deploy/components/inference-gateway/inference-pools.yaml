@@ -11,5 +11,4 @@ spec:
     kind: Service
     port:
       number: 9002
-  targetPorts:
-  - number: ${TARGET_PORTS}
+  targetPorts: ${TARGET_PORTS}

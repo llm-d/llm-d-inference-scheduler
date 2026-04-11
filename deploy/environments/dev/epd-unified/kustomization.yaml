@@ -1,0 +1,15 @@
+# ------------------------------------------------------------------------------
+# EPD Unified (No Disaggregation, multimodal capable) Development Environment
+#
+# Same as EPD but adds the encode-prefill-decode role label so the EPP
+# can route encode/prefill/decode stages to the single deployment.
+# The routing sidecar is removed since all stages run in one pod.
+# ------------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../../components/vllm-decode/
+
+patches:
+- path: patch-decode.yaml

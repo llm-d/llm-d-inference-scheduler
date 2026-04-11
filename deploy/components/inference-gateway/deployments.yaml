@@ -23,6 +23,8 @@ spec:
         args:
         - --pool-name
         - "${POOL_NAME}"
+        - --pool-namespace
+        - "${POOL_NAMESPACE}"
         - --v
         - "4"
         - --zap-encoder
@@ -31,6 +33,9 @@ spec:
         - "9002"
         - --grpc-health-port
         - "9003"
+        - --config-file
+        - "/etc/epp/epp-config.yaml"
+        - --metrics-endpoint-auth=${METRICS_ENDPOINT_AUTH}
         ports:
         - containerPort: 5557
         - containerPort: 9002
