@@ -1,3 +1,4 @@
+# Patch to set pool-namespace to "default" for KIND development environments
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +10,7 @@ spec:
       - name: epp
         args:
         - --pool-name
-        - ${POOL_NAME}
+        - "${POOL_NAME}"
         - --pool-namespace
         - "default"
         - --v

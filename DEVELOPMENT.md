@@ -256,29 +256,41 @@ kubectl debug -it <pod-name> -n <namespace> \
 
 ### Inference Disaggregation Modes
 
-You can deploy the inference stack in disaggregated modes to optimize performance by separating specific stages of the LLM pipeline into dedicated pods. For technical details on the advanced disaggregation strategies, refer to [docs/disaggregation.md](docs/disaggregation.md).
+The deployment uses three atomic Kustomize components (`vllm-encode`, `vllm-prefill`,
+`vllm-decode`) that compose to form any disaggregation scenario. Select the scenario
+with the `DISAGG_MODE` environment variable. For technical details, refer to
+[docs/disaggregation.md](docs/disaggregation.md) and
+[deploy/environments/dev/README.md](deploy/environments/dev/README.md).
 
-#### 1. Prefill/Decode (P/D) Disaggregation
+| `DISAGG_MODE` | Components | Description |
+|---|---|---|
+| `epd` (default) | decode | No disaggregation, single deployment |
+| `p-d` | prefill + decode | Separate prefill and decode pods |
+| `e-pd` | encode + decode | Separate encoder, combined prefill-decode |
+| `e-p-d` | encode + prefill + decode | Fully disaggregated pipeline |
+| `dp` | decode | Data parallel (multi-rank) decode |
+| `epd-unified` | decode (no sidecar) | Single pod handling all E/P/D stages |
 
-In this mode, Prefill and Decode run on independent deployments.
+#### Prefill/Decode (P/D) Disaggregation
 
-To deploy a P/D-enabled Kind environment:
+Prefill and Decode run on independent deployments:
 
 ```bash
-PD_ENABLED=true make env-dev-kind
+DISAGG_MODE=p-d make env-dev-kind
 ```
 
-To verify the setup, follow the same steps described in the [Accessing the Gateway](#accessing-the-gateway) section above.
+> **Note:** The legacy `PD_ENABLED=true` syntax still works for backward compatibility.
 
-#### 2. Encode/Prefill/Decode (E/P/D) Disaggregation
+#### Encode/Prefill/Decode (E/P/D) Disaggregation
 
-This multimodal configuration introduces a standalone Encoder pod for compute-intensive image and video embeddings, while decoupling Prefill and Decode into specialized deployments.
-
-To deploy an E/P/D-enabled Kind environment:
+Multimodal configuration with a standalone Encoder pod for image/video embeddings,
+and separate Prefill and Decode deployments:
 
 ```bash
-EPD_ENABLED=true make env-dev-kind
+DISAGG_MODE=e-p-d make env-dev-kind
 ```
+
+> **Note:** The legacy `EPD_ENABLED=true` syntax still works for backward compatibility.
 
 <details>
 <summary>E/P/D Setup Verification</summary>
@@ -309,6 +321,42 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 </details>
+
+#### Other Modes
+
+```bash
+# Encode / Prefill-Decode (encoder separate, prefill+decode combined)
+DISAGG_MODE=e-pd make env-dev-kind
+
+# Data Parallel (multi-rank decode)
+DISAGG_MODE=dp make env-dev-kind
+
+# EPD Unified (single deployment, multimodal capable, no sidecar)
+DISAGG_MODE=epd-unified make env-dev-kind
+```
+
+### Simulator vs Real vLLM
+
+By default, the KIND environment uses the **vLLM simulator** — a lightweight mock that
+echoes requests without running actual model inference. This is suitable for development
+and testing without GPUs.
+
+To deploy with a **real vLLM image** (requires GPU nodes):
+
+```bash
+VLLM_IMAGE=vllm/vllm-openai:v0.16.0 VLLM_MODE="" make env-dev-kind
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
+| `VLLM_MODE` | `echo` | Set to `echo` for simulator mode. Set to empty (`""`) for real vLLM |
+| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image (used when `VLLM_IMAGE` is not set) |
+
+> **Note:** When using a real vLLM image with encode disaggregation (`e-pd` or `e-p-d`),
+> the encoder embeddings are transferred via shared storage. The `vllm-encode` component
+> includes an `ec-cache` emptyDir volume by default. For production, override this with a
+> PersistentVolumeClaim via a Kustomize patch.
 
 ### Cleanup
 

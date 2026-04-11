@@ -1,11 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${MODEL_NAME_SAFE}-vllm-sim-epd
+  name: vllm-e
   labels:
     app: ${POOL_NAME}
 spec:
-  replicas: ${VLLM_REPLICA_COUNT}
+  replicas: ${VLLM_REPLICA_COUNT_E}
   selector:
     matchLabels:
       app: ${POOL_NAME}
@@ -13,12 +13,9 @@ spec:
     metadata:
       labels:
         app: ${POOL_NAME}
-        llm-d.ai/role: encode-prefill-decode
+        llm-d.ai/role: encode
     spec:
       initContainers:
-      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
-      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
-      # vllm-sim will not start until this container's readinessProbe passes
       - name: uds-tokenizer
         image: ${UDS_TOKENIZER_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -50,16 +47,55 @@ spec:
           mountPath: /tmp/tokenizer
       containers:
       - name: vllm
-        image: ${VLLM_SIMULATOR_IMAGE}
+        # VLLM_IMAGE can be a simulator (e.g. llm-d-inference-sim) or a real
+        # vLLM image (e.g. vllm/vllm-openai:v0.16.0)
+        image: ${VLLM_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--model=${MODEL_NAME}"
         - "--port=8000"
-        - "--mode=echo"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "--no-enable-prefix-caching"
+        - "--mm-encoder-only"
+        - "--ec-transfer-config"
+        - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
         ports:
-        - name: http
+        - name: encode-http
           containerPort: 8000
           protocol: TCP
+        - name: encode-rank1
+          containerPort: 8001
+          protocol: TCP
+        - name: encode-rank2
+          containerPort: 8002
+          protocol: TCP
+        - name: encode-rank3
+          containerPort: 8003
+          protocol: TCP
+        - name: encode-rank4
+          containerPort: 8004
+          protocol: TCP
+        - name: encode-rank5
+          containerPort: 8005
+          protocol: TCP
+        - name: encode-rank6
+          containerPort: 8006
+          protocol: TCP
+        - name: encode-rank7
+          containerPort: 8007
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /v1/models
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /v1/models
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
         env:
         - name: PORT
           value: "8000"
@@ -76,7 +112,12 @@ spec:
         volumeMounts:
         - name: uds-socket
           mountPath: /tmp/tokenizer
+        - name: ec-cache
+          mountPath: /shared-ec-cache
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
       volumes:
-      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
       - name: uds-socket
+        emptyDir: {}
+      - name: ec-cache
         emptyDir: {}

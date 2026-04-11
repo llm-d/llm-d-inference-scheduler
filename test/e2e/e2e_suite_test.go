@@ -35,7 +35,7 @@ const (
 	// xInferPoolManifest is the manifest for the inference pool CRD with 'inference.networking.x-k8s.io' group.
 	gieCrdsKustomize = "../../deploy/components/crds-gie"
 	// inferExtManifest is the manifest for the inference extension test resources.
-	inferExtManifest = "./yaml/inference-pools.yaml"
+	inferExtManifest = "../../deploy/components/inference-gateway/inference-pools.yaml"
 	// simModelName is the test model name.
 	simModelName = "food-review"
 	// kvModelName is the model name used in KV tests.
@@ -43,15 +43,15 @@ const (
 	// safeKvModelName is the safe form of the model name used in KV tests
 	safeKvModelName = "qwen-qwen2-5-1-5b-instruct"
 	// envoyManifest is the manifest for the envoy proxy test resources.
-	envoyManifest = "./yaml/envoy.yaml"
+	envoyManifest = "../../deploy/environments/dev/e2e-infra/envoy.yaml"
 	// eppManifest is the manifest for the deployment of the EPP
-	eppManifest = "./yaml/deployments.yaml"
+	eppManifest = "../../deploy/components/inference-gateway/deployments.yaml"
 	// rbacManifest is the manifest for the EPP's RBAC resources.
-	rbacManifest = "./yaml/rbac.yaml"
+	rbacManifest = "../../deploy/components/inference-gateway/rbac.yaml"
 	// serviceAccountManifest is the manifest for the EPP's service account resources.
-	serviceAccountManifest = "./yaml/service-accounts.yaml"
+	serviceAccountManifest = "../../deploy/components/inference-gateway/service-accounts.yaml"
 	// servicesManifest is the manifest for the EPP's service resources.
-	servicesManifest = "./yaml/services.yaml"
+	servicesManifest = "../../deploy/environments/dev/e2e-infra/services.yaml"
 )
 
 var (
@@ -106,8 +106,13 @@ var _ = ginkgo.BeforeSuite(func() {
 	setupNameSpace()
 	createCRDs()
 	createEnvoy()
-	rbacObjects = testutils.ApplyYAMLFile(testConfig, rbacManifest)
-	serviceAccountObjects = testutils.ApplyYAMLFile(testConfig, serviceAccountManifest)
+	infraSubs := map[string]string{
+		"${EPP_NAME}": "e2e-epp",
+	}
+	rbacYamls := substituteMany(testutils.ReadYaml(rbacManifest), infraSubs)
+	rbacObjects = testutils.CreateObjsFromYaml(testConfig, rbacYamls)
+	saYamls := substituteMany(testutils.ReadYaml(serviceAccountManifest), infraSubs)
+	serviceAccountObjects = testutils.CreateObjsFromYaml(testConfig, saYamls)
 	serviceObjects = testutils.ApplyYAMLFile(testConfig, servicesManifest)
 
 	// Prevent failure in tests due to InferencePool not existing before the test
@@ -298,6 +303,7 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	infPoolYaml = substituteMany(infPoolYaml,
 		map[string]string{
 			"${POOL_NAME}":    poolName,
+			"${EPP_NAME}":     "e2e-epp",
 			"${TARGET_PORTS}": targetPorts,
 		})
 
