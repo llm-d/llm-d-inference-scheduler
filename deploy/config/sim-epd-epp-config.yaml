@@ -1,0 +1,34 @@
+# Sample EPP configuration for running with E/P/D
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: disagg-headers-handler
+- type: queue-scorer
+- type: encode-filter
+- type: prefill-filter
+- type: decode-filter
+- type: always-disagg-multimodal-decider
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      encode: always-disagg-multimodal-decider
+      prefill: prefix-based-pd-decider
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: queue-scorer
+    weight: 1
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: queue-scorer
+    weight: 1

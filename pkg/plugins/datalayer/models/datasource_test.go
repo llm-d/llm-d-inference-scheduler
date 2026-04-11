@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
@@ -20,21 +21,22 @@ func TestDatasource(t *testing.T) {
 	extractor, err := NewModelExtractor()
 	assert.Nil(t, err, "failed to create extractor")
 
-	err = source.AddExtractor(extractor)
-	assert.Nil(t, err, "failed to add extractor")
+	cfg := &datalayer.Config{
+		Sources: []datalayer.DataSourceConfig{
+			{
+				Plugin:     source,
+				Extractors: []fwkdl.Extractor{extractor},
+			},
+		},
+	}
 
-	err = source.AddExtractor(extractor)
-	assert.NotNil(t, err, "expected to fail to add the same extractor twice")
+	pollingInterval := 50 * time.Millisecond
+	runtime := datalayer.NewRuntime(pollingInterval)
 
-	extractors := source.Extractors()
-	assert.Len(t, extractors, 1)
-	assert.Equal(t, extractor.TypedName().String(), extractors[0])
-
-	err = datalayer.RegisterSource(source)
-	assert.Nil(t, err, "failed to register")
+	err = runtime.Configure(cfg, true, "", logr.Logger{})
+	assert.Nil(t, err, "failed to configure runtime")
 
 	ctx := context.Background()
-	factory := datalayer.NewEndpointFactory([]fwkdl.DataSource{source}, 100*time.Hour)
 	pod := &fwkdl.EndpointMetadata{
 		NamespacedName: types.NamespacedName{
 			Name:      "pod1",
@@ -42,9 +44,11 @@ func TestDatasource(t *testing.T) {
 		},
 		Address: "1.2.3.4:5678",
 	}
-	endpoint := factory.NewEndpoint(ctx, pod, nil)
+
+	endpoint := runtime.NewEndpoint(ctx, pod, nil)
 	assert.NotNil(t, endpoint, "failed to create endpoint")
 
-	err = source.Poll(ctx, endpoint)
+	data, err := source.Poll(ctx, endpoint)
 	assert.NotNil(t, err, "expected to fail to collect metrics")
+	assert.Nil(t, data)
 }
