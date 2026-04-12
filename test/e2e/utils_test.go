@@ -136,11 +136,38 @@ func podsInDeploymentsReady(objects []string) {
 }
 
 func runKustomize(kustomizeDir string) []string {
-	command := exec.Command("kustomize", "build", kustomizeDir)
+	// Use "kubectl kustomize" rather than the standalone "kustomize" binary.
+	// CI/dev environments guarantee kubectl but may not have kustomize installed
+	// (see Makefile.tools.mk check-kustomize target).
+	command := exec.Command("kubectl", "kustomize", kustomizeDir)
 	session, err := gexec.Start(command, nil, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	return strings.Split(string(session.Out.Contents()), "\n---")
+}
+
+// injectSimulatorMode adds --mode=echo to every vllm container's args in the
+// rendered manifests. This is done via string replacement rather than a YAML
+// template variable because real vLLM does not recognize the --mode flag.
+// injectSimulatorMode adds --mode=echo to every vllm container's args list.
+// It matches "args:\n        - --port=8200" (decode) and "args:\n        - --model="
+// (prefill/encode) which are the first args of the vllm container. The routing
+// sidecar's args start with "--port=8000" so it is not affected.
+func injectSimulatorMode(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		output := input
+		// Decode vllm container: args list starts with --port=8200
+		output = strings.ReplaceAll(output,
+			"args:\n        - --port=8200",
+			"args:\n        - --mode=echo\n        - --port=8200")
+		// Prefill/encode vllm container: args list starts with --model=
+		output = strings.ReplaceAll(output,
+			"args:\n        - --model=",
+			"args:\n        - --mode=echo\n        - --model=")
+		outputs[idx] = output
+	}
+	return outputs
 }
 
 func substituteMany(inputs []string, substitutions map[string]string) []string {

@@ -350,8 +350,8 @@ VLLM_IMAGE=vllm/vllm-openai:v0.16.0 VLLM_MODE="" make env-dev-kind
 | Variable | Default | Description |
 |---|---|---|
 | `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
-| `VLLM_MODE` | `echo` | Set to `echo` for simulator mode. Set to empty (`""`) for real vLLM |
-| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image (used when `VLLM_IMAGE` is not set) |
+| `VLLM_MODE` | `echo` | When non-empty, injects `--mode=<value>` into vllm container args at deploy time. Set to `echo` for simulator. Set to empty (`""`) for real vLLM (the flag is omitted entirely since real vLLM does not recognize it) |
+| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image. Used as the default for `VLLM_IMAGE` |
 
 > **Note:** When using a real vLLM image with encode disaggregation (`e-pd` or `e-p-d`),
 > the encoder embeddings are transferred via shared storage. The `vllm-encode` component
@@ -443,7 +443,9 @@ kubectl --context kind-e2e-tests get pods
 | `CONTAINER_RUNTIME` | `docker` | Container runtime used to load images into Kind (`docker` or `podman`) |
 | `READY_TIMEOUT` | `3m` | How long to wait for resources to become ready |
 | `EPP_IMAGE` | `ghcr.io/llm-d/llm-d-inference-scheduler:dev` | EPP image loaded into the Kind cluster |
-| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM simulator image loaded into the Kind cluster |
+| `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image used in deployment templates. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
+| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image. Used as the default for `VLLM_IMAGE` and loaded into the Kind cluster |
+| `VLLM_MODE` | `echo` | vLLM run mode. Set to `echo` for simulator, empty (`""`) for real vLLM |
 | `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
 | `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
 

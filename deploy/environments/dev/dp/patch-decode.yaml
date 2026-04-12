@@ -18,7 +18,6 @@ spec:
       containers:
       - name: vllm
         args:
-        - "--mode=${VLLM_MODE}"
         - "--port=8200"
         - "--model=${MODEL_NAME}"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"

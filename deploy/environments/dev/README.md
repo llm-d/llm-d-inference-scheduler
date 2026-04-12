@@ -59,7 +59,7 @@ Variables substituted at deploy time via `envsubst` or Go test `substituteMany`:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `VLLM_IMAGE` | vLLM container image (simulator or real) | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` |
-| `VLLM_MODE` | vLLM mode (`echo` for simulator, empty for real) | `echo` |
+| `VLLM_MODE` | When non-empty, `--mode=<value>` is injected into vllm args at deploy time. Empty for real vLLM (flag omitted entirely) | `echo` |
 | `SIDECAR_IMAGE` | Routing sidecar image | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` |
 | `UDS_TOKENIZER_IMAGE` | UDS tokenizer sidecar image | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` |
 | `MODEL_NAME` | HuggingFace model name | `food-review` |

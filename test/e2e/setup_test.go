@@ -24,7 +24,6 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
 		"${SIDECAR_IMAGE}":           sideCarImage,
 		"${VLLM_DATA_PARALLEL_SIZE}": "1",
-		"${VLLM_MODE}":               "echo",
 		"${KV_CACHE_ENABLED}":        "false",
 		"${EPP_NAME}":                "e2e-epp",
 		"${NAMESPACE}":               nsName,
@@ -35,6 +34,10 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 	}
 	manifests := runKustomize(kustomizeDir)
 	manifests = substituteMany(manifests, subs)
+	// Inject --mode=echo for the simulator. This is done via string replacement
+	// rather than a YAML template variable because real vLLM does not recognize
+	// the --mode flag, so it must not appear in the deploy templates at all.
+	manifests = injectSimulatorMode(manifests)
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
 	return objects
