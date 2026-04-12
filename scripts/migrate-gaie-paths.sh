@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Migrate one or more directories from the source repo into this repo,
+# Migrate one or more directories or files from the source repo into this repo,
 # rewriting Go import paths throughout.
 #
 # Usage:
@@ -10,15 +10,17 @@
 #                  The ref to pass next time is printed in the PR title.
 #                  Omit for the initial full migration.
 #
-# Requires: git filter-repo  (pip install git-filter-repo)
+# Requires: git filter-repo  (pip/pipx install git-filter-repo)
 #
-# Merge the resulting PR via "Create a merge commit" on the initial migration
-# to preserve history. Subsequent syncs (--since) can use any merge strategy.
+# NOTE
+# Must merge the initial migration PR via "Create a merge commit" to preserve history.
+# Incremental migrations can use "merge commit" (cleanest audit trail) or
+# "rebase and merge" (for a slightly cleaner linear history).
 
 set -euo pipefail
 
 # Configuration
-REPOS_BASE="/tmp"  # override as needed
+LOCAL_PATH="/tmp"  # override as needed
 
 SOURCE_ORG="kubernetes-sigs"
 SOURCE_REPO_NAME="gateway-api-inference-extension"
@@ -32,9 +34,9 @@ UPSTREAM_REMOTE="upstream"
 ORIGIN_REMOTE="origin"
 MAIN_BRANCH="main"
 
-SOURCE_DIR="${REPOS_BASE}/${SOURCE_REPO_NAME}"
-DEST_DIR="${REPOS_BASE}/${DEST_REPO_NAME}"
-FILTER_WORK_DIR="${REPOS_BASE}/${SOURCE_REPO_NAME}-filter-work"
+SOURCE_DIR="${LOCAL_PATH}/${SOURCE_REPO_NAME}"
+DEST_DIR="${LOCAL_PATH}/${DEST_REPO_NAME}"
+FILTER_WORK_DIR="${LOCAL_PATH}/${SOURCE_REPO_NAME}-filter-work"
 
 usage() {
   cat <<EOF
@@ -44,7 +46,7 @@ Usage: $0 [--since <ref>] <src1> <dest1> [<src2> <dest2> ...]
   src            path relative to source repo root  (e.g. pkg/common)
   dest           path relative to dest repo root    (e.g. pkg/common/igw)
 
-Repos are cloned to ${REPOS_BASE} if not present, otherwise updated to ${UPSTREAM_REMOTE}/${MAIN_BRANCH}.
+Repos are cloned to ${LOCAL_PATH} if not present, otherwise updated to ${UPSTREAM_REMOTE}/${MAIN_BRANCH}.
 EOF
   exit 1
 }
@@ -66,7 +68,7 @@ while [[ $# -gt 0 ]]; do
   shift 2
 done
 
-# Preflight
+# Preflight checks
 if ! command -v git-filter-repo &>/dev/null && ! git filter-repo --version &>/dev/null 2>&1; then
   echo "error: git filter-repo not installed (pip install git-filter-repo)"
   exit 1
@@ -148,6 +150,15 @@ rm -rf "${FILTER_WORK_DIR}"
 git clone "file://${SOURCE_DIR}" "${FILTER_WORK_DIR}"
 git -C "${FILTER_WORK_DIR}" filter-repo "${FILTER_ARGS[@]}" --force
 
+# Rewrite bare #NNN references to SOURCE_ORG/SOURCE_REPO_NAME#NNN in commit messages so
+# references point to original repo links, and not arbitrary destination references.
+# Matches only #NNN preceded by start-of-line, space, '(' or ','. This avoids
+# hex literals, code-block references, and already-qualified org/repo#NNN refs.
+FILTER_BRANCH_SQUELCH_WARNING=1 git -C "${FILTER_WORK_DIR}" \
+  filter-branch --msg-filter \
+  "sed -E 's/(^|[ (,])#([0-9]+)/\1${SOURCE_ORG}\/${SOURCE_REPO_NAME}#\2/g'" \
+  -- --all
+
 if [[ -n "${SINCE_REF}" ]]; then
   # Use filter-repo's commit-map to translate SINCE_REF into the filtered history.
   # Find the latest source commit at or before SINCE_REF that touched any of the paths.
@@ -196,7 +207,7 @@ else
     --no-edit -m "${MERGE_MSG}"
 fi
 
-# Rewrite imports — single pass, all pairs applied per file
+# Rewrite imports - single pass, all pairs applied per file
 declare -a OLD_IMPORTS NEW_IMPORTS
 for i in "${!SRC_PATHS[@]}"; do
   OLD_IMPORTS+=("${SOURCE_MODULE}/${SRC_PATHS[$i]}")
@@ -236,12 +247,11 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 # Open PR
-PATHS_SUMMARY=$(IFS=', '; echo "${DEST_PATHS[*]}")
 if [[ -n "${SINCE_REF}" ]]; then
-  PR_TITLE="sync: ${PATHS_SUMMARY} from ${SOURCE_MODULE} since ${SINCE_REF} @ ${SOURCE_SHA}"
+  PR_TITLE="sync: ${SOURCE_MODULE} since ${SINCE_REF} @ ${SOURCE_SHA}"
   PR_INTRO="Picks up ${#COMMITS[@]} commit(s) to \`${SOURCE_MODULE}\` since \`${SINCE_REF}\` (now @ ${SOURCE_SHA}):"
 else
-  PR_TITLE="migrate: ${PATHS_SUMMARY} from ${SOURCE_MODULE} @ ${SOURCE_SHA}"
+  PR_TITLE="migrate: ${SOURCE_MODULE} @ ${SOURCE_SHA}"
   PR_INTRO="Migrates the following paths from \`${SOURCE_MODULE}\` (@ ${SOURCE_SHA}) with full git history:"
 fi
 
