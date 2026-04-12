@@ -15,36 +15,6 @@ spec:
         app: ${POOL_NAME}
         llm-d.ai/role: encode
     spec:
-      initContainers:
-      - name: uds-tokenizer
-        image: ${UDS_TOKENIZER_IMAGE}
-        imagePullPolicy: IfNotPresent
-        restartPolicy: Always
-        env:
-        - name: LOG_LEVEL
-          value: "DEBUG"
-        - name: PROBE_PORT
-          value: "8082"
-        - name: HF_TOKEN
-          value: "${HF_TOKEN}"
-        ports:
-        - name: health
-          containerPort: 8082
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8082
-          initialDelaySeconds: 10
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 8082
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        volumeMounts:
-        - name: uds-socket
-          mountPath: /tmp/tokenizer
       containers:
       - name: vllm
         # VLLM_IMAGE can be a simulator (e.g. llm-d-inference-sim) or a real
@@ -57,8 +27,6 @@ spec:
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         - "--no-enable-prefix-caching"
         - "--mm-encoder-only"
-        - "--ec-transfer-config"
-        - '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
         ports:
         - name: encode-http
           containerPort: 8000
@@ -109,15 +77,5 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: metadata.namespace
-        volumeMounts:
-        - name: uds-socket
-          mountPath: /tmp/tokenizer
-        - name: ec-cache
-          mountPath: /shared-ec-cache
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
-      volumes:
-      - name: uds-socket
-        emptyDir: {}
-      - name: ec-cache
-        emptyDir: {}

@@ -1,0 +1,43 @@
+# ------------------------------------------------------------------------------
+# Real vLLM Overlay
+#
+# Adds real vLLM-specific configuration:
+#   - EC transfer config for encode/decode disaggregation (producer on encode,
+#     consumer on prefill/decode)
+#   - Shared PVC for encoder embeddings cache
+#
+# Uses JSON patches to add args without replacing existing ones.
+#
+# Usage: include as a Kustomize component in scenario overlays:
+#   components:
+#   - ../../../components/overlays/real-vllm/
+# ------------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+- pvc.yaml
+
+patches:
+# --- Encode deployment (vllm-e): EC producer ---
+- target:
+    kind: Deployment
+    name: vllm-e
+  patch: |
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: "--ec-transfer-config"
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
+    - op: add
+      path: /spec/template/spec/containers/0/volumeMounts/-
+      value:
+        name: ec-cache
+        mountPath: /shared-ec-cache
+    - op: add
+      path: /spec/template/spec/volumes/-
+      value:
+        name: ec-cache
+        persistentVolumeClaim:
+          claimName: ec-cache-pvc

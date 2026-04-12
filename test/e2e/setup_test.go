@@ -28,7 +28,6 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${EPP_NAME}":                "e2e-epp",
 		"${NAMESPACE}":               nsName,
 		"${HF_TOKEN}":                "",
-		"${VLLM_MODE}":               "echo",
 	}
 	for k, v := range extra {
 		subs[k] = v
@@ -102,7 +101,7 @@ func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas
 
 // createModelServersEPDUnified creates model server resources for EPD (one deployment for encode/prefill/decode) testing.
 func createModelServersEPDUnified(replicas int) []string {
-	return createModelServersFromKustomize(epdUnifiedDir, map[string]string{
+	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
 	})
 }

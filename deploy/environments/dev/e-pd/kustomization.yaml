@@ -12,3 +12,6 @@ resources:
 
 patches:
 - path: patch-decode.yaml
+
+components:
+- ../../../components/overlays/simulator/

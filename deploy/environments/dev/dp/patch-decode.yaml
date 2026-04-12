@@ -7,18 +7,3 @@ spec:
     metadata:
       labels:
         llm-d.ai/role: decode
-    spec:
-      initContainers:
-      - name: routing-sidecar
-        args:
-        - "--port=8000"
-        - "--vllm-port=8200"
-        - "--secure-proxy=false"
-        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
-      containers:
-      - name: vllm
-        args:
-        - "--mode=${VLLM_MODE}"
-        - "--port=8200"
-        - "--model=${MODEL_NAME}"
-        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"

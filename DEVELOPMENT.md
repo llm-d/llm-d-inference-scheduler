@@ -264,12 +264,11 @@ with the `DISAGG_MODE` environment variable. For technical details, refer to
 
 | `DISAGG_MODE` | Components | Description |
 |---|---|---|
-| `epd` (default) | decode | No disaggregation, single deployment |
+| `epd` (default) | decode | No disaggregation, single deployment (no routing sidecar) |
 | `p-d` | prefill + decode | Separate prefill and decode pods |
 | `e-pd` | encode + decode | Separate encoder, combined prefill-decode |
 | `e-p-d` | encode + prefill + decode | Fully disaggregated pipeline |
 | `dp` | decode | Data parallel (multi-rank) decode |
-| `epd-unified` | decode (no sidecar) | Single pod handling all E/P/D stages |
 
 #### Prefill/Decode (P/D) Disaggregation
 
@@ -330,33 +329,85 @@ DISAGG_MODE=e-pd make env-dev-kind
 
 # Data Parallel (multi-rank decode)
 DISAGG_MODE=dp make env-dev-kind
-
-# EPD Unified (single deployment, multimodal capable, no sidecar)
-DISAGG_MODE=epd-unified make env-dev-kind
 ```
 
 ### Simulator vs Real vLLM
 
-By default, the KIND environment uses the **vLLM simulator** — a lightweight mock that
-echoes requests without running actual model inference. This is suitable for development
-and testing without GPUs.
+The deployment components are split into a clean base and two Kustomize overlays:
 
-To deploy with a **real vLLM image** (requires GPU nodes):
+- **Base components** (`deploy/components/vllm-{encode,prefill,decode}/`) — contain only
+  the vLLM container, routing sidecar (decode), ports, probes, and env vars. No
+  simulator-specific or production-specific configuration.
+- **Simulator overlay** (`deploy/components/overlays/simulator/`) — adds `--mode=echo`,
+  UDS tokenizer sidecar, and KV cache args. Included by default in all dev scenario overlays.
+- **Real vLLM overlay** (`deploy/components/overlays/real-vllm/`) — adds
+  `--ec-transfer-config` for encoder embeddings and a shared PVC for the encode cache.
+
+#### Deploying with Simulator (default)
+
+The dev scenario overlays include the simulator component by default. No extra flags needed:
 
 ```bash
-VLLM_IMAGE=vllm/vllm-openai:v0.16.0 VLLM_MODE="" make env-dev-kind
+# EPD — no disaggregation (default)
+make env-dev-kind
+
+# P/D — prefill + decode
+DISAGG_MODE=p-d make env-dev-kind
+
+# E/PD — encode + prefill-decode
+DISAGG_MODE=e-pd make env-dev-kind
+
+# E/P/D — encode + prefill + decode (fully disaggregated)
+DISAGG_MODE=e-p-d make env-dev-kind
+
+# DP — data parallel (multi-rank decode)
+DISAGG_MODE=dp make env-dev-kind
 ```
+
+#### Deploying with Real vLLM
+
+To deploy with a real vLLM image, create a custom overlay that replaces the simulator
+component with the real-vllm component. For example, to deploy P/D with real vLLM:
+
+```yaml
+# deploy/environments/prod/p-d/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../../components/vllm-prefill/
+- ../../../components/vllm-decode/
+
+patches:
+- path: ../../dev/p-d/patch-decode.yaml    # reuse scenario patches
+
+components:
+- ../../../components/overlays/real-vllm/  # instead of simulator
+```
+
+Then deploy with:
+
+```bash
+VLLM_IMAGE=vllm/vllm-openai:v0.16.0 \
+  kubectl kustomize deploy/environments/prod/p-d \
+  | envsubst | kubectl apply -f -
+```
+
+For encode disaggregation scenarios (E/PD, E/P/D), the real-vllm overlay automatically
+adds `--ec-transfer-config` (producer role) to the encode deployment and creates a shared
+PVC (`ec-cache-pvc`) for encoder embeddings transfer.
+
+#### Deployment Component Summary
+
+| Component | What it adds | When to use |
+|---|---|---|
+| `overlays/simulator/` | `--mode=echo`, UDS tokenizer, KV cache args | Dev/test with simulator image |
+| `overlays/real-vllm/` | `--ec-transfer-config`, ec-cache PVC | Production with real vLLM image |
 
 | Variable | Default | Description |
 |---|---|---|
-| `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
-| `VLLM_MODE` | `echo` | When non-empty, injects `--mode=<value>` into vllm container args at deploy time. Set to `echo` for simulator. Set to empty (`""`) for real vLLM (the flag is omitted entirely since real vLLM does not recognize it) |
-| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image. Used as the default for `VLLM_IMAGE` |
-
-> **Note:** When using a real vLLM image with encode disaggregation (`e-pd` or `e-p-d`),
-> the encoder embeddings are transferred via shared storage. The `vllm-encode` component
-> includes an `ec-cache` emptyDir volume by default. For production, override this with a
-> PersistentVolumeClaim via a Kustomize patch.
+| `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image — simulator or real (e.g., `vllm/vllm-openai:v0.16.0`) |
+| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image, used as the default for `VLLM_IMAGE` |
 
 ### Cleanup
 
@@ -445,7 +496,6 @@ kubectl --context kind-e2e-tests get pods
 | `EPP_IMAGE` | `ghcr.io/llm-d/llm-d-inference-scheduler:dev` | EPP image loaded into the Kind cluster |
 | `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image used in deployment templates. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
 | `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image. Used as the default for `VLLM_IMAGE` and loaded into the Kind cluster |
-| `VLLM_MODE` | `echo` | vLLM run mode. Set to `echo` for simulator, empty (`""`) for real vLLM |
 | `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
 | `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
 

@@ -316,8 +316,7 @@ case "${DISAGG_MODE}" in
   e-pd)  KUSTOMIZE_DIR="deploy/environments/dev/e-pd" ;;
   e-p-d) KUSTOMIZE_DIR="deploy/environments/dev/e-p-d" ;;
   dp)    KUSTOMIZE_DIR="deploy/environments/dev/dp" ;;
-  epd-unified) KUSTOMIZE_DIR="deploy/environments/dev/epd-unified" ;;
-  *)     KUSTOMIZE_DIR="deploy/components/vllm-decode" ;;
+  *)     KUSTOMIZE_DIR="deploy/environments/dev/epd" ;;
 esac
 
 TEMP_FILE=$(mktemp)
@@ -340,7 +339,7 @@ kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
-  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_MODE}' \
+  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------

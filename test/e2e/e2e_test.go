@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	// epdDeploymentDir references the Kustomize directory for the base decode
-	// component — used for non-disaggregated scenarios (simple, KV cache)
-	epdDeploymentDir = "../../deploy/components/vllm-decode"
+	// epdDeploymentDir references the Kustomize directory for the non-disaggregated
+	// EPD scenario — single deployment, no routing sidecar, vLLM on port 8000
+	epdDeploymentDir = "../../deploy/environments/dev/epd"
 	// pdDisaggDir references the Kustomize directory for the deployment
 	// running vLLM with P/D (connector type is configurable via ${CONNECTOR_TYPE})
 	pdDisaggDir = "../../deploy/environments/dev/p-d"
@@ -27,9 +27,6 @@ const (
 	// ePDDisaggDir references the Kustomize directory for the deployment
 	// running vLLM with E/P/D (Encode/Prefill/Decode)
 	ePDDisaggDir = "../../deploy/environments/dev/e-p-d"
-	// epdUnifiedDir references the Kustomize directory for the deployment
-	// running vLLM with EPD unified (single deployment with encode-prefill-decode role)
-	epdUnifiedDir = "../../deploy/environments/dev/epd-unified"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"

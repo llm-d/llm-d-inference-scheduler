@@ -11,14 +11,11 @@ and e2e tests (via `kustomize build` + env var substitution).
 
 | Directory | Disaggregation | Components | Description |
 |-----------|---------------|------------|-------------|
+| `epd/` | EPD (default) | decode | No disaggregation, single deployment (no routing sidecar, vLLM on port 8000) |
 | `p-d/` | P/D | prefill + decode | Separate prefill and decode deployments with KV cache transfer |
 | `e-pd/` | E/PD | encode + decode | Separate encoder, combined prefill-decode with EC transfer |
 | `e-p-d/` | E/P/D | encode + prefill + decode | Fully disaggregated: encoder, prefill, and decode |
 | `dp/` | Data Parallel | decode | Single decode deployment with multi-rank data parallelism |
-| `epd-unified/` | EPD unified | decode (no sidecar) | Single deployment handling all stages (encode+prefill+decode) for multimodal |
-
-For the default non-disaggregated scenario (no encode, no prefill separation),
-`deploy/components/vllm-decode` is used directly without an overlay.
 
 ## Shared Infrastructure
 
@@ -47,9 +44,6 @@ DISAGG_MODE=e-p-d ./scripts/kind-dev-env.sh
 
 # Data Parallel
 DISAGG_MODE=dp ./scripts/kind-dev-env.sh
-
-# EPD Unified (multimodal, single deployment)
-DISAGG_MODE=epd-unified ./scripts/kind-dev-env.sh
 ```
 
 ## Key Environment Variables
@@ -59,7 +53,6 @@ Variables substituted at deploy time via `envsubst` or Go test `substituteMany`:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `VLLM_IMAGE` | vLLM container image (simulator or real) | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` |
-| `VLLM_MODE` | When non-empty, `--mode=<value>` is injected into vllm args at deploy time. Empty for real vLLM (flag omitted entirely) | `echo` |
 | `SIDECAR_IMAGE` | Routing sidecar image | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` |
 | `UDS_TOKENIZER_IMAGE` | UDS tokenizer sidecar image | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` |
 | `MODEL_NAME` | HuggingFace model name | `food-review` |

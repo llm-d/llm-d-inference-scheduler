@@ -14,7 +14,7 @@ spec:
       containers:
       - name: vllm
         args:
-        - "--mode=${VLLM_MODE}"
+        - "--mode=echo"
         - "--model=${MODEL_NAME}"
         - "--port=8000"
         ports:
