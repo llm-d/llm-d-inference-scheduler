@@ -57,7 +57,7 @@ func createModelServersDecodeKV(replicas int) []string {
 
 func createModelServersDecodeDP(replicas int) []string {
 	return createModelServersFromKustomize(dpDeploymentDir, map[string]string{
-		"${VLLM_REPLICA_COUNT_D}":     strconv.Itoa(replicas),
+		"${VLLM_REPLICA_COUNT_D}":    strconv.Itoa(replicas),
 		"${VLLM_DATA_PARALLEL_SIZE}": "2",
 	})
 }
@@ -127,13 +127,13 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_NAME}":                "e2e-epp",
-			"${EPP_IMAGE}":               eppImage,
-			"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
-			"${NAMESPACE}":               nsName,
-			"${POOL_NAME}":               simModelName + "-inference-pool",
-			"${POOL_NAMESPACE}":          nsName,
-			"${METRICS_ENDPOINT_AUTH}":   "false",
+			"${EPP_NAME}":              "e2e-epp",
+			"${EPP_IMAGE}":             eppImage,
+			"${UDS_TOKENIZER_IMAGE}":   udsTokenizerImage,
+			"${NAMESPACE}":             nsName,
+			"${POOL_NAME}":             simModelName + "-inference-pool",
+			"${POOL_NAMESPACE}":        nsName,
+			"${METRICS_ENDPOINT_AUTH}": "false",
 		})
 
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -263,14 +262,6 @@ func parseRequestCountFromMetrics(metricsOutput string) int {
 
 // dumpPodsAndLogs dumps all pod statuses and their logs to the Ginkgo writer.
 // Call this before cleanup to insure the information is available when CI tests fail.
-func mustReadFile(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		panic(fmt.Sprintf("failed to read file %s: %v", path, err))
-	}
-	return string(data)
-}
-
 func dumpPodsAndLogs() {
 	if testConfig == nil || testConfig.KubeCli == nil {
 		ginkgo.GinkgoWriter.Println("Skipping pod dump: cluster not initialized")
