@@ -17,9 +17,9 @@ limitations under the License.
 package proxy
 
 import (
+	"bytes"
 	"io"
 	"net/http"
-	"bytes"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive

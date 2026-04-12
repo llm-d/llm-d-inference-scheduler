@@ -17,13 +17,13 @@ limitations under the License.
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"bytes"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"

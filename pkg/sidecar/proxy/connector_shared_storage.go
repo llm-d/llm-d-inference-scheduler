@@ -35,7 +35,7 @@ func (s *Server) runSharedStorageProtocol(w http.ResponseWriter, r *http.Request
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest) // TODO: check FastAPI error code when failing to read body
-		w.Write([]byte(err.Error())) //nolint:errcheck
+		w.Write([]byte(err.Error()))         //nolint:errcheck
 		return
 	}
 

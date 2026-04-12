@@ -17,11 +17,11 @@ limitations under the License.
 package proxy
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"bytes"
 	"strings"
 	"sync/atomic"
 	"time"

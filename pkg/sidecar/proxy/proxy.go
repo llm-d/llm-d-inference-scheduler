@@ -37,6 +37,8 @@ import (
 const (
 	schemeHTTPS = "https"
 
+	defaultMaxIdleConnsPerHost = 1024
+
 	requestHeaderRequestID = "x-request-id"
 
 	requestFieldKVTransferParams    = "kv_transfer_params"
@@ -270,6 +272,36 @@ func (s *Server) Clone() *Server {
 	}
 }
 
+// newProxyTransport returns an http.Transport cloned from the default with
+// connection-pool settings applied. If scheme is schemeHTTPS the transport's
+// TLSClientConfig is set accordingly.
+func (s *Server) newProxyTransport(scheme string, insecureSkipVerify bool) *http.Transport {
+	maxIdle := s.config.MaxIdleConnsPerHost
+	if maxIdle <= 0 {
+		maxIdle = defaultMaxIdleConnsPerHost
+	}
+	t := http.DefaultTransport.(*http.Transport).Clone() //nolint:errcheck
+	t.MaxIdleConns = 0                                   // unlimited
+	t.MaxIdleConnsPerHost = maxIdle
+	t.MaxConnsPerHost = 0 // unlimited
+	t.IdleConnTimeout = 90 * time.Second
+	if scheme == schemeHTTPS {
+		t.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: insecureSkipVerify, //nolint:gosec
+			MinVersion:         tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			},
+		}
+	}
+	return t
+}
+
 func (s *Server) setKVConnector() {
 
 	switch s.config.KVConnector {
@@ -343,30 +375,7 @@ func (s *Server) createProxyHandler(
 	}
 
 	newProxy := httputil.NewSingleHostReverseProxy(u)
-	maxIdle := s.config.MaxIdleConnsPerHost
-	if maxIdle <= 0 {
-		maxIdle = 1024
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.MaxIdleConns = 0 // unlimited
-	transport.MaxIdleConnsPerHost = maxIdle
-	transport.MaxConnsPerHost = 0 // unlimited
-	transport.IdleConnTimeout = 90 * time.Second
-	if u.Scheme == schemeHTTPS {
-		transport.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: insecureSkipVerify,
-			MinVersion:         tls.VersionTLS12,
-			CipherSuites: []uint16{
-				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-			},
-		}
-	}
-	newProxy.Transport = transport
+	newProxy.Transport = s.newProxyTransport(u.Scheme, insecureSkipVerify)
 	cache.Add(hostPort, newProxy)
 
 	return newProxy, nil
