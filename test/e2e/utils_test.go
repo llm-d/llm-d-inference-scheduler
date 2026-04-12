@@ -146,6 +146,29 @@ func runKustomize(kustomizeDir string) []string {
 	return strings.Split(string(session.Out.Contents()), "\n---")
 }
 
+// removeEmptyLabels strips YAML lines like "llm-d.ai/role: " where the value
+// is empty after variable substitution. Kubernetes accepts empty-value labels,
+// but the test pod-selector logic treats the key's presence as meaningful.
+func removeEmptyLabels(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		lines := strings.Split(input, "\n")
+		filtered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			// Skip lines like "llm-d.ai/role: " (key with empty value)
+			if strings.HasSuffix(trimmed, ": ") || strings.HasSuffix(trimmed, ":") {
+				if strings.Contains(trimmed, "llm-d.ai/role") {
+					continue
+				}
+			}
+			filtered = append(filtered, line)
+		}
+		outputs[idx] = strings.Join(filtered, "\n")
+	}
+	return outputs
+}
+
 func substituteMany(inputs []string, substitutions map[string]string) []string {
 	outputs := make([]string, len(inputs))
 	for idx, input := range inputs {

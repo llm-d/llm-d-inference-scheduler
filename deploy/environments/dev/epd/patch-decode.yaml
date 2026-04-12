@@ -6,7 +6,7 @@ spec:
   template:
     metadata:
       labels:
-        llm-d.ai/role: encode-prefill-decode
+        llm-d.ai/role: ${DECODE_ROLE}
     spec:
       initContainers:
       - name: routing-sidecar

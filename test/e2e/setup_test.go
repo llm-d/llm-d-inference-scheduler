@@ -25,6 +25,7 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${SIDECAR_IMAGE}":           sideCarImage,
 		"${VLLM_DATA_PARALLEL_SIZE}": "1",
 		"${KV_CACHE_ENABLED}":        "false",
+		"${DECODE_ROLE}":             "",
 		"${EPP_NAME}":                "e2e-epp",
 		"${NAMESPACE}":               nsName,
 		"${HF_TOKEN}":                "",
@@ -34,6 +35,8 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 	}
 	manifests := runKustomize(kustomizeDir)
 	manifests = substituteMany(manifests, subs)
+	// Remove labels with empty values (produced when ${DECODE_ROLE} is empty)
+	manifests = removeEmptyLabels(manifests)
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
 	return objects
@@ -103,6 +106,7 @@ func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas
 func createModelServersEPDUnified(replicas int) []string {
 	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
+		"${DECODE_ROLE}":          "encode-prefill-decode",
 	})
 }
 
