@@ -28,16 +28,13 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${EPP_NAME}":                "e2e-epp",
 		"${NAMESPACE}":               nsName,
 		"${HF_TOKEN}":                "",
+		"${VLLM_MODE}":               "echo",
 	}
 	for k, v := range extra {
 		subs[k] = v
 	}
 	manifests := runKustomize(kustomizeDir)
 	manifests = substituteMany(manifests, subs)
-	// Inject --mode=echo for the simulator. This is done via string replacement
-	// rather than a YAML template variable because real vLLM does not recognize
-	// the --mode flag, so it must not appear in the deploy templates at all.
-	manifests = injectSimulatorMode(manifests)
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
 	return objects

@@ -95,6 +95,7 @@ spec:
         image: ${VLLM_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
+        - "--mode=${VLLM_MODE}"
         - "--port=8200"
         - "--model=${MODEL_NAME}"
         - "--enable-kvcache=${KV_CACHE_ENABLED}"

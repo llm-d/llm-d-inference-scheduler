@@ -336,20 +336,11 @@ kubectl kustomize --enable-helm deploy/environments/dev/base-kind-istio \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # Deploy scenario-specific vLLM components
-# If VLLM_MODE is set (e.g. "echo" for simulator), inject --mode=<value> into
-# all vllm container args. This is done via sed rather than envsubst because
-# real vLLM does not recognize the --mode flag — an empty --mode= would break it.
-VLLM_MODE_SED=""
-if [ -n "${VLLM_MODE}" ]; then
-  VLLM_MODE_SED="s|args:|args:\n        - --mode=${VLLM_MODE}|"
-fi
-
 kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
-  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN}' \
-  | if [ -n "${VLLM_MODE_SED}" ]; then sed "${VLLM_MODE_SED}"; else cat; fi \
+  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_MODE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------
