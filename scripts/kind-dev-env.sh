@@ -29,6 +29,10 @@ export VLLM_SIMULATOR_TAG="${VLLM_SIMULATOR_TAG:-v0.8.2}"
 VLLM_SIMULATOR_IMAGE="${VLLM_SIMULATOR_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-sim:${VLLM_SIMULATOR_TAG}}"
 export VLLM_SIMULATOR_IMAGE
 
+# VLLM_IMAGE is used in deploy components — can be a simulator or a real vLLM image
+# (e.g., vllm/vllm-openai:v0.16.0 for production). Defaults to the simulator image.
+export VLLM_IMAGE="${VLLM_IMAGE:-${VLLM_SIMULATOR_IMAGE}}"
+
 # Set a default EPP_TAG if not provided
 export EPP_TAG="${EPP_TAG:-dev}"
 
@@ -72,22 +76,23 @@ export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 # vLLM replica count (without PD/EPD)
 export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 
-# By default we are not setting up for PD (Prefill/Decode)
-export PD_ENABLED="\"${PD_ENABLED:-false}\""
-
 # By default we are not deploying Prometheus monitoring
 export PROM_ENABLED="${PROM_ENABLED:-false}"
 
 # Set the host port to map to the Prometheus NodePort (30090)
 : "${PROM_HOST_PORT:=30090}"
 
-# By default we are not setting up for E/P/D (separate Encode, Prefill, and Decode deployments)
-export EPD_ENABLED="\"${EPD_ENABLED:-false}\""
+# Disaggregation mode: epd (default), pd, e-pd, e-p-d, dp
+# Backward compatibility: EPD_ENABLED=true maps to e-p-d, PD_ENABLED=true maps to pd
+PD_ENABLED="${PD_ENABLED:-false}"
+EPD_ENABLED="${EPD_ENABLED:-false}"
 
-if [ "${PD_ENABLED}" == "\"true\"" ] && [ "${EPD_ENABLED}" == "\"true\"" ]; then
-  echo "Error: PD_ENABLED and EPD_ENABLED cannot both be set to true." >&2
-  exit 1
+if [ "${EPD_ENABLED}" == "true" ] || [ "${EPD_ENABLED}" == "\"true\"" ]; then
+  DISAGG_MODE="${DISAGG_MODE:-e-p-d}"
+elif [ "${PD_ENABLED}" == "true" ] || [ "${PD_ENABLED}" == "\"true\"" ]; then
+  DISAGG_MODE="${DISAGG_MODE:-p-d}"
 fi
+export DISAGG_MODE="${DISAGG_MODE:-epd}"
 
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
@@ -98,7 +103,7 @@ export EXTERNAL_TOKENIZER_ENABLED="${EXTERNAL_TOKENIZER_ENABLED:-false}"
 # Replica counts for E (Encode), P (Prefill), and D (Decode)
 export VLLM_REPLICA_COUNT_E="${VLLM_REPLICA_COUNT_E:-1}"
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
-if [ "${EPD_ENABLED}" == "\"true\"" ]; then
+if [ "${DISAGG_MODE}" == "e-p-d" ]; then
   export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
 else
   export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
@@ -107,32 +112,28 @@ fi
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
+# vLLM mode: echo for simulator, empty for real vLLM
+export VLLM_MODE="${VLLM_MODE:-echo}"
+
 # Validate configuration compatibility
-if [ "${KV_CACHE_ENABLED}" == "true" ] && ([ "${PD_ENABLED}" == "\"true\"" ] || [ "${EPD_ENABLED}" == "\"true\"" ] || [ ${VLLM_DATA_PARALLEL_SIZE} -ne 1 ]); then
-  echo "Error: KV_CACHE_ENABLED=true is not supported with PD_ENABLED=true, EPD_ENABLED=true, or VLLM_DATA_PARALLEL_SIZE != 1." >&2
+if [ "${KV_CACHE_ENABLED}" == "true" ] && [ "${DISAGG_MODE}" != "epd" ]; then
+  echo "Error: KV_CACHE_ENABLED=true is only supported with DISAGG_MODE=epd." >&2
   exit 1
 fi
 
-# Determine EPP config file based on feature flags
+# Determine EPP config file based on DISAGG_MODE
 if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
-  # External tokenizer mode (uses precise-prefix-cache with UDS tokenizer sidecar)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
-
 elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
-  # KV cache mode (simple mode only)
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
-
-elif [ "${EPD_ENABLED}" == "\"true\"" ]; then
-  # E/P/D mode (separate Encode, Prefill, and Decode deployments)
-  DEFAULT_EPP_CONFIG="deploy/config/sim-epd-epp-config.yaml"
-
-elif [ "${PD_ENABLED}" == "\"true\"" ]; then
-  # Prefill-Decode mode
-  DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
-
 else
-  # Simple mode
-  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
+  case "${DISAGG_MODE}" in
+    p-d)   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml" ;;
+    e-pd)  DEFAULT_EPP_CONFIG="deploy/config/sim-e-pd-epp-config.yaml" ;;
+    e-p-d) DEFAULT_EPP_CONFIG="deploy/config/sim-e-p-d-epp-config.yaml" ;;
+    dp)    DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml" ;;
+    *)     DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml" ;;
+  esac
 fi
 
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
@@ -176,9 +177,8 @@ if [ "${PROM_ENABLED}" == "true" ]; then
   fi
 fi
 
-TARGET_PORTS="8000"
-
 NEW_LINE=$'\n'
+TARGET_PORTS="${NEW_LINE}  - number: 8000"
 for ((i = 1; i < VLLM_DATA_PARALLEL_SIZE; ++i)); do
     EXTRA_PORT=$((8000 + i))
     TARGET_PORTS="${TARGET_PORTS}${NEW_LINE}  - number: ${EXTRA_PORT}"
@@ -275,13 +275,14 @@ kubectl kustomize --enable-helm deploy/components/crds-istio |
 # ------------------------------------------------------------------------------
 
 # Deploy the environment to the "default" namespace
-if [ "${EPD_ENABLED}" == "\"true\"" ]; then
-  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-epd"
-elif [ "${PD_ENABLED}" == "\"true\"" ]; then
-  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio-pd"
-else
-  KUSTOMIZE_DIR="deploy/environments/dev/kind-istio"
-fi
+case "${DISAGG_MODE}" in
+  p-d)   KUSTOMIZE_DIR="deploy/environments/dev/p-d" ;;
+  e-pd)  KUSTOMIZE_DIR="deploy/environments/dev/e-pd" ;;
+  e-p-d) KUSTOMIZE_DIR="deploy/environments/dev/e-p-d" ;;
+  dp)    KUSTOMIZE_DIR="deploy/environments/dev/dp" ;;
+  epd-unified) KUSTOMIZE_DIR="deploy/environments/dev/epd-unified" ;;
+  *)     KUSTOMIZE_DIR="deploy/components/vllm-decode" ;;
+esac
 
 TEMP_FILE=$(mktemp)
 # Ensure that the temporary file is deleted now matter what happens in the script
@@ -291,10 +292,19 @@ kubectl --context ${KUBE_CONTEXT} delete configmap epp-config --ignore-not-found
 envsubst '$MODEL_NAME' < ${EPP_CONFIG} > ${TEMP_FILE}
 kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-config.yaml=${TEMP_FILE}
 
-kubectl kustomize --enable-helm  ${KUSTOMIZE_DIR} \
-	| envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
-  ${PD_ENABLED} ${KV_CACHE_ENABLED} ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
+# Deploy Istio base (shared infrastructure)
+kubectl kustomize --enable-helm deploy/environments/dev/base-kind-istio \
+  | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
+  ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} ${POOL_NAMESPACE} ${METRICS_ENDPOINT_AUTH} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
+  | kubectl --context ${KUBE_CONTEXT} apply -f -
+
+# Deploy scenario-specific vLLM components
+kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
+  | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
+  ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} ${VLLM_MODE} \
+  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
+  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------
