@@ -23,7 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
+	"bytes"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -194,7 +194,7 @@ var _ = Describe("Reverse Proxy", func() {
         			"max_tokens": 50
 				}`
 
-				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
 				req.Header.Add(common.PrefillEndpointHeader, prefillBackend.URL)
 
@@ -267,7 +267,7 @@ var _ = Describe("Reverse Proxy", func() {
         			"max_tokens": 50
 				}`
 
-				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
 				req.Header.Add(common.PrefillEndpointHeader, prefillBackend.URL[len("http://"):])
 

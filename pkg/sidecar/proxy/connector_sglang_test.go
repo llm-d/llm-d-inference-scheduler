@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"bytes"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -63,7 +64,7 @@ var _ = Describe("SGLang Connector", func() {
 				"max_tokens": 50
 			}`
 
-		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 		Expect(err).ToNot(HaveOccurred())
 
 		prefillHostPort := testInfo.prefillBackend.URL[len("http://"):]
@@ -73,7 +74,7 @@ var _ = Describe("SGLang Connector", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:all
+			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
 			Fail(string(bp))
 		}
 
@@ -154,7 +155,7 @@ var _ = Describe("SGLang Connector", func() {
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		body := `{"model": "Qwen", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 50}`
-		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, strings.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 		Expect(err).ToNot(HaveOccurred())
 
 		prefillHostPort := testInfo.prefillBackend.URL[len("http://"):]

@@ -185,8 +185,8 @@ type Server struct {
 
 // NewProxy creates a new routing reverse proxy from the given Config.
 func NewProxy(config Config) *Server {
-	prefillerCache, _ := lru.New[string, http.Handler](1024) // nolint:all
-	encoderCache, _ := lru.New[string, http.Handler](1024)   // nolint:all
+	prefillerCache, _ := lru.New[string, http.Handler](1024) // nolint:errcheck
+	encoderCache, _ := lru.New[string, http.Handler](1024)   // nolint:errcheck
 
 	server := &Server{
 		readyCh:             make(chan struct{}),

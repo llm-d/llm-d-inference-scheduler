@@ -31,11 +31,11 @@ func (s *Server) runSharedStorageProtocol(w http.ResponseWriter, r *http.Request
 	s.logger.V(4).Info("running Shared Storage protocol", "url", prefillPodHostPort)
 
 	// Read and parse request body
-	defer r.Body.Close() //nolint:all
+	defer r.Body.Close() //nolint:errcheck
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest) // TODO: check FastAPI error code when failing to read body
-		w.Write([]byte(err.Error()))         //nolint:all
+		w.Write([]byte(err.Error())) //nolint:errcheck
 		return
 	}
 
@@ -108,7 +108,7 @@ func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool
 
 		w.WriteHeader(dw.statusCode)
 		if dw.buffer.Len() > 0 {
-			w.Write([]byte(dw.buffer.String())) //nolint:all
+			w.Write(dw.buffer.Bytes()) //nolint:errcheck
 		}
 
 		err := errors.New("decode request failed")
@@ -135,7 +135,7 @@ func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool
 
 	// Decode succeeded, write response to client
 	maps.Copy(w.Header(), dw.headers)
-	w.Write([]byte(dw.buffer.String())) //nolint:all
+	w.Write(dw.buffer.Bytes()) //nolint:errcheck
 
 	return false, nil
 }
@@ -259,7 +259,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 		s.logger.Error(nil, "prefill request failed", "code", pw.statusCode)
 		w.WriteHeader(pw.statusCode)
 		if pw.buffer.Len() > 0 {
-			w.Write([]byte(pw.buffer.String())) //nolint:all
+			w.Write(pw.buffer.Bytes()) //nolint:errcheck
 		}
 		return fmt.Errorf("prefill request failed with status code: %d", pw.statusCode)
 	}

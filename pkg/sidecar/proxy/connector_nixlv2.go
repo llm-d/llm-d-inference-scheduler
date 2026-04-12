@@ -34,11 +34,11 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	s.logger.V(4).Info("running NIXL protocol V2", "url", prefillPodHostPort)
 
 	// Read request body
-	defer r.Body.Close() //nolint:all
+	defer r.Body.Close() //nolint:errcheck
 	original, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest) // TODO: check FastAPI error code when failing to read body
-		w.Write([]byte(err.Error()))         //nolint:all
+		w.Write([]byte(err.Error()))         //nolint:errcheck
 		return
 	}
 
