@@ -15,13 +15,45 @@ spec:
         app: ${POOL_NAME}
     spec:
       initContainers:
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
+      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
+      # vllm-sim will not start until this container's readinessProbe passes
+      - name: uds-tokenizer
+        image: ${UDS_TOKENIZER_IMAGE}
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always
+        env:
+        - name: LOG_LEVEL
+          value: "DEBUG"
+        - name: PROBE_PORT
+          value: "8082"
+        - name: HF_TOKEN
+          value: "${HF_TOKEN}"
+        ports:
+        - name: health
+          containerPort: 8082
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uds-socket
+          mountPath: /tmp/tokenizer      
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8000"
         - "--vllm-port=8200"
-        - "--connector=nixlv2"
+        - "--kv-connector=nixlv2"
         - "--secure-proxy=false"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
@@ -67,7 +99,6 @@ spec:
         - "--block-size=16"
         - "--zmq-endpoint=tcp://${EPP_NAME}.default.svc.cluster.local:5557"
         - "--event-batch-size=16"
-        - "--tokenizers-cache-dir=/tokenizer-cache"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
         - name: http
@@ -95,14 +126,19 @@ spec:
           containerPort: 8207
           protocol: TCP
         env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
         - name: PORT
           value: "8200"
         - name: PYTHONHASHSEED
           value: "42"
         volumeMounts:
-        - name: tokenizer-cache
-          mountPath: /tokenizer-cache
+        - name: uds-socket
+          mountPath: /tmp/tokenizer
       volumes:
-      - name: tokenizer-cache
+      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
+      - name: uds-socket
         emptyDir: {}
 

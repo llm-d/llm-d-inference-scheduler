@@ -1,19 +1,17 @@
 name: Trivy Scan
-description: Scan container image with Trivy
+description: Scan container image with official Aqua Security Trivy action
 inputs:
   image:
     required: true
+    description: "Image to scan (e.g., 'my-repo/my-image:latest')"
+
 runs:
   using: "composite"
   steps:
-    - name: Install Trivy
-      run: |
-        wget https://github.com/aquasecurity/trivy/releases/download/v0.44.1/trivy_0.44.1_Linux-64bit.deb
-        sudo dpkg -i trivy_0.44.1_Linux-64bit.deb
-      shell: bash
-
-
-    - name: Scan image
-      run: |
-        trivy image --severity HIGH,CRITICAL --no-progress ${{ inputs.image }}
-      shell: bash
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@0.35.0
+      with:
+        image-ref: ${{ inputs.image }}
+        format: 'table'
+        severity: 'HIGH,CRITICAL'
+        exit-code: '1'

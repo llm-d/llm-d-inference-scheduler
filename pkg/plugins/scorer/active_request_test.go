@@ -164,25 +164,53 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 	})
 }
 
-func TestActiveRequestScorer_ResponseComplete(t *testing.T) {
+func TestActiveRequestScorer_ResponseBody(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := NewActiveRequest(ctx, nil)
-
 	endpointA := newTestEndpoint("pod-a", 2)
-	request := newTestRequest("test-request-1")
 
-	// Setup initial state: add request through PreRequest
-	schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
-		"test-profile": endpointA,
-	})
-	scorer.PreRequest(ctx, request, schedulingResult)
+	tests := []struct {
+		name            string
+		requestID       string
+		endOfStream     bool
+		wantInCache     bool
+		wantHasPodCount bool
+		wantPodCount    int
+	}{
+		{
+			name:            "Response complete (EndOfStream=true)",
+			requestID:       "test-request-1",
+			endOfStream:     true,
+			wantInCache:     false,
+			wantHasPodCount: false,
+		},
+		{
+			name:            "Response incomplete (EndOfStream=false)",
+			requestID:       "test-request-2",
+			endOfStream:     false,
+			wantInCache:     true,
+			wantHasPodCount: true,
+			wantPodCount:    1,
+		},
+	}
 
-	// Call ResponseComplete
-	scorer.ResponseComplete(ctx, request, &requestcontrol.Response{}, endpointA.GetMetadata())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scorer := NewActiveRequest(ctx, nil)
+			request := newTestRequest(tt.requestID)
+			schedulingResult := newTestSchedulingResult(map[string]scheduling.Endpoint{
+				"test-profile": endpointA,
+			})
+			scorer.PreRequest(ctx, request, schedulingResult)
 
-	assert.False(t, scorer.requestCache.Has(request.RequestId))
-	assert.False(t, scorer.hasPodCount(endpointA.GetMetadata().NamespacedName.String()),
-		"Pod count should be removed after decrement to zero")
+			scorer.ResponseBody(ctx, request, &requestcontrol.Response{EndOfStream: tt.endOfStream}, endpointA.GetMetadata())
+
+			assert.Equal(t, tt.wantInCache, scorer.requestCache.Has(request.RequestId))
+			assert.Equal(t, tt.wantHasPodCount, scorer.hasPodCount(endpointA.GetMetadata().NamespacedName.String()))
+			if tt.wantHasPodCount {
+				assert.Equal(t, tt.wantPodCount, scorer.getPodCount(endpointA.GetMetadata().NamespacedName.String()))
+			}
+		})
+	}
 }
 
 func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
@@ -242,4 +270,67 @@ func TestActiveRequestScorer_WithName(t *testing.T) {
 	scorer = scorer.WithName(testName)
 
 	assert.Equal(t, testName, scorer.TypedName().Name)
+}
+
+func TestActiveRequest_IdleThresholdAndMaxBusyScore(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+
+	t.Run("binary mode: idleThreshold=0, maxBusyScore=0", func(t *testing.T) {
+		params := &ActiveRequestParameters{
+			RequestTimeout: "1m",
+			IdleThreshold:  0,
+			MaxBusyScore:   0.0,
+		}
+		scorer := NewActiveRequest(ctx, params)
+
+		podA := newTestEndpoint("pod-a", 0)
+		podB := newTestEndpoint("pod-b", 0)
+
+		// Both idle → both score 1.0
+		scores := scorer.Score(ctx, nil, nil, []scheduling.Endpoint{podA, podB})
+		assert.Equal(t, 1.0, scores[podA])
+		assert.Equal(t, 1.0, scores[podB])
+
+		// Send request to pod A
+		req1 := newTestRequest("req-1")
+		result := newTestSchedulingResult(map[string]scheduling.Endpoint{"primary": podA})
+		scorer.PreRequest(ctx, req1, result)
+
+		// Pod A busy → 0.0, Pod B idle → 1.0
+		scores = scorer.Score(ctx, nil, nil, []scheduling.Endpoint{podA, podB})
+		assert.Equal(t, 0.0, scores[podA], "Busy pod scores 0.0 in binary mode")
+		assert.Equal(t, 1.0, scores[podB], "Idle pod scores 1.0")
+	})
+
+	t.Run("hybrid mode: idleThreshold=1, maxBusyScore=0.5", func(t *testing.T) {
+		params := &ActiveRequestParameters{
+			RequestTimeout: "1m",
+			IdleThreshold:  1,
+			MaxBusyScore:   0.5,
+		}
+		scorer := NewActiveRequest(ctx, params)
+
+		podA := newTestEndpoint("pod-a", 0)
+		podB := newTestEndpoint("pod-b", 0)
+		podC := newTestEndpoint("pod-c", 0)
+
+		// Send 1 request to pod A, 2 to pod B
+		req1 := newTestRequest("req-1")
+		resultA := newTestSchedulingResult(map[string]scheduling.Endpoint{"primary": podA})
+		scorer.PreRequest(ctx, req1, resultA)
+
+		req2 := newTestRequest("req-2")
+		req3 := newTestRequest("req-3")
+		resultB := newTestSchedulingResult(map[string]scheduling.Endpoint{"primary": podB})
+		scorer.PreRequest(ctx, req2, resultB)
+		scorer.PreRequest(ctx, req3, resultB)
+
+		// Pod A: 1 request ≤ idleThreshold → idle → 1.0
+		// Pod B: 2 requests > idleThreshold → busy, maxCount=2 → (2-2)/2*0.5 = 0.0
+		// Pod C: 0 requests ≤ idleThreshold → idle → 1.0
+		scores := scorer.Score(ctx, nil, nil, []scheduling.Endpoint{podA, podB, podC})
+		assert.Equal(t, 1.0, scores[podA], "Pod with 1 request is idle (threshold=1)")
+		assert.Equal(t, 0.0, scores[podB], "Pod with 2 requests (busiest) scores 0.0")
+		assert.Equal(t, 1.0, scores[podC], "Pod with 0 requests is idle")
+	})
 }

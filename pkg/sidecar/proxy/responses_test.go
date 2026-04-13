@@ -44,27 +44,27 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 		},
 		{
 			name: "passthrough with no header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{}}},
 
 			expectedPassthrough: true,
 		},
 		{
 			name: "default prefill to one header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a"}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a"}}},
 
 			expectedCode:             200,
 			expectedPrefillHostPorts: []string{"a"},
 		},
 		{
 			name: "default prefill to first header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a,b"}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,b"}}},
 
 			expectedCode:             200,
 			expectedPrefillHostPorts: []string{"a"},
 		},
 		{
 			name:     "sample from comma delimited header",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a,b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -72,7 +72,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 		},
 		{
 			name:     "sample from comma delimited header with whitespace",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{" a, b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{" a, b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -80,7 +80,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 		},
 		{
 			name:     "sample from duplicate values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a,a"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,a"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -88,7 +88,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 		},
 		{
 			name:     "sample from multiple header values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"a", "b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a", "b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -96,14 +96,14 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 		},
 		{
 			name:     "sample from empty header value",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{""}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{""}}},
 			sampling: true,
 
 			expectedPassthrough: true,
 		},
 		{
 			name:     "sample from multiple empty header values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillPodHeader): []string{"", ""}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"", ""}}},
 			sampling: true,
 
 			expectedPassthrough: true,
@@ -114,11 +114,11 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 
 		for i := 0; i < maxAttempts; i++ {
 			t.Run(fmt.Sprintf("%s_%d", tt.name, i), func(t *testing.T) {
-				s := NewProxy("8000", nil, Config{EnablePrefillerSampling: tt.sampling})
+				s := NewProxy(Config{Port: "8000", EnablePrefillerSampling: tt.sampling})
 				s.allowlistValidator = &AllowlistValidator{}
 				s.prefillSamplerFn = func(n int) int { return i % n }
 				var hostPort string
-				s.runConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ []string) {
+				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ []string) {
 					hostPort = selectedHostPort
 				}
 				var passthrough bool

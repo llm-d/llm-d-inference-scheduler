@@ -30,14 +30,14 @@ func startConnectorTestProxy(testInfo *sidecarTestInfo) {
 	go func() {
 		defer GinkgoRecover()
 
-		validator := &AllowlistValidator{enabled: false}
-		err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+		testInfo.proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+		err := testInfo.proxy.Start(testInfo.ctx)
 		Expect(err).ToNot(HaveOccurred())
 
 		testInfo.stoppedCh <- struct{}{}
 	}()
 
-	Eventually(func() interface{} { return testInfo.proxy.addr }).ShouldNot(BeNil())
+	<-testInfo.proxy.readyCh
 }
 
 func stopConnectorTestProxy(testInfo *sidecarTestInfo) {
@@ -50,7 +50,7 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 	var testInfo *sidecarTestInfo
 
 	BeforeEach(func() {
-		testInfo = sidecarConnectionTestSetup(ConnectorNIXLV2)
+		testInfo = sidecarConnectionTestSetup(KVConnectorNIXLV2)
 		startConnectorTestProxy(testInfo)
 	})
 
@@ -70,7 +70,7 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -120,7 +120,7 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -156,7 +156,7 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -220,7 +220,7 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -247,7 +247,7 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 	var testInfo *sidecarTestInfo
 
 	BeforeEach(func() {
-		testInfo = sidecarConnectionTestSetup(ConnectorNIXLV2)
+		testInfo = sidecarConnectionTestSetup(KVConnectorNIXLV2)
 		startConnectorTestProxy(testInfo)
 	})
 
@@ -268,7 +268,7 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ConversationsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -319,7 +319,7 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ConversationsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillPodHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())

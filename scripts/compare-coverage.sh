@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# compare-coverage.sh <baseline-dir> <current-dir> [threshold]
+#
+# Compares Go coverage profiles between a baseline and the current run.
+# Outputs a markdown table to stdout and, when running in GitHub Actions,
+# appends it to $GITHUB_STEP_SUMMARY so it appears in the Job Summary.
+#
+# Usage:
+#   ./scripts/compare-coverage.sh coverage/baseline coverage/ 0
+#
+# Arguments:
+#   baseline-dir  Directory containing baseline *.out coverage profiles
+#   current-dir   Directory containing current *.out coverage profiles
+#   threshold     Optional minimum total coverage % (default: 0, report only)
+
+set -euo pipefail
+
+BASELINE_DIR="${1:?baseline-dir required}"
+CURRENT_DIR="${2:?current-dir required}"
+THRESHOLD="${3:-0}"
+
+# extract_total <profile.out> → percentage as a bare number, e.g. "72.4"
+extract_total() {
+    local profile="$1"
+    if [[ ! -s "$profile" ]]; then
+        echo ""
+        return
+    fi
+    go tool cover -func="$profile" 2>/dev/null \
+        | awk '/^total:/{gsub(/%/,"",$NF); print $NF}' || true
+}
+
+# delta_str <base> <cur> → e.g. "+1.2" or "-0.5" or "0.0"
+delta_str() {
+    awk "BEGIN{printf \"%+.1f\", $2 - $1}"
+}
+
+# status_icon <base_pct> <cur_pct> <threshold>
+status_icon() {
+    local base="$1" cur="$2" threshold="$3"
+    awk -v base="$base" -v cur="$cur" -v threshold="$threshold" 'BEGIN {
+        if (cur == "" || base == "") { print "⚠️ missing data"; exit }
+        if (threshold > 0 && cur+0 < threshold+0) { print "❌ below threshold"; exit }
+        diff = cur - base
+        if (diff < -0.05)                         { print "⬇️ regression"; exit }
+        if (diff >  0.05)                         { print "⬆️ improvement"; exit }
+        print "✅ no change"
+    }'
+}
+
+any_regression=0
+rows=""
+
+# Find all .out files present in either directory
+all_names=()
+for f in "$BASELINE_DIR"/*.out "$CURRENT_DIR"/*.out; do
+    [[ -f "$f" ]] || continue
+    name=$(basename "$f" .out)
+    # deduplicate
+    if [[ ! " ${all_names[*]-} " =~ " ${name} " ]]; then
+        all_names+=("$name")
+    fi
+done
+
+if [[ ${#all_names[@]} -eq 0 ]]; then
+    echo "No coverage profiles found in $BASELINE_DIR or $CURRENT_DIR"
+    exit 0
+fi
+
+for name in "${all_names[@]}"; do
+    base_pct=$(extract_total "$BASELINE_DIR/$name.out")
+    cur_pct=$(extract_total  "$CURRENT_DIR/$name.out")
+
+    if [[ -n "$base_pct" && -n "$cur_pct" ]]; then
+        delta=$(delta_str "$base_pct" "$cur_pct")
+        status=$(status_icon "$base_pct" "$cur_pct" "$THRESHOLD")
+        base_fmt="${base_pct}%"
+        cur_fmt="${cur_pct}%"
+    elif [[ -z "$base_pct" && -n "$cur_pct" ]]; then
+        delta="n/a"
+        status="🆕 new"
+        base_fmt="—"
+        cur_fmt="${cur_pct}%"
+    elif [[ -n "$base_pct" && -z "$cur_pct" ]]; then
+        delta="n/a"
+        status="⚠️ missing"
+        base_fmt="${base_pct}%"
+        cur_fmt="—"
+    else
+        delta="n/a"
+        status="⚠️ missing data"
+        base_fmt="—"
+        cur_fmt="—"
+    fi
+
+    if [[ "$status" == *"regression"* || "$status" == *"below threshold"* ]]; then
+        any_regression=1
+    fi
+
+    rows+="| \`$name\` | $base_fmt | $cur_fmt | $delta% | $status |\n"
+done
+
+output="$(printf '## Coverage Report\n\n| Component | Baseline | Current | Delta | Status |\n|-----------|----------|---------|-------|--------|\n%b' "$rows")"
+if [[ "$THRESHOLD" -gt 0 ]]; then
+    output+="$(printf '\n> Minimum threshold: **%s%%**' "$THRESHOLD")"
+fi
+
+printf '%s\n' "$output"
+
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '%s\n' "$output" >> "$GITHUB_STEP_SUMMARY"
+fi
+
+# Exit non-zero only if we ever want hard-failure (threshold > 0 + regression)
+# Currently always 0 per project policy (report only).
+exit 0

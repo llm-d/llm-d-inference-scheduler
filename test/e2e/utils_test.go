@@ -1,8 +1,13 @@
 package e2e
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,6 +104,16 @@ func getPods(labels map[string]string) []corev1.Pod {
 	return pods
 }
 
+// getPodNames returns the names of all running pods matching the given label selector.
+func getPodNames(labels map[string]string) []string {
+	pods := getPods(labels)
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+	return names
+}
+
 func podsInDeploymentsReady(objects []string) {
 	isDeploymentReady := func(deploymentName string) bool {
 		var deployment appsv1.Deployment
@@ -129,13 +144,219 @@ func runKustomize(kustomizeDir string) []string {
 }
 
 func substituteMany(inputs []string, substitutions map[string]string) []string {
-	outputs := []string{}
-	for _, input := range inputs {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
 		output := input
 		for key, value := range substitutions {
 			output = strings.ReplaceAll(output, key, value)
 		}
-		outputs = append(outputs, output)
+		outputs[idx] = output
 	}
 	return outputs
+}
+
+// getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+//
+//nolint:unparam // metricName may vary in future test cases
+func getCounterMetric(metricsURL, metricName, labelMatch string) int {
+	resp, err := http.Get(metricsURL)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	defer func() {
+		err = resp.Body.Close()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	}()
+	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
+
+	body, err := io.ReadAll(resp.Body)
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+	metricsText := string(body)
+	for _, line := range strings.Split(metricsText, "\n") {
+		if strings.HasPrefix(line, metricName) && strings.Contains(line, labelMatch) {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				valFloat, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+				return int(valFloat)
+			}
+		}
+	}
+	return 0
+}
+
+// extractFinishReason extracts the finish_reason field from a JSON response string.
+func extractFinishReason(jsonStr string) string {
+	// Simple extraction - look for "finish_reason":"value" pattern
+	idx := strings.Index(jsonStr, `"finish_reason":"`)
+	if idx == -1 {
+		// Try with null value
+		if strings.Contains(jsonStr, `"finish_reason":null`) {
+			return "null"
+		}
+		return ""
+	}
+	start := idx + len(`"finish_reason":"`)
+	end := strings.Index(jsonStr[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return jsonStr[start : start+end]
+}
+
+// extractFinishReasonFromStreaming extracts the finish_reason from the last SSE data chunk.
+func extractFinishReasonFromStreaming(sseData string) string {
+	// Find the last "finish_reason" that is not null
+	lines := strings.Split(sseData, "\n")
+	lastFinishReason := ""
+	for _, line := range lines {
+		if strings.HasPrefix(line, "data: ") && !strings.Contains(line, "[DONE]") {
+			fr := extractFinishReason(line)
+			if fr != "" && fr != "null" {
+				lastFinishReason = fr
+			}
+		}
+	}
+	return lastFinishReason
+}
+
+// getPodRequestCount gets the total vLLM request count from a pod's metrics endpoint.
+func getPodRequestCount(podName string) int {
+	ginkgo.By("Getting request count from pod: " + podName)
+
+	// Use Kubernetes API proxy to access the metrics endpoint
+	output, err := testConfig.KubeCli.CoreV1().RESTClient().
+		Get().
+		Namespace(nsName).
+		Resource("pods").
+		Name(podName + ":8000").
+		SubResource("proxy").
+		Suffix("metrics").
+		DoRaw(testConfig.Context)
+	if err != nil {
+		ginkgo.By(fmt.Sprintf("Warning: Could not get metrics from pod %s: %v", podName, err))
+		return -1
+	}
+
+	return parseRequestCountFromMetrics(string(output))
+}
+
+// parseRequestCountFromMetrics extracts the request count from Prometheus metrics output.
+func parseRequestCountFromMetrics(metricsOutput string) int {
+	// Look for vllm:e2e_request_latency_seconds_count{model_name="food-review"} <count>
+	lines := strings.Split(metricsOutput, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "vllm:e2e_request_latency_seconds_count") &&
+			strings.Contains(line, "food-review") {
+			// Extract the count value after the last space
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				count, err := strconv.Atoi(parts[len(parts)-1])
+				if err == nil {
+					return count
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// dumpPodsAndLogs dumps all pod statuses and their logs to the Ginkgo writer.
+// Call this before cleanup to insure the information is available when CI tests fail.
+func dumpPodsAndLogs() {
+	if testConfig == nil || testConfig.KubeCli == nil {
+		ginkgo.GinkgoWriter.Println("Skipping pod dump: cluster not initialized")
+		return
+	}
+
+	ginkgo.GinkgoWriter.Printf("\n=== Dumping pod states and logs (namespace: %s) ===\n", nsName)
+
+	ctx, cancel := context.WithTimeout(testConfig.Context, 30*time.Second)
+	defer cancel()
+
+	pods, err := testConfig.KubeCli.CoreV1().Pods(nsName).List(ctx, v1.ListOptions{})
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("Failed to list pods: %v\n", err)
+		return
+	}
+
+	ginkgo.GinkgoWriter.Printf("Total pods found: %d\n\n", len(pods.Items))
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		ginkgo.GinkgoWriter.Printf("--- Pod: %s | Phase: %s | Node: %s ---\n",
+			pod.Name, pod.Status.Phase, pod.Spec.NodeName)
+
+		for _, cs := range pod.Status.InitContainerStatuses {
+			printContainerStatus("init", cs)
+		}
+		for _, cs := range pod.Status.ContainerStatuses {
+			printContainerStatus("container", cs)
+		}
+
+		restarted := map[string]bool{}
+		for _, cs := range pod.Status.InitContainerStatuses {
+			if cs.RestartCount > 0 {
+				restarted[cs.Name] = true
+			}
+		}
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.RestartCount > 0 {
+				restarted[cs.Name] = true
+			}
+		}
+
+		for _, c := range pod.Spec.InitContainers {
+			if restarted[c.Name] {
+				dumpContainerLogs(ctx, pod.Name, c.Name, true)
+			}
+			dumpContainerLogs(ctx, pod.Name, c.Name, false)
+		}
+		for _, c := range pod.Spec.Containers {
+			if restarted[c.Name] {
+				dumpContainerLogs(ctx, pod.Name, c.Name, true)
+			}
+			dumpContainerLogs(ctx, pod.Name, c.Name, false)
+		}
+	}
+	ginkgo.GinkgoWriter.Println("=== End of pod dump ===")
+}
+
+func printContainerStatus(kind string, cs corev1.ContainerStatus) {
+	status := fmt.Sprintf("  [%s] %s | ready=%v restarts=%d", kind, cs.Name, cs.Ready, cs.RestartCount)
+	if cs.State.Waiting != nil {
+		status += " | Waiting: " + cs.State.Waiting.Reason
+	}
+	if cs.State.Terminated != nil {
+		status += fmt.Sprintf(" | Terminated: %s (exit %d)", cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
+	}
+	ginkgo.GinkgoWriter.Println(status)
+}
+
+func dumpContainerLogs(ctx context.Context, podName, containerName string, previous bool) {
+	tailLines := int64(100)
+	req := testConfig.KubeCli.CoreV1().Pods(nsName).GetLogs(podName, &corev1.PodLogOptions{
+		Container: containerName,
+		TailLines: &tailLines,
+		Previous:  previous,
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to stream logs: %v\n", podName, containerName, err)
+		return
+	}
+	defer func() {
+		if err := stream.Close(); err != nil {
+			ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to close log stream: %v\n", podName, containerName, err)
+		}
+	}()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, stream); err != nil {
+		ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to read logs: %v\n", podName, containerName, err)
+		return
+	}
+	label := "last 100 lines"
+	if previous {
+		label = "previous instance, last 100 lines"
+	}
+	ginkgo.GinkgoWriter.Printf("  [logs] %s/%s (%s):\n%s\n", podName, containerName, label, buf.String())
 }

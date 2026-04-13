@@ -9,50 +9,51 @@ import (
 	"net"
 	"strconv"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 const (
-	// PdProfileHandlerType is the type of the PdProfileHandler
-	PdProfileHandlerType = "pd-profile-handler"
-
-	defaultDecodeProfile    = "decode"
-	defaultPrefillProfile   = "prefill"
-	defaultPrefixPluginType = prefix.PrefixCachePluginType
-
-	// An estimated average characters per token, used since the request we cached is not tokenized.
-	averageCharactersPerToken = 4
+	// PdProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
+	PdProfileHandlerType     = "pd-profile-handler"
+	defaultPrefixPluginType  = prefix.PrefixCachePluginType
+	defaultDeciderPluginName = PrefixBasedPDDeciderPluginType
 )
 
+// pdDeciderPlugin interface for pd decider plugins
+
 type pdProfileHandlerParameters struct {
-	Threshold        int    `json:"threshold"`
-	DecodeProfile    string `json:"decodeProfile"`
-	PrefillProfile   string `json:"prefillProfile"`
-	PrefixPluginType string `json:"prefixPluginType"`
-	PrefixPluginName string `json:"prefixPluginName"`
-	HashBlockSize    int    `json:"hashBlockSize"`
-	PrimaryPort      int    `json:"primaryPort"`
+	DecodeProfile     string `json:"decodeProfile"`
+	PrefillProfile    string `json:"prefillProfile"`
+	PrefixPluginType  string `json:"prefixPluginType"`
+	PrefixPluginName  string `json:"prefixPluginName"`
+	PrimaryPort       int    `json:"primaryPort"`
+	DeciderPluginName string `json:"deciderPluginName"`
 }
 
 // compile-time type assertion
 var _ scheduling.ProfileHandler = &PdProfileHandler{}
 
-// PdProfileHandlerFactory defines the factory function for the PdProfileHandler
-func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+// PdProfileHandlerFactory defines the factory function for the PdProfileHandler.
+//
+// Deprecated: Use DisaggProfileHandlerFactory instead.
+func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	log.FromContext(handle.Context()).Info("Deprecated: pd-profile-handler is deprecated, use disagg-profile-handler instead")
 	parameters := pdProfileHandlerParameters{
-		Threshold:        0,
-		DecodeProfile:    defaultDecodeProfile,
-		PrefillProfile:   defaultPrefillProfile,
-		PrefixPluginType: defaultPrefixPluginType,
-		HashBlockSize:    prefix.DefaultBlockSizeTokens * averageCharactersPerToken,
-		PrimaryPort:      0,
+		DecodeProfile:     defaultDecodeProfile,
+		PrefillProfile:    defaultPrefillProfile,
+		PrefixPluginType:  defaultPrefixPluginType,
+		PrimaryPort:       0,
+		DeciderPluginName: defaultDeciderPluginName,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -64,50 +65,72 @@ func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, _ plugi
 		parameters.PrefixPluginName = parameters.PrefixPluginType
 	}
 
-	if parameters.Threshold < 0 {
-		return nil, fmt.Errorf("invalid threshold: must be >= 0, got %d", parameters.Threshold)
-	}
-
-	if parameters.HashBlockSize <= 0 {
-		return nil, fmt.Errorf("invalid hashBlockSize: must be > 0, got %d", parameters.HashBlockSize)
-	}
-
 	if parameters.PrimaryPort != 0 {
+		log.FromContext(handle.Context()).Info("Deprecated: primaryPort not needed with Istio >= 1.28.1")
 		if parameters.PrimaryPort < 1 || parameters.PrimaryPort > 65535 {
 			return nil, fmt.Errorf("invalid primaryPort: must be between 1 and 65535, got %d", parameters.PrimaryPort)
 		}
 	}
 
-	return NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginType, parameters.PrefixPluginName,
-		parameters.Threshold, parameters.HashBlockSize, parameters.PrimaryPort).WithName(name), nil
+	if parameters.DeciderPluginName == "" {
+		return nil, errors.New("decider plugin name is not defined")
+	}
+
+	plugin := handle.Plugin(parameters.DeciderPluginName)
+	if plugin == nil {
+		return nil, fmt.Errorf("invalid decider plugin type: %s", parameters.DeciderPluginName)
+	}
+
+	deciderPlugin, ok := plugin.(deciderPlugin)
+	if !ok {
+		return nil, fmt.Errorf("decider plugin of type: %s does not implement pdDeciderPlugin", parameters.DeciderPluginName)
+	}
+
+	handler, err := NewPdProfileHandler(parameters.PrefillProfile, parameters.DecodeProfile, parameters.PrefixPluginType, parameters.PrefixPluginName,
+		parameters.PrimaryPort, deciderPlugin)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return handler.WithName(name), nil
+
 }
 
 // NewPdProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string, pdThreshold, hashBlockSize, primaryPort int) *PdProfileHandler {
+//
+// Deprecated: Use NewDisaggProfileHandler instead.
+func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefixPluginName string,
+	primaryPort int, deciderPlugin deciderPlugin) (*PdProfileHandler, error) {
 	result := &PdProfileHandler{
 		typedName:             plugin.TypedName{Type: PdProfileHandlerType},
 		prefixPluginTypedName: plugin.TypedName{Type: prefixPluginType, Name: prefixPluginName},
 		decodeProfile:         decodeProfile,
 		prefillProfile:        prefillProfile,
-		pdThreshold:           pdThreshold,
-		hashBlockSize:         hashBlockSize,
+		decider:               deciderPlugin,
 	}
 	if primaryPort != 0 {
 		result.primaryPort = strconv.Itoa(primaryPort)
 	}
 
-	return result
+	return result, nil
 }
 
 // PdProfileHandler handles scheduler profiles for PD.
+//
+// Deprecated: Use DisaggProfileHandler instead.
 type PdProfileHandler struct {
 	typedName             plugin.TypedName
 	prefixPluginTypedName plugin.TypedName
 	decodeProfile         string
 	prefillProfile        string
-	pdThreshold           int
-	hashBlockSize         int
 	primaryPort           string
+	decider               deciderPlugin
+}
+
+// Consumes defines data types consumed by this plugin (through the PD decider).
+func (*PdProfileHandler) Consumes() map[string]any {
+	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
 }
 
 // TypedName returns the typed name of the plugin.
@@ -123,10 +146,37 @@ func (h *PdProfileHandler) WithName(name string) *PdProfileHandler {
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
+	// Start tracing span for profile picking operation
+	tracer := telemetry.Tracer()
+	ctx, span := tracer.Start(ctx, "llm_d.epp.pd.profile_handler.pick",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	// Set initial attributes
+	span.SetAttributes(
+		attribute.Int("llm_d.profile_handler.total_profiles", len(profiles)),
+		attribute.Int("llm_d.profile_handler.executed_profiles", len(profileResults)),
+	)
+
+	// Set optional request attributes if request is not nil
+	if request != nil {
+		if request.TargetModel != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+		}
+		if request.RequestId != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+		}
+	}
+
 	if _, executed := profileResults[h.decodeProfile]; !executed {
 		// if decode profile was not executed yet, first let the scheduler run the decode profile
+		span.SetAttributes(
+			attribute.String("llm_d.profile_handler.decision", "run_decode"),
+			attribute.String("llm_d.profile_handler.selected_profile", h.decodeProfile),
+		)
 		return map[string]scheduling.SchedulerProfile{
 			h.decodeProfile: profiles[h.decodeProfile],
 		}
@@ -136,44 +186,30 @@ func (h *PdProfileHandler) Pick(ctx context.Context, cycleState *scheduling.Cycl
 	// when a profile run fails its result value is nil. we need to check decode result before continuing to prefill
 	// check if all configured profiles have been executed, or if decode failed, no need to run more profiles.
 	if len(profiles) == len(profileResults) || profileResults[h.decodeProfile] == nil {
+		span.SetAttributes(
+			attribute.String("llm_d.profile_handler.decision", "complete"),
+			attribute.Bool("llm_d.profile_handler.decode_failed", profileResults[h.decodeProfile] == nil),
+		)
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
-	if h.pdThreshold > 0 {
-		userInput, err := getUserInputBytes(request)
-		if err != nil {
-			log.FromContext(ctx).V(logutil.DEBUG).Error(err, "Failed to get user input bytes")
-			return nil
-		}
-
-		// if we're here that means decode profile ran successfully, and we have additional profile configured that didn't run yet,
-		// which means PD is enabled (otherwise, prefill profile is not configured at all and this profile handler is not used).
-		// inspect decode execution result to decide if prefill should run or not.
-		// if the request is short enough, use decode results only and don't run the prefill profile.
-		hitPercentagePrefix := 0.0 // default to 0, meaning no prefix cache hit
-		prefixState, err := scheduling.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugin.StateKey(h.prefixPluginTypedName.String()))
-		if err != nil {
-			log.FromContext(ctx).Error(err, "unable to read prefix state")
-		} else {
-			decodeEndpoint := profileResults[h.decodeProfile].TargetEndpoints[0].GetMetadata().NamespacedName
-			hitPrefix := max(prefixState.PrefixCacheServers[prefix.ServerID(decodeEndpoint)]-1, 0) // The first hit is always the model name
-			hitPercentagePrefix = float64(hitPrefix*h.hashBlockSize*averageCharactersPerToken) / float64(len(userInput))
-			log.FromContext(ctx).V(logutil.DEBUG).Info("Computed hit percentage for prefix cache", "hitPercentage", hitPercentagePrefix,
-				"promptLength", len(userInput))
-		}
-
-		if (1.0-hitPercentagePrefix)*float64(len(userInput)) < float64(h.pdThreshold) {
-			log.FromContext(ctx).Info("Non-cached suffix is smaller than threshold, using decode profile only", "hitPercentage", hitPercentagePrefix)
-			metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly)
-			return map[string]scheduling.SchedulerProfile{} // do not run prefill
+	if h.decider != nil && h.decider.disaggregate(ctx, request, profileResults[h.decodeProfile].TargetEndpoints[0]) {
+		metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode) //nolint:staticcheck // intentional: pd-profile-handler is itself deprecated
+		// run the prefill profile
+		span.SetAttributes(
+			attribute.String("llm_d.profile_handler.decision", "prefill_decode"),
+			attribute.String("llm_d.profile_handler.selected_profile", h.prefillProfile),
+		)
+		return map[string]scheduling.SchedulerProfile{
+			h.prefillProfile: profiles[h.prefillProfile],
 		}
 	}
 
-	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypePrefillDecode)
-	// run the prefill profile
-	return map[string]scheduling.SchedulerProfile{
-		h.prefillProfile: profiles[h.prefillProfile],
-	}
+	metrics.RecordPDDecision(request.TargetModel, metrics.DecisionTypeDecodeOnly) //nolint:staticcheck // intentional: pd-profile-handler is itself deprecated
+	span.SetAttributes(
+		attribute.String("llm_d.profile_handler.decision", "decode_only"),
+	)
+	return map[string]scheduling.SchedulerProfile{} // do not run prefill
 }
 
 // ProcessResults handles the outcome of the profile runs after the selected profiles ran.
@@ -193,17 +229,17 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 	if h.primaryPort != "" {
 		// Data Parallel is active
 
-		targetPod := decodeRunResults.TargetEndpoints[0].GetMetadata()
-		request.Headers[common.DataParallelPodHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
+		targetEndpoint := decodeRunResults.TargetEndpoints[0].GetMetadata()
+		request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
 
 		updatedResult := scheduling.ProfileRunResult{
 			TargetEndpoints: []scheduling.Endpoint{},
 		}
 
 		for _, target := range decodeRunResults.TargetEndpoints {
-			updatedPodInfo := target.GetMetadata().Clone()
-			updatedPodInfo.Port = h.primaryPort
-			targetEndpoint := scheduling.NewEndpoint(updatedPodInfo, target.GetMetrics().Clone(), nil)
+			updatedEndpointInfo := target.GetMetadata().Clone()
+			updatedEndpointInfo.Port = h.primaryPort
+			targetEndpoint := scheduling.NewEndpoint(updatedEndpointInfo, target.GetMetrics().Clone(), nil)
 			updatedResult.TargetEndpoints = append(updatedResult.TargetEndpoints, targetEndpoint)
 		}
 		updatedResults[h.decodeProfile] = &updatedResult
@@ -221,13 +257,4 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 		PrimaryProfileName: h.decodeProfile,
 		ProfileResults:     updatedResults,
 	}, nil
-}
-
-func getUserInputBytes(request *scheduling.LLMRequest) ([]byte, error) {
-	if request.Body.Completions != nil { // assumed to be valid if not nil
-		return []byte(request.Body.Completions.Prompt), nil
-	}
-
-	// must be chat-completions request at this point, return bytes of entire messages
-	return json.Marshal(request.Body.ChatCompletions.Messages)
 }
