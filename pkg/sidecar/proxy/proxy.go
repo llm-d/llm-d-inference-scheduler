@@ -80,13 +80,21 @@ const (
 	APITypeConversations
 )
 
-// TokenLimitFields returns the field names used for token limits based on API type
-func (a APIType) TokenLimitFields() []string {
-	switch a {
+// JSON request field names used for token limits in prefill/decode staging.
+// Do not mutate these slices.
+var (
+	chatCompletionTokenLimitFields = []string{requestFieldMaxTokens, requestFieldMaxCompletionTokens}
+	responsesStyleTokenLimitFields = []string{requestFieldMaxOutputTokens}
+)
+
+// tokenLimitFieldsForAPIType returns token limit field names for the given API.
+// Returned slices are shared package-level vars; callers must not mutate them.
+func tokenLimitFieldsForAPIType(api APIType) []string {
+	switch api {
 	case APITypeResponses, APITypeConversations:
-		return []string{requestFieldMaxOutputTokens}
+		return responsesStyleTokenLimitFields
 	default:
-		return []string{requestFieldMaxTokens, requestFieldMaxCompletionTokens}
+		return chatCompletionTokenLimitFields
 	}
 }
 
@@ -112,7 +120,9 @@ type Config struct {
 	EnablePrefillerSampling bool
 }
 
-type protocolRunner func(http.ResponseWriter, *http.Request, string, APIType)
+// protocolRunner runs the configured P/D connector. The final argument lists JSON keys
+// for token limits (NIXL v2 and LMCache); SGLang ignores it.
+type protocolRunner func(http.ResponseWriter, *http.Request, string, []string)
 
 // Server is the reverse proxy server
 type Server struct {
@@ -122,7 +132,7 @@ type Server struct {
 	decoderURL           *url.URL     // the local decoder URL
 	handler              http.Handler // the handler function. either a Mux or a proxy
 	allowlistValidator   *AllowlistValidator
-	runConnectorProtocol protocolRunner // the handler for running the protocol (unified for all API types)
+	runConnectorProtocol protocolRunner // the handler for running the P/D protocol
 	prefillerURLPrefix   string
 
 	decoderProxy        http.Handler                     // decoder proxy handler
@@ -203,7 +213,9 @@ func (s *Server) setConnector() {
 	case ConnectorLMCache:
 		s.runConnectorProtocol = s.runLMCacheProtocol
 	case ConnectorSGLang:
-		s.runConnectorProtocol = s.runSGLangProtocol
+		s.runConnectorProtocol = func(w http.ResponseWriter, r *http.Request, host string, _ []string) {
+			s.runSGLangProtocol(w, r, host)
+		}
 	case ConnectorNIXLV2:
 		fallthrough
 	default:
@@ -219,10 +231,10 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("POST "+ChatCompletionsPath, s.chatCompletionsHandler) // /v1/chat/completions (openai)
-	mux.HandleFunc("POST "+CompletionsPath, s.chatCompletionsHandler)     // /v1/completions (legacy)
-	mux.HandleFunc("POST "+ResponsesPath, s.responsesHandler)             // /v1/responses (openai responses API)
-	mux.HandleFunc("POST "+ConversationsPath, s.conversationsHandler)     // /v1/conversations (openai conversations API)
+	mux.HandleFunc("POST "+ChatCompletionsPath, s.disaggregatedPrefillHandler(APITypeChatCompletions, "skip disaggregated prefill"))
+	mux.HandleFunc("POST "+CompletionsPath, s.disaggregatedPrefillHandler(APITypeChatCompletions, "skip disaggregated prefill"))
+	mux.HandleFunc("POST "+ResponsesPath, s.disaggregatedPrefillHandler(APITypeResponses, "skip disaggregated prefill for responses API"))
+	mux.HandleFunc("POST "+ConversationsPath, s.disaggregatedPrefillHandler(APITypeConversations, "skip disaggregated prefill for conversations API"))
 
 	s.decoderProxy = s.createDecoderProxyHandler(s.decoderURL, s.config.DecoderInsecureSkipVerify)
 

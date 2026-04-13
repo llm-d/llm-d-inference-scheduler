@@ -26,11 +26,9 @@ import (
 )
 
 // runNIXLProtocolV2 handles the NIXL v2 protocol for all OpenAI API types.
-// The apiType parameter determines which token limit fields to use:
-// - Chat Completions: max_tokens, max_completion_tokens
-// - Responses/Conversations: max_output_tokens
-func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType APIType) {
-	s.logger.V(4).Info("running NIXL protocol V2", "url", prefillPodHostPort, "apiType", apiType)
+// tokenLimitFields lists JSON keys to stage for prefill (e.g. max_tokens or max_output_tokens).
+func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, tokenLimitFields []string) {
+	s.logger.V(4).Info("running NIXL protocol V2", "url", prefillPodHostPort, "tokenLimitFields", tokenLimitFields)
 
 	// Read request body
 	defer r.Body.Close() //nolint:all
@@ -72,18 +70,11 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	streamValue, streamOk := completionRequest[requestFieldStream]
 	streamOptionsValue, streamOptionsOk := completionRequest[requestFieldStreamOptions]
 
-	// Save token limit fields based on API type
-	tokenFields := apiType.TokenLimitFields()
-	savedTokenValues := make(map[string]struct {
-		value any
-		ok    bool
-	})
-	for _, field := range tokenFields {
-		value, ok := completionRequest[field]
-		savedTokenValues[field] = struct {
-			value any
-			ok    bool
-		}{value, ok}
+	savedTokenValues := map[string]any{}
+	for _, field := range tokenLimitFields {
+		if v, ok := completionRequest[field]; ok {
+			savedTokenValues[field] = v
+		}
 	}
 
 	completionRequest[requestFieldKVTransferParams] = map[string]any{
@@ -98,8 +89,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	completionRequest[requestFieldStream] = false
 	delete(completionRequest, requestFieldStreamOptions)
 
-	// Set token limits to 1 for prefill based on API type
-	for _, field := range tokenFields {
+	for _, field := range tokenLimitFields {
 		completionRequest[field] = 1
 	}
 
@@ -166,11 +156,10 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		completionRequest[requestFieldStreamOptions] = streamOptionsValue
 	}
 
-	// Restore token limit fields based on API type
-	for _, field := range tokenFields {
+	for _, field := range tokenLimitFields {
 		delete(completionRequest, field)
-		if saved := savedTokenValues[field]; saved.ok {
-			completionRequest[field] = saved.value
+		if v, ok := savedTokenValues[field]; ok {
+			completionRequest[field] = v
 		}
 	}
 

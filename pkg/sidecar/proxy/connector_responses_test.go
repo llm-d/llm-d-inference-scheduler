@@ -20,12 +20,30 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
 )
+
+func startConnectorTestProxy(testInfo *sidecarTestInfo) {
+	go func() {
+		defer GinkgoRecover()
+
+		validator := &AllowlistValidator{enabled: false}
+		err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
+		Expect(err).ToNot(HaveOccurred())
+
+		testInfo.stoppedCh <- struct{}{}
+	}()
+
+	Eventually(func() interface{} { return testInfo.proxy.addr }).ShouldNot(BeNil())
+}
+
+func stopConnectorTestProxy(testInfo *sidecarTestInfo) {
+	testInfo.cancelFn()
+	<-testInfo.stoppedCh
+}
 
 var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
@@ -33,22 +51,14 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
 	BeforeEach(func() {
 		testInfo = sidecarConnectionTestSetup(ConnectorNIXLV2)
+		startConnectorTestProxy(testInfo)
+	})
+
+	AfterEach(func() {
+		stopConnectorTestProxy(testInfo)
 	})
 
 	It("should successfully send responses API request to 1. prefill 2. decode with the correct fields", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/responses request with prefill header")
@@ -86,7 +96,6 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteHost, BeNil()))
 		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemotePort, BeNil()))
 
-		// Responses API uses max_output_tokens instead of max_tokens
 		Expect(prq1).To(HaveKeyWithValue("max_output_tokens", BeNumerically("==", 1)))
 		Expect(prq1).To(HaveKeyWithValue("stream", false))
 		Expect(prq1).ToNot(HaveKey("stream_options"))
@@ -97,25 +106,9 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 
 	It("should set max_output_tokens=1 in prefill and restore original value in decode", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/responses request with max_output_tokens set")
@@ -149,27 +142,10 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
 		decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 
-		// The decode request should have the original max_output_tokens value
 		Expect(decodeReq).To(HaveKeyWithValue("max_output_tokens", BeNumerically("==", 100)))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 
 	It("should handle responses API request without max_output_tokens", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/responses request without max_output_tokens")
@@ -202,27 +178,10 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
 		decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 
-		// The decode request should not have max_output_tokens if it wasn't in the original request
 		Expect(decodeReq).ToNot(HaveKey("max_output_tokens"))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 
 	It("should pass through responses API request when no prefill header is set", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/responses request without prefill header")
@@ -234,7 +193,6 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		// Note: No prefill header is set
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -244,30 +202,12 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 			Fail(string(bp))
 		}
 
-		// Prefill should not be called
 		Expect(testInfo.prefillHandler.RequestCount.Load()).To(BeNumerically("==", 0))
 
-		// Only decoder should be called (passthrough)
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 
 	It("should preserve stream settings in responses API request", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/responses request with streaming enabled")
@@ -299,9 +239,6 @@ var _ = Describe("NIXL Connector (v2) for Responses API", func() {
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 		Expect(decodeReq).To(HaveKeyWithValue("stream", true))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 })
 
@@ -311,22 +248,14 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 
 	BeforeEach(func() {
 		testInfo = sidecarConnectionTestSetup(ConnectorNIXLV2)
+		startConnectorTestProxy(testInfo)
+	})
+
+	AfterEach(func() {
+		stopConnectorTestProxy(testInfo)
 	})
 
 	It("should successfully send conversations API request to 1. prefill 2. decode with the correct fields", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/conversations request with prefill header")
@@ -365,7 +294,6 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemoteHost, BeNil()))
 		Expect(kvTransferParams).To(HaveKeyWithValue(requestFieldRemotePort, BeNil()))
 
-		// Conversations API uses max_output_tokens instead of max_tokens
 		Expect(prq1).To(HaveKeyWithValue("max_output_tokens", BeNumerically("==", 1)))
 		Expect(prq1).To(HaveKeyWithValue("stream", false))
 		Expect(prq1).ToNot(HaveKey("stream_options"))
@@ -376,25 +304,9 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 
 	It("should set max_output_tokens=1 in prefill and restore original value in decode for conversations", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/conversations request with max_output_tokens set")
@@ -429,27 +341,10 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
 		decodeReq := testInfo.decodeHandler.CompletionRequests[0]
 
-		// The decode request should have the original max_output_tokens value
 		Expect(decodeReq).To(HaveKeyWithValue("max_output_tokens", BeNumerically("==", 100)))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 
 	It("should pass through conversations API request when no prefill header is set", func() {
-		By("starting the proxy")
-		go func() {
-			defer GinkgoRecover()
-
-			validator := &AllowlistValidator{enabled: false}
-			err := testInfo.proxy.Start(testInfo.ctx, nil, validator)
-			Expect(err).ToNot(HaveOccurred())
-
-			testInfo.stoppedCh <- struct{}{}
-		}()
-
-		time.Sleep(1 * time.Second)
-		Expect(testInfo.proxy.addr).ToNot(BeNil())
 		proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 		By("sending a /v1/conversations request without prefill header")
@@ -462,7 +357,6 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ConversationsPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		// Note: No prefill header is set
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -472,13 +366,8 @@ var _ = Describe("NIXL Connector (v2) for Conversations API", func() {
 			Fail(string(bp))
 		}
 
-		// Prefill should not be called
 		Expect(testInfo.prefillHandler.RequestCount.Load()).To(BeNumerically("==", 0))
 
-		// Only decoder should be called (passthrough)
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
-
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
 	})
 })

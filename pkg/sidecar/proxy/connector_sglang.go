@@ -46,10 +46,8 @@ func init() {
 }
 
 // runSGLangProtocol handles the SGLang protocol for all OpenAI API types.
-// The SGLang protocol doesn't manipulate token fields differently per API type,
-// so the apiType parameter is only used for logging purposes.
-func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType APIType) {
-	s.logger.V(4).Info("running SGLang protocol", "url", prefillPodHostPort, "apiType", apiType)
+func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
+	s.logger.V(4).Info("running SGLang protocol", "url", prefillPodHostPort)
 
 	// Make Request
 	requestData, err := s.parseSGLangRequest(r)

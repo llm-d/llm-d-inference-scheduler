@@ -119,7 +119,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.prefillSamplerFn = func(n int) int { return i % n }
 				// verify the hostPort value
 				var hostPort string
-				s.runConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ APIType) {
+				s.runConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ []string) {
 					hostPort = selectedHostPort
 				}
 				var passthrough bool
@@ -129,7 +129,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.dataParallelProxies = make(map[string]http.Handler)
 				recorder := httptest.NewRecorder()
 				recorder.Code = 0
-				s.chatCompletionsHandler(recorder, tt.r)
+				s.disaggregatedPrefillHandler(APITypeChatCompletions, "skip disaggregated prefill")(recorder, tt.r)
 
 				resp := recorder.Result()
 				if passthrough {
