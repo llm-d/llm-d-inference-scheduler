@@ -51,7 +51,7 @@ func openAIAPIAttr(apiType APIType) attribute.KeyValue {
 
 // disaggregatedPrefillHandler routes OpenAI-style requests: optional encoder (EPD) stage,
 // optional P/D prefill when the prefill header is set, otherwise decoder (or data-parallel).
-func (s *Server) disaggregatedPrefillHandler(apiType APIType, skipDisaggregatedLog string) http.HandlerFunc {
+func (s *Server) disaggregatedPrefillHandler(apiType APIType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestStart := time.Now()
 		tracer := telemetry.Tracer()
@@ -92,7 +92,7 @@ func (s *Server) disaggregatedPrefillHandler(apiType APIType, skipDisaggregatedL
 		}
 
 		if len(prefillHostPort) == 0 {
-			s.logger.V(4).Info(skipDisaggregatedLog)
+			s.logger.V(4).Info("skip disaggregated prefill", "api", apiType.String())
 			span.SetAttributes(
 				attribute.Bool("llm_d.pd_proxy.disaggregation_used", false),
 				attribute.String("llm_d.pd_proxy.reason", "no_prefill_header"),

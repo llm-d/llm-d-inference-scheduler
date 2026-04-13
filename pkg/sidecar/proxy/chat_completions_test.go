@@ -129,7 +129,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.dataParallelProxies = make(map[string]http.Handler)
 				recorder := httptest.NewRecorder()
 				recorder.Code = 0
-				s.disaggregatedPrefillHandler(APITypeChatCompletions, "skip disaggregated prefill")(recorder, tt.r)
+				s.disaggregatedPrefillHandler(APITypeChatCompletions)(recorder, tt.r)
 
 				resp := recorder.Result()
 				if passthrough {

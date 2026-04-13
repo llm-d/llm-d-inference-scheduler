@@ -25,7 +25,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
 
-func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLog string) {
+func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 	t.Helper()
 	tests := []struct {
 		name     string
@@ -128,7 +128,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 				s.dataParallelProxies = make(map[string]http.Handler)
 				recorder := httptest.NewRecorder()
 				recorder.Code = 0
-				s.disaggregatedPrefillHandler(apiType, skipDisaggregatedLog)(recorder, tt.r)
+				s.disaggregatedPrefillHandler(apiType)(recorder, tt.r)
 
 				resp := recorder.Result()
 				if passthrough {
@@ -159,7 +159,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType, skipDisaggregatedLo
 }
 
 func TestServer_responsesHandler(t *testing.T) {
-	testPrefillHeaderRouting(t, APITypeResponses, "skip disaggregated prefill for responses API")
+	testPrefillHeaderRouting(t, APITypeResponses)
 }
 
 func TestAPIType_String(t *testing.T) {
