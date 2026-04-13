@@ -314,7 +314,8 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 			recorder.Code = 0
 			s.disaggregatedPrefillHandler(APITypeChatCompletions)(recorder, tt.r)
 
-			if tt.expectedEPD {
+			switch {
+			case tt.expectedEPD:
 				if !epdCalled {
 					t.Fatal("expected EPD protocol to be called, but it was not")
 				}
@@ -335,7 +336,7 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 				if passthrough {
 					t.Error("decoder passthrough should not happen when EPD is used")
 				}
-			} else if tt.expectedPD {
+			case tt.expectedPD:
 				if !pdCalled {
 					t.Fatal("expected P/D protocol to be called, but it was not")
 				}
@@ -348,7 +349,7 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 				if passthrough {
 					t.Error("decoder passthrough should not happen when P/D is used")
 				}
-			} else if tt.expectedPassthrough {
+			case tt.expectedPassthrough:
 				if !passthrough {
 					t.Fatal("expected decoder passthrough, but it did not happen")
 				}
@@ -358,6 +359,7 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 				if pdCalled {
 					t.Error("P/D protocol should not be called during passthrough")
 				}
+
 			}
 		})
 	}
