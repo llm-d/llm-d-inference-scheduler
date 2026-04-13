@@ -162,6 +162,15 @@ func TestServer_responsesHandler(t *testing.T) {
 	testPrefillHeaderRouting(t, APITypeResponses, "skip disaggregated prefill for responses API")
 }
 
-func TestServer_conversationsHandler(t *testing.T) {
-	testPrefillHeaderRouting(t, APITypeConversations, "skip disaggregated prefill for conversations API")
+func TestAPIType_String(t *testing.T) {
+	t.Parallel()
+	if g, w := APITypeChatCompletions.String(), "chat_completions"; g != w {
+		t.Errorf("APITypeChatCompletions.String() = %q, want %q", g, w)
+	}
+	if g, w := APITypeResponses.String(), "responses"; g != w {
+		t.Errorf("APITypeResponses.String() = %q, want %q", g, w)
+	}
+	if g, w := APIType(7).String(), "APIType(7)"; g != w {
+		t.Errorf("APIType(7).String() = %q, want %q", g, w)
+	}
 }

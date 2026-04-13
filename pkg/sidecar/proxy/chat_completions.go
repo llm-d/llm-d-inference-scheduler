@@ -43,20 +43,10 @@ var (
 
 	// ResponsesPath is the OpenAI Responses API path
 	ResponsesPath = "/v1/responses"
-
-	// ConversationsPath is the OpenAI Conversations API path
-	ConversationsPath = "/v1/conversations"
 )
 
 func openAIAPIAttr(apiType APIType) attribute.KeyValue {
-	switch apiType {
-	case APITypeResponses:
-		return attribute.String("llm_d.openai.api", "responses")
-	case APITypeConversations:
-		return attribute.String("llm_d.openai.api", "conversations")
-	default:
-		return attribute.String("llm_d.openai.api", "chat_completions")
-	}
+	return attribute.String("llm_d.openai.api", apiType.String())
 }
 
 // disaggregatedPrefillHandler routes OpenAI-style requests: optional encoder (EPD) stage,

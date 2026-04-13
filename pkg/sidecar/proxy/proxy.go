@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
@@ -41,7 +42,7 @@ const (
 	requestFieldKVTransferParams    = "kv_transfer_params"
 	requestFieldMaxTokens           = "max_tokens"
 	requestFieldMaxCompletionTokens = "max_completion_tokens"
-	requestFieldMaxOutputTokens     = "max_output_tokens" // Used by Responses/Conversations API
+	requestFieldMaxOutputTokens     = "max_output_tokens" // Used by Responses API
 	requestFieldDoRemotePrefill     = "do_remote_prefill"
 	requestFieldDoRemoteDecode      = "do_remote_decode"
 	requestFieldRemoteBlockIDs      = "remote_block_ids"
@@ -88,9 +89,19 @@ const (
 	APITypeChatCompletions APIType = iota
 	// APITypeResponses is the Responses API (/v1/responses)
 	APITypeResponses
-	// APITypeConversations is the Conversations API (/v1/conversations)
-	APITypeConversations
 )
+
+// String implements fmt.Stringer so structured logs show readable API names.
+func (a APIType) String() string {
+	switch a {
+	case APITypeChatCompletions:
+		return "chat_completions"
+	case APITypeResponses:
+		return "responses"
+	default:
+		return fmt.Sprintf("APIType(%d)", int(a))
+	}
+}
 
 // JSON request field names used for token limits in prefill/decode staging.
 // Do not mutate these slices.
@@ -103,7 +114,7 @@ var (
 // Returned slices are shared package-level vars; callers must not mutate them.
 func tokenLimitFieldsForAPIType(api APIType) []string {
 	switch api {
-	case APITypeResponses, APITypeConversations:
+	case APITypeResponses:
 		return responsesStyleTokenLimitFields
 	default:
 		return chatCompletionTokenLimitFields
@@ -343,7 +354,6 @@ func (s *Server) createRoutes() *http.ServeMux {
 	mux.HandleFunc("POST "+ChatCompletionsPath, s.disaggregatedPrefillHandler(APITypeChatCompletions, "skip disaggregated prefill"))
 	mux.HandleFunc("POST "+CompletionsPath, s.disaggregatedPrefillHandler(APITypeChatCompletions, "skip disaggregated prefill"))
 	mux.HandleFunc("POST "+ResponsesPath, s.disaggregatedPrefillHandler(APITypeResponses, "skip disaggregated prefill for responses API"))
-	mux.HandleFunc("POST "+ConversationsPath, s.disaggregatedPrefillHandler(APITypeConversations, "skip disaggregated prefill for conversations API"))
 
 	s.decoderProxy = s.createDecoderProxyHandler(s.config.DecoderURL, s.config.InsecureSkipVerifyForDecoder)
 
