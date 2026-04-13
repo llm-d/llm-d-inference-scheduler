@@ -114,7 +114,11 @@ type NoHitLRU struct {
 	typedName             plugin.TypedName
 	lruCache              *lru.Cache[string, struct{}] // endpoint name -> dummy value (we only care about order)
 	prefixPluginTypedName plugin.TypedName
-	pluginState           *plugin.PluginState
+	// Deprecated: pluginState is used to share cold-request state between
+	// Score and PreRequest. This should be replaced with CycleState once the
+	// upstream PreRequest interface accepts CycleState. See:
+	// https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2657
+	pluginState *plugin.PluginState
 }
 
 // TypedName returns the typed name of the plugin.
@@ -258,7 +262,8 @@ func (s *NoHitLRU) Score(ctx context.Context, cycleState *scheduling.CycleState,
 
 	isCold := s.isColdRequest(ctx, cycleState)
 
-	// Store the cold request state in plugin state for PreRequest to use
+	// Store the cold request state in plugin state for PreRequest to use.
+	// Deprecated: migrate to CycleState once PreRequest receives it upstream.
 	coldState := &coldRequestState{isCold: isCold}
 	s.pluginState.Write(request.RequestId, plugin.StateKey(s.typedName.String()), coldState)
 
@@ -281,7 +286,8 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *scheduling.LLMReques
 		return
 	}
 
-	// Read the cold request state we stored in Score
+	// Read the cold request state we stored in Score.
+	// Deprecated: reads from PluginState; migrate to CycleState once PreRequest receives it upstream.
 	coldState, err := plugin.ReadPluginStateKey[*coldRequestState](s.pluginState, request.RequestId, plugin.StateKey(s.typedName.String()))
 	// After fetching the cold state, drop it from the plugin state immediately (otherwise it will hang around until it becomes stale).
 	s.pluginState.Delete(request.RequestId)
