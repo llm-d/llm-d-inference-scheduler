@@ -22,7 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strconv"
@@ -221,7 +221,7 @@ func (s *Server) parseSGLangRequest(r *http.Request) (map[string]interface{}, er
 }
 
 func (s *Server) generateSGLangRoomID() int64 {
-	return time.Now().UnixNano() + int64(rand.Intn(1000))
+	return time.Now().UnixNano() + int64(rand.IntN(1000))
 }
 
 func (s *Server) getBootstrapHost(prefillHostPort string) string {
