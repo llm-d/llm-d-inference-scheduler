@@ -21,12 +21,13 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -36,6 +37,8 @@ import (
 
 const (
 	schemeHTTPS = "https"
+
+	defaultMaxIdleConnsPerHost = 1024
 
 	requestHeaderRequestID = "x-request-id"
 
@@ -135,6 +138,12 @@ type Config struct {
 	ECConnector string
 	// DataParallelSize is the value passed to the vLLM server's --DATA_PARALLEL-SIZE argument.
 	DataParallelSize int
+
+	// MaxIdleConnsPerHost controls how many idle keep-alive connections are
+	// maintained per host for the reverse proxy transports. Set this to at
+	// least the expected concurrency level to avoid connection churn.
+	MaxIdleConnsPerHost int
+
 	// EnablePrefillerSampling configures the proxy to randomly choose from the set
 	// of provided prefill hosts instead of always using the first one.
 	EnablePrefillerSampling bool
@@ -223,8 +232,8 @@ type Server struct {
 
 // NewProxy creates a new routing reverse proxy from the given Config.
 func NewProxy(config Config) *Server {
-	prefillerCache, _ := lru.New[string, http.Handler](16) // nolint:all
-	encoderCache, _ := lru.New[string, http.Handler](16)   // nolint:all
+	prefillerCache, _ := lru.New[string, http.Handler](1024) // nolint:errcheck
+	encoderCache, _ := lru.New[string, http.Handler](1024)   // nolint:errcheck
 
 	server := &Server{
 		readyCh:             make(chan struct{}),
@@ -235,7 +244,7 @@ func NewProxy(config Config) *Server {
 		config:              config,
 		dataParallelProxies: map[string]http.Handler{},
 		forwardDataParallel: true,
-		prefillSamplerFn:    rand.Intn,
+		prefillSamplerFn:    rand.IntN,
 	}
 
 	server.setKVConnector()
@@ -306,6 +315,36 @@ func (s *Server) Clone() *Server {
 		prefillSamplerFn:        s.prefillSamplerFn,
 		config:                  s.config,
 	}
+}
+
+// newProxyTransport returns an http.Transport cloned from the default with
+// connection-pool settings applied. If scheme is schemeHTTPS the transport's
+// TLSClientConfig is set accordingly.
+func (s *Server) newProxyTransport(scheme string, insecureSkipVerify bool) *http.Transport {
+	maxIdle := s.config.MaxIdleConnsPerHost
+	if maxIdle <= 0 {
+		maxIdle = defaultMaxIdleConnsPerHost
+	}
+	t := http.DefaultTransport.(*http.Transport).Clone() //nolint:errcheck
+	t.MaxIdleConns = 0                                   // unlimited
+	t.MaxIdleConnsPerHost = maxIdle
+	t.MaxConnsPerHost = 0 // unlimited
+	t.IdleConnTimeout = 90 * time.Second
+	if scheme == schemeHTTPS {
+		t.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: insecureSkipVerify, //nolint:gosec
+			MinVersion:         tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			},
+		}
+	}
+	return t
 }
 
 func (s *Server) setKVConnector() {
@@ -386,22 +425,7 @@ func (s *Server) createProxyHandler(
 	}
 
 	newProxy := httputil.NewSingleHostReverseProxy(u)
-	if u.Scheme == schemeHTTPS {
-		newProxy.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: insecureSkipVerify,
-				MinVersion:         tls.VersionTLS12,
-				CipherSuites: []uint16{
-					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-				},
-			},
-		}
-	}
+	newProxy.Transport = s.newProxyTransport(u.Scheme, insecureSkipVerify)
 	cache.Add(hostPort, newProxy)
 
 	return newProxy, nil
