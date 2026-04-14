@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package precise_prefix_cache
+package preciseprefixcache
 
 import (
 	"context"
@@ -81,13 +81,13 @@ var testEndpoints = []scheduling.Endpoint{
 	),
 }
 
-func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
+func TestScorer_UsesTokenizedPrompt(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	tokenIDs := []uint32{10, 20, 30, 40, 50}
 	var capturedTokens []uint32
 	var capturedModel string
 
-	scorer := &PrecisePrefixCacheScorer{
+	scorer := &Scorer{
 		typedName:      plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),
@@ -117,12 +117,12 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 	require.Equal(t, "test-model", capturedModel)
 }
 
-func TestPrecisePrefixCacheScorer_PassesExtraFeaturesToScoreTokens(t *testing.T) {
+func TestScorer_PassesExtraFeaturesToScoreTokens(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	tokenIDs := []uint32{10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160}
 	var capturedExtraFeatures []*kvblock.BlockExtraFeatures
 
-	scorer := &PrecisePrefixCacheScorer{
+	scorer := &Scorer{
 		typedName:       plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
 		kvEventsConfig:  &kvevents.Config{},
 		pluginState:     plugin.NewPluginState(ctx),
@@ -160,13 +160,13 @@ func TestPrecisePrefixCacheScorer_PassesExtraFeaturesToScoreTokens(t *testing.T)
 	require.NotNil(t, capturedExtraFeatures, "extraFeatures should be passed to ScoreTokens when MMFeatures present")
 }
 
-func TestPrecisePrefixCacheScorer_NilExtraFeaturesForTextOnly(t *testing.T) {
+func TestScorer_NilExtraFeaturesForTextOnly(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	tokenIDs := []uint32{10, 20, 30, 40, 50}
 	var capturedExtraFeatures []*kvblock.BlockExtraFeatures
 	called := false
 
-	scorer := &PrecisePrefixCacheScorer{
+	scorer := &Scorer{
 		typedName:       plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
 		kvEventsConfig:  &kvevents.Config{},
 		pluginState:     plugin.NewPluginState(ctx),
@@ -197,11 +197,11 @@ func TestPrecisePrefixCacheScorer_NilExtraFeaturesForTextOnly(t *testing.T) {
 	assert.Nil(t, capturedExtraFeatures, "extraFeatures should be nil for text-only requests")
 }
 
-func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
+func TestScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	fromTokensCalled := false
 
-	scorer := &PrecisePrefixCacheScorer{
+	scorer := &Scorer{
 		typedName:      plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),

@@ -1,4 +1,4 @@
-package no_hit_lru_test
+package nohitlru_test
 
 import (
 	"context"
@@ -100,7 +100,7 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 			raw = bytes
 		}
 
-		plugin, err := no_hit_lru.NoHitLRUFactory("test", raw, tt.handle)
+		plugin, err := no_hit_lru.Factory("test", raw, tt.handle)
 		if tt.expectError {
 			if err == nil {
 				t.Fatalf("expected error for case %q, got none", tt.name)

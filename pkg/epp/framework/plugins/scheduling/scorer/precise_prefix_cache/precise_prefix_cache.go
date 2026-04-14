@@ -1,4 +1,4 @@
-package precise_prefix_cache
+package preciseprefixcache
 
 import (
 	"context"
@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	// PrecisePrefixCachePluginType is the type-name of the PrecisePrefixCacheScorer plugin.
+	// PrecisePrefixCachePluginType is the type-name of the Scorer plugin.
 	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
 
 	// defaultSpeculativeTTL is the default TTL for speculative entries.
@@ -54,9 +54,9 @@ type kvCacheIndexer interface {
 	KVBlockIndex() kvblock.Index
 }
 
-// PrecisePrefixCachePluginConfig holds the configuration for the
-// PrecisePrefixCacheScorer plugin.
-type PrecisePrefixCachePluginConfig struct {
+// PluginConfig holds the configuration for the
+// Scorer plugin.
+type PluginConfig struct {
 	// TokenProcessorConfig holds the configuration for the `kvblock.TokenProcessor` which is
 	// used to process tokens into KV-block keys.
 	TokenProcessorConfig *kvblock.TokenProcessorConfig `json:"tokenProcessorConfig"`
@@ -82,9 +82,9 @@ type PrecisePrefixCachePluginConfig struct {
 
 // compile-time type assertions
 var (
-	_ scheduling.Scorer                = &PrecisePrefixCacheScorer{}
-	_ requestcontrol.PrepareDataPlugin = &PrecisePrefixCacheScorer{}
-	_ requestcontrol.PreRequest        = &PrecisePrefixCacheScorer{}
+	_ scheduling.Scorer                = &Scorer{}
+	_ requestcontrol.PrepareDataPlugin = &Scorer{}
+	_ requestcontrol.PreRequest        = &Scorer{}
 )
 
 // speculativeEntries holds the data needed to evict speculative entries
@@ -115,9 +115,9 @@ func (s *precisePluginState) Clone() plugin.StateData {
 	}
 }
 
-// PrecisePrefixCachePluginFactory defines the factory function for creating
+// PluginFactory defines the factory function for creating
 // a new instance of the PrefixCacheTrackingPlugin.
-func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
+func PluginFactory(name string, rawParameters json.RawMessage,
 	handle plugin.Handle,
 ) (plugin.Plugin, error) {
 	indexerConfig, err := kvcache.NewDefaultConfig()
@@ -125,7 +125,7 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 		return nil, fmt.Errorf("failed to initialize indexer config: %w", err)
 	}
 
-	parameters := PrecisePrefixCachePluginConfig{
+	parameters := PluginConfig{
 		IndexerConfig:  indexerConfig,
 		KVEventsConfig: kvevents.DefaultConfig(),
 	}
@@ -158,7 +158,7 @@ func PrecisePrefixCachePluginFactory(name string, rawParameters json.RawMessage,
 //
 // If the configuration is invalid or if the indexer fails to initialize,
 // an error is returned.
-func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePrefixCacheScorer, error) {
+func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 	if config.TokenProcessorConfig == nil {
 		config.TokenProcessorConfig = kvblock.DefaultTokenProcessorConfig()
 	}
@@ -253,7 +253,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 		go cleanCachePeriodically(ctx, speculativeCache, speculativeTTL)
 	}
 
-	return &PrecisePrefixCacheScorer{
+	return &Scorer{
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
 		kvBlockScorer:      kvBlockScorer,
@@ -268,7 +268,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 	}, nil
 }
 
-// PrecisePrefixCacheScorer implements the framework.Scorer interface.
+// Scorer implements the framework.Scorer interface.
 // The scorer implements precise prefix-cache KV-block locality scoring.
 // It uses the `kvcache.Indexer` to score endpoints based on the KV-cache index
 // state, and the `kvevents.Pool` to subscribe to KV-cache events
@@ -278,7 +278,7 @@ func New(ctx context.Context, config PrecisePrefixCachePluginConfig) (*PrecisePr
 // PreRequest to proactively populate the index with expected cache entries
 // immediately after a routing decision, closing the blind spot between the
 // routing decision and the arrival of actual KV events from the engine.
-type PrecisePrefixCacheScorer struct {
+type Scorer struct {
 	typedName      plugin.TypedName
 	kvCacheIndexer kvCacheIndexer
 
@@ -312,32 +312,32 @@ type PrecisePrefixCacheScorer struct {
 }
 
 // TypedName returns the typed name of the plugin.
-func (s *PrecisePrefixCacheScorer) TypedName() plugin.TypedName {
+func (s *Scorer) TypedName() plugin.TypedName {
 	return s.typedName
 }
 
 // WithName sets the name of the plugin.
-func (s *PrecisePrefixCacheScorer) WithName(name string) *PrecisePrefixCacheScorer {
+func (s *Scorer) WithName(name string) *Scorer {
 	s.typedName.Name = name
 	return s
 }
 
 // Category returns the preference the scorer applies when scoring candidate endpoints.
-func (s *PrecisePrefixCacheScorer) Category() scheduling.ScorerCategory {
+func (s *Scorer) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
 // --- PrepareDataPlugin implementation ---
 
 // Produces declares the data keys this plugin writes to endpoints.
-func (s *PrecisePrefixCacheScorer) Produces() map[string]any {
+func (s *Scorer) Produces() map[string]any {
 	return map[string]any{
 		dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{},
 	}
 }
 
 // Consumes declares the data keys this plugin requires from other plugins.
-func (s *PrecisePrefixCacheScorer) Consumes() map[string]any {
+func (s *Scorer) Consumes() map[string]any {
 	return map[string]any{}
 }
 
@@ -345,7 +345,7 @@ func (s *PrecisePrefixCacheScorer) Consumes() map[string]any {
 // per-endpoint prefix match information. The computed block keys and scores
 // are saved to PluginState for reuse by Score() and PreRequest().
 // This is a no-op when speculative indexing is disabled.
-func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
+func (s *Scorer) PrepareRequestData(ctx context.Context,
 	request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) error {
 	if !s.speculativeEnabled {
 		return nil
@@ -412,7 +412,7 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 // If PrepareRequestData was called beforehand, Score reuses the pre-computed
 // results from PluginState. Otherwise, it falls back to computing scores
 // directly via getScores (backward compatible).
-func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	// Start tracing span for scoring operation
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(ctx, "llm_d.epp.scorer.prefix_cache",
@@ -544,7 +544,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 // The speculative entries are associated with a TTL and will be automatically
 // evicted when the TTL expires.
 // This is a no-op when speculative indexing is disabled.
-func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
+func (s *Scorer) PreRequest(ctx context.Context,
 	request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
 	if !s.speculativeEnabled {
 		return
@@ -621,7 +621,7 @@ func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
 
 // computeBlockKeys extracts block keys from an LLM request by tokenizing
 // the prompt and computing KV-block hashes.
-func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
+func (s *Scorer) computeBlockKeys(ctx context.Context,
 	request *scheduling.LLMRequest) ([]kvblock.BlockHash, error) {
 	if request.Body == nil {
 		return nil, nil
@@ -654,7 +654,7 @@ func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
 }
 
 // getBlockSizeTokens returns the block size in tokens from the token processor config.
-func (s *PrecisePrefixCacheScorer) getBlockSizeTokens() int {
+func (s *Scorer) getBlockSizeTokens() int {
 	return s.blockSizeTokens
 }
 
@@ -663,7 +663,7 @@ func (s *PrecisePrefixCacheScorer) getBlockSizeTokens() int {
 // If tokenized prompt data is found in CycleState (written by the tokenizer
 // scorer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
 // Otherwise, chat completions and regular completions are tokenized internally.
-func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (map[string]float64, error) {
+func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 

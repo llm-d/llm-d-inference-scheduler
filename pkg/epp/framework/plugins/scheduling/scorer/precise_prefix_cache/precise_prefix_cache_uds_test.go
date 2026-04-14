@@ -1,4 +1,4 @@
-package precise_prefix_cache
+package preciseprefixcache
 
 import (
 	"context"
@@ -573,7 +573,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				},
 			}
 
-			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
+			prefixCacheScorer, err := New(ctx, PluginConfig{
 				IndexerConfig:  kvcacheConfig,
 				KVEventsConfig: kvevents.DefaultConfig(),
 			})
@@ -787,7 +787,7 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 		},
 	}
 
-	prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
+	prefixCacheScorer, err := New(ctx, PluginConfig{
 		IndexerConfig:  kvcacheConfig,
 		KVEventsConfig: kvevents.DefaultConfig(),
 	})

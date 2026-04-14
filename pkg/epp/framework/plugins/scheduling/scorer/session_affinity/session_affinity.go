@@ -1,4 +1,4 @@
-package session_affinity
+package sessionaffinity
 
 import (
 	"context"
@@ -24,8 +24,8 @@ const (
 var _ scheduling.Scorer = &SessionAffinity{}
 var _ requestcontrol.ResponseBody = &SessionAffinity{}
 
-// SessionAffinityFactory defines the factory function for SessionAffinity scorer.
-func SessionAffinityFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+// Factory defines the factory function for SessionAffinity scorer.
+func Factory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	return NewSessionAffinity().WithName(name), nil
 }
 

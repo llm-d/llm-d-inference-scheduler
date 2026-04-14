@@ -1,4 +1,4 @@
-package no_hit_lru
+package nohitlru
 
 import (
 	"context"
@@ -32,8 +32,8 @@ const (
 var _ scheduling.Scorer = &NoHitLRU{}
 var _ requestcontrol.PreRequest = &NoHitLRU{}
 
-// NoHitLRUParameters defines the parameters for the NoHitLRU scorer.
-type NoHitLRUParameters struct {
+// Parameters defines the parameters for the NoHitLRU scorer.
+type Parameters struct {
 	// PrefixPluginType defines the type of the prefix cache plugin to read state from.
 	// Defaults to "prefix-cache-scorer".
 	PrefixPluginType string `json:"prefixPluginType"`
@@ -56,9 +56,9 @@ func (c *coldRequestState) Clone() plugin.StateData {
 	return &coldRequestState{isCold: c.isCold}
 }
 
-// NoHitLRUFactory defines the factory function for the NoHitLRU
-func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	parameters := NoHitLRUParameters{}
+// Factory defines the factory function for the NoHitLRU
+func Factory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	parameters := Parameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", NoHitLRUType, err)
@@ -76,7 +76,7 @@ func NoHitLRUFactory(name string, rawParameters json.RawMessage, handle plugin.H
 }
 
 // NewNoHitLRU creates a new NoHitLRU scorer
-func NewNoHitLRU(ctx context.Context, params *NoHitLRUParameters) *NoHitLRU {
+func NewNoHitLRU(ctx context.Context, params *Parameters) *NoHitLRU {
 	prefixPluginType := prefix.PrefixCachePluginType
 	prefixPluginName := prefix.PrefixCachePluginType
 	lruSize := defaultLRUSize

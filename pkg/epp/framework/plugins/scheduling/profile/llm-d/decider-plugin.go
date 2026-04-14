@@ -1,4 +1,4 @@
-// Package profile provides profile handler plugins for the epp.
+// Package llmd provides profile handler plugins for the epp.
 package llmd
 
 import (

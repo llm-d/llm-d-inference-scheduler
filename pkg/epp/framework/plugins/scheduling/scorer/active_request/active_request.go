@@ -1,4 +1,4 @@
-package active_request
+package activerequest
 
 import (
 	"context"
@@ -26,9 +26,9 @@ const (
 	defaultRequestTimeout = 2 * time.Minute
 )
 
-// ActiveRequestParameters defines the parameters for the
+// Parameters defines the parameters for the
 // ActiveRequest.
-type ActiveRequestParameters struct {
+type Parameters struct {
 	// RequestTimeout defines the timeout for requests in seconds.
 	// Once the request is "in-flight" for this duration, it is considered to
 	// be timed out and dropped.
@@ -78,9 +78,9 @@ var _ scheduling.Scorer = &ActiveRequest{}
 var _ requestcontrol.PreRequest = &ActiveRequest{}
 var _ requestcontrol.ResponseBody = &ActiveRequest{}
 
-// ActiveRequestFactory defines the factory function for the ActiveRequest scorer.
-func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	parameters := ActiveRequestParameters{}
+// Factory defines the factory function for the ActiveRequest scorer.
+func Factory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	parameters := Parameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' scorer - %w", ActiveRequestType, err)
@@ -91,7 +91,7 @@ func ActiveRequestFactory(name string, rawParameters json.RawMessage, handle plu
 }
 
 // NewActiveRequest creates a new ActiveRequest scorer.
-func NewActiveRequest(ctx context.Context, params *ActiveRequestParameters) *ActiveRequest {
+func NewActiveRequest(ctx context.Context, params *Parameters) *ActiveRequest {
 	requestTimeout := defaultRequestTimeout
 	logger := log.FromContext(ctx)
 

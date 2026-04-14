@@ -1,4 +1,4 @@
-package load_aware_test
+package loadaware_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	load_aware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/load_aware"
+	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/load_aware"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -46,7 +46,7 @@ func TestLoadBasedScorer(t *testing.T) {
 	}{
 		{
 			name:   "load based scorer",
-			scorer: load_aware.NewLoadAware(utils.NewTestContext(t), 10),
+			scorer: loadaware.NewLoadAware(utils.NewTestContext(t), 10),
 			req: &scheduling.LLMRequest{
 				TargetModel: "critical",
 			},

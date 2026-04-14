@@ -1,4 +1,4 @@
-package load_aware
+package loadaware
 
 import (
 	"context"
@@ -26,8 +26,8 @@ type loadAwareParameters struct {
 // compile-time type assertion
 var _ scheduling.Scorer = &LoadAware{}
 
-// LoadAwareFactory defines the factory function for the LoadAware
-func LoadAwareFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+// Factory defines the factory function for the LoadAware
+func Factory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := loadAwareParameters{Threshold: QueueThresholdDefault}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {

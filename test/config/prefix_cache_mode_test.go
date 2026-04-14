@@ -11,11 +11,11 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins"
-	precise_prefix_cache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/precise_prefix_cache"
+	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/precise_prefix_cache"
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func TestPrecisePrefixCacheScorer(t *testing.T) {
+func TestScorer(t *testing.T) {
 	tests := []struct {
 		name       string
 		pluginName string
@@ -60,9 +60,9 @@ schedulingProfiles:
 			}
 			fmt.Println("all plugins", handle.GetAllPluginsWithNames())
 
-			_, err = giePlugins.PluginByType[*precise_prefix_cache.PrecisePrefixCacheScorer](handle, test.pluginName)
+			_, err = giePlugins.PluginByType[*preciseprefixcache.Scorer](handle, test.pluginName)
 			if err != nil {
-				t.Fatalf("expected PrecisePrefixCacheScorer, but got error: %v", err)
+				t.Fatalf("expected Scorer, but got error: %v", err)
 			}
 		})
 	}

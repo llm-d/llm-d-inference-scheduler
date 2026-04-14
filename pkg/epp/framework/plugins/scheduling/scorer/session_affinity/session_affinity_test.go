@@ -1,4 +1,4 @@
-package session_affinity_test
+package sessionaffinity_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	session_affinity "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/session_affinity"
+	sessionaffinity "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/session_affinity"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -33,7 +33,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 	// valid session token for endpointB
 	validSessionTokenForEndpointB := base64.StdEncoding.EncodeToString([]byte(endpointB.GetMetadata().NamespacedName.String()))
 
-	sessionAffinityScorer := session_affinity.NewSessionAffinity()
+	sessionAffinityScorer := sessionaffinity.NewSessionAffinity()
 
 	tests := []struct {
 		name       string
@@ -138,7 +138,7 @@ func TestSessionAffinity_ResponseBody(t *testing.T) {
 		},
 	}
 
-	s := session_affinity.NewSessionAffinity()
+	s := sessionaffinity.NewSessionAffinity()
 	ctx := utils.NewTestContext(t)
 
 	for _, test := range tests {

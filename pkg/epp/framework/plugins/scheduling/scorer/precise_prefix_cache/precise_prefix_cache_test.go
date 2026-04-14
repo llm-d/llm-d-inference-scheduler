@@ -1,6 +1,6 @@
 //go:build embedded_tokenizers
 
-package precise_prefix_cache
+package preciseprefixcache
 
 import (
 	"fmt"
@@ -566,7 +566,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			prefixCacheScorer, err := New(ctx, PrecisePrefixCachePluginConfig{
+			prefixCacheScorer, err := New(ctx, PluginConfig{
 				IndexerConfig:  kvcacheConfig,
 				KVEventsConfig: kvevents.DefaultConfig(),
 			})
@@ -599,8 +599,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 	}
 }
 
-// newTestScorer creates a PrecisePrefixCacheScorer for testing.
-func newTestScorer(t *testing.T) *PrecisePrefixCacheScorer {
+// newTestScorer creates a Scorer for testing.
+func newTestScorer(t *testing.T) *Scorer {
 	t.Helper()
 	ctx := utils.NewTestContext(t)
 
@@ -621,7 +621,7 @@ func newTestScorer(t *testing.T) *PrecisePrefixCacheScorer {
 		LocalTokenizerConfig: &localTokenizerConfig,
 	}
 
-	scorer, err := New(ctx, PrecisePrefixCachePluginConfig{
+	scorer, err := New(ctx, PluginConfig{
 		IndexerConfig:       kvcacheConfig,
 		KVEventsConfig:      kvevents.DefaultConfig(),
 		SpeculativeIndexing: true,
@@ -858,7 +858,7 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 	}
 
 	// Create scorer with very short TTL for testing eviction
-	scorer, err := New(ctx, PrecisePrefixCachePluginConfig{
+	scorer, err := New(ctx, PluginConfig{
 		IndexerConfig:       kvcacheConfig,
 		KVEventsConfig:      kvevents.DefaultConfig(),
 		SpeculativeIndexing: true,

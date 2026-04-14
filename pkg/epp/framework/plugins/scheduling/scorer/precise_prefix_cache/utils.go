@@ -1,4 +1,4 @@
-package precise_prefix_cache
+package preciseprefixcache
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package active_request
+package activerequest
 
 import (
 	"testing"
@@ -217,7 +217,7 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	// Use very short timeout for test
-	params := &ActiveRequestParameters{RequestTimeout: "1s"}
+	params := &Parameters{RequestTimeout: "1s"}
 	scorer := NewActiveRequest(ctx, params)
 
 	endpointA := newTestEndpoint("pod-a", 0)
@@ -246,7 +246,7 @@ func TestActiveRequestScorer_TTLExpiration(t *testing.T) {
 func TestNewActiveRequestScorer_InvalidTimeout(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
-	params := &ActiveRequestParameters{RequestTimeout: "invalid"}
+	params := &Parameters{RequestTimeout: "invalid"}
 	scorer := NewActiveRequest(ctx, params)
 
 	// Should use default timeout when invalid value is provided
@@ -276,7 +276,7 @@ func TestActiveRequest_IdleThresholdAndMaxBusyScore(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	t.Run("binary mode: idleThreshold=0, maxBusyScore=0", func(t *testing.T) {
-		params := &ActiveRequestParameters{
+		params := &Parameters{
 			RequestTimeout: "1m",
 			IdleThreshold:  0,
 			MaxBusyScore:   0.0,
@@ -303,7 +303,7 @@ func TestActiveRequest_IdleThresholdAndMaxBusyScore(t *testing.T) {
 	})
 
 	t.Run("hybrid mode: idleThreshold=1, maxBusyScore=0.5", func(t *testing.T) {
-		params := &ActiveRequestParameters{
+		params := &Parameters{
 			RequestTimeout: "1m",
 			IdleThreshold:  1,
 			MaxBusyScore:   0.5,
