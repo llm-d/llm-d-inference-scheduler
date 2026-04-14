@@ -32,7 +32,7 @@ import (
 )
 
 type tokenizer interface {
-	Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
+	Encode(prompt string, addSpecialTokens bool) ([]uint32, []tokenizerTypes.Offset, error)
 	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error)
 }
 
@@ -178,8 +178,8 @@ func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMR
 
 	switch {
 	case request.Body.Completions != nil:
-		traceLogger.Info("Calling Render for completions", "prompt", request.Body.Completions.Prompt)
-		tokenIDs, _, err = p.tokenizer.Render(request.Body.Completions.Prompt)
+		traceLogger.Info("Calling Encode for completions", "prompt", request.Body.Completions.Prompt)
+		tokenIDs, _, err = p.tokenizer.Encode(request.Body.Completions.Prompt, true)
 	case request.Body.ChatCompletions != nil:
 		renderReq := ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))

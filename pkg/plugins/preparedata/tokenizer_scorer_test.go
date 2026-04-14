@@ -48,7 +48,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 	fakeTokenIDs := []uint32{10, 20, 30, 40}
 
 	tok := &mockTokenizer{
-		renderFunc: func(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
+		encodeFunc: func(prompt string, addSpecialTokens bool) ([]uint32, []tokenizerTypes.Offset, error) {
 			return fakeTokenIDs, nil, nil
 		},
 		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
@@ -113,7 +113,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 				},
 			},
 			tokenizer: &mockTokenizer{
-				renderFunc: func(string) ([]uint32, []tokenizerTypes.Offset, error) {
+				encodeFunc: func(string, bool) ([]uint32, []tokenizerTypes.Offset, error) {
 					return nil, nil, errors.New("tokenizer exploded")
 				},
 			},
@@ -159,7 +159,7 @@ func TestTokenizerScorer_SkipsWhenAlreadyInCycleState(t *testing.T) {
 	// Use a recording mock to assert tokenizer is never called.
 	tokenizerCalled := false
 	tok := &mockTokenizer{
-		renderFunc: func(string) ([]uint32, []tokenizerTypes.Offset, error) {
+		encodeFunc: func(string, bool) ([]uint32, []tokenizerTypes.Offset, error) {
 			tokenizerCalled = true
 			return nil, nil, nil
 		},
@@ -277,12 +277,12 @@ func TestTokenizerScorer_RenderChat_ForwardsStructuredContent(t *testing.T) {
 	assert.Equal(t, fakeMMFeatures.MMHashes, stored.MMFeatures.MMHashes)
 }
 
-func TestTokenizerScorer_Render_NilMMFeatures(t *testing.T) {
+func TestTokenizerScorer_Encode_NilMMFeatures(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	fakeTokenIDs := []uint32{10, 20, 30}
 
 	tok := &mockTokenizer{
-		renderFunc: func(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
+		encodeFunc: func(prompt string, addSpecialTokens bool) ([]uint32, []tokenizerTypes.Offset, error) {
 			return fakeTokenIDs, nil, nil
 		},
 	}

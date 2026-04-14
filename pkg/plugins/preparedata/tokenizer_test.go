@@ -31,12 +31,12 @@ import (
 )
 
 type mockTokenizer struct {
-	renderFunc     func(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
+	encodeFunc     func(prompt string, addSpecialTokens bool) ([]uint32, []tokenizerTypes.Offset, error)
 	renderChatFunc func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error)
 }
 
-func (m *mockTokenizer) Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
-	return m.renderFunc(prompt)
+func (m *mockTokenizer) Encode(prompt string, addSpecialTokens bool) ([]uint32, []tokenizerTypes.Offset, error) {
+	return m.encodeFunc(prompt, addSpecialTokens)
 }
 
 func (m *mockTokenizer) RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
