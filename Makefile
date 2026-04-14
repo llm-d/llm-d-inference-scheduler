@@ -135,6 +135,11 @@ BUILDER_RUN_CLUSTER = $(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_CL
 # Override locally to build a debuggable image: LDFLAGS="" make image-build-epp
 LDFLAGS ?= -s -w
 
+# Optional: override the runtime base image used in container builds.
+# When set, passed as --build-arg BASE_IMAGE=<value> to the container build.
+# Example: BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:9.7 make image-build-epp
+BASE_IMAGE ?=
+
 # test packages
 epp_TEST_PACKAGES = $$(go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/ | tr '\n' ' ')
 sidecar_TEST_PACKAGES = ./pkg/sidecar/...
@@ -265,6 +270,7 @@ post-deploy-test: ## Run post deployment tests
 
 COVERAGE_DIR       ?= coverage
 COVERAGE_THRESHOLD ?= 0
+COVERAGE_LABEL     ?= main
 BASE_REF           ?= main
 
 .PHONY: test-coverage
@@ -282,23 +288,31 @@ coverage-report: image-build-builder ## Generate HTML coverage reports (open cov
 	done'
 
 .PHONY: coverage-compare
-coverage-compare: image-build-builder ## Compare coverage vs baseline (BASELINE_DIR=path or BASE_REF=git-ref, default main)
+coverage-compare: image-build-builder ## Compare coverage vs baseline (BASELINE_DIR=path or BASE_REF=git-ref, default main; COVERAGE_LABEL=label)
 	@if [ -n "$(BASELINE_DIR)" ]; then \
-	    ./scripts/compare-coverage.sh "$(BASELINE_DIR)" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \
+	    ./scripts/compare-coverage.sh "$(BASELINE_DIR)" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)" "$(COVERAGE_LABEL)"; \
 	else \
 	    printf "\033[33;1m==== Building Baseline Coverage from $(BASE_REF) ====\033[0m\n"; \
-	    WORKTREE=$$(mktemp -d); \
-	    git worktree add --quiet "$$WORKTREE" "$(BASE_REF)"; \
+	    EXISTING=$$(git worktree list --porcelain \
+	        | awk '/^worktree /{wt=$$2} /^branch refs\/heads\/$(BASE_REF)$$/{print wt}'); \
+	    if [ -n "$$EXISTING" ]; then \
+	        WORKTREE="$$EXISTING"; CLEANUP=0; \
+	    else \
+	        WORKTREE=$$(mktemp -u /tmp/cov-baseline-XXXXXX); \
+	        git worktree add --quiet "$$WORKTREE" "$(BASE_REF)"; \
+	        CLEANUP=1; \
+	    fi; \
+	    mkdir -p "$(COVERAGE_DIR)/baseline"; \
 	    $(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) \
-	        -v "$$WORKTREE":/baseline:Z -w /baseline \
+	        -v "$$WORKTREE":/baseline:Z \
 	        $(BUILDER_IMAGE) sh -c " \
-	            mkdir -p $(COVERAGE_DIR)/baseline && \
-	            go test -race -coverprofile=$(COVERAGE_DIR)/baseline/epp.out -covermode=atomic \
+	            cd /baseline && \
+	            go test -race -coverprofile=/app/$(COVERAGE_DIR)/baseline/epp.out -covermode=atomic \
 	                $$(go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/ | tr '\n' ' ') && \
-	            go test -race -coverprofile=$(COVERAGE_DIR)/baseline/sidecar.out -covermode=atomic \
+	            go test -race -coverprofile=/app/$(COVERAGE_DIR)/baseline/sidecar.out -covermode=atomic \
 	                ./pkg/sidecar/..."; \
-	    git worktree remove --force "$$WORKTREE"; \
-	    ./scripts/compare-coverage.sh "$(COVERAGE_DIR)/baseline" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)"; \
+	    [ "$$CLEANUP" -eq 1 ] && git worktree remove --force "$$WORKTREE"; \
+	    ./scripts/compare-coverage.sh "$(COVERAGE_DIR)/baseline" "$(COVERAGE_DIR)" "$(COVERAGE_THRESHOLD)" "$(COVERAGE_LABEL)"; \
 	fi
 
 
@@ -327,6 +341,7 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
 		--build-arg LDFLAGS="$(LDFLAGS)" \
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE="$(BASE_IMAGE)") \
 		-t $($*_IMAGE) -f Dockerfile.$* .
 
 BUILDER_STAMP = build/.builder.stamp
