@@ -203,7 +203,7 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *
 	}
 	s.mutex.RUnlock()
 
-	log.FromContext(ctx).V(logutil.DEBUG).Info("Active request counts", "endpointCounts", scoredEndpoints, "maxCount", maxCount)
+	log.FromContext(ctx).V(logutil.TRACE).Info("Active request counts", "endpointCounts", scoredEndpoints, "maxCount", maxCount)
 
 	scoredEndpointsMap := make(map[scheduling.Endpoint]float64, len(endpoints))
 	for _, endpoint := range endpoints {
@@ -225,7 +225,7 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *
 		scoredEndpointsMap[endpoint] = float64(maxCount-count) / float64(maxCount) * s.maxBusyScore
 	}
 
-	log.FromContext(ctx).V(logutil.DEBUG).Info("Scored endpoints", "scores", endpointScores(scoredEndpointsMap))
+	log.FromContext(ctx).V(logutil.TRACE).Info("Scored endpoints", "scores", endpointScores(scoredEndpointsMap))
 	return scoredEndpointsMap
 }
 
@@ -237,7 +237,7 @@ func (s *ActiveRequest) PreRequest(
 	request *scheduling.LLMRequest,
 	schedulingResult *scheduling.SchedulingResult,
 ) {
-	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
+	traceLogger := log.FromContext(ctx).V(logutil.TRACE)
 
 	endpointNames := make([]string, 0, len(schedulingResult.ProfileResults))
 	for profileName, profileResult := range schedulingResult.ProfileResults {
@@ -248,7 +248,7 @@ func (s *ActiveRequest) PreRequest(
 		endpointName := profileResult.TargetEndpoints[0].GetMetadata().NamespacedName.String()
 		endpointNames = append(endpointNames, endpointName)
 		s.incrementPodCount(endpointName)
-		debugLogger.Info(
+		traceLogger.Info(
 			"Added request to cache",
 			"requestId", request.RequestId,
 			"endpointName", endpointName,
@@ -269,13 +269,13 @@ func (s *ActiveRequest) ResponseBody(
 	resp *requestcontrol.Response,
 	targetPod *datalayer.EndpointMetadata,
 ) {
-	debugLogger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ActiveRequest.ResponseBody")
+	traceLogger := log.FromContext(ctx).V(logutil.TRACE).WithName("ActiveRequest.ResponseBody")
 	if !resp.EndOfStream {
-		debugLogger.Info("Skipping ResponseBody because EndOfStream is false")
+		traceLogger.Info("Skipping ResponseBody because EndOfStream is false")
 		return
 	}
 	if targetPod == nil {
-		debugLogger.Info("Skipping ResponseBody because targetPod is nil")
+		traceLogger.Info("Skipping ResponseBody because targetPod is nil")
 		return
 	}
 
@@ -285,12 +285,12 @@ func (s *ActiveRequest) ResponseBody(
 			for _, endpointName := range entry.PodNames {
 				s.decrementPodCount(endpointName)
 			}
-			debugLogger.Info("Removed request from cache", "requestEntry", entry.String())
+			traceLogger.Info("Removed request from cache", "requestEntry", entry.String())
 		} else {
-			debugLogger.Info("Request entry value is nil", "requestId", request.RequestId)
+			traceLogger.Info("Request entry value is nil", "requestId", request.RequestId)
 		}
 	} else {
-		debugLogger.Info("Request not found in cache", "requestId", request.RequestId)
+		traceLogger.Info("Request not found in cache", "requestId", request.RequestId)
 	}
 }
 
