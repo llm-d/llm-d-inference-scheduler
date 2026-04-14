@@ -347,7 +347,7 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 BUILDER_STAMP = build/.builder.stamp
 
 .PHONY: image-build-builder
-image-build-builder: | check-container-tool ## Build builder image if missing locally or Dockerfile.builder changed
+image-build-builder: check-container-tool ## Build builder image if missing locally, stamp missing, or Dockerfile.builder newer than stamp
 	@if ! $(CONTAINER_RUNTIME) image inspect $(BUILDER_IMAGE) >/dev/null 2>&1 || \
 	    [ ! -f $(BUILDER_STAMP) ] || \
 	    [ Dockerfile.builder -nt $(BUILDER_STAMP) ]; then \
