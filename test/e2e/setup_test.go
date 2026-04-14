@@ -59,9 +59,10 @@ func createModelServersDecodeKV(replicas int) []string {
 }
 
 func createModelServersDecodeDP(replicas int) []string {
-	return createModelServersFromKustomize(dpDeploymentDir, map[string]string{
+	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
 		"${VLLM_REPLICA_COUNT_D}":    strconv.Itoa(replicas),
 		"${VLLM_DATA_PARALLEL_SIZE}": "2",
+		"${DECODE_ROLE}":             "decode",
 	})
 }
 

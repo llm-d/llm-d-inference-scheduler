@@ -149,12 +149,8 @@ case "${DISAGG_MODE}" in
 esac
 
 # Validate configuration compatibility
-if [ "${KV_CACHE_ENABLED}" == "true" ] && [ "${DISAGG_MODE}" != "epd" ]; then
-  echo "Error: KV_CACHE_ENABLED=true is only supported with DISAGG_MODE=epd." >&2
-  exit 1
-fi
-
 # Determine EPP config file based on DISAGG_MODE
+# KV cache and data parallel are independent options that work with any disaggregation mode
 if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
 elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
@@ -164,7 +160,6 @@ else
     p-d)   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml" ;;
     e-pd)  DEFAULT_EPP_CONFIG="deploy/config/sim-e-pd-epp-config.yaml" ;;
     e-p-d) DEFAULT_EPP_CONFIG="deploy/config/sim-e-p-d-epp-config.yaml" ;;
-    dp)    DEFAULT_EPP_CONFIG="deploy/config/dp-epp-config.yaml" ;;
     *)     DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml" ;;
   esac
 fi
@@ -315,7 +310,6 @@ case "${DISAGG_MODE}" in
   p-d)   KUSTOMIZE_DIR="deploy/environments/dev/p-d" ;;
   e-pd)  KUSTOMIZE_DIR="deploy/environments/dev/e-pd" ;;
   e-p-d) KUSTOMIZE_DIR="deploy/environments/dev/e-p-d" ;;
-  dp)    KUSTOMIZE_DIR="deploy/environments/dev/dp" ;;
   *)     KUSTOMIZE_DIR="deploy/environments/dev/epd" ;;
 esac
 

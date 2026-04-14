@@ -268,7 +268,13 @@ with the `DISAGG_MODE` environment variable. For technical details, refer to
 | `p-d` | prefill + decode | Separate prefill and decode pods |
 | `e-pd` | encode + decode | Separate encoder, combined prefill-decode |
 | `e-p-d` | encode + prefill + decode | Fully disaggregated pipeline |
-| `dp` | decode | Data parallel (multi-rank) decode |
+
+Data parallel and KV cache are independent options that combine with any disaggregation mode:
+
+| Variable | Default | Description |
+|---|---|---|
+| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks. Set to `2`+ to enable multi-rank inference |
+| `KV_CACHE_ENABLED` | `false` | Enable KV cache-aware scheduling |
 
 #### Prefill/Decode (P/D) Disaggregation
 
@@ -321,14 +327,29 @@ curl http://localhost:8080/v1/chat/completions \
 ```
 </details>
 
-#### Other Modes
+#### Other Disaggregation Modes
 
 ```bash
 # Encode / Prefill-Decode (encoder separate, prefill+decode combined)
 DISAGG_MODE=e-pd make env-dev-kind
+```
 
-# Data Parallel (multi-rank decode)
-DISAGG_MODE=dp make env-dev-kind
+#### Combining with Data Parallel and KV Cache
+
+Data parallel and KV cache are independent options that work with any disaggregation mode:
+
+```bash
+# EPD with data parallel (2 ranks)
+VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+
+# P/D with data parallel
+DISAGG_MODE=p-d VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+
+# EPD with KV cache enabled
+KV_CACHE_ENABLED=true make env-dev-kind
+
+# E/P/D with data parallel and KV cache
+DISAGG_MODE=e-p-d VLLM_DATA_PARALLEL_SIZE=2 KV_CACHE_ENABLED=true make env-dev-kind
 ```
 
 ### Simulator vs Real vLLM
@@ -360,8 +381,9 @@ DISAGG_MODE=e-pd make env-dev-kind
 # E/P/D — encode + prefill + decode (fully disaggregated)
 DISAGG_MODE=e-p-d make env-dev-kind
 
-# DP — data parallel (multi-rank decode)
-DISAGG_MODE=dp make env-dev-kind
+# Any mode with data parallel
+VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+DISAGG_MODE=p-d VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
 ```
 
 #### Deploying with Real vLLM

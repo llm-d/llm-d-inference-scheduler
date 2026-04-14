@@ -15,7 +15,9 @@ and e2e tests (via `kustomize build` + env var substitution).
 | `p-d/` | P/D | prefill + decode | Separate prefill and decode deployments with KV cache transfer |
 | `e-pd/` | E/PD | encode + decode | Separate encoder, combined prefill-decode with EC transfer |
 | `e-p-d/` | E/P/D | encode + prefill + decode | Fully disaggregated: encoder, prefill, and decode |
-| `dp/` | Data Parallel | decode | Single decode deployment with multi-rank data parallelism |
+
+Data parallel (`VLLM_DATA_PARALLEL_SIZE`) and KV cache (`KV_CACHE_ENABLED`) are independent
+options that combine with any disaggregation mode — they are not separate scenarios.
 
 ## Shared Infrastructure
 

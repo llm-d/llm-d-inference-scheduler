@@ -18,9 +18,6 @@ const (
 	// pdDisaggDir references the Kustomize directory for the deployment
 	// running vLLM with P/D (connector type is configurable via ${CONNECTOR_TYPE})
 	pdDisaggDir = "../../deploy/environments/dev/p-d"
-	// dpDeploymentDir references the Kustomize directory for the deployment
-	// running vLLM with Data Parallel
-	dpDeploymentDir = "../../deploy/environments/dev/dp"
 	// ePdDisaggDir references the Kustomize directory for the deployment
 	// running vLLM with E/PD (Encode/Prefill-Decode)
 	ePdDisaggDir = "../../deploy/environments/dev/e-pd"
