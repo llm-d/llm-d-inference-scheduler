@@ -346,16 +346,16 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 
 BUILDER_STAMP = build/.builder.stamp
 
-$(BUILDER_STAMP): Dockerfile.builder | check-container-tool
-	@printf "\033[33;1m==== Building image $(BUILDER_IMAGE) ====\033[0m\n"
-	$(CONTAINER_RUNTIME) build \
-		-f Dockerfile.builder \
-		-t $(BUILDER_IMAGE) .
-	@mkdir -p $(dir $(BUILDER_STAMP))
-	@touch $(BUILDER_STAMP)
-
 .PHONY: image-build-builder
-image-build-builder: $(BUILDER_STAMP)
+image-build-builder: | check-container-tool ## Build builder image if missing locally or Dockerfile.builder changed
+	@if ! $(CONTAINER_RUNTIME) image inspect $(BUILDER_IMAGE) >/dev/null 2>&1 || \
+	    [ ! -f $(BUILDER_STAMP) ] || \
+	    [ Dockerfile.builder -nt $(BUILDER_STAMP) ]; then \
+		printf "\033[33;1m==== Building image $(BUILDER_IMAGE) ====\033[0m\n"; \
+		$(CONTAINER_RUNTIME) build -f Dockerfile.builder -t $(BUILDER_IMAGE) .; \
+		mkdir -p $(dir $(BUILDER_STAMP)); \
+		touch $(BUILDER_STAMP); \
+	fi
 
 .PHONY: image-push
 image-push: image-push-epp image-push-sidecar ## Push container images to registry using $(CONTAINER_RUNTIME)
