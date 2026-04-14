@@ -13,7 +13,10 @@ Documentation for developing the inference scheduler.
     - [Prometheus Monitoring](#prometheus-monitoring)
     - [Grafana Dashboard](#grafana-dashboard)
     - [Development Cycle](#development-cycle)
+    - [Debugging](#debugging)
     - [Inference Disaggregation Modes](#inference-disaggregation-modes)
+      - [1. Prefill/Decode (P/D) Disaggregation](#1-prefilldecode-pd-disaggregation)
+      - [2. Encode/Prefill/Decode (E/P/D) Disaggregation](#2-encodeprefilldecode-epd-disaggregation)
     - [Cleanup](#cleanup)
   - [Running Tests](#running-tests)
     - [Unit Tests](#unit-tests)
@@ -184,6 +187,72 @@ kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
 > ```bash
 > VLLM_SIMULATOR_TAG=<tag> make env-dev-kind
 > ```
+
+### Debugging
+
+**Building a debug image**
+
+Debug symbols are stripped by default (`-s -w`). To build an image with symbols preserved
+(required for `dlv` or other debuggers), clear `LDFLAGS`:
+
+```bash
+LDFLAGS="" make image-build-epp
+```
+
+To use a non-default runtime base image (e.g. a UBI variant or a debug-capable image),
+set `BASE_IMAGE`:
+
+```bash
+BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:9.7 make image-build-epp
+```
+
+Both overrides can be combined:
+
+```bash
+LDFLAGS="" BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:9.7 make image-build-epp
+```
+
+> [!NOTE]
+> The default base image is `gcr.io/distroless/static:nonroot`. If you switch to `scratch`,
+> you must copy CA certificates from the builder stage manually - see the comments in
+> `Dockerfile.epp` for guidance.
+
+**Attaching an ephemeral debug container**
+
+The distroless runtime image has no shell. For ad-hoc inspection (filesystem, processes,
+network), attach an ephemeral container without modifying the image:
+
+```bash
+kubectl debug -it <pod-name> -n <namespace> \
+    --image=busybox \
+    --target=epp \
+    -- sh
+```
+
+This creates a throwaway container that shares the pod's PID/network/filesystem namespace.
+Ephemeral container support requires Kubernetes 1.23+.
+
+To connect `dlv` to a running EPP process, build and deploy a debug image first (see above),
+then attach `dlv` via the ephemeral container:
+
+```bash
+# 1. Build and load the debug image
+LDFLAGS="" make image-build-epp
+kind load docker-image $(EPP_IMAGE) --name llm-d-inference-scheduler-dev
+
+# 2. Restart the deployment to pick up the new image
+kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
+
+# 3. Attach dlv in an ephemeral container
+kubectl debug -it <pod-name> -n <namespace> \
+    --image=ghcr.io/go-delve/delve:latest \
+    --target=epp \
+    -- dlv attach 1
+```
+
+> [!NOTE]
+> `dlv attach 1` assumes the EPP binary is PID 1. Confirm with `ps` in a `busybox`
+> ephemeral container if the pod runs additional processes.
 
 ### Inference Disaggregation Modes
 

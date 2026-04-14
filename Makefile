@@ -135,6 +135,11 @@ BUILDER_RUN_CLUSTER = $(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_CL
 # Override locally to build a debuggable image: LDFLAGS="" make image-build-epp
 LDFLAGS ?= -s -w
 
+# Optional: override the runtime base image used in container builds.
+# When set, passed as --build-arg BASE_IMAGE=<value> to the container build.
+# Example: BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:9.7 make image-build-epp
+BASE_IMAGE ?=
+
 # test packages
 epp_TEST_PACKAGES = $$(go list ./... | grep -v /test/ | grep -v ./pkg/sidecar/ | tr '\n' ' ')
 sidecar_TEST_PACKAGES = ./pkg/sidecar/...
@@ -327,6 +332,7 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
 		--build-arg BUILD_REF=${BUILD_REF} \
 		--build-arg LDFLAGS="$(LDFLAGS)" \
+		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE="$(BASE_IMAGE)") \
 		-t $($*_IMAGE) -f Dockerfile.$* .
 
 BUILDER_STAMP = build/.builder.stamp
