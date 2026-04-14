@@ -169,10 +169,9 @@ func (s *Server) disaggregatedPrefillHandler(apiType APIType) http.HandlerFunc {
 			)
 		}
 
-		tokenFields := tokenLimitFieldsForAPIType(apiType)
 		if len(prefillHostPort) > 0 {
 			s.logger.V(4).Info("using P/D protocol")
-			s.runPDConnectorProtocol(w, r, prefillHostPort, tokenFields)
+			s.runPDConnectorProtocol(w, r, prefillHostPort, apiType)
 			return
 		}
 

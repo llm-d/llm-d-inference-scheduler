@@ -201,9 +201,9 @@ func (c Config) String() string {
 	return string(b)
 }
 
-// pdConnectorRunner runs the configured P/D KV connector. tokenLimitFieldNames selects JSON
-// keys adjusted for prefill in NIXL v2; shared-storage and SGLang ignore the slice.
-type pdConnectorRunner func(http.ResponseWriter, *http.Request, string, []string)
+// pdConnectorRunner runs the configured P/D KV connector. The APIType lets each
+// connector decide internally which JSON fields (if any) need special handling.
+type pdConnectorRunner func(http.ResponseWriter, *http.Request, string, APIType)
 
 type epdProtocolRunner func(http.ResponseWriter, *http.Request, string, []string)
 
@@ -351,11 +351,11 @@ func (s *Server) setKVConnector() {
 
 	switch s.config.KVConnector {
 	case KVConnectorSharedStorage:
-		s.runPDConnectorProtocol = func(w http.ResponseWriter, r *http.Request, host string, _ []string) {
+		s.runPDConnectorProtocol = func(w http.ResponseWriter, r *http.Request, host string, _ APIType) {
 			s.runSharedStorageProtocol(w, r, host)
 		}
 	case KVConnectorSGLang:
-		s.runPDConnectorProtocol = func(w http.ResponseWriter, r *http.Request, host string, _ []string) {
+		s.runPDConnectorProtocol = func(w http.ResponseWriter, r *http.Request, host string, _ APIType) {
 			s.runSGLangProtocol(w, r, host)
 		}
 	case KVConnectorNIXLV2:

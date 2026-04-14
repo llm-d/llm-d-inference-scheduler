@@ -30,9 +30,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// runNIXLProtocolV2 handles the NIXL v2 protocol for all OpenAI API types.
-// tokenLimitFields lists JSON keys to stage for prefill (e.g. max_tokens or max_output_tokens).
-func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, tokenLimitFields []string) {
+func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType APIType) {
+	tokenLimitFields := tokenLimitFieldsForAPIType(apiType)
 	s.logger.V(4).Info("running NIXL protocol V2", "url", prefillPodHostPort, "tokenLimitFields", tokenLimitFields)
 
 	// Read request body
@@ -86,10 +85,18 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	streamValue, streamOk := completionRequest[requestFieldStream]
 	streamOptionsValue, streamOptionsOk := completionRequest[requestFieldStreamOptions]
 
-	savedTokenValues := map[string]any{}
-	for _, field := range tokenLimitFields {
+	// Save and override token limit fields for prefill
+	type savedField struct {
+		field   string
+		val     any
+		present bool
+	}
+	var savedTokenValues [2]savedField
+	for i, field := range tokenLimitFields {
 		if v, ok := completionRequest[field]; ok {
-			savedTokenValues[field] = v
+			savedTokenValues[i] = savedField{field: field, val: v, present: true}
+		} else {
+			savedTokenValues[i] = savedField{field: field}
 		}
 	}
 
@@ -213,10 +220,11 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 		completionRequest[requestFieldStreamOptions] = streamOptionsValue
 	}
 
-	for _, field := range tokenLimitFields {
-		delete(completionRequest, field)
-		if v, ok := savedTokenValues[field]; ok {
-			completionRequest[field] = v
+	for i := range savedTokenValues[:len(tokenLimitFields)] {
+		sv := &savedTokenValues[i]
+		delete(completionRequest, sv.field)
+		if sv.present {
+			completionRequest[sv.field] = sv.val
 		}
 	}
 

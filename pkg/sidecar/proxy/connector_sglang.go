@@ -51,7 +51,6 @@ func init() {
 	}
 }
 
-// runSGLangProtocol handles the SGLang protocol for all OpenAI API types.
 func (s *Server) runSGLangProtocol(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.V(4).Info("running SGLang protocol", "url", prefillPodHostPort)
 

@@ -27,7 +27,12 @@ import (
 	"k8s.io/utils/set"
 )
 
-func TestServer_chatCompletionsHandler(t *testing.T) {
+// testPrefillHeaderRouting is a shared table-driven helper that exercises
+// prefill-header parsing, sampling, passthrough, and P/D protocol invocation
+// for any APIType.  Both TestServer_chatCompletionsHandler and
+// TestServer_responsesHandler delegate to it.
+func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
+	t.Helper()
 	tests := []struct {
 		name     string
 		sampling bool
@@ -117,11 +122,9 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 			t.Run(fmt.Sprintf("%s_%d", tt.name, i), func(t *testing.T) {
 				s := NewProxy(Config{Port: "8000", EnablePrefillerSampling: tt.sampling})
 				s.allowlistValidator = &AllowlistValidator{}
-				// return a predictable sequence of values
 				s.prefillSamplerFn = func(n int) int { return i % n }
-				// verify the hostPort value
 				var hostPort string
-				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ []string) {
+				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ APIType) {
 					hostPort = selectedHostPort
 				}
 				var passthrough bool
@@ -131,7 +134,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.dataParallelProxies = make(map[string]http.Handler)
 				recorder := httptest.NewRecorder()
 				recorder.Code = 0
-				s.disaggregatedPrefillHandler(APITypeChatCompletions)(recorder, tt.r)
+				s.disaggregatedPrefillHandler(apiType)(recorder, tt.r)
 
 				resp := recorder.Result()
 				if passthrough {
@@ -159,6 +162,14 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestServer_chatCompletionsHandler(t *testing.T) {
+	testPrefillHeaderRouting(t, APITypeChatCompletions)
+}
+
+func TestServer_responsesHandler(t *testing.T) {
+	testPrefillHeaderRouting(t, APITypeResponses)
 }
 
 func TestServer_encoderEndpointRouting(t *testing.T) {
@@ -299,7 +310,7 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 
 			var pdCalled bool
 			var pdHost string
-			s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, host string, _ []string) {
+			s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, host string, _ APIType) {
 				pdCalled = true
 				pdHost = host
 			}
@@ -362,5 +373,18 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 
 			}
 		})
+	}
+}
+
+func TestAPIType_String(t *testing.T) {
+	t.Parallel()
+	if g, w := APITypeChatCompletions.String(), "chat_completions"; g != w {
+		t.Errorf("APITypeChatCompletions.String() = %q, want %q", g, w)
+	}
+	if g, w := APITypeResponses.String(), "responses"; g != w {
+		t.Errorf("APITypeResponses.String() = %q, want %q", g, w)
+	}
+	if g, w := APIType(7).String(), fmt.Sprintf("APIType(%d)", 7); g != w {
+		t.Errorf("APIType(7).String() = %q, want %q", g, w)
 	}
 }
