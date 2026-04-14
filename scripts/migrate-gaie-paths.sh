@@ -145,19 +145,18 @@ for i in "${!SRC_PATHS[@]}"; do
   [[ "${SRC_PATHS[$i]}" != "${DEST_PATHS[$i]}" ]] && FILTER_ARGS+=(--path-rename "${SRC_PATHS[$i]}:${DEST_PATHS[$i]}")
 done
 
-# Clone source and filter to target paths
+# Clone source, filter to target paths, and rewrite bare #NNN issue references to
+# SOURCE_ORG/SOURCE_REPO_NAME#NNN so they link to the original repo rather than the
+# destination. Matches only #NNN preceded by start-of-line, space, '(' or ',' to
+# avoid hex literals, code-block references, and already-qualified org/repo#NNN refs.
+MSG_CALLBACK="import re
+return re.sub(rb'(?m)(^|[ (,])#(\\d+)', lambda m: m.group(1) + b'${SOURCE_ORG}/${SOURCE_REPO_NAME}#' + m.group(2), message)"
+
 rm -rf "${FILTER_WORK_DIR}"
 git clone "file://${SOURCE_DIR}" "${FILTER_WORK_DIR}"
-git -C "${FILTER_WORK_DIR}" filter-repo "${FILTER_ARGS[@]}" --force
-
-# Rewrite bare #NNN references to SOURCE_ORG/SOURCE_REPO_NAME#NNN in commit messages so
-# references point to original repo links, and not arbitrary destination references.
-# Matches only #NNN preceded by start-of-line, space, '(' or ','. This avoids
-# hex literals, code-block references, and already-qualified org/repo#NNN refs.
-FILTER_BRANCH_SQUELCH_WARNING=1 git -C "${FILTER_WORK_DIR}" \
-  filter-branch --msg-filter \
-  "sed -E 's/(^|[ (,])#([0-9]+)/\1${SOURCE_ORG}\/${SOURCE_REPO_NAME}#\2/g'" \
-  -- --all
+git -C "${FILTER_WORK_DIR}" filter-repo "${FILTER_ARGS[@]}" \
+  --message-callback "${MSG_CALLBACK}" \
+  --force
 
 if [[ -n "${SINCE_REF}" ]]; then
   # Use filter-repo's commit-map to translate SINCE_REF into the filtered history.
@@ -173,9 +172,13 @@ if [[ -n "${SINCE_REF}" ]]; then
     echo "error: could not map ${SINCE_SRC_SHA} to filter-work; the commit may not touch the specified paths"
     exit 1
   fi
-  readarray -t COMMITS < <(git -C "${FILTER_WORK_DIR}" rev-list --reverse "${SINCE_FILTERED}..HEAD" 2>/dev/null || true)
+  COMMITS=()
+  while IFS= read -r line; do COMMITS+=("${line}"); done \
+    < <(git -C "${FILTER_WORK_DIR}" rev-list --reverse "${SINCE_FILTERED}..HEAD" 2>/dev/null || true)
 else
-  readarray -t COMMITS < <(git -C "${FILTER_WORK_DIR}" rev-list --reverse HEAD 2>/dev/null || true)
+  COMMITS=()
+  while IFS= read -r line; do COMMITS+=("${line}"); done \
+    < <(git -C "${FILTER_WORK_DIR}" rev-list --reverse HEAD 2>/dev/null || true)
 fi
 
 if [[ ${#COMMITS[@]} -eq 0 ]]; then
