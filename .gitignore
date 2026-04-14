@@ -43,3 +43,5 @@ vendor
 # Coverage reports (HTML; .out files are already covered by *.out above)
 /coverage
 /pd-sidecar*
+
+*.pem
