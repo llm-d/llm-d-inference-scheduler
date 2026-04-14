@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
-# compare-coverage.sh <baseline-dir> <current-dir> [threshold]
+# compare-coverage.sh <baseline-dir> <current-dir> [threshold] [label]
 #
 # Compares Go coverage profiles between a baseline and the current run.
 # Outputs a markdown table to stdout and, when running in GitHub Actions,
 # appends it to $GITHUB_STEP_SUMMARY so it appears in the Job Summary.
 #
 # Usage:
-#   ./scripts/compare-coverage.sh coverage/baseline coverage/ 0
+#   ./scripts/compare-coverage.sh coverage/baseline coverage/ 0 main
 #
 # Arguments:
 #   baseline-dir  Directory containing baseline *.out coverage profiles
 #   current-dir   Directory containing current *.out coverage profiles
 #   threshold     Optional minimum total coverage % (default: 0, report only)
+#   label         Optional baseline label for the report heading (default: main)
 
 set -euo pipefail
 
 BASELINE_DIR="${1:?baseline-dir required}"
 CURRENT_DIR="${2:?current-dir required}"
 THRESHOLD="${3:-0}"
+LABEL="${4:-main}"
 
 # extract_total <profile.out> → percentage as a bare number, e.g. "72.4"
 extract_total() {
@@ -100,7 +102,7 @@ for name in "${all_names[@]}"; do
     rows+="| \`$name\` | $base_fmt | $cur_fmt | $delta% | $status |\n"
 done
 
-output="$(printf '## Coverage Report\n\n| Component | Baseline | Current | Delta | Status |\n|-----------|----------|---------|-------|--------|\n%b' "$rows")"
+output="$(printf '## Coverage Report vs %s\n\n| Component | Baseline | Current | Delta | Status |\n|-----------|----------|---------|-------|--------|\n%b' "$LABEL" "$rows")"
 if [[ "$THRESHOLD" -gt 0 ]]; then
     output+="$(printf '\n> Minimum threshold: **%s%%**' "$THRESHOLD")"
 fi
