@@ -222,7 +222,7 @@ func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
 		},
 	}
 
-	p.ResponseComplete(context.Background(), request, response, &datalayer.EndpointMetadata{})
+	p.ResponseBody(context.Background(), request, response, &datalayer.EndpointMetadata{})
 
 	metricsRaw, _ := p.programMetrics.Load("prog-a")
 	metrics := metricsRaw.(*ProgramMetrics)
@@ -246,7 +246,7 @@ func TestResponseComplete_NoFairnessHeader_StillCleansTimestamp(t *testing.T) {
 		Headers:   map[string]string{},
 	}
 
-	p.ResponseComplete(context.Background(), request, nil, nil)
+	p.ResponseBody(context.Background(), request, nil, nil)
 
 	_, ok := p.requestTimestamps.Load("req-1")
 	assert.False(t, ok, "timestamp should be cleaned up even without fairness header")
@@ -307,7 +307,7 @@ func TestFullLifecycle(t *testing.T) {
 	// 3. ResponseComplete
 	response := &requestcontrol.Response{Headers: map[string]string{}}
 	response.Usage = requestcontrol.Usage{PromptTokens: 42, CompletionTokens: 17}
-	p.ResponseComplete(context.Background(), request, response, &datalayer.EndpointMetadata{})
+	p.ResponseBody(context.Background(), request, response, &datalayer.EndpointMetadata{})
 	assert.Equal(t, int64(42), metrics.TotalInputTokens())
 	assert.Equal(t, int64(17), metrics.TotalOutputTokens())
 

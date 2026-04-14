@@ -101,7 +101,7 @@ var (
 	_ flowcontrol.FairnessPolicy       = &ProgramAwarePlugin{}
 	_ requestcontrol.PrepareDataPlugin = &ProgramAwarePlugin{}
 	_ requestcontrol.PreRequest        = &ProgramAwarePlugin{}
-	_ requestcontrol.ResponseComplete  = &ProgramAwarePlugin{}
+	_ requestcontrol.ResponseBody      = &ProgramAwarePlugin{}
 )
 
 // ProgramAwarePluginFactory creates a new ProgramAwarePlugin from JSON config.

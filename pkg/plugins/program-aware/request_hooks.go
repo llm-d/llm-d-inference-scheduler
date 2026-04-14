@@ -76,8 +76,8 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 
 // --- ResponseComplete interface ---
 
-// ResponseComplete records token usage and cleans up per-request state.
-func (p *ProgramAwarePlugin) ResponseComplete(ctx context.Context, request *scheduling.LLMRequest, response *requestcontrol.Response, _ *datalayer.EndpointMetadata) {
+// ResponseBody records token usage and cleans up per-request state.
+func (p *ProgramAwarePlugin) ResponseBody(ctx context.Context, request *scheduling.LLMRequest, response *requestcontrol.Response, _ *datalayer.EndpointMetadata) {
 	if request == nil {
 		return
 	}
