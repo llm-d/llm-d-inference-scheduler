@@ -50,8 +50,11 @@ var (
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
-	collectors := []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount}
-	collectors = append(collectors, programaware.GetCollectors()...)
+	base := []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount}
+	pa := programaware.GetCollectors()
+	collectors := make([]prometheus.Collector, 0, len(base)+len(pa))
+	collectors = append(collectors, base...)
+	collectors = append(collectors, pa...)
 	return collectors
 }
 
