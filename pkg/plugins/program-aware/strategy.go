@@ -251,7 +251,6 @@ func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequ
 	metrics.DeductTokens(weightInputToken*promptTokens + weightOutputToken*completionTokens)
 }
 
-
 // =============================================================================
 // LAS (Least Attained Service) Strategy
 // =============================================================================
@@ -474,4 +473,5 @@ func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.LLMRequ
 }
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).
-func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _ *scheduling.LLMRequest, _ *requestcontrol.Response) {}
+func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _ *scheduling.LLMRequest, _ *requestcontrol.Response) {
+}

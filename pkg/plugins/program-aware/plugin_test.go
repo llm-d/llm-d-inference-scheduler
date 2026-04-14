@@ -323,7 +323,7 @@ func TestComputeFairnessIndex_EqualServiceRate(t *testing.T) {
 
 	now := time.Now()
 	mA := &ProgramMetrics{}
-	mA.RecordServiceRate(1000.0, now)              // first call sets baseline
+	mA.RecordServiceRate(1000.0, now)                  // first call sets baseline
 	mA.RecordServiceRate(1000.0, now.Add(time.Second)) // rate = 1000 tok/s
 	p.programMetrics.Store("prog-a", mA)
 

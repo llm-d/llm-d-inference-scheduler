@@ -22,11 +22,9 @@ func testDRR() *DRRStrategy {
 	}
 }
 
-// testRequest returns an LLMRequest with the given priority for OnPreRequest tests.
-func testRequest(priority int) *scheduling.LLMRequest {
-	return &scheduling.LLMRequest{
-		Objectives: scheduling.RequestObjectives{Priority: priority},
-	}
+// testRequest returns an LLMRequest for OnPreRequest tests.
+func testRequest() *scheduling.LLMRequest {
+	return &scheduling.LLMRequest{}
 }
 
 func TestNewStrategy_Valid(t *testing.T) {
@@ -119,7 +117,7 @@ func TestDRRStrategy_Pick_QuantumAccumulates(t *testing.T) {
 	for range 5 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
 		s.Pick(0, queues)
-		s.OnPreRequest(nil, testRequest(0)) // reset for next dispatch cycle
+		s.OnPreRequest(nil, testRequest()) // reset for next dispatch cycle
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*5, m.Deficit(), "deficit should accumulate across rounds")
 }
@@ -133,7 +131,7 @@ func TestDRRStrategy_Pick_IdleNoQuantum(t *testing.T) {
 	for range 3 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 2, m, now)}
 		s.Pick(0, queues)
-		s.OnPreRequest(nil, testRequest(0))
+		s.OnPreRequest(nil, testRequest())
 	}
 	assert.Equal(t, defaultDRRQuantumTokens*3, m.Deficit())
 
@@ -210,7 +208,7 @@ func TestDRRStrategy_OnPrerequest_ResetsQuantum(t *testing.T) {
 	assert.Equal(t, defaultDRRQuantumTokens, m.Deficit())
 
 	// OnPrerequest resets the cycle — next Pick should allocate again.
-	s.OnPreRequest(nil, testRequest(0))
+	s.OnPreRequest(nil, testRequest())
 	s.Pick(0, queues)
 	assert.Equal(t, defaultDRRQuantumTokens*2, m.Deficit(), "Pick after OnPrerequest should allocate quantum again")
 }
@@ -303,7 +301,7 @@ func TestDRRStrategy_Pick_IdleDecaysDeficit(t *testing.T) {
 	m2.AddDeficit(10000)
 	queues2 := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m2, now)}
 	s.Pick(0, queues2)
-	assert.Equal(t, int64(10000+defaultDRRQuantumTokens), m2.Deficit(),
+	assert.Equal(t, 10000+defaultDRRQuantumTokens, m2.Deficit(),
 		"non-empty queue should get quantum, no decay")
 }
 
@@ -315,7 +313,7 @@ func TestDRRStrategy_Pick_NoDecayOnNonEmpty(t *testing.T) {
 	for range 100 {
 		queues := map[string]QueueInfo{"prog": makeQueueInfo("prog", 1, m, now)}
 		s.Pick(0, queues)
-		s.OnPreRequest(nil, testRequest(0))
+		s.OnPreRequest(nil, testRequest())
 	}
 	// All 100 quanta should have accumulated — no decay on non-empty queues.
 	assert.Equal(t, defaultDRRQuantumTokens*100, m.Deficit(),
@@ -742,8 +740,8 @@ func TestRRStrategy_DeferCursor_OnPreRequestCommits(t *testing.T) {
 	s := &RRStrategy{deferCursor: true}
 	ids := []string{"alpha", "beta", "gamma"}
 
-	simulateRRCycle(s, ids, ids)        // picks alpha, sets moveCursor=false
-	s.OnPreRequest(nil, testRequest(0)) // resets moveCursor=true
+	simulateRRCycle(s, ids, ids)       // picks alpha, sets moveCursor=false
+	s.OnPreRequest(nil, testRequest()) // resets moveCursor=true
 
 	v, _ := s.lastSelected.Load(0)
 	assert.Equal(t, "alpha", v.(string))
@@ -772,7 +770,7 @@ func TestRRStrategy_DeferCursor_FullCycle(t *testing.T) {
 	for _, want := range expected {
 		picked := simulateRRCycle(s, ids, ids)
 		assert.Equal(t, want, picked)
-		s.OnPreRequest(nil, testRequest(0)) // commit after dispatch
+		s.OnPreRequest(nil, testRequest()) // commit after dispatch
 	}
 }
 
