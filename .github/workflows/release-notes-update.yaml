@@ -1,0 +1,53 @@
+name: Update Release Notes on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  update-release-notes:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Update RELEASE-NOTES.md and open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          NOTE=$(printf '%s' "$PR_BODY" | tr -d '\r' | \
+            sed -n '/^```release-note/,/^```/p' | sed '1d;$d' | xargs)
+
+          if [[ -z "$NOTE" || "${NOTE,,}" == "none" ]]; then
+            echo "No valid release note found. Exiting."
+            exit 0
+          fi
+
+          touch RELEASE-NOTES.md
+          printf '%s\n%s\n' "${PR_MERGED_AT:0:10} $PR_URL $NOTE" "$(cat RELEASE-NOTES.md)" > RELEASE-NOTES.md
+
+          BRANCH="release-notes/pr-${PR_NUMBER}"
+          git checkout -b "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add RELEASE-NOTES.md
+          git commit -s -m "docs: update release notes for PR #${PR_NUMBER}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "update release notes for PR #${PR_NUMBER}" \
+            --body "Updates RELEASE-NOTES.md with the release note from ${PR_URL}." \
+            --base main \
+            --head "$BRANCH"

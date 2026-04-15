@@ -6,6 +6,9 @@ on:
 jobs:
   check-signed-commits:
     name: Check signed commits in PR
+    if: |
+      !startsWith(github.head_ref, 'release-notes/pr-') ||
+      github.event.pull_request.user.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -273,7 +273,7 @@ func (s *Server) runEPDProtocol(w http.ResponseWriter, r *http.Request, prefillE
 		s.logger.V(4).Info("using P/D protocol after encoder", "prefiller", prefillEndPoint)
 		// Run the configured P/D protocol (prefill + decode)
 		// This will use whichever protocol is configured: shared-storage, nixlv2, or sglang
-		s.runPDConnectorProtocol(w, pdRequest, prefillEndPoint)
+		s.runPDConnectorProtocol(w, pdRequest, prefillEndPoint, APITypeChatCompletions)
 	} else {
 		s.logger.V(4).Info("no prefiller configured, going directly to decoder after encoder")
 		// No prefiller, go directly to decoder (Encoder-Decoder mode)

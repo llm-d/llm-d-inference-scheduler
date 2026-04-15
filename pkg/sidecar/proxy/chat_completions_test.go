@@ -20,12 +20,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"k8s.io/utils/set"
 )
 
-func TestServer_chatCompletionsHandler(t *testing.T) {
+// testPrefillHeaderRouting is a shared table-driven helper that exercises
+// prefill-header parsing, sampling, passthrough, and P/D protocol invocation
+// for any APIType.  Both TestServer_chatCompletionsHandler and
+// TestServer_responsesHandler delegate to it.
+func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
+	t.Helper()
 	tests := []struct {
 		name     string
 		sampling bool
@@ -115,11 +122,11 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 			t.Run(fmt.Sprintf("%s_%d", tt.name, i), func(t *testing.T) {
 				s := NewProxy(Config{Port: "8000", EnablePrefillerSampling: tt.sampling})
 				s.allowlistValidator = &AllowlistValidator{}
-				// return a predictable sequence of values
 				s.prefillSamplerFn = func(n int) int { return i % n }
-				// verify the hostPort value
 				var hostPort string
-				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string) { hostPort = selectedHostPort }
+				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ APIType) {
+					hostPort = selectedHostPort
+				}
 				var passthrough bool
 				s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 					passthrough = true
@@ -127,7 +134,7 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				s.dataParallelProxies = make(map[string]http.Handler)
 				recorder := httptest.NewRecorder()
 				recorder.Code = 0
-				s.chatCompletionsHandler(recorder, tt.r)
+				s.disaggregatedPrefillHandler(apiType)(recorder, tt.r)
 
 				resp := recorder.Result()
 				if passthrough {
@@ -154,5 +161,230 @@ func TestServer_chatCompletionsHandler(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestServer_chatCompletionsHandler(t *testing.T) {
+	testPrefillHeaderRouting(t, APITypeChatCompletions)
+}
+
+func TestServer_responsesHandler(t *testing.T) {
+	testPrefillHeaderRouting(t, APITypeResponses)
+}
+
+func TestServer_encoderEndpointRouting(t *testing.T) {
+	encoderHeader := http.CanonicalHeaderKey(common.EncoderEndpointsHeader)
+	prefillHeader := http.CanonicalHeaderKey(common.PrefillEndpointHeader)
+
+	tests := []struct {
+		name string
+		r    *http.Request
+
+		// allowlist config: nil means disabled (allow all), non-nil means enabled with given hosts
+		allowedHosts []string
+
+		// set to true to install a mock EPD runner
+		epdConfigured bool
+
+		expectedEPD         bool
+		expectedEPDEncoders []string
+		expectedEPDPrefill  string
+		expectedPD          bool
+		expectedPDHost      string
+		expectedPassthrough bool
+	}{
+		{
+			name: "encoder header allowed invokes EPD protocol",
+			r: &http.Request{Header: http.Header{
+				encoderHeader: []string{"enc1:8000"},
+			}},
+			epdConfigured:       true,
+			expectedEPD:         true,
+			expectedEPDEncoders: []string{"enc1:8000"},
+			expectedEPDPrefill:  "",
+		},
+		{
+			name: "multiple encoder headers allowed invokes EPD protocol with all",
+			r: &http.Request{Header: http.Header{
+				encoderHeader: []string{"enc1:8000,enc2:8000"},
+			}},
+			epdConfigured:       true,
+			expectedEPD:         true,
+			expectedEPDEncoders: []string{"enc1:8000", "enc2:8000"},
+			expectedEPDPrefill:  "",
+		},
+		{
+			name: "encoder header all denied falls back to decoder passthrough",
+			r: &http.Request{
+				Header: http.Header{
+					encoderHeader: []string{"enc1:8000"},
+				},
+				URL: &url.URL{Path: "/v1/chat/completions"},
+			},
+			allowedHosts:        []string{"other-host"},
+			epdConfigured:       true,
+			expectedPassthrough: true,
+		},
+		{
+			name: "encoder header partially denied filters to allowed only",
+			r: &http.Request{
+				Header: http.Header{
+					encoderHeader: []string{"enc1:8000,denied:8000"},
+				},
+				URL: &url.URL{Path: "/v1/chat/completions"},
+			},
+			allowedHosts:        []string{"enc1"},
+			epdConfigured:       true,
+			expectedEPD:         true,
+			expectedEPDEncoders: []string{"enc1:8000"},
+			expectedEPDPrefill:  "",
+		},
+		{
+			name: "encoder header all denied falls back to P/D when prefill header present",
+			r: &http.Request{
+				Header: http.Header{
+					encoderHeader: []string{"enc1:8000"},
+					prefillHeader: []string{"prefill1:8000"},
+				},
+				URL: &url.URL{Path: "/v1/chat/completions"},
+			},
+			allowedHosts:   []string{"prefill1"},
+			epdConfigured:  true,
+			expectedPD:     true,
+			expectedPDHost: "prefill1:8000",
+		},
+		{
+			name: "encoder and prefill headers both allowed invokes EPD with prefill host",
+			r: &http.Request{Header: http.Header{
+				encoderHeader: []string{"enc1:8000"},
+				prefillHeader: []string{"prefill1:8000"},
+			}},
+			epdConfigured:       true,
+			expectedEPD:         true,
+			expectedEPDEncoders: []string{"enc1:8000"},
+			expectedEPDPrefill:  "prefill1:8000",
+		},
+		{
+			name: "encoder header allowed but no EPD connector configured falls back to decoder",
+			r: &http.Request{Header: http.Header{
+				encoderHeader: []string{"enc1:8000"},
+			}},
+			epdConfigured:       false,
+			expectedPassthrough: true,
+		},
+		{
+			name: "encoder header allowed but no EPD connector with prefill header falls back to P/D",
+			r: &http.Request{Header: http.Header{
+				encoderHeader: []string{"enc1:8000"},
+				prefillHeader: []string{"prefill1:8000"},
+			}},
+			epdConfigured:  false,
+			expectedPD:     true,
+			expectedPDHost: "prefill1:8000",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewProxy(Config{Port: "8000"})
+
+			if tt.allowedHosts != nil {
+				s.allowlistValidator = &AllowlistValidator{
+					enabled:        true,
+					allowedTargets: set.New(tt.allowedHosts...),
+				}
+			} else {
+				s.allowlistValidator = &AllowlistValidator{}
+			}
+
+			var epdCalled bool
+			var epdPrefill string
+			var epdEncoders []string
+			if tt.epdConfigured {
+				s.runEPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, prefillHost string, encoders []string) {
+					epdCalled = true
+					epdPrefill = prefillHost
+					epdEncoders = encoders
+				}
+			}
+
+			var pdCalled bool
+			var pdHost string
+			s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, host string, _ APIType) {
+				pdCalled = true
+				pdHost = host
+			}
+
+			var passthrough bool
+			s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				passthrough = true
+			})
+			s.dataParallelProxies = make(map[string]http.Handler)
+
+			recorder := httptest.NewRecorder()
+			recorder.Code = 0
+			s.disaggregatedPrefillHandler(APITypeChatCompletions)(recorder, tt.r)
+
+			switch {
+			case tt.expectedEPD:
+				if !epdCalled {
+					t.Fatal("expected EPD protocol to be called, but it was not")
+				}
+				if epdPrefill != tt.expectedEPDPrefill {
+					t.Errorf("EPD prefill host: got %q, want %q", epdPrefill, tt.expectedEPDPrefill)
+				}
+				if len(epdEncoders) != len(tt.expectedEPDEncoders) {
+					t.Fatalf("EPD encoders: got %v, want %v", epdEncoders, tt.expectedEPDEncoders)
+				}
+				for i, enc := range tt.expectedEPDEncoders {
+					if epdEncoders[i] != enc {
+						t.Errorf("EPD encoder[%d]: got %q, want %q", i, epdEncoders[i], enc)
+					}
+				}
+				if pdCalled {
+					t.Error("P/D protocol should not be called when EPD is used")
+				}
+				if passthrough {
+					t.Error("decoder passthrough should not happen when EPD is used")
+				}
+			case tt.expectedPD:
+				if !pdCalled {
+					t.Fatal("expected P/D protocol to be called, but it was not")
+				}
+				if pdHost != tt.expectedPDHost {
+					t.Errorf("P/D host: got %q, want %q", pdHost, tt.expectedPDHost)
+				}
+				if epdCalled {
+					t.Error("EPD protocol should not be called when falling back to P/D")
+				}
+				if passthrough {
+					t.Error("decoder passthrough should not happen when P/D is used")
+				}
+			case tt.expectedPassthrough:
+				if !passthrough {
+					t.Fatal("expected decoder passthrough, but it did not happen")
+				}
+				if epdCalled {
+					t.Error("EPD protocol should not be called during passthrough")
+				}
+				if pdCalled {
+					t.Error("P/D protocol should not be called during passthrough")
+				}
+
+			}
+		})
+	}
+}
+
+func TestAPIType_String(t *testing.T) {
+	t.Parallel()
+	if g, w := APITypeChatCompletions.String(), "chat_completions"; g != w {
+		t.Errorf("APITypeChatCompletions.String() = %q, want %q", g, w)
+	}
+	if g, w := APITypeResponses.String(), "responses"; g != w {
+		t.Errorf("APITypeResponses.String() = %q, want %q", g, w)
+	}
+	if g, w := APIType(7).String(), fmt.Sprintf("APIType(%d)", 7); g != w {
+		t.Errorf("APIType(7).String() = %q, want %q", g, w)
 	}
 }
