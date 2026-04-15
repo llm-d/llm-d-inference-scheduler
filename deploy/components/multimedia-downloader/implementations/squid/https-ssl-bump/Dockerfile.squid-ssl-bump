@@ -17,24 +17,32 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Create the SSL Database and cache directories
-# The SSL_DB is critical for storing certificates generated on-the-fly
+# The SSL_DB is critical for storing certificates generated on-the-fly.
 RUN mkdir -p /var/lib/squid \
     && /usr/lib/squid/security_file_certgen -c -s /var/lib/squid/ssl_db -M 4MB \
-    && chown -R proxy:proxy /var/lib/squid/ssl_db
+    && chown -R proxy:root /var/lib/squid/ssl_db \
+    && chmod -R g+rwX /var/lib/squid/ssl_db
 
 # 3. Create necessary log and run directories
 RUN mkdir -p /var/log/squid /var/run/squid \
-    && chown -R proxy:proxy /var/log/squid /var/run/squid
+    && chown -R proxy:root /var/log/squid /var/run/squid \
+    && chmod -R g+rwX /var/log/squid /var/run/squid
 
 # 4. Prepare for CA Certificate from K8s Secret
 # We create the directory where the secret will be mounted
-RUN mkdir -p /etc/squid/certs && chown proxy:proxy /etc/squid/certs
+RUN mkdir -p /etc/squid/certs \
+    && chown proxy:root /etc/squid/certs \
+    && chmod g+rwX /etc/squid/certs
 
 # 5. Add a robust entrypoint script to handle initialization
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3128
+
+RUN mkdir -p /var/cache/squid \
+    && chown proxy:root /var/cache/squid \
+    && chmod g+rwX /var/cache/squid
 
 # Transition to the proxy user for runtime security
 USER proxy

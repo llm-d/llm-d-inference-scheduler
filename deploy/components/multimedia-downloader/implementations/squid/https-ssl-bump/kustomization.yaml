@@ -28,6 +28,30 @@ patches:
         name: squid-ssl-certs
         secret:
           secretName: squid-ssl-certs
+    - op: replace
+      path: /spec/template/spec/containers/0/command
+      value: ["/usr/local/bin/docker-entrypoint.sh"]
+    - op: replace
+      path: /spec/template/spec/containers/0/args
+      value: ["squid", "-NYd", "1"]
+    - op: add
+      path: /spec/template/spec/securityContext
+      value:
+        runAsNonRoot: true
+    - op: add
+      path: /spec/template/spec/containers/0/securityContext
+      value:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        runAsUser: 13
+    - op: add
+      path: /spec/template/spec/containers/1/securityContext
+      value:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        runAsUser: 13
 
 # Add your image override at the bottom:
 images:
