@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package preparedata provides PrepareData plugins for the scheduler.
-package preparedata
+// Package tokenizer provides PrepareData plugins for the scheduler.
+package tokenizer
 
 import (
 	"context"
@@ -37,8 +37,8 @@ type tokenizer interface {
 }
 
 const (
-	// TokenizerPluginType is the type name used to register the tokenizer plugin.
-	TokenizerPluginType = "tokenizer"
+	// PluginType is the type name used to register the tokenizer plugin.
+	PluginType = "tokenizer"
 
 	// TokenizedPromptKey is the data key advertised by this plugin to indicate
 	// that it produces tokenized prompt data.
@@ -46,8 +46,8 @@ const (
 
 	// TokenizedPromptStateKey is the CycleState key used by the tokenizer scorer
 	// to store tokenized prompt data for downstream consumers.
-	// Namespaced by TokenizerPluginType to avoid collisions with other plugins.
-	TokenizedPromptStateKey = plugin.StateKey(TokenizerPluginType + "." + TokenizedPromptKey)
+	// Namespaced by PluginType to avoid collisions with other plugins.
+	TokenizedPromptStateKey = plugin.StateKey(PluginType + "." + TokenizedPromptKey)
 )
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
@@ -59,21 +59,21 @@ type tokenizerPluginConfig struct {
 	ModelName string `json:"modelName"`
 }
 
-// TokenizerPluginFactory is the factory function for the tokenizer plugin.
-func TokenizerPluginFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+// PluginFactory is the factory function for the tokenizer plugin.
+func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	config := tokenizerPluginConfig{}
 
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' plugin - %w", TokenizerPluginType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' plugin - %w", PluginType, err)
 		}
 	}
 
 	if config.ModelName == "" {
-		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'modelName' must be specified", TokenizerPluginType)
+		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'modelName' must be specified", PluginType)
 	}
 
-	p, err := NewTokenizerPlugin(handle.Context(), &config)
+	p, err := NewPlugin(handle.Context(), &config)
 	if err != nil {
 		return nil, err
 	}
@@ -81,15 +81,15 @@ func TokenizerPluginFactory(name string, rawParameters json.RawMessage, handle p
 	return p.WithName(name), nil
 }
 
-// NewTokenizerPlugin creates a new tokenizer plugin instance and initializes the UDS tokenizer.
-func NewTokenizerPlugin(ctx context.Context, config *tokenizerPluginConfig) (*TokenizerPlugin, error) {
+// NewPlugin creates a new tokenizer plugin instance and initializes the UDS tokenizer.
+func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, error) {
 	tokenizer, err := tokenization.NewUdsTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize UDS tokenizer for '%s' plugin - %w", TokenizerPluginType, err)
+		return nil, fmt.Errorf("failed to initialize UDS tokenizer for '%s' plugin - %w", PluginType, err)
 	}
 
-	return &TokenizerPlugin{
-		typedName: plugin.TypedName{Type: TokenizerPluginType},
+	return &Plugin{
+		typedName: plugin.TypedName{Type: PluginType},
 		tokenizer: tokenizer,
 	}, nil
 }
@@ -139,27 +139,27 @@ func cloneMMFeatures(src *tokenization.MultiModalFeatures) *tokenization.MultiMo
 	return dst
 }
 
-// TokenizerPlugin tokenizes the prompt in the incoming request and stores
+// Plugin tokenizes the prompt in the incoming request and stores
 // the result in CycleState for downstream consumers (scorers).
-type TokenizerPlugin struct {
+type Plugin struct {
 	typedName plugin.TypedName
 	tokenizer tokenizer
 }
 
 // TypedName returns the typed name of the plugin.
-func (p *TokenizerPlugin) TypedName() plugin.TypedName {
+func (p *Plugin) TypedName() plugin.TypedName {
 	return p.typedName
 }
 
 // WithName sets the name of the plugin.
-func (p *TokenizerPlugin) WithName(name string) *TokenizerPlugin {
+func (p *Plugin) WithName(name string) *Plugin {
 	p.typedName.Name = name
 	return p
 }
 
 // tokenize extracts token IDs and optional multimodal features from the request.
 // Returns (nil, nil) on error or unsupported type.
-func (p *TokenizerPlugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) ([]uint32, *tokenization.MultiModalFeatures) {
+func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) ([]uint32, *tokenization.MultiModalFeatures) {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 

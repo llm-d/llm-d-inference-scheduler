@@ -1,4 +1,4 @@
-package llmd
+package disaggprofile
 
 import (
 	"encoding/json"

@@ -1,5 +1,5 @@
-// Package llmd provides profile handler plugin for the epp.
-package llmd
+// Package disaggprofile provides profile handler plugin for the epp.
+package disaggprofile
 
 import (
 	"context"
@@ -45,7 +45,7 @@ var _ scheduling.ProfileHandler = &PdProfileHandler{}
 
 // PdProfileHandlerFactory defines the factory function for the PdProfileHandler.
 //
-// Deprecated: Use DisaggProfileHandlerFactory instead.
+// Deprecated: Use HandlerFactory instead.
 func PdProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	log.FromContext(handle.Context()).Info("Deprecated: pd-profile-handler is deprecated, use disagg-profile-handler instead")
 	parameters := pdProfileHandlerParameters{
@@ -118,7 +118,7 @@ func NewPdProfileHandler(prefillProfile, decodeProfile, prefixPluginType, prefix
 
 // PdProfileHandler handles scheduler profiles for PD.
 //
-// Deprecated: Use DisaggProfileHandler instead.
+// Deprecated: Use Handler instead.
 type PdProfileHandler struct {
 	typedName             plugin.TypedName
 	prefixPluginTypedName plugin.TypedName

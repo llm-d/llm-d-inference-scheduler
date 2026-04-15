@@ -1,5 +1,5 @@
-// Package llmd provides profile handler plugins for the epp.
-package llmd
+// Package disaggprofile provides profile handler plugins for the epp.
+package disaggprofile
 
 import (
 	"context"

@@ -4,11 +4,11 @@ package plugins
 import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/models"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata"
-	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol"
-	filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
-	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile/llm-d"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata/tokenizer"
+	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/disagg_headers"
+	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/disagg_profile"
+	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
 	activerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/active_request"
 	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/load_aware"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/multi"
@@ -19,16 +19,16 @@ import (
 
 // RegisterAllPlugins registers the factory functions of all plugins in this repository.
 func RegisterAllPlugins() {
-	plugin.Register(filter.ByLabelType, filter.ByLabelFactory)
-	plugin.Register(filter.ByLabelSelectorType, filter.ByLabelSelectorFactory)
-	plugin.Register(filter.EncodeRoleType, filter.EncodeRoleFactory)
-	plugin.Register(filter.DecodeRoleType, filter.DecodeRoleFactory)
-	plugin.Register(filter.PrefillRoleType, filter.PrefillRoleFactory)
+	plugin.Register(by_label_filter.ByLabelType, by_label_filter.ByLabelFactory)
+	plugin.Register(by_label_filter.ByLabelSelectorType, by_label_filter.ByLabelSelectorFactory)
+	plugin.Register(by_label_filter.EncodeRoleType, by_label_filter.EncodeRoleFactory)
+	plugin.Register(by_label_filter.DecodeRoleType, by_label_filter.DecodeRoleFactory)
+	plugin.Register(by_label_filter.PrefillRoleType, by_label_filter.PrefillRoleFactory)
 	plugin.Register(prerequest.DisaggHeadersHandlerType, prerequest.DisaggHeadersHandlerFactory)
 	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
 	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.DisaggHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
-	plugin.Register(profile.DisaggProfileHandlerType, profile.DisaggProfileHandlerFactory)
+	plugin.Register(profile.DisaggProfileHandlerType, profile.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
 	// golangci-lint v2 only accepts linter names (lowercase) in //nolint directives, not individual check IDs like SA1019
 	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
@@ -42,7 +42,7 @@ func RegisterAllPlugins() {
 	// pd decider plugins
 	plugin.Register(profile.PrefixBasedPDDeciderPluginType, profile.PrefixBasedPDDeciderPluginFactory)
 	plugin.Register(profile.AlwaysDisaggPDDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
-	plugin.Register(preparedata.TokenizerPluginType, preparedata.TokenizerPluginFactory)
+	plugin.Register(tokenizer.PluginType, tokenizer.PluginFactory)
 	// ep decider plugins
 	plugin.Register(profile.AlwaysDisaggMulimodalPluginType, profile.AlwaysDisaggMulimodalDeciderPluginFactory)
 	plugin.Register(multi.ContextLengthAwareType, multi.ContextLengthAwareFactory)

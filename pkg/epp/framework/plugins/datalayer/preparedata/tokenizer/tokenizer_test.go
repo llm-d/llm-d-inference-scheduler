@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package preparedata
+package tokenizer
 
 import (
 	"encoding/json"
@@ -43,14 +43,14 @@ func (m *mockTokenizer) RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uin
 	return m.renderChatFunc(req)
 }
 
-func newTestPlugin(tok tokenizer) *TokenizerPlugin {
-	return &TokenizerPlugin{
-		typedName: plugin.TypedName{Type: TokenizerPluginType, Name: "test"},
+func newTestPlugin(tok tokenizer) *Plugin {
+	return &Plugin{
+		typedName: plugin.TypedName{Type: PluginType, Name: "test"},
 		tokenizer: tok,
 	}
 }
 
-func TestTokenizerPluginFactory_Validation(t *testing.T) {
+func TestPluginFactory_Validation(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := plugin.NewEppHandle(ctx, nil)
 
@@ -87,7 +87,7 @@ func TestTokenizerPluginFactory_Validation(t *testing.T) {
 				rawParams = json.RawMessage(tt.params)
 			}
 
-			p, err := TokenizerPluginFactory("test-tokenizer", rawParams, handle)
+			p, err := PluginFactory("test-tokenizer", rawParams, handle)
 			if tt.expectErr {
 				require.Error(t, err)
 				assert.Nil(t, p)

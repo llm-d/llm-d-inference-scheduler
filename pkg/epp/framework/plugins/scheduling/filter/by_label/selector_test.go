@@ -12,7 +12,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
+	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -94,7 +94,7 @@ func TestByLabelSelectorFactoryWithJSON(t *testing.T) {
 		t.Run(tt.testName, func(t *testing.T) {
 			rawParams := json.RawMessage(tt.jsonParams)
 
-			plugin, err := filter.ByLabelSelectorFactory(tt.pluginName, rawParams, nil)
+			plugin, err := by_label_filter.ByLabelSelectorFactory(tt.pluginName, rawParams, nil)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -137,7 +137,7 @@ func TestByLabelSelectorFactoryWithInvalidJSON(t *testing.T) {
 		t.Run(tt.testName, func(t *testing.T) {
 			rawParams := json.RawMessage(tt.jsonParams)
 
-			plugin, err := filter.ByLabelSelectorFactory(tt.pluginName, rawParams, nil)
+			plugin, err := by_label_filter.ByLabelSelectorFactory(tt.pluginName, rawParams, nil)
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
@@ -291,11 +291,11 @@ func TestByLabelSelectorFiltering(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.testName, func(t *testing.T) {
 			rawParams := json.RawMessage(tt.selectorJSON)
-			plugin, err := filter.ByLabelSelectorFactory("test-selector", rawParams, nil)
+			plugin, err := by_label_filter.ByLabelSelectorFactory("test-selector", rawParams, nil)
 			require.NoError(t, err)
 			require.NotNil(t, plugin)
 
-			blf, ok := plugin.(*filter.ByLabelSelector)
+			blf, ok := plugin.(*by_label_filter.ByLabelSelector)
 			require.True(t, ok, "plugin should be of type *ByLabelSelector")
 
 			ctx := utils.NewTestContext(t)
@@ -317,10 +317,10 @@ func TestByLabelSelectorFiltering(t *testing.T) {
 
 func TestByLabelSelectorFilterEdgeCases(t *testing.T) {
 	rawParams := json.RawMessage(`{"matchLabels": {"app": "test"}}`)
-	plugin, err := filter.ByLabelSelectorFactory("test-selector", rawParams, nil)
+	plugin, err := by_label_filter.ByLabelSelectorFactory("test-selector", rawParams, nil)
 	require.NoError(t, err)
 
-	blf, ok := plugin.(*filter.ByLabelSelector)
+	blf, ok := plugin.(*by_label_filter.ByLabelSelector)
 	require.True(t, ok)
 
 	ctx := utils.NewTestContext(t)
@@ -348,27 +348,27 @@ func TestByLabelSelectorFilterEdgeCases(t *testing.T) {
 	})
 }
 
-// Example for setting Prefill/Decode roles using a LabelSelector filter.
+// Example for setting Prefill/Decode roles using a LabelSelector by_label_filter.
 // Definition of labels is based on https://github.com/llm-d/llm-d-inference-scheduler/issues/220.
 func ExamplePrefillDecodeRolesInLWS() {
 	decodeLeaderJSON := json.RawMessage(`{ "matchLabels": { "leaderworkerset.sigs.k8s.io/worker-index": "0" } }`)
-	plugin, _ := filter.ByLabelSelectorFactory("decode-role", decodeLeaderJSON, nil)
-	decodeLeader, _ := plugin.(*filter.ByLabelSelector)
+	plugin, _ := by_label_filter.ByLabelSelectorFactory("decode-role", decodeLeaderJSON, nil)
+	decodeLeader, _ := plugin.(*by_label_filter.ByLabelSelector)
 
 	decodeFollowerJSON := json.RawMessage(`{"matchExpressions": [{ 
 		"key": "leaderworkerset.sigs.k8s.io/worker-index",
       	"operator": "NotIn",
       	"values": ["0"]
     }]}`)
-	plugin, _ = filter.ByLabelSelectorFactory("ignore-decode-workers", decodeFollowerJSON, nil)
-	decodeFollower, _ := plugin.(*filter.ByLabelSelector)
+	plugin, _ = by_label_filter.ByLabelSelectorFactory("ignore-decode-workers", decodeFollowerJSON, nil)
+	decodeFollower, _ := plugin.(*by_label_filter.ByLabelSelector)
 
 	prefillWorkerJSON := json.RawMessage(`{"matchExpressions": [{
     	"key": "leaderworkerset.sigs.k8s.io/worker-index",
       	"operator": "DoesNotExist"
     }]}`)
-	plugin, _ = filter.ByLabelSelectorFactory("prefill-role", prefillWorkerJSON, nil)
-	prefillworker, _ := plugin.(*filter.ByLabelSelector)
+	plugin, _ = by_label_filter.ByLabelSelectorFactory("prefill-role", prefillWorkerJSON, nil)
+	prefillworker, _ := plugin.(*by_label_filter.ByLabelSelector)
 
 	endpoints := []scheduling.Endpoint{createEndpoint(k8stypes.NamespacedName{Namespace: "default", Name: "vllm"},
 		"10.0.0.1",
@@ -381,7 +381,7 @@ func ExamplePrefillDecodeRolesInLWS() {
 
 	name := ""
 
-	for _, blf := range []*filter.ByLabelSelector{decodeLeader, decodeFollower, prefillworker} {
+	for _, blf := range []*by_label_filter.ByLabelSelector{decodeLeader, decodeFollower, prefillworker} {
 		filtered := PrefillDecodeRolesInLWS(blf, endpoints)
 		if len(filtered) > 0 {
 			name = blf.TypedName().Name
@@ -406,6 +406,6 @@ func createEndpoint(nsn k8stypes.NamespacedName, ipaddr string, labels map[strin
 	)
 }
 
-func PrefillDecodeRolesInLWS(blf *filter.ByLabelSelector, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+func PrefillDecodeRolesInLWS(blf *by_label_filter.ByLabelSelector, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	return blf.Filter(context.Background(), nil, nil, endpoints)
 }

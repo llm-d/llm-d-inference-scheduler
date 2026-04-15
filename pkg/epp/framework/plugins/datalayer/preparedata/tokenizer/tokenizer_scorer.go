@@ -16,7 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package preparedata
+package tokenizer
 
 import (
 	"context"
@@ -27,19 +27,19 @@ import (
 )
 
 // compile-time type assertion.
-var _ scheduling.Scorer = &TokenizerPlugin{}
+var _ scheduling.Scorer = &Plugin{}
 
 // Category implements scheduling.Scorer.
 // The tokenizer scorer is an Affinity scorer since it produces data consumed
 // by cache-locality scorers.
-func (p *TokenizerPlugin) Category() scheduling.ScorerCategory {
+func (p *Plugin) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
 // Score implements scheduling.Scorer. It tokenizes the request prompt, writes
 // the result to CycleState under the TokenizedPromptStateKey constant, and
 // returns zero scores for all endpoints since this scorer only produces data.
-func (p *TokenizerPlugin) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, pods []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+func (p *Plugin) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, pods []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logutil.TRACE)
 

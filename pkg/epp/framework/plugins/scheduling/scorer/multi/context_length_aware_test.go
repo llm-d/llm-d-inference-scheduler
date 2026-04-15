@@ -11,7 +11,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata"
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -269,7 +269,7 @@ func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
 	}
 
 	cycleState := scheduling.NewCycleState()
-	cycleState.Write(preparedata.TokenizedPromptStateKey, &preparedata.TokenizedPromptState{
+	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
 		TokenIDs: tokenIDs,
 	})
 

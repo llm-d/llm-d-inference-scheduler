@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata"
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata/tokenizer"
 )
 
 const (
@@ -206,8 +206,8 @@ func (p *ContextLengthAware) getContextLength(ctx context.Context, cycleState *s
 
 	// Read tokenized prompt from CycleState, written by the tokenizer scorer plugin.
 	if cycleState != nil {
-		if tp, err := scheduling.ReadCycleStateKey[*preparedata.TokenizedPromptState](
-			cycleState, preparedata.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
+		if tp, err := scheduling.ReadCycleStateKey[*tokenizer.TokenizedPromptState](
+			cycleState, tokenizer.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
 			return len(tp.TokenIDs), true
 		}
 	}

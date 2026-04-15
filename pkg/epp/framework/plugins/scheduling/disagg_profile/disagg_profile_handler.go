@@ -1,5 +1,5 @@
-// Package llmd provides profile handler plugins for the epp.
-package llmd
+// Package disaggprofile provides profile handler plugins for the epp.
+package disaggprofile
 
 import (
 	"context"
@@ -94,11 +94,11 @@ func (l *legacyDisaggProfileHandlerParameters) toDisaggParams(logger logr.Logger
 	return p
 }
 
-// DisaggProfileHandlerFactory is the unified factory for all disaggregation profile handlers.
+// HandlerFactory is the unified factory for all disaggregation profile handlers.
 //
 //	if parameters.deciders.prefill is set - P disaggregation will be supported
 //	if parameters.deciders.encode is set - E disaggregation will be supported
-func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+func HandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	logger := log.FromContext(handle.Context())
 
 	parameters := disaggProfileHandlerParameters{}
@@ -175,9 +175,9 @@ func DisaggProfileHandlerFactory(name string, rawParameters json.RawMessage, han
 	return handler.WithName(name), nil
 }
 
-// NewDisaggProfileHandler creates a DisaggProfileHandler directly.
+// NewDisaggProfileHandler creates a Handler directly.
 // Active stages are determined by non-empty deciders.
-func NewDisaggProfileHandler(decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *DisaggProfileHandler {
+func NewDisaggProfileHandler(decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *Handler {
 	return newDisaggProfileHandler(
 		DisaggProfileHandlerType,
 		decodeProfile, prefillProfile, encodeProfile,
@@ -188,9 +188,9 @@ func NewDisaggProfileHandler(decodeProfile, prefillProfile, encodeProfile string
 // ── Shared implementation ───────────────────────────────────────────────────
 
 // compile-time assertion
-var _ scheduling.ProfileHandler = &DisaggProfileHandler{}
+var _ scheduling.ProfileHandler = &Handler{}
 
-// DisaggProfileHandler is the unified disaggregation profile handler.
+// Handler is the unified disaggregation profile handler.
 // It drives one or more of the following stages, each optional except decode:
 //
 //   - Encode  (E): schedules encoder pods for multimodal content
@@ -199,7 +199,7 @@ var _ scheduling.ProfileHandler = &DisaggProfileHandler{}
 //
 // All four handler types (D, P/D, E/PD, E/P/D) share this single implementation;
 // active stages are selected by setting encodeProfile / prefillProfile.
-type DisaggProfileHandler struct {
+type Handler struct {
 	typedName      plugin.TypedName
 	decodeProfile  string
 	prefillProfile string
@@ -209,21 +209,21 @@ type DisaggProfileHandler struct {
 }
 
 // TypedName returns the typed name of the plugin.
-func (h *DisaggProfileHandler) TypedName() plugin.TypedName { return h.typedName }
+func (h *Handler) TypedName() plugin.TypedName { return h.typedName }
 
 // WithName sets the instance name of the plugin.
-func (h *DisaggProfileHandler) WithName(name string) *DisaggProfileHandler {
+func (h *Handler) WithName(name string) *Handler {
 	h.typedName.Name = name
 	return h
 }
 
 // Consumes defines data types consumed by this plugin (through the PD decider).
-func (*DisaggProfileHandler) Consumes() map[string]any {
+func (*Handler) Consumes() map[string]any {
 	return map[string]any{dl_prefix.PrefixCacheMatchInfoKey: dl_prefix.PrefixCacheMatchInfo{}}
 }
 
-func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *DisaggProfileHandler {
-	return &DisaggProfileHandler{
+func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeProfile string, pdDecider, encodeDecider deciderPlugin) *Handler {
+	return &Handler{
 		typedName:      plugin.TypedName{Type: handlerType},
 		decodeProfile:  decodeProfile,
 		prefillProfile: prefillProfile,
@@ -236,7 +236,7 @@ func newDisaggProfileHandler(handlerType, decodeProfile, prefillProfile, encodeP
 // Pick implements scheduling.ProfileHandler.
 // Stages run in order: decode → encode (optional) → prefill (optional).
 // Returns the next profile to execute, or an empty map when all stages are done.
-func (h *DisaggProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+func (h *Handler) Pick(ctx context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(ctx, "llm_d.epp.disagg.profile_handler.pick",
@@ -313,7 +313,7 @@ func (h *DisaggProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleStat
 
 // ProcessResults implements scheduling.ProfileHandler.
 // Builds the final SchedulingResult from whichever stages ran successfully.
-func (h *DisaggProfileHandler) ProcessResults(
+func (h *Handler) ProcessResults(
 	_ context.Context,
 	_ *scheduling.CycleState,
 	request *scheduling.LLMRequest,

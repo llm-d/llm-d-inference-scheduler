@@ -1,4 +1,4 @@
-package llmd
+package disaggprofile
 
 import (
 	"context"
@@ -157,7 +157,7 @@ func TestHasMultimodalContent(t *testing.T) {
 
 // ── TypedName / WithName ─────────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_TypedName(t *testing.T) {
+func TestHandler_TypedName(t *testing.T) {
 	h := NewDisaggProfileHandler(defaultDecodeProfile, "", defaultEncodeProfile, nil, nil)
 	assert.Equal(t, DisaggProfileHandlerType, h.TypedName().Type)
 	assert.Empty(t, h.TypedName().Name)
@@ -169,7 +169,7 @@ func TestDisaggProfileHandler_TypedName(t *testing.T) {
 
 // ── Factory tests ─────────────────────────────────────────────────────────────
 
-func TestDisaggProfileHandlerFactory(t *testing.T) {
+func TestHandlerFactory(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := handleWithDeciders(ctx)
 
@@ -223,7 +223,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b, _ := json.Marshal(tt.params)
-			p, err := DisaggProfileHandlerFactory("h", b, handle)
+			p, err := HandlerFactory("h", b, handle)
 			if tt.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, p)
@@ -235,7 +235,7 @@ func TestDisaggProfileHandlerFactory(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandlerFactory_DeprecatedFlatParams(t *testing.T) {
+func TestHandlerFactory_DeprecatedFlatParams(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := handleWithDeciders(ctx)
 
@@ -272,7 +272,7 @@ func TestDisaggProfileHandlerFactory_DeprecatedFlatParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b, _ := json.Marshal(tt.params)
-			p, err := DisaggProfileHandlerFactory("h", b, handle)
+			p, err := HandlerFactory("h", b, handle)
 			if tt.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, p)
@@ -284,10 +284,10 @@ func TestDisaggProfileHandlerFactory_DeprecatedFlatParams(t *testing.T) {
 	}
 }
 
-// TestDisaggProfileHandlerFactory_PdProfileHandlerParams verifies that
-// DisaggProfileHandler accepts the exact parameter format of the deprecated
+// TestHandlerFactory_PdProfileHandlerParams verifies that
+// Handler accepts the exact parameter format of the deprecated
 // pd-profile-handler, enabling a zero-change migration between the two types.
-func TestDisaggProfileHandlerFactory_PdProfileHandlerParams(t *testing.T) {
+func TestHandlerFactory_PdProfileHandlerParams(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := handleWithDeciders(ctx)
 
@@ -306,9 +306,9 @@ func TestDisaggProfileHandlerFactory_PdProfileHandlerParams(t *testing.T) {
 			"decodeProfile":     "decode",
 			"prefillProfile":    "prefill",
 			"deciderPluginName": PrefixBasedPDDeciderPluginType,
-			"prefixPluginType":  "prefix-cache-scorer", // ignored by DisaggProfileHandler
-			"prefixPluginName":  "prefix-cache-scorer", // ignored by DisaggProfileHandler
-			"primaryPort":       8080,                  // ignored by DisaggProfileHandler
+			"prefixPluginType":  "prefix-cache-scorer", // ignored by Handler
+			"prefixPluginName":  "prefix-cache-scorer", // ignored by Handler
+			"primaryPort":       8080,                  // ignored by Handler
 		}, false},
 		{"pd-profile-handler unknown deciderPluginName", map[string]any{
 			"deciderPluginName": "INVALID",
@@ -317,7 +317,7 @@ func TestDisaggProfileHandlerFactory_PdProfileHandlerParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b, _ := json.Marshal(tt.params)
-			p, err := DisaggProfileHandlerFactory("h", b, handle)
+			p, err := HandlerFactory("h", b, handle)
 			if tt.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, p)
@@ -329,11 +329,11 @@ func TestDisaggProfileHandlerFactory_PdProfileHandlerParams(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandlerFactory_InvalidJSON(t *testing.T) {
+func TestHandlerFactory_InvalidJSON(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := handleWithDeciders(ctx)
 	for _, raw := range []string{`{"deciders": `} {
-		p, err := DisaggProfileHandlerFactory("h", json.RawMessage(raw), handle)
+		p, err := HandlerFactory("h", json.RawMessage(raw), handle)
 		assert.Error(t, err)
 		assert.Nil(t, p)
 	}
@@ -341,7 +341,7 @@ func TestDisaggProfileHandlerFactory_InvalidJSON(t *testing.T) {
 
 // ── P/D Pick tests ───────────────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_Pick_PD(t *testing.T) {
+func TestHandler_Pick_PD(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	req := completionsRequest("hello world hello world hello world") // ~8 tokens
 
@@ -413,7 +413,7 @@ func TestDisaggProfileHandler_Pick_PD(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandler_Pick_PD_InputTokenError(t *testing.T) {
+func TestHandler_Pick_PD_InputTokenError(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	// Request with neither Completions nor ChatCompletions → getUserInputLenInTokens fails.
 	req := &scheduling.LLMRequest{
@@ -436,7 +436,7 @@ func TestDisaggProfileHandler_Pick_PD_InputTokenError(t *testing.T) {
 	assert.Empty(t, got, "should return empty map on input token estimation error")
 }
 
-func TestDisaggProfileHandler_Pick_PD_Series(t *testing.T) {
+func TestHandler_Pick_PD_Series(t *testing.T) {
 	ctx := context.Background()
 	short := completionsRequest("hello world, hello world!")
 	long := completionsRequest("hello world, hello world! and some additional padding text here")
@@ -503,7 +503,7 @@ func TestDisaggProfileHandler_Pick_PD_Series(t *testing.T) {
 
 // ── P/D ProcessResults tests ─────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_ProcessResults_PD(t *testing.T) {
+func TestHandler_ProcessResults_PD(t *testing.T) {
 	tests := []struct {
 		name      string
 		results   map[string]*scheduling.ProfileRunResult
@@ -558,7 +558,7 @@ func TestDisaggProfileHandler_ProcessResults_PD(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandler_ProcessResults_NilRequest(t *testing.T) {
+func TestHandler_ProcessResults_NilRequest(t *testing.T) {
 	h := NewDisaggProfileHandler(defaultDecodeProfile, defaultPrefillProfile, "",
 		nil, nil)
 	results := map[string]*scheduling.ProfileRunResult{
@@ -571,7 +571,7 @@ func TestDisaggProfileHandler_ProcessResults_NilRequest(t *testing.T) {
 
 // ── Custom profile name tests ─────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_Pick_CustomProfiles(t *testing.T) {
+func TestHandler_Pick_CustomProfiles(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	profiles := map[string]scheduling.SchedulerProfile{
@@ -600,7 +600,7 @@ func TestDisaggProfileHandler_Pick_CustomProfiles(t *testing.T) {
 	assert.ElementsMatch(t, []string{customEncodeProfile}, profileNames(got))
 }
 
-func TestDisaggProfileHandler_ProcessResults_CustomProfiles(t *testing.T) {
+func TestHandler_ProcessResults_CustomProfiles(t *testing.T) {
 	h := NewDisaggProfileHandler(
 		customDecodeProfile, customPrefillProfile, customEncodeProfile,
 		nil, nil,
@@ -623,7 +623,7 @@ func TestDisaggProfileHandler_ProcessResults_CustomProfiles(t *testing.T) {
 
 // ── E/PD Pick tests ──────────────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_Pick_EPD(t *testing.T) {
+func TestHandler_Pick_EPD(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	profiles := map[string]scheduling.SchedulerProfile{
@@ -710,7 +710,7 @@ func TestDisaggProfileHandler_Pick_EPD(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandler_Pick_EPD_EncodeDecider(t *testing.T) {
+func TestHandler_Pick_EPD_EncodeDecider(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	profiles := map[string]scheduling.SchedulerProfile{
@@ -742,7 +742,7 @@ func TestDisaggProfileHandler_Pick_EPD_EncodeDecider(t *testing.T) {
 
 // ── E/PD ProcessResults tests ────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_ProcessResults_EPD(t *testing.T) {
+func TestHandler_ProcessResults_EPD(t *testing.T) {
 	tests := []struct {
 		name      string
 		results   map[string]*scheduling.ProfileRunResult
@@ -805,7 +805,7 @@ func TestDisaggProfileHandler_ProcessResults_EPD(t *testing.T) {
 
 // ── E/P/D Pick tests ─────────────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_Pick_EPD_Full(t *testing.T) {
+func TestHandler_Pick_EPD_Full(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	profiles := map[string]scheduling.SchedulerProfile{
@@ -923,7 +923,7 @@ func TestDisaggProfileHandler_Pick_EPD_Full(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandler_Pick_EPD_Full_EncodeDecider(t *testing.T) {
+func TestHandler_Pick_EPD_Full_EncodeDecider(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	multimodalLong := withPrompt(chatRequest(true, false, false), testLongPrompt)
@@ -968,7 +968,7 @@ func TestDisaggProfileHandler_Pick_EPD_Full_EncodeDecider(t *testing.T) {
 
 // ── E/P/D ProcessResults tests ───────────────────────────────────────────────
 
-func TestDisaggProfileHandler_ProcessResults_EPD_Full(t *testing.T) {
+func TestHandler_ProcessResults_EPD_Full(t *testing.T) {
 	tests := []struct {
 		name      string
 		results   map[string]*scheduling.ProfileRunResult
@@ -1040,7 +1040,7 @@ func TestDisaggProfileHandler_ProcessResults_EPD_Full(t *testing.T) {
 
 // ── Nil decider tests ────────────────────────────────────────────────────────
 
-func TestDisaggProfileHandler_Pick_NilDeciders(t *testing.T) {
+func TestHandler_Pick_NilDeciders(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	profiles := map[string]scheduling.SchedulerProfile{
@@ -1146,7 +1146,7 @@ func TestDisaggProfileHandler_Pick_NilDeciders(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandler_ProcessResults_NilDeciders(t *testing.T) {
+func TestHandler_ProcessResults_NilDeciders(t *testing.T) {
 	tests := []struct {
 		name          string
 		pdDecider     deciderPlugin
@@ -1233,7 +1233,7 @@ func TestDisaggProfileHandler_ProcessResults_NilDeciders(t *testing.T) {
 	}
 }
 
-func TestDisaggProfileHandler_Factory_NilDeciders(t *testing.T) {
+func TestHandler_Factory_NilDeciders(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handle := handleWithDeciders(ctx)
 
@@ -1278,7 +1278,7 @@ func TestDisaggProfileHandler_Factory_NilDeciders(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b, _ := json.Marshal(tt.params)
-			p, err := DisaggProfileHandlerFactory("h", b, handle)
+			p, err := HandlerFactory("h", b, handle)
 			if tt.expectErr {
 				assert.Error(t, err, tt.description)
 				assert.Nil(t, p)

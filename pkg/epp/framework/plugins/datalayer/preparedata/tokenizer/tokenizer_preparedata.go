@@ -16,7 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package preparedata
+package tokenizer
 
 import (
 	"context"
@@ -26,15 +26,15 @@ import (
 )
 
 // compile-time type assertion.
-var _ requestcontrol.PrepareDataPlugin = &TokenizerPlugin{}
+var _ requestcontrol.PrepareDataPlugin = &Plugin{}
 
 // Produces returns the data keys this plugin produces.
-func (p *TokenizerPlugin) Produces() map[string]any {
+func (p *Plugin) Produces() map[string]any {
 	return map[string]any{TokenizedPromptKey: scheduling.TokenizedPrompt{}}
 }
 
 // Consumes returns the data keys this plugin requires.
-func (p *TokenizerPlugin) Consumes() map[string]any {
+func (p *Plugin) Consumes() map[string]any {
 	return nil
 }
 
@@ -42,7 +42,7 @@ func (p *TokenizerPlugin) Consumes() map[string]any {
 // on the LLMRequest so that scorers and filters can use it.
 // If the request already contains tokenized data, tokenization is skipped.
 // This method is fail-open: errors are logged and TokenizedPrompt is left nil.
-func (p *TokenizerPlugin) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, pods []scheduling.Endpoint) error {
+func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, pods []scheduling.Endpoint) error {
 	if request.TokenizedPrompt != nil {
 		return nil
 	}

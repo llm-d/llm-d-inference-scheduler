@@ -19,8 +19,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 
-	filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
-	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile/llm-d"
+	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/disagg_profile"
+	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
 	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/load_aware"
 )
 
@@ -35,7 +35,7 @@ func TestPDSchedule(t *testing.T) {
 		&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "endpoint1"},
 			Address:        "1.2.3.4",
-			Labels:         map[string]string{filter.RoleLabel: filter.RolePrefill},
+			Labels:         map[string]string{by_label_filter.RoleLabel: by_label_filter.RolePrefill},
 		},
 		&fwkdl.Metrics{WaitingQueueSize: 0},
 		fwkdl.NewAttributes(),
@@ -44,7 +44,7 @@ func TestPDSchedule(t *testing.T) {
 		&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "endpoint2"},
 			Address:        "5.6.7.8",
-			Labels:         map[string]string{filter.RoleLabel: filter.RoleDecode},
+			Labels:         map[string]string{by_label_filter.RoleLabel: by_label_filter.RoleDecode},
 		},
 		&fwkdl.Metrics{WaitingQueueSize: 0},
 		fwkdl.NewAttributes(),
@@ -239,13 +239,13 @@ func TestPDSchedule(t *testing.T) {
 			assert.NoError(t, err, "Prefix plugin creation returned unexpected error")
 
 			prefillSchedulerProfile := scheduling.NewSchedulerProfile().
-				WithFilters(filter.NewPrefillRole()).
+				WithFilters(by_label_filter.NewPrefillRole()).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = prefillSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := scheduling.NewSchedulerProfile().
-				WithFilters(filter.NewDecodeRole()).
+				WithFilters(by_label_filter.NewDecodeRole()).
 				WithScorers(scheduling.NewWeightedScorer(loadaware.NewLoadAware(ctx, loadaware.QueueThresholdDefault), 1)).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = decodeSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 0))

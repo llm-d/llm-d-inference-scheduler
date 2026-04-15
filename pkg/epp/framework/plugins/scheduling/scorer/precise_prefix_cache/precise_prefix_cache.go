@@ -25,7 +25,7 @@ import (
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata"
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
@@ -629,7 +629,7 @@ func (s *Scorer) computeBlockKeys(ctx context.Context,
 
 	// Chat completions path
 	if request.Body.ChatCompletions != nil {
-		renderReq := preparedata.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
+		renderReq := tokenizer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 
 		return s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
 	}
@@ -672,8 +672,8 @@ func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleStat
 		"isCompletions", request.Body != nil && request.Body.Completions != nil)
 
 	// Read tokenized prompt from CycleState, written by the tokenizer scorer plugin.
-	if tp, err := scheduling.ReadCycleStateKey[*preparedata.TokenizedPromptState](
-		cycleState, preparedata.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
+	if tp, err := scheduling.ReadCycleStateKey[*tokenizer.TokenizedPromptState](
+		cycleState, tokenizer.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
 		traceLogger.Info("tokens found in CycleState, skipping tokenization")
 
 		var extraFeatures []*kvblock.BlockExtraFeatures
@@ -697,7 +697,7 @@ func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleStat
 			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
 		}
 
-		renderReq := preparedata.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
+		renderReq := tokenizer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 
 		traceLogger.Info("Processing chat completion request",
 			"messagesCount", len(renderReq.Conversation),
