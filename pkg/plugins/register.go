@@ -21,7 +21,7 @@ func RegisterAllPlugins() {
 	plugin.Register(prerequest.DisaggHeadersHandlerType, prerequest.DisaggHeadersHandlerFactory)
 	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
 	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.DisaggHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
-	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
+
 	plugin.Register(profile.DisaggProfileHandlerType, profile.DisaggProfileHandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
 	// golangci-lint v2 only accepts linter names (lowercase) in //nolint directives, not individual check IDs like SA1019
