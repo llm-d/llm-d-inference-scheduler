@@ -1,4 +1,4 @@
-package multi
+package contextlengthaware
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata/tokenizer"
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -35,7 +35,7 @@ func createRequest() *scheduling.LLMRequest {
 	}
 }
 
-func TestContextLengthAwareFactory(t *testing.T) {
+func TestFactory(t *testing.T) {
 	tests := []struct {
 		name       string
 		pluginName string
@@ -68,7 +68,7 @@ func TestContextLengthAwareFactory(t *testing.T) {
 			if tt.jsonParams != "" {
 				rawParams = json.RawMessage(tt.jsonParams)
 			}
-			plugin, err := ContextLengthAwareFactory(tt.pluginName, rawParams, nil)
+			plugin, err := Factory(tt.pluginName, rawParams, nil)
 
 			if tt.expectErr {
 				assert.Error(t, err)

@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins"
-	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/precise_prefix_cache"
+	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache"
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 

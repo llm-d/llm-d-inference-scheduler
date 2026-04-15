@@ -1,4 +1,5 @@
-package disaggprofile
+// Package dataparallel provides a data-parallel profile handler plugin for the epp.
+package dataparallel
 
 import (
 	"context"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	// DataParallelProfileHandlerType is the type of the DataParallelProfileHandler
+	// DataParallelProfileHandlerType is the type of the ProfileHandler
 	DataParallelProfileHandlerType = "data-parallel-profile-handler"
 )
 
@@ -25,17 +26,17 @@ type dataParallelProfileHandlerParameters struct {
 }
 
 // compile-time type assertion
-var _ scheduling.ProfileHandler = &DataParallelProfileHandler{}
+var _ scheduling.ProfileHandler = &ProfileHandler{}
 
-// DataParallelProfileHandlerFactory defines the factory function for the DataParallelProfileHandler
-func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+// ProfileHandlerFactory defines the factory function for the ProfileHandler
+func ProfileHandlerFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	log.FromContext(handle.Context()).Info("Deprecated: Use simple-profile-handler with Istio >= 1.28.1")
 	parameters := dataParallelProfileHandlerParameters{
 		PrimaryPort: 8000,
 	}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", PdProfileHandlerType, err)
+			return nil, fmt.Errorf("failed to parse the parameters of the '%s' profile handler - %w", DataParallelProfileHandlerType, err)
 		}
 	}
 
@@ -45,37 +46,37 @@ func DataParallelProfileHandlerFactory(name string, rawParameters json.RawMessag
 		}
 	}
 
-	return NewDataParallelProfileHandler(parameters.PrimaryPort).WithName(name), nil
+	return NewProfileHandler(parameters.PrimaryPort).WithName(name), nil
 }
 
-// NewDataParallelProfileHandler initializes a new PdProfileHandler and returns its pointer.
-func NewDataParallelProfileHandler(primaryPort int) *DataParallelProfileHandler {
-	return &DataParallelProfileHandler{
+// NewProfileHandler initializes a new PdProfileHandler and returns its pointer.
+func NewProfileHandler(primaryPort int) *ProfileHandler {
+	return &ProfileHandler{
 		typedName:   plugin.TypedName{Type: DataParallelProfileHandlerType},
 		primaryPort: strconv.Itoa(primaryPort),
 	}
 }
 
-// DataParallelProfileHandler handles scheduler profiles for Data Parallel.
-type DataParallelProfileHandler struct {
+// ProfileHandler handles scheduler profiles for Data Parallel.
+type ProfileHandler struct {
 	typedName   plugin.TypedName
 	primaryPort string
 }
 
 // TypedName returns the typed name of the plugin.
-func (h *DataParallelProfileHandler) TypedName() plugin.TypedName {
+func (h *ProfileHandler) TypedName() plugin.TypedName {
 	return h.typedName
 }
 
 // WithName sets the name of the plugin.
-func (h *DataParallelProfileHandler) WithName(name string) *DataParallelProfileHandler {
+func (h *ProfileHandler) WithName(name string) *ProfileHandler {
 	h.typedName.Name = name
 	return h
 }
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *DataParallelProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+func (h *ProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	if len(profiles) == len(profileResults) { // all profiles have been executed already in previous call
 		return map[string]scheduling.SchedulerProfile{}
@@ -95,7 +96,7 @@ func (h *DataParallelProfileHandler) Pick(ctx context.Context, _ *scheduling.Cyc
 // It may aggregate results, log test profile outputs, or apply custom logic. It specifies in the SchedulingResult the
 // key of the primary profile that should be used to get the request selected destination.
 // When a profile run fails, its result in the profileResults map is nil.
-func (h *DataParallelProfileHandler) ProcessResults(_ context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
+func (h *ProfileHandler) ProcessResults(_ context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
 	profileResults map[string]*scheduling.ProfileRunResult) (*scheduling.SchedulingResult, error) {
 	if len(profileResults) != 1 {
 		return nil, errors.New("data parallel profile handler is intended to be used with a single profile, failed to process multiple profiles")

@@ -19,9 +19,9 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 
-	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/disagg_profile"
-	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
-	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/load_aware"
+	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
+	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
+	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
 )
 
 const (

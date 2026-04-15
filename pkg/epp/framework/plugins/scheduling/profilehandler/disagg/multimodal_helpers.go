@@ -1,4 +1,4 @@
-package disaggprofile
+package disagg
 
 import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"

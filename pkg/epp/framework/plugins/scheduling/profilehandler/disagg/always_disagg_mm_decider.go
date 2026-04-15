@@ -1,4 +1,4 @@
-package disaggprofile
+package disagg
 
 import (
 	"context"

@@ -1,13 +1,16 @@
-package disaggprofile
+package dataparallel
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
@@ -15,7 +18,48 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func TestDataParallelProfileHandlerFactory(t *testing.T) {
+const DefaultTestPodPort = "8000"
+
+func createEndpoint(nsn k8stypes.NamespacedName, ipaddr, port string, labels map[string]string) scheduling.Endpoint {
+	return scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{
+			NamespacedName: nsn,
+			Address:        ipaddr,
+			Port:           port,
+			Labels:         labels,
+		},
+		nil,
+		fwkdl.NewAttributes(),
+	)
+}
+
+func newMockProfileRunResult(port string, endpointNames ...string) *scheduling.ProfileRunResult {
+	endpoints := make([]scheduling.Endpoint, 0, len(endpointNames))
+	for i, name := range endpointNames {
+		ip := fmt.Sprintf("10.0.0.%d", i+1)
+		endpoints = append(endpoints, createEndpoint(
+			k8stypes.NamespacedName{Namespace: "default", Name: name},
+			ip,
+			port,
+			map[string]string{},
+		))
+	}
+	return &scheduling.ProfileRunResult{
+		TargetEndpoints: endpoints,
+	}
+}
+
+func newMockSchedulerProfile() scheduling.SchedulerProfile {
+	return &mockSchedulerProfile{}
+}
+
+type mockSchedulerProfile struct{}
+
+func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.LLMRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
+	return &scheduling.ProfileRunResult{}, nil
+}
+
+func TestProfileHandlerFactory(t *testing.T) {
 	tests := []struct {
 		name         string
 		pluginName   string
@@ -79,7 +123,7 @@ func TestDataParallelProfileHandlerFactory(t *testing.T) {
 				rawParams = json.RawMessage(tt.jsonParams)
 			}
 			handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
-			plugin, err := DataParallelProfileHandlerFactory(tt.pluginName, rawParams, handle)
+			plugin, err := ProfileHandlerFactory(tt.pluginName, rawParams, handle)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -92,7 +136,7 @@ func TestDataParallelProfileHandlerFactory(t *testing.T) {
 	}
 }
 
-func TestDataParallelProfileHandlerFactoryInvalidJSON(t *testing.T) {
+func TestProfileHandlerFactoryInvalidJSON(t *testing.T) {
 	invalidTests := []struct {
 		name       string
 		jsonParams string
@@ -116,7 +160,7 @@ func TestDataParallelProfileHandlerFactoryInvalidJSON(t *testing.T) {
 
 			rawParams := json.RawMessage(tt.jsonParams)
 			handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
-			plugin, err := DataParallelProfileHandlerFactory("test", rawParams, handle)
+			plugin, err := ProfileHandlerFactory("test", rawParams, handle)
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
@@ -124,7 +168,7 @@ func TestDataParallelProfileHandlerFactoryInvalidJSON(t *testing.T) {
 	}
 }
 
-func Test_DataParallelProfileHandler_Pick(t *testing.T) {
+func Test_ProfileHandler_Pick(t *testing.T) {
 	tests := []struct {
 		name              string
 		profiles          map[string]scheduling.SchedulerProfile
@@ -178,7 +222,7 @@ func Test_DataParallelProfileHandler_Pick(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDataParallelProfileHandler(8000).WithName("test-handler")
+			handler := NewProfileHandler(8000).WithName("test-handler")
 			ctx := context.Background()
 
 			result := handler.Pick(ctx, &scheduling.CycleState{}, &scheduling.LLMRequest{}, tt.profiles, tt.profileResults)
@@ -193,7 +237,7 @@ func Test_DataParallelProfileHandler_Pick(t *testing.T) {
 	}
 }
 
-func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
+func Test_ProfileHandler_ProcessResults(t *testing.T) {
 	tests := []struct {
 		name           string
 		primaryPort    int
@@ -266,7 +310,7 @@ func Test_DataParallelProfileHandler_ProcessResults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewDataParallelProfileHandler(tt.primaryPort).WithName("test-handler")
+			handler := NewProfileHandler(tt.primaryPort).WithName("test-handler")
 			headers := make(map[string]string)
 			req := &scheduling.LLMRequest{Headers: headers}
 			result, err := handler.ProcessResults(context.Background(), &scheduling.CycleState{}, req, tt.profileResults)

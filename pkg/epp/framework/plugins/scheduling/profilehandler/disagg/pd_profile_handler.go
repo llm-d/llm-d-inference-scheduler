@@ -1,5 +1,5 @@
-// Package disaggprofile provides profile handler plugin for the epp.
-package disaggprofile
+// Package disagg provides profile handler plugin for the epp.
+package disagg
 
 import (
 	"context"

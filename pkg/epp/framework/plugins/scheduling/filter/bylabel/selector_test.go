@@ -12,7 +12,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
+	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 

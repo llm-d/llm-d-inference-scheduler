@@ -1,4 +1,4 @@
-package multi
+package contextlengthaware
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata/tokenizer"
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/dataproducer/tokenizer"
 )
 
 const (
@@ -50,8 +50,8 @@ type contextRange struct {
 var _ scheduling.Filter = &ContextLengthAware{} // validate interface conformance
 var _ scheduling.Scorer = &ContextLengthAware{} // validate interface conformance
 
-// ContextLengthAwareFactory defines the factory function for the ContextLengthAware plugin.
-func ContextLengthAwareFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+// Factory defines the factory function for the ContextLengthAware plugin.
+func Factory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := &contextLengthAwareParameters{
 		Label:           DefaultContextLengthLabel,
 		EnableFiltering: false,

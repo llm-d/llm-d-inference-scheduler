@@ -1,4 +1,4 @@
-package disaggprofile
+package disagg
 
 import (
 	"context"
@@ -186,7 +186,7 @@ func createEndpoint(nsn k8stypes.NamespacedName, ipaddr, port string, labels map
 }
 
 // newMockProfileRunResult creates a ProfileRunResult with Pods using the given port.
-func newMockProfileRunResult(port string, endpointNames ...string) *scheduling.ProfileRunResult {
+func newMockProfileRunResult(port string, endpointNames ...string) *scheduling.ProfileRunResult { //nolint:unparam // port varies in other packages using this pattern
 	endpoints := make([]scheduling.Endpoint, 0, len(endpointNames))
 	for i, name := range endpointNames {
 		ip := fmt.Sprintf("10.0.0.%d", i+1)

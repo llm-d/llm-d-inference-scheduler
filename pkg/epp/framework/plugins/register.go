@@ -4,17 +4,18 @@ package plugins
 import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
-	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/preparedata/tokenizer"
-	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/disagg_headers"
-	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/disagg_profile"
-	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/by_label"
-	activerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/active_request"
-	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/load_aware"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/multi"
-	nohitlru "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/no_hit_lru"
-	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/precise_prefix_cache"
-	sessionaffinity "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/session_affinity"
+	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/disaggheaders"
+	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
+	dataparallel "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/dataparallel"
+	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
+	activerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/activerequest"
+	contextlengthaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/contextlengthaware"
+	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
+	nohitlru "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/nohitlru"
+	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache"
+	sessionaffinity "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/sessionaffinity"
 )
 
 // RegisterAllPlugins registers the factory functions of all plugins in this repository.
@@ -27,7 +28,7 @@ func RegisterAllPlugins() {
 	plugin.Register(prerequest.DisaggHeadersHandlerType, prerequest.DisaggHeadersHandlerFactory)
 	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
 	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.DisaggHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
-	plugin.Register(profile.DataParallelProfileHandlerType, profile.DataParallelProfileHandlerFactory)
+	plugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
 	plugin.Register(profile.DisaggProfileHandlerType, profile.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
 	// golangci-lint v2 only accepts linter names (lowercase) in //nolint directives, not individual check IDs like SA1019
@@ -45,5 +46,5 @@ func RegisterAllPlugins() {
 	plugin.Register(tokenizer.PluginType, tokenizer.PluginFactory)
 	// ep decider plugins
 	plugin.Register(profile.AlwaysDisaggMulimodalPluginType, profile.AlwaysDisaggMulimodalDeciderPluginFactory)
-	plugin.Register(multi.ContextLengthAwareType, multi.ContextLengthAwareFactory)
+	plugin.Register(contextlengthaware.ContextLengthAwareType, contextlengthaware.Factory)
 }
