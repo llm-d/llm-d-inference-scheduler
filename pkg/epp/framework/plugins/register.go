@@ -4,9 +4,8 @@ package plugins
 import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
-	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/dataproducer/tokenizer"
+	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/app/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
-	prerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/disaggheaders"
 	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
 	dataparallel "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/dataparallel"
 	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
@@ -25,9 +24,9 @@ func RegisterAllPlugins() {
 	plugin.Register(by_label_filter.EncodeRoleType, by_label_filter.EncodeRoleFactory)
 	plugin.Register(by_label_filter.DecodeRoleType, by_label_filter.DecodeRoleFactory)
 	plugin.Register(by_label_filter.PrefillRoleType, by_label_filter.PrefillRoleFactory)
-	plugin.Register(prerequest.DisaggHeadersHandlerType, prerequest.DisaggHeadersHandlerFactory)
+	plugin.Register(profile.DisaggHeadersHandlerType, profile.HeadersHandlerFactory)
 	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
-	plugin.Register(prerequest.PrefillHeaderHandlerType, prerequest.DisaggHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
+	plugin.Register(profile.PrefillHeaderHandlerType, profile.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	plugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
 	plugin.Register(profile.DisaggProfileHandlerType, profile.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.

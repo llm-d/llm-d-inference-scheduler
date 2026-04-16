@@ -1,4 +1,4 @@
-package prerequest
+package disagg
 
 import (
 	"encoding/json"
@@ -19,8 +19,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	giePlugin.Register(DisaggHeadersHandlerType, DisaggHeadersHandlerFactory)
-	giePlugin.Register(PrefillHeaderHandlerType, DisaggHeadersHandlerFactory) //nolint:staticcheck
+	giePlugin.Register(DisaggHeadersHandlerType, HeadersHandlerFactory)
+	giePlugin.Register(PrefillHeaderHandlerType, HeadersHandlerFactory) //nolint:staticcheck
 	os.Exit(m.Run())
 }
 
@@ -30,7 +30,7 @@ const (
 	testIPv6Addr = "fd00::1"
 )
 
-func makeEndpoint(addr string) scheduling.Endpoint {
+func makeEndpointByAddr(addr string) scheduling.Endpoint {
 	return scheduling.NewEndpoint(
 		&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Namespace: "default", Name: "prefill-pod"},
@@ -54,7 +54,7 @@ func makeEncodeEndpoint(addr string) scheduling.Endpoint {
 	)
 }
 
-func TestDisaggHeadersHandlerFactory(t *testing.T) {
+func TestHeadersHandlerFactory(t *testing.T) {
 	tests := []struct {
 		name                 string
 		pluginName           string
@@ -106,7 +106,7 @@ func TestDisaggHeadersHandlerFactory(t *testing.T) {
 				raw = json.RawMessage(tt.rawParams)
 			}
 
-			p, err := DisaggHeadersHandlerFactory(tt.pluginName, raw, nil)
+			p, err := HeadersHandlerFactory(tt.pluginName, raw, nil)
 			if tt.expectErr {
 				assert.Error(t, err)
 				assert.Nil(t, p)
@@ -116,7 +116,7 @@ func TestDisaggHeadersHandlerFactory(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, p)
 
-			handler, ok := p.(*DisaggHeadersHandler)
+			handler, ok := p.(*HeadersHandler)
 			require.True(t, ok)
 			assert.Equal(t, tt.expectName, handler.TypedName().Name)
 			assert.Equal(t, DisaggHeadersHandlerType, handler.TypedName().Type)
@@ -128,7 +128,7 @@ func TestDisaggHeadersHandlerFactory(t *testing.T) {
 
 func TestPreRequestNilRequest(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	result := &scheduling.SchedulingResult{
 		ProfileResults: map[string]*scheduling.ProfileRunResult{},
@@ -141,7 +141,7 @@ func TestPreRequestNilRequest(t *testing.T) {
 
 func TestPreRequestNilSchedulingResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -165,7 +165,7 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
-	handler, ok := p.(*DisaggHeadersHandler)
+	handler, ok := p.(*HeadersHandler)
 	require.True(t, ok)
 	assert.Equal(t, "prefill", handler.prefillProfile)
 	assert.Equal(t, defaultEncodeProfile, handler.encodeProfile)
@@ -179,7 +179,7 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 	result := &scheduling.SchedulingResult{
 		PrimaryProfileName: "decode",
 		ProfileResults: map[string]*scheduling.ProfileRunResult{
-			"prefill": {TargetEndpoints: []scheduling.Endpoint{makeEndpoint(testAddr)}},
+			"prefill": {TargetEndpoints: []scheduling.Endpoint{makeEndpointByAddr(testAddr)}},
 		},
 	}
 
@@ -194,7 +194,7 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 
 func TestPreRequestPrefillProfileExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		TargetModel: "test-model",
@@ -207,7 +207,7 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 		ProfileResults: map[string]*scheduling.ProfileRunResult{
 			"prefill": {
 				TargetEndpoints: []scheduling.Endpoint{
-					makeEndpoint(testAddr),
+					makeEndpointByAddr(testAddr),
 				},
 			},
 		},
@@ -220,7 +220,7 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 
 func TestPreRequestPrefillProfileNotExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{},
@@ -239,7 +239,7 @@ func TestPreRequestPrefillProfileNotExists(t *testing.T) {
 
 func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
@@ -252,7 +252,7 @@ func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
 		ProfileResults: map[string]*scheduling.ProfileRunResult{
 			"prefill": {
 				TargetEndpoints: []scheduling.Endpoint{
-					makeEndpoint(testAddr),
+					makeEndpointByAddr(testAddr),
 				},
 			},
 		},
@@ -265,7 +265,7 @@ func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
 
 func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
@@ -286,7 +286,7 @@ func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 
 func TestPreRequestCustomPrefillProfile(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("my-custom-prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("my-custom-prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{},
@@ -297,7 +297,7 @@ func TestPreRequestCustomPrefillProfile(t *testing.T) {
 		ProfileResults: map[string]*scheduling.ProfileRunResult{
 			"my-custom-prefill": {
 				TargetEndpoints: []scheduling.Endpoint{
-					makeEndpoint(testAddr),
+					makeEndpointByAddr(testAddr),
 				},
 			},
 		},
@@ -312,7 +312,7 @@ func TestPreRequestPrefillProfileNilResult(t *testing.T) {
 	// disagg_profile_handler sets the prefill profile result to nil when the
 	// decider decides not to prefill. Verify PreRequest handles this gracefully.
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -335,7 +335,7 @@ func TestPreRequestPrefillProfileNilResult(t *testing.T) {
 
 func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -358,7 +358,7 @@ func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
 
 func TestPreRequestPrefillIPv6Address(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{},
@@ -369,7 +369,7 @@ func TestPreRequestPrefillIPv6Address(t *testing.T) {
 		ProfileResults: map[string]*scheduling.ProfileRunResult{
 			"prefill": {
 				TargetEndpoints: []scheduling.Endpoint{
-					makeEndpoint(testIPv6Addr),
+					makeEndpointByAddr(testIPv6Addr),
 				},
 			},
 		},
@@ -384,7 +384,7 @@ func TestPreRequestPrefillIPv6Address(t *testing.T) {
 
 func TestPreRequestEncodeProfileExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		TargetModel: "test-model",
@@ -410,7 +410,7 @@ func TestPreRequestEncodeProfileExists(t *testing.T) {
 
 func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -430,7 +430,7 @@ func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 
 func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -457,7 +457,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 
 func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -479,7 +479,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 
 func TestPreRequestEncodeCustomProfile(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "my-custom-encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "my-custom-encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -504,7 +504,7 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 
 func TestPreRequestEncodeIPv6Address(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -531,7 +531,7 @@ func TestPreRequestEncodeProfileNilResult(t *testing.T) {
 	// disagg_profile_handler sets the encode profile result to nil when the
 	// decider decides not to encode. Verify PreRequest handles this gracefully.
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -554,7 +554,7 @@ func TestPreRequestEncodeProfileNilResult(t *testing.T) {
 
 func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
@@ -579,7 +579,7 @@ func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 
 func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	handler := NewDisaggHeadersHandler("prefill", "encode").WithName("test")
+	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",

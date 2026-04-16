@@ -1,5 +1,5 @@
-// Package prerequest provides pre-request plugins for GIE.
-package prerequest
+// Package disagg provides pre-request plugins for GIE.
+package disagg
 
 import (
 	"context"
@@ -19,28 +19,25 @@ import (
 )
 
 const (
-	// DisaggHeadersHandlerType is the type of the DisaggHeadersHandler
+	// DisaggHeadersHandlerType is the type of the HeadersHandler
 	DisaggHeadersHandlerType = "disagg-headers-handler"
 
 	// PrefillHeaderHandlerType is a deprecated alias for DisaggHeadersHandlerType.
 	//
 	// Deprecated: use DisaggHeadersHandlerType instead.
 	PrefillHeaderHandlerType = "prefill-header-handler"
-
-	defaultPrefillProfile = "prefill"
-	defaultEncodeProfile  = "encode"
 )
 
 // compile-time type assertion
-var _ requestcontrol.PreRequest = &DisaggHeadersHandler{}
+var _ requestcontrol.PreRequest = &HeadersHandler{}
 
 type disaggHeadersHandlerParameters struct {
 	PrefillProfile string `json:"prefillProfile"`
 	EncodeProfile  string `json:"encodeProfile"`
 }
 
-// DisaggHeadersHandlerFactory defines the factory function for the DisaggHeadersHandler
-func DisaggHeadersHandlerFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+// HeadersHandlerFactory defines the factory function for the HeadersHandler
+func HeadersHandlerFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := disaggHeadersHandlerParameters{
 		PrefillProfile: defaultPrefillProfile,
 		EncodeProfile:  defaultEncodeProfile,
@@ -50,38 +47,38 @@ func DisaggHeadersHandlerFactory(name string, rawParameters json.RawMessage, _ p
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' pre-request plugin - %w", DisaggHeadersHandlerType, err)
 		}
 	}
-	return NewDisaggHeadersHandler(parameters.PrefillProfile, parameters.EncodeProfile).WithName(name), nil
+	return NewHeadersHandler(parameters.PrefillProfile, parameters.EncodeProfile).WithName(name), nil
 }
 
-// NewDisaggHeadersHandler initializes a new DisaggHeadersHandler and returns its pointer.
-func NewDisaggHeadersHandler(prefillProfile, encodeProfile string) *DisaggHeadersHandler {
-	return &DisaggHeadersHandler{
+// NewHeadersHandler initializes a new HeadersHandler and returns its pointer.
+func NewHeadersHandler(prefillProfile, encodeProfile string) *HeadersHandler {
+	return &HeadersHandler{
 		typedName:      plugin.TypedName{Type: DisaggHeadersHandlerType},
 		prefillProfile: prefillProfile,
 		encodeProfile:  encodeProfile,
 	}
 }
 
-// DisaggHeadersHandler PreRequest plugin that sets both prefill and encode disaggregation headers.
-type DisaggHeadersHandler struct {
+// HeadersHandler PreRequest plugin that sets both prefill and encode disaggregation headers.
+type HeadersHandler struct {
 	typedName      plugin.TypedName
 	prefillProfile string
 	encodeProfile  string
 }
 
 // TypedName returns the typed name of the plugin.
-func (p *DisaggHeadersHandler) TypedName() plugin.TypedName {
+func (p *HeadersHandler) TypedName() plugin.TypedName {
 	return p.typedName
 }
 
 // WithName sets the name of the plugin.
-func (p *DisaggHeadersHandler) WithName(name string) *DisaggHeadersHandler {
+func (p *HeadersHandler) WithName(name string) *HeadersHandler {
 	p.typedName.Name = name
 	return p
 }
 
 // PreRequest wires prefill and encode SchedulerProfile results into headers to indicate disaggregation workers.
-func (p *DisaggHeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
 	tracer := telemetry.Tracer()
 	_, span := tracer.Start(ctx, "llm_d.epp.prerequest.disaggregation",
 		trace.WithSpanKind(trace.SpanKindInternal),

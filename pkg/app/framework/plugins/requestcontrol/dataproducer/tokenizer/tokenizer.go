@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package tokenizer provides PrepareData plugins for the scheduler.
+// Package tokenizer provides DataProducer plugin for the scheduler.
 package tokenizer
 
 import (
