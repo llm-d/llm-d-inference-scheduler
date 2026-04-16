@@ -291,8 +291,12 @@ type PrecisePrefixCacheScorer struct {
 	subscribersManager *kvevents.SubscriberManager
 	kvEventsConfig     *kvevents.Config
 
-	// pluginState stores per-request data (block keys, scores) shared
+	// Deprecated: pluginState stores per-request data (block keys, scores) shared
 	// between PrepareRequestData, Score, and PreRequest extension points.
+	// This should be replaced with CycleState once the upstream IGW interfaces
+	// (PrepareDataPlugin.PrepareRequestData and requestcontrol.PreRequest) are
+	// updated to accept CycleState. See:
+	// https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2657
 	pluginState *plugin.PluginState
 
 	// speculativeCache tracks speculative entries added to the index so that
@@ -393,7 +397,8 @@ func (s *PrecisePrefixCacheScorer) PrepareRequestData(ctx context.Context,
 		ep.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(matchLen, len(blockKeys), blockSize))
 	}
 
-	// 6. Save to PluginState for Score() and PreRequest()
+	// 6. Save to PluginState for Score() and PreRequest().
+	// Deprecated: migrate to CycleState once PrepareRequestData receives it upstream.
 	s.pluginState.Write(request.RequestId, stateKey, &precisePluginState{
 		blockKeys: blockKeys,
 		scores:    scores,
@@ -464,7 +469,9 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 	}
 
-	// Try to reuse pre-computed scores from PrepareRequestData
+	// Try to reuse pre-computed scores from PrepareRequestData.
+	// Deprecated: reads from PluginState; migrate to CycleState once
+	// PrepareRequestData writes to CycleState upstream.
 	var scores map[string]float64
 	if pluginStateData, err := plugin.ReadPluginStateKey[*precisePluginState](
 		s.pluginState, request.RequestId, stateKey); err == nil {
@@ -552,7 +559,8 @@ func (s *PrecisePrefixCacheScorer) PreRequest(ctx context.Context,
 
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 
-	// 1. Read block keys from PluginState
+	// 1. Read block keys from PluginState.
+	// Deprecated: migrate to CycleState once PreRequest receives it upstream.
 	state, err := plugin.ReadPluginStateKey[*precisePluginState](
 		s.pluginState, request.RequestId, stateKey)
 	if err != nil {
