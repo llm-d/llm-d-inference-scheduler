@@ -5,6 +5,7 @@ approvers:
 - nirrozenbaum
 - shmuelk
 - vMaroon
+- ahg-g
 
 reviewers:
 - elevran
@@ -13,6 +14,7 @@ reviewers:
 - nirrozenbaum
 - shmuelk
 - vMaroon
+- ahg-g
 
 # Auto-assign configuration for global assignment
 # Works in addition to GitHub's built-in CODEOWNERS functionality
@@ -24,3 +26,4 @@ auto-assign:
   - nirrozenbaum
   - shmuelk
   - vMaroon
+  - ahg-g
