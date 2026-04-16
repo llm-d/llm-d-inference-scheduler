@@ -1,7 +1,7 @@
 # Use Ubuntu 22.04 as the stable base
 FROM ubuntu:22.04
 
-LABEL description="Squid Proxy with SSL-Bump support for vLLM and ai-dynamo"
+LABEL description="Squid Proxy with SSL-Bump support"
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
