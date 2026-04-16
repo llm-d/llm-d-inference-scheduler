@@ -49,7 +49,7 @@ const (
 
 type kvCacheIndexer interface {
 	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
-	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
 	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
 }
@@ -510,7 +510,7 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 			return "", false
 		}
 
-		return fmt.Sprintf("%s:%s", metadata.Address, metadata.Port), true
+		return common.PodAddress(metadata.Address, metadata.Port), true
 	}
 
 	// Write prefix cache state to cycle state.
@@ -650,7 +650,7 @@ func (s *PrecisePrefixCacheScorer) computeBlockKeys(ctx context.Context,
 		for i, msg := range request.Body.ChatCompletions.Messages {
 			conversations[i] = types.Conversation{
 				Role:    msg.Role,
-				Content: msg.Content.Raw,
+				Content: types.Content{Raw: msg.Content.Raw},
 			}
 		}
 
@@ -709,7 +709,7 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 	if request.TokenizedPrompt != nil && len(request.TokenizedPrompt.TokenIDs) > 0 {
 		traceLogger.Info("tokens already in the request, skipping tokenization")
 
-		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, request.TokenizedPrompt.TokenIDs, request.TargetModel, nil)
+		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, request.TokenizedPrompt.TokenIDs, request.TargetModel, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
 		}
@@ -728,7 +728,7 @@ func (s *PrecisePrefixCacheScorer) getScores(ctx context.Context, request *sched
 		for i, msg := range request.Body.ChatCompletions.Messages {
 			conversations[i] = types.Conversation{
 				Role:    msg.Role,
-				Content: msg.Content.Raw,
+				Content: types.Content{Raw: msg.Content.Raw},
 			}
 		}
 

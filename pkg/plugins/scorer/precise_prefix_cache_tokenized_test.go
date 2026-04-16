@@ -35,7 +35,7 @@ import (
 
 type mockKVCacheIndexer struct {
 	getPodScoresFunc func(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
-	scoreTokensFunc  func(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error)
+	scoreTokensFunc  func(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
 }
 
 func (m *mockKVCacheIndexer) GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error) {
@@ -45,9 +45,9 @@ func (m *mockKVCacheIndexer) GetPodScores(ctx context.Context, renderReq *types.
 	return map[string]float64{}, nil
 }
 
-func (m *mockKVCacheIndexer) ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string) (map[string]float64, error) {
+func (m *mockKVCacheIndexer) ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
 	if m.scoreTokensFunc != nil {
-		return m.scoreTokensFunc(ctx, tokens, modelName, podIdentifiers)
+		return m.scoreTokensFunc(ctx, tokens, modelName, podIdentifiers, extraFeatures)
 	}
 	return map[string]float64{}, nil
 }
@@ -90,7 +90,7 @@ func TestPrecisePrefixCacheScorer_UsesTokenizedPrompt(t *testing.T) {
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
-			scoreTokensFunc: func(_ context.Context, tokens []uint32, modelName string, _ []string) (map[string]float64, error) {
+			scoreTokensFunc: func(_ context.Context, tokens []uint32, modelName string, _ []string, _ []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
 				capturedTokens = tokens
 				capturedModel = modelName
 				return map[string]float64{"10.0.0.1:8080": 1.0}, nil
@@ -121,7 +121,7 @@ func TestPrecisePrefixCacheScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 		kvEventsConfig: &kvevents.Config{},
 		pluginState:    plugin.NewPluginState(ctx),
 		kvCacheIndexer: &mockKVCacheIndexer{
-			scoreTokensFunc: func(_ context.Context, _ []uint32, _ string, _ []string) (map[string]float64, error) {
+			scoreTokensFunc: func(_ context.Context, _ []uint32, _ string, _ []string, _ []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
 				fromTokensCalled = true
 				return map[string]float64{}, nil
 			},

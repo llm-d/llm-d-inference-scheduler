@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,14 +33,14 @@ import (
 
 type mockTokenizer struct {
 	renderFunc     func(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
-	renderChatFunc func(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error)
+	renderChatFunc func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error)
 }
 
 func (m *mockTokenizer) Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
 	return m.renderFunc(prompt)
 }
 
-func (m *mockTokenizer) RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error) {
+func (m *mockTokenizer) RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
 	return m.renderChatFunc(req)
 }
 
@@ -118,7 +119,7 @@ func TestTokenizerPlugin_PrepareRequestData(t *testing.T) {
 		renderFunc: func(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
 			return fakeTokenIDs, nil, nil
 		},
-		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error) {
+		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
 			return fakeTokenIDs, nil, nil
 		},
 	}
@@ -231,9 +232,9 @@ func TestChatCompletionsToRenderChatRequest(t *testing.T) {
 
 	require.Len(t, result.Conversation, 2)
 	assert.Equal(t, "system", result.Conversation[0].Role)
-	assert.Equal(t, "You are a helpful assistant.", result.Conversation[0].Content)
+	assert.Equal(t, "You are a helpful assistant.", result.Conversation[0].Content.Raw)
 	assert.Equal(t, "user", result.Conversation[1].Role)
-	assert.Equal(t, "Hello!", result.Conversation[1].Content)
+	assert.Equal(t, "Hello!", result.Conversation[1].Content.Raw)
 	assert.Equal(t, "template", result.ChatTemplate)
 	assert.True(t, result.AddGenerationPrompt)
 	assert.False(t, result.ContinueFinalMessage)

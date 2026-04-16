@@ -33,7 +33,7 @@ import (
 
 type tokenizer interface {
 	Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
-	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, []tokenizerTypes.Offset, error)
+	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error)
 }
 
 const (
@@ -178,7 +178,7 @@ func chatCompletionsToRenderChatRequest(chat *scheduling.ChatCompletionsRequest)
 	for _, msg := range chat.Messages {
 		conversation = append(conversation, tokenizerTypes.Conversation{
 			Role:    msg.Role,
-			Content: msg.Content.Raw,
+			Content: tokenizerTypes.Content{Raw: msg.Content.Raw},
 		})
 	}
 

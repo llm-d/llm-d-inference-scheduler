@@ -149,7 +149,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
 				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
+				chunkKeys, err := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model, nil)
+				require.NoError(t, err)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
 
@@ -232,7 +233,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				for _, msg := range req.ChatCompletions.Messages {
 					conversations = append(conversations, types.Conversation{
 						Role:    msg.Role,
-						Content: msg.Content.Raw,
+						Content: types.Content{Raw: msg.Content.Raw},
 					})
 				}
 
@@ -252,7 +253,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
 				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
+				chunkKeys, err := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model, nil)
+				require.NoError(t, err)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
@@ -332,7 +334,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
 				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
+				chunkKeys, err := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model, nil)
+				require.NoError(t, err)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
 
@@ -402,7 +405,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
 				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
+				chunkKeys, err := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model, nil)
+				require.NoError(t, err)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
@@ -523,7 +527,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
 				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
+				chunkKeys, err := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model, nil)
+				require.NoError(t, err)
 
 				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
 
