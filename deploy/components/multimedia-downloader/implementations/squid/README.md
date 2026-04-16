@@ -12,8 +12,8 @@ Execute the [test-squid.sh](test/test-squid.sh) script to run cache validations 
 # Run HTTP test (spins up a temporary kind cluster, tests, and tears it down)
 ./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh
 
-# Retain the kind cluster after testing for manual review and debugging
-./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --keep-cluster
+# Retain resources after testing for manual review and debugging
+./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --skip-cleanup
 ```
 
 ### OpenShift
@@ -24,6 +24,9 @@ Execute the [test-squid.sh](test/test-squid.sh) script to run cache validations 
 
 # Target a specific OpenShift context (implies --openshift)
 ./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --context <ctx>
+
+# Leave OpenShift resources in place after testing for manual inspection
+./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --openshift --skip-cleanup
 ```
 
 ### Understanding Log Results
@@ -59,8 +62,8 @@ While Squid supports TLS 1.3, new privacy standards like ECH (Encrypted Client H
 # Run SSL Bump test (builds image, generates CA, deploys, and verifies cache)
 ./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --mode ssl-bump
 
-# Keep the cluster for manual inspection after the test
-./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --mode ssl-bump --keep-cluster
+# Retain resources after testing for manual inspection
+./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --mode ssl-bump --skip-cleanup
 ```
 
 #### OpenShift
@@ -84,6 +87,9 @@ Make the pushed image accessible from your cluster, then proceed to step 2.
 
 ```bash
 ./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --mode ssl-bump --openshift
+
+# Leave OpenShift resources in place after testing for manual inspection
+./deploy/components/multimedia-downloader/implementations/squid/test/test-squid.sh --mode ssl-bump --openshift --skip-cleanup
 ```
 
 (Note: You can always pass --registry <url> manually if you prefer not to use the environment variable).

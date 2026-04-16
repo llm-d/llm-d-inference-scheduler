@@ -19,7 +19,7 @@ readonly SSL_CA_ORG="Squid Test CA"
 
 # Default configurations
 MODE="http"
-KEEP_CLUSTER=false
+SKIP_CLEANUP=false
 USE_OPENSHIFT=false
 KUBE_CONTEXT=""
 NAMESPACE="default"
@@ -37,7 +37,7 @@ error()   { echo -e "${RED}✗ $*${NC}"; }
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode)             MODE="$2"; shift 2 ;;
-        --keep-cluster)     KEEP_CLUSTER=true; shift ;;
+        --skip-cleanup)     SKIP_CLEANUP=true; shift ;;
         --openshift)        USE_OPENSHIFT=true; shift ;;
         --registry)         REGISTRY="$2"; shift 2 ;;
         --build-push)       BUILD_PUSH=true; MODE="ssl-bump"; shift ;;
@@ -73,15 +73,20 @@ esac
 
 cleanup() {
     section "Cleaning up"
-    kubectl delete pod "${TEST_POD}" --ignore-not-found --wait=false 2>/dev/null || true
-    
-    if [[ ${USE_OPENSHIFT} == true ]]; then
-        echo "  Using OpenShift cluster — skipping cluster deletion."
-    elif [[ ${KEEP_CLUSTER} == false ]]; then
-        kind delete cluster --name "${CLUSTER_NAME}" 2>/dev/null || true
-        echo "  Cluster '${CLUSTER_NAME}' deleted."
+
+    if [[ ${SKIP_CLEANUP} == true ]]; then
+        echo "  Resources left in place for inspection (--skip-cleanup)."
     else
-        echo "  Cluster kept. Resources left in place for inspection."
+        kubectl delete pod "${TEST_POD}" --ignore-not-found --wait=false 2>/dev/null || true
+
+        if [[ ${USE_OPENSHIFT} == true ]]; then
+            kubectl delete -f "${SERVICE_YAML}" --ignore-not-found 2>/dev/null || true
+            kubectl delete -k "${IMPL_DIR}/overlays/openshift" --ignore-not-found 2>/dev/null || true
+            echo "  OpenShift multimedia-downloader resources deleted."
+        else
+            kind delete cluster --name "${CLUSTER_NAME}" 2>/dev/null || true
+            echo "  Cluster '${CLUSTER_NAME}' deleted."
+        fi
     fi
 
     if [[ -d "${SCRIPT_DIR}/squid-ssl-certs" ]]; then
