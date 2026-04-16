@@ -19,13 +19,8 @@ spec:
         image: ubuntu/squid:6.1-23.10_beta
         imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
-        args: 
-        - |
-          # Ensure the log file exists and the proxy user owns the whole volume
-          touch /var/cache/squid/access.log
-          chown -R proxy:proxy /var/cache/squid
-          # Start Squid with -N (No daemon) and -d1 (Log to stderr)
-          exec squid -NYCd1
+        args:
+        - exec squid -NYCd1
         ports:
         - name: http-proxy
           containerPort: 8080
@@ -53,16 +48,6 @@ spec:
             command: ["/bin/sh", "-c", "test -f /var/cache/squid/squid.pid && kill -0 $(cat /var/cache/squid/squid.pid)"]
           initialDelaySeconds: 10
           periodSeconds: 5
-     
-      # This container bridges the gap between the proxy-owned file and the root-owned console
-      - name: log-tailer
-        image: busybox:1.37
-        imagePullPolicy: IfNotPresent
-        command: ["/bin/sh", "-c", "tail -F /var/cache/squid/access.log"]
-        volumeMounts:
-        - name: cache-volume
-          mountPath: /var/cache/squid
-
       volumes:
       - name: squid-config
         configMap:

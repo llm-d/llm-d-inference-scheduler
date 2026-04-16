@@ -8,7 +8,8 @@ metadata:
     component: multimedia-downloader
 data:
   squid.conf: |
-    access_log /var/cache/squid/access.log squid
+    access_log stdio:/dev/stdout squid
+    cache_log /dev/stderr
 
     http_port 3128 ssl-bump \
       cert=/etc/squid/certs/squid-ca-cert.pem \
@@ -21,6 +22,14 @@ data:
     sslcrtd_children 10 startup=5 idle=1
 
     # --- SSL Bump Rules ---
+    # "bump all" decrypts every HTTPS connection — intentional for test/lab use.
+    # For production, replace with a peek-then-splice strategy to limit interception
+    # to specific domains and pass ECH/TLS-1.3 connections through blindly:
+    #
+    #   acl to_cache dstdomain .images.cocodataset.org .images.dog.ceo
+    #   ssl_bump peek all       # inspect SNI without decrypting
+    #   ssl_bump bump to_cache  # decrypt only the target domains
+    #   ssl_bump splice all     # pass everything else through untouched
     ssl_bump bump all
 
     # --- PID/Files for Non-Root ---
@@ -30,6 +39,10 @@ data:
     # --- Caching ---
     cache_mem 256 MB
     refresh_pattern -i \.(jpg|jpeg|png|gif|webp|bmp|tiff)$ 10080 100% 43200
+
+    # --- Performance ---
+    # Disable ICMP pinger: containers run without NET_RAW capability.
+    pinger_enable off
 
     # --- Access Control ---
     http_access allow all

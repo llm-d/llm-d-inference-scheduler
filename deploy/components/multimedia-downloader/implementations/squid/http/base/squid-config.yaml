@@ -7,9 +7,8 @@ metadata:
     component: multimedia-downloader
 data:
   squid.conf: |-
-    # Force Squid to flush logs to disk immediately
-    buffered_logs off
-    access_log /var/cache/squid/access.log squid
+    access_log stdio:/dev/stdout squid
+    cache_log /dev/stderr
 
     # --- Listen Port ---
     http_port 8080
@@ -28,6 +27,9 @@ data:
     http_access allow all
 
     # --- Performance & DNS ---
+    # Disable ICMP pinger: containers run without NET_RAW capability, so the
+    # pinger helper would fail to open raw sockets and produce FATAL log noise.
+    pinger_enable off
     collapsed_forwarding on
     # External DNS resolvers are used so that Squid can reach internet hosts.
     # Squid does not resolve in-cluster service names, so keep NO_PROXY set

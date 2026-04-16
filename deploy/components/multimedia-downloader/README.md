@@ -7,7 +7,7 @@ A pluggable caching proxy designed to speed up the fetching of large multimedia 
 The proxy is designed to support different caching backends, which are maintained in the [`implementations/`](implementations/) directory. Each backend manages its own specific configuration and resource footprints.
 
 * **[Squid](https://github.com/squid-cache/squid) (Default):** A robust, high-performance HTTP/HTTPS caching proxy with two variants:
-  * **[basic](implementations/squid/http/)** — HTTP caching proxy (port 8080).
+  * **[http](implementations/squid/http/)** — HTTP caching proxy (port 8080).
   * **[https-ssl-bump](implementations/squid/https-ssl-bump/)** — HTTPS caching proxy (port 3128). Requires a custom CA certificate.
 
   For setup instructions see the [Squid Implementation Guide](implementations/squid/README.md).
@@ -50,7 +50,7 @@ kubectl run curl-test --image=curlimages/curl:8.11.1 --restart=Never --rm -it --
 Check the cache log (run twice to see `TCP_MISS` → `TCP_HIT`):
 
 ```bash
-kubectl logs -l app=multimedia-downloader -c log-tailer --tail=5
+kubectl logs -l app=multimedia-downloader --tail=5
 ```
 
 > Note: For a detailed breakdown of what TCP_MISS, TCP_HIT, and other log statuses mean, see the [Squid Implementation Guide](implementations/squid/README.md).
