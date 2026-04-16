@@ -1,4 +1,4 @@
-package filter
+package bylabel
 
 import (
 	"context"
@@ -22,8 +22,8 @@ type byLabelParameters struct {
 
 var _ scheduling.Filter = &ByLabel{} // validate interface conformance
 
-// ByLabelFactory defines the factory function for the ByLabel filter.
-func ByLabelFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+// Factory defines the factory function for the ByLabel filter.
+func Factory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := byLabelParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {

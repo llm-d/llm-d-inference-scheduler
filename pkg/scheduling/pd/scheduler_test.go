@@ -19,8 +19,8 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 
-	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
-	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
 	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
 )
 
@@ -35,7 +35,7 @@ func TestPDSchedule(t *testing.T) {
 		&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "endpoint1"},
 			Address:        "1.2.3.4",
-			Labels:         map[string]string{by_label_filter.RoleLabel: by_label_filter.RolePrefill},
+			Labels:         map[string]string{bylabel.RoleLabel: bylabel.RolePrefill},
 		},
 		&fwkdl.Metrics{WaitingQueueSize: 0},
 		fwkdl.NewAttributes(),
@@ -44,7 +44,7 @@ func TestPDSchedule(t *testing.T) {
 		&fwkdl.EndpointMetadata{
 			NamespacedName: k8stypes.NamespacedName{Name: "endpoint2"},
 			Address:        "5.6.7.8",
-			Labels:         map[string]string{by_label_filter.RoleLabel: by_label_filter.RoleDecode},
+			Labels:         map[string]string{bylabel.RoleLabel: bylabel.RoleDecode},
 		},
 		&fwkdl.Metrics{WaitingQueueSize: 0},
 		fwkdl.NewAttributes(),
@@ -239,22 +239,22 @@ func TestPDSchedule(t *testing.T) {
 			assert.NoError(t, err, "Prefix plugin creation returned unexpected error")
 
 			prefillSchedulerProfile := scheduling.NewSchedulerProfile().
-				WithFilters(by_label_filter.NewPrefillRole()).
+				WithFilters(bylabel.NewPrefillRole()).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = prefillSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := scheduling.NewSchedulerProfile().
-				WithFilters(by_label_filter.NewDecodeRole()).
+				WithFilters(bylabel.NewDecodeRole()).
 				WithScorers(scheduling.NewWeightedScorer(loadaware.NewLoadAware(ctx, loadaware.QueueThresholdDefault), 1)).
 				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = decodeSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
-			deciderPlugin, err := profile.NewPrefixBasedPDDecider(profile.PrefixBasedPDDeciderConfig{NonCachedTokens: 2})
+			deciderPlugin, err := disagg.NewPrefixBasedPDDecider(disagg.PrefixBasedPDDeciderConfig{NonCachedTokens: 2})
 			assert.NoError(t, err)
 
-			profileHandle := profile.NewDisaggProfileHandler(decode, prefill, "",
+			profileHandle := disagg.NewDisaggProfileHandler(decode, prefill, "",
 				deciderPlugin, nil)
 
 			schedulerConfig := scheduling.NewSchedulerConfig(profileHandle, map[string]fwkschd.SchedulerProfile{
@@ -263,7 +263,7 @@ func TestPDSchedule(t *testing.T) {
 			})
 			scheduler := scheduling.NewSchedulerWithConfig(schedulerConfig)
 
-			inputTokens := len(test.req.Body.Completions.Prompt) / profile.AverageCharactersPerToken
+			inputTokens := len(test.req.Body.Completions.Prompt) / disagg.AverageCharactersPerToken
 			for _, pod := range test.input {
 				pod.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(0, inputTokens, 1))
 			}

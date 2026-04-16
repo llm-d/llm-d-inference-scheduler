@@ -1,4 +1,4 @@
-package filter
+package bylabel
 
 import (
 	"encoding/json"

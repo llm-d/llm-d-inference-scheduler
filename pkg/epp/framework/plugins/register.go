@@ -4,34 +4,34 @@ package plugins
 import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 
-	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/app/framework/plugins/requestcontrol/dataproducer/tokenizer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/app/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
-	by_label_filter "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
-	dataparallel "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/dataparallel"
-	profile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
-	activerequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/activerequest"
-	contextlengthaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/contextlengthaware"
-	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
-	nohitlru "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/nohitlru"
-	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache"
-	sessionaffinity "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/sessionaffinity"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/dataparallel"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/activerequest"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/contextlengthaware"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/nohitlru"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/sessionaffinity"
 )
 
 // RegisterAllPlugins registers the factory functions of all plugins in this repository.
 func RegisterAllPlugins() {
-	plugin.Register(by_label_filter.ByLabelType, by_label_filter.ByLabelFactory)
-	plugin.Register(by_label_filter.ByLabelSelectorType, by_label_filter.ByLabelSelectorFactory)
-	plugin.Register(by_label_filter.EncodeRoleType, by_label_filter.EncodeRoleFactory)
-	plugin.Register(by_label_filter.DecodeRoleType, by_label_filter.DecodeRoleFactory)
-	plugin.Register(by_label_filter.PrefillRoleType, by_label_filter.PrefillRoleFactory)
-	plugin.Register(profile.DisaggHeadersHandlerType, profile.HeadersHandlerFactory)
+	plugin.Register(bylabel.ByLabelType, bylabel.Factory)
+	plugin.Register(bylabel.ByLabelSelectorType, bylabel.SelectorFactory)
+	plugin.Register(bylabel.EncodeRoleType, bylabel.EncodeRoleFactory)
+	plugin.Register(bylabel.DecodeRoleType, bylabel.DecodeRoleFactory)
+	plugin.Register(bylabel.PrefillRoleType, bylabel.PrefillRoleFactory)
+	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.HeadersHandlerFactory)
 	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
-	plugin.Register(profile.PrefillHeaderHandlerType, profile.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
+	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	plugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
-	plugin.Register(profile.DisaggProfileHandlerType, profile.HandlerFactory)
+	plugin.Register(disagg.DisaggProfileHandlerType, disagg.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
 	// golangci-lint v2 only accepts linter names (lowercase) in //nolint directives, not individual check IDs like SA1019
-	plugin.Register(profile.PdProfileHandlerType, profile.PdProfileHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
+	plugin.Register(disagg.PdProfileHandlerType, disagg.PdProfileHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	plugin.Register(preciseprefixcache.PrecisePrefixCachePluginType, preciseprefixcache.PluginFactory)
 	plugin.Register(loadaware.LoadAwareType, loadaware.Factory)
 	plugin.Register(sessionaffinity.SessionAffinityType, sessionaffinity.Factory)
@@ -40,10 +40,10 @@ func RegisterAllPlugins() {
 	plugin.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
 	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
 	// pd decider plugins
-	plugin.Register(profile.PrefixBasedPDDeciderPluginType, profile.PrefixBasedPDDeciderPluginFactory)
-	plugin.Register(profile.AlwaysDisaggPDDeciderPluginType, profile.AlwaysDisaggPDDeciderPluginFactory)
+	plugin.Register(disagg.PrefixBasedPDDeciderPluginType, disagg.PrefixBasedPDDeciderPluginFactory)
+	plugin.Register(disagg.AlwaysDisaggPDDeciderPluginType, disagg.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(tokenizer.PluginType, tokenizer.PluginFactory)
 	// ep decider plugins
-	plugin.Register(profile.AlwaysDisaggMulimodalPluginType, profile.AlwaysDisaggMulimodalDeciderPluginFactory)
+	plugin.Register(disagg.AlwaysDisaggMulimodalPluginType, disagg.AlwaysDisaggMulimodalDeciderPluginFactory)
 	plugin.Register(contextlengthaware.ContextLengthAwareType, contextlengthaware.Factory)
 }

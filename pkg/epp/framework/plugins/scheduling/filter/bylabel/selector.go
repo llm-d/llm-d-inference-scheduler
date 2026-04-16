@@ -1,4 +1,4 @@
-package filter
+package bylabel
 
 import (
 	"context"
@@ -13,54 +13,54 @@ import (
 )
 
 const (
-	// ByLabelSelectorType is the type of the ByLabelSelector filter
+	// ByLabelSelectorType is the type of the Selector filter
 	ByLabelSelectorType = "by-label-selector"
 )
 
 // compile-time type assertion
-var _ scheduling.Filter = &ByLabelSelector{}
+var _ scheduling.Filter = &Selector{}
 
-// ByLabelSelectorFactory defines the factory function for the ByLabelSelector filter
-func ByLabelSelectorFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+// SelectorFactory defines the factory function for the Selector filter
+func SelectorFactory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	parameters := metav1.LabelSelector{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
 			return nil, fmt.Errorf("failed to parse the parameters of the '%s' filter - %w", ByLabelSelectorType, err)
 		}
 	}
-	return NewByLabelSelector(name, &parameters)
+	return NewSelector(name, &parameters)
 }
 
-// NewByLabelSelector returns a new filter instance, configured with the provided
+// NewSelector returns a new filter instance, configured with the provided
 // name and label selector.
-func NewByLabelSelector(name string, selector *metav1.LabelSelector) (*ByLabelSelector, error) {
+func NewSelector(name string, selector *metav1.LabelSelector) (*Selector, error) {
 	if name == "" {
-		return nil, errors.New("ByLabelSelector: missing filter name")
+		return nil, errors.New("Selector: missing filter name")
 	}
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ByLabelSelector{
+	return &Selector{
 		typedName: plugin.TypedName{Type: ByLabelSelectorType, Name: name},
 		selector:  labelSelector,
 	}, nil
 }
 
-// ByLabelSelector filters out endpoints that do not match its label selector criteria
-type ByLabelSelector struct {
+// Selector filters out endpoints that do not match its label selector criteria
+type Selector struct {
 	typedName plugin.TypedName
 	selector  labels.Selector
 }
 
 // TypedName returns the typed name of the plugin
-func (blf *ByLabelSelector) TypedName() plugin.TypedName {
+func (blf *Selector) TypedName() plugin.TypedName {
 	return blf.typedName
 }
 
 // Filter filters out all endpoints that do not satisfy the label selector
-func (blf *ByLabelSelector) Filter(_ context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+func (blf *Selector) Filter(_ context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	filtered := []scheduling.Endpoint{}
 
 	for _, endpoint := range endpoints {

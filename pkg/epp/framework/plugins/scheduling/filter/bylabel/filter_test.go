@@ -1,4 +1,4 @@
-package filter
+package bylabel
 
 import (
 	"encoding/json"
@@ -14,7 +14,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func TestByLabelFactory(t *testing.T) {
+func TestFactory(t *testing.T) {
 	tests := []struct {
 		name       string
 		pluginName string
@@ -94,7 +94,7 @@ func TestByLabelFactory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rawParams := json.RawMessage(tt.jsonParams)
-			plugin, err := ByLabelFactory(tt.pluginName, rawParams, nil)
+			plugin, err := Factory(tt.pluginName, rawParams, nil)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -107,7 +107,7 @@ func TestByLabelFactory(t *testing.T) {
 	}
 }
 
-func TestByLabelFactoryInvalidJSON(t *testing.T) {
+func TestFactoryInvalidJSON(t *testing.T) {
 	invalidTests := []struct {
 		name       string
 		jsonParams string
@@ -129,7 +129,7 @@ func TestByLabelFactoryInvalidJSON(t *testing.T) {
 	for _, tt := range invalidTests {
 		t.Run(tt.name, func(t *testing.T) {
 			rawParams := json.RawMessage(tt.jsonParams)
-			plugin, err := ByLabelFactory("test", rawParams, nil)
+			plugin, err := Factory("test", rawParams, nil)
 
 			assert.Error(t, err)
 			assert.Nil(t, plugin)
@@ -238,7 +238,7 @@ func TestByLabelFiltering(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			plugin, err := ByLabelFactory("test-label", rawParams, nil)
+			plugin, err := Factory("test-label", rawParams, nil)
 			require.NoError(t, err)
 			require.NotNil(t, plugin)
 
