@@ -34,6 +34,10 @@ linters:
     - unparam
     - unused
     - unconvert
+  exclusions:
+    presets:
+      - comments        # suppress missing comment violations on packages and exported symbols
+      - std-error-handling  # suppress unchecked errors on well-known stdlib patterns (e.g. Close())
   settings:
     revive: # see https://github.com/mgechev/revive#available-rules for all options
       rules:
