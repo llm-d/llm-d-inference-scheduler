@@ -1,51 +1,41 @@
-# Use Ubuntu 22.04 as the stable base
-FROM ubuntu:22.04
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:9.7
 
-LABEL description="Squid Proxy with SSL-Bump support"
+# ==========================================
+# Stage 1: Builder
+# ==========================================
+FROM registry.access.redhat.com/ubi9/ubi:9.7 AS builder
 
-# Prevent interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
+RUN mkdir -p /mnt/rootfs
 
-# 1. Install Squid with OpenSSL support
-# Note: Ubuntu 22.04 provides the 'squid-openssl' package for this purpose
-RUN apt-get update && apt-get install -y \
-    squid-openssl \
+# Install packages and clean cache in a single layer
+RUN dnf install --installroot /mnt/rootfs --releasever=9 --setopt=install_weak_deps=False --nodocs -y \
+    squid \
     openssl \
     ca-certificates \
     curl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && dnf --installroot /mnt/rootfs clean all
 
-# 2. Create the SSL Database and cache directories
-# The SSL_DB is critical for storing certificates generated on-the-fly.
-RUN mkdir -p /var/lib/squid \
-    && /usr/lib/squid/security_file_certgen -c -s /var/lib/squid/ssl_db -M 4MB \
-    && chown -R proxy:root /var/lib/squid/ssl_db \
-    && chmod -R g+rwX /var/lib/squid/ssl_db
+# ==========================================
+# Stage 2: Final Micro Image
+# ==========================================
+FROM ${BASE_IMAGE}
 
-# 3. Create necessary log and run directories
-RUN mkdir -p /var/log/squid /var/run/squid \
-    && chown -R proxy:root /var/log/squid /var/run/squid \
-    && chmod -R g+rwX /var/log/squid /var/run/squid
+LABEL description="Squid Proxy with SSL-Bump support"
 
-# 4. Prepare for CA Certificate from K8s Secret
-# We create the directory where the secret will be mounted
-RUN mkdir -p /etc/squid/certs \
-    && chown proxy:root /etc/squid/certs \
-    && chmod g+rwX /etc/squid/certs
+COPY --from=builder /mnt/rootfs /
 
-# 5. Add a robust entrypoint script to handle initialization
+# Consolidate directory creation, cert generation, and permissions into a single layer
+RUN mkdir -p /var/lib/squid /var/log/squid /var/run/squid /etc/squid/certs /var/cache/squid \
+    && /usr/lib64/squid/security_file_certgen -c -s /var/lib/squid/ssl_db -M 4MB \
+    && chown -R squid:root /var/lib/squid /var/log/squid /var/run/squid /etc/squid/certs /var/cache/squid \
+    && chmod -R g+rwX /var/lib/squid /var/log/squid /var/run/squid /etc/squid/certs /var/cache/squid
+
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3128
 
-RUN mkdir -p /var/cache/squid \
-    && chown proxy:root /var/cache/squid \
-    && chmod g+rwX /var/cache/squid
-
-# Transition to the proxy user for runtime security
-USER proxy
+USER squid
 WORKDIR /var/cache/squid
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

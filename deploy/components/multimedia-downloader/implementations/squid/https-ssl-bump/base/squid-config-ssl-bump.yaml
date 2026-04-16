@@ -18,7 +18,7 @@ data:
       dynamic_cert_mem_cache_size=16MB
 
     # --- SSL Certificate Generation ---
-    sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/lib/squid/ssl_db -M 16MB
+    sslcrtd_program /usr/lib64/squid/security_file_certgen -s /var/lib/squid/ssl_db -M 16MB
     sslcrtd_children 10 startup=5 idle=1
 
     # --- SSL Bump Rules ---
