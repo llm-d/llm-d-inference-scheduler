@@ -17,7 +17,6 @@ limitations under the License.
 package loader
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -37,9 +36,7 @@ import (
 	fwkplugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
 	framework "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	reqdataprodprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/requestcontrol/dataproducer/approximateprefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/profile"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 )
@@ -171,8 +168,6 @@ func decodeRawConfig(configBytes []byte) (*configapi.EndpointPickerConfig, error
 
 func instantiatePlugins(configuredPlugins []configapi.PluginSpec, handle fwkplugin.Handle) error {
 	pluginNames := sets.New[string]()
-	var approxPrefixCacheParams json.RawMessage
-	foundPrefixCacheScorer := false
 	for _, spec := range configuredPlugins {
 		if spec.Type == "" {
 			return fmt.Errorf("plugin '%s' is missing a type", spec.Name)
@@ -192,32 +187,9 @@ func instantiatePlugins(configuredPlugins []configapi.PluginSpec, handle fwkplug
 		}
 
 		handle.AddPlugin(spec.Name, plugin)
-		// If the prefix cache scorer plugin is configured, create the corresponding dataproducer plugin.
-		// This is necessary because the prefix cache scorer plugin relies on the dataproducer plugin to populate its state.
-		// This is due to historical reasons where the scorer plugin was developed before the dataproducer plugins were introduced.
-		if spec.Type == prefix.PrefixCacheScorerPluginType {
-			foundPrefixCacheScorer = true
-			approxPrefixCacheParams = spec.Parameters
-		}
-	}
-	if foundPrefixCacheScorer && !existsByType(handle, reqdataprodprefix.ApproxPrefixCachePluginType) {
-		plugin, err := reqdataprodprefix.ApproxPrefixCacheFactory(reqdataprodprefix.ApproxPrefixCachePluginType, approxPrefixCacheParams, handle)
-		if err != nil {
-			return fmt.Errorf("failed to create ApproxPrefixCache plugin for prefix cache plugin: %w, params: %s", err, string(approxPrefixCacheParams))
-		}
-		handle.AddPlugin(reqdataprodprefix.ApproxPrefixCachePluginType, plugin)
 	}
 
 	return nil
-}
-
-func existsByType(handle fwkplugin.Handle, pluginType string) bool {
-	for _, p := range handle.GetAllPlugins() {
-		if p.TypedName().Type == pluginType {
-			return true
-		}
-	}
-	return false
 }
 
 func buildSchedulerConfig(

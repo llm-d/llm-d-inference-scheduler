@@ -29,5 +29,18 @@ func Register(pluginType string, factory FactoryFunc) {
 	Registry[pluginType] = factory
 }
 
-// Registry is a mapping from plugin name to Factory function
+// RegisterAsDefaultProducer registers a factory for the given plugin type and records it as the
+// default producer for the given data key. Only one producer may be registered as default per key.
+// Out-of-tree projects that extend the EPP can call this to make their producers eligible for
+// auto-configuration alongside in-tree producers.
+func RegisterAsDefaultProducer(pluginType string, factory FactoryFunc, key string) {
+	Register(pluginType, factory)
+	DefaultProducerRegistry[key] = pluginType
+}
+
+// Registry is a mapping from plugin type to Factory function.
 var Registry map[string]FactoryFunc = map[string]FactoryFunc{}
+
+// DefaultProducerRegistry maps a data key to the plugin type that is the default producer for it.
+// Populated via RegisterAsDefaultProducer.
+var DefaultProducerRegistry = map[string]string{}
