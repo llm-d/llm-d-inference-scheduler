@@ -7,7 +7,7 @@ This tutorial outlines the steps needed for creating and hooking a new filter
  
 The tutorial demonstrates the coding of a new filter, which selects inference
  serving Pods based on their labels. All relevant code is contained in the
- [`by_label_selector.go`](https://github.com/llm-d/llm-d-inference-scheduler/blob/main/pkg/plugins/filter/by_label_selector.go) file.
+ [`bylabel`](https://github.com/llm-d/llm-d-inference-scheduler/tree/main/pkg/epp/framework/plugins/scheduling/filter/bylabel) package.
 
 ## Introduction to filtering
 
