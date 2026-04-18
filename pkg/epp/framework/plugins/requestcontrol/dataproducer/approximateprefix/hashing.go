@@ -75,13 +75,23 @@ func hashPrompt(ctx context.Context, request *scheduling.InferenceRequest, block
 	}
 
 	prevBlockHash := blockHash(h.Sum64())
-	for i := 0; i+cacheBlockSizeChars <= len(userInput); i += cacheBlockSizeChars {
+	i := 0
+	for ; i+cacheBlockSizeChars <= len(userInput); i += cacheBlockSizeChars {
 		h.Reset()
 		_, _ = h.Write(userInput[i : i+cacheBlockSizeChars])
 		_, _ = h.Write(toBytes(prevBlockHash))
 		res = append(res, blockHash(h.Sum64()))
 
 		prevBlockHash = res[len(res)-1]
+	}
+
+	// 2. Process any remaining bytes as a partial block
+	if i < len(userInput) {
+		h.Reset()
+
+		_, _ = h.Write(userInput[i:])
+		_, _ = h.Write(toBytes(prevBlockHash))
+		res = append(res, blockHash(h.Sum64()))
 	}
 
 	return res
