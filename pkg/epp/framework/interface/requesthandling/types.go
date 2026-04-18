@@ -136,9 +136,24 @@ func (r *InferenceRequestBody) PromptText() string {
 	case r.Conversations != nil:
 		b, _ := json.Marshal(r.Conversations.Items)
 		return string(b)
+	case r.Embeddings != nil:
+		return r.Embeddings.Input.PlainText()
 	default:
 		return ""
 	}
+}
+
+// InputTokenCountHint returns a best-effort input token count when the
+// caller knows it exactly (token-ID inputs), or -1 when the count has
+// to be estimated from text.
+func (r *InferenceRequestBody) InputTokenCountHint() int {
+	if r.Completions != nil {
+		return r.Completions.Prompt.TokenCountHint()
+	}
+	if r.Embeddings != nil {
+		return r.Embeddings.Input.TokenCountHint()
+	}
+	return -1
 }
 
 func (r *InferenceRequestBody) CacheSalt() string {
@@ -164,18 +179,77 @@ func (r *InferenceRequestBody) CacheSalt() string {
 // Per the OpenAI spec it can be a string or an array of strings.
 // See https://platform.openai.com/docs/api-reference/completions/create#completions-create-prompt
 type Prompt struct {
-	Raw     string
-	Strings []string
+	Raw      string
+	Strings  []string
+	TokenIDs []uint32
+}
+
+type arrayInputResult struct {
+	Strings  []string
+	TokenIDs []uint32
+}
+
+func parseArrayInput(v []any, errorPrefix string) (arrayInputResult, error) {
+	if len(v) == 0 {
+		return arrayInputResult{}, nil
+	}
+	switch v[0].(type) {
+	case string:
+		strings := make([]string, len(v))
+		for i, val := range v {
+			str, ok := val.(string)
+			if !ok {
+				return arrayInputResult{}, fmt.Errorf("%s: mixed types in array", errorPrefix)
+			}
+			strings[i] = str
+		}
+		return arrayInputResult{Strings: strings}, nil
+	case float64:
+		uint32s := make([]uint32, len(v))
+		for i, val := range v {
+			flt, ok := val.(float64)
+			if !ok {
+				return arrayInputResult{}, fmt.Errorf("%s: mixed types in array", errorPrefix)
+			}
+			if flt != float64(uint32(flt)) {
+				return arrayInputResult{}, fmt.Errorf("%s: floating-point number %f is not a valid token ID", errorPrefix, flt)
+			}
+			uint32s[i] = uint32(flt)
+		}
+		return arrayInputResult{TokenIDs: uint32s}, nil
+	default:
+		return arrayInputResult{}, fmt.Errorf("%s: unsupported array element type", errorPrefix)
+	}
 }
 
 func (p *Prompt) UnmarshalJSON(data []byte) error {
-	if len(data) > 0 && data[0] == '"' {
-		return json.Unmarshal(data, &p.Raw)
+	var raw any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
 	}
-	if len(data) > 0 && data[0] == '[' {
-		return json.Unmarshal(data, &p.Strings)
+
+	switch v := raw.(type) {
+	case string:
+		p.Raw = v
+		return nil
+	case []any:
+		res, err := parseArrayInput(v, "prompt")
+		if err != nil {
+			return err
+		}
+		p.Strings = res.Strings
+		p.TokenIDs = res.TokenIDs
+		return nil
+	default:
+		return errors.New("prompt: must be a string or an array")
 	}
-	return errors.New("prompt: must be a string or an array of strings")
+}
+
+func (p Prompt) TokenCountHint() int {
+	if len(p.TokenIDs) > 0 {
+		return len(p.TokenIDs)
+	}
+	return -1
 }
 
 func (p Prompt) MarshalJSON() ([]byte, error) {
@@ -196,7 +270,7 @@ func (p Prompt) PlainText() string {
 }
 
 func (p Prompt) IsEmpty() bool {
-	return p.Raw == "" && len(p.Strings) == 0
+	return p.Raw == "" && len(p.Strings) == 0 && len(p.TokenIDs) == 0
 }
 
 // CompletionsRequest is a structured representation of the fields we parse out of the /v1/completions request
@@ -285,11 +359,60 @@ func (c *ConversationsRequest) String() string {
 	return fmt.Sprintf("{ItemsCount: %d}", len(c.Items))
 }
 
+// EmbeddingsInput represents the input field in a /v1/embeddings request.
+// Per the OpenAI spec it can be a string, an array of strings, or an array of integers.
+type EmbeddingsInput struct {
+	Raw      string
+	Strings  []string
+	TokenIDs []uint32
+}
+
+func (e *EmbeddingsInput) UnmarshalJSON(data []byte) error {
+	var raw any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	switch v := raw.(type) {
+	case string:
+		e.Raw = v
+		return nil
+	case []any:
+		res, err := parseArrayInput(v, "embeddings input")
+		if err != nil {
+			return err
+		}
+		e.Strings = res.Strings
+		e.TokenIDs = res.TokenIDs
+		return nil
+	default:
+		return errors.New("embeddings input: must be a string or an array")
+	}
+}
+
+func (e EmbeddingsInput) TokenCountHint() int {
+	if len(e.TokenIDs) > 0 {
+		return len(e.TokenIDs)
+	}
+	return -1
+}
+
+func (e EmbeddingsInput) PlainText() string {
+	if e.Raw != "" {
+		return e.Raw
+	}
+	return strings.Join(e.Strings, " ")
+}
+
+func (e EmbeddingsInput) IsEmpty() bool {
+	return e.Raw == "" && len(e.Strings) == 0 && len(e.TokenIDs) == 0
+}
+
 // EmbeddingsRequest represents the OpenAI /v1/embeddings request body structure.
 // Input can be a string or array of strings; see https://platform.openai.com/docs/api-reference/embeddings.
 type EmbeddingsRequest struct {
 	// Input is the text to embed (string or array of strings).
-	Input any `json:"input,omitempty"`
+	Input EmbeddingsInput `json:"input,omitempty"`
 	// CacheSalt is an optional request parameter to isolate prefix caches for security reasons.
 	CacheSalt string `json:"cache_salt,omitempty"`
 }

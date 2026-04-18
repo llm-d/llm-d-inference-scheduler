@@ -55,10 +55,15 @@ func (e *SimpleTokenEstimator) Estimate(request *framework.InferenceRequest) int
 	case request.RequestSizeBytes > 0:
 		inputTokens = max(int64(request.RequestSizeBytes)/4, 1)
 	case request.Body != nil:
-		// Fallback: character count from prompt text across all API types
-		// (completions, chat/completions, responses, conversations).
-		chars := len(request.Body.PromptText())
-		inputTokens = int64(math.Max(1, math.Round(float64(chars)/e.CharactersPerToken)))
+		hint := request.Body.InputTokenCountHint()
+		if hint >= 0 {
+			inputTokens = int64(hint)
+		} else {
+			// Fallback: character count from prompt text across all API types
+			// (completions, chat/completions, responses, conversations).
+			chars := len(request.Body.PromptText())
+			inputTokens = int64(math.Max(1, math.Round(float64(chars)/e.CharactersPerToken)))
+		}
 	default:
 		return 0
 	}

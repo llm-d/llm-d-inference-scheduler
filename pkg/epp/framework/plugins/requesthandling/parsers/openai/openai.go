@@ -226,11 +226,10 @@ func extractRequestBody(rawBody []byte, headers map[string]string) (*fwkrh.Infer
 
 	case embeddingsAPI:
 		var embeddings fwkrh.EmbeddingsRequest
-		if err := json.Unmarshal(rawBody, &embeddings); err == nil && embeddings.Input != nil {
+		if err := json.Unmarshal(rawBody, &embeddings); err == nil && !embeddings.Input.IsEmpty() {
 			return &fwkrh.InferenceRequestBody{Embeddings: &embeddings}, nil
 		}
 		return nil, errors.New("invalid embeddings request: must have input field")
-
 	default:
 		return nil, errors.New("unsupported API endpoint")
 	}

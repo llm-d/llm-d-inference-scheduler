@@ -112,7 +112,6 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 				},
 			},
 		},
-
 		{
 			name: "Valid Tokenized Request",
 			reqMsg: &pb.GenerateRequest{
@@ -126,7 +125,9 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 			headers: map[string]string{":path": "/vllm.grpc.engine.VllmEngine/Generate"},
 			want: &fwkrh.InferenceRequestBody{
 				Completions: &fwkrh.CompletionsRequest{
-					Prompt: fwkrh.Prompt{Raw: "Tokenized hello"},
+					Prompt: fwkrh.Prompt{
+						TokenIDs: []uint32{11, 12, 13},
+					},
 				},
 				Payload: fwkrh.PayloadProto{
 					Message: &pb.GenerateRequest{
@@ -162,7 +163,7 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 			headers: map[string]string{":path": "/vllm.grpc.engine.VllmEngine/Generate"},
 			want: &fwkrh.InferenceRequestBody{
 				Completions: &fwkrh.CompletionsRequest{
-					Prompt: fwkrh.Prompt{Raw: "Describe image"},
+					Prompt: fwkrh.Prompt{TokenIDs: []uint32{101, 102, 103, 104, 105}},
 				},
 				Payload: fwkrh.PayloadProto{
 					Message: &pb.GenerateRequest{
@@ -210,7 +211,7 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 			headers: map[string]string{":path": "/vllm.grpc.engine.VllmEngine/Generate"},
 			want: &fwkrh.InferenceRequestBody{
 				Completions: &fwkrh.CompletionsRequest{
-					Prompt: fwkrh.Prompt{Raw: "Two images"},
+					Prompt: fwkrh.Prompt{TokenIDs: []uint32{201, 202, 203, 204}},
 				},
 				Payload: fwkrh.PayloadProto{
 					Message: &pb.GenerateRequest{
@@ -238,7 +239,6 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 				},
 			},
 		},
-
 		{
 			name:          "Malformed gRPC payload (too short)",
 			malformedData: []byte{0, 0, 0},
@@ -282,24 +282,27 @@ func TestVllmGRPCParser_ParseRequest(t *testing.T) {
 			reqMsg: &pb.EmbedRequest{
 				Tokenized: &pb.TokenizedInput{
 					OriginalText: "Embed this",
+					InputIds:     []uint32{4, 5, 6},
 				},
 			},
 			headers: map[string]string{":path": "/vllm.grpc.engine.VllmEngine/Embed"},
 			want: &fwkrh.InferenceRequestBody{
 				Embeddings: &fwkrh.EmbeddingsRequest{
-					Input: "Embed this",
+					Input: fwkrh.EmbeddingsInput{
+						TokenIDs: []uint32{4, 5, 6},
+					},
 				},
 				Payload: fwkrh.PayloadProto{
 					Message: &pb.EmbedRequest{
 						Tokenized: &pb.TokenizedInput{
 							OriginalText: "Embed this",
+							InputIds:     []uint32{4, 5, 6},
 						},
 					},
 				},
 			},
 		},
 	}
-
 	parser := NewVllmGRPCParser()
 	ctx := context.Background()
 

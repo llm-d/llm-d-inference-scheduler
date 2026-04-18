@@ -131,6 +131,24 @@ func TestLLMRequestBody_PromptText(t *testing.T) {
 			},
 			expected: "",
 		},
+		{
+			name: "embeddings request with string input",
+			body: &InferenceRequestBody{
+				Embeddings: &EmbeddingsRequest{
+					Input: EmbeddingsInput{Raw: "hello world"},
+				},
+			},
+			expected: "hello world",
+		},
+		{
+			name: "embeddings request with array of strings input",
+			body: &InferenceRequestBody{
+				Embeddings: &EmbeddingsRequest{
+					Input: EmbeddingsInput{Strings: []string{"hello", "world"}},
+				},
+			},
+			expected: "hello world",
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +182,23 @@ func TestPrompt_UnmarshalJSON(t *testing.T) {
 			want:  Prompt{Strings: []string{"hello world"}},
 		},
 		{
+			name:  "array of integers prompt",
+			input: `[1,2,3]`,
+			want:  Prompt{TokenIDs: []uint32{1, 2, 3}},
+		},
+		{
+			name:    "array of floats prompt is rejected",
+			input:   `[1.5,2.7]`,
+			wantErr: true,
+		},
+
+		{
+			name:    "array of arrays of integers prompt is rejected for now",
+			input:   `[[1,2],[3,4]]`,
+			wantErr: true,
+		},
+
+		{
 			name:    "integer prompt is rejected",
 			input:   `123`,
 			wantErr: true,
@@ -185,6 +220,117 @@ func TestPrompt_UnmarshalJSON(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.want, p)
 			}
+		})
+	}
+}
+
+func TestEmbeddingsInput_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    EmbeddingsInput
+		wantErr bool
+	}{
+		{
+			name:  "string input",
+			input: `"hello world"`,
+			want:  EmbeddingsInput{Raw: "hello world"},
+		},
+		{
+			name:  "array of strings input",
+			input: `["hello","world"]`,
+			want:  EmbeddingsInput{Strings: []string{"hello", "world"}},
+		},
+		{
+			name:  "array of integers input",
+			input: `[1,2,3]`,
+			want:  EmbeddingsInput{TokenIDs: []uint32{1, 2, 3}},
+		},
+		{
+			name:    "array of floats input is rejected",
+			input:   `[1.5,2.7]`,
+			wantErr: true,
+		},
+
+		{
+			name:    "array of arrays of integers input is rejected for now",
+			input:   `[[1,2],[3,4]]`,
+			wantErr: true,
+		},
+
+		{
+			name:    "integer input is rejected",
+			input:   `123`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var e EmbeddingsInput
+			err := e.UnmarshalJSON([]byte(tt.input))
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want, e)
+			}
+		})
+	}
+}
+
+func TestInferenceRequestBody_InputTokenCountHint(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     *InferenceRequestBody
+		wantHint int
+	}{
+		{
+			name: "completions with token IDs returns count",
+			body: &InferenceRequestBody{
+				Completions: &CompletionsRequest{
+					Prompt: Prompt{TokenIDs: []uint32{1, 2, 3}},
+				},
+			},
+			wantHint: 3,
+		},
+		{
+			name: "completions with text returns -1",
+			body: &InferenceRequestBody{
+				Completions: &CompletionsRequest{
+					Prompt: Prompt{Raw: "hello"},
+				},
+			},
+			wantHint: -1,
+		},
+		{
+			name: "embeddings with token IDs returns count",
+			body: &InferenceRequestBody{
+				Embeddings: &EmbeddingsRequest{
+					Input: EmbeddingsInput{TokenIDs: []uint32{1, 2, 3, 4}},
+				},
+			},
+			wantHint: 4,
+		},
+		{
+			name: "embeddings with text returns -1",
+			body: &InferenceRequestBody{
+				Embeddings: &EmbeddingsRequest{
+					Input: EmbeddingsInput{Raw: "hello"},
+				},
+			},
+			wantHint: -1,
+		},
+		{
+			name:     "empty body returns -1",
+			body:     &InferenceRequestBody{},
+			wantHint: -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantHint, tt.body.InputTokenCountHint())
 		})
 	}
 }

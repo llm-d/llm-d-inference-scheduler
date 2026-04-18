@@ -103,6 +103,23 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 			},
 		},
 		{
+			name:    "completions request with token IDs",
+			headers: map[string]string{":path": "/v1/completions"},
+			body: map[string]any{
+				"model":  "test",
+				"prompt": []any{1, 2, 3},
+			},
+			want: &fwkrh.InferenceRequestBody{
+				Completions: &fwkrh.CompletionsRequest{
+					Prompt: fwkrh.Prompt{TokenIDs: []uint32{1, 2, 3}},
+				},
+				Payload: fwkrh.PayloadMap{
+					"model":  "test",
+					"prompt": []any{float64(1), float64(2), float64(3)},
+				},
+			},
+		},
+		{
 			name:    "completions request with empty string array prompt rejected",
 			headers: map[string]string{":path": "/v1/completions"},
 			body: map[string]any{
@@ -679,7 +696,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 			},
 			want: &fwkrh.InferenceRequestBody{
 				Embeddings: &fwkrh.EmbeddingsRequest{
-					Input: "The food was delicious and the waiter...",
+					Input: fwkrh.EmbeddingsInput{Raw: "The food was delicious and the waiter..."},
 				},
 				Payload: fwkrh.PayloadMap{
 					"model": "text-embedding-3-small",
@@ -696,11 +713,28 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 			},
 			want: &fwkrh.InferenceRequestBody{
 				Embeddings: &fwkrh.EmbeddingsRequest{
-					Input: []any{"First document", "Second document"},
+					Input: fwkrh.EmbeddingsInput{Strings: []string{"First document", "Second document"}},
 				},
 				Payload: fwkrh.PayloadMap{
 					"model": "text-embedding-3-small",
 					"input": []any{"First document", "Second document"},
+				},
+			},
+		},
+		{
+			name:    "embeddings request with token IDs",
+			headers: map[string]string{":path": "/v1/embeddings"},
+			body: map[string]any{
+				"model": "text-embedding-3-small",
+				"input": []any{1, 2, 3},
+			},
+			want: &fwkrh.InferenceRequestBody{
+				Embeddings: &fwkrh.EmbeddingsRequest{
+					Input: fwkrh.EmbeddingsInput{TokenIDs: []uint32{1, 2, 3}},
+				},
+				Payload: fwkrh.PayloadMap{
+					"model": "text-embedding-3-small",
+					"input": []any{float64(1), float64(2), float64(3)},
 				},
 			},
 		},
@@ -714,7 +748,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 			},
 			want: &fwkrh.InferenceRequestBody{
 				Embeddings: &fwkrh.EmbeddingsRequest{
-					Input:     "embed this text",
+					Input:     fwkrh.EmbeddingsInput{Raw: "embed this text"},
 					CacheSalt: "embeddings-salt-123",
 				},
 				Payload: fwkrh.PayloadMap{
@@ -733,7 +767,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 			},
 			want: &fwkrh.InferenceRequestBody{
 				Embeddings: &fwkrh.EmbeddingsRequest{
-					Input: "text to embed",
+					Input: fwkrh.EmbeddingsInput{Raw: "text to embed"},
 				},
 				Payload: fwkrh.PayloadMap{
 					"model": "text-embedding-3-small",
