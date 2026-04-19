@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	attrprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 )
 
@@ -66,7 +67,7 @@ func Factory(name string, rawParameters json.RawMessage, handle plugin.Handle) (
 	}
 
 	if parameters.PrefixPluginName == "" {
-		parameters.PrefixPluginName = prefix.PrefixCachePluginType
+		parameters.PrefixPluginName = prefix.PrefixCacheScorerPluginType
 	}
 
 	// Note: We don't enforce that the prefix plugin exists here
@@ -77,8 +78,8 @@ func Factory(name string, rawParameters json.RawMessage, handle plugin.Handle) (
 
 // NewNoHitLRU creates a new NoHitLRU scorer
 func NewNoHitLRU(ctx context.Context, params *Parameters) *NoHitLRU {
-	prefixPluginType := prefix.PrefixCachePluginType
-	prefixPluginName := prefix.PrefixCachePluginType
+	prefixPluginType := prefix.PrefixCacheScorerPluginType
+	prefixPluginName := prefix.PrefixCacheScorerPluginType
 	lruSize := defaultLRUSize
 
 	if params != nil {
@@ -133,22 +134,23 @@ func (s *NoHitLRU) Category() scheduling.ScorerCategory {
 	return scheduling.Distribution
 }
 
-// isColdRequest determines if a request is cold by reading the prefix cache state.
-// Returns true if no prefix cache hits were found, or if prefix cache state is unavailable.
-func (s *NoHitLRU) isColdRequest(ctx context.Context, cycleState *scheduling.CycleState) bool {
+// isColdRequest determines if a request is cold by checking endpoint prefix-cache attributes.
+// Returns true when no endpoint reports any cache-hit blocks, or when no attribute is present.
+func (s *NoHitLRU) isColdRequest(ctx context.Context, endpoints []scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	// Read prefix cache state to determine if this is a cold request
-	// This is treated as an optimization - if the state isn't available, we assume cold request
-	prefixState, err := scheduling.ReadCycleStateKey[*prefix.SchedulingContextState](cycleState, plugin.StateKey(s.prefixPluginTypedName.String()))
-
-	if err != nil {
-		logger.Info("No prefix cache state found, treating as cold request for LRU optimization", "error", err)
-		return true
+	for _, ep := range endpoints {
+		attr, ok := ep.Get(attrprefix.PrefixCacheMatchInfoKey)
+		if !ok {
+			continue
+		}
+		info, ok := attr.(*attrprefix.PrefixCacheMatchInfo)
+		if ok && info.MatchBlocks() > 0 {
+			logger.Info("Cache hit detected on endpoint", "endpoint", ep.GetMetadata().NamespacedName)
+			return false
+		}
 	}
-
-	// Check if this is a cold request (no prefix cache hits)
-	return len(prefixState.PrefixCacheServers) == 0
+	return true
 }
 
 // scoreNeutral returns neutral scores (0.5) for all endpoints.
@@ -256,7 +258,7 @@ func (s *NoHitLRU) scoreColdRequestByLRU(endpoints []scheduling.Endpoint) map[sc
 func (s *NoHitLRU) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).V(logutil.DEBUG)
 
-	isCold := s.isColdRequest(ctx, cycleState)
+	isCold := s.isColdRequest(ctx, endpoints)
 
 	// Store the cold request state in plugin state for PreRequest to use
 	coldState := &coldRequestState{isCold: isCold}

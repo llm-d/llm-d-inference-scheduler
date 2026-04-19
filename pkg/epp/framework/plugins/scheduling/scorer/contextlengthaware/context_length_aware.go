@@ -237,7 +237,7 @@ func estimateContextLength(request *scheduling.LLMRequest) int {
 
 	// Handle regular completions
 	if request.Body.Completions != nil {
-		totalChars += len(request.Body.Completions.Prompt)
+		totalChars += len(request.Body.Completions.Prompt.Raw)
 	}
 
 	// Convert characters to approximate token count

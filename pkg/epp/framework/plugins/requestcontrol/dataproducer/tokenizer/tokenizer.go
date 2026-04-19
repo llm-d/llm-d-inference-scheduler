@@ -179,7 +179,7 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) (
 	switch {
 	case request.Body.Completions != nil:
 		traceLogger.Info("Calling Render for completions", "prompt", request.Body.Completions.Prompt)
-		tokenIDs, _, err = p.tokenizer.Render(request.Body.Completions.Prompt)
+		tokenIDs, _, err = p.tokenizer.Render(request.Body.Completions.Prompt.Raw)
 	case request.Body.ChatCompletions != nil:
 		renderReq := ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))

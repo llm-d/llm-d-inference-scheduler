@@ -25,7 +25,7 @@ import (
 const (
 	// PdProfileHandlerType is a legacy alias for DisaggProfileHandlerType.
 	PdProfileHandlerType     = "pd-profile-handler"
-	defaultPrefixPluginType  = prefix.PrefixCachePluginType
+	defaultPrefixPluginType  = prefix.PrefixCacheScorerPluginType
 	defaultDeciderPluginName = PrefixBasedPDDeciderPluginType
 )
 

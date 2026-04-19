@@ -126,13 +126,13 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				TargetModel: "test-model",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{
-						Prompt: prompt,
+						Prompt: scheduling.Prompt{Raw: prompt},
 					},
 				},
 			},
 			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
-				prompt := req.Completions.Prompt
+				prompt := req.Completions.Prompt.Raw
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
@@ -321,7 +321,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				TargetModel: "test-model",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{
-						Prompt: prompt,
+						Prompt: scheduling.Prompt{Raw: prompt},
 					},
 				},
 			},
@@ -331,7 +331,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Render(req.Completions.Prompt)
+				tokens, _, err := testTokenizer.Render(req.Completions.Prompt.Raw)
 				require.NoError(t, err)
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -393,7 +393,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				TargetModel: "test-model",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{
-						Prompt: prompt,
+						Prompt: scheduling.Prompt{Raw: prompt},
 					},
 				},
 			},
@@ -403,7 +403,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Render(req.Completions.Prompt)
+				tokens, _, err := testTokenizer.Render(req.Completions.Prompt.Raw)
 				require.NoError(t, err)
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -463,7 +463,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				TargetModel: "test-model",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{
-						Prompt: "This prompt has never been cached before on any endpoint.",
+						Prompt: scheduling.Prompt{Raw: "This prompt has never been cached before on any endpoint."},
 					},
 				},
 			},
@@ -511,7 +511,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				TargetModel: "test-model",
 				Body: &scheduling.LLMRequestBody{
 					Completions: &scheduling.CompletionsRequest{
-						Prompt: prompt,
+						Prompt: scheduling.Prompt{Raw: prompt},
 					},
 				},
 			},
@@ -521,7 +521,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
 				require.NoError(t, err)
 
-				tokens, _, err := testTokenizer.Render(req.Completions.Prompt)
+				tokens, _, err := testTokenizer.Render(req.Completions.Prompt.Raw)
 				require.NoError(t, err)
 
 				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
@@ -648,7 +648,7 @@ func TestPrepareRequestData_PopulatesPluginState(t *testing.T) {
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
-				Prompt: prompt,
+				Prompt: scheduling.Prompt{Raw: prompt},
 			},
 		},
 	}
@@ -731,7 +731,7 @@ func TestScoreReusesPluginState(t *testing.T) {
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
-				Prompt: prompt,
+				Prompt: scheduling.Prompt{Raw: prompt},
 			},
 		},
 	}
@@ -784,7 +784,7 @@ func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
-				Prompt: prompt,
+				Prompt: scheduling.Prompt{Raw: prompt},
 			},
 		},
 	}
@@ -884,7 +884,7 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 		TargetModel: "test-model",
 		Body: &scheduling.LLMRequestBody{
 			Completions: &scheduling.CompletionsRequest{
-				Prompt: prompt,
+				Prompt: scheduling.Prompt{Raw: prompt},
 			},
 		},
 	}

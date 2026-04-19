@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
 const (

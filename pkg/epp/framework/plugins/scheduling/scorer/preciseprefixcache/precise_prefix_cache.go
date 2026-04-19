@@ -23,7 +23,6 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
@@ -496,21 +495,18 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 		return fmt.Sprintf("%s:%s", metadata.Address, metadata.Port), true
 	}
 
-	// Write prefix cache state to cycle state.
-	prefixCacheState := &prefix.SchedulingContextState{
-		PrefixHashes:       []prefix.BlockHash{},
-		PrefixCacheServers: map[prefix.ServerID]int{},
-	}
+	// Write per-endpoint prefix-cache match info as endpoint attributes so downstream
+	// scorers (e.g. nohitlru) can determine whether any cache hits were found.
 	for _, endpoint := range endpoints {
 		key, ok := endpointToKey(endpoint)
-		if !ok {
-			continue
+		matchBlocks := 0
+		if ok {
+			if rawScore, exists := scores[key]; exists && rawScore > 0 {
+				matchBlocks = 1
+			}
 		}
-		if s, exists := scores[key]; exists && s > 0 {
-			prefixCacheState.PrefixCacheServers[prefix.ServerID(endpoint.GetMetadata().NamespacedName)] = int(s)
-		}
+		endpoint.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(matchBlocks, 1, 1))
 	}
-	cycleState.Write(plugin.StateKey(s.typedName.String()), prefixCacheState)
 
 	normalizedScores := indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
 
@@ -636,7 +632,7 @@ func (s *Scorer) computeBlockKeys(ctx context.Context,
 
 	// Regular completions path
 	if request.Body.Completions != nil {
-		return s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt, request.TargetModel)
+		return s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
 	}
 
 	return nil, nil
@@ -713,7 +709,7 @@ func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleStat
 
 	// For regular completions, use the prompt directly
 	if request.Body != nil && request.Body.Completions != nil {
-		prompt := request.Body.Completions.Prompt
+		prompt := request.Body.Completions.Prompt.Raw
 		traceLogger.Info("Using completion prompt directly", "promptLength", len(prompt))
 
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)

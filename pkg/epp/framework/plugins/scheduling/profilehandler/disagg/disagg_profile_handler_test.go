@@ -67,7 +67,7 @@ func profileNames(m map[string]scheduling.SchedulerProfile) []string {
 func completionsRequest(prompt string) *scheduling.LLMRequest {
 	return &scheduling.LLMRequest{
 		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: prompt},
+			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: prompt}},
 		},
 	}
 }
@@ -95,7 +95,7 @@ func chatRequest(hasImage, hasVideo, hasAudio bool) *scheduling.LLMRequest {
 
 // withPrompt adds a completions body to a chat request so the PD decider can estimate tokens.
 func withPrompt(req *scheduling.LLMRequest, prompt string) *scheduling.LLMRequest {
-	req.Body.Completions = &scheduling.CompletionsRequest{Prompt: prompt}
+	req.Body.Completions = &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: prompt}}
 	return req
 }
 
@@ -404,7 +404,7 @@ func TestHandler_Pick_PD(t *testing.T) {
 			h := NewDisaggProfileHandler(defaultDecodeProfile, defaultPrefillProfile, "",
 				decider, nil)
 
-			inputTokens := len(req.Body.Completions.Prompt) / AverageCharactersPerToken
+			inputTokens := len(req.Body.Completions.Prompt.Raw) / AverageCharactersPerToken
 			injectPrefixCache(tt.profileResults, tt.cachedTokens, inputTokens)
 
 			got := h.Pick(ctx, nil, req, profiles, tt.profileResults)
@@ -463,7 +463,7 @@ func TestHandler_Pick_PD_Series(t *testing.T) {
 				want         []string
 			}{
 				{short, 0, []string{defaultPrefillProfile}},
-				{short, len(short.Body.Completions.Prompt) / AverageCharactersPerToken, []string{}},
+				{short, len(short.Body.Completions.Prompt.Raw) / AverageCharactersPerToken, []string{}},
 			},
 		},
 		{
@@ -475,7 +475,7 @@ func TestHandler_Pick_PD_Series(t *testing.T) {
 				want         []string
 			}{
 				{short, 0, []string{defaultPrefillProfile}},
-				{long, len(short.Body.Completions.Prompt) / AverageCharactersPerToken, []string{defaultPrefillProfile}},
+				{long, len(short.Body.Completions.Prompt.Raw) / AverageCharactersPerToken, []string{defaultPrefillProfile}},
 			},
 		},
 	}
@@ -492,7 +492,7 @@ func TestHandler_Pick_PD_Series(t *testing.T) {
 				results := map[string]*scheduling.ProfileRunResult{
 					defaultDecodeProfile: makeProfileRunResult("pod1"),
 				}
-				inputTokens := len(step.req.Body.Completions.Prompt) / AverageCharactersPerToken
+				inputTokens := len(step.req.Body.Completions.Prompt.Raw) / AverageCharactersPerToken
 				injectPrefixCache(results, step.cachedTokens, inputTokens)
 				got := h.Pick(ctx, &scheduling.CycleState{}, step.req, profiles, results)
 				assert.ElementsMatch(t, step.want, profileNames(got))
@@ -910,7 +910,7 @@ func TestHandler_Pick_EPD_Full(t *testing.T) {
 
 			inputTokens := 0
 			if tt.req.Body.Completions != nil {
-				inputTokens = len(tt.req.Body.Completions.Prompt) / AverageCharactersPerToken
+				inputTokens = len(tt.req.Body.Completions.Prompt.Raw) / AverageCharactersPerToken
 			} else if tt.req.Body.ChatCompletions != nil {
 				b, _ := json.Marshal(tt.req.Body.ChatCompletions.Messages)
 				inputTokens = len(b) / AverageCharactersPerToken
@@ -1136,7 +1136,7 @@ func TestHandler_Pick_NilDeciders(t *testing.T) {
 
 			// Inject prefix cache if needed for PD decider
 			if tt.req.Body.Completions != nil {
-				inputTokens := len(tt.req.Body.Completions.Prompt) / AverageCharactersPerToken
+				inputTokens := len(tt.req.Body.Completions.Prompt.Raw) / AverageCharactersPerToken
 				injectPrefixCache(tt.results, 0, inputTokens)
 			}
 
