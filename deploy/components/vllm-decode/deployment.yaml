@@ -95,13 +95,13 @@ spec:
           httpGet:
             path: /v1/models
             port: 8200
-          initialDelaySeconds: 5
+          initialDelaySeconds: 2
           periodSeconds: 10
         livenessProbe:
           httpGet:
             path: /v1/models
             port: 8200
-          initialDelaySeconds: 15
+          initialDelaySeconds: 2
           periodSeconds: 10
         env:
         - name: POD_IP

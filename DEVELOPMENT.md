@@ -257,17 +257,22 @@ kubectl debug -it <pod-name> -n <namespace> \
 ### Inference Disaggregation Modes
 
 The deployment uses three atomic Kustomize components (`vllm-encode`, `vllm-prefill`,
-`vllm-decode`) that compose to form any disaggregation scenario. Select the scenario
-with the `DISAGG_MODE` environment variable. For technical details, refer to
-[docs/disaggregation.md](docs/disaggregation.md) and
-[deploy/environments/dev/README.md](deploy/environments/dev/README.md).
+`vllm-decode`) that compose to form any disaggregation scenario. Disaggregation is
+controlled by two independent boolean flags:
 
-| `DISAGG_MODE` | Components | Description |
+| Flag | Default | Meaning |
 |---|---|---|
-| `epd` (default) | decode | No disaggregation, single deployment (no routing sidecar) |
-| `p-d` | prefill + decode | Separate prefill and decode pods |
-| `e-pd` | encode + decode | Separate encoder, combined prefill-decode |
-| `e-p-d` | encode + prefill + decode | Fully disaggregated pipeline |
+| `DISAGG_E` | `false` | Deploy a separate **Encoder** pod |
+| `DISAGG_P` | `false` | Deploy a separate **Prefill** pod |
+
+The combination determines the scenario:
+
+| `DISAGG_E` | `DISAGG_P` | Scenario | Components |
+|---|---|---|---|
+| `false` | `false` | EPD (default) | decode only (no routing sidecar) |
+| `false` | `true` | P/D | prefill + decode |
+| `true` | `false` | E/PD | encode + decode |
+| `true` | `true` | E/P/D | encode + prefill + decode |
 
 Data parallel and KV cache are independent options that combine with any disaggregation mode:
 
@@ -276,12 +281,15 @@ Data parallel and KV cache are independent options that combine with any disaggr
 | `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks. Set to `2`+ to enable multi-rank inference |
 | `KV_CACHE_ENABLED` | `false` | Enable KV cache-aware scheduling |
 
+For technical details, refer to [docs/disaggregation.md](docs/disaggregation.md) and
+[deploy/environments/dev/README.md](deploy/environments/dev/README.md).
+
 #### Prefill/Decode (P/D) Disaggregation
 
 Prefill and Decode run on independent deployments:
 
 ```bash
-DISAGG_MODE=p-d make env-dev-kind
+DISAGG_P=true make env-dev-kind
 ```
 
 > **Note:** The legacy `PD_ENABLED=true` syntax still works for backward compatibility.
@@ -292,7 +300,7 @@ Multimodal configuration with a standalone Encoder pod for image/video embedding
 and separate Prefill and Decode deployments:
 
 ```bash
-DISAGG_MODE=e-p-d make env-dev-kind
+DISAGG_E=true DISAGG_P=true make env-dev-kind
 ```
 
 > **Note:** The legacy `EPD_ENABLED=true` syntax still works for backward compatibility.
@@ -327,11 +335,12 @@ curl http://localhost:8080/v1/chat/completions \
 ```
 </details>
 
-#### Other Disaggregation Modes
+#### Encode/Prefill-Decode (E/PD) Disaggregation
+
+Encoder separate, prefill and decode combined:
 
 ```bash
-# Encode / Prefill-Decode (encoder separate, prefill+decode combined)
-DISAGG_MODE=e-pd make env-dev-kind
+DISAGG_E=true make env-dev-kind
 ```
 
 #### Combining with Data Parallel and KV Cache
@@ -343,13 +352,13 @@ Data parallel and KV cache are independent options that work with any disaggrega
 VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
 
 # P/D with data parallel
-DISAGG_MODE=p-d VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
 
 # EPD with KV cache enabled
 KV_CACHE_ENABLED=true make env-dev-kind
 
 # E/P/D with data parallel and KV cache
-DISAGG_MODE=e-p-d VLLM_DATA_PARALLEL_SIZE=2 KV_CACHE_ENABLED=true make env-dev-kind
+DISAGG_E=true DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 KV_CACHE_ENABLED=true make env-dev-kind
 ```
 
 ### Simulator vs Real vLLM
@@ -373,17 +382,17 @@ The dev scenario overlays include the simulator component by default. No extra f
 make env-dev-kind
 
 # P/D — prefill + decode
-DISAGG_MODE=p-d make env-dev-kind
+DISAGG_P=true make env-dev-kind
 
 # E/PD — encode + prefill-decode
-DISAGG_MODE=e-pd make env-dev-kind
+DISAGG_E=true make env-dev-kind
 
 # E/P/D — encode + prefill + decode (fully disaggregated)
-DISAGG_MODE=e-p-d make env-dev-kind
+DISAGG_E=true DISAGG_P=true make env-dev-kind
 
 # Any mode with data parallel
 VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
-DISAGG_MODE=p-d VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
 ```
 
 #### Deploying with Real vLLM

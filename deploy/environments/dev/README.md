@@ -36,16 +36,16 @@ Set `DISAGG_MODE` environment variable when running `kind-dev-env.sh`:
 DISAGG_MODE=epd ./scripts/kind-dev-env.sh
 
 # Prefill/Decode
-DISAGG_MODE=p-d ./scripts/kind-dev-env.sh
+DISAGG_P=true ./scripts/kind-dev-env.sh
 
 # Encode / Prefill-Decode
-DISAGG_MODE=e-pd ./scripts/kind-dev-env.sh
+DISAGG_E=true ./scripts/kind-dev-env.sh
 
 # Encode / Prefill / Decode (fully disaggregated)
-DISAGG_MODE=e-p-d ./scripts/kind-dev-env.sh
+DISAGG_E=true DISAGG_P=true ./scripts/kind-dev-env.sh
 
-# Data Parallel
-DISAGG_MODE=dp ./scripts/kind-dev-env.sh
+# Data Parallel (any mode)
+VLLM_DATA_PARALLEL_SIZE=2 ./scripts/kind-dev-env.sh
 ```
 
 ## Key Environment Variables

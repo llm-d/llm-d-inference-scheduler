@@ -82,17 +82,30 @@ export PROM_ENABLED="${PROM_ENABLED:-false}"
 # Set the host port to map to the Prometheus NodePort (30090)
 : "${PROM_HOST_PORT:=30090}"
 
-# Disaggregation mode: epd (default), pd, e-pd, e-p-d, dp
-# Backward compatibility: EPD_ENABLED=true maps to e-p-d, PD_ENABLED=true maps to pd
+# Disaggregation flags (independent boolean options):
+#   DISAGG_E=true  — deploy a separate Encoder pod
+#   DISAGG_P=true  — deploy a separate Prefill pod
+#
+# Combinations:
+#   DISAGG_E=false DISAGG_P=false  → EPD (no disaggregation, default)
+#   DISAGG_E=false DISAGG_P=true   → P/D
+#   DISAGG_E=true  DISAGG_P=false  → E/PD
+#   DISAGG_E=true  DISAGG_P=true   → E/P/D
+export DISAGG_E="${DISAGG_E:-false}"
+export DISAGG_P="${DISAGG_P:-false}"
+
+# Backward compatibility: PD_ENABLED and EPD_ENABLED are deprecated.
+# Use DISAGG_P=true and DISAGG_E=true instead.
 PD_ENABLED="${PD_ENABLED:-false}"
 EPD_ENABLED="${EPD_ENABLED:-false}"
-
 if [ "${EPD_ENABLED}" == "true" ] || [ "${EPD_ENABLED}" == "\"true\"" ]; then
-  DISAGG_MODE="${DISAGG_MODE:-e-p-d}"
+  echo "WARNING: EPD_ENABLED is deprecated. Use DISAGG_E=true DISAGG_P=true instead." >&2
+  DISAGG_E="true"
+  DISAGG_P="true"
 elif [ "${PD_ENABLED}" == "true" ] || [ "${PD_ENABLED}" == "\"true\"" ]; then
-  DISAGG_MODE="${DISAGG_MODE:-p-d}"
+  echo "WARNING: PD_ENABLED is deprecated. Use DISAGG_P=true instead." >&2
+  DISAGG_P="true"
 fi
-export DISAGG_MODE="${DISAGG_MODE:-epd}"
 
 # By default we are not setting up for KV cache
 export KV_CACHE_ENABLED="${KV_CACHE_ENABLED:-false}"
@@ -103,11 +116,7 @@ export EXTERNAL_TOKENIZER_ENABLED="${EXTERNAL_TOKENIZER_ENABLED:-false}"
 # Replica counts for E (Encode), P (Prefill), and D (Decode)
 export VLLM_REPLICA_COUNT_E="${VLLM_REPLICA_COUNT_E:-1}"
 export VLLM_REPLICA_COUNT_P="${VLLM_REPLICA_COUNT_P:-1}"
-if [ "${DISAGG_MODE}" == "e-p-d" ]; then
-  export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
-else
-  export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-2}"
-fi
+export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
 
 # Data Parallel size
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
@@ -124,44 +133,36 @@ export METRICS_ENDPOINT_AUTH="${METRICS_ENDPOINT_AUTH:-false}"
 # HuggingFace token for model downloads (empty for simulator)
 export HF_TOKEN="${HF_TOKEN:-}"
 
-# Connector types for disaggregation scenarios (set based on DISAGG_MODE)
-case "${DISAGG_MODE}" in
-  p-d)
-    export CONNECTOR_TYPE="${CONNECTOR_TYPE:-nixlv2}"
-    export KV_CONNECTOR_TYPE="${KV_CONNECTOR_TYPE:-nixlv2}"
-    export EC_CONNECTOR_TYPE="${EC_CONNECTOR_TYPE:-}"
-    ;;
-  e-pd)
-    export CONNECTOR_TYPE="${CONNECTOR_TYPE:-}"
-    export KV_CONNECTOR_TYPE="${KV_CONNECTOR_TYPE:-}"
-    export EC_CONNECTOR_TYPE="${EC_CONNECTOR_TYPE:-ec-example}"
-    ;;
-  e-p-d)
-    export CONNECTOR_TYPE="${CONNECTOR_TYPE:-}"
-    export KV_CONNECTOR_TYPE="${KV_CONNECTOR_TYPE:-nixlv2}"
-    export EC_CONNECTOR_TYPE="${EC_CONNECTOR_TYPE:-ec-example}"
-    ;;
-  *)
-    export CONNECTOR_TYPE="${CONNECTOR_TYPE:-}"
-    export KV_CONNECTOR_TYPE="${KV_CONNECTOR_TYPE:-}"
-    export EC_CONNECTOR_TYPE="${EC_CONNECTOR_TYPE:-}"
-    ;;
-esac
+# Connector types — derived from DISAGG_E and DISAGG_P
+# KV connector: needed when P is disaggregated (P/D or E/P/D)
+if [ "${DISAGG_P}" == "true" ]; then
+  export CONNECTOR_TYPE="${CONNECTOR_TYPE:-nixlv2}"
+  export KV_CONNECTOR_TYPE="${KV_CONNECTOR_TYPE:-nixlv2}"
+else
+  export CONNECTOR_TYPE="${CONNECTOR_TYPE:-}"
+  export KV_CONNECTOR_TYPE="${KV_CONNECTOR_TYPE:-}"
+fi
+# EC connector: needed when E is disaggregated (E/PD or E/P/D)
+if [ "${DISAGG_E}" == "true" ]; then
+  export EC_CONNECTOR_TYPE="${EC_CONNECTOR_TYPE:-ec-example}"
+else
+  export EC_CONNECTOR_TYPE="${EC_CONNECTOR_TYPE:-}"
+fi
 
-# Validate configuration compatibility
-# Determine EPP config file based on DISAGG_MODE
-# KV cache and data parallel are independent options that work with any disaggregation mode
+# Determine EPP config file based on disaggregation flags
+# KV cache and data parallel are independent options that work with any mode
 if [ "${EXTERNAL_TOKENIZER_ENABLED}" == "true" ]; then
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-external-tokenizer-config.yaml"
 elif [ "${KV_CACHE_ENABLED}" == "true" ]; then
   DEFAULT_EPP_CONFIG="deploy/config/sim-epp-kvcache-config.yaml"
+elif [ "${DISAGG_E}" == "true" ] && [ "${DISAGG_P}" == "true" ]; then
+  DEFAULT_EPP_CONFIG="deploy/config/sim-e-p-d-epp-config.yaml"
+elif [ "${DISAGG_E}" == "true" ]; then
+  DEFAULT_EPP_CONFIG="deploy/config/sim-e-pd-epp-config.yaml"
+elif [ "${DISAGG_P}" == "true" ]; then
+  DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml"
 else
-  case "${DISAGG_MODE}" in
-    p-d)   DEFAULT_EPP_CONFIG="deploy/config/sim-pd-epp-config.yaml" ;;
-    e-pd)  DEFAULT_EPP_CONFIG="deploy/config/sim-e-pd-epp-config.yaml" ;;
-    e-p-d) DEFAULT_EPP_CONFIG="deploy/config/sim-e-p-d-epp-config.yaml" ;;
-    *)     DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml" ;;
-  esac
+  DEFAULT_EPP_CONFIG="deploy/config/sim-epp-config.yaml"
 fi
 
 export EPP_CONFIG="${EPP_CONFIG:-${DEFAULT_EPP_CONFIG}}"
@@ -305,13 +306,16 @@ kubectl kustomize --enable-helm deploy/components/crds-istio |
 # Development Environment
 # ------------------------------------------------------------------------------
 
-# Deploy the environment to the "default" namespace
-case "${DISAGG_MODE}" in
-  p-d)   KUSTOMIZE_DIR="deploy/environments/dev/p-d" ;;
-  e-pd)  KUSTOMIZE_DIR="deploy/environments/dev/e-pd" ;;
-  e-p-d) KUSTOMIZE_DIR="deploy/environments/dev/e-p-d" ;;
-  *)     KUSTOMIZE_DIR="deploy/environments/dev/epd" ;;
-esac
+# Select scenario overlay based on disaggregation flags
+if [ "${DISAGG_E}" == "true" ] && [ "${DISAGG_P}" == "true" ]; then
+  KUSTOMIZE_DIR="deploy/environments/dev/e-p-d"
+elif [ "${DISAGG_E}" == "true" ]; then
+  KUSTOMIZE_DIR="deploy/environments/dev/e-pd"
+elif [ "${DISAGG_P}" == "true" ]; then
+  KUSTOMIZE_DIR="deploy/environments/dev/p-d"
+else
+  KUSTOMIZE_DIR="deploy/environments/dev/epd"
+fi
 
 TEMP_FILE=$(mktemp)
 # Ensure that the temporary file is deleted now matter what happens in the script
