@@ -138,7 +138,6 @@ func createEndPointPicker(eppConfig string) []string {
 			"${UDS_TOKENIZER_IMAGE}":   udsTokenizerImage,
 			"${NAMESPACE}":             nsName,
 			"${POOL_NAME}":             simModelName + "-inference-pool",
-			"${POOL_NAMESPACE}":        nsName,
 			"${METRICS_ENDPOINT_AUTH}": "false",
 		})
 

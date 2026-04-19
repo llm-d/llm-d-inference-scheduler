@@ -4,6 +4,7 @@
 # Adds simulator-specific configuration to vLLM deployments:
 #   - --mode=${VLLM_SIM_MODE} arg on Decode (vllm-d) only — controls simulator
 #     response mode (echo: returns input, random: returns random sentences)
+#   - --zmq-endpoint on Decode only — publishes KV cache events to the EPP
 #   - UDS tokenizer sidecar on all deployments (Decode, Prefill, Encode)
 #   - KV cache args on Decode for cache-aware scheduling tests
 #
@@ -36,6 +37,9 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/args/3
       value: "--block-size=16"
+    - op: add
+      path: /spec/template/spec/containers/0/args/4
+      value: "--zmq-endpoint=tcp://${EPP_NAME}.${NAMESPACE}.svc.cluster.local:5557"
     - op: add
       path: /spec/template/spec/initContainers/0
       value:
