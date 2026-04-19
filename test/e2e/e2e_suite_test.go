@@ -45,7 +45,7 @@ const (
 	// envoyManifest is the manifest for the envoy proxy test resources.
 	envoyManifest = "../../deploy/environments/dev/e2e-infra/envoy.yaml"
 	// eppManifest is the manifest for the deployment of the EPP
-	eppManifest = "../../deploy/components/inference-gateway/deployments.yaml"
+	eppManifest = "../../deploy/components/inference-gateway/deployment.yaml"
 	// rbacManifest is the manifest for the EPP's RBAC resources.
 	rbacManifest = "../../deploy/components/inference-gateway/rbac.yaml"
 	// serviceAccountManifest is the manifest for the EPP's service account resources.
