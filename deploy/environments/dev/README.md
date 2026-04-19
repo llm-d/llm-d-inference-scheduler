@@ -62,7 +62,7 @@ Variables substituted at deploy time via `envsubst` or Go test `substituteMany`:
 | `VLLM_REPLICA_COUNT_E` | Encode deployment replicas | `1` |
 | `VLLM_REPLICA_COUNT_P` | Prefill deployment replicas | `1` |
 | `VLLM_REPLICA_COUNT_D` | Decode deployment replicas | `2` |
-| `VLLM_DATA_PARALLEL_SIZE` | Data parallel rank count | `1` |
+| `VLLM_DATA_PARALLEL_SIZE` | Data parallel rank count per vLLM pod — applies to ALL pod types (encode, prefill, decode) | `1` |
 | `CONNECTOR_TYPE` | KV connector for P/D | `nixlv2` |
 | `EC_CONNECTOR_TYPE` | EC connector for E scenarios | `ec-example` |
 | `KV_CACHE_ENABLED` | Enable KV cache scoring | `false` |

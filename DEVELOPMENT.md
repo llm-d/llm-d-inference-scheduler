@@ -283,7 +283,7 @@ Data parallel and KV cache are orthogonal options that can be combined with any 
 
 | Variable | Default | Description |
 |---|---|---|
-| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per vLLM pod. Set to `2`+ to enable |
+| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per vLLM pod. Applies to ALL pod types (encode, prefill, decode). Set to `2`+ to enable |
 | `KV_CACHE_ENABLED` | `false` | Enable KV cache-aware scheduling |
 
 For technical details, refer to [docs/disaggregation.md](docs/disaggregation.md) and
