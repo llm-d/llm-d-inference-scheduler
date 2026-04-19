@@ -265,45 +265,60 @@ controlled by two independent boolean flags:
 | `DISAGG_E` | `false` | Deploy a separate **Encoder** pod |
 | `DISAGG_P` | `false` | Deploy a separate **Prefill** pod |
 
-The combination determines the scenario:
+The combination of these flags determines the scenario:
 
 | `DISAGG_E` | `DISAGG_P` | Scenario | Components |
 |---|---|---|---|
-| `false` | `false` | EPD (default) | decode only (no routing sidecar) |
+| `false` | `false` | EPD (default) | decode only |
 | `false` | `true` | P/D | prefill + decode |
 | `true` | `false` | E/PD | encode + decode |
 | `true` | `true` | E/P/D | encode + prefill + decode |
 
-Data parallel and KV cache are independent options that combine with any disaggregation mode:
+Data parallel and KV cache are orthogonal options that can be combined with any scenario:
 
 | Variable | Default | Description |
 |---|---|---|
-| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks. Set to `2`+ to enable multi-rank inference |
+| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per decode pod. Set to `2`+ to enable |
 | `KV_CACHE_ENABLED` | `false` | Enable KV cache-aware scheduling |
 
 For technical details, refer to [docs/disaggregation.md](docs/disaggregation.md) and
 [deploy/environments/dev/README.md](deploy/environments/dev/README.md).
 
-#### Prefill/Decode (P/D) Disaggregation
+#### 1. EPD — No Disaggregation (default)
 
-Prefill and Decode run on independent deployments:
+Single decode deployment. No separate encoder or prefill pod:
+
+```bash
+make env-dev-kind
+```
+
+#### 2. Prefill/Decode (P/D) Disaggregation
+
+Separate Prefill and Decode pods:
 
 ```bash
 DISAGG_P=true make env-dev-kind
 ```
 
-> **Note:** The legacy `PD_ENABLED=true` syntax still works for backward compatibility.
+> **Note:** The legacy `PD_ENABLED=true` is deprecated. Use `DISAGG_P=true` instead.
 
-#### Encode/Prefill/Decode (E/P/D) Disaggregation
+#### 3. Encode/Prefill-Decode (E/PD) Disaggregation
 
-Multimodal configuration with a standalone Encoder pod for image/video embeddings,
-and separate Prefill and Decode deployments:
+Separate Encoder pod; Prefill and Decode combined:
+
+```bash
+DISAGG_E=true make env-dev-kind
+```
+
+#### 4. Encode/Prefill/Decode (E/P/D) Disaggregation
+
+Fully disaggregated — separate Encoder, Prefill, and Decode pods:
 
 ```bash
 DISAGG_E=true DISAGG_P=true make env-dev-kind
 ```
 
-> **Note:** The legacy `EPD_ENABLED=true` syntax still works for backward compatibility.
+> **Note:** The legacy `EPD_ENABLED=true` is deprecated. Use `DISAGG_E=true DISAGG_P=true` instead.
 
 <details>
 <summary>E/P/D Setup Verification</summary>
@@ -313,8 +328,8 @@ DISAGG_E=true DISAGG_P=true make env-dev-kind
 ```bash
 kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
 ```
-2. Test the Pipeline:
-Run an image-based inference request to ensure the E/P/D components are communicating correctly:
+
+2. Test the Pipeline — send an image-based inference request:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -335,29 +350,16 @@ curl http://localhost:8080/v1/chat/completions \
 ```
 </details>
 
-#### Encode/Prefill-Decode (E/PD) Disaggregation
-
-Encoder separate, prefill and decode combined:
+#### Combining Scenarios with Data Parallel and KV Cache
 
 ```bash
-DISAGG_E=true make env-dev-kind
-```
-
-#### Combining with Data Parallel and KV Cache
-
-Data parallel and KV cache are independent options that work with any disaggregation mode:
-
-```bash
-# EPD with data parallel (2 ranks)
-VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
-
-# P/D with data parallel
+# P/D with 2-rank data parallel decode
 DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
 
-# EPD with KV cache enabled
+# EPD with KV cache-aware scheduling
 KV_CACHE_ENABLED=true make env-dev-kind
 
-# E/P/D with data parallel and KV cache
+# Fully disaggregated E/P/D with data parallel and KV cache
 DISAGG_E=true DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 KV_CACHE_ENABLED=true make env-dev-kind
 ```
 

@@ -24,6 +24,7 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
 		"${SIDECAR_IMAGE}":           sideCarImage,
 		"${VLLM_DATA_PARALLEL_SIZE}": "1",
+		"${VLLM_MODE}":               "echo",
 		"${KV_CACHE_ENABLED}":        "false",
 		"${DECODE_ROLE}":             "",
 		"${EPP_NAME}":                "e2e-epp",

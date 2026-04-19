@@ -25,7 +25,7 @@ patches:
   patch: |
     - op: add
       path: /spec/template/spec/containers/0/args/0
-      value: "--mode=echo"
+      value: "--mode=${VLLM_MODE}"
     - op: add
       path: /spec/template/spec/containers/0/args/1
       value: "--enable-kvcache=${KV_CACHE_ENABLED}"
@@ -86,7 +86,7 @@ patches:
   patch: |
     - op: add
       path: /spec/template/spec/containers/0/args/0
-      value: "--mode=echo"
+      value: "--mode=${VLLM_MODE}"
     - op: add
       path: /spec/template/spec/initContainers
       value:
@@ -138,7 +138,7 @@ patches:
   patch: |
     - op: add
       path: /spec/template/spec/containers/0/args/0
-      value: "--mode=echo"
+      value: "--mode=${VLLM_MODE}"
     - op: add
       path: /spec/template/spec/initContainers
       value:
