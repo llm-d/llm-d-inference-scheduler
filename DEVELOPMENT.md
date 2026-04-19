@@ -15,8 +15,13 @@ Documentation for developing the inference scheduler.
     - [Development Cycle](#development-cycle)
     - [Debugging](#debugging)
     - [Inference Disaggregation Modes](#inference-disaggregation-modes)
-      - [1. Prefill/Decode (P/D) Disaggregation](#1-prefilldecode-pd-disaggregation)
-      - [2. Encode/Prefill/Decode (E/P/D) Disaggregation](#2-encodeprefilldecode-epd-disaggregation)
+      - [1. EPD — No Disaggregation (default)](#1-epd--no-disaggregation-default)
+      - [2. Prefill/Decode (P/D) Disaggregation](#2-prefilldecode-pd-disaggregation)
+      - [3. Encode/Prefill-Decode (E/PD) Disaggregation](#3-encodeprefill-decode-epd-disaggregation)
+      - [4. Encode/Prefill/Decode (E/P/D) Disaggregation](#4-encodeprefilldecode-epd-disaggregation)
+      - [5. Disaggregated Setup Verification](#5-disaggregated-setup-verification)
+      - [Combining Scenarios with Data Parallel and KV Cache](#combining-scenarios-with-data-parallel-and-kv-cache)
+    - [Simulator vs Real vLLM](#simulator-vs-real-vllm)
     - [Cleanup](#cleanup)
   - [Running Tests](#running-tests)
     - [Unit Tests](#unit-tests)
@@ -39,7 +44,7 @@ Documentation for developing the inference scheduler.
 This repo builds the **Endpoint Picker Plugin (EPP)**, the inference scheduling component
 that routes requests to vLLM backends. The EPP runs alongside a Gateway API implementation
 and picks backends based on KV cache state, prefill locality, and load. A second binary,
-the **P/D sidecar** (`cmd/pd-sidecar/`), handles prefill/decode disaggregation routing.
+the **routing sidecar** (`cmd/pd-sidecar/`), handles disaggregation routing.
 
 The KIND environment is the easiest way to get started: one command, no cloud account.
 A real Kubernetes cluster setup is covered later for shared or production-like testing.
@@ -278,7 +283,7 @@ Data parallel and KV cache are orthogonal options that can be combined with any 
 
 | Variable | Default | Description |
 |---|---|---|
-| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per decode pod. Set to `2`+ to enable |
+| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per vLLM pod. Set to `2`+ to enable |
 | `KV_CACHE_ENABLED` | `false` | Enable KV cache-aware scheduling |
 
 For technical details, refer to [docs/disaggregation.md](docs/disaggregation.md) and
@@ -286,7 +291,7 @@ For technical details, refer to [docs/disaggregation.md](docs/disaggregation.md)
 
 #### 1. EPD — No Disaggregation (default)
 
-Single decode deployment. No separate encoder or prefill pod:
+Single decode deployment. No separate encoder or prefill pods:
 
 ```bash
 make env-dev-kind
@@ -304,7 +309,7 @@ DISAGG_P=true make env-dev-kind
 
 #### 3. Encode/Prefill-Decode (E/PD) Disaggregation
 
-Separate Encoder pod; Prefill and Decode combined:
+Separate Encoder pods; Prefill and Decode combined:
 
 ```bash
 DISAGG_E=true make env-dev-kind
@@ -320,16 +325,15 @@ DISAGG_E=true DISAGG_P=true make env-dev-kind
 
 > **Note:** The legacy `EPD_ENABLED=true` is deprecated. Use `DISAGG_E=true DISAGG_P=true` instead.
 
-<details>
-<summary>E/P/D Setup Verification</summary>
+#### 5. Disaggregated Setup Verification
 
-1. Port-forward the Gateway:
+After deploying any disaggregation mode, verify with a basic request:
 
 ```bash
-kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
+kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio 8080:80
 ```
 
-2. Test the Pipeline — send an image-based inference request:
+For multimodal disaggregation (E/PD, E/P/D), test with an image request to verify the encoder stage is working:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -348,9 +352,8 @@ curl http://localhost:8080/v1/chat/completions \
     "max_tokens": 100
   }'
 ```
-</details>
 
-#### Combining Scenarios with Data Parallel and KV Cache
+### Combining Scenarios with Data Parallel and KV Cache
 
 ```bash
 # P/D with 2-rank data parallel decode
