@@ -122,7 +122,7 @@ export VLLM_REPLICA_COUNT_D="${VLLM_REPLICA_COUNT_D:-1}"
 export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 
 # vLLM mode: echo for simulator, empty for real vLLM
-export VLLM_MODE="${VLLM_MODE:-echo}"
+export VLLM_SIM_MODE="${VLLM_SIM_MODE:-echo}"
 
 # EPP pool namespace (used in inference-gateway deployment template)
 export POOL_NAMESPACE="${POOL_NAMESPACE:-default}"
@@ -337,7 +337,7 @@ kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
   ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
-  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_MODE} ${DECODE_ROLE}' \
+  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_SIM_MODE} ${DECODE_ROLE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------
