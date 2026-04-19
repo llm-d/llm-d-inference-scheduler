@@ -187,6 +187,7 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 	}
 
 	// initialize the KV-events pool
+	config.KVEventsConfig.ModelRegistry = kvCacheIndexer.ModelRegistry()
 	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex(), tokenProcessor, engineadapter.NewVLLMAdapter())
 	pool.Start(ctx)
 
@@ -376,7 +377,7 @@ func (s *Scorer) PrepareRequestData(ctx context.Context,
 	}
 
 	// 4. Compute per-pod scores using KVBlockScorer (supports device-backend weights)
-	scores, err := s.kvBlockScorer.Score(ctx, blockKeys, keyToPods)
+	scores, err := s.kvBlockScorer.Score(ctx, blockKeys, keyToPods, request.TargetModel)
 	if err != nil {
 		return fmt.Errorf("failed to score block keys: %w", err)
 	}
