@@ -2,9 +2,10 @@
 # Simulator Overlay
 #
 # Adds simulator-specific configuration to vLLM deployments:
-#   - --mode=echo arg (simulator echo mode)
-#   - UDS tokenizer sidecar (native sidecar for tokenization)
-#   - KV cache args for cache-aware scheduling tests
+#   - --mode=${VLLM_SIM_MODE} arg on Decode (vllm-d) only — controls simulator
+#     response mode (echo: returns input, random: returns random sentences)
+#   - UDS tokenizer sidecar on all deployments (Decode, Prefill, Encode)
+#   - KV cache args on Decode for cache-aware scheduling tests
 #
 # Uses JSON patches (op: add) to INSERT into args arrays without replacing
 # them, avoiding conflicts with scenario-specific strategic merge patches.
@@ -85,9 +86,6 @@ patches:
     name: vllm-p
   patch: |
     - op: add
-      path: /spec/template/spec/containers/0/args/0
-      value: "--mode=${VLLM_SIM_MODE}"
-    - op: add
       path: /spec/template/spec/initContainers
       value:
       - name: uds-tokenizer
@@ -136,9 +134,6 @@ patches:
     kind: Deployment
     name: vllm-e
   patch: |
-    - op: add
-      path: /spec/template/spec/containers/0/args/0
-      value: "--mode=${VLLM_SIM_MODE}"
     - op: add
       path: /spec/template/spec/initContainers
       value:
