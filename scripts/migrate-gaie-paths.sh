@@ -124,7 +124,16 @@ echo
 # Validate all pairs before touching anything
 for i in "${!SRC_PATHS[@]}"; do
   [[ -e "${SOURCE_DIR}/${SRC_PATHS[$i]}" ]] || { echo "error: '${SRC_PATHS[$i]}' not found in source repo"; exit 1; }
-  [[ -z "${SINCE_REF}" && -e "${DEST_DIR}/${DEST_PATHS[$i]}" ]] && { echo "error: '${DEST_PATHS[$i]}' already exists in destination repo"; exit 1; }
+  if [[ -z "${SINCE_REF}" ]]; then
+    while IFS= read -r -d '' src_dir; do
+      rel="${src_dir#"${SOURCE_DIR}/${SRC_PATHS[$i]}"}"
+      dest_dir="${DEST_DIR}/${DEST_PATHS[$i]}${rel}"
+      if [[ -d "${dest_dir}" ]] && find "${dest_dir}" -maxdepth 1 -name "*.go" -print -quit 2>/dev/null | grep -q .; then
+        echo "error: Go package conflict at '${DEST_PATHS[$i]}${rel}': destination already contains Go files"
+        exit 1
+      fi
+    done < <(find "${SOURCE_DIR}/${SRC_PATHS[$i]}" -type d -print0)
+  fi
 done
 
 if git -C "${DEST_DIR}" rev-parse --verify "${BRANCH_NAME}" &>/dev/null; then
