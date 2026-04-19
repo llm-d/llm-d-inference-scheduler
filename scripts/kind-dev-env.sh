@@ -73,8 +73,6 @@ export UDS_TOKENIZER_IMAGE
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 
-# vLLM replica count (without PD/EPD)
-export VLLM_REPLICA_COUNT="${VLLM_REPLICA_COUNT:-1}"
 
 # By default we are not deploying Prometheus monitoring
 export PROM_ENABLED="${PROM_ENABLED:-false}"
@@ -329,14 +327,14 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 kubectl kustomize --enable-helm deploy/environments/dev/base-kind-istio \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} ${POOL_NAMESPACE} ${METRICS_ENDPOINT_AUTH} \
-  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
+${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # Deploy scenario-specific vLLM components
 kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_SIMULATOR_IMAGE} \
   ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} \
-  ${VLLM_REPLICA_COUNT} ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
+${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
   ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_SIM_MODE} ${DECODE_ROLE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 

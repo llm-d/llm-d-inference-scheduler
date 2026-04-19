@@ -29,11 +29,11 @@ options that combine with any disaggregation mode — they are not separate scen
 
 ## Scenario Selection
 
-Set `DISAGG_MODE` environment variable when running `kind-dev-env.sh`:
+Use `DISAGG_E` and `DISAGG_P` boolean flags when running `kind-dev-env.sh`:
 
 ```bash
-# Default (no disaggregation) - uses vllm-decode component directly
-DISAGG_MODE=epd ./scripts/kind-dev-env.sh
+# Default (no disaggregation)
+./scripts/kind-dev-env.sh
 
 # Prefill/Decode
 DISAGG_P=true ./scripts/kind-dev-env.sh
@@ -54,6 +54,9 @@ Variables substituted at deploy time via `envsubst` or Go test `substituteMany`:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `DISAGG_E` | Deploy a separate Encoder pod (`true`/`false`) | `false` |
+| `DISAGG_P` | Deploy a separate Prefill pod (`true`/`false`) | `false` |
+| `VLLM_SIM_MODE` | Simulator response mode: `echo` (returns input) or `random` (random sentences) | `echo` |
 | `VLLM_IMAGE` | vLLM container image (simulator or real) | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` |
 | `SIDECAR_IMAGE` | Routing sidecar image | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` |
 | `UDS_TOKENIZER_IMAGE` | UDS tokenizer sidecar image | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` |
