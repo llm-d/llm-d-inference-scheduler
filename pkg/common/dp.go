@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -21,7 +22,8 @@ const (
 
 	// DPWinningRanksHeader is an internal header used to transport winning DP rank
 	// information from the scorer to the PreRequest plugin. It carries a JSON-encoded
-	// map of pod address → winning rank (e.g., {"10.0.0.1":0,"10.0.0.2":1}).
+	// map of pod address → winning rank, where the pod address is the canonical
+	// "ip:port" form produced by PodAddress (e.g., {"10.0.0.1:8000":0,"10.0.0.2:8000":1}).
 	// This header is removed by the dp-rank-header-handler PreRequest plugin before
 	// the request is forwarded to the backend.
 	DPWinningRanksHeader = "x-llm-d-dp-winning-ranks"
@@ -101,9 +103,11 @@ func BuildDPScoringKey(podIdentifier string, dpRank int) (string, error) {
 // across the scorer and pre-request plugins. Keeping this in one place prevents
 // format drift between the scorer (which uses this as a scoring key) and the
 // PreRequest handler (which uses it to look up the winning rank for the
-// selected pod).
+// selected pod). It uses net.JoinHostPort so IPv6 literals are bracketed
+// correctly (e.g. "[2001:db8::1]:8000"), matching the format the KV cache
+// indexer emits and preventing scorer/lookup mismatches.
 func PodAddress(ipAddress, port string) string {
-	return ipAddress + ":" + port
+	return net.JoinHostPort(ipAddress, port)
 }
 
 // ErrEmptyWinningRanks is returned when Encode/DecodeWinningRanks is asked to

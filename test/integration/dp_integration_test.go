@@ -59,18 +59,45 @@ var (
 	externalLB = flag.Bool("external-lb", false, "Enable External LB mode tests (requires two vLLM servers)")
 )
 
+// httpClient is shared by chatRequest and the per-test vLLM health probes. A
+// fixed per-call timeout keeps the suite from hanging if vLLM is unreachable
+// or stalls — http.DefaultClient has no timeout.
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// healthCheck probes /health with a short timeout so tests skip quickly when
+// vLLM is not running.
+func healthCheck(url string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", url+"/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("unhealthy: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // chatRequest sends a chat completion request to vLLM with optional headers.
 func chatRequest(t *testing.T, url, prompt string, headers map[string]string) (int, map[string]interface{}) {
 	t.Helper()
 	body := fmt.Sprintf(`{"model":"Qwen/Qwen2.5-1.5B-Instruct","messages":[{"role":"user","content":"%s"}],"max_tokens":5}`, prompt)
-	req, err := http.NewRequest("POST", url+"/v1/chat/completions", strings.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", url+"/v1/chat/completions", strings.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -82,10 +109,11 @@ func chatRequest(t *testing.T, url, prompt string, headers map[string]string) (i
 	return resp.StatusCode, result
 }
 
-// ---------- Test 1: ParseDPScoringKey + StripDPRankFromScores (real Go code) ----------
+// ---------- Test 1: ParseDPScoringKey parses real indexer key formats ----------
 
-// ExportedStripDPRankFromScores wraps the unexported scorer function for testing.
-// We test the public common.ParseDPScoringKey which is the core of stripDPRankFromScores.
+// TestParseDPScoringKey_WithRealFormats exercises common.ParseDPScoringKey,
+// which is the core of the scorer's stripDPRankFromScores logic, against the
+// exact key shapes the KV cache indexer produces for each DP mode.
 func TestParseDPScoringKey_WithRealFormats(t *testing.T) {
 	// These are the exact key formats the KV cache indexer produces in Internal LB mode.
 	// vLLM publishes KV events with pod identifier "IP:PORT" and the indexer appends "@dpN".
@@ -190,13 +218,8 @@ func TestDPRankHeaderHandler_FullPipeline(t *testing.T) {
 
 func TestDPRankHeaderHandler_ToVLLM(t *testing.T) {
 	// Skip if vLLM is not running
-	resp, err := http.Get(*vllmURL + "/health")
-	if err != nil {
+	if err := healthCheck(*vllmURL); err != nil {
 		t.Skipf("vLLM not available at %s: %v", *vllmURL, err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Skipf("vLLM unhealthy at %s: %d", *vllmURL, resp.StatusCode)
 	}
 
 	// Simulate the full scheduler pipeline:
@@ -304,12 +327,9 @@ func TestDPRankHeaderHandler_ToVLLM(t *testing.T) {
 // ---------- Test 5: ZMQ Event Subscription (real Go zmq library) ----------
 
 func TestZMQEventSubscription(t *testing.T) {
-	// Skip if vLLM is not running
-	resp, err := http.Get(*vllmURL + "/health")
-	if err != nil {
+	if err := healthCheck(*vllmURL); err != nil {
 		t.Skipf("vLLM not available at %s: %v", *vllmURL, err)
 	}
-	resp.Body.Close()
 
 	// The llm-d-kv-cache library uses go-zmq to subscribe to KV events.
 	// We can't easily import the full kvevents.Pool here without complex setup,
@@ -388,11 +408,9 @@ func TestStripDPRankFromScores_ViaParseDPScoringKey(t *testing.T) {
 // ---------- Test 7: End-to-end header verification with vLLM ----------
 
 func TestVLLMAcceptsSchedulerHeaders(t *testing.T) {
-	resp, err := http.Get(*vllmURL + "/health")
-	if err != nil {
+	if err := healthCheck(*vllmURL); err != nil {
 		t.Skipf("vLLM not available at %s: %v", *vllmURL, err)
 	}
-	resp.Body.Close()
 
 	// In External LB mode each vLLM server is DP=1, so only rank 0 is valid.
 	// In Internal LB mode the server is DP=N, so rank 0..N-1 are all valid.
@@ -434,11 +452,9 @@ func TestVLLMAcceptsSchedulerHeaders(t *testing.T) {
 // ---------- Test 8: Verify internal header is NOT leaked to vLLM ----------
 
 func TestInternalHeaderNotLeaked(t *testing.T) {
-	resp, err := http.Get(*vllmURL + "/health")
-	if err != nil {
+	if err := healthCheck(*vllmURL); err != nil {
 		t.Skipf("vLLM not available at %s: %v", *vllmURL, err)
 	}
-	resp.Body.Close()
 
 	// Simulate full pipeline: scorer sets internal header, PreRequest processes it
 	winningRanks := map[string]int{"127.0.0.1:8000": 0}
@@ -497,11 +513,9 @@ func TestScorerPluginTypeRegistered(t *testing.T) {
 // ---------- Test 10: Multiple pods with different winning ranks ----------
 
 func TestMultiplePods_CorrectRankSelection(t *testing.T) {
-	resp, err := http.Get(*vllmURL + "/health")
-	if err != nil {
+	if err := healthCheck(*vllmURL); err != nil {
 		t.Skipf("vLLM not available at %s: %v", *vllmURL, err)
 	}
-	resp.Body.Close()
 
 	// Simulate 3 pods with different winning ranks
 	rawScores := map[string]float64{
@@ -611,11 +625,9 @@ func TestExternalLBMode_NoRankHeaderInjected(t *testing.T) {
 	}
 
 	for _, url := range []string{*vllmURL, *vllmURLAlt} {
-		resp, err := http.Get(url + "/health")
-		if err != nil {
+		if err := healthCheck(url); err != nil {
 			t.Skipf("vLLM not available at %s: %v", url, err)
 		}
-		resp.Body.Close()
 		require.Equal(t, 200, resp.StatusCode, "vLLM unhealthy at %s", url)
 	}
 

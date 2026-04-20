@@ -495,6 +495,9 @@ func (s *PrecisePrefixCacheScorer) Score(ctx context.Context, cycleState *schedu
 	// and works with any profile handler including the built-in single-profile-handler.
 	if len(winningRanks) > 0 {
 		if encoded, err := common.EncodeWinningRanks(winningRanks); err == nil {
+			if request.Headers == nil {
+				request.Headers = make(map[string]string, 1)
+			}
 			request.Headers[common.DPWinningRanksHeader] = encoded
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
@@ -116,7 +117,7 @@ func (p *DPRankHeaderHandler) PreRequest(ctx context.Context, request *schedulin
 
 	if len(primaryResult.TargetEndpoints) > 1 {
 		// Surface the divergence instead of silently dropping extra ranks.
-		logger.V(1).Info("multiple target endpoints in DP request; honoring rank for first only",
+		logger.V(logutil.DEBUG).Info("multiple target endpoints in DP request; honoring rank for first only",
 			"count", len(primaryResult.TargetEndpoints))
 	}
 
