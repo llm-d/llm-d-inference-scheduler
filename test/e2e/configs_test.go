@@ -24,8 +24,6 @@ schedulingProfiles:
 // Uses deprecated pd-profile-handler
 const deprecatedPdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
@@ -84,8 +82,6 @@ schedulingProfiles:
 // The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
 const epdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: prefill-header-handler
 - type: encode-filter
@@ -127,8 +123,6 @@ schedulingProfiles:
 // EPP configuration for running with P/D using the unified disagg-profile-handler
 const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: disagg-headers-handler
 - type: prefix-cache-scorer
@@ -223,8 +217,6 @@ schedulingProfiles:
 // pre-computed token IDs to the request, so the scorer skips internal tokenization.
 const kvExternalTokenizerConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: tokenizer
   parameters:
