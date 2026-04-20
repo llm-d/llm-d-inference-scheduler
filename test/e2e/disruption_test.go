@@ -9,12 +9,13 @@ import (
 	"sync"
 	"time"
 
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 const (

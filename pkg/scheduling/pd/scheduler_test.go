@@ -13,14 +13,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log" // Import config for thresholds
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	fwkschd "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/picker"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
-	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
 )
 
 const (
@@ -264,7 +264,7 @@ func TestPDSchedule(t *testing.T) {
 
 			inputTokens := len(test.req.Body.Completions.Prompt.Raw) / disagg.AverageCharactersPerToken
 			for _, pod := range test.input {
-				pod.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(0, inputTokens, 1))
+				pod.Put(approxprefix.PrefixCacheMatchInfoKey, approxprefix.NewPrefixCacheMatchInfo(0, inputTokens, 1))
 			}
 			got, err := scheduler.Schedule(ctx, test.req, test.input)
 
@@ -278,7 +278,7 @@ func TestPDSchedule(t *testing.T) {
 			if test.wantRes2 != nil { // Checking the prefix match in the decode pod.
 				// update number of cached tokens for the following schedule call
 				for _, pod := range test.input {
-					pod.Put(dl_prefix.PrefixCacheMatchInfoKey, dl_prefix.NewPrefixCacheMatchInfo(inputTokens, inputTokens, 1))
+					pod.Put(approxprefix.PrefixCacheMatchInfoKey, approxprefix.NewPrefixCacheMatchInfo(inputTokens, inputTokens, 1))
 				}
 
 				got, err = scheduler.Schedule(ctx, test.req, test.input)

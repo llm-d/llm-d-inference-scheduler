@@ -11,7 +11,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
@@ -332,8 +332,8 @@ func TestPdProfileHandler_Pick(t *testing.T) {
 			for profileName, profileRes := range tt.profileResults {
 				if profileName == defaultDecodeProfile && profileRes != nil {
 					for _, pod := range profileRes.TargetEndpoints {
-						pod.Put(dl_prefix.PrefixCacheMatchInfoKey,
-							dl_prefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, 1))
+						pod.Put(approxprefix.PrefixCacheMatchInfoKey,
+							approxprefix.NewPrefixCacheMatchInfo(tt.cachedTokens, inputTokens, 1))
 					}
 				}
 			}
@@ -436,8 +436,8 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 				for profileName, profileRes := range profileResults {
 					if profileName == defaultDecodeProfile && profileRes != nil {
 						for _, endpoint := range profileRes.TargetEndpoints {
-							endpoint.Put(dl_prefix.PrefixCacheMatchInfoKey,
-								dl_prefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, 1))
+							endpoint.Put(approxprefix.PrefixCacheMatchInfoKey,
+								approxprefix.NewPrefixCacheMatchInfo(innerTest.cachedTokens, inputTokens, 1))
 						}
 					}
 				}

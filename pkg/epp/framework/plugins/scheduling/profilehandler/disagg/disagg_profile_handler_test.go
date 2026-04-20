@@ -11,7 +11,7 @@ import (
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	approximateprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -106,8 +106,8 @@ func injectPrefixCache(profileResults map[string]*scheduling.ProfileRunResult, c
 		return
 	}
 	for _, ep := range res.TargetEndpoints {
-		ep.Put(approximateprefix.PrefixCacheMatchInfoKey,
-			approximateprefix.NewPrefixCacheMatchInfo(cachedTokens, inputTokens, 1))
+		ep.Put(approxprefix.PrefixCacheMatchInfoKey,
+			approxprefix.NewPrefixCacheMatchInfo(cachedTokens, inputTokens, 1))
 	}
 }
 

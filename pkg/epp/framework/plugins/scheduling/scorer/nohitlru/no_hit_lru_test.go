@@ -7,15 +7,14 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	attrprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
-	no_hit_lru "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/nohitlru"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/nohitlru"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -86,12 +85,8 @@ func newColdNS(name string) scheduling.Endpoint {
 
 // newWarm returns an endpoint with prefix-cache match info indicating a cache hit.
 func newWarm(name string) scheduling.Endpoint {
-	ep := scheduling.NewEndpoint(
-		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: name}},
-		&fwkdl.Metrics{},
-		nil,
-	)
-	ep.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(5, 10, 1))
+	ep := newCold(name)
+	ep.Put(approxprefix.PrefixCacheMatchInfoKey, approxprefix.NewPrefixCacheMatchInfo(5, 10, 1))
 	return ep
 }
 
@@ -130,7 +125,7 @@ func TestNoHitLRUFactoryDependencyValidation(t *testing.T) {
 			raw = bytes
 		}
 
-		plugin, err := no_hit_lru.Factory("test", raw, tt.handle)
+		plugin, err := nohitlru.Factory("test", raw, tt.handle)
 		if tt.expectError {
 			if err == nil {
 				t.Fatalf("expected error for case %q, got none", tt.name)
@@ -162,7 +157,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 	}{
 		{
 			name:   "cold request - all endpoints never used",
-			scorer: no_hit_lru.NewNoHitLRU(utils.NewTestContext(t), nil),
+			scorer: nohitlru.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &scheduling.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -180,7 +175,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		},
 		{
 			name:   "cache hit - neutral scores",
-			scorer: no_hit_lru.NewNoHitLRU(utils.NewTestContext(t), nil),
+			scorer: nohitlru.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &scheduling.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -199,7 +194,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		},
 		{
 			name:   "single endpoint - max score",
-			scorer: no_hit_lru.NewNoHitLRU(utils.NewTestContext(t), nil),
+			scorer: nohitlru.NewNoHitLRU(utils.NewTestContext(t), nil),
 			req: &scheduling.LLMRequest{
 				TargetModel: "test-model",
 			},
@@ -227,7 +222,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 
 func TestNoHitLRUBasicFunctionality(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+	scorer := nohitlru.NewNoHitLRU(ctx, nil)
 
 	endpointA := newCold("pod-a")
 	endpointB := newCold("pod-b")
@@ -253,7 +248,7 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 
 func TestNoPrefixCacheStateFound(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+	scorer := nohitlru.NewNoHitLRU(ctx, nil)
 
 	// No attributes on the endpoint → treated as cold request.
 	endpointA := newCold("pod-a")
@@ -268,7 +263,7 @@ func TestNoPrefixCacheStateFound(t *testing.T) {
 
 func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+	scorer := nohitlru.NewNoHitLRU(ctx, nil)
 
 	// Shared cold endpoints — no PrefixCacheMatchInfo attributes.
 	endpointA := newColdNS("pod-a")
@@ -286,7 +281,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 			&fwkdl.Metrics{},
 			nil,
 		)
-		w.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(5, 10, 1))
+		w.Put(approxprefix.PrefixCacheMatchInfoKey, approxprefix.NewPrefixCacheMatchInfo(5, 10, 1))
 		return []scheduling.Endpoint{w, endpointB, endpointC}
 	}
 
@@ -378,7 +373,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 
 func TestNoHitLRUEdgeCases(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+	scorer := nohitlru.NewNoHitLRU(ctx, nil)
 
 	t.Run("empty endpoints list", func(t *testing.T) {
 		emptyEndpoints := []scheduling.Endpoint{}
@@ -422,7 +417,7 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("P/D scenario - both profiles tracked separately", func(t *testing.T) {
-		scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 
 		// First cold request with P/D (no attributes = cold).
 		req1 := &scheduling.LLMRequest{RequestId: "pd-request-1"}
@@ -456,7 +451,7 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 
 	t.Run("non-P/D scenario - only primary profile exists", func(t *testing.T) {
 		req := &scheduling.LLMRequest{RequestId: "non-pd-request"}
-		scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 		scorer.Score(ctx, &scheduling.CycleState{}, req, decodeEndpoints)
 
 		result := &scheduling.SchedulingResult{
@@ -479,14 +474,14 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 
 	t.Run("nil scheduling result - graceful handling", func(_ *testing.T) {
 		req := &scheduling.LLMRequest{RequestId: "nil-result"}
-		scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 		scorer.Score(ctx, &scheduling.CycleState{}, req, decodeEndpoints)
 		scorer.PreRequest(ctx, req, nil)
 	})
 
 	t.Run("empty profile results - graceful handling", func(_ *testing.T) {
 		req := &scheduling.LLMRequest{RequestId: "empty-results"}
-		scorer := no_hit_lru.NewNoHitLRU(ctx, nil)
+		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 		scorer.Score(ctx, &scheduling.CycleState{}, req, decodeEndpoints)
 
 		result := &scheduling.SchedulingResult{

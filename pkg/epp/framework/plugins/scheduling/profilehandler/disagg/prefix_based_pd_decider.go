@@ -7,10 +7,10 @@ import (
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
 
 const (
@@ -97,7 +97,7 @@ func (d *PrefixBasedPDDecider) WithName(name string) *PrefixBasedPDDecider {
 
 func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx)
-	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
+	debugLogger := log.FromContext(ctx).V(logging.DEBUG)
 
 	// NonCachedTokens defines the minimum number of non-cached tokens required
 	// to trigger disaggregated PD. A value of 0 disables disaggregation.
@@ -119,12 +119,12 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *schedu
 	}
 	// inspect the decode endpoint to disaggregate if prefill should run or not.
 	// if the non-cached part is short enough - no disaggregation.
-	prefixInfoRaw, ok := endpoint.Get(prefix.PrefixCacheMatchInfoKey)
+	prefixInfoRaw, ok := endpoint.Get(approxprefix.PrefixCacheMatchInfoKey)
 	if !ok || prefixInfoRaw == nil {
 		logger.Error(nil, "unable to read prefix cache state")
 		return false
 	}
-	prefixCacheMatchInfo, ok := prefixInfoRaw.(*prefix.PrefixCacheMatchInfo)
+	prefixCacheMatchInfo, ok := prefixInfoRaw.(*approxprefix.PrefixCacheMatchInfo)
 	if !ok {
 		logger.Error(nil, "wrong type of prefix cache match info")
 		return false

@@ -7,11 +7,11 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	attrprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 )
 
@@ -137,14 +137,14 @@ func (s *NoHitLRU) Category() scheduling.ScorerCategory {
 // isColdRequest determines if a request is cold by checking endpoint prefix-cache attributes.
 // Returns true when no endpoint reports any cache-hit blocks, or when no attribute is present.
 func (s *NoHitLRU) isColdRequest(ctx context.Context, endpoints []scheduling.Endpoint) bool {
-	logger := log.FromContext(ctx).V(logutil.DEBUG)
+	logger := log.FromContext(ctx).V(logging.DEBUG)
 
 	for _, ep := range endpoints {
-		attr, ok := ep.Get(attrprefix.PrefixCacheMatchInfoKey)
+		attr, ok := ep.Get(approxprefix.PrefixCacheMatchInfoKey)
 		if !ok {
 			continue
 		}
-		info, ok := attr.(*attrprefix.PrefixCacheMatchInfo)
+		info, ok := attr.(*approxprefix.PrefixCacheMatchInfo)
 		if ok && info.MatchBlocks() > 0 {
 			logger.Info("Cache hit detected on endpoint", "endpoint", ep.GetMetadata().NamespacedName)
 			return false
@@ -256,7 +256,7 @@ func (s *NoHitLRU) scoreColdRequestByLRU(endpoints []scheduling.Endpoint) map[sc
 // - Least recently used (or never used) endpoints get highest score (1.0)
 // - Most recently used endpoints get lowest score (approaching 0.0)
 func (s *NoHitLRU) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
-	logger := log.FromContext(ctx).V(logutil.DEBUG)
+	logger := log.FromContext(ctx).V(logging.DEBUG)
 
 	isCold := s.isColdRequest(ctx, endpoints)
 
@@ -276,7 +276,7 @@ func (s *NoHitLRU) Score(ctx context.Context, cycleState *scheduling.CycleState,
 // PreRequest is called before a request is sent to the target endpoint.
 // For cold requests, it updates the LRU cache to track which endpoints have been used recently.
 func (s *NoHitLRU) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
-	logger := log.FromContext(ctx).V(logutil.DEBUG)
+	logger := log.FromContext(ctx).V(logging.DEBUG)
 
 	if schedulingResult == nil || len(schedulingResult.ProfileResults) == 0 {
 		logger.Info("No scheduling result available")
@@ -307,7 +307,7 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *scheduling.LLMReques
 }
 
 func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *scheduling.LLMRequest, targetProfile *scheduling.ProfileRunResult, profileName string) {
-	logger := log.FromContext(ctx).V(logutil.DEBUG)
+	logger := log.FromContext(ctx).V(logging.DEBUG)
 
 	targetPod := targetProfile.TargetEndpoints[0]
 	endpointName := targetPod.GetMetadata().NamespacedName.String()

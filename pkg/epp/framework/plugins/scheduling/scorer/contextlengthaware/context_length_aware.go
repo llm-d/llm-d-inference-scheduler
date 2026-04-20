@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	tokenizer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
 
 const (
@@ -115,9 +115,9 @@ func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.
 		return endpoints // pass through if not in filter mode
 	}
 
-	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware.Filter")
+	logger := log.FromContext(ctx).V(logging.DEBUG).WithName("ContextLengthAware.Filter")
 	contextLength, usedTokenizer := p.getContextLength(ctx, cycleState, request)
-	logger.V(logutil.TRACE).Info("Filtering endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
+	logger.V(logging.TRACE).Info("Filtering endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
 
 	filteredEndpoints := []scheduling.Endpoint{}
 
@@ -147,7 +147,7 @@ func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.
 		}
 	}
 
-	logger.V(logutil.TRACE).Info("Filtered endpoints", "originalCount", len(endpoints),
+	logger.V(logging.TRACE).Info("Filtered endpoints", "originalCount", len(endpoints),
 		"filteredCount", len(filteredEndpoints))
 	return filteredEndpoints
 }
@@ -155,9 +155,9 @@ func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.
 // Score scores endpoints based on how well their context length ranges match the request.
 // Endpoints with tighter/more specific ranges matching the request get higher scores.
 func (p *ContextLengthAware) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
-	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware.Score")
+	logger := log.FromContext(ctx).V(logging.DEBUG).WithName("ContextLengthAware.Score")
 	contextLength, usedTokenizer := p.getContextLength(ctx, cycleState, request)
-	logger.V(logutil.TRACE).Info("Scoring endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
+	logger.V(logging.TRACE).Info("Scoring endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
 
 	scoredEndpoints := make(map[scheduling.Endpoint]float64)
 
@@ -186,7 +186,7 @@ func (p *ContextLengthAware) Score(ctx context.Context, cycleState *scheduling.C
 		scoredEndpoints[endpoint] = score
 	}
 
-	logger.V(logutil.TRACE).Info("Scored endpoints", "scores", scoredEndpoints)
+	logger.V(logging.TRACE).Info("Scored endpoints", "scores", scoredEndpoints)
 	return scoredEndpoints
 }
 
@@ -212,7 +212,7 @@ func (p *ContextLengthAware) getContextLength(ctx context.Context, cycleState *s
 		}
 	}
 
-	logger := log.FromContext(ctx).V(logutil.DEBUG).WithName("ContextLengthAware")
+	logger := log.FromContext(ctx).V(logging.DEBUG).WithName("ContextLengthAware")
 	logger.Info("TokenizedPrompt not available in CycleState, falling back to character-based estimation")
 
 	// Fall back to character-based estimation

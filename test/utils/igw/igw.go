@@ -29,9 +29,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gaiev1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	gaieutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
-
-	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 )
 
 type TestConfig = gaieutils.TestConfig
@@ -75,7 +74,7 @@ func getClientObject(kind string) client.Object {
 	case "deployment":
 		return &appsv1.Deployment{}
 	case "inferencepool":
-		return &v1.InferencePool{}
+		return &gaiev1.InferencePool{}
 	case "pod":
 		return &corev1.Pod{}
 	case "role":

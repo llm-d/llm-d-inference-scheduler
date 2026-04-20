@@ -26,7 +26,7 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
@@ -161,7 +161,7 @@ func (p *Plugin) WithName(name string) *Plugin {
 // Returns (nil, nil) on error or unsupported type.
 func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) ([]uint32, *tokenization.MultiModalFeatures) {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
-	traceLogger := logger.V(logutil.TRACE)
+	traceLogger := logger.V(logging.TRACE)
 
 	if request.Body == nil {
 		traceLogger.Info("Request body is nil, skipping tokenization")
