@@ -1,18 +1,30 @@
 package preciseprefixcache
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
+
+// discardCtx returns a context whose logger drops everything. The kvevents
+// subscriber spawns a background goroutine that logs via this context's
+// logger; under -race a test-bound logger writing after t.Run cleanup races
+// with the testing framework. Discarding sidesteps that without losing
+// fidelity (we don't assert on log output).
+func discardCtx(t *testing.T) context.Context {
+	t.Helper()
+	return log.IntoContext(context.Background(), logr.Discard())
+}
 
 // newExtractorScorer builds a minimal Scorer wired only with the bits the
 // EndpointExtractor path touches: a SubscriberManager, the kvevents config,
@@ -40,21 +52,22 @@ func newEndpoint(name, addr, port string) fwkdl.Endpoint {
 }
 
 func TestScorer_EndpointExtractor_InterfaceContract(t *testing.T) {
+	ctx := discardCtx(t)
 	s := newExtractorScorer(true)
-	defer s.subscribersManager.Shutdown(t.Context())
+	defer s.subscribersManager.Shutdown(ctx)
 
 	assert.Equal(t, fwkdl.EndpointEventReflectType, s.ExpectedInputType(),
 		"ExpectedInputType must report EndpointEvent for data-layer compatibility checks")
 
 	// Base Extract is a documented no-op; the Runtime calls ExtractEndpoint instead.
-	require.NoError(t, s.Extract(t.Context(), nil, nil))
+	require.NoError(t, s.Extract(ctx, nil, nil))
 
 	var _ fwkdl.EndpointExtractor = s
 	assert.True(t, reflect.TypeOf(s).Implements(reflect.TypeFor[fwkdl.EndpointExtractor]()))
 }
 
 func TestScorer_ExtractEndpoint_AddAndDelete(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := discardCtx(t)
 	s := newExtractorScorer(true)
 	defer s.subscribersManager.Shutdown(ctx)
 
@@ -88,7 +101,7 @@ func TestScorer_ExtractEndpoint_AddAndDelete(t *testing.T) {
 }
 
 func TestScorer_ExtractEndpoint_DiscoverPodsDisabledIsNoOp(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := discardCtx(t)
 	// DiscoverPods=false is the global-socket-mode toggle: per-pod discovery
 	// must be skipped so a single shared subscriber drives the index.
 	s := newExtractorScorer(false)
@@ -104,7 +117,7 @@ func TestScorer_ExtractEndpoint_DiscoverPodsDisabledIsNoOp(t *testing.T) {
 }
 
 func TestScorer_ExtractEndpoint_IgnoresMissingMetadata(t *testing.T) {
-	ctx := utils.NewTestContext(t)
+	ctx := discardCtx(t)
 	s := newExtractorScorer(true)
 	defer s.subscribersManager.Shutdown(ctx)
 
@@ -120,4 +133,33 @@ func TestScorer_ExtractEndpoint_IgnoresMissingMetadata(t *testing.T) {
 
 	ids, _ := s.subscribersManager.GetActiveSubscribers()
 	assert.Empty(t, ids, "endpoints without an address must be ignored")
+}
+
+// Delete events from the data layer may omit address fields. The subscriber
+// is keyed by NamespacedName, so delete must succeed regardless of address
+// presence — otherwise stale subscribers leak when pods disappear.
+func TestScorer_ExtractEndpoint_DeleteWithMissingAddressRemovesExistingSubscriber(t *testing.T) {
+	ctx := discardCtx(t)
+	s := newExtractorScorer(true)
+	defer s.subscribersManager.Shutdown(ctx)
+
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventAddOrUpdate,
+		Endpoint: newEndpoint("pod-a", "10.0.0.1", "8080"),
+	}))
+
+	ids, _ := s.subscribersManager.GetActiveSubscribers()
+	require.Len(t, ids, 1, "sanity check: expected subscriber to be registered before delete")
+
+	deleteEndpoint := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
+		NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: "pod-a"},
+	}, nil)
+
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventDelete,
+		Endpoint: deleteEndpoint,
+	}))
+
+	ids, _ = s.subscribersManager.GetActiveSubscribers()
+	assert.Empty(t, ids, "delete events must remove an existing subscriber even when the address is missing")
 }

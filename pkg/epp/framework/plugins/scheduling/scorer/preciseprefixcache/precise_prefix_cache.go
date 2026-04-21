@@ -592,13 +592,13 @@ func (s *Scorer) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
 // ExtractEndpoint reacts to endpoint lifecycle events from the data layer's
 // endpoint-notification-source: an add/update installs a per-pod ZMQ
 // subscriber so KV-cache events flow into the index; a delete tears it down.
-// No-op when DiscoverPods is disabled or pod metadata is unavailable.
+// No-op when DiscoverPods is disabled or the namespaced name is unavailable.
 func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent) error {
 	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
 		return nil
 	}
 	meta := event.Endpoint.GetMetadata()
-	if meta == nil || meta.Address == "" {
+	if meta == nil || meta.NamespacedName.Name == "" {
 		return nil
 	}
 
@@ -607,6 +607,9 @@ func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent)
 
 	switch event.Type {
 	case fwkdl.EventAddOrUpdate:
+		if meta.Address == "" {
+			return nil
+		}
 		zmqEndpoint := fmt.Sprintf("tcp://%s:%d", meta.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort)
 		if err := s.subscribersManager.EnsureSubscriber(ctx, endpointKey,
 			zmqEndpoint, s.kvEventsConfig.TopicFilter, true); err != nil {
