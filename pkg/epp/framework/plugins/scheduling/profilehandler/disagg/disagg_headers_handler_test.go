@@ -14,7 +14,7 @@ import (
 	giePlugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -185,8 +185,8 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
-	_, encodeSet := request.Headers[common.EncoderEndpointsHeader]
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
+	_, encodeSet := request.Headers[routing.EncoderEndpointsHeader]
 	assert.False(t, encodeSet, "encode header must not be set in PD-only scenario")
 }
 
@@ -215,7 +215,7 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 func TestPreRequestPrefillProfileNotExists(t *testing.T) {
@@ -233,7 +233,7 @@ func TestPreRequestPrefillProfileNotExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	_, exists := request.Headers[common.PrefillEndpointHeader]
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
 	assert.False(t, exists)
 }
 
@@ -243,7 +243,7 @@ func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
-			common.PrefillEndpointHeader: "old-host:9999",
+			routing.PrefillEndpointHeader: "old-host:9999",
 		},
 	}
 
@@ -260,7 +260,7 @@ func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
@@ -269,7 +269,7 @@ func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 
 	request := &scheduling.LLMRequest{
 		Headers: map[string]string{
-			common.PrefillEndpointHeader: "stale-host:9999",
+			routing.PrefillEndpointHeader: "stale-host:9999",
 		},
 	}
 
@@ -280,7 +280,7 @@ func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	val := request.Headers[common.PrefillEndpointHeader]
+	val := request.Headers[routing.PrefillEndpointHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -305,7 +305,7 @@ func TestPreRequestCustomPrefillProfile(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 func TestPreRequestPrefillProfileNilResult(t *testing.T) {
@@ -329,7 +329,7 @@ func TestPreRequestPrefillProfileNilResult(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	_, exists := request.Headers[common.PrefillEndpointHeader]
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
 	assert.False(t, exists)
 }
 
@@ -352,7 +352,7 @@ func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	_, exists := request.Headers[common.PrefillEndpointHeader]
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
 	assert.False(t, exists)
 }
 
@@ -377,7 +377,7 @@ func TestPreRequestPrefillIPv6Address(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 // ----- Encode tests -----
@@ -405,7 +405,7 @@ func TestPreRequestEncodeProfileExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeProfileNotExists(t *testing.T) {
@@ -424,7 +424,7 @@ func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	_, exists := request.Headers[common.EncoderEndpointsHeader]
+	_, exists := request.Headers[routing.EncoderEndpointsHeader]
 	assert.False(t, exists)
 }
 
@@ -435,7 +435,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
 		Headers: map[string]string{
-			common.EncoderEndpointsHeader: "old-host:9999",
+			routing.EncoderEndpointsHeader: "old-host:9999",
 		},
 	}
 
@@ -452,7 +452,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
@@ -462,7 +462,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
 		Headers: map[string]string{
-			common.EncoderEndpointsHeader: "stale-host:9999",
+			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
 	}
 
@@ -473,7 +473,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	val := request.Headers[common.EncoderEndpointsHeader]
+	val := request.Headers[routing.EncoderEndpointsHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -499,7 +499,7 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeIPv6Address(t *testing.T) {
@@ -524,7 +524,7 @@ func TestPreRequestEncodeIPv6Address(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeProfileNilResult(t *testing.T) {
@@ -548,7 +548,7 @@ func TestPreRequestEncodeProfileNilResult(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	_, exists := request.Headers[common.EncoderEndpointsHeader]
+	_, exists := request.Headers[routing.EncoderEndpointsHeader]
 	assert.False(t, exists)
 }
 
@@ -559,7 +559,7 @@ func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 	request := &scheduling.LLMRequest{
 		RequestId: "req-123",
 		Headers: map[string]string{
-			common.EncoderEndpointsHeader: "stale-host:9999",
+			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
 	}
 
@@ -573,7 +573,7 @@ func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	val := request.Headers[common.EncoderEndpointsHeader]
+	val := request.Headers[routing.EncoderEndpointsHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -605,5 +605,5 @@ func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 		net.JoinHostPort(testAddr, testPort),
 		net.JoinHostPort(addr2, testPort),
 	}, ",")
-	assert.Equal(t, expected, request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, expected, request.Headers[routing.EncoderEndpointsHeader])
 }

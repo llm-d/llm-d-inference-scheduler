@@ -14,9 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package igw wraps sigs.k8s.io/gateway-api-inference-extension/test/utils and
-// adds back DeleteObjects which was removed in v1.5.0.
-package igw
+// Package utils provides test utilities for the llm-d inference scheduler.
+// DeleteObjects and getClientObject restore the function removed from
+// sigs.k8s.io/gateway-api-inference-extension/test/utils in v1.5.0.
+package utils
 
 import (
 	"strings"

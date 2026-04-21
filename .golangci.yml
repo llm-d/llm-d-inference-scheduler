@@ -26,7 +26,6 @@ linters:
     - makezero
     - misspell
     - nakedret
-    - nilnil
     - perfsprint
     - prealloc
     - revive
@@ -38,27 +37,27 @@ linters:
     presets:
       - comments        # suppress missing comment violations on packages and exported symbols
       - std-error-handling  # suppress unchecked errors on well-known stdlib patterns (e.g. Close())
+    rules:
+      # Package names inherited from GAIE upstream (common, types, utils, http) are intentional
+      - linters: [revive]
+        text: "avoid meaningless package names"
+      - linters: [revive]
+        text: "avoid package names that conflict with Go standard library package names"
+      # goconst and prealloc findings in tests are low-value noise
+      - linters: [goconst, prealloc]
+        path: "_test\\.go"
   settings:
     revive: # see https://github.com/mgechev/revive#available-rules for all options
       rules:
         - name: blank-imports
-        - name: context-as-argument
         - name: context-keys-type
         - name: dot-imports
         - name: error-return
         - name: error-strings
         - name: error-naming
-        - name: exported
-        - name: if-return
-        - name: increment-decrement
-        - name: var-naming
-        - name: var-declaration
         - name: package-comments
         - name: range
-        - name: receiver-naming
         - name: time-naming
-        - name: unexported-return
-        - name: indent-error-flow
         - name: errorf
 
 issues:

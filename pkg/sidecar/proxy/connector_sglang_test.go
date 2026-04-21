@@ -26,7 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
 )
@@ -68,7 +68,7 @@ var _ = Describe("SGLang Connector", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		prefillHostPort := testInfo.prefillBackend.URL[len("http://"):]
-		req.Header.Add(common.PrefillEndpointHeader, prefillHostPort)
+		req.Header.Add(routing.PrefillEndpointHeader, prefillHostPort)
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -159,7 +159,7 @@ var _ = Describe("SGLang Connector", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		prefillHostPort := testInfo.prefillBackend.URL[len("http://"):]
-		req.Header.Add(common.PrefillEndpointHeader, prefillHostPort)
+		req.Header.Add(routing.PrefillEndpointHeader, prefillHostPort)
 
 		// Submit request. This will complete as soon as fastDecode completes.
 		rp, err := http.DefaultClient.Do(req)
