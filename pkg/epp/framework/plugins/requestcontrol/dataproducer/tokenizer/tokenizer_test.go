@@ -125,6 +125,32 @@ func TestChatCompletionsToRenderChatRequest(t *testing.T) {
 	assert.True(t, result.ReturnAssistantTokensMask)
 }
 
+func TestTokenizedPromptState_Clone_MultiPrompt(t *testing.T) {
+	original := &TokenizedPromptState{
+		TokenIDs: []uint32{10, 20, 30, 40, 50},
+		PerPromptTokens: [][]uint32{
+			{10, 20, 30},
+			{40, 50},
+		},
+	}
+
+	cloned := original.Clone().(*TokenizedPromptState)
+
+	// Verify deep equality
+	assert.Equal(t, original.TokenIDs, cloned.TokenIDs)
+	require.Len(t, cloned.PerPromptTokens, 2)
+	assert.Equal(t, original.PerPromptTokens, cloned.PerPromptTokens)
+
+	// Verify independence — mutating the clone must not affect the original
+	cloned.TokenIDs[0] = 999
+	cloned.PerPromptTokens[0][0] = 888
+	cloned.PerPromptTokens[1] = append(cloned.PerPromptTokens[1], 60)
+
+	assert.Equal(t, uint32(10), original.TokenIDs[0], "original TokenIDs must be unaffected by clone mutation")
+	assert.Equal(t, uint32(10), original.PerPromptTokens[0][0], "original PerPromptTokens must be unaffected by clone mutation")
+	assert.Len(t, original.PerPromptTokens[1], 2, "original PerPromptTokens must be unaffected by clone append")
+}
+
 func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 	tests := []struct {
 		name     string

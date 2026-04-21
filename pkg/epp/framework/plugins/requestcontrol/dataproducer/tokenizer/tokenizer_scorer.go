@@ -48,12 +48,20 @@ func (p *Plugin) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 		cycleState, TokenizedPromptStateKey); err == nil {
 		traceLogger.Info("TokenizedPrompt already in CycleState, skipping")
 	} else {
-		tokenIDs, mmFeatures := p.tokenize(ctx, request)
-		if tokenIDs != nil {
-			cycleState.Write(TokenizedPromptStateKey, &TokenizedPromptState{
-				TokenIDs:   tokenIDs,
+		allTokenIDs, mmFeatures := p.tokenize(ctx, request)
+		if len(allTokenIDs) > 0 {
+			var flat []uint32
+			for _, ids := range allTokenIDs {
+				flat = append(flat, ids...)
+			}
+			state := &TokenizedPromptState{
+				TokenIDs:   flat,
 				MMFeatures: mmFeatures,
-			})
+			}
+			if len(allTokenIDs) > 1 {
+				state.PerPromptTokens = allTokenIDs
+			}
+			cycleState.Write(TokenizedPromptStateKey, state)
 		}
 	}
 
