@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"google.golang.org/grpc"

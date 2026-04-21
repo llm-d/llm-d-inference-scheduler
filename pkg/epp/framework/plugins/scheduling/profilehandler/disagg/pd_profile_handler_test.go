@@ -14,7 +14,7 @@ import (
 	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -477,7 +477,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				assert.NotContains(t, res.ProfileResults, defaultPrefillProfile)
 				metadata := res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, DefaultTestPodPort, metadata.Port)
-				assert.Empty(t, headers[common.DataParallelEndpointHeader])
+				assert.Empty(t, headers[routing.DataParallelEndpointHeader])
 			},
 		},
 		{
@@ -505,7 +505,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 				metadata := res.ProfileResults[defaultDecodeProfile].TargetEndpoints[0].GetMetadata()
 				assert.Equal(t, "9000", metadata.Port)
 
-				hostPort := headers[common.DataParallelEndpointHeader]
+				hostPort := headers[routing.DataParallelEndpointHeader]
 				assert.Equal(t, "10.0.0.1:8000", hostPort)
 			},
 		},

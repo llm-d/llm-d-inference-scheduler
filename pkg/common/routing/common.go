@@ -1,8 +1,8 @@
-// Package common contains items common to both the
-// EPP/Inference-Scheduler and the Routing Sidecar
+// Package routing contains routing constants and utilities shared between
+// the EPP/Inference-Scheduler and the Routing Sidecar.
 //
 //revive:disable:var-naming
-package common
+package routing
 
 import "net/url"
 

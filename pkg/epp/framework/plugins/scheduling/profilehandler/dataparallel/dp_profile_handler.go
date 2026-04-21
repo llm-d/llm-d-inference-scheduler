@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 )
 
 const (
@@ -119,7 +119,7 @@ func (h *ProfileHandler) ProcessResults(_ context.Context, _ *scheduling.CycleSt
 
 	targetPod := profileResult.TargetEndpoints[0].GetMetadata()
 
-	request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
+	request.Headers[routing.DataParallelEndpointHeader] = net.JoinHostPort(targetPod.Address, targetPod.Port)
 
 	for _, target := range profileResult.TargetEndpoints {
 		newMetadata := target.GetMetadata().Clone()
