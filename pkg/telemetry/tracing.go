@@ -24,7 +24,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -65,7 +65,7 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 
 	// Strip http:// or https:// prefix if present
 	// otlptracegrpc.WithEndpoint() expects host:port only
-	endpoint = common.StripScheme(endpoint)
+	endpoint = routing.StripScheme(endpoint)
 
 	logger.Info("Initializing OpenTelemetry tracing", "endpoint", endpoint, "service", serviceName)
 

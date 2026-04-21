@@ -17,7 +17,7 @@ import (
 	dl_prefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
@@ -230,7 +230,7 @@ func (h *PdProfileHandler) ProcessResults(_ context.Context, _ *scheduling.Cycle
 		// Data Parallel is active
 
 		targetEndpoint := decodeRunResults.TargetEndpoints[0].GetMetadata()
-		request.Headers[common.DataParallelEndpointHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
+		request.Headers[routing.DataParallelEndpointHeader] = net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
 
 		updatedResult := scheduling.ProfileRunResult{
 			TargetEndpoints: []scheduling.Endpoint{},

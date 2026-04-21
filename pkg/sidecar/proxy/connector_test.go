@@ -25,7 +25,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
@@ -80,7 +80,7 @@ var _ = Describe("Common Connector tests", func() {
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
-				req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
+				req.Header.Add(routing.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 				rp, err := http.DefaultClient.Do(req)
 				Expect(err).ToNot(HaveOccurred())
@@ -140,7 +140,7 @@ var _ = Describe("Common Connector tests", func() {
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
-				req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
+				req.Header.Add(routing.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 				rp, err := http.DefaultClient.Do(req)
 				Expect(err).ToNot(HaveOccurred())
