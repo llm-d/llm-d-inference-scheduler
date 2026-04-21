@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"testing"
 
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -29,8 +30,8 @@ func createEndpoint(nsn k8stypes.NamespacedName, ipaddr string, labels map[strin
 	)
 }
 
-func createRequest() *scheduling.LLMRequest {
-	return &scheduling.LLMRequest{
+func createRequest() *scheduling.InferenceRequest {
+	return &scheduling.InferenceRequest{
 		RequestId: "test-request",
 	}
 }
@@ -273,12 +274,12 @@ func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
 		TokenIDs: tokenIDs,
 	})
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-request",
 		TargetModel: "test-model",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{
-				Prompt: scheduling.Prompt{Raw: "some prompt text"},
+		Body: &requesthandling.InferenceRequestBody{
+			Completions: &requesthandling.CompletionsRequest{
+				Prompt: requesthandling.Prompt{Raw: "some prompt text"},
 			},
 		},
 	}
@@ -309,12 +310,12 @@ func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
 	}
 	plugin := NewContextLengthAware("test-fallback", params)
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-request",
 		TargetModel: "test-model",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{
-				Prompt: scheduling.Prompt{Raw: prompt},
+		Body: &requesthandling.InferenceRequestBody{
+			Completions: &requesthandling.CompletionsRequest{
+				Prompt: requesthandling.Prompt{Raw: prompt},
 			},
 		},
 	}

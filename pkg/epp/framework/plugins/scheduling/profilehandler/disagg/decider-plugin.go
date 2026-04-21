@@ -11,5 +11,5 @@ import (
 // deciderPlugin decides whether the disaggregated stage should run for the request.
 type deciderPlugin interface {
 	plugin.Plugin
-	disaggregate(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool
+	disaggregate(ctx context.Context, request *scheduling.InferenceRequest, endpoint scheduling.Endpoint) bool
 }

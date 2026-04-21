@@ -23,14 +23,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
+	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pod"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
-	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pod"
 )
 
 type PodReconciler struct {
@@ -67,9 +67,9 @@ func (c *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			pod := ce.Object.(*corev1.Pod)
 			return c.Datastore.PoolLabelsMatch(pod.GetLabels())
 		},
-		UpdateFunc: func(ue event.UpdateEvent) bool {
-			oldPod := ue.ObjectOld.(*corev1.Pod)
-			newPod := ue.ObjectNew.(*corev1.Pod)
+		UpdateFunc: func(evt event.UpdateEvent) bool {
+			oldPod := evt.ObjectOld.(*corev1.Pod)
+			newPod := evt.ObjectNew.(*corev1.Pod)
 			return c.Datastore.PoolLabelsMatch(oldPod.GetLabels()) || c.Datastore.PoolLabelsMatch(newPod.GetLabels())
 		},
 		DeleteFunc: func(de event.DeleteEvent) bool {

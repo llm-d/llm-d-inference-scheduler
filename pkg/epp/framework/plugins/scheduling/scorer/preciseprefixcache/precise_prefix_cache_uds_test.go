@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
@@ -14,8 +17,6 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -51,8 +52,8 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 	testcases := []struct {
 		name                string
 		endpoints           []scheduling.Endpoint
-		request             *scheduling.LLMRequest
-		kvBlockData         func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
+		request             *scheduling.InferenceRequest
+		kvBlockData         func(t *testing.T, req *requesthandling.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
 		wantScoresByAddress map[string]float64
 	}{
 		{
@@ -83,7 +84,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
 				Body:        nil,
@@ -127,16 +128,16 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &requesthandling.InferenceRequestBody{
+					Completions: &requesthandling.CompletionsRequest{
+						Prompt: requesthandling.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *requesthandling.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				udsTokenizer := createUDSTokenizer(t, model)
@@ -202,31 +203,31 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					ChatCompletions: &scheduling.ChatCompletionsRequest{
+				Body: &requesthandling.InferenceRequestBody{
+					ChatCompletions: &requesthandling.ChatCompletionsRequest{
 						ChatTemplate: `{% for message in messages %}{{ message.role }}: {{ message.content }}
 		{% endfor %}`,
-						Messages: []scheduling.Message{
+						Messages: []requesthandling.Message{
 							{
 								Role:    "user",
-								Content: scheduling.Content{Raw: "Hello, how are you?"},
+								Content: requesthandling.Content{Raw: "Hello, how are you?"},
 							},
 							{
 								Role:    "assistant",
-								Content: scheduling.Content{Raw: "I'm doing well, thank you for asking!"},
+								Content: requesthandling.Content{Raw: "I'm doing well, thank you for asking!"},
 							},
 							{
 								Role:    "user",
-								Content: scheduling.Content{Raw: "Can you help me with a question about prefix caching in LLM inference?"},
+								Content: requesthandling.Content{Raw: "Can you help me with a question about prefix caching in LLM inference?"},
 							},
 						},
 					},
 				},
 			},
-			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *requesthandling.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to types format
@@ -312,16 +313,16 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &requesthandling.InferenceRequestBody{
+					Completions: &requesthandling.CompletionsRequest{
+						Prompt: requesthandling.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *requesthandling.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				udsTokenizer := createUDSTokenizer(t, model)
@@ -383,16 +384,16 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &requesthandling.InferenceRequestBody{
+					Completions: &requesthandling.CompletionsRequest{
+						Prompt: requesthandling.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *requesthandling.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				udsTokenizer := createUDSTokenizer(t, model)
@@ -457,12 +458,12 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: "This prompt has never been cached before on any endpoint."},
+				Body: &requesthandling.InferenceRequestBody{
+					Completions: &requesthandling.CompletionsRequest{
+						Prompt: requesthandling.Prompt{Raw: "This prompt has never been cached before on any endpoint."},
 					},
 				},
 			},
@@ -505,16 +506,16 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &requesthandling.InferenceRequestBody{
+					Completions: &requesthandling.CompletionsRequest{
+						Prompt: requesthandling.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(t *testing.T, req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(t *testing.T, req *requesthandling.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				udsTokenizer := createUDSTokenizer(t, model)
@@ -832,7 +833,7 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 		MMFeatures: mmFeatures,
 	})
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-mm-e2e",
 		TargetModel: mmModelName,
 	}

@@ -19,8 +19,8 @@ package approximateprefix
 import (
 	"time"
 
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 // indexerInterface maintains an LRU cache of prompt prefix hashes and the server(s) that might have that

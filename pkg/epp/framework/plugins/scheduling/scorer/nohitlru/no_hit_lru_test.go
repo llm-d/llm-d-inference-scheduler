@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/nohitlru"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -150,7 +150,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 	tests := []struct {
 		name        string
 		scorer      scheduling.Scorer
-		req         *scheduling.LLMRequest
+		req         *scheduling.InferenceRequest
 		input       func() []scheduling.Endpoint
 		wantScores  func([]scheduling.Endpoint) map[scheduling.Endpoint]float64
 		description string
@@ -158,7 +158,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		{
 			name:   "cold request - all endpoints never used",
 			scorer: nohitlru.NewNoHitLRU(utils.NewTestContext(t), nil),
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				TargetModel: "test-model",
 			},
 			input: func() []scheduling.Endpoint {
@@ -176,7 +176,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		{
 			name:   "cache hit - neutral scores",
 			scorer: nohitlru.NewNoHitLRU(utils.NewTestContext(t), nil),
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				TargetModel: "test-model",
 			},
 			input: func() []scheduling.Endpoint {
@@ -195,7 +195,7 @@ func TestNoHitLRUScorer(t *testing.T) {
 		{
 			name:   "single endpoint - max score",
 			scorer: nohitlru.NewNoHitLRU(utils.NewTestContext(t), nil),
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				TargetModel: "test-model",
 			},
 			input: func() []scheduling.Endpoint {
@@ -229,7 +229,7 @@ func TestNoHitLRUBasicFunctionality(t *testing.T) {
 	endpoints := []scheduling.Endpoint{endpointA, endpointB}
 
 	// Cold request (no attributes): should not crash and should return valid scores.
-	scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.LLMRequest{}, endpoints)
+	scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.InferenceRequest{}, endpoints)
 
 	if len(scores) != 2 {
 		t.Errorf("Expected 2 scores, got %d", len(scores))
@@ -254,7 +254,7 @@ func TestNoPrefixCacheStateFound(t *testing.T) {
 	endpointA := newCold("pod-a")
 	endpoints := []scheduling.Endpoint{endpointA}
 
-	scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.LLMRequest{}, endpoints)
+	scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.InferenceRequest{}, endpoints)
 
 	if scores[endpointA] != 1.0 {
 		t.Errorf("No prefix cache attributes should result in cold request scoring (expected 1.0, got %f).", scores[endpointA])
@@ -298,7 +298,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 
 	assertHighestScoredPod := func(expectedEndpoint scheduling.Endpoint, testName string) {
 		t.Helper()
-		coldReq := &scheduling.LLMRequest{RequestId: testName + "-scoring-check"}
+		coldReq := &scheduling.InferenceRequest{RequestId: testName + "-scoring-check"}
 		scores := scorer.Score(ctx, &scheduling.CycleState{}, coldReq, endpoints)
 
 		highestScore := -1.0
@@ -320,14 +320,14 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	}
 
 	t.Run("initial cold request seeds cache", func(_ *testing.T) {
-		coldReqA := &scheduling.LLMRequest{RequestId: "cold-1"}
+		coldReqA := &scheduling.InferenceRequest{RequestId: "cold-1"}
 		scorer.Score(ctx, &scheduling.CycleState{}, coldReqA, endpoints)
 		scorer.PreRequest(ctx, coldReqA, requestToEndpoint(endpointA))
 		assertHighestScoredPod(endpointB, "after-endpointA-used")
 	})
 
 	t.Run("unused endpoints rank above existing ones", func(t *testing.T) {
-		coldReqCheck := &scheduling.LLMRequest{RequestId: "cold-check"}
+		coldReqCheck := &scheduling.InferenceRequest{RequestId: "cold-check"}
 		coldScores := scorer.Score(ctx, &scheduling.CycleState{}, coldReqCheck, endpoints)
 		if coldScores[endpointB] <= coldScores[endpointA] {
 			t.Fatalf("expected endpoint-b to outrank endpoint-a after endpoint-a handled previous cold request, scores=%+v", coldScores)
@@ -341,7 +341,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	})
 
 	t.Run("warm request leaves LRU untouched", func(t *testing.T) {
-		warmReq := &scheduling.LLMRequest{RequestId: "warm-1"}
+		warmReq := &scheduling.InferenceRequest{RequestId: "warm-1"}
 		warmScores := scorer.Score(ctx, &scheduling.CycleState{}, warmReq, warmEndpoints())
 		for _, score := range warmScores {
 			if score != 0.5 {
@@ -349,7 +349,7 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 			}
 		}
 		scorer.PreRequest(ctx, warmReq, requestToEndpoint(endpointB))
-		postWarmReq := &scheduling.LLMRequest{RequestId: "cold-after-warm"}
+		postWarmReq := &scheduling.InferenceRequest{RequestId: "cold-after-warm"}
 		postWarmScores := scorer.Score(ctx, &scheduling.CycleState{}, postWarmReq, endpoints)
 		if postWarmScores[endpointB] <= postWarmScores[endpointA] {
 			t.Fatalf("expected warm request to leave ordering unchanged, scores=%+v", postWarmScores)
@@ -357,14 +357,14 @@ func TestNoHitLRUPreferLeastRecentlyUsedAfterColdRequests(t *testing.T) {
 	})
 
 	t.Run("second cold request rotates to endpointB", func(_ *testing.T) {
-		coldReqB := &scheduling.LLMRequest{RequestId: "cold-2"}
+		coldReqB := &scheduling.InferenceRequest{RequestId: "cold-2"}
 		scorer.Score(ctx, &scheduling.CycleState{}, coldReqB, endpoints)
 		scorer.PreRequest(ctx, coldReqB, requestToEndpoint(endpointB))
 		assertHighestScoredPod(endpointC, "after-endpointB-used")
 	})
 
 	t.Run("third cold request rotates back to endpointA", func(_ *testing.T) {
-		coldReqC := &scheduling.LLMRequest{RequestId: "cold-3"}
+		coldReqC := &scheduling.InferenceRequest{RequestId: "cold-3"}
 		scorer.Score(ctx, &scheduling.CycleState{}, coldReqC, endpoints)
 		scorer.PreRequest(ctx, coldReqC, requestToEndpoint(endpointC))
 		assertHighestScoredPod(endpointA, "after-endpointC-used")
@@ -377,14 +377,14 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 
 	t.Run("empty endpoints list", func(t *testing.T) {
 		emptyEndpoints := []scheduling.Endpoint{}
-		scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.LLMRequest{}, emptyEndpoints)
+		scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.InferenceRequest{}, emptyEndpoints)
 		if len(scores) != 0 {
 			t.Errorf("Expected empty scores for empty endpoints list, got %d scores", len(scores))
 		}
 	})
 
 	t.Run("nil endpoints list", func(t *testing.T) {
-		scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.LLMRequest{}, nil)
+		scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.InferenceRequest{}, nil)
 		if scores == nil {
 			t.Errorf("Expected non-nil scores map for nil endpoints list")
 		}
@@ -395,7 +395,7 @@ func TestNoHitLRUEdgeCases(t *testing.T) {
 
 	t.Run("single endpoint returns 1.0", func(t *testing.T) {
 		endpoints := []scheduling.Endpoint{newCold("pod-a")}
-		scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.LLMRequest{}, endpoints)
+		scores := scorer.Score(ctx, &scheduling.CycleState{}, &scheduling.InferenceRequest{}, endpoints)
 		if scores[endpoints[0]] != 1.0 {
 			t.Errorf("Expected single endpoint to get score 1.0, got %f", scores[endpoints[0]])
 		}
@@ -420,7 +420,7 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 
 		// First cold request with P/D (no attributes = cold).
-		req1 := &scheduling.LLMRequest{RequestId: "pd-request-1"}
+		req1 := &scheduling.InferenceRequest{RequestId: "pd-request-1"}
 		scorer.Score(ctx, &scheduling.CycleState{}, req1, append(prefillEndpoints, decodeEndpoints...))
 
 		pdResult := &scheduling.SchedulingResult{
@@ -436,7 +436,7 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 		}
 		scorer.PreRequest(ctx, req1, pdResult)
 
-		req2 := &scheduling.LLMRequest{RequestId: "pd-request-2"}
+		req2 := &scheduling.InferenceRequest{RequestId: "pd-request-2"}
 		prefillScores := scorer.Score(ctx, &scheduling.CycleState{}, req2, prefillEndpoints)
 		decodeScores := scorer.Score(ctx, &scheduling.CycleState{}, req2, decodeEndpoints)
 
@@ -450,7 +450,7 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 	})
 
 	t.Run("non-P/D scenario - only primary profile exists", func(t *testing.T) {
-		req := &scheduling.LLMRequest{RequestId: "non-pd-request"}
+		req := &scheduling.InferenceRequest{RequestId: "non-pd-request"}
 		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 		scorer.Score(ctx, &scheduling.CycleState{}, req, decodeEndpoints)
 
@@ -464,7 +464,7 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 		}
 		scorer.PreRequest(ctx, req, result)
 
-		req2 := &scheduling.LLMRequest{RequestId: "non-pd-request-2"}
+		req2 := &scheduling.InferenceRequest{RequestId: "non-pd-request-2"}
 		scores := scorer.Score(ctx, &scheduling.CycleState{}, req2, decodeEndpoints)
 
 		if scores[decodeEndpointB] <= scores[decodeEndpointA] {
@@ -473,14 +473,14 @@ func TestNoHitLRUPrefillDecodeTracking(t *testing.T) {
 	})
 
 	t.Run("nil scheduling result - graceful handling", func(_ *testing.T) {
-		req := &scheduling.LLMRequest{RequestId: "nil-result"}
+		req := &scheduling.InferenceRequest{RequestId: "nil-result"}
 		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 		scorer.Score(ctx, &scheduling.CycleState{}, req, decodeEndpoints)
 		scorer.PreRequest(ctx, req, nil)
 	})
 
 	t.Run("empty profile results - graceful handling", func(_ *testing.T) {
-		req := &scheduling.LLMRequest{RequestId: "empty-results"}
+		req := &scheduling.InferenceRequest{RequestId: "empty-results"}
 		scorer := nohitlru.NewNoHitLRU(ctx, nil)
 		scorer.Score(ctx, &scheduling.CycleState{}, req, decodeEndpoints)
 

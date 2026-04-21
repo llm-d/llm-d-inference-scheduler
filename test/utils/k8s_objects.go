@@ -15,13 +15,14 @@ limitations under the License.
 */
 
 // Package utils provides test utilities for the llm-d inference scheduler.
-// DeleteObjects and getClientObject restore the function removed from
-// sigs.k8s.io/gateway-api-inference-extension/test/utils in v1.5.0.
+// DeleteObjects and getClientObject are llm-d additions not present in the
+// upstream test/utils/igw package.
 package utils
 
 import (
 	"strings"
 
+	gaieutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gaiev1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	gaieutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 type TestConfig = gaieutils.TestConfig

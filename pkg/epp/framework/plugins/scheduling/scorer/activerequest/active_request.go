@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -76,7 +76,7 @@ func (s endpointScores) MarshalLog() interface{} {
 // compile-time type assertion
 var _ scheduling.Scorer = &ActiveRequest{}
 var _ requestcontrol.PreRequest = &ActiveRequest{}
-var _ requestcontrol.ResponseBody = &ActiveRequest{}
+var _ requestcontrol.ResponseBodyProcessor = &ActiveRequest{}
 
 // Factory defines the factory function for the ActiveRequest scorer.
 func Factory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
@@ -190,7 +190,7 @@ func (s *ActiveRequest) Category() scheduling.ScorerCategory {
 
 // Score scores the given endpoints based on the number of active requests
 // being served by each endpoint. The score is normalized to a range of 0-1.
-func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest,
+func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.InferenceRequest,
 	endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	scoredEndpoints := make(map[string]int)
 	maxCount := 0
@@ -234,7 +234,7 @@ func (s *ActiveRequest) Score(ctx context.Context, _ *scheduling.CycleState, _ *
 // increments the endpoint count for fast lookup.
 func (s *ActiveRequest) PreRequest(
 	ctx context.Context,
-	request *scheduling.LLMRequest,
+	request *scheduling.InferenceRequest,
 	schedulingResult *scheduling.SchedulingResult,
 ) {
 	traceLogger := log.FromContext(ctx).V(logutil.TRACE)
@@ -265,7 +265,7 @@ func (s *ActiveRequest) PreRequest(
 // the endpoint count.
 func (s *ActiveRequest) ResponseBody(
 	ctx context.Context,
-	request *scheduling.LLMRequest,
+	request *scheduling.InferenceRequest,
 	resp *requestcontrol.Response,
 	targetPod *datalayer.EndpointMetadata,
 ) {

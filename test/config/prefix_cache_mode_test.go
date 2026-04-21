@@ -8,7 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/config/loader"
 	giePlugins "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins"
 	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache"

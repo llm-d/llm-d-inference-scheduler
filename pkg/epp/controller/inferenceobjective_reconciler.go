@@ -22,15 +22,15 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
-	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 )
 
 type InferenceObjectiveReconciler struct {

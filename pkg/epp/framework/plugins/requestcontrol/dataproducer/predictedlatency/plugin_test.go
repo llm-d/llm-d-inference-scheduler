@@ -30,8 +30,8 @@ import (
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 // mockPredictor implements PredictorInterface for testing

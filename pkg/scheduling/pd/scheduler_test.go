@@ -8,15 +8,17 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
-	k8stypes "k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log" // Import config for thresholds
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	fwkschd "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker/maxscore"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/scheduling"
+	"github.com/stretchr/testify/assert"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log" // Import config for thresholds
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
@@ -93,7 +95,7 @@ func TestPDSchedule(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		req      *fwkschd.LLMRequest
+		req      *fwkschd.InferenceRequest
 		input    []fwkschd.Endpoint
 		wantRes  *fwkschd.SchedulingResult
 		wantRes2 *fwkschd.SchedulingResult // a subsequent call to check prefix cache and how it affects PD
@@ -101,12 +103,12 @@ func TestPDSchedule(t *testing.T) {
 	}{
 		{
 			name: "no candidate endpoints",
-			req: &fwkschd.LLMRequest{
+			req: &fwkschd.InferenceRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "any-model",
-				Body: &fwkschd.LLMRequestBody{
-					Completions: &fwkschd.CompletionsRequest{
-						Prompt: fwkschd.Prompt{Raw: "12345678901"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "12345678901"},
 					},
 				},
 			},
@@ -115,12 +117,12 @@ func TestPDSchedule(t *testing.T) {
 		},
 		{
 			name: "one decode endpoint, long prompt",
-			req: &fwkschd.LLMRequest{
+			req: &fwkschd.InferenceRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Body: &fwkschd.LLMRequestBody{
-					Completions: &fwkschd.CompletionsRequest{
-						Prompt: fwkschd.Prompt{Raw: "12345678901"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "12345678901"},
 					},
 				},
 			},
@@ -130,12 +132,12 @@ func TestPDSchedule(t *testing.T) {
 		},
 		{
 			name: "one prefill endpoint, long prompt",
-			req: &fwkschd.LLMRequest{
+			req: &fwkschd.InferenceRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Body: &fwkschd.LLMRequestBody{
-					Completions: &fwkschd.CompletionsRequest{
-						Prompt: fwkschd.Prompt{Raw: "12345678901"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "12345678901"},
 					},
 				},
 			},
@@ -145,12 +147,12 @@ func TestPDSchedule(t *testing.T) {
 		},
 		{
 			name: "1P1D - long prompt",
-			req: &fwkschd.LLMRequest{
+			req: &fwkschd.InferenceRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Body: &fwkschd.LLMRequestBody{
-					Completions: &fwkschd.CompletionsRequest{
-						Prompt: fwkschd.Prompt{Raw: "12345678906"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "12345678906"},
 					},
 				},
 			},
@@ -161,12 +163,12 @@ func TestPDSchedule(t *testing.T) {
 		},
 		{
 			name: "1P1Dshort",
-			req: &fwkschd.LLMRequest{
+			req: &fwkschd.InferenceRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Body: &fwkschd.LLMRequestBody{
-					Completions: &fwkschd.CompletionsRequest{
-						Prompt: fwkschd.Prompt{Raw: "12345"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "12345"},
 					},
 				},
 			},
@@ -178,12 +180,12 @@ func TestPDSchedule(t *testing.T) {
 		},
 		{
 			name: "TestRolesWithNoDecode",
-			req: &fwkschd.LLMRequest{
+			req: &fwkschd.InferenceRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Body: &fwkschd.LLMRequestBody{
-					Completions: &fwkschd.CompletionsRequest{
-						Prompt: fwkschd.Prompt{Raw: "12345678901"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "12345678901"},
 					},
 				},
 			},
@@ -210,12 +212,12 @@ func TestPDSchedule(t *testing.T) {
 		},
 		{
 			name: "1P2D - long prompt",
-			req: &fwkschd.LLMRequest{
+			req: &fwkschd.InferenceRequest{
 				RequestId:   uuid.NewString(),
 				TargetModel: "critical",
-				Body: &fwkschd.LLMRequestBody{
-					Completions: &fwkschd.CompletionsRequest{
-						Prompt: fwkschd.Prompt{Raw: "1234567890123456789012345678901234567890"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "1234567890123456789012345678901234567890"},
 					},
 				},
 			},
@@ -239,14 +241,14 @@ func TestPDSchedule(t *testing.T) {
 
 			prefillSchedulerProfile := scheduling.NewSchedulerProfile().
 				WithFilters(bylabel.NewPrefillRole()).
-				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+				WithPicker(maxscore.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = prefillSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 50))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 
 			decodeSchedulerProfile := scheduling.NewSchedulerProfile().
 				WithFilters(bylabel.NewDecodeRole()).
 				WithScorers(scheduling.NewWeightedScorer(loadaware.NewLoadAware(ctx, loadaware.QueueThresholdDefault), 1)).
-				WithPicker(picker.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
+				WithPicker(maxscore.NewMaxScorePicker(picker.DefaultMaxNumOfEndpoints))
 			err = decodeSchedulerProfile.AddPlugins(scheduling.NewWeightedScorer(prefixScorer, 0))
 			assert.NoError(t, err, "SchedulerProfile AddPlugins returned unexpected error")
 

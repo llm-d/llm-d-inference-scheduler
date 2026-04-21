@@ -23,9 +23,9 @@ import (
 	"fmt"
 	"strings"
 
-	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 )
 
 const (
@@ -94,7 +94,7 @@ func (p *OpenAIParser) WithName(name string) *OpenAIParser {
 func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.InferenceRequestBody, error) {
 	bodyMap := make(map[string]any)
 	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		return nil, fmt.Errorf("error unmarshaling request bodyMap: %w", err)
+		return nil, fmt.Errorf("error unmarshalling request bodyMap: %w", err)
 	}
 	extractedBody, err := extractRequestBody(body, headers)
 	if err != nil {

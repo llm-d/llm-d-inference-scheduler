@@ -37,13 +37,13 @@ func TestSessionAffinity_Score(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		req        *scheduling.LLMRequest
+		req        *scheduling.InferenceRequest
 		input      []scheduling.Endpoint
 		wantScores map[scheduling.Endpoint]float64
 	}{
 		{
 			name: "selects correct endpoint : endpointB",
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				Headers: map[string]string{"x-session-token": validSessionTokenForEndpointB},
 			},
 			input: inputEndpoints,
@@ -54,7 +54,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 		},
 		{
 			name: "no session token",
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				Headers: map[string]string{},
 			},
 			// both endpoints get score 0.0
@@ -66,7 +66,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 		},
 		{
 			name: "invalid session token",
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				Headers: map[string]string{"x-session-token": "garbage-token"},
 			},
 			// expect same behavior as no session token
@@ -78,7 +78,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 		},
 		{
 			name:  "no endpoints available",
-			req:   &scheduling.LLMRequest{},
+			req:   &scheduling.InferenceRequest{},
 			input: []scheduling.Endpoint{},
 			// returns empty score map
 			wantScores: map[scheduling.Endpoint]float64{},

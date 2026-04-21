@@ -72,7 +72,7 @@ type FairnessPolicy interface {
 	//  4. Update the state (e.g., increment the cursor) if necessary.
 	//
 	// State may also be updated out-of-band (e.g., from monitoring a metrics server, from integrating with request
-	// lifeycle hooks, etc.).
+	// lifecycle hooks, etc.).
 	//
 	// Returns:
 	//   - flow: The Flow to service next. Returns nil if no valid candidate is found (e.g., all queues empty).

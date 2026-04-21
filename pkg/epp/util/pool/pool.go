@@ -17,8 +17,8 @@ limitations under the License.
 package pool
 
 import (
-	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 )
 
 func InferencePoolToEndpointPool(inferencePool *v1.InferencePool) *datalayer.EndpointPool {

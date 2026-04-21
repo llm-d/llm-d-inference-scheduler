@@ -8,11 +8,11 @@ import (
 	"net"
 	"strings"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
@@ -78,7 +78,7 @@ func (p *HeadersHandler) WithName(name string) *HeadersHandler {
 }
 
 // PreRequest wires prefill and encode SchedulerProfile results into headers to indicate disaggregation workers.
-func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
 	tracer := telemetry.Tracer()
 	_, span := tracer.Start(ctx, "llm_d.epp.prerequest.disaggregation",
 		trace.WithSpanKind(trace.SpanKindInternal),

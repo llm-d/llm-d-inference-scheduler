@@ -32,7 +32,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/usagelimits"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 func TestNewConfigFromAPI(t *testing.T) {

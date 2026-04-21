@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -95,7 +95,7 @@ func (d *PrefixBasedPDDecider) WithName(name string) *PrefixBasedPDDecider {
 	return d
 }
 
-func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *scheduling.LLMRequest, endpoint scheduling.Endpoint) bool {
+func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *scheduling.InferenceRequest, endpoint scheduling.Endpoint) bool {
 	logger := log.FromContext(ctx)
 	debugLogger := log.FromContext(ctx).V(logging.DEBUG)
 
@@ -148,7 +148,7 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *schedu
 }
 
 // getUserInputLenInTokens returns an estimated token count for the user input.
-func getUserInputLenInTokens(request *scheduling.LLMRequest) (int, error) {
+func getUserInputLenInTokens(request *scheduling.InferenceRequest) (int, error) {
 	if request == nil || request.Body == nil {
 		return 0, errors.New("request or request body is nil")
 	}

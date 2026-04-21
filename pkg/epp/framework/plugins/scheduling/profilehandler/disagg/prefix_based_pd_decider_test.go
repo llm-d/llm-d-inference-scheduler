@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	prefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -51,14 +51,14 @@ func makeTestEndpoint(cachedTokens int) scheduling.Endpoint {
 
 // makeRequestWithTokens creates a completions request whose prompt yields the given token count
 // via getUserInputLenInTokens (len(prompt) / AverageCharactersPerToken).
-func makeRequestWithTokens(tokens int) *scheduling.LLMRequest {
+func makeRequestWithTokens(tokens int) *scheduling.InferenceRequest {
 	return completionsRequest(strings.Repeat("x", tokens*AverageCharactersPerToken))
 }
 
 func TestGetUserInputLenInTokens(t *testing.T) {
 	tests := []struct {
 		name     string
-		req      *scheduling.LLMRequest
+		req      *scheduling.InferenceRequest
 		wantMin  int // at least this many tokens
 		wantZero bool
 	}{
@@ -196,7 +196,7 @@ func TestDisaggregate(t *testing.T) {
 	tests := []struct {
 		name               string
 		nonCachedTokens    int
-		request            *scheduling.LLMRequest
+		request            *scheduling.InferenceRequest
 		endpoint           scheduling.Endpoint
 		expectDisaggregate bool
 	}{

@@ -33,7 +33,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
@@ -46,6 +45,7 @@ import (
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
+	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 )
 
 const (

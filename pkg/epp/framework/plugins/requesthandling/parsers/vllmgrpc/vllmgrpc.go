@@ -23,13 +23,13 @@ import (
 	"errors"
 	"fmt"
 
-	"google.golang.org/protobuf/proto"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	pb "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/gen"
+	"google.golang.org/protobuf/proto"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 )
 
 const (
@@ -134,17 +134,17 @@ func (p *VllmGRPCParser) ParseResponse(ctx context.Context, body []byte, headers
 		logger.V(logutil.DEBUG).Info("parsed GenerateResponse_Chunk", "tokenLength", len(v.Chunk.TokenIds))
 		// Only populate Usage if the chunk actually contains token data.
 		// Streaming chunks often leave this empty until the final chunk.
-		promptToken, completionToken, cahcedToken := int(v.Chunk.PromptTokens), int(v.Chunk.CompletionTokens), int(v.Chunk.CachedTokens)
+		promptToken, completionToken, cachedToken := int(v.Chunk.PromptTokens), int(v.Chunk.CompletionTokens), int(v.Chunk.CachedTokens)
 		if promptToken > 0 || completionToken > 0 {
-			result.Usage = requestControlUsage(promptToken, completionToken, cahcedToken)
+			result.Usage = requestControlUsage(promptToken, completionToken, cachedToken)
 		}
 
 	case *pb.GenerateResponse_Complete:
 		logger.V(logutil.DEBUG).Info("parsed GenerateResponse_Complete", "finishReason", v.Complete.FinishReason)
 		// Populate Usage for complete, non-streaming responses.
-		promptToken, completionToken, cahcedToken := int(v.Complete.PromptTokens), int(v.Complete.CompletionTokens), int(v.Complete.CachedTokens)
+		promptToken, completionToken, cachedToken := int(v.Complete.PromptTokens), int(v.Complete.CompletionTokens), int(v.Complete.CachedTokens)
 		if promptToken > 0 || completionToken > 0 {
-			result.Usage = requestControlUsage(promptToken, completionToken, cahcedToken)
+			result.Usage = requestControlUsage(promptToken, completionToken, cachedToken)
 		}
 
 	default:

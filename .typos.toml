@@ -4,6 +4,10 @@ KServe = "KServe"
 vLLM = "vLLM"
 IST = "IST"
 
+[default.extend-identifiers]
+image_grid_thw = "image_grid_thw"
+typ = "typ"
+
 [files]
 extend-exclude = [
     "*.png", 

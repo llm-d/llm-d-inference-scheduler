@@ -84,7 +84,7 @@ func (p *PodWrapper) Labels(labels map[string]string) *PodWrapper {
 	return p
 }
 
-// SetReadyCondition sets a PodReay=true condition.
+// SetReadyCondition sets a PodReady=true condition.
 func (p *PodWrapper) ReadyCondition() *PodWrapper {
 	p.Status.Conditions = []corev1.PodCondition{{
 		Type:   corev1.PodReady,

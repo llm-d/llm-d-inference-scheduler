@@ -19,8 +19,8 @@ package requesthandling
 import (
 	"context"
 
-	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 )
 
 // Parser defines the interface for parsing payload(requests and responses).

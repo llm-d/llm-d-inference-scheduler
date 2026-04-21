@@ -35,7 +35,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/roundrobin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/ordering/edf"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 func newTestPluginsHandle(t *testing.T) plugin.Handle {

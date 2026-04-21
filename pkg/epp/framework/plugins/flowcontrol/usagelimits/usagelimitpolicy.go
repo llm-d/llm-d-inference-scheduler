@@ -70,21 +70,21 @@ func NewConstPolicy(usageLimitName string, threshold float64) flowcontrol.UsageL
 // NewPolicyFunc implements a UsageLimitPolicy with a single func.
 func NewPolicyFunc(usageLimitName string, f func(ctx context.Context, saturation float64, priorities []int) (ceilings []float64)) flowcontrol.UsageLimitPolicy {
 	return &usageLimitPolicyFunc{
-		tpe:  fmt.Sprint(usageLimitName, "-type"),
+		typ:  fmt.Sprint(usageLimitName, "-type"),
 		name: usageLimitName,
 		f:    f,
 	}
 }
 
 type usageLimitPolicyFunc struct {
-	tpe  string
+	typ  string
 	name string
 	f    func(ctx context.Context, saturation float64, priorities []int) (ceilings []float64)
 }
 
 func (u usageLimitPolicyFunc) TypedName() plugin.TypedName {
 	return plugin.TypedName{
-		Type: u.tpe,
+		Type: u.typ,
 		Name: u.name,
 	}
 }

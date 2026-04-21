@@ -344,7 +344,7 @@ func TestGenerateResponseHeaders_Sanitization(t *testing.T) {
 				"x-backend-server":              "vllm-v0.6.3",            // should passthrough
 				metadata.ObjectiveKey:           "sensitive-objective-id", // should be stripped
 				metadata.DestinationEndpointKey: "10.2.0.5:8080",          // should be stripped
-				"content-length":                "500",                    // hould be stripped
+				"content-length":                "500",                    // should be stripped
 			},
 		},
 	}

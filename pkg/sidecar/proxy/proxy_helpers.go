@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // startHTTP starts the HTTP reverse proxy.

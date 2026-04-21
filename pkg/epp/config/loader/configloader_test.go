@@ -51,7 +51,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
-	"github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 // Define constants for test plugins.

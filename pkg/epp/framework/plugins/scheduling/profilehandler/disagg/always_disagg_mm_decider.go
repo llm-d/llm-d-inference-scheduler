@@ -44,6 +44,6 @@ func (d *AlwaysDisaggMultimodalDecider) WithName(name string) *AlwaysDisaggMulti
 	return d
 }
 
-func (d *AlwaysDisaggMultimodalDecider) disaggregate(_ context.Context, request *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
+func (d *AlwaysDisaggMultimodalDecider) disaggregate(_ context.Context, request *scheduling.InferenceRequest, _ scheduling.Endpoint) bool {
 	return hasMultimodalContent(request)
 }

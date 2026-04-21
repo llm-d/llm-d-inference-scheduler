@@ -21,10 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (

@@ -7,12 +7,12 @@ import (
 	"net"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -55,7 +55,7 @@ func newMockSchedulerProfile() scheduling.SchedulerProfile {
 
 type mockSchedulerProfile struct{}
 
-func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.LLMRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
+func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.InferenceRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
 	return &scheduling.ProfileRunResult{}, nil
 }
 
@@ -225,7 +225,7 @@ func Test_ProfileHandler_Pick(t *testing.T) {
 			handler := NewProfileHandler(8000).WithName("test-handler")
 			ctx := context.Background()
 
-			result := handler.Pick(ctx, &scheduling.CycleState{}, &scheduling.LLMRequest{}, tt.profiles, tt.profileResults)
+			result := handler.Pick(ctx, &scheduling.CycleState{}, &scheduling.InferenceRequest{}, tt.profiles, tt.profileResults)
 
 			if tt.expectEmptyResult {
 				assert.Empty(t, result, tt.description)
@@ -312,7 +312,7 @@ func Test_ProfileHandler_ProcessResults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := NewProfileHandler(tt.primaryPort).WithName("test-handler")
 			headers := make(map[string]string)
-			req := &scheduling.LLMRequest{Headers: headers}
+			req := &scheduling.InferenceRequest{Headers: headers}
 			result, err := handler.ProcessResults(context.Background(), &scheduling.CycleState{}, req, tt.profileResults)
 
 			if tt.expectError {

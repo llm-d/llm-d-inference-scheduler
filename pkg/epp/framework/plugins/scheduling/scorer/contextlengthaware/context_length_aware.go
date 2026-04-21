@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
@@ -110,7 +110,7 @@ func (p *ContextLengthAware) WithName(name string) *ContextLengthAware {
 
 // Filter filters out endpoints that don't have a context length range matching the request.
 // This is only active when enableFiltering is true.
-func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	if !p.enableFiltering {
 		return endpoints // pass through if not in filter mode
 	}
@@ -154,7 +154,7 @@ func (p *ContextLengthAware) Filter(ctx context.Context, cycleState *scheduling.
 
 // Score scores endpoints based on how well their context length ranges match the request.
 // Endpoints with tighter/more specific ranges matching the request get higher scores.
-func (p *ContextLengthAware) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+func (p *ContextLengthAware) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	logger := log.FromContext(ctx).V(logging.DEBUG).WithName("ContextLengthAware.Score")
 	contextLength, usedTokenizer := p.getContextLength(ctx, cycleState, request)
 	logger.V(logging.TRACE).Info("Scoring endpoints by context length", "contextLength", contextLength, "usedTokenizer", usedTokenizer)
@@ -199,7 +199,7 @@ func (p *ContextLengthAware) Category() scheduling.ScorerCategory {
 // It reads tokenized data from CycleState (written by the tokenizer scorer plugin).
 // When tokens are not available, it falls back to character-based estimation.
 // Returns the token count and a boolean indicating whether precise tokenization was used.
-func (p *ContextLengthAware) getContextLength(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (int, bool) {
+func (p *ContextLengthAware) getContextLength(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest) (int, bool) {
 	if request == nil || request.Body == nil {
 		return 0, false
 	}
@@ -221,7 +221,7 @@ func (p *ContextLengthAware) getContextLength(ctx context.Context, cycleState *s
 
 // estimateContextLength estimates the context length from the request using character count.
 // This is a fallback when no tokenizer is configured.
-func estimateContextLength(request *scheduling.LLMRequest) int {
+func estimateContextLength(request *scheduling.InferenceRequest) int {
 	if request == nil || request.Body == nil {
 		return 0
 	}

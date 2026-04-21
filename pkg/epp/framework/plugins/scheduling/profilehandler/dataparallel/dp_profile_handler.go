@@ -9,9 +9,9 @@ import (
 	"net"
 	"strconv"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 )
@@ -76,7 +76,7 @@ func (h *ProfileHandler) WithName(name string) *ProfileHandler {
 
 // Pick selects the SchedulingProfiles to run from the list of candidate profiles, while taking into consideration the request properties and the
 // previously executed cycles along with their results.
-func (h *ProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, profiles map[string]scheduling.SchedulerProfile,
+func (h *ProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, _ *scheduling.InferenceRequest, profiles map[string]scheduling.SchedulerProfile,
 	profileResults map[string]*scheduling.ProfileRunResult) map[string]scheduling.SchedulerProfile {
 	if len(profiles) == len(profileResults) { // all profiles have been executed already in previous call
 		return map[string]scheduling.SchedulerProfile{}
@@ -96,7 +96,7 @@ func (h *ProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, _ *
 // It may aggregate results, log test profile outputs, or apply custom logic. It specifies in the SchedulingResult the
 // key of the primary profile that should be used to get the request selected destination.
 // When a profile run fails, its result in the profileResults map is nil.
-func (h *ProfileHandler) ProcessResults(_ context.Context, _ *scheduling.CycleState, request *scheduling.LLMRequest,
+func (h *ProfileHandler) ProcessResults(_ context.Context, _ *scheduling.CycleState, request *scheduling.InferenceRequest,
 	profileResults map[string]*scheduling.ProfileRunResult) (*scheduling.SchedulingResult, error) {
 	if len(profileResults) != 1 {
 		return nil, errors.New("data parallel profile handler is intended to be used with a single profile, failed to process multiple profiles")

@@ -8,6 +8,11 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
@@ -18,11 +23,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
@@ -81,9 +81,9 @@ type PluginConfig struct {
 
 // compile-time type assertions
 var (
-	_ scheduling.Scorer                = &Scorer{}
-	_ requestcontrol.PrepareDataPlugin = &Scorer{}
-	_ requestcontrol.PreRequest        = &Scorer{}
+	_ scheduling.Scorer           = &Scorer{}
+	_ requestcontrol.DataProducer = &Scorer{}
+	_ requestcontrol.PreRequest   = &Scorer{}
 )
 
 // speculativeEntries holds the data needed to evict speculative entries
@@ -345,7 +345,7 @@ func (s *Scorer) Consumes() map[string]any {
 // are saved to PluginState for reuse by Score() and PreRequest().
 // This is a no-op when speculative indexing is disabled.
 func (s *Scorer) PrepareRequestData(ctx context.Context,
-	request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) error {
+	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) error {
 	if !s.speculativeEnabled {
 		return nil
 	}
@@ -411,7 +411,7 @@ func (s *Scorer) PrepareRequestData(ctx context.Context,
 // If PrepareRequestData was called beforehand, Score reuses the pre-computed
 // results from PluginState. Otherwise, it falls back to computing scores
 // directly via getScores (backward compatible).
-func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	// Start tracing span for scoring operation
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(ctx, "llm_d.epp.scorer.prefix_cache",
@@ -541,7 +541,7 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 // evicted when the TTL expires.
 // This is a no-op when speculative indexing is disabled.
 func (s *Scorer) PreRequest(ctx context.Context,
-	request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+	request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
 	if !s.speculativeEnabled {
 		return
 	}
@@ -618,7 +618,7 @@ func (s *Scorer) PreRequest(ctx context.Context,
 // computeBlockKeys extracts block keys from an LLM request by tokenizing
 // the prompt and computing KV-block hashes.
 func (s *Scorer) computeBlockKeys(ctx context.Context,
-	request *scheduling.LLMRequest) ([]kvblock.BlockHash, error) {
+	request *scheduling.InferenceRequest) ([]kvblock.BlockHash, error) {
 	if request.Body == nil {
 		return nil, nil
 	}
@@ -659,7 +659,7 @@ func (s *Scorer) getBlockSizeTokens() int {
 // If tokenized prompt data is found in CycleState (written by the tokenizer
 // scorer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
 // Otherwise, chat completions and regular completions are tokenized internally.
-func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (map[string]float64, error) {
+func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logging.TRACE)
 
