@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-	configapi "sigs.k8s.io/gateway-api-inference-extension/apix/config/v1alpha1"
+	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
 )
 
 // validateConfig performs a deep validation of the configuration integrity.

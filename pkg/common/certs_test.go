@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 )
 
 func TestCertReloader_InitialLoad(t *testing.T) {

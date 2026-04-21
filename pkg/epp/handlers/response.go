@@ -23,11 +23,11 @@ import (
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"google.golang.org/protobuf/types/known/structpb"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 
-	envoy "sigs.k8s.io/gateway-api-inference-extension/pkg/common/envoy"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
+	envoy "github.com/llm-d/llm-d-inference-scheduler/pkg/common/envoy"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/request"
 )
 
 // HandleResponseBody processes response data for both streaming and non-streaming models.

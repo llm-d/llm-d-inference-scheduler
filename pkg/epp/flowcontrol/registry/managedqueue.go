@@ -23,9 +23,9 @@ import (
 
 	"github.com/go-logr/logr"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/flowcontrol/contracts"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/contracts"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 )
 
 // managedQueue implements `contracts.ManagedQueue`. It acts as a stateful decorator around a SafeQueue.

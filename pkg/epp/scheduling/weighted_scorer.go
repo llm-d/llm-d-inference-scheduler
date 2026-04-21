@@ -17,7 +17,7 @@ limitations under the License.
 package scheduling
 
 import (
-	fwksched "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // NewWeightedScorer initializes a new WeightedScorer and returns its pointer.

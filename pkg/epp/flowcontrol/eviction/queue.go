@@ -20,7 +20,7 @@ import (
 	"container/heap"
 	"sync"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 )
 
 // heapEntry is the internal wrapper that pairs an EvictionItem with its heap index.

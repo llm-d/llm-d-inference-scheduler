@@ -17,7 +17,7 @@ limitations under the License.
 package handlers
 
 import (
-	fwkrh "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 )
 
 // Config holds the configuration for the SaturationDetector.

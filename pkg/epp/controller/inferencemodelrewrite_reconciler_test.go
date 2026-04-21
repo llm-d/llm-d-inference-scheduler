@@ -34,12 +34,12 @@ import (
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
-	backendmetrics "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/backend/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/datastore"
-	poolutil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/pool"
-	utiltest "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/testing"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	backendmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/backend/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
+	poolutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
+	utiltest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 )
 
 var (
