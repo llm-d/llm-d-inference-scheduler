@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -20,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
@@ -84,6 +86,7 @@ var (
 	_ scheduling.Scorer           = &Scorer{}
 	_ requestcontrol.DataProducer = &Scorer{}
 	_ requestcontrol.PreRequest   = &Scorer{}
+	_ fwkdl.EndpointExtractor     = &Scorer{}
 )
 
 // speculativeEntries holds the data needed to evict speculative entries
@@ -190,24 +193,7 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 	pool.Start(ctx)
 
 	subscribersManager := kvevents.NewSubscriberManager(pool)
-	var subscribersCache *ttlcache.Cache[string, struct{}]
 
-	// initialize the subscribers cache only if endpoint discovery is enabled
-	if config.KVEventsConfig.DiscoverPods {
-		// initialize the subscribers TTL cache
-		subscriptionTimeout := 10 * time.Minute
-		subscribersCache = ttlcache.New[string, struct{}](
-			ttlcache.WithTTL[string, struct{}](subscriptionTimeout),
-		)
-		subscribersCache.OnEviction(func(ctx context.Context, reason ttlcache.EvictionReason,
-			item *ttlcache.Item[string, struct{}],
-		) {
-			if reason == ttlcache.EvictionReasonExpired {
-				subscribersManager.RemoveSubscriber(ctx, item.Key())
-			}
-		})
-		go cleanCachePeriodically(ctx, subscribersCache, subscriptionTimeout)
-	}
 	if config.KVEventsConfig.ZMQEndpoint != "" {
 		// setup local subscriber to support global socket mode
 		if err := subscribersManager.EnsureSubscriber(ctx, "local-subscriber",
@@ -256,7 +242,6 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
 		kvBlockScorer:      kvBlockScorer,
-		subscribersCache:   subscribersCache,
 		subscribersManager: subscribersManager,
 		kvEventsConfig:     config.KVEventsConfig,
 		pluginState:        plugin.NewPluginState(ctx),
@@ -277,16 +262,14 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 // PreRequest to proactively populate the index with expected cache entries
 // immediately after a routing decision, closing the blind spot between the
 // routing decision and the arrival of actual KV events from the engine.
+//
+// The scorer also implements EndpointExtractor to react to endpoint lifecycle
+// events from the data layer's endpoint-notification-source: an add/update
+// installs a per-pod ZMQ subscriber, a delete removes it.
 type Scorer struct {
 	typedName      plugin.TypedName
 	kvCacheIndexer kvCacheIndexer
 
-	// until the IGW data-layer is ready to provide endpoint events,
-	// we maintain a TTL cache of known endpoints that are discovered through
-	// the scoring process. If a endpoint is not in the received endpoints list
-	// during scoring for a certain period, we consider it gone and
-	// stop its KV events subscription.
-	subscribersCache   *ttlcache.Cache[string, struct{}]
 	subscribersManager *kvevents.SubscriberManager
 	kvEventsConfig     *kvevents.Config
 
@@ -426,27 +409,6 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 	span.SetAttributes(
 		attribute.Int("llm_d.scorer.candidate_endpoints", len(endpoints)),
 	)
-
-	// Handle pod discovery and subscriber management
-	if s.kvEventsConfig.DiscoverPods {
-		// update subscribers here temporarily
-		for _, endpoint := range endpoints {
-			endpointObj := endpoint.GetMetadata()
-			if endpointObj == nil {
-				continue
-			}
-			endpointKey := endpointObj.NamespacedName.String()
-			s.subscribersCache.Set(endpointKey, struct{}{}, 0) // use default TTL
-
-			if err := s.subscribersManager.EnsureSubscriber(context.Background(), endpointKey, // dont use request ctx
-				fmt.Sprintf("tcp://%s:%d", endpointObj.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort),
-				s.kvEventsConfig.TopicFilter, true); err != nil {
-				logger.Error(err, "Failed to ensure KV-events subscriber for endpoint", "endpoint", endpointKey,
-					"endpoint", endpointObj.Address)
-				continue
-			}
-		}
-	}
 
 	// Early return if request is nil
 	if request == nil {
@@ -611,6 +573,53 @@ func (s *Scorer) PreRequest(ctx context.Context,
 		"pod", speculativePod.PodIdentifier,
 		"blockKeys", len(state.blockKeys),
 		"ttl", s.speculativeTTL)
+}
+
+// --- EndpointExtractor implementation ---
+
+// ExpectedInputType declares the data type this extractor consumes.
+// Required by the data layer's source/extractor type-compatibility check.
+func (s *Scorer) ExpectedInputType() reflect.Type {
+	return fwkdl.EndpointEventReflectType
+}
+
+// Extract is the base Extractor entrypoint and is unused for endpoint
+// extractors — the Runtime calls ExtractEndpoint instead.
+func (s *Scorer) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
+	return nil
+}
+
+// ExtractEndpoint reacts to endpoint lifecycle events from the data layer's
+// endpoint-notification-source: an add/update installs a per-pod ZMQ
+// subscriber so KV-cache events flow into the index; a delete tears it down.
+// No-op when DiscoverPods is disabled or pod metadata is unavailable.
+func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent) error {
+	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
+		return nil
+	}
+	meta := event.Endpoint.GetMetadata()
+	if meta == nil || meta.Address == "" {
+		return nil
+	}
+
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+	endpointKey := meta.NamespacedName.String()
+
+	switch event.Type {
+	case fwkdl.EventAddOrUpdate:
+		zmqEndpoint := fmt.Sprintf("tcp://%s:%d", meta.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort)
+		if err := s.subscribersManager.EnsureSubscriber(ctx, endpointKey,
+			zmqEndpoint, s.kvEventsConfig.TopicFilter, true); err != nil {
+			logger.Error(err, "Failed to ensure KV-events subscriber for endpoint",
+				"endpoint", endpointKey, "address", meta.Address)
+			return fmt.Errorf("ensure subscriber for %s: %w", endpointKey, err)
+		}
+		logger.V(logging.DEBUG).Info("Ensured KV-events subscriber", "endpoint", endpointKey, "zmq", zmqEndpoint)
+	case fwkdl.EventDelete:
+		s.subscribersManager.RemoveSubscriber(ctx, endpointKey)
+		logger.V(logging.DEBUG).Info("Removed KV-events subscriber", "endpoint", endpointKey)
+	}
+	return nil
 }
 
 // --- Internal helper methods ---

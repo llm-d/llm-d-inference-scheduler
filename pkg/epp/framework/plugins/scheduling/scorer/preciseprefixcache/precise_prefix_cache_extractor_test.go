@@ -1,0 +1,123 @@
+package preciseprefixcache
+
+import (
+	"reflect"
+	"testing"
+
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
+)
+
+// newExtractorScorer builds a minimal Scorer wired only with the bits the
+// EndpointExtractor path touches: a SubscriberManager, the kvevents config,
+// and a typed name. Skipping the full New() lets us exercise the data-layer
+// callbacks without standing up a tokenizer pool or KV index.
+func newExtractorScorer(discoverPods bool) *Scorer {
+	cfg := kvevents.DefaultConfig()
+	cfg.DiscoverPods = discoverPods
+	cfg.PodDiscoveryConfig = kvevents.DefaultPodReconcilerConfig()
+	cfg.PodDiscoveryConfig.SocketPort = 5557
+
+	return &Scorer{
+		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: PrecisePrefixCachePluginType},
+		subscribersManager: kvevents.NewSubscriberManager(kvevents.NewPool(cfg, nil, nil, nil)),
+		kvEventsConfig:     cfg,
+	}
+}
+
+func newEndpoint(name, addr, port string) fwkdl.Endpoint {
+	return fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
+		NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: name},
+		Address:        addr,
+		Port:           port,
+	}, nil)
+}
+
+func TestScorer_EndpointExtractor_InterfaceContract(t *testing.T) {
+	s := newExtractorScorer(true)
+	defer s.subscribersManager.Shutdown(t.Context())
+
+	assert.Equal(t, fwkdl.EndpointEventReflectType, s.ExpectedInputType(),
+		"ExpectedInputType must report EndpointEvent for data-layer compatibility checks")
+
+	// Base Extract is a documented no-op; the Runtime calls ExtractEndpoint instead.
+	require.NoError(t, s.Extract(t.Context(), nil, nil))
+
+	var _ fwkdl.EndpointExtractor = s
+	assert.True(t, reflect.TypeOf(s).Implements(reflect.TypeFor[fwkdl.EndpointExtractor]()))
+}
+
+func TestScorer_ExtractEndpoint_AddAndDelete(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	s := newExtractorScorer(true)
+	defer s.subscribersManager.Shutdown(ctx)
+
+	ep := newEndpoint("pod-a", "10.0.0.1", "8080")
+	wantKey := "ns/pod-a"
+	wantEndpoint := "tcp://10.0.0.1:5557"
+
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventAddOrUpdate,
+		Endpoint: ep,
+	}))
+
+	ids, endpoints := s.subscribersManager.GetActiveSubscribers()
+	require.Equal(t, []string{wantKey}, ids, "add/update should register exactly one subscriber")
+	require.Equal(t, []string{wantEndpoint}, endpoints, "ZMQ endpoint must derive from address + SocketPort")
+
+	// Re-add is idempotent (EnsureSubscriber dedups on identical endpoint).
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventAddOrUpdate,
+		Endpoint: ep,
+	}))
+	ids, _ = s.subscribersManager.GetActiveSubscribers()
+	assert.Len(t, ids, 1, "duplicate add must not create a second subscriber")
+
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventDelete,
+		Endpoint: ep,
+	}))
+	ids, _ = s.subscribersManager.GetActiveSubscribers()
+	assert.Empty(t, ids, "delete should tear down the subscriber")
+}
+
+func TestScorer_ExtractEndpoint_DiscoverPodsDisabledIsNoOp(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	// DiscoverPods=false is the global-socket-mode toggle: per-pod discovery
+	// must be skipped so a single shared subscriber drives the index.
+	s := newExtractorScorer(false)
+	defer s.subscribersManager.Shutdown(ctx)
+
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventAddOrUpdate,
+		Endpoint: newEndpoint("pod-a", "10.0.0.1", "8080"),
+	}))
+
+	ids, _ := s.subscribersManager.GetActiveSubscribers()
+	assert.Empty(t, ids, "no per-pod subscriber should be registered when DiscoverPods is disabled")
+}
+
+func TestScorer_ExtractEndpoint_IgnoresMissingMetadata(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	s := newExtractorScorer(true)
+	defer s.subscribersManager.Shutdown(ctx)
+
+	// Endpoint with empty address — nothing to subscribe to.
+	ep := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
+		NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: "pod-a"},
+	}, nil)
+
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventAddOrUpdate,
+		Endpoint: ep,
+	}))
+
+	ids, _ := s.subscribersManager.GetActiveSubscribers()
+	assert.Empty(t, ids, "endpoints without an address must be ignored")
+}
