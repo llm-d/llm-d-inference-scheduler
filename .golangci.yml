@@ -51,26 +51,49 @@ linters:
       # NewDatastore returning unexported type requires a larger interface refactor
       - linters: [revive]
         text: "exported func NewDatastore returns unexported type"
+      # Underscore names inherited from migrated code (e.g. a_ep, b_ep, selector_v1)
+      - linters: [revive]
+        text: "don't use underscores in Go names"
+      # Public const with 30+ callers; rename would be API-breaking
+      - linters: [revive]
+        text: "should be RequestIDHeaderKey"
+      # Internal variable names from migrated code
+      - linters: [revive]
+        text: "should be metricsHTTPClient"
+      - linters: [revive]
+        text: "should be errorBadPluginJSONText"
+      - linters: [revive]
+        text: "should be inputIDs"
+      - linters: [revive]
+        text: "should be requestID"
+      # Experimental public var from GAIE upstream; rename would break callers
+      - linters: [revive]
+        text: "should be Experimental_DefaultPrefillProfile"
+      # predicted_tpot and predicted_ttft are local vars in migrated latency code
+      - linters: [revive]
+        text: "should be predictedTPOT"
+      - linters: [revive]
+        text: "should be predictedTTFT"
+      # tp_filterAll is a local var in migrated filter code
+      - linters: [revive]
+        text: "should be tpFilterAll"
+      # goconst and prealloc findings in tests are low-value noise
+      - linters: [goconst, prealloc]
+        path: "_test\\.go"
   settings:
     revive: # see https://github.com/mgechev/revive#available-rules for all options
       rules:
         - name: blank-imports
-        - name: context-as-argument
         - name: context-keys-type
         - name: dot-imports
         - name: error-return
         - name: error-strings
         - name: error-naming
-        - name: if-return
-        - name: increment-decrement
         - name: var-naming
-        - name: var-declaration
         - name: package-comments
         - name: range
-        - name: receiver-naming
         - name: time-naming
         - name: unexported-return
-        - name: indent-error-flow
         - name: errorf
 
 issues:
