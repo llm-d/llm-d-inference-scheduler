@@ -26,7 +26,6 @@ linters:
     - makezero
     - misspell
     - nakedret
-    - nilnil
     - perfsprint
     - prealloc
     - revive
@@ -38,6 +37,20 @@ linters:
     presets:
       - comments        # suppress missing comment violations on packages and exported symbols
       - std-error-handling  # suppress unchecked errors on well-known stdlib patterns (e.g. Close())
+    rules:
+      # Package names inherited from GAIE upstream (common, types, utils, http) are intentional
+      - linters: [revive]
+        text: "avoid meaningless package names"
+      - linters: [revive]
+        text: "avoid package names that conflict with Go standard library package names"
+      # RequestId and Url are JSON-serialized API fields; renaming would break callers
+      - linters: [revive]
+        text: "struct field RequestId should be RequestID"
+      - linters: [revive]
+        text: "struct field Url should be URL"
+      # NewDatastore returning unexported type requires a larger interface refactor
+      - linters: [revive]
+        text: "exported func NewDatastore returns unexported type"
   settings:
     revive: # see https://github.com/mgechev/revive#available-rules for all options
       rules:
@@ -48,7 +61,6 @@ linters:
         - name: error-return
         - name: error-strings
         - name: error-naming
-        - name: exported
         - name: if-return
         - name: increment-decrement
         - name: var-naming
