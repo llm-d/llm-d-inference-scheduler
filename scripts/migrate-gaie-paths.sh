@@ -128,8 +128,10 @@ for i in "${!SRC_PATHS[@]}"; do
     while IFS= read -r -d '' src_dir; do
       rel="${src_dir#"${SOURCE_DIR}/${SRC_PATHS[$i]}"}"
       dest_dir="${DEST_DIR}/${DEST_PATHS[$i]}${rel}"
-      if [[ -d "${dest_dir}" ]] && find "${dest_dir}" -maxdepth 1 -name "*.go" -print -quit 2>/dev/null | grep -q .; then
-        echo "error: Go package conflict at '${DEST_PATHS[$i]}${rel}': destination already contains Go files"
+      if [[ -d "${dest_dir}" ]] && \
+           find "${src_dir}" -maxdepth 1 -name "*.go" -print -quit 2>/dev/null | grep -q . && \
+           find "${dest_dir}" -maxdepth 1 -name "*.go" -print -quit 2>/dev/null | grep -q .; then
+        echo "error: Go package conflict at '${DEST_PATHS[$i]}${rel}': both source and destination contain Go files"
         exit 1
       fi
     done < <(find "${SOURCE_DIR}/${SRC_PATHS[$i]}" -type d -print0)
