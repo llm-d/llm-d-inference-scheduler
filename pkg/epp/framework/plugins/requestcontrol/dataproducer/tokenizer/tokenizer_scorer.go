@@ -50,7 +50,11 @@ func (p *Plugin) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 	} else {
 		allTokenIDs, mmFeatures := p.tokenize(ctx, request)
 		if len(allTokenIDs) > 0 {
-			var flat []uint32
+			totalLen := 0
+			for _, ids := range allTokenIDs {
+				totalLen += len(ids)
+			}
+			flat := make([]uint32, 0, totalLen)
 			for _, ids := range allTokenIDs {
 				flat = append(flat, ids...)
 			}
