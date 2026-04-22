@@ -4,7 +4,7 @@ exclude = [
 ]
 
 # Timeout in seconds
-timeout = 20
+timeout = 60
 
 # Retry failed links (helpful for flaky sites)
 max_retries = 5
