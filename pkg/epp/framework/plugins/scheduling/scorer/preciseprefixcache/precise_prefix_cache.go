@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -291,6 +292,13 @@ type Scorer struct {
 
 	// speculativeEnabled controls whether speculative indexing is active.
 	speculativeEnabled bool
+
+	// extractorActive is set the first time ExtractEndpoint is invoked,
+	// signalling that the data layer's endpoint-notification-source is wired
+	// for this scorer. Once set, the legacy in-Score subscriber discovery
+	// path becomes a no-op so the data layer is the sole authority over
+	// per-pod subscriber lifecycle.
+	extractorActive atomic.Bool
 }
 
 // TypedName returns the typed name of the plugin.
@@ -602,7 +610,12 @@ func (s *Scorer) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
 // endpoint-notification-source: an add/update installs a per-pod ZMQ
 // subscriber so KV-cache events flow into the index; a delete tears it down.
 // No-op when DiscoverPods is disabled or the namespaced name is unavailable.
+//
+// Being called at all is also the signal that the data layer is wired for
+// this scorer; the legacy in-Score discovery path turns itself off from
+// here on.
 func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent) error {
+	s.extractorActive.Store(true)
 	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
 		return nil
 	}
@@ -619,6 +632,7 @@ func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent)
 		if err := s.ensureSubscriber(ctx, meta); err != nil {
 			return err
 		}
+		logger.V(logging.DEBUG).Info("Adding subscriber", "endpoint", endpointKey)
 	case fwkdl.EventDelete:
 		s.subscribersManager.RemoveSubscriber(ctx, endpointKey)
 		logger.V(logging.DEBUG).Info("Removed KV-events subscriber", "endpoint", endpointKey)
@@ -653,7 +667,13 @@ func (s *Scorer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMetad
 // endpoints presented to Score and ensures a per-pod subscriber for each.
 // Errors are logged and not returned — discovery is best-effort here, the
 // data layer remains the authoritative source when wired.
+//
+// Becomes a no-op once ExtractEndpoint has been called at least once,
+// indicating the data layer is wired and will drive subscriber lifecycle.
 func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []scheduling.Endpoint) {
+	if s.extractorActive.Load() {
+		return
+	}
 	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
 		return
 	}

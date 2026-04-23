@@ -162,6 +162,35 @@ func TestScorer_LegacyInScoreDiscovery_EnsuresSubscribers(t *testing.T) {
 		"legacy in-Score discovery must subscribe to every candidate endpoint")
 }
 
+// Once the data layer is wired (ExtractEndpoint has been called even once),
+// the legacy in-Score discovery must stop running so the data layer remains
+// the sole authority over per-pod subscriber lifecycle.
+func TestScorer_LegacyInScoreDiscovery_DisabledOnceExtractorObserved(t *testing.T) {
+	ctx := discardCtx(t)
+	s := newExtractorScorer(true)
+	defer s.subscribersManager.Shutdown(ctx)
+
+	// Simulate the data layer dispatching even an unrelated event — the call
+	// itself proves the source is wired.
+	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
+		Type:     fwkdl.EventDelete,
+		Endpoint: newEndpoint("pod-x", "10.0.0.99", "8080"),
+	}))
+
+	// Now Score()-time discovery should be a no-op even with fresh endpoints.
+	endpoints := []scheduling.Endpoint{
+		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: "pod-a"},
+			Address:        "10.0.0.1", Port: "8080",
+		}, nil, nil),
+	}
+	s.ensureSubscribersForEndpoints(ctx, endpoints)
+
+	ids, _ := s.subscribersManager.GetActiveSubscribers()
+	assert.NotContains(t, ids, "ns/pod-a",
+		"legacy path must not subscribe once the data-layer extractor has been observed")
+}
+
 func TestScorer_LegacyInScoreDiscovery_DiscoverPodsDisabled(t *testing.T) {
 	ctx := discardCtx(t)
 	// Global-socket mode: per-pod subscribers must not be opened.

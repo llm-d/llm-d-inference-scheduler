@@ -490,6 +490,11 @@ supported:
   data layer. This gives clean subscriber teardown when pods leave the pool
   and avoids opportunistic subscribe-on-Score traffic.
 
+The two paths are mutually exclusive at runtime: the first time the scorer
+receives an `ExtractEndpoint` call from the data layer, the legacy in-Score
+path turns itself off, leaving the data layer as the sole authority over
+per-pod subscriber lifecycle. No config flag is required.
+
 To enable the data layer path, declare the source plugin and wire it under
 `dataLayer.sources`:
 
