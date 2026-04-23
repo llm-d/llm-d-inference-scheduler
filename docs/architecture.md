@@ -475,6 +475,56 @@ plugins:
               tokenizersCacheDir: /tmp/tokenizers
 ```
 
+##### Pod discovery via the data layer (recommended)
+
+When `discoverPods: true`, the scorer needs to know when pods come and go so
+it can install (and tear down) per-pod ZMQ subscribers. Two mechanisms are
+supported:
+
+- **Legacy (default, backwards-compatible).** The scorer opportunistically
+  installs subscribers for every endpoint it sees during scoring. No extra
+  YAML required. Subscribers for pods that disappear are not actively
+  removed — this is the historical behavior.
+- **Data layer endpoint-notification-source (recommended).** The scorer
+  implements `EndpointExtractor` and reacts to add/delete events from the
+  data layer. This gives clean subscriber teardown when pods leave the pool
+  and avoids opportunistic subscribe-on-Score traffic.
+
+The two paths are mutually exclusive at runtime: the first time the scorer
+receives an `ExtractEndpoint` call from the data layer, the legacy in-Score
+path turns itself off, leaving the data layer as the sole authority over
+per-pod subscriber lifecycle. No config flag is required.
+
+To enable the data layer path, declare the source plugin and wire it under
+`dataLayer.sources`:
+
+```yaml
+plugins:
+  - type: endpoint-notification-source
+  - type: metrics-data-source
+  - type: core-metrics-extractor
+  - type: precise-prefix-cache-scorer
+    # ...same parameters as above
+dataLayer:
+  sources:
+    - pluginRef: metrics-data-source
+      extractors:
+        - pluginRef: core-metrics-extractor
+    - pluginRef: endpoint-notification-source
+      extractors:
+        - pluginRef: precise-prefix-cache-scorer
+```
+
+The same scorer instance serves both roles (Scorer and EndpointExtractor),
+no second factory is needed.
+
+> [!NOTE]
+> The `tokenizer` PrepareData plugin is the preferred source of tokenized
+> prompts; the scorer's internal tokenization (via
+> `indexerConfig.tokenizersPoolConfig`) is a fallback and is being phased
+> out. New configs should declare a `tokenizer` plugin and reference it in
+> the scheduling profile alongside the precise-prefix-cache-scorer.
+
 ---
 
 #### LoadAwareScorer
