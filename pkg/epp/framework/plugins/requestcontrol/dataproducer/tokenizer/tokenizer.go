@@ -199,7 +199,7 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) (
 			allTokenIDs = make([][]uint32, 0, len(prompt.Strings))
 			for _, promptStr := range prompt.Strings {
 				traceLogger.Info("Calling Render for completions string", "promptLength", len(promptStr))
-				sTokenIDs, _, renderErr := p.tokenizer.Render(promptStr)
+				sTokenIDs, _, err := p.tokenizer.Render(promptStr)
 				if renderErr != nil {
 					logger.Error(renderErr, "String tokenization failed, skipping")
 					continue
