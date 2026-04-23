@@ -501,10 +501,15 @@ To enable the data layer path, declare the source plugin and wire it under
 ```yaml
 plugins:
   - type: endpoint-notification-source
+  - type: metrics-data-source        # required, see note below
+  - type: core-metrics-extractor     # paired with metrics-data-source
   - type: precise-prefix-cache-scorer
     # ...same parameters as above
 dataLayer:
   sources:
+    - pluginRef: metrics-data-source
+      extractors:
+        - pluginRef: core-metrics-extractor
     - pluginRef: endpoint-notification-source
       extractors:
         - pluginRef: precise-prefix-cache-scorer
@@ -512,6 +517,16 @@ dataLayer:
 
 The same scorer instance serves both roles (Scorer and EndpointExtractor),
 no second factory is needed.
+
+> [!IMPORTANT]
+> The `metrics-data-source` (or any `PollingDataSource`) is required for
+> the data layer to dispatch endpoint lifecycle events. GAIE's
+> `Runtime.NewEndpoint` short-circuits without a polling source
+> configured, so an `endpoint-notification-source` on its own will never
+> fire `EndpointEvent`s. Also note that providing **any** explicit
+> `dataLayer:` block disables GAIE's auto-injection of the default
+> metrics source, so you must declare `metrics-data-source` yourself
+> when wiring custom sources.
 
 > [!NOTE]
 > The `tokenizer` PrepareData plugin is the preferred source of tokenized

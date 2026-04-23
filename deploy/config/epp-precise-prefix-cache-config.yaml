@@ -19,6 +19,14 @@ plugins:
     parameters:
       modelName: hf-repo/model-name           # set to the model used in the vLLM deployment
   - type: endpoint-notification-source
+  # Polling source — required for the data layer to dispatch endpoint
+  # lifecycle events. GAIE's Runtime.NewEndpoint short-circuits without a
+  # PollingDataSource configured, so no `EndpointEvent` ever fires for
+  # endpoint-notification-source on its own. The metrics source also
+  # populates per-endpoint queue/KV-cache metrics consumed by the
+  # downstream scorers.
+  - type: metrics-data-source
+  - type: core-metrics-extractor
   - type: single-profile-handler
   - type: decode-filter
   - type: precise-prefix-cache-scorer
@@ -39,6 +47,9 @@ plugins:
   - type: max-score-picker
 dataLayer:
   sources:
+    - pluginRef: metrics-data-source
+      extractors:
+        - pluginRef: core-metrics-extractor
     - pluginRef: endpoint-notification-source
       extractors:
         - pluginRef: precise-prefix-cache-scorer
