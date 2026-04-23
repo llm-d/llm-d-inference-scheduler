@@ -60,7 +60,10 @@ func (p *Plugin) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 				flat = append(flat, ids...)
 			}
 			state := &TokenizedPromptState{
-				TokenIDs:   flat,
+  state := &TokenizedPromptState{
+      TokenIDs:   slices.Concat(allTokenIDs...),
+      MMFeatures: mmFeatures,
+  }
 				MMFeatures: mmFeatures,
 			}
 			if len(allTokenIDs) > 1 {
