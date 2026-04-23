@@ -659,7 +659,7 @@ func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent)
 // The subscriber goroutine is started against subscriberCtx (plugin-lifetime),
 // not the caller ctx, so request-scoped contexts don't tear it down.
 func (s *Scorer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMetadata) error {
-	if meta == nil || meta.Address == "" || meta.NamespacedName.Name == "" {
+	if meta == nil || meta.Address == "" {
 		return nil
 	}
 	endpointKey := meta.NamespacedName.String()

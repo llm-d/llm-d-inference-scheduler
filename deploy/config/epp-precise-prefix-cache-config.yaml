@@ -1,17 +1,4 @@
-# Sample EPP configuration for running with KvCache and load aware scorers.
-#
-# Recommended layout:
-#   - tokenizer (PrepareData plugin) supplies tokens via CycleState so the
-#     scorer can skip internal tokenization. Internal tokenization in
-#     indexerConfig.tokenizersPoolConfig is the legacy fallback and is being
-#     phased out.
-#   - endpoint-notification-source feeds endpoint add/delete events to the
-#     scorer (which implements EndpointExtractor) so per-pod ZMQ subscribers
-#     are torn down cleanly when pods leave the pool.
-#
-# Backwards-compatible: configs that omit the dataLayer block (or omit the
-# tokenizer plugin) continue to work — the scorer falls back to in-Score
-# subscriber discovery and to its internal tokenizer pool.
+# Sample EPP configuration with the precise-prefix-cache scorer.
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
@@ -19,12 +6,6 @@ plugins:
     parameters:
       modelName: hf-repo/model-name           # set to the model used in the vLLM deployment
   - type: endpoint-notification-source
-  # Polling source — required for the data layer to dispatch endpoint
-  # lifecycle events. GAIE's Runtime.NewEndpoint short-circuits without a
-  # PollingDataSource configured, so no `EndpointEvent` ever fires for
-  # endpoint-notification-source on its own. The metrics source also
-  # populates per-endpoint queue/KV-cache metrics consumed by the
-  # downstream scorers.
   - type: metrics-data-source
   - type: core-metrics-extractor
   - type: single-profile-handler
@@ -35,9 +16,6 @@ plugins:
         blockSize: 64                 # must match vLLM block size
         hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
       indexerConfig:
-        # Required by the validator today; unused at runtime once the
-        # `tokenizer` plugin populates CycleState. Tracking removal alongside
-        # the deprecation of internal tokenization.
         tokenizersPoolConfig:
           modelName: hf-repo/model-name
         kvBlockIndexConfig:

@@ -45,11 +45,11 @@ func newExtractorScorer(discoverPods bool) *Scorer {
 	}
 }
 
-func newEndpoint(name, addr, port string) fwkdl.Endpoint {
+func newEndpoint(name, addr string) fwkdl.Endpoint {
 	return fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
 		NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: name},
 		Address:        addr,
-		Port:           port,
+		Port:           "8080",
 	}, nil)
 }
 
@@ -73,7 +73,7 @@ func TestScorer_ExtractEndpoint_AddAndDelete(t *testing.T) {
 	s := newExtractorScorer(true)
 	defer s.subscribersManager.Shutdown(ctx)
 
-	ep := newEndpoint("pod-a", "10.0.0.1", "8080")
+	ep := newEndpoint("pod-a", "10.0.0.1")
 	wantKey := "ns/pod-a"
 	wantEndpoint := "tcp://10.0.0.1:5557"
 
@@ -111,7 +111,7 @@ func TestScorer_ExtractEndpoint_DiscoverPodsDisabledIsNoOp(t *testing.T) {
 
 	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
 		Type:     fwkdl.EventAddOrUpdate,
-		Endpoint: newEndpoint("pod-a", "10.0.0.1", "8080"),
+		Endpoint: newEndpoint("pod-a", "10.0.0.1"),
 	}))
 
 	ids, _ := s.subscribersManager.GetActiveSubscribers()
@@ -200,7 +200,7 @@ func TestScorer_LegacyInScoreDiscovery_DisabledOnceExtractorObserved(t *testing.
 	// itself proves the source is wired.
 	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
 		Type:     fwkdl.EventDelete,
-		Endpoint: newEndpoint("pod-x", "10.0.0.99", "8080"),
+		Endpoint: newEndpoint("pod-x", "10.0.0.99"),
 	}))
 
 	// Now Score()-time discovery should be a no-op even with fresh endpoints.
@@ -246,7 +246,7 @@ func TestScorer_ExtractEndpoint_DeleteWithMissingAddressRemovesExistingSubscribe
 
 	require.NoError(t, s.ExtractEndpoint(ctx, fwkdl.EndpointEvent{
 		Type:     fwkdl.EventAddOrUpdate,
-		Endpoint: newEndpoint("pod-a", "10.0.0.1", "8080"),
+		Endpoint: newEndpoint("pod-a", "10.0.0.1"),
 	}))
 
 	ids, _ := s.subscribersManager.GetActiveSubscribers()
