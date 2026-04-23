@@ -1,8 +1,24 @@
-# Sample EPP configuration for running with KvCache and load aware scorers
+# Sample EPP configuration for running with KvCache and load aware scorers.
 #
+# Recommended layout:
+#   - tokenizer (PrepareData plugin) supplies tokens via CycleState so the
+#     scorer can skip internal tokenization. Internal tokenization in
+#     indexerConfig.tokenizersPoolConfig is the legacy fallback and is being
+#     phased out.
+#   - endpoint-notification-source feeds endpoint add/delete events to the
+#     scorer (which implements EndpointExtractor) so per-pod ZMQ subscribers
+#     are torn down cleanly when pods leave the pool.
+#
+# Backwards-compatible: configs that omit the dataLayer block (or omit the
+# tokenizer plugin) continue to work — the scorer falls back to in-Score
+# subscriber discovery and to its internal tokenizer pool.
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
+  - type: tokenizer
+    parameters:
+      modelName: hf-repo/model-name           # set to the model used in the vLLM deployment
+  - type: endpoint-notification-source
   - type: single-profile-handler
   - type: decode-filter
   - type: precise-prefix-cache-scorer
@@ -11,15 +27,26 @@ plugins:
         blockSize: 64                 # must match vLLM block size
         hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
       indexerConfig:
+        # Required by the validator today; unused at runtime once the
+        # `tokenizer` plugin populates CycleState. Tracking removal alongside
+        # the deprecation of internal tokenization.
+        tokenizersPoolConfig:
+          modelName: hf-repo/model-name
         kvBlockIndexConfig:
           enableMetrics: true           # enable kv-block index metrics (prometheus)
   - type: kv-cache-utilization-scorer
   - type: queue-scorer
   - type: max-score-picker
+dataLayer:
+  sources:
+    - pluginRef: endpoint-notification-source
+      extractors:
+        - pluginRef: precise-prefix-cache-scorer
 schedulingProfiles:
   - name: default
     plugins:
       - pluginRef: decode-filter
+      - pluginRef: tokenizer
       - pluginRef: precise-prefix-cache-scorer
         weight: 2.0
       - pluginRef: kv-cache-utilization-scorer

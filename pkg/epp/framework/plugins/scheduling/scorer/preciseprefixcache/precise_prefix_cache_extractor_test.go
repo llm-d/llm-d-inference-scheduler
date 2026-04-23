@@ -14,6 +14,7 @@ import (
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // discardCtx returns a context whose logger drops everything. The kvevents
@@ -133,6 +134,51 @@ func TestScorer_ExtractEndpoint_IgnoresMissingMetadata(t *testing.T) {
 
 	ids, _ := s.subscribersManager.GetActiveSubscribers()
 	assert.Empty(t, ids, "endpoints without an address must be ignored")
+}
+
+// Backwards-compat: configs that don't wire the endpoint-notification-source
+// rely on Score()-time subscriber discovery. Verify the legacy path still
+// installs a subscriber for each endpoint Score() sees.
+func TestScorer_LegacyInScoreDiscovery_EnsuresSubscribers(t *testing.T) {
+	ctx := discardCtx(t)
+	s := newExtractorScorer(true)
+	defer s.subscribersManager.Shutdown(ctx)
+
+	endpoints := []scheduling.Endpoint{
+		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: "pod-a"},
+			Address:        "10.0.0.1", Port: "8080",
+		}, nil, nil),
+		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: "pod-b"},
+			Address:        "10.0.0.2", Port: "8080",
+		}, nil, nil),
+	}
+
+	s.ensureSubscribersForEndpoints(ctx, endpoints)
+
+	ids, _ := s.subscribersManager.GetActiveSubscribers()
+	assert.ElementsMatch(t, []string{"ns/pod-a", "ns/pod-b"}, ids,
+		"legacy in-Score discovery must subscribe to every candidate endpoint")
+}
+
+func TestScorer_LegacyInScoreDiscovery_DiscoverPodsDisabled(t *testing.T) {
+	ctx := discardCtx(t)
+	// Global-socket mode: per-pod subscribers must not be opened.
+	s := newExtractorScorer(false)
+	defer s.subscribersManager.Shutdown(ctx)
+
+	endpoints := []scheduling.Endpoint{
+		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: "pod-a"},
+			Address:        "10.0.0.1", Port: "8080",
+		}, nil, nil),
+	}
+
+	s.ensureSubscribersForEndpoints(ctx, endpoints)
+
+	ids, _ := s.subscribersManager.GetActiveSubscribers()
+	assert.Empty(t, ids)
 }
 
 // Delete events from the data layer may omit address fields. The subscriber

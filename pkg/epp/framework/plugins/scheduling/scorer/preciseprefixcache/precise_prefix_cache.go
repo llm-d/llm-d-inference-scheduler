@@ -410,6 +410,15 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 		attribute.Int("llm_d.scorer.candidate_endpoints", len(endpoints)),
 	)
 
+	// Backwards-compat: opportunistically subscribe to per-pod KV events for
+	// each endpoint we see in scoring. Preferred path is the data-layer
+	// EndpointExtractor (see ExtractEndpoint), which also handles teardown
+	// when pods disappear. This in-Score path keeps existing configs that
+	// don't wire the endpoint-notification-source working without changes;
+	// EnsureSubscriber is idempotent so the two paths are safe to run
+	// together.
+	s.ensureSubscribersForEndpoints(ctx, endpoints)
+
 	// Early return if request is nil
 	if request == nil {
 		debugLogger.Info("Request is nil, skipping scoring")
@@ -607,22 +616,50 @@ func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent)
 
 	switch event.Type {
 	case fwkdl.EventAddOrUpdate:
-		if meta.Address == "" {
-			return nil
+		if err := s.ensureSubscriber(ctx, meta); err != nil {
+			return err
 		}
-		zmqEndpoint := fmt.Sprintf("tcp://%s:%d", meta.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort)
-		if err := s.subscribersManager.EnsureSubscriber(ctx, endpointKey,
-			zmqEndpoint, s.kvEventsConfig.TopicFilter, true); err != nil {
-			logger.Error(err, "Failed to ensure KV-events subscriber for endpoint",
-				"endpoint", endpointKey, "address", meta.Address)
-			return fmt.Errorf("ensure subscriber for %s: %w", endpointKey, err)
-		}
-		logger.V(logging.DEBUG).Info("Ensured KV-events subscriber", "endpoint", endpointKey, "zmq", zmqEndpoint)
 	case fwkdl.EventDelete:
 		s.subscribersManager.RemoveSubscriber(ctx, endpointKey)
 		logger.V(logging.DEBUG).Info("Removed KV-events subscriber", "endpoint", endpointKey)
 	}
 	return nil
+}
+
+// ensureSubscriber installs (or refreshes) a per-pod ZMQ subscriber for the
+// given endpoint metadata. Used by both the data-layer-driven extractor path
+// and the legacy in-Score backwards-compat path. Returns nil for endpoints
+// without an address — those can't be dialed.
+func (s *Scorer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMetadata) error {
+	if meta == nil || meta.Address == "" || meta.NamespacedName.Name == "" {
+		return nil
+	}
+	endpointKey := meta.NamespacedName.String()
+	zmqEndpoint := fmt.Sprintf("tcp://%s:%d", meta.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort)
+
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+	if err := s.subscribersManager.EnsureSubscriber(ctx, endpointKey,
+		zmqEndpoint, s.kvEventsConfig.TopicFilter, true); err != nil {
+		logger.Error(err, "Failed to ensure KV-events subscriber for endpoint",
+			"endpoint", endpointKey, "address", meta.Address)
+		return fmt.Errorf("ensure subscriber for %s: %w", endpointKey, err)
+	}
+	logger.V(logging.DEBUG).Info("Ensured KV-events subscriber", "endpoint", endpointKey, "zmq", zmqEndpoint)
+	return nil
+}
+
+// ensureSubscribersForEndpoints is the backwards-compat path for configs
+// that don't wire the endpoint-notification-source: it iterates the candidate
+// endpoints presented to Score and ensures a per-pod subscriber for each.
+// Errors are logged and not returned — discovery is best-effort here, the
+// data layer remains the authoritative source when wired.
+func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []scheduling.Endpoint) {
+	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
+		return
+	}
+	for _, ep := range endpoints {
+		_ = s.ensureSubscriber(ctx, ep.GetMetadata())
+	}
 }
 
 // --- Internal helper methods ---
