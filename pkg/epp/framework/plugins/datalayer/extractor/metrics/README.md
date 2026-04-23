@@ -49,6 +49,16 @@ The plugin comes with built-in support for the following engines:
 -   `trtllm-serve`
 -   `triton-tensorrt-llm`
 
+To correctly establish the mapping, model server Pods should be labeled using the `engineLabelKey` with the engine type as follows:
+
+```yaml
+metadata:
+  labels:
+    inference.networking.k8s.io/engine-type: vllm # other options: sglang, trtllm-serve, triton-tensorrt-llm 
+
+```
+
+
 ### Custom Engine Configuration Example
 
 ```yaml
@@ -60,3 +70,13 @@ parameters:
       runningRequestsSpec: "custom_running_size"
       kvUsageSpec: "custom_cache_utilization"
 ```
+
+and the model server deployment Pods should have the label:
+
+```yaml
+metadata:
+  labels:
+    inference.networking.k8s.io/engine-type: my-custom-engine
+
+```
+

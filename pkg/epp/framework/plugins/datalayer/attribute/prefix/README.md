@@ -10,7 +10,7 @@ Contains information about how much of a request's prefix matched the cache on a
 - **Fields**:
   - `MatchBlocks`: Number of blocks that matched the cache.
   - `TotalBlocks`: Total number of blocks in the request prefix.
-  - `BlockSizeTokens`: Number of tokens per block.
+  - `BlockSizeTokens`: Number of tokens per block. This is fixed across endpoints.
 
 This information is used by affinity-based scheduling scorers to prefer endpoints with high cache hits.
 
