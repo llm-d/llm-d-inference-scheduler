@@ -24,7 +24,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -33,6 +32,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 )
 
 const (

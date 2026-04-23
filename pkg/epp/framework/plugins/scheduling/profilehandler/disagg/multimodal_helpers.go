@@ -1,11 +1,11 @@
 package disagg
 
 import (
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // hasMultimodalContent returns true if the request contains any image, video, or audio content blocks.
-func hasMultimodalContent(request *scheduling.LLMRequest) bool {
+func hasMultimodalContent(request *scheduling.InferenceRequest) bool {
 	if request == nil || request.Body == nil || request.Body.ChatCompletions == nil {
 		return false
 	}

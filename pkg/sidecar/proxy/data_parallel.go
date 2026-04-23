@@ -8,9 +8,10 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 )
 
 // dataParallelHandler checks if Data Parallel handling is needed.

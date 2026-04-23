@@ -21,12 +21,12 @@ package tokenizer
 import (
 	"context"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // compile-time type assertion.
-var _ requestcontrol.PrepareDataPlugin = &Plugin{}
+var _ requestcontrol.DataProducer = &Plugin{}
 
 // Produces returns the data keys this plugin produces.
 func (p *Plugin) Produces() map[string]any {
@@ -39,10 +39,10 @@ func (p *Plugin) Consumes() map[string]any {
 }
 
 // PrepareRequestData tokenizes the request prompt and stores the result
-// on the LLMRequest so that scorers and filters can use it.
+// on the InferenceRequest so that scorers and filters can use it.
 // If the request already contains tokenized data, tokenization is skipped.
 // This method is fail-open: errors are logged and TokenizedPrompt is left nil.
-func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, pods []scheduling.Endpoint) error {
+func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.InferenceRequest, pods []scheduling.Endpoint) error {
 	if request.TokenizedPrompt != nil {
 		return nil
 	}

@@ -26,9 +26,11 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 type tokenizer interface {
@@ -240,7 +242,7 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) (
 
 // ChatCompletionsToRenderChatRequest converts a ChatCompletionsRequest to a
 // tokenization RenderChatRequest, including multimodal content blocks.
-func ChatCompletionsToRenderChatRequest(chat *scheduling.ChatCompletionsRequest) *tokenizerTypes.RenderChatRequest {
+func ChatCompletionsToRenderChatRequest(chat *fwkrh.ChatCompletionsRequest) *tokenizerTypes.RenderChatRequest {
 	conversation := make([]tokenizerTypes.Conversation, 0, len(chat.Messages))
 	for _, msg := range chat.Messages {
 		conv := tokenizerTypes.Conversation{

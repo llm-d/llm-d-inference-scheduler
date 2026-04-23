@@ -27,9 +27,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -58,31 +59,31 @@ func TestTokenizerScorer_Score(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		request      *scheduling.LLMRequest
+		request      *scheduling.InferenceRequest
 		tokenizer    tokenizer
 		wantTokenIDs []uint32
 		wantNil      bool
 	}{
 		{
 			name:    "skips nil body",
-			request: &scheduling.LLMRequest{RequestId: "nil-body", Body: nil},
+			request: &scheduling.InferenceRequest{RequestId: "nil-body", Body: nil},
 			wantNil: true,
 		},
 		{
 			name: "skips unsupported request type",
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId: "unsupported",
-				Body:      &scheduling.LLMRequestBody{},
+				Body:      &fwkrh.InferenceRequestBody{},
 			},
 			wantNil: true,
 		},
 		{
 			name: "tokenizes completions and writes to CycleState",
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId: "completions",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: "The quick brown fox"},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "The quick brown fox"},
 					},
 				},
 			},
@@ -91,12 +92,12 @@ func TestTokenizerScorer_Score(t *testing.T) {
 		},
 		{
 			name: "tokenizes chat completions and writes to CycleState",
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId: "chat",
-				Body: &scheduling.LLMRequestBody{
-					ChatCompletions: &scheduling.ChatCompletionsRequest{
-						Messages: []scheduling.Message{
-							{Role: "user", Content: scheduling.Content{Raw: "Hello"}},
+				Body: &fwkrh.InferenceRequestBody{
+					ChatCompletions: &fwkrh.ChatCompletionsRequest{
+						Messages: []fwkrh.Message{
+							{Role: "user", Content: fwkrh.Content{Raw: "Hello"}},
 						},
 					},
 				},
@@ -106,10 +107,10 @@ func TestTokenizerScorer_Score(t *testing.T) {
 		},
 		{
 			name: "fail-open on tokenization error",
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId: "fail-open",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "fail"}},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "fail"}},
 				},
 			},
 			tokenizer: &mockTokenizer{
@@ -166,10 +167,10 @@ func TestTokenizerScorer_SkipsWhenAlreadyInCycleState(t *testing.T) {
 	}
 	p := newTestPlugin(tok)
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "already-tokenized",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "hello"}},
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
 		},
 	}
 
@@ -201,12 +202,12 @@ func TestTokenizerScorer_RenderChat_WritesMMFeaturesToCycleState(t *testing.T) {
 	p := newTestPlugin(tok)
 	cycleState := scheduling.NewCycleState()
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "mm-chat",
-		Body: &scheduling.LLMRequestBody{
-			ChatCompletions: &scheduling.ChatCompletionsRequest{
-				Messages: []scheduling.Message{
-					{Role: "user", Content: scheduling.Content{Raw: "Describe this image"}},
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{
+					{Role: "user", Content: fwkrh.Content{Raw: "Describe this image"}},
 				},
 			},
 		},
@@ -240,16 +241,16 @@ func TestTokenizerScorer_RenderChat_ForwardsStructuredContent(t *testing.T) {
 	p := newTestPlugin(tok)
 	cycleState := scheduling.NewCycleState()
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "mm-structured",
-		Body: &scheduling.LLMRequestBody{
-			ChatCompletions: &scheduling.ChatCompletionsRequest{
-				Messages: []scheduling.Message{
-					{Role: "system", Content: scheduling.Content{Raw: "You are a visual analyst."}},
-					{Role: "user", Content: scheduling.Content{
-						Structured: []scheduling.ContentBlock{
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{
+					{Role: "system", Content: fwkrh.Content{Raw: "You are a visual analyst."}},
+					{Role: "user", Content: fwkrh.Content{
+						Structured: []fwkrh.ContentBlock{
 							{Type: "text", Text: "Describe this image"},
-							{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,abc"}},
+							{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,abc"}},
 						},
 					}},
 				},
@@ -289,10 +290,10 @@ func TestTokenizerScorer_Render_NilMMFeatures(t *testing.T) {
 	p := newTestPlugin(tok)
 	cycleState := scheduling.NewCycleState()
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "text-completions",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "hello"}},
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
 		},
 	}
 

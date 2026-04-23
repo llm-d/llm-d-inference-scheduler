@@ -3,15 +3,21 @@ k8s = "k8s"
 KServe = "KServe"
 vLLM = "vLLM"
 IST = "IST"
+# American English (Go stdlib uses Unmarshal)
+unmarshaling = "unmarshaling"
+# image_grid_thw is a vLLM/CUDA tensor shape parameter
+thw = "thw"
 
 [files]
 extend-exclude = [
-    "*.png", 
-    "*.jpg", 
+    "*.png",
+    "*.jpg",
     "deploy/",
     "go.mod",
     "go.sum",
     "build/",
-    "testdata/"
+    "testdata/",
+    # Generated protobuf files
+    "pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/gen/"
 ]
 

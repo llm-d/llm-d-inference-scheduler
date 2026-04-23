@@ -8,11 +8,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -51,7 +52,7 @@ func makeProfileRunResult(names ...string) *scheduling.ProfileRunResult {
 
 type mockProfile struct{}
 
-func (p *mockProfile) Run(_ context.Context, _ *scheduling.LLMRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
+func (p *mockProfile) Run(_ context.Context, _ *scheduling.InferenceRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
 	return &scheduling.ProfileRunResult{}, nil
 }
 
@@ -63,39 +64,39 @@ func profileNames(m map[string]scheduling.SchedulerProfile) []string {
 	return out
 }
 
-// completionsRequest builds a text-only LLMRequest.
-func completionsRequest(prompt string) *scheduling.LLMRequest {
-	return &scheduling.LLMRequest{
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: prompt}},
+// completionsRequest builds a text-only InferenceRequest.
+func completionsRequest(prompt string) *scheduling.InferenceRequest {
+	return &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: prompt}},
 		},
 	}
 }
 
-// chatRequest builds a chat-completions LLMRequest with optional multimodal blocks.
-func chatRequest(hasImage, hasVideo, hasAudio bool) *scheduling.LLMRequest {
-	blocks := []scheduling.ContentBlock{{Type: "text", Text: "describe this"}}
+// chatRequest builds a chat-completions InferenceRequest with optional multimodal blocks.
+func chatRequest(hasImage, hasVideo, hasAudio bool) *scheduling.InferenceRequest {
+	blocks := []fwkrh.ContentBlock{{Type: "text", Text: "describe this"}}
 	if hasImage {
-		blocks = append(blocks, scheduling.ContentBlock{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "https://example.com/img.jpg"}})
+		blocks = append(blocks, fwkrh.ContentBlock{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://example.com/img.jpg"}})
 	}
 	if hasVideo {
-		blocks = append(blocks, scheduling.ContentBlock{Type: "video_url"})
+		blocks = append(blocks, fwkrh.ContentBlock{Type: "video_url"})
 	}
 	if hasAudio {
-		blocks = append(blocks, scheduling.ContentBlock{Type: "input_audio"})
+		blocks = append(blocks, fwkrh.ContentBlock{Type: "input_audio"})
 	}
-	return &scheduling.LLMRequest{
-		Body: &scheduling.LLMRequestBody{
-			ChatCompletions: &scheduling.ChatCompletionsRequest{
-				Messages: []scheduling.Message{{Role: "user", Content: scheduling.Content{Structured: blocks}}},
+	return &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{{Role: "user", Content: fwkrh.Content{Structured: blocks}}},
 			},
 		},
 	}
 }
 
 // withPrompt adds a completions body to a chat request so the PD decider can estimate tokens.
-func withPrompt(req *scheduling.LLMRequest, prompt string) *scheduling.LLMRequest {
-	req.Body.Completions = &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: prompt}}
+func withPrompt(req *scheduling.InferenceRequest, prompt string) *scheduling.InferenceRequest {
+	req.Body.Completions = &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: prompt}}
 	return req
 }
 
@@ -127,7 +128,7 @@ type mockEncodeDecider struct {
 
 func (m *mockEncodeDecider) TypedName() plugin.TypedName { return plugin.TypedName{} }
 
-func (m *mockEncodeDecider) disaggregate(_ context.Context, _ *scheduling.LLMRequest, _ scheduling.Endpoint) bool {
+func (m *mockEncodeDecider) disaggregate(_ context.Context, _ *scheduling.InferenceRequest, _ scheduling.Endpoint) bool {
 	return m.allow
 }
 
@@ -136,12 +137,12 @@ func (m *mockEncodeDecider) disaggregate(_ context.Context, _ *scheduling.LLMReq
 func TestHasMultimodalContent(t *testing.T) {
 	tests := []struct {
 		name     string
-		req      *scheduling.LLMRequest
+		req      *scheduling.InferenceRequest
 		expected bool
 	}{
 		{"nil request", nil, false},
-		{"nil body", &scheduling.LLMRequest{Body: nil}, false},
-		{"nil chat completions", &scheduling.LLMRequest{Body: &scheduling.LLMRequestBody{}}, false},
+		{"nil body", &scheduling.InferenceRequest{Body: nil}, false},
+		{"nil chat completions", &scheduling.InferenceRequest{Body: &fwkrh.InferenceRequestBody{}}, false},
 		{"text only", chatRequest(false, false, false), false},
 		{"image", chatRequest(true, false, false), true},
 		{"video", chatRequest(false, true, false), true},
@@ -416,8 +417,8 @@ func TestHandler_Pick_PD(t *testing.T) {
 func TestHandler_Pick_PD_InputTokenError(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	// Request with neither Completions nor ChatCompletions → getUserInputLenInTokens fails.
-	req := &scheduling.LLMRequest{
-		Body: &scheduling.LLMRequestBody{},
+	req := &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{},
 	}
 	profiles := map[string]scheduling.SchedulerProfile{
 		defaultDecodeProfile:  &mockProfile{},
@@ -449,7 +450,7 @@ func TestHandler_Pick_PD_Series(t *testing.T) {
 		name            string
 		nonCachedTokens int
 		steps           []struct {
-			req          *scheduling.LLMRequest
+			req          *scheduling.InferenceRequest
 			cachedTokens int
 			want         []string
 		}
@@ -458,7 +459,7 @@ func TestHandler_Pick_PD_Series(t *testing.T) {
 			name:            "same request twice: first disaggregates, second hits cache",
 			nonCachedTokens: 2,
 			steps: []struct {
-				req          *scheduling.LLMRequest
+				req          *scheduling.InferenceRequest
 				cachedTokens int
 				want         []string
 			}{
@@ -470,7 +471,7 @@ func TestHandler_Pick_PD_Series(t *testing.T) {
 			name:            "short then long: long triggers disaggregation",
 			nonCachedTokens: 2,
 			steps: []struct {
-				req          *scheduling.LLMRequest
+				req          *scheduling.InferenceRequest
 				cachedTokens int
 				want         []string
 			}{
@@ -546,7 +547,7 @@ func TestHandler_ProcessResults_PD(t *testing.T) {
 			h := NewDisaggProfileHandler(defaultDecodeProfile, defaultPrefillProfile, "",
 				decider, nil)
 
-			req := &scheduling.LLMRequest{Headers: map[string]string{}}
+			req := &scheduling.InferenceRequest{Headers: map[string]string{}}
 			res, err := h.ProcessResults(context.Background(), nil, req, tt.results)
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -612,7 +613,7 @@ func TestHandler_ProcessResults_CustomProfiles(t *testing.T) {
 		customEncodeProfile:  makeProfileRunResult("pod3"),
 	}
 
-	req := &scheduling.LLMRequest{Headers: map[string]string{}}
+	req := &scheduling.InferenceRequest{Headers: map[string]string{}}
 	res, err := h.ProcessResults(context.Background(), nil, req, results)
 	assert.NoError(t, err)
 	assert.Equal(t, customDecodeProfile, res.PrimaryProfileName)
@@ -633,7 +634,7 @@ func TestHandler_Pick_EPD(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		req     *scheduling.LLMRequest
+		req     *scheduling.InferenceRequest
 		results map[string]*scheduling.ProfileRunResult
 		want    []string
 	}{
@@ -791,7 +792,7 @@ func TestHandler_ProcessResults_EPD(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewDisaggProfileHandler(defaultDecodeProfile, "", defaultEncodeProfile, nil, newAlwaysDisaggEncodeDecider())
-			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
+			res, err := h.ProcessResults(context.Background(), nil, &scheduling.InferenceRequest{}, tt.results)
 			if tt.expectErr {
 				assert.Error(t, err)
 				return
@@ -818,7 +819,7 @@ func TestHandler_Pick_EPD_Full(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		req             *scheduling.LLMRequest
+		req             *scheduling.InferenceRequest
 		nonCachedTokens int
 		cachedTokens    int
 		results         map[string]*scheduling.ProfileRunResult
@@ -1026,7 +1027,7 @@ func TestHandler_ProcessResults_EPD_Full(t *testing.T) {
 				defaultDecodeProfile, defaultPrefillProfile, defaultEncodeProfile,
 				decider, newAlwaysDisaggEncodeDecider(),
 			)
-			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
+			res, err := h.ProcessResults(context.Background(), nil, &scheduling.InferenceRequest{}, tt.results)
 			if tt.expectErr {
 				assert.Error(t, err)
 				return
@@ -1055,7 +1056,7 @@ func TestHandler_Pick_NilDeciders(t *testing.T) {
 		name          string
 		pdDecider     deciderPlugin
 		encodeDecider deciderPlugin
-		req           *scheduling.LLMRequest
+		req           *scheduling.InferenceRequest
 		results       map[string]*scheduling.ProfileRunResult
 		want          []string
 		description   string
@@ -1219,7 +1220,7 @@ func TestHandler_ProcessResults_NilDeciders(t *testing.T) {
 				tt.pdDecider, tt.encodeDecider,
 			)
 
-			res, err := h.ProcessResults(context.Background(), nil, &scheduling.LLMRequest{}, tt.results)
+			res, err := h.ProcessResults(context.Background(), nil, &scheduling.InferenceRequest{}, tt.results)
 			if tt.expectErr {
 				assert.Error(t, err, tt.description)
 				return

@@ -22,9 +22,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 )
 
 var _ = Describe("NIXL Connector (v2)", func() {

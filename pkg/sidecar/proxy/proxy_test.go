@@ -26,13 +26,13 @@ import (
 	"net/url"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2" // nolint:revive
+	. "github.com/onsi/gomega"    // nolint:revive
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
 )
 
 func newTestContext() context.Context {
