@@ -250,6 +250,7 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 		speculativeTTL:     speculativeTTL,
 		blockSizeTokens:    config.TokenProcessorConfig.BlockSize,
 		speculativeEnabled: config.SpeculativeIndexing,
+		subscriberCtx:      ctx,
 	}, nil
 }
 
@@ -299,6 +300,16 @@ type Scorer struct {
 	// path becomes a no-op so the data layer is the sole authority over
 	// per-pod subscriber lifecycle.
 	extractorActive atomic.Bool
+
+	// subscriberCtx is the long-lived context used to start ZMQ subscribers.
+	// SubscriberManager binds each subscriber's goroutine lifetime to the
+	// context passed in to EnsureSubscriber, so any caller-scoped context
+	// (e.g. the request ctx in the legacy in-Score path) would tear the
+	// subscriber down as soon as the caller returned. Using the plugin's
+	// construction-time ctx keeps subscribers alive for the EPP's lifetime,
+	// matching the original behavior of `context.Background()` in the
+	// pre-refactor code.
+	subscriberCtx context.Context
 }
 
 // TypedName returns the typed name of the plugin.
@@ -644,6 +655,9 @@ func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent)
 // given endpoint metadata. Used by both the data-layer-driven extractor path
 // and the legacy in-Score backwards-compat path. Returns nil for endpoints
 // without an address — those can't be dialed.
+//
+// The subscriber goroutine is started against subscriberCtx (plugin-lifetime),
+// not the caller ctx, so request-scoped contexts don't tear it down.
 func (s *Scorer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMetadata) error {
 	if meta == nil || meta.Address == "" || meta.NamespacedName.Name == "" {
 		return nil
@@ -652,7 +666,7 @@ func (s *Scorer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMetad
 	zmqEndpoint := fmt.Sprintf("tcp://%s:%d", meta.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort)
 
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	if err := s.subscribersManager.EnsureSubscriber(ctx, endpointKey,
+	if err := s.subscribersManager.EnsureSubscriber(s.subscriberCtx, endpointKey,
 		zmqEndpoint, s.kvEventsConfig.TopicFilter, true); err != nil {
 		logger.Error(err, "Failed to ensure KV-events subscriber for endpoint",
 			"endpoint", endpointKey, "address", meta.Address)

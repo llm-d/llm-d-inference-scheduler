@@ -41,6 +41,7 @@ func newExtractorScorer(discoverPods bool) *Scorer {
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: PrecisePrefixCachePluginType},
 		subscribersManager: kvevents.NewSubscriberManager(kvevents.NewPool(cfg, nil, nil, nil)),
 		kvEventsConfig:     cfg,
+		subscriberCtx:      context.Background(),
 	}
 }
 
@@ -134,6 +135,31 @@ func TestScorer_ExtractEndpoint_IgnoresMissingMetadata(t *testing.T) {
 
 	ids, _ := s.subscribersManager.GetActiveSubscribers()
 	assert.Empty(t, ids, "endpoints without an address must be ignored")
+}
+
+// Regression: SubscriberManager binds the subscriber goroutine's lifetime
+// to the ctx passed to EnsureSubscriber. If we naively pass the caller's
+// (request-scoped) ctx, the subscriber dies when the request ends and we
+// have to recreate it on every subsequent request — exactly what showed up
+// in production logs after the data-layer refactor. ensureSubscriber must
+// use the long-lived subscriberCtx instead.
+func TestScorer_EnsureSubscriber_SurvivesRequestCtxCancel(t *testing.T) {
+	s := newExtractorScorer(true)
+	defer s.subscribersManager.Shutdown(context.Background())
+
+	// Simulate a request-scoped ctx that ends as soon as the call returns.
+	reqCtx, cancel := context.WithCancel(context.Background())
+
+	require.NoError(t, s.ensureSubscriber(reqCtx, &fwkdl.EndpointMetadata{
+		NamespacedName: k8stypes.NamespacedName{Namespace: "ns", Name: "pod-a"},
+		Address:        "10.0.0.1", Port: "8080",
+	}))
+
+	cancel() // request finishes — must not tear the subscriber down.
+
+	ids, _ := s.subscribersManager.GetActiveSubscribers()
+	assert.ElementsMatch(t, []string{"ns/pod-a"}, ids,
+		"subscriber must outlive the caller's request-scoped context")
 }
 
 // Backwards-compat: configs that don't wire the endpoint-notification-source
