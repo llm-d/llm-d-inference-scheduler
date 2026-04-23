@@ -58,7 +58,7 @@ func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.Inf
 		flat = append(flat, ids...)
 	}
 	request.TokenizedPrompt = &scheduling.TokenizedPrompt{
-		TokenIDs: flat,
+	TokenIDs: slices.Concat(allTokenIDs...)
 	}
 
 	return nil
