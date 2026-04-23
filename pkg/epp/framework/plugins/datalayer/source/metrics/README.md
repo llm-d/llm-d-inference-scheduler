@@ -1,8 +1,10 @@
 # Metrics Data Source
 
-The Metrics Data Source is a data layer plugin that polls a Prometheus-compatible metrics endpoint of a model server and parses the response into a structured format for extraction.
+**Type:** `metrics-data-source` | **Implementation:** [datasource.go](datasource.go)
 
-It is registered as type `metrics-data-source` and runs as a data layer source.
+> Note: This plugin is auto-injected together with `core-metrics-extractor` when the data layer is enabled — you do not need to declare it explicitly.
+
+The Metrics Data Source is a data layer plugin that polls a Prometheus-compatible metrics endpoint of a model server and parses the response into a structured format for extraction.
 
 ## What it does
 
@@ -31,3 +33,10 @@ parameters:
   path: "/metrics"
   insecureSkipVerify: true
 ```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)
+- [Core Metrics Extractor](../../extractor/metrics/README.md)

@@ -12,14 +12,15 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	extmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/http"
 )
 
 func TestDatasource(t *testing.T) {
 	source, err := http.NewHTTPDataSource("https", "/models", true, ModelsDataSourceType,
-		"models-data-source", parseModels, ModelsResponseType)
+		"models-data-source", parseModels, extmodels.ModelsResponseType)
 	assert.Nil(t, err, "failed to create http datasource")
-	extractor, err := NewModelExtractor()
+	extractor, err := extmodels.NewModelExtractor()
 	assert.Nil(t, err, "failed to create extractor")
 
 	cfg := &datalayer.Config{

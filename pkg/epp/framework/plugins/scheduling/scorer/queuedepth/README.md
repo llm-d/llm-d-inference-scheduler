@@ -4,7 +4,11 @@ This plugin scores candidate endpoints by current waiting-queue depth.
 
 It is registered as type `queue-scorer` and runs as a scheduling scorer.
 
+> Note: This scorer is included in the default out-of-the-box configuration.
+
 ## What it does
+
+**Type:** `queue-scorer` | **Implementation:** [queue.go](queue.go)
 
 For each scheduling cycle, the plugin reads `WaitingQueueSize` from endpoint metrics and computes a normalized score:
 
@@ -33,3 +37,21 @@ The plugin consumes:
 ## Configuration
 
 This scorer currently has no runtime parameters.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: queue-scorer
+    name: queue-depth
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: queue-depth
+        weight: 1
+```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

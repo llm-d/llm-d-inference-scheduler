@@ -20,3 +20,9 @@ The following plugins produce this attribute:
 
 - **`approx-prefix-cache-producer`** (Request Control): Estimates cache hit rates by comparing the request prefix against a local index of recently seen prefixes for each endpoint.
 
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)
+

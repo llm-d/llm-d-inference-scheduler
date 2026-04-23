@@ -6,6 +6,8 @@ It is registered as type `token-load-scorer` and runs as a scheduling scorer.
 
 ## What it does
 
+**Type:** `token-load-scorer` | **Implementation:** [token_load.go](token_load.go)
+
 For each scheduling cycle, the plugin reads the `InFlightLoad` attribute from each endpoint and computes a normalized score based on the total estimated tokens in flight:
 
 $$
@@ -33,3 +35,23 @@ The plugin consumes:
 The scorer supports the following runtime parameters:
 
 - `queueThresholdTokens` (integer, default: 4194304): The maximum number of in-flight tokens used for score normalization. Endpoints exceeding this threshold will receive a score of `0.0`. The default (4Mi tokens) is equivalent to 128 requests with an average size of 32K tokens.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: token-load-scorer
+    name: token-load
+    parameters:
+      queueThresholdTokens: 4194304
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: token-load
+        weight: 1
+```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

@@ -7,6 +7,8 @@ scores and are more likely to be selected by the picker. For negative headroom
 
 ## Inputs
 
+**Type:** `latency-scorer` | **Implementation:** [plugin.go](plugin.go)
+
 - `LatencyPredictionInfo` endpoint attribute:
   - `TTFTHeadroom` / `TPOTHeadroom` - `SLO - predicted` (positive = meets SLO, negative = violates)
   - `DispatchedRequestCount` - in-flight requests tracked by the EPP
@@ -76,11 +78,17 @@ combination of KV cache utilization, queue depth, and prefix cache score.
 
 ## Config
 
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `ttftWeight` | 0.8 | [0, inf) | TTFT blending weight. Higher = favor lower TTFT |
-| `tpotWeight` | 0.2 | [0, inf) | TPOT blending weight. Set to 0 for non-streaming |
-| `headroomSelectionStrategy` | "least" | least/most | Scoring strategy |
-| `compositeKVWeight` | 1 | [0, inf) | KV cache weight in composite fallback |
-| `compositeQueueWeight` | 1 | [0, inf) | Queue depth weight in composite fallback |
-| `compositePrefixWeight` | 1 | [0, inf) | Prefix cache weight in composite fallback |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `ttftWeight` | `float64` | No | `0.8` | TTFT blending weight. Higher = favor lower TTFT. Range: [0, ∞) |
+| `tpotWeight` | `float64` | No | `0.2` | TPOT blending weight. Set to 0 for non-streaming. Range: [0, ∞) |
+| `headroomSelectionStrategy` | `string` | No | `"least"` | Scoring strategy. Options: `least` / `most` |
+| `compositeKVWeight` | `float64` | No | `1` | KV cache weight in composite fallback. Range: [0, ∞) |
+| `compositeQueueWeight` | `float64` | No | `1` | Queue depth weight in composite fallback. Range: [0, ∞) |
+| `compositePrefixWeight` | `float64` | No | `1` | Prefix cache weight in composite fallback. Range: [0, ∞) |
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

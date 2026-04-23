@@ -1,12 +1,14 @@
 # Core Metrics Extractor
 
-The Core Metrics Extractor is a data layer plugin responsible for extracting model server metrics from a data source and storing them as endpoint attributes. It supports multiple inference engines and can be configured to map engine-specific metric names to a standard set of internal keys.
+**Type:** `core-metrics-extractor` | **Implementation:** [extractor.go](extractor.go)
 
-It is registered as type `core-metrics-extractor` and runs as a data layer extractor.
+> Note: This plugin is auto-injected together with `metrics-data-source` when the data layer is enabled — you do not need to declare it explicitly.
+
+The Core Metrics Extractor is a data layer plugin responsible for extracting model server metrics from a data source and storing them as endpoint attributes. It supports multiple inference engines and can be configured to map engine-specific metric names to a standard set of internal keys.
 
 ## What it does
 
-1.  Receives a `PrometheusMetricMap` from a metrics data source (e.g., `metrics-data-source`).
+1.  Receives a [`PrometheusMetricMap`](../../source/metrics/types.go#L25) from a metrics data source (e.g., [`metrics-data-source`](../../source/metrics/README.md)).
 2.  Identifies the inference engine type of the endpoint (e.g., vLLM, SGLang, Triton) using a Pod label.
 3.  Looks up the metric specifications for that engine.
 4.  Extracts values for standard metrics:
@@ -19,7 +21,7 @@ It is registered as type `core-metrics-extractor` and runs as a data layer extra
 
 ## Inputs consumed
 
--   `PrometheusMetricMap`: A map of Prometheus metric families, typically produced by `metrics-data-source`.
+-   [`PrometheusMetricMap`](../../source/metrics/types.go#L25): A map of Prometheus metric families, typically produced by [`metrics-data-source`](../../source/metrics/README.md).
 
 ## Attributes produced
 
@@ -79,4 +81,11 @@ metadata:
     inference.networking.k8s.io/engine-type: my-custom-engine
 
 ```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)
+- [Metrics Data Source](../../source/metrics/README.md)
 

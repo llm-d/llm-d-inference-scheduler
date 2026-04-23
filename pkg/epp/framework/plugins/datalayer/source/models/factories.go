@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	extmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/http"
 )
 
@@ -40,7 +41,7 @@ func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugin.Ha
 	}
 
 	ds, err := http.NewHTTPDataSource(cfg.Scheme, cfg.Path, cfg.InsecureSkipVerify, ModelsDataSourceType,
-		name, parseModels, ModelsResponseType)
+		name, parseModels, extmodels.ModelsResponseType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP data source: %w", err)
 	}
@@ -50,7 +51,7 @@ func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugin.Ha
 // ModelServerExtractorFactory is a factory function used to instantiate data layer's models
 // Extractor plugins specified in a configuration.
 func ModelServerExtractorFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	extractor, err := NewModelExtractor()
+	extractor, err := extmodels.NewModelExtractor()
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func parseModels(data io.Reader) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
-	var modelsResponse ModelResponse
+	var modelsResponse extmodels.ModelResponse
 	err = json.Unmarshal(body, &modelsResponse)
 	return &modelsResponse, err
 }

@@ -10,7 +10,10 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
-const modelsAttributeKey = "/v1/models"
+const (
+	modelsAttributeKey  = "/v1/models"
+	modelsExtractorType = "model-server-protocol-models"
+)
 
 // ModelInfoCollection defines models' data returned from /v1/models API
 type ModelInfoCollection []ModelInfo
@@ -67,8 +70,8 @@ type ModelExtractor struct {
 func NewModelExtractor() (*ModelExtractor, error) {
 	return &ModelExtractor{
 		typedName: fwkplugin.TypedName{
-			Type: ModelsExtractorType,
-			Name: ModelsExtractorType,
+			Type: modelsExtractorType,
+			Name: modelsExtractorType,
 		},
 	}, nil
 }

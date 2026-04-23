@@ -4,7 +4,11 @@ This plugin scores candidate endpoints using each endpoint's current KV-cache ut
 
 It is registered as type `kv-cache-utilization-scorer` and runs as a scheduling scorer.
 
+> Note: This scorer is included in the default out-of-the-box configuration.
+
 ## What it does
+
+**Type:** `kv-cache-utilization-scorer` | **Implementation:** [kvcache_utilization.go](kvcache_utilization.go)
 
 For each candidate endpoint, the plugin computes:
 
@@ -32,3 +36,21 @@ The plugin consumes:
 ## Configuration
 
 This scorer currently has no runtime parameters.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: kv-cache-utilization-scorer
+    name: kv-cache-util
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: kv-cache-util
+        weight: 1
+```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

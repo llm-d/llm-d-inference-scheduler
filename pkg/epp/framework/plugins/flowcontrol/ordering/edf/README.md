@@ -6,6 +6,8 @@ The Earliest Deadline First (EDF) ordering policy selects requests based on thei
 
 ## Why Choose This Policy?
 
+**Type:** `edf-ordering-policy` | **Implementation:** [edf.go](edf.go)
+
 - **SLO Awareness:** Best suited for workloads with strict latency Service Level Objectives (SLOs) or Time-To-Live (TTL) requirements.
 - **Minimizes Timeout Rates:** By prioritizing requests that are about to expire, it helps maximize the number of requests completed before their deadline.
 - **Graceful Degradation:** Requests without a deadline are still processed but are yielded to time-sensitive requests.
@@ -47,5 +49,6 @@ orderingPolicyRef: edf-ordering-policy
 
 ## Related Documentation
 
+*  [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)
+*   [Architecture Overview](../../../../../../../docs/architecture.md)
 *   [Ordering Overview](../README.md)
-*   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

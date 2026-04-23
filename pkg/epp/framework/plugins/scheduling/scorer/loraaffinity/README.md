@@ -6,6 +6,8 @@ It is registered as type `lora-affinity-scorer` and runs as a scheduling scorer.
 
 ## What it does
 
+**Type:** `lora-affinity-scorer` | **Implementation:** [lora_affinity.go](lora_affinity.go)
+
 For each candidate endpoint, the plugin checks endpoint metrics for the request's `targetModel` and assigns:
 
 - `1.0`: target model is already active on endpoint (`ActiveModels` contains target)
@@ -29,3 +31,21 @@ It also relies on endpoint metric `MaxActiveModels` to determine remaining adapt
 ## Configuration
 
 This scorer currently has no runtime parameters.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: lora-affinity-scorer
+    name: lora-affinity
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: lora-affinity
+        weight: 1
+```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

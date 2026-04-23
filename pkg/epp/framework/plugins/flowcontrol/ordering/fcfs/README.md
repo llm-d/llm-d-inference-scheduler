@@ -2,9 +2,13 @@
 
 It is registered as type `fcfs-ordering-policy` and runs as an ordering policy.
 
+> Note: This is the default ordering policy when flow control is enabled — you do not need to declare it explicitly.
+
 The First-Come, First-Served (FCFS) ordering policy selects requests based on their arrival order at the Flow Control layer.
 
 ## Why Choose This Policy?
+
+**Type:** `fcfs-ordering-policy` | **Implementation:** [fcfs.go](fcfs.go)
 
 - **Simplicity and Intuitive Behavior:** Requests are processed in the order they arrive, making the system behavior easy to understand and predict.
 - **No Special Inputs Required:** Unlike policies that rely on deadlines or priorities, FCFS works without any additional request metadata or headers.
@@ -46,5 +50,6 @@ orderingPolicyRef: fcfs-ordering-policy
 
 ## Related Documentation
 
+*   [Architecture Overview](../../../../../../../docs/architecture.md)
 *   [Ordering Overview](../README.md)
-*   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)
+*  [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

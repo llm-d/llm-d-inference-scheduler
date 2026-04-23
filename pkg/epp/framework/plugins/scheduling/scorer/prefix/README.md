@@ -4,7 +4,11 @@ This plugin scores candidate endpoints by estimating **prompt prefix cache reuse
 
 It is registered as type `prefix-cache-scorer` and runs as a scheduling scorer.
 
+> Note: This scorer is included in the default out-of-the-box configuration.
+
 ## What it does
+
+**Type:** `prefix-cache-scorer` | **Implementation:** [plugin.go](plugin.go)
 
 For each incoming request, the plugin:
 
@@ -50,3 +54,9 @@ The plugin config supports:
 - Matching is model-scoped (same prompt across different models does not collide).
 - Pods no longer active are periodically removed from the index.
 - Hashing uses token-to-character approximation, so it is a heuristic, not exact tokenizer parity.
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

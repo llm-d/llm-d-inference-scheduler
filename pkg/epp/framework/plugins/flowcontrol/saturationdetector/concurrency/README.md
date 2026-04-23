@@ -6,6 +6,8 @@ It is registered as type `concurrency-detector` and runs as a saturation detecto
 
 ## What it does
 
+**Type:** `concurrency-detector` | **Implementation:** [detector.go](detector.go)
+
 This plugin uses a two-tier approach to manage average pool load and protect individual endpoints.
 
 ### Role in Flow Control (The Gatekeeper)
@@ -45,3 +47,9 @@ Unlike the Utilization Detector, this approach reacts instantaneously to new req
 
 1. **Open-Loop Divergence**: The detector operates as an open-loop controller, completely blind to actual hardware telemetry. While the internal counters are mathematically zero-sum and do not leak, consistent under- or over-estimations of token lengths will cause the view of pool saturation to systematically drift from the physical reality of the GPU workload.
 2. **KV Cache Blindness**: Because the detector cannot observe true engine memory pressure, it is highly vulnerable to continuous-batching edge cases. If actual output generations exceed static estimates, the underlying KV cache will silently fill up. This forces the inference engine to preempt active requests and swap KV blocks to CPU memory, causing severe latency degradation (TPOT spikes) that remains completely invisible to this detector.
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

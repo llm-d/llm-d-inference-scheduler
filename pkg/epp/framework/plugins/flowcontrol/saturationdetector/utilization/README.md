@@ -4,7 +4,11 @@ Reactive saturation detection and scheduling filter based on telemetry from LLM 
 
 It is registered as type `utilization-detector` and runs as a saturation detector and scheduling filter.
 
+> Note: This plugin is auto-injected when flow control is enabled — you do not need to declare it explicitly.
+
 ## What it does
+
+**Type:** `utilization-detector` | **Implementation:** [detector.go](detector.go)
 
 This plugin uses a two-tier approach to manage average pool load and protect individual endpoints.
 
@@ -54,3 +58,9 @@ Unlike the Concurrency Detector, this approach operates as a closed-loop control
 
 1. **Telemetry Staleness (The Thundering Herd)**: Because it relies on asynchronous polling, the view of the endpoint state is perpetually delayed. A sudden burst of traffic can create a severe "thundering herd" condition, where the scheduler routes massive request volumes to a seemingly healthy endpoint before the next metric interval reveals it is completely saturated.
 2. **Reactive Backpressure**: By definition, this detector only signals saturation after the inference engine is already under physical duress. It cannot preemptively shield an endpoint from an initial queue buildup; it can only throttle traffic after the physical limits have been breached and latency (TTFT/TPOT) has already degraded.
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

@@ -1,0 +1,40 @@
+# Approximate Prefix Cache Producer Plugin
+
+## ApproxPrefixCacheProducer
+
+**Type:** `approx-prefix-cache-producer` | **Implementation:** [plugin.go](plugin.go)
+
+Prepares per-endpoint prefix cache match data consumed by the [`prefix-cache-affinity-filter`](../../../scheduling/filter/prefixcacheaffinity/README.md) and [`prefix-cache-scorer`](../../../scheduling/scorer/prefix/README.md). Runs in the `PrepareRequestData` phase before scheduling.
+
+For each request, the plugin hashes the prompt into fixed-size blocks and looks up which endpoints have recently served requests with a matching prefix. It writes a `PrefixCacheMatchInfo` attribute onto each candidate endpoint, then records the selected endpoint(s) in the index after scheduling completes (via `PreRequest`).
+
+**Parameters:**
+- `autoTune` (bool, optional, default: `true`): Infer block size and LRU capacity from endpoint metrics when available.
+- `blockSizeTokens` (int, optional, default: `0`): Prefix block size in tokens. Used when `autoTune` is false or metrics are unavailable.
+- `maxPrefixBlocksToMatch` (int, optional, default: `0`): Maximum number of prefix blocks considered per request. `0` means unlimited.
+- `maxPrefixTokensToMatch` (int, optional, default: `0`): Alternative cap expressed in tokens instead of blocks. Takes precedence over `maxPrefixBlocksToMatch` when set.
+- `lruCapacityPerServer` (int, optional, default: `0`): Default per-pod LRU index capacity when endpoint metrics are unavailable.
+- `blockSize` (int, optional): Deprecated — character-based block size. Use `blockSizeTokens` instead.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: approx-prefix-cache-producer
+    name: approx-prefix
+    parameters:
+      autoTune: true
+      lruCapacityPerServer: 1000
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: approx-prefix
+        weight: 0
+```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)
+- [Prefix Cache Scorer](../../../scheduling/scorer/prefix/README.md)
+- [Prefix Cache Affinity Filter](../../../scheduling/filter/prefixcacheaffinity/README.md)

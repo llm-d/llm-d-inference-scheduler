@@ -6,6 +6,8 @@ The SLO Deadline ordering policy selects requests based on a deadline derived fr
 
 ## Why Choose This Policy?
 
+**Type:** `slo-deadline-ordering-policy` | **Implementation:** [slo_deadline.go](slo_deadline.go)
+
 - **Header-Driven SLOs:** Ideal for systems where clients or upstream proxies specify latency targets (e.g., Time-To-First-Token) dynamically per request.
 - **Dynamic Prioritization:** Allows prioritizing urgent requests (with tight deadlines) over less urgent ones on the fly.
 - **Maximizes Goodput:** By prioritizing requests closest to their SLO deadline, it helps maximize the number of requests that successfully meet their latency targets.
@@ -53,5 +55,5 @@ orderingPolicyRef: slo-deadline-ordering-policy
 
 ## Related Documentation
 
+*   [Architecture Overview](../../../../../../../docs/architecture.md)
 *   [Ordering Overview](../README.md)
-*   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

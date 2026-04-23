@@ -6,6 +6,8 @@ It is registered as type `running-requests-size-scorer` and runs as a scheduling
 
 ## What it does
 
+**Type:** `running-requests-size-scorer` | **Implementation:** [runningrequest.go](runningrequest.go)
+
 For each scheduling cycle, the plugin reads `RunningRequestsSize` from endpoint metrics and computes a normalized score:
 
 $$
@@ -33,3 +35,21 @@ The plugin consumes:
 ## Configuration
 
 This scorer currently has no runtime parameters.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: running-requests-size-scorer
+    name: running-requests
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: running-requests
+        weight: 1
+```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

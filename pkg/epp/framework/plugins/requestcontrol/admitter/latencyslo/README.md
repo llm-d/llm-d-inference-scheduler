@@ -4,6 +4,8 @@ Rejects sheddable requests when no endpoint can meet latency SLO constraints.
 
 ## Interface
 
+**Type:** `latency-slo-admitter` | **Implementation:** [plugin.go](plugin.go)
+
 AdmissionPlugin
 
 ## Behavior
@@ -33,3 +35,20 @@ because the predictor already neutralizes TPOT for non-streaming mode and prefil
   `LatencyPredictionInfo` attributes on endpoints.
 - Reads `DispatchedRequestCount` from the same attributes for idle detection.
 - Reads `KVCacheUsagePercent` from endpoint metrics for cold detection.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: latency-slo-admitter
+    name: latency-admitter
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: latency-admitter
+```
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)

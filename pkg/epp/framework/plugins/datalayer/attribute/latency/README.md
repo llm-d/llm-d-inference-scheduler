@@ -22,3 +22,9 @@ The following plugins produce this attribute:
 
 - **`predicted-latency-producer`** (Request Control): Uses a sidecar-based machine learning model to generate TTFT and TPOT predictions for each candidate endpoint based on current load and request characteristics.
 
+---
+
+## Related Documentation
+
+- [Architecture Overview](../../../../../../../docs/architecture.md)
+

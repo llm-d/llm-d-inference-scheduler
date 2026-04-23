@@ -36,7 +36,7 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/single"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/scheduling"
 )
@@ -241,7 +241,7 @@ func buildSchedulerConfig(
 		return nil, errors.New("no profile handler configured")
 	}
 
-	if profileHandler.TypedName().Type == profile.SingleProfileHandlerType && len(profiles) > 1 {
+	if profileHandler.TypedName().Type == single.SingleProfileHandlerType && len(profiles) > 1 {
 		return nil, errors.New("SingleProfileHandler cannot support multiple scheduling profiles")
 	}
 

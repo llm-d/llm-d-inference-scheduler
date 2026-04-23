@@ -1,5 +1,25 @@
 # llm-d Inference Scheduler Architecture
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Core Goals](#core-goals)
+- [Architecture Design](#architecture-design)
+  - [Pluggability](#pluggability)
+- [Filters, Scorers, and Scrapers](#filters-scorers-and-scrapers)
+  - [Core Design Principles](#core-design-principles)
+  - [Routing Flow](#routing-flow)
+  - [Lifecycle Hooks](#lifecycle-hooks)
+  - [Configuration](#configuration)
+    - [`Plugins` Configuration](#plugins-configuration)
+    - [`SchedulingProfiles` Configuration](#schedulingprofiles-configuration)
+  - [Available Plugins](#available-plugins)
+- [Metric Scraping](#metric-scraping)
+- [Disaggregated Encode/Prefill/Decode (E/P/D)](#disaggregated-encodeprefilldecodesepd-epd)
+- [InferencePool & InferenceModel Design](#inferencepool--inferencemodel-design)
+  - [Current Assumptions](#current-assumptions)
+- [References](#references)
+
 ---
 
 ## Overview
@@ -10,7 +30,7 @@
 
 The design enables:
 
-- Support for **multiple base models** within a shared cluster (see [serving multiple inference pools](https://gateway-api-inference-extension.sigs.k8s.io/guides/serving-multiple-inference-pools-latest/))
+- Support for **multiple base models** within a shared cluster (see [serving multiple inference pools](#inferencepool--inferencemodel-design))
 - Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
@@ -41,13 +61,12 @@ The inference scheduler is built on top of:
 - An [EPP] (Endpoint Picker), making scheduling decisions, as the control plane.
   The llm-d inference scheduler extends the EPP in [GIE] with state of the art
   scheduling algorithms.
-- An optional [BBR] (Body Based Routing) component, to associate requests with
+- An optional BBR (Body Based Routing) component, to associate requests with
   their corresponding model before the EPP is consulted.
 
 [Envoy]:https://www.envoyproxy.io/
-[EPP]:https://gateway-api-inference-extension.sigs.k8s.io/#endpoint-picker
-[BBR]:https://gateway-api-inference-extension.sigs.k8s.io/#concepts-and-definitions
-[GIE]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
+[EPP]:../cmd/epp/
+[GIE]:../README.md#relation-to-gie-igw
 
 ---
 
@@ -57,6 +76,7 @@ The inference scheduler is built on top of:
 
 Routing decisions are governed by dynamic components:
 
+- **Profile Handlers**: Implement `scheduling.ProfileHandler` and control which scheduling profiles run and in what order
 - **Filters**: Exclude pods based on static or dynamic criteria
 - **Scorers**: Assign scores to candidate pods
 - **Scrapers**: Collect pod metadata and metrics for scorers
@@ -100,18 +120,18 @@ A [sample filter plugin guide](./create_new_filter.md) is provided to illustrate
 - `Post-choice`
 - `After-response`
 
+
 ---
 
-## Configuration
+### Configuration
 
-The set of lifecycle hooks (plugins) that are used by the inference scheduler is determined by how
- it is configured. The configuration is in the form of YAML text, which can either be in a file or
- specified in-line as a parameter. The configuration defines the set of plugins to be instantiated
- along with their parameters. Each plugin is also given a name, enabling the same plugin type to be
- instantiated multiple times, if needed. Also defined is a set of SchedulingProfiles, which determine
- the set of plugins to be used when scheduling a request. The set of plugins instantiated must also
- include a Profile Handler, which determines which SchedulingProfiles will be used for a particular
- request and how their results will be processed.
+The inference scheduler relies on a YAML-based configuration—provided either as a file or an in-line parameter—to determine which lifecycle hooks (plugins) are active.
+
+Specifically, this configuration establishes the following components:
+
+- `Plugins`: The specific plugins to instantiate, along with their parameters. Because each instantiated plugin is assigned a unique name, you can configure the same plugin type multiple times if necessary.
+
+- `SchedulingProfiles`: A collection of profiles that dictate the exact set of plugins invoked when scheduling a given request.
 
 The configuration text has the following form:
 
@@ -128,8 +148,9 @@ schedulingProfiles:
 
 The first two lines of the configuration are constant and must appear as is.
 
-The plugins section defines the set of plugins that will be instantiated and their parameters.
- Each entry in this section has the following form:
+### `Plugins` Configuration
+
+The `plugins` section in the configuration defines the set of plugins that will be instantiated and their parameters. Each entry in this section has the following form:
 
 ```yaml
 - name: aName
@@ -139,14 +160,17 @@ The plugins section defines the set of plugins that will be instantiated and the
     param2: val2
 ```
 
-The fields in a plugin entry are:
-- **name** (optional): provides a name by which the plugin instance can be referenced. If this
-field is omitted, the plugin's type will be used as its name.
-- **type**: specifies the type of the plugin to be instantiated.
-- **parameters** (optional): defines the set of parameters used to configure the plugin in question.
-The actual set of parameters varies from plugin to plugin.
+#### `Plugin` Fields:
 
-The schedulingProfiles section defines the set of scheduling profiles that can be used in scheduling
+The fields in a plugin entry are:
+
+- **name** (optional): provides a name by which the plugin instance can be referenced. If this field is omitted, the plugin's type will be used as its name.
+- **type**: specifies the type of the plugin to be instantiated.
+- **parameters** (optional): defines the set of parameters used to configure the plugin in question. The actual set of parameters varies from plugin to plugin.
+
+### `SchedulingProfiles` Configuration
+
+The `schedulingProfiles` section defines the set of scheduling profiles that can be used in scheduling
 requests to pods. The number of scheduling profiles one defines, depends on the use case. For simple
 serving of requests, one is enough. For disaggregated prefill, two profiles are required. Each entry
 in this section has the following form:
@@ -158,11 +182,15 @@ in this section has the following form:
   - pluginRef: plugin2
     weight: 50
 ```
+
+#### `SchedulingProfile` Fields
+
 The fields in a schedulingProfile entry are:
+
 - **name**: specifies the scheduling profile's name.
 - **plugins**: specifies the set of plugins to be used when this scheduling profile is chosen for a request.
-  - **pluginRef**: reference to the name of the plugin instance to be used
-  - **weight**: weight to be used if the referenced plugin is a scorer.
+- **pluginRef**: reference to the name of the plugin instance to be used
+- **weight**: weight to be used if the referenced plugin is a scorer.
 
 A complete configuration might look like this:
 
@@ -195,557 +223,63 @@ If the configuration is in a file, the EPP command line argument `--configFile` 
 
 ---
 
-### Plugin Configuration
+### Available plugins
 
-This section describes how to setup the various plugins available with the llm-d-inference-scheduler
+The available plugins are grouped into five core categories based on their role within the request processing pipeline, as outlined below. For more detailed information, please refer to the README files located alongside each plugin's source code.
 
-#### DisaggHeadersHandler
+<img src="./images/plugins.png" alt="Plugin Execution Pipeline" width="100%"/>
 
-Sets headers for use in disaggregated prefill/decode and encode/prefill/decode
+#### 1. Preparation & Setup
 
-- **Type**: `disagg-headers-handler`
-- **Parameters**:
-  - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-  - `encodeProfile`: specifies the name of the profile used for the encode scheduling. Only needed if the encode profile is not named `encode`.
+- **[Data Layer](../pkg/epp/framework/plugins/datalayer/)**: Runs continuously in the background to monitor the health and stats of all the pods (servers) so the system knows what's available.
+  - **Default:** [`metrics-data-source`](../pkg/epp/framework/plugins/datalayer/source/metrics/) + [`core-metrics-extractor`](../pkg/epp/framework/plugins/datalayer/extractor/metrics/) (framework-injected, no config needed)
+  - **Interface:** [`DataSource`](../pkg/epp/framework/interface/datalayer/plugin.go) · [`Extractor`](../pkg/epp/framework/interface/datalayer/plugin.go)
+  - **Reference**: [datalayer/source/](../pkg/epp/framework/plugins/datalayer/source/), [datalayer/extractor/](../pkg/epp/framework/plugins/datalayer/extractor/)
 
----
+- **[Parsers](../pkg/epp/framework/plugins/requesthandling/parsers/) & [Producers](../pkg/epp/framework/plugins/requestcontrol/dataproducer/)**: Parsers inspect incoming HTTP and gRPC request payloads to extract the model name and prompt. Producers enrich the request cycle state with additional metadata (e.g., token counts, prefix hashes, latency predictions) consumed by downstream scheduling plugins like scorers and admitters.
+  - **Default:** [`openai-parser`](../pkg/epp/framework/plugins/requesthandling/parsers/openai/) (framework-injected, no config needed)
+  - **Interface:** [`Parser`](../pkg/epp/framework/interface/requesthandling/plugins.go) · [`DataProducer`](../pkg/epp/framework/interface/requestcontrol/plugins.go)
+  - **Reference**: [requesthandling/parsers/](../pkg/epp/framework/plugins/requesthandling/parsers/), [requestcontrol/dataproducer/](../pkg/epp/framework/plugins/requestcontrol/dataproducer/)
 
-#### DisaggProfileHandler
+- **[Flow Control](../pkg/epp/framework/plugins/flowcontrol/) & [Admitters](../pkg/epp/framework/plugins/requestcontrol/admitter/)**: Admitters act as the first line of defense, rejecting requests upfront if the endpoints cannot meet SLOs. Once a request enters the queue, flow control takes over to manage dispatching. It prevents system saturation by enforcing priority bands, per-flow fairness, FCFS ordering, and strict usage limits.
+  - **Default:** [`utilization-detector`](../pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization/) + [`fcfs-ordering-policy`](../pkg/epp/framework/plugins/flowcontrol/ordering/fcfs/) + [`global-strict-fairness-policy`](../pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict/) + [`static-usage-limit-policy`](../pkg/epp/framework/plugins/flowcontrol/usagelimits/) (framework-injected, no config needed)
+  - **Interface:** [`Admitter`](../pkg/epp/framework/interface/requestcontrol/plugins.go) · [`SaturationDetector`](../pkg/epp/framework/interface/flowcontrol/plugins.go) · [`FairnessPolicy`](../pkg/epp/framework/interface/flowcontrol/plugins.go) · [`OrderingPolicy`](../pkg/epp/framework/interface/flowcontrol/plugins.go) · [`UsageLimitPolicy`](../pkg/epp/framework/interface/flowcontrol/plugins.go)
+  - **Reference**: [flowcontrol/](../pkg/epp/framework/plugins/flowcontrol/), [requestcontrol/admitter/](../pkg/epp/framework/plugins/requestcontrol/admitter/)
 
+#### 2. Routing Logic
 
-Selects the profiles to use when running with disaggregation
+- **[Profile Handlers & Deciders](../pkg/epp/framework/plugins/scheduling/profilehandler/)**: Orchestrates the selection and execution order of scheduling profiles. Every configuration must include exactly one handler.
+  - **Default:** [`single-profile-handler`](../pkg/epp/framework/plugins/scheduling/profilehandler/single/) (framework-injected when exactly one scheduling profile is defined and no handler is specified)
+  - **Interface:** [`ProfileHandler`](../pkg/epp/framework/interface/scheduling/plugins.go)
+  - **Reference**: [scheduling/profilehandler/](../pkg/epp/framework/plugins/scheduling/profilehandler/)
 
-- **Type**: `disagg-profile-handler`
-- **Parameters**:
-  - `profiles` (optional): names of scheduling profiles to use. Defaults match the profile names.
-    - `decode`: name of the decode scheduling profile. Defaults to `decode`.
-    - `prefill`: name of the prefill scheduling profile. Defaults to `prefill`.
-    - `encode`: name of the encode scheduling profile. Defaults to `encode`.
-  - `deciders` (optional): decider plugins that control whether each disaggregation stage runs.
-    - `prefill`: name of the prefill decider plugin. When set, enables P/D disaggregation.
-    - `encode`: name of the encode decider plugin. When set, enables E disaggregation.
+#### 3. Filtering
 
+- **[Filters](../pkg/epp/framework/plugins/scheduling/filter/)**: Excludes pods based on labels, label selectors, specific pod roles, prefix cache state, or SLO headroom.
+  - **Interface:** [`Filter`](../pkg/epp/framework/interface/scheduling/plugins.go)
+  - **Reference**: [scheduling/filter/bylabel/](../pkg/epp/framework/plugins/scheduling/filter/bylabel/), [scheduling/filter/prefixcacheaffinity/](../pkg/epp/framework/plugins/scheduling/filter/prefixcacheaffinity/), [scheduling/filter/sloheadroomtier/](../pkg/epp/framework/plugins/scheduling/filter/sloheadroomtier/)
 
-> [!NOTE]
-> When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
+#### 4. Scoring & Selection
 
-**Examples**
+- **[Scorers](../pkg/epp/framework/plugins/scheduling/scorer/)**: Scores pods using metrics such as [KV-cache prefix matching](../pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache/), [session affinity](../pkg/epp/framework/plugins/scheduling/scorer/sessionaffinity/), [current load](../pkg/epp/framework/plugins/scheduling/scorer/loadaware/), and [active request counts](../pkg/epp/framework/plugins/scheduling/scorer/activerequest/). Each scorer returns a value in `[0, 1]` per pod; that value is multiplied by the scorer's `weight` (set in `schedulingProfiles`) and accumulated across all scorers into a final score per pod. The pod with the highest total is selected. Weight controls each scorer's relative influence — omitting it defaults to `0`, meaning the scorer has no effect.
+  - **Interface:** [`Scorer`](../pkg/epp/framework/interface/scheduling/plugins.go)
+  - **Reference**: [scheduling/scorer/](../pkg/epp/framework/plugins/scheduling/scorer/)
 
-Decode-only (no disaggregation):
-```yaml
-- type: disagg-profile-handler
-```
+- **[Pickers](../pkg/epp/framework/plugins/scheduling/picker/)**: Select one or more candidate endpoints from the scored set for the final routing decision.
+  - **Default:** [`max-score-picker`](../pkg/epp/framework/plugins/scheduling/picker/maxscore/) (framework-injected, no config needed)
+  - **Interface:** [`Picker`](../pkg/epp/framework/interface/scheduling/plugins.go)
+  - **Reference**: [scheduling/picker/](../pkg/epp/framework/plugins/scheduling/picker/)
 
-P/D disaggregation:
-```yaml
-- type: disagg-profile-handler
-  parameters:
-    deciders:
-      prefill: prefix-based-pd-decider
-```
+#### 5. Execution & Delivery
 
-E/P/D disaggregation:
-```yaml
-- type: disagg-profile-handler
-  parameters:
-    deciders:
-      prefill: prefix-based-pd-decider
-      encode: always-disagg-multimodal-decider
-```
+- **[PreRequest Plugins](../pkg/epp/framework/plugins/scheduling/profilehandler/disagg/)**: Run after scheduling and before the request is forwarded. Translate scheduling results into HTTP headers consumed by the vLLM sidecar.
+  - **Interface:** [`PreRequest`](../pkg/epp/framework/interface/requestcontrol/plugins.go)
+  - **Reference**: [scheduling/profilehandler/](../pkg/epp/framework/plugins/scheduling/profilehandler/)
 
----
+- **[Response Processing](../pkg/epp/framework/plugins/requestcontrol/requestattributereporter/)**: Adds logging and metadata to the final generated text before handing it back to the user.
+  - **Interface:** [`ResponseHeaderProcessor`](../pkg/epp/framework/interface/requestcontrol/plugins.go) · [`ResponseBodyProcessor`](../pkg/epp/framework/interface/requestcontrol/plugins.go)
+  - **Reference**: [requestcontrol/requestattributereporter/](../pkg/epp/framework/plugins/requestcontrol/requestattributereporter/)
 
-#### Prefix Based Decider Plugin
-
-Type: `prefix-based-pd-decider`
-
-**Parameters**
-- `nonCachedTokens`: length, in token, of the uncached part of the user input above which disaggregated PD is triggered.
-
-> [!NOTE]
-> `prepareDataPlugins` feature gate should be enabled
-
-**Example**
-```yaml
-kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
-plugins:
-- type: prefix-based-pd-decider
-  parameters:
-    nonCachedTokens: 4
-- type: disagg-profile-handler
-  parameters:
-    deciders:
-      prefill: prefix-based-pd-decider
-```
-
----
-
-#### ByLabelSelector
-
-Filters out pods using a standard Kubernetes label selector.
-
-> [!NOTE]
->  Only the matching labels feature of Kubernetes label selectors is supported.
-
-- **Type**: `by-label-selector`
-- **Parameters**: A standard Kubernetes label selector.
-  - `matchLabels`: map of `{key,value}` pairs. If more than one pair are in the map, all of the keys are checked and the results are combined with AND logic.
-
-Example configuration with the above parameters set:
-
-```yaml
-plugins:
-  - type: by-label-selector
-    parameters:
-      matchLabels:
-        inference-role: decode
-        hardware-type: H100
-```
-
-In this example:
-- Only pods that have **both** labels  
-  `inference-role=decode` **and** `hardware-type=H100`  
-  will be selected.
-- Pods missing either label, or having a different value (e.g., `inference-role=prefill`), are **filtered out**.
-- The matching logic follows standard Kubernetes label selector semantics: all key-value pairs in `matchLabels` must match (**AND** logic).
-
----
-
-#### ByLabel
-
-Filters out pods that do not have a specific label with one of the allowed values. Pods missing the label are either filtered out or retained based on the `allowsNoLabel` setting.
-
-- **Type**: `by-label`  
-- **Parameters**:
-  - `label` (string, required): The name of the Kubernetes label to inspect on each pod.
-  - `validValues` (list of strings, required unless `allowsNoLabel=true`): A list of acceptable label values. A pod is kept if its label value matches any entry in this list.
-  - `allowsNoLabel` (boolean, optional, default: `false`): If `true`, pods that **do not have the specified label at all** will be **included** in the candidate set. If `false` (default), such pods are filtered out.
-
-Example configuration with the above parameters set:
-
-```yaml
-plugins:
-  - type: by-label
-    parameters:
-      label: "inference-role"
-      validValues: ["decode", "prefill-decode"]
-      allowsNoLabel: false
-```
-
-In this example:
-- Only pods labeled for decoding (`inference-role=decode`) or supporting both stages (`inference-role=prefill-decode`) are selected.
-- Pods missing the `inference-role` label are not considered for decode scheduling.
-
----
-
-#### DecodeFilter
-
-Filters out pods that are not marked either as decode or both prefill and decode. The filter looks for
- the label `llm-d.ai/role`, with a value of either `decode`, `prefill-decode` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
-
-- **Type**: `decode-filter`
-- **Parameters**: None
-
----
-
-#### PrefillFilter
-
-Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`, `encode-prefill`, `prefill-decode` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
-
-- **Type**: `prefill-filter`
-- **Parameters**: None
-
----
-
-#### EncodeFilter
-
-Filters out pods that are not marked as encode. The filter looks for the label `llm-d.ai/role`, with a value of `encode`, `encode-prefill` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
-
-- **Type**: `encode-filter`
-- **Parameters**: None
-
----
-
-#### PrecisePrefixCacheScorer
-
-The `precise-prefix-cache-scorer` scores a request based on KV-cache localities.
-Similarly to the IGW `prefix-cache-scorer`, it provides a score based on the number of
- matching KV-cache blocks between the request's prompt and the KV-cache contents of each pod.
- However, unlike the IGW `prefix-cache-scorer`, which relies on estimations based on scheduling history,
- the `precise-prefix-cache-scorer` tracks the real-time KV-cache states across the vLLM instances to
- provide more accurate scoring.
-
-When enabled, the scorer will use the `llm-d-kv-cache` to track the KV-cache states
- across the vLLM instances. It will use the `kvcache.Indexer` to score the pods based on the
- number of matching blocks in the KV-cache. It will also use the `kvevents.Pool` to subscribe
- to the KV-Events emitted by the vLLM instances and update the KV-cache states in near-real-time.
-
-Configuration:
-
-- **Type**: `precise-prefix-cache-scorer`
-- **Parameters**:
-  - `tokenProcessorConfig`: Configuration for the `kvblock.TokenProcessor`.
-  - `indexerConfig`: Configuration for the `kvcache.Indexer`.
-  - `kvEventsConfig`: Configuration for the `kvevents.Pool`.
-
-See list of parameters at [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/fa85b60207ba0a09daf23071e10ccb62d7977b40/docs/configuration.md).
-
-> [!NOTE] 
-> In most cases you will only need to set:
-> - Model name in the `tokenizersPoolConfig` to match the model used in the vLLM deployment.
-> - HuggingFace token for the `tokenizersPoolConfig` or the `tokenizersCacheDir` to a mounted directory containing the tokenizers.
->  - For the HuggingFace token, the inference-scheduler also accepts the environment variable `HF_TOKEN` - this is the practical option for security. 
-> - **IMPORTANT**: Token processor's block-size and hash-seed to match those used in the vLLM deployment.
-> - `KVBlockIndex` metrics to true if you wish to enable metrics for the KV-Block Index (admissions, evictions, lookups and hits).
-
-Example configuration with the above parameters set:
-
-```yaml
-plugins:
-  - type: precise-prefix-cache-scorer
-    parameters:
-      tokenProcessorConfig:
-        blockSize: 64                    # must match vLLM block size
-        hashSeed: "12345"                # must match vLLM PYTHONHASHSEED env var
-      indexerConfig:
-        kvBlockIndexConfig:
-          enableMetrics: true    
-        tokenizersPoolConfig:
-          modelName: hf-repo/model-name
-          hf:
-            huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
-```
-
-Example configuration for automatic pod discovery in active-active multi-replica scheduler deployments:
-```yaml
-  - type: precise-prefix-cache-scorer
-    parameters:
-      tokenProcessorConfig:
-        blockSize: 64
-        hashSeed: "42"
-      indexerConfig:
-        tokenizersPoolConfig:
-          modelName: "Qwen/Qwen3-32B"
-          hf:
-            tokenizersCacheDir: "/tmp/tokenizers"
-      kvEventsConfig:
-        topicFilter: "kv@"
-        concurrency: 4 
-        discoverPods: true      # enables automatic pod discovery for active-active HA
-        podDiscoveryConfig:
-          socketPort: 5556
-```
-
-Where the vLLM engines are configured to emit KV-Events on port `5556` as follows:
-```yaml
-  --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://*:5556\",\"topic\":\"kv@${POD_IP}@Qwen/Qwen3-32B\"}"
-```
-
-Example configuration with all parameters set:
-
-```yaml
-plugins:
-  - type: precise-prefix-cache-scorer
-    parameters:
-        tokenProcessorConfig:
-          blockSize: 16
-          hashSeed: "12345"
-        kvEventsConfig:
-          topicFilter: "kv@"
-          concurrency: 4
-          discoverPods: true    # enables automatic pod discovery for active-active HA
-          podDiscoveryConfig:
-            socketPort: 5556
-        indexerConfig:
-          prefixStoreConfig:
-            cacheSize: 500000
-            blockSize: 256
-          kvBlockIndexConfig:
-            inMemoryConfig:
-              size: 100000000
-              podCacheSize: 10
-            enableMetrics: true
-          tokenizersPoolConfig:
-            modelName: hf-repo/model-name
-            workersCount: 8
-            hf:
-              huggingFaceToken: your_hf_token_here    # automatically set by `HF_TOKEN` environment variable
-              tokenizersCacheDir: /tmp/tokenizers
-```
-
----
-
-#### LoadAwareScorer
-
-Scores pods based on their load, based on the number of requests concurrently being processed.
-A threshold is provided which is used to determine what is considered an overloaded pod.
-
-Scores are given to the pods in the range of 0-1. Currently the metrics contain the number of
-requests waiting in the queue, there is no information about number of requests that can be
-processed in the given pod immediately.
-
-Pods with an empty waiting requests queue are scored with 0.5.
-
-Pods with requests in the queue will get score between 0.5 and 0.
-
-- **Type**: `load-aware-scorer`
-- **Parameters**:
-  - `threshold`: specifies the threshold at which a pod is considered overloaded.
-
----
-
-#### ActiveRequestScorer
-
-Scores pods based on the number of active requests being served per pod. Each request is tracked 
-individually with its own TTL to ensure accurate timeout handling. Pods with fewer active 
-requests receive higher scores.
-
-Scores are normalized to a range of 0-1, where pods with fewer active requests get higher scores.
-
-- **Type**: `active-request-scorer`
-- **Parameters**:
-  - `requestTimeout`: specifies the timeout for requests in seconds. Once a request is "in-flight" 
-    for this duration, it is considered timed out and automatically removed.
-
----
-
-#### SessionAffinity
-
-Scores the candidate pods by giving a higher score to the pods that were previously
-used for the same session.
-
-- **Type**: `session-affinity-scorer`
-- **Parameters**: None
-
----
-
-#### NoHitLRUScorer
-
-Scores pods based on least recently used (LRU) ordering for cold requests (requests with no KV cache hits).
-This helps evenly distribute cache growth across pods, since cold requests result in new KV blocks being created.
-
-The scorer integrates with a prefix cache plugin to determine if a request has cache hits:
-- For cold requests (no cache hits): Ranks pods by LRU order, with never-used or least recently used pods
-  receiving higher scores (up to 1.0) and most recently used pods receiving lower scores (approaching 0.0)
-- For warm requests (cache hits): Returns neutral scores (0.5) for all pods to avoid interfering with
-  cache locality optimization
-
-The LRU tracking is specific to cold requests only - pods are added to the LRU cache when they serve
-a cold request, not when they serve requests with cache hits.
-
-- **Type**: `no-hit-lru-scorer`
-- **Parameters**:
-  - `prefixPluginName` (optional): The name of the prefix cache plugin to read state from. Defaults to `prefix-cache-scorer`.
-  - `lruSize` (optional): The maximum number of pods to track in the LRU cache. Defaults to 1024.
-
-Example configuration:
-
-```yaml
-plugins:
-  - type: precise-prefix-cache-scorer
-    parameters:
-      indexerConfig:
-        tokenProcessorConfig:
-          blockSize: 5
-        kvBlockIndexConfig:
-          maxPrefixBlocksToMatch: 256
-  - type: no-hit-lru-scorer
-    parameters:
-      lruSize: 2048
-  - type: decode-filter
-  - type: max-score-picker
-  - type: single-profile-handler
-schedulingProfiles:
-  - name: default
-    plugins:
-      - pluginRef: decode-filter
-      - pluginRef: max-score-picker
-      - pluginRef: precise-prefix-cache-scorer
-        weight: 2
-      - pluginRef: no-hit-lru-scorer
-        weight: 1
-```
-
-> [!NOTE]
->  This scorer is designed to work alongside a prefix cache scorer (such as `prefix-cache-scorer` or
-> `precise-prefix-cache-scorer`). If no prefix cache state is available, all requests are treated as cold.
-> When integrating with a prefix-cache scorer, the prefix-cache scorer should be defined first in the scheduling 
-> profile.
-
----
-
-#### ContextLengthAware
-
-A **Scorer** plugin that routes inference requests based on context length (token count), with optional
-**filtering** gated behind `enableFiltering`. Scoring is always applied; filtering is off by default.
-This enables optimized resource allocation by directing requests to pods configured for specific
-context length ranges.
-
-**Use Cases:**
-- Route short prompts to pods with smaller GPU memory
-- Direct long-context requests to specialized high-memory pods
-- Optimize performance by matching workload characteristics to hardware capabilities
-- Support heterogeneous deployments with different GPU configurations
-
-The plugin scores all pods based on how well their ranges match the request:
-- **In-range match (0.3–1.0]:** Higher scores for tighter/more specific ranges (specialized pods), lower scores for very wide ranges (generalist pods). In-range scores are always strictly above 0.3, guaranteeing they beat any out-of-range fallback.
-- **Out-of-range fallback [0.0–0.3):** When no range matches, pods are ranked by proximity to the request. For example, a 9000-token request prefers a pod with `max=8192` over one with `max=2048`.
-- **Neutral score (0.5):** Pods without the context length label.
-
-When `enableFiltering` is set to true, the plugin also filters out pods whose range does not contain the request's context length.
-
-**Configuration:**
-
-- **Type**: `context-length-aware`
-- **Parameters**:
-  - `label` (optional): Pod label name containing context length range(s).
-    Default: `llm-d.ai/context-length-range`
-  - `enableFiltering` (optional): If true, the plugin operates as a filter, excluding non-matching pods.
-    Default: false
-
-**Token Counting:**
-
-This plugin reads tokenized prompt data from CycleState, as written by the `tokenizer` plugin.
-When the tokenizer plugin is configured in the same scheduling profile, the context-length-aware plugin
-uses the exact token count for routing decisions. This avoids double-tokenization with other plugins
-that also consume tokens (e.g., `precise-prefix-cache-scorer`).
-
-When the tokenizer scorer is not configured, the plugin falls back to character-based estimation
-(characters × 0.25).
-
-> [!NOTE]
-> The `tokenizer` plugin must appear **before** `context-length-aware` in the scheduling profile
-> so that CycleState is populated before scoring runs.
-
-**Label Format:**
-
-Pods should be labeled with context length ranges using the format `"min-max"`, where _min_ and _max_ are both positive integers:
-
-```yaml
-llm-d.ai/context-length-range: "0-2048"
-```
-
-**Example Configuration - Scorer:**
-
-```yaml
-plugins:
-  - type: tokenizer
-    parameters:
-      modelName: meta-llama/Llama-3.1-8B-Instruct
-      udsTokenizerConfig:
-        socketFile: /tmp/tokenizer/tokenizer-uds.socket
-  - type: context-length-aware
-    parameters:
-      label: llm-d.ai/context-length-range
-  - type: load-aware-scorer
-  - type: max-score-picker
-schedulingProfiles:
-  - name: default
-    plugins:
-      - pluginRef: tokenizer
-        weight: 1
-      - pluginRef: context-length-aware
-        weight: 3
-      - pluginRef: load-aware-scorer
-        weight: 1
-      - pluginRef: max-score-picker
-```
-
-**Example Configuration - Scorer with Filtering Enabled:**
-
-```yaml
-plugins:
-  - type: context-length-aware
-    parameters:
-      enableFiltering: true
-      label: llm-d.ai/context-length-range
-  - type: max-score-picker
-schedulingProfiles:
-  - name: default
-    plugins:
-      - pluginRef: context-length-aware
-      - pluginRef: max-score-picker
-```
-
-**Example Pod Labels:**
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vllm-short-context
-  labels:
-    llm-d.ai/context-length-range: "0-2048"
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vllm-long-context
-  labels:
-    llm-d.ai/context-length-range: "2048-8192"
-```
-
----
-
-### Sample Disaggregated Prefill/Decode Configuration
-
-The following is an example of what a configuration for disaggregated Prefill/Decode might look like:
-
-```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
-kind: EndpointPickerConfig
-plugins:
-- type: disagg-headers-handler
-- type: prefix-cache-scorer
-  parameters:
-    maxPrefixBlocksToMatch: 256
-    lruCapacityPerServer: 31250
-- type: prefill-filter
-- type: decode-filter
-- type: max-score-picker
-- type: prefix-based-pd-decider
-    parameters:
-      nonCachedTokens: 8
-- type: disagg-profile-handler
-  parameters:
-    deciders:
-      prefill: prefix-based-pd-decider
-schedulingProfiles:
-- name: prefill
-  plugins:
-  - pluginRef: prefill-filter
-  - pluginRef: max-score-picker
-  - pluginRef: prefix-cache-scorer
-    weight: 50
-- name: decode
-  plugins:
-  - pluginRef: decode-filter
-  - pluginRef: max-score-picker
-  - pluginRef: prefix-cache-scorer
-    weight: 50
-```
-
-Several things should be noted:
-1. The `PrefillHeader`, `DisaggProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
- plugins must be in the list of plugins instantiated.
-2. There must be two scheduler profiles defined.
-3. The scheduler profile for prefill, must include the `PrefillFilter`
-4. The scheduler profile for decode, must include the `DecodeFilter`
-
-### Speculative Indexing
-
-Speculative indexing closes the blind spot between a routing decision and KV event arrival by immediately writing a predicted cache entry to the prefix-cache index. This lets the next request with the same prefix hit the cache without waiting for engine confirmation. See [#538](https://github.com/llm-d/llm-d-inference-scheduler/issues/538) for background.
-
-Enable via `precise-prefix-cache-scorer` parameters:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `speculativeIndexing` | bool | `false` | Enable speculative index entries on routing decisions. |
-| `speculativeTTL` | duration string | `"2s"` | TTL for speculative entries. Accepts Go duration strings (e.g. `"2s"`, `"500ms"`). |
-
-Requires the `prepareDataPlugins` feature gate and KV events from vLLM engines.
 
 ---
 
@@ -776,9 +310,9 @@ The **vLLM sidecar** handles orchestration between Encode, Prefill and Decode st
 - Local memory management
 - Experimental protocol compatibility
 
-> [!NOTE] 
-The detailed E/P/D design is available in this document:
->[Disaggregated Inference Serving in llm-d](./disaggregation.md)
+> [!NOTE]
+> The detailed E/P/D design is available in this document:
+> [Disaggregated Inference Serving in llm-d](./disaggregation.md)
 
 ---
 
@@ -799,5 +333,5 @@ The detailed E/P/D design is available in this document:
 
 ## References
 
-- [GIE Spec](https://gateway-api-inference-extension.sigs.k8s.io/)
+- [GIE Spec](../README.md#relation-to-gie-igw)
 - [Envoy External Processing](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter)
