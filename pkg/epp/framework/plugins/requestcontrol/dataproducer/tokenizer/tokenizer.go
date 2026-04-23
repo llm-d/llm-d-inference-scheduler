@@ -217,7 +217,7 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) (
 	case request.Body.ChatCompletions != nil:
 		renderReq := ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))
-		var tokenIDs []uint32
+       tokenIDs, mmFeatures, err := p.tokenizer.RenderChat(renderReq)
 		tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(renderReq)
 		if err == nil {
 			allTokenIDs = [][]uint32{tokenIDs}
