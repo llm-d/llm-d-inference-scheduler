@@ -236,7 +236,7 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) (
 	for _, ids := range allTokenIDs {
 		totalTokens += len(ids)
 	}
-	traceLogger.Info("Tokenization succeeded", "tokenCount", totalTokens, "promptCount", len(allTokenIDs))
+   traceLogger.Info("Tokenization succeeded", "promptCount", len(allTokenIDs))
 	return allTokenIDs, mmFeatures
 }
 
