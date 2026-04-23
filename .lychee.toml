@@ -7,7 +7,7 @@ exclude = [
 timeout = 60
 
 # Retry failed links (helpful for flaky sites)
-max_retries = 5
+max_retries = 3
 retry_wait_time = 2
 
 # Accept non-200 status codes (429: rate limits)
