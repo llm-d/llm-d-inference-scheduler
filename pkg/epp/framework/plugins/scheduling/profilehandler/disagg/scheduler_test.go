@@ -1,4 +1,4 @@
-package pd_test
+package disagg_test
 
 import (
 	"context"
