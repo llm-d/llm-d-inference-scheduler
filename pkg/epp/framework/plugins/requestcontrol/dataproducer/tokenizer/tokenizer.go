@@ -208,7 +208,7 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) (
 			}
 		} else {
 			traceLogger.Info("Calling Render for completions", "prompt", prompt)
-			var tokenIDs []uint32
+    tokenIDs, _, err := p.tokenizer.Render(prompt.PlainText())
 			tokenIDs, _, err = p.tokenizer.Render(prompt.PlainText())
 			if err == nil {
 				allTokenIDs = [][]uint32{tokenIDs}
