@@ -24,10 +24,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType APIType) {

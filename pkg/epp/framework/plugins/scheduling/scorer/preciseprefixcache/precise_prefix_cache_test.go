@@ -20,10 +20,11 @@ import (
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -45,8 +46,8 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 	testcases := []struct {
 		name                string
 		endpoints           []scheduling.Endpoint
-		request             *scheduling.LLMRequest
-		kvBlockData         func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
+		request             *scheduling.InferenceRequest
+		kvBlockData         func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
 		wantScoresByAddress map[string]float64
 	}{
 		{
@@ -77,7 +78,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
 				Body:        nil,
@@ -121,16 +122,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 				prompt := req.Completions.Prompt.Raw
 
@@ -205,31 +206,31 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					ChatCompletions: &scheduling.ChatCompletionsRequest{
+				Body: &fwkrh.InferenceRequestBody{
+					ChatCompletions: &fwkrh.ChatCompletionsRequest{
 						ChatTemplate: `{% for message in messages %}{{ message.role }}: {{ message.content }}
 		{% endfor %}`,
-						Messages: []scheduling.Message{
+						Messages: []fwkrh.Message{
 							{
 								Role:    "user",
-								Content: scheduling.Content{Raw: "Hello, how are you?"},
+								Content: fwkrh.Content{Raw: "Hello, how are you?"},
 							},
 							{
 								Role:    "assistant",
-								Content: scheduling.Content{Raw: "I'm doing well, thank you for asking!"},
+								Content: fwkrh.Content{Raw: "I'm doing well, thank you for asking!"},
 							},
 							{
 								Role:    "user",
-								Content: scheduling.Content{Raw: "Can you help me with a question about prefix caching in LLM inference?"},
+								Content: fwkrh.Content{Raw: "Can you help me with a question about prefix caching in LLM inference?"},
 							},
 						},
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
 
 				// convert to preprocessing format
@@ -316,16 +317,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
@@ -388,16 +389,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
@@ -458,12 +459,12 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: "This prompt has never been cached before on any endpoint."},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: "This prompt has never been cached before on any endpoint."},
 					},
 				},
 			},
@@ -506,16 +507,16 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 					nil,
 				),
 			},
-			request: &scheduling.LLMRequest{
+			request: &scheduling.InferenceRequest{
 				RequestId:   "test-request",
 				TargetModel: "test-model",
-				Body: &scheduling.LLMRequestBody{
-					Completions: &scheduling.CompletionsRequest{
-						Prompt: scheduling.Prompt{Raw: prompt},
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{
+						Prompt: fwkrh.Prompt{Raw: prompt},
 					},
 				},
 			},
-			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
 				require.NotNil(t, req.Completions, "req expected to use Completions API")
 
 				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
@@ -643,12 +644,12 @@ func TestPrepareRequestData_PopulatesPluginState(t *testing.T) {
 		"He lay on his armour-like back, and if he lifted his head a little he could see his brown belly, " +
 		"slightly domed and divided by arches into stiff sections."
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-prepare-request",
 		TargetModel: "test-model",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{
-				Prompt: scheduling.Prompt{Raw: prompt},
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{
+				Prompt: fwkrh.Prompt{Raw: prompt},
 			},
 		},
 	}
@@ -726,12 +727,12 @@ func TestScoreReusesPluginState(t *testing.T) {
 		}, nil, nil),
 	}
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-reuse",
 		TargetModel: "test-model",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{
-				Prompt: scheduling.Prompt{Raw: prompt},
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{
+				Prompt: fwkrh.Prompt{Raw: prompt},
 			},
 		},
 	}
@@ -779,12 +780,12 @@ func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 		}, nil, nil),
 	}
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-speculative",
 		TargetModel: "test-model",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{
-				Prompt: scheduling.Prompt{Raw: prompt},
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{
+				Prompt: fwkrh.Prompt{Raw: prompt},
 			},
 		},
 	}
@@ -879,12 +880,12 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 		}, nil, nil),
 	}
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-ttl-evict",
 		TargetModel: "test-model",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{
-				Prompt: scheduling.Prompt{Raw: prompt},
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{
+				Prompt: fwkrh.Prompt{Raw: prompt},
 			},
 		},
 	}

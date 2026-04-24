@@ -25,10 +25,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
-	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
+	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
 )
 
 type sidecarTestInfo struct {

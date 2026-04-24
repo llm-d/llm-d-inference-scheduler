@@ -27,10 +27,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -106,7 +107,7 @@ func TestScorer_UsesTokenizedPrompt(t *testing.T) {
 		TokenIDs: tokenIDs,
 	})
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-tokenized",
 		TargetModel: "test-model",
 	}
@@ -150,7 +151,7 @@ func TestScorer_PassesExtraFeaturesToScoreTokens(t *testing.T) {
 		MMFeatures: mmFeatures,
 	})
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-mm",
 		TargetModel: "test-model",
 	}
@@ -186,7 +187,7 @@ func TestScorer_NilExtraFeaturesForTextOnly(t *testing.T) {
 		MMFeatures: nil,
 	})
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-text-only",
 		TargetModel: "test-model",
 	}
@@ -222,11 +223,11 @@ func TestScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 		TokenIDs: []uint32{},
 	})
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId:   "test-skip-empty",
 		TargetModel: "test-model",
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{Prompt: scheduling.Prompt{Raw: "hello"}},
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
 		},
 	}
 
