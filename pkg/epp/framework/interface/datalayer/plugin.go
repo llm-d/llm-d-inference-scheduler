@@ -18,7 +18,6 @@ package datalayer
 
 import (
 	"context"
-	"reflect"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,26 +25,11 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
-var (
-	ExtractorType             = reflect.TypeFor[Extractor]()
-	NotificationExtractorType = reflect.TypeFor[NotificationExtractor]()
-	NotificationEventType     = reflect.TypeFor[NotificationEvent]()
-	EndpointExtractorType     = reflect.TypeFor[EndpointExtractor]()
-	EndpointEventReflectType  = reflect.TypeFor[EndpointEvent]()
-)
-
 // DataSource provides raw data to registered Extractors.
 // For poll-based sources, use PollingDataSource.
-// For event-driven sources, use NotificationSource.
+// For event-driven sources, use NotificationSource or EndpointSource.
 type DataSource interface {
 	plugin.Plugin
-	// OutputType returns the type of data this DataSource produces.
-	// Used for validating extractor compatibility.
-	OutputType() reflect.Type
-	// ExtractorType returns the type of Extractor this DataSource expects.
-	// For poll-based sources, this is the base Extractor interface.
-	// For notification sources, this is the NotificationExtractor interface.
-	ExtractorType() reflect.Type
 }
 
 // PollingDataSource is a poll-based DataSource that fetches data at regular intervals.
@@ -56,14 +40,47 @@ type PollingDataSource interface {
 	Poll(ctx context.Context, ep Endpoint) (any, error)
 }
 
-// Extractor transforms raw data into structured attributes.
-type Extractor interface {
+// ExtractOptions carries optional per-call parameters for Extract.
+type ExtractOptions struct {
+	// Endpoint is the target pod for attribute writes.
+	Endpoint Endpoint
+}
+
+// ExtractOption mutates ExtractOptions.
+type ExtractOption func(*ExtractOptions)
+
+// ApplyExtractOptions applies opts and returns the resulting value.
+func ApplyExtractOptions(opts []ExtractOption) ExtractOptions {
+	var o ExtractOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
+}
+
+// WithEndpoint sets the target endpoint on ExtractOptions.
+func WithEndpoint(ep Endpoint) ExtractOption {
+	return func(o *ExtractOptions) { o.Endpoint = ep }
+}
+
+// Extractor transforms typed input T into endpoint attributes.
+// See PollingExtractor, EndpointExtractor, and NotificationExtractor for variants.
+type Extractor[T any] interface {
 	plugin.Plugin
-	// ExpectedInputType defines the type expected by the extractor.
-	ExpectedInputType() reflect.Type
-	// Extract transforms the raw data source output into a concrete structured
-	// attribute, stored on the given endpoint.
-	Extract(ctx context.Context, data any, ep Endpoint) error
+	Extract(ctx context.Context, input T, opts ...ExtractOption) error
+}
+
+// PollingExtractor is an Extractor paired with a PollingDataSource.
+type PollingExtractor = Extractor[any]
+
+// EndpointExtractor processes endpoint lifecycle events.
+type EndpointExtractor = Extractor[EndpointEvent]
+
+// NotificationExtractor processes k8s object events pushed from a NotificationSource.
+type NotificationExtractor interface {
+	Extractor[NotificationEvent]
+	// GVK returns the GroupVersionKind this extractor handles.
+	GVK() schema.GroupVersionKind
 }
 
 // ValidatingDataSource is an optional interface that DataSources can implement
@@ -71,7 +88,7 @@ type Extractor interface {
 type ValidatingDataSource interface {
 	// ValidateExtractor allows the DataSource to perform additional validation
 	// beyond the standard type compatibility checks. Return an error if validation fails.
-	ValidateExtractor(extractor Extractor) error
+	ValidateExtractor(extractor plugin.Plugin) error
 }
 
 // EventType identifies the type of mutation that triggered the notification.
@@ -110,17 +127,6 @@ type NotificationSource interface {
 	Notify(ctx context.Context, event NotificationEvent) (*NotificationEvent, error)
 }
 
-// NotificationExtractor processes k8s object events pushed from a
-// NotificationSource.
-type NotificationExtractor interface {
-	Extractor
-	// GVK returns the GroupVersionKind this extractor handles.
-	GVK() schema.GroupVersionKind
-	// ExtractNotification processes a notification event. Called synchronously
-	// by the source in event order.
-	ExtractNotification(ctx context.Context, event NotificationEvent) error
-}
-
 // EndpointEvent carries an endpoint lifecycle event.
 // Reuses EventType: EventAddOrUpdate signals an endpoint was added to the
 // datastore; EventDelete signals an endpoint was removed.
@@ -139,12 +145,4 @@ type EndpointSource interface {
 	// Returns the event (possibly modified) for the Runtime to dispatch to extractors.
 	// Returns nil event to signal Runtime to skip extractor dispatch.
 	NotifyEndpoint(ctx context.Context, event EndpointEvent) (*EndpointEvent, error)
-}
-
-// EndpointExtractor processes endpoint lifecycle events pushed from an
-// EndpointSource. Called synchronously by the Runtime in event order.
-type EndpointExtractor interface {
-	Extractor
-	// ExtractEndpoint processes an endpoint lifecycle event.
-	ExtractEndpoint(ctx context.Context, event EndpointEvent) error
 }

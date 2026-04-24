@@ -19,7 +19,6 @@ package inflightload
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -65,18 +64,9 @@ func (p *InFlightLoadProducer) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-// ExpectedInputType defines the type expected by the extractor.
-func (p *InFlightLoadProducer) ExpectedInputType() reflect.Type {
-	return datalayer.EndpointEventReflectType
-}
-
-// Extract transforms the raw data into structured attributes (not used for notifications).
-func (p *InFlightLoadProducer) Extract(context.Context, any, datalayer.Endpoint) error {
-	return nil
-}
-
-// ExtractEndpoint handles endpoint deletion events to prune stateful trackers.
-func (p *InFlightLoadProducer) ExtractEndpoint(ctx context.Context, event datalayer.EndpointEvent) error {
+// Extract handles endpoint deletion events to prune stateful trackers.
+// Endpoint events carry their own context; the endpoint option (if passed) is ignored.
+func (p *InFlightLoadProducer) Extract(ctx context.Context, event datalayer.EndpointEvent, _ ...datalayer.ExtractOption) error {
 	if event.Type != datalayer.EventDelete || event.Endpoint == nil {
 		return nil
 	}

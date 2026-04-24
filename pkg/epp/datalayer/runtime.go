@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
@@ -35,10 +34,13 @@ import (
 type Runtime struct {
 	pollingInterval time.Duration // used for polling sources
 
-	pollers          sync.Map // Map of polling sources (key=source name, value=PollingDataSource)
-	notifiers        sync.Map // Map of k8s notification sources (key=source name, value=NotificationSource)
-	endpointSources  sync.Map // Map of endpoint sources (key=source name, value=EndpointSource)
-	sourceExtractors sync.Map // Map sources to extractors (key=source name. value=[]Extractor)
+	pollers         sync.Map // Map of polling sources (key=source name, value=PollingDataSource)
+	notifiers       sync.Map // Map of k8s notification sources (key=source name, value=NotificationSource)
+	endpointSources sync.Map // Map of endpoint sources (key=source name, value=EndpointSource)
+
+	pollingExtractors      sync.Map // Map of polling extractors (key=source name, value=[]PollingExtractor)
+	notificationExtractors sync.Map // Map of notification extractors (key=source name, value=[]NotificationExtractor)
+	endpointExtractors     sync.Map // Map of endpoint extractors (key=source name, value=[]EndpointExtractor)
 
 	collectors sync.Map    // Per-endpoint poller (key=namespaced name, value=*Collector)
 	logger     logr.Logger // Set in Configure; used where no context is available (e.g. ReleaseEndpoint).
@@ -77,48 +79,127 @@ func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtrac
 	pollersCount := 0
 	notifiersCount := 0
 	endpointSourcesCount := 0
-	gvkToSource := make(map[string]string, len(cfg.Sources)) // track GVK uniqueness
+	gvkToSource := make(map[string]string, len(cfg.Sources))
 
 	for _, srcCfg := range cfg.Sources {
 		src := srcCfg.Plugin
 		srcName := src.TypedName().Name
 
-		logger.V(logging.DEFAULT).Info("Processing source", "source", srcName, "numExtractors", len(srcCfg.Extractors))
-		if err := r.validateSourceExtractors(src, srcCfg.Extractors, disallowedExtractorType); err != nil {
-			return err
-		}
-
-		if poller, ok := src.(fwkdl.PollingDataSource); ok { // Register to appropriate map based on type
-			r.pollers.Store(srcName, poller)
+		switch s := src.(type) {
+		case fwkdl.PollingDataSource:
+			if len(srcCfg.NotificationExtractors) > 0 || len(srcCfg.EndpointExtractors) > 0 {
+				return fmt.Errorf("source %s is a PollingDataSource; only PollingExtractors are allowed", srcName)
+			}
+			if err := r.validatePolling(s, srcCfg.PollingExtractors, disallowedExtractorType); err != nil {
+				return err
+			}
+			r.pollers.Store(srcName, s)
+			if len(srcCfg.PollingExtractors) > 0 {
+				r.pollingExtractors.Store(srcName, srcCfg.PollingExtractors)
+			}
 			pollersCount++
-		} else if notifier, ok := src.(fwkdl.NotificationSource); ok {
-			gvk := notifier.GVK().String()
+
+		case fwkdl.NotificationSource:
+			if len(srcCfg.PollingExtractors) > 0 || len(srcCfg.EndpointExtractors) > 0 {
+				return fmt.Errorf("source %s is a NotificationSource; only NotificationExtractors are allowed", srcName)
+			}
+			gvk := s.GVK().String()
 			if existingSource, exists := gvkToSource[gvk]; exists {
 				return fmt.Errorf("duplicate notification source GVK %s: already used by source %s, cannot add %s",
 					gvk, existingSource, src.TypedName().String())
 			}
-			r.notifiers.Store(srcName, notifier)
+			if err := r.validateNotification(s, srcCfg.NotificationExtractors, disallowedExtractorType); err != nil {
+				return err
+			}
+			r.notifiers.Store(srcName, s)
+			if len(srcCfg.NotificationExtractors) > 0 {
+				r.notificationExtractors.Store(srcName, srcCfg.NotificationExtractors)
+			}
 			gvkToSource[gvk] = srcName
 			notifiersCount++
-		} else if epSrc, ok := src.(fwkdl.EndpointSource); ok {
-			r.endpointSources.Store(srcName, epSrc)
+
+		case fwkdl.EndpointSource:
+			if len(srcCfg.PollingExtractors) > 0 || len(srcCfg.NotificationExtractors) > 0 {
+				return fmt.Errorf("source %s is an EndpointSource; only EndpointExtractors are allowed", srcName)
+			}
+			if err := r.validateEndpoint(s, srcCfg.EndpointExtractors, disallowedExtractorType); err != nil {
+				return err
+			}
+			r.endpointSources.Store(srcName, s)
+			if len(srcCfg.EndpointExtractors) > 0 {
+				r.endpointExtractors.Store(srcName, srcCfg.EndpointExtractors)
+			}
 			endpointSourcesCount++
-		} else {
-			return fmt.Errorf("skipping unknown datasource plugin type %s", src.TypedName().String())
+
+		default:
+			return fmt.Errorf("unknown datasource plugin type %s", src.TypedName().String())
 		}
 
-		if len(srcCfg.Extractors) > 0 { // Store extractors mapped to source
-			r.sourceExtractors.Store(srcName, srcCfg.Extractors)
-		}
-
-		extractorNames := make([]string, len(srcCfg.Extractors))
-		for i, ext := range srcCfg.Extractors {
-			extractorNames[i] = ext.TypedName().String()
-		}
-		logger.V(logging.DEFAULT).Info("Source configured", "source", srcName, "extractors", extractorNames)
+		logger.V(logging.DEFAULT).Info("Source configured",
+			"source", srcName,
+			"polling", len(srcCfg.PollingExtractors),
+			"notification", len(srcCfg.NotificationExtractors),
+			"endpoint", len(srcCfg.EndpointExtractors))
 	}
 
-	logger.Info("Datalayer runtime configured", "pollers", pollersCount, "notifiers", notifiersCount, "endpointSources", endpointSourcesCount)
+	logger.Info("Datalayer runtime configured",
+		"pollers", pollersCount, "notifiers", notifiersCount, "endpointSources", endpointSourcesCount)
+	return nil
+}
+
+func (r *Runtime) validatePolling(src fwkdl.PollingDataSource, exts []fwkdl.PollingExtractor, disallowedType string) error {
+	validator, hasValidator := src.(fwkdl.ValidatingDataSource)
+	for _, ext := range exts {
+		if disallowedType != "" && ext.TypedName().Type == disallowedType {
+			return fmt.Errorf("disallowed Extractor %s is configured for source %s",
+				ext.TypedName(), src.TypedName())
+		}
+		if hasValidator {
+			if err := validator.ValidateExtractor(ext); err != nil {
+				return fmt.Errorf("extractor %s failed custom validation for datasource %s: %w",
+					ext.TypedName(), src.TypedName(), err)
+			}
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) validateNotification(src fwkdl.NotificationSource, exts []fwkdl.NotificationExtractor, disallowedType string) error {
+	srcGVK := src.GVK().String()
+	validator, hasValidator := src.(fwkdl.ValidatingDataSource)
+	for _, ext := range exts {
+		if disallowedType != "" && ext.TypedName().Type == disallowedType {
+			return fmt.Errorf("disallowed Extractor %s is configured for source %s",
+				ext.TypedName(), src.TypedName())
+		}
+		if ext.GVK().String() != srcGVK {
+			return fmt.Errorf("extractor %s GVK %s does not match source %s GVK %s",
+				ext.TypedName(), ext.GVK().String(), src.TypedName(), srcGVK)
+		}
+		if hasValidator {
+			if err := validator.ValidateExtractor(ext); err != nil {
+				return fmt.Errorf("extractor %s failed custom validation for datasource %s: %w",
+					ext.TypedName(), src.TypedName(), err)
+			}
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) validateEndpoint(src fwkdl.EndpointSource, exts []fwkdl.EndpointExtractor, disallowedType string) error {
+	validator, hasValidator := src.(fwkdl.ValidatingDataSource)
+	for _, ext := range exts {
+		if disallowedType != "" && ext.TypedName().Type == disallowedType {
+			return fmt.Errorf("disallowed Extractor %s is configured for source %s",
+				ext.TypedName(), src.TypedName())
+		}
+		if hasValidator {
+			if err := validator.ValidateExtractor(ext); err != nil {
+				return fmt.Errorf("extractor %s failed custom validation for datasource %s: %w",
+					ext.TypedName(), src.TypedName(), err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -127,17 +208,13 @@ func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtrac
 func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 	var err error
 
-	r.notifiers.Range(func(key, val any) bool { // bind notification sources to the manager
+	r.notifiers.Range(func(key, val any) bool {
 		ns := val.(fwkdl.NotificationSource)
 		srcName := ns.TypedName().Name
 
 		var extractors []fwkdl.NotificationExtractor
-		if rawExts, ok := r.sourceExtractors.Load(srcName); ok {
-			raw := rawExts.([]fwkdl.Extractor)
-			extractors = make([]fwkdl.NotificationExtractor, len(raw))
-			for i, e := range raw {
-				extractors[i] = e.(fwkdl.NotificationExtractor)
-			}
+		if rawExts, ok := r.notificationExtractors.Load(srcName); ok {
+			extractors = rawExts.([]fwkdl.NotificationExtractor)
 		}
 
 		if bindErr := BindNotificationSource(ns, extractors, mgr); bindErr != nil {
@@ -149,8 +226,7 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 	return err
 }
 
-// Stop is called to terminate the Runtime's data collection. It terminates all
-// go routines used for polling data sources.
+// Stop terminates the Runtime's data collection. It stops all per-endpoint collectors.
 func (r *Runtime) Stop() error {
 	r.collectors.Range(func(_, val any) bool {
 		if c, ok := val.(*Collector); ok {
@@ -184,11 +260,10 @@ func (r *Runtime) NewEndpoint(ctx context.Context, endpointMetadata *fwkdl.Endpo
 		return endpoint
 	}
 
-	extractors := make(map[string][]fwkdl.Extractor, len(pollers))
-	r.sourceExtractors.Range(func(key, val any) bool {
+	extractors := make(map[string][]fwkdl.PollingExtractor, len(pollers))
+	r.pollingExtractors.Range(func(key, val any) bool {
 		srcName := key.(string)
-		exts := val.([]fwkdl.Extractor)
-		extractors[srcName] = exts
+		extractors[srcName] = val.([]fwkdl.PollingExtractor)
 		return true
 	})
 
@@ -224,7 +299,7 @@ func (r *Runtime) ReleaseEndpoint(ep fwkdl.Endpoint) {
 }
 
 // dispatchEndpointEvent routes an endpoint lifecycle event to all registered
-// EndpointSources and their extractors.
+// EndpointSources and their typed extractors.
 func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger, event fwkdl.EndpointEvent) {
 	if isEmpty(&r.endpointSources) {
 		return
@@ -242,91 +317,17 @@ func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger,
 			return true
 		}
 
-		rawExts, ok := r.sourceExtractors.Load(srcName)
+		rawExts, ok := r.endpointExtractors.Load(srcName)
 		if !ok {
 			return true
 		}
-		for _, ext := range rawExts.([]fwkdl.Extractor) {
-			if epExt, ok := ext.(fwkdl.EndpointExtractor); ok {
-				if err := epExt.ExtractEndpoint(ctx, *processed); err != nil {
-					logger.Error(err, "endpoint extractor failed", "extractor", ext.TypedName())
-				}
+		for _, ext := range rawExts.([]fwkdl.EndpointExtractor) {
+			if err := ext.Extract(ctx, *processed); err != nil {
+				logger.Error(err, "endpoint extractor failed", "extractor", ext.TypedName())
 			}
 		}
 		return true
 	})
-}
-
-// validates the compatibility of data source and configured extractors. This includes
-// expected Extractor type, source output and extractor input type compatibility and
-// optionally source specific validation.
-func (r *Runtime) validateSourceExtractors(src fwkdl.DataSource, extractors []fwkdl.Extractor, disallowedExtractorType string) error {
-	for _, ext := range extractors {
-		// check if disallowed extractor type
-		if disallowedExtractorType != "" && ext.TypedName().Type == disallowedExtractorType {
-			return fmt.Errorf("disallowed Extractor %s is configured for source %s",
-				ext.TypedName().String(), src.TypedName().String())
-		}
-
-		// validate extractor type
-		extractorType := reflect.TypeOf(ext)
-		if err := validateExtractorCompatible(extractorType, src.ExtractorType()); err != nil {
-			return fmt.Errorf("extractor %s type incompatible with datasource %s: %w",
-				ext.TypedName(), src.TypedName(), err)
-		}
-
-		// validate input/output types match
-		if err := validateInputTypeCompatible(src.OutputType(), ext.ExpectedInputType()); err != nil {
-			return fmt.Errorf("extractor %s input type incompatible with datasource %s: %w",
-				ext.TypedName(), src.TypedName(), err)
-		}
-		if notifySrc, ok := src.(fwkdl.NotificationSource); ok {
-			if notifyExt, ok := ext.(fwkdl.NotificationExtractor); ok {
-				if notifySrc.GVK().String() != notifyExt.GVK().String() {
-					return fmt.Errorf("extractor %s GVK %s does not match source %s GVK %s",
-						ext.TypedName(), notifyExt.GVK().String(), src.TypedName(), notifySrc.GVK().String())
-				}
-			}
-		}
-
-		// allow datasource custom validation
-		if validator, ok := src.(fwkdl.ValidatingDataSource); ok {
-			if err := validator.ValidateExtractor(ext); err != nil {
-				return fmt.Errorf("extractor %s failed custom validation for datasource %s: %w",
-					ext.TypedName(), src.TypedName(), err)
-			}
-		}
-	}
-	return nil
-}
-
-// validate input/output type compatibility.
-func validateInputTypeCompatible(dataSourceOutput, extractorInput reflect.Type) error {
-	if dataSourceOutput == nil || extractorInput == nil {
-		return errors.New("data source output type or extractor input type can't be nil")
-	}
-	if dataSourceOutput == extractorInput ||
-		(extractorInput.Kind() == reflect.Interface && extractorInput.NumMethod() == 0) ||
-		(extractorInput.Kind() == reflect.Interface && dataSourceOutput.Implements(extractorInput)) {
-		return nil
-	}
-	return fmt.Errorf("extractor input type %v is not compatible with data source output type %v",
-		extractorInput, dataSourceOutput)
-}
-
-// validate extractor compatibility.
-func validateExtractorCompatible(extractorType reflect.Type, expectedInterfaceType reflect.Type) error {
-	if extractorType == nil || expectedInterfaceType == nil {
-		return errors.New("extractor type or expected interface type can't be nil")
-	}
-	if expectedInterfaceType.Kind() != reflect.Interface {
-		return fmt.Errorf("expected type must be an interface, got %v", expectedInterfaceType.Kind())
-	}
-	if !extractorType.Implements(expectedInterfaceType) {
-		return fmt.Errorf("extractor type %v does not implement interface %v",
-			extractorType, expectedInterfaceType)
-	}
-	return nil
 }
 
 // isEmpty reports whether the sync.Map has no entries.

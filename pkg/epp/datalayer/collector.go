@@ -96,7 +96,7 @@ func NewCollector() *Collector {
 
 // Start initiates data source collection for the endpoint.
 // All sources must implement PollingDataSource. Validation is performed by the caller.
-func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) error {
+func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.PollingExtractor) error {
 	// Validate sources slice is not empty
 	if len(pollers) == 0 {
 		return errors.New("cannot start collector with empty sources")
@@ -111,7 +111,7 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint,
 	return c.startCollection(ctx, ticker, ep, pollers, extractors)
 }
 
-func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) error {
+func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.PollingExtractor) error {
 	var ready chan struct{}
 	started := false
 
@@ -121,7 +121,7 @@ func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl
 		started = true
 		ready = make(chan struct{})
 
-		go func(endpoint fwkdl.Endpoint, sources []fwkdl.PollingDataSource, exts map[string][]fwkdl.Extractor) {
+		go func(endpoint fwkdl.Endpoint, sources []fwkdl.PollingDataSource, exts map[string][]fwkdl.PollingExtractor) {
 			logger.V(logging.DEFAULT).Info("starting collection")
 
 			defer func() {
@@ -153,7 +153,7 @@ func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl
 						if srcExtractors, ok := exts[tn.Name]; ok && data != nil {
 							for _, ext := range srcExtractors {
 								extKey := ext.TypedName().String()
-								extErr := ext.Extract(ctx, data, endpoint)
+								extErr := ext.Extract(ctx, data, fwkdl.WithEndpoint(endpoint))
 								logErrorTransition(logger, c.lastExtractErrors, extKey, "extract", "extractor", extErr)
 							}
 						}

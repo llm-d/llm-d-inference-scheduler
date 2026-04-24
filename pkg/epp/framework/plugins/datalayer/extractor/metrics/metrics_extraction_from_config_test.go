@@ -50,7 +50,7 @@ import (
 // the full fetch→extract path without a running Collector.
 type pipeline struct {
 	source    fwkdl.PollingDataSource
-	extractor fwkdl.Extractor
+	extractor fwkdl.PollingExtractor
 }
 
 // Poll fetches raw data from the source then passes it to the extractor.
@@ -62,7 +62,7 @@ func (p *pipeline) Poll(ctx context.Context, ep fwkdl.Endpoint) error {
 	if data == nil {
 		return nil
 	}
-	return p.extractor.Extract(ctx, data, ep)
+	return p.extractor.Extract(ctx, data, fwkdl.WithEndpoint(ep))
 }
 
 // buildSource creates a MetricsDataSource pointing at the given server URL.

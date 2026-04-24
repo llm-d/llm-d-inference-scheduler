@@ -21,15 +21,24 @@ import (
 )
 
 // Config defines the configuration of EPP data layer, as the set of DataSources
-// and Extractors defined on them. Both poll-based and event-driven (notification)
-// sources are stored in Sources. Differentiation by type of source is handled during
-// the set-up phase.
+// and Extractors defined on them.
 type Config struct {
-	Sources []DataSourceConfig // the data sources configured in the data layer
+	Sources []DataSourceConfig
 }
 
-// DataSourceConfig defines the configuration of a specific DataSource
+// DataSourceConfig defines the configuration of a specific DataSource.
+//
+// Each source pairs with extractors of exactly one variant (polling,
+// notification, or endpoint) — the variant is determined by the source's
+// interface type. Exactly one of the *Extractors fields is populated by the
+// config loader; the Runtime reads the field matching the source's variant.
 type DataSourceConfig struct {
-	Plugin     fwkdl.DataSource  // the data source plugin instance
-	Extractors []fwkdl.Extractor // extractors defined for the data source
+	Plugin fwkdl.DataSource
+
+	// Populated when Plugin is a PollingDataSource.
+	PollingExtractors []fwkdl.PollingExtractor
+	// Populated when Plugin is a NotificationSource.
+	NotificationExtractors []fwkdl.NotificationExtractor
+	// Populated when Plugin is an EndpointSource.
+	EndpointExtractors []fwkdl.EndpointExtractor
 }

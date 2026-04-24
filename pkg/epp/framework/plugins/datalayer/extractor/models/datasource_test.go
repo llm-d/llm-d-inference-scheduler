@@ -25,8 +25,8 @@ func TestDatasource(t *testing.T) {
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
 			{
-				Plugin:     source,
-				Extractors: []fwkdl.Extractor{extractor},
+				Plugin:            source,
+				PollingExtractors: []fwkdl.PollingExtractor{extractor},
 			},
 		},
 	}

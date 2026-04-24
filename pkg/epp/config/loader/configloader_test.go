@@ -19,7 +19,6 @@ package loader
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"testing"
 	"time"
 
@@ -682,34 +681,15 @@ func (m *mockSaturationDetector) Saturation(ctx context.Context, endpoints []fwk
 	return 0.5
 }
 
-func (m *mockSource) AddExtractor(_ fwkdl.Extractor) error {
-	return nil
+// mockSource implements PollingDataSource for config-loader tests.
+func (m *mockSource) Poll(_ context.Context, _ fwkdl.Endpoint) (any, error) {
+	return nil, nil
 }
 
-func (m *mockSource) Collect(ctx context.Context, ep fwkdl.Endpoint) error {
-	return nil
-}
-
-func (m *mockSource) Extractors() []string {
-	return []string{}
-}
-
-func (m *mockSource) OutputType() reflect.Type {
-	return fwkdl.NotificationEventType
-}
-
-func (m *mockSource) ExtractorType() reflect.Type {
-	return fwkdl.ExtractorType
-}
-
-// Mock Extractor
+// Mock Extractor — satisfies PollingExtractor (Extractor[any]).
 type mockExtractor struct{ mockPlugin }
 
-func (m *mockExtractor) ExpectedInputType() reflect.Type {
-	return reflect.TypeFor[string]()
-}
-
-func (m *mockExtractor) Extract(ctx context.Context, data any, ep fwkdl.Endpoint) error {
+func (m *mockExtractor) Extract(_ context.Context, _ any, _ ...fwkdl.ExtractOption) error {
 	return nil
 }
 

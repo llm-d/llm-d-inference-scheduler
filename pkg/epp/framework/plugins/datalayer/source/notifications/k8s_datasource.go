@@ -18,7 +18,6 @@ package notifications
 
 import (
 	"context"
-	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -55,16 +54,6 @@ func (s *K8sNotificationSource) TypedName() fwkplugin.TypedName {
 // GVK returns the GroupVersionKind this source watches.
 func (s *K8sNotificationSource) GVK() schema.GroupVersionKind {
 	return s.gvk
-}
-
-// OutputType returns the type of data this DataSource produces (NotificationEvent).
-func (s *K8sNotificationSource) OutputType() reflect.Type {
-	return fwkdl.NotificationEventType
-}
-
-// ExtractorType returns the type of Extractor this DataSource expects (NotificationExtractor).
-func (s *K8sNotificationSource) ExtractorType() reflect.Type {
-	return fwkdl.NotificationExtractorType
 }
 
 // Notify processes a notification event and returns it for Runtime to dispatch.

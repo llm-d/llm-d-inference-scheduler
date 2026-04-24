@@ -288,22 +288,47 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 	}
 
 	for _, source := range rawDataConfig.Sources {
-		if sourcePlugin, ok := handle.Plugin(source.PluginRef).(fwkdl.DataSource); ok {
-			sourceConfig := datalayer.DataSourceConfig{
-				Plugin:     sourcePlugin,
-				Extractors: []fwkdl.Extractor{},
-			}
-			for _, extractor := range source.Extractors {
-				if extractorPlugin, ok := handle.Plugin(extractor.PluginRef).(fwkdl.Extractor); ok {
-					sourceConfig.Extractors = append(sourceConfig.Extractors, extractorPlugin)
-				} else {
-					return nil, fmt.Errorf("the plugin %s is not a fwkdl.Extractor", source.PluginRef)
-				}
-			}
-			cfg.Sources = append(cfg.Sources, sourceConfig)
-		} else {
+		sourcePlugin, ok := handle.Plugin(source.PluginRef).(fwkdl.DataSource)
+		if !ok {
 			return nil, fmt.Errorf("the plugin %s is not a fwkdl.DataSource", source.PluginRef)
 		}
+
+		sourceConfig := datalayer.DataSourceConfig{Plugin: sourcePlugin}
+
+		switch sourcePlugin.(type) {
+		case fwkdl.PollingDataSource:
+			for _, extractor := range source.Extractors {
+				ext, ok := handle.Plugin(extractor.PluginRef).(fwkdl.PollingExtractor)
+				if !ok {
+					return nil, fmt.Errorf("plugin %s is not a fwkdl.PollingExtractor (required by source %s)",
+						extractor.PluginRef, source.PluginRef)
+				}
+				sourceConfig.PollingExtractors = append(sourceConfig.PollingExtractors, ext)
+			}
+		case fwkdl.NotificationSource:
+			for _, extractor := range source.Extractors {
+				ext, ok := handle.Plugin(extractor.PluginRef).(fwkdl.NotificationExtractor)
+				if !ok {
+					return nil, fmt.Errorf("plugin %s is not a fwkdl.NotificationExtractor (required by source %s)",
+						extractor.PluginRef, source.PluginRef)
+				}
+				sourceConfig.NotificationExtractors = append(sourceConfig.NotificationExtractors, ext)
+			}
+		case fwkdl.EndpointSource:
+			for _, extractor := range source.Extractors {
+				ext, ok := handle.Plugin(extractor.PluginRef).(fwkdl.EndpointExtractor)
+				if !ok {
+					return nil, fmt.Errorf("plugin %s is not a fwkdl.EndpointExtractor (required by source %s)",
+						extractor.PluginRef, source.PluginRef)
+				}
+				sourceConfig.EndpointExtractors = append(sourceConfig.EndpointExtractors, ext)
+			}
+		default:
+			return nil, fmt.Errorf("source %s does not implement a known DataSource variant (polling/notification/endpoint)",
+				source.PluginRef)
+		}
+
+		cfg.Sources = append(cfg.Sources, sourceConfig)
 	}
 	return &cfg, nil
 }

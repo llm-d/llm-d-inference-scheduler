@@ -70,10 +70,6 @@ func TestExtractorExtract(t *testing.T) {
 		t.Error("empty extractor name")
 	}
 
-	if inputType := extractor.ExpectedInputType(); inputType != sourcemetrics.PrometheusMetricType {
-		t.Errorf("incorrect expected input type: %v", inputType)
-	}
-
 	ep := fwkdl.NewEndpoint(nil, nil)
 	if ep == nil {
 		t.Fatal("expected non-nil endpoint")
@@ -193,7 +189,7 @@ func TestExtractorExtract(t *testing.T) {
 			}()
 
 			before := ep.GetMetrics().Clone()
-			err := extractor.Extract(ctx, tt.data, ep)
+			err := extractor.Extract(ctx, tt.data, fwkdl.WithEndpoint(ep))
 			after := ep.GetMetrics()
 
 			if tt.wantErr && err == nil {
@@ -253,7 +249,7 @@ func TestExtractorMultiEngine(t *testing.T) {
 	epVllm := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
 		Labels: map[string]string{DefaultEngineTypeLabelKey: "vllm"},
 	}, nil)
-	_ = extractor.Extract(ctx, data, epVllm)
+	_ = extractor.Extract(ctx, data, fwkdl.WithEndpoint(epVllm))
 	if epVllm.GetMetrics().WaitingQueueSize != 10 {
 		t.Errorf("vllm: expected queue size 10, got %v", epVllm.GetMetrics().WaitingQueueSize)
 	}
@@ -262,7 +258,7 @@ func TestExtractorMultiEngine(t *testing.T) {
 	epSgl := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
 		Labels: map[string]string{DefaultEngineTypeLabelKey: "sglang"},
 	}, nil)
-	_ = extractor.Extract(ctx, data, epSgl)
+	_ = extractor.Extract(ctx, data, fwkdl.WithEndpoint(epSgl))
 	if epSgl.GetMetrics().WaitingQueueSize != 20 {
 		t.Errorf("sglang: expected queue size 20, got %v", epSgl.GetMetrics().WaitingQueueSize)
 	}
@@ -291,7 +287,7 @@ func TestBackwardCompatibility(t *testing.T) {
 
 	// Case 1: No labels at all
 	epNone := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{Labels: nil}, nil)
-	_ = extractor.Extract(ctx, data, epNone)
+	_ = extractor.Extract(ctx, data, fwkdl.WithEndpoint(epNone))
 	if epNone.GetMetrics().WaitingQueueSize != 100 {
 		t.Errorf("no labels: expected 100, got %v", epNone.GetMetrics().WaitingQueueSize)
 	}
@@ -300,7 +296,7 @@ func TestBackwardCompatibility(t *testing.T) {
 	epUnknown := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
 		Labels: map[string]string{DefaultEngineTypeLabelKey: "unknown-engine"},
 	}, nil)
-	_ = extractor.Extract(ctx, data, epUnknown)
+	_ = extractor.Extract(ctx, data, fwkdl.WithEndpoint(epUnknown))
 	if epUnknown.GetMetrics().WaitingQueueSize != 100 {
 		t.Errorf("unknown label: expected 100, got %v", epUnknown.GetMetrics().WaitingQueueSize)
 	}
@@ -350,7 +346,7 @@ func TestCacheInfoLabelAliasing(t *testing.T) {
 	}
 
 	ep := fwkdl.NewEndpoint(nil, nil)
-	_ = extractor.Extract(ctx, data, ep)
+	_ = extractor.Extract(ctx, data, fwkdl.WithEndpoint(ep))
 
 	if ep.GetMetrics().CacheBlockSize != 64 {
 		t.Errorf("expected CacheBlockSize 64, got %d", ep.GetMetrics().CacheBlockSize)
@@ -417,7 +413,7 @@ func TestDirectGaugeSpecExtraction(t *testing.T) {
 	}
 
 	ep := fwkdl.NewEndpoint(nil, nil)
-	_ = extractor.Extract(ctx, data, ep)
+	_ = extractor.Extract(ctx, data, fwkdl.WithEndpoint(ep))
 
 	if ep.GetMetrics().CacheBlockSize != 64 {
 		t.Errorf("expected CacheBlockSize 64, got %d", ep.GetMetrics().CacheBlockSize)

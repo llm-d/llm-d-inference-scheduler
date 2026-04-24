@@ -18,7 +18,6 @@ package mocks
 
 import (
 	"context"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,14 +46,6 @@ func NewDataSource(typedName plugin.TypedName) *MetricsDataSource {
 
 func (fds *MetricsDataSource) TypedName() plugin.TypedName {
 	return fds.typedName
-}
-
-func (fds *MetricsDataSource) OutputType() reflect.Type {
-	return reflect.TypeFor[fwkdl.Metrics]()
-}
-
-func (fds *MetricsDataSource) ExtractorType() reflect.Type {
-	return reflect.TypeFor[fwkdl.Extractor]()
 }
 
 // SetMetrics replaces the metrics map in a thread-safe manner.
@@ -103,30 +94,10 @@ func (m *NotificationSource) TypedName() plugin.TypedName {
 	return m.typedName
 }
 
-func (m *NotificationSource) OutputType() reflect.Type {
-	return reflect.TypeFor[fwkdl.NotificationEvent]()
-}
-
-func (m *NotificationSource) ExtractorType() reflect.Type {
-	return reflect.TypeFor[fwkdl.NotificationExtractor]()
-}
-
 func (m *NotificationSource) GVK() schema.GroupVersionKind {
 	return m.gvk
 }
 
 func (m *NotificationSource) Notify(_ context.Context, event fwkdl.NotificationEvent) (*fwkdl.NotificationEvent, error) {
 	return &event, nil
-}
-
-func (m *NotificationSource) Extractors() []string {
-	return []string{}
-}
-
-func (m *NotificationSource) AddExtractor(_ fwkdl.Extractor) error {
-	return nil
-}
-
-func (m *NotificationSource) Collect(_ context.Context, _ fwkdl.Endpoint) error {
-	return nil
 }
