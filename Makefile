@@ -45,7 +45,9 @@ CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker;
 export CONTAINER_RUNTIME
 
 GIT_COMMIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null)
-BUILD_REF ?= $(shell git describe --abbrev=0 2>/dev/null)
+# Match only root-level release tags (v[0-9]*) so submodule tags don't leak into image versions.
+ROOT_RELEASE_TAG_MATCH ?= v[0-9]*
+BUILD_REF ?= $(shell git describe --tags --match '$(ROOT_RELEASE_TAG_MATCH)' --abbrev=0 2>/dev/null)
 
 # Named volumes for Go module and build caches, persisted across container runs and image rebuilds.
 GO_MOD_CACHE_VOL ?= llm-d-gomodcache

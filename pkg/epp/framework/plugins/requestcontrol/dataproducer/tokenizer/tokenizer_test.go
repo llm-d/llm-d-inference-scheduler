@@ -24,9 +24,9 @@ import (
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -101,10 +101,10 @@ func TestPluginFactory_Validation(t *testing.T) {
 }
 
 func TestChatCompletionsToRenderChatRequest(t *testing.T) {
-	chat := &scheduling.ChatCompletionsRequest{
-		Messages: []scheduling.Message{
-			{Role: "system", Content: scheduling.Content{Raw: "You are a helpful assistant."}},
-			{Role: "user", Content: scheduling.Content{Raw: "Hello!"}},
+	chat := &fwkrh.ChatCompletionsRequest{
+		Messages: []fwkrh.Message{
+			{Role: "system", Content: fwkrh.Content{Raw: "You are a helpful assistant."}},
+			{Role: "user", Content: fwkrh.Content{Raw: "Hello!"}},
 		},
 		ChatTemplate:              "template",
 		AddGenerationPrompt:       true,
@@ -128,16 +128,16 @@ func TestChatCompletionsToRenderChatRequest(t *testing.T) {
 func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 	tests := []struct {
 		name     string
-		messages []scheduling.Message
+		messages []fwkrh.Message
 		wantConv []tokenizerTypes.Conversation
 	}{
 		{
 			name: "single image with text",
-			messages: []scheduling.Message{
-				{Role: "user", Content: scheduling.Content{
-					Structured: []scheduling.ContentBlock{
+			messages: []fwkrh.Message{
+				{Role: "user", Content: fwkrh.Content{
+					Structured: []fwkrh.ContentBlock{
 						{Type: "text", Text: "Describe this image"},
-						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,abc123"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,abc123"}},
 					},
 				}},
 			},
@@ -152,13 +152,13 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 		},
 		{
 			name: "system text message plus multimodal user message",
-			messages: []scheduling.Message{
-				{Role: "system", Content: scheduling.Content{Raw: "You are a visual analyst."}},
-				{Role: "user", Content: scheduling.Content{
-					Structured: []scheduling.ContentBlock{
+			messages: []fwkrh.Message{
+				{Role: "system", Content: fwkrh.Content{Raw: "You are a visual analyst."}},
+				{Role: "user", Content: fwkrh.Content{
+					Structured: []fwkrh.ContentBlock{
 						{Type: "text", Text: "Compare these two images"},
-						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,img1"}},
-						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "data:image/png;base64,img2"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,img1"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,img2"}},
 					},
 				}},
 			},
@@ -175,15 +175,15 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 		},
 		{
 			name: "multi-turn with image in history",
-			messages: []scheduling.Message{
-				{Role: "user", Content: scheduling.Content{
-					Structured: []scheduling.ContentBlock{
+			messages: []fwkrh.Message{
+				{Role: "user", Content: fwkrh.Content{
+					Structured: []fwkrh.ContentBlock{
 						{Type: "text", Text: "What is in this image?"},
-						{Type: "image_url", ImageURL: scheduling.ImageBlock{Url: "https://example.com/img.jpg"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://example.com/img.jpg"}},
 					},
 				}},
-				{Role: "assistant", Content: scheduling.Content{Raw: "I see a dog."}},
-				{Role: "user", Content: scheduling.Content{Raw: "What breed is it?"}},
+				{Role: "assistant", Content: fwkrh.Content{Raw: "I see a dog."}},
+				{Role: "user", Content: fwkrh.Content{Raw: "What breed is it?"}},
 			},
 			wantConv: []tokenizerTypes.Conversation{
 				{Role: "user", Content: tokenizerTypes.Content{
@@ -198,8 +198,8 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 		},
 		{
 			name: "text-only messages produce no Structured field",
-			messages: []scheduling.Message{
-				{Role: "user", Content: scheduling.Content{Raw: "Hello!"}},
+			messages: []fwkrh.Message{
+				{Role: "user", Content: fwkrh.Content{Raw: "Hello!"}},
 			},
 			wantConv: []tokenizerTypes.Conversation{
 				{Role: "user", Content: tokenizerTypes.Content{Raw: "Hello!"}},
@@ -209,7 +209,7 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chat := &scheduling.ChatCompletionsRequest{Messages: tt.messages}
+			chat := &fwkrh.ChatCompletionsRequest{Messages: tt.messages}
 			result := ChatCompletionsToRenderChatRequest(chat)
 			require.Len(t, result.Conversation, len(tt.wantConv))
 			for i, want := range tt.wantConv {

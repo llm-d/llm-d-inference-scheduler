@@ -244,17 +244,20 @@ case "${LINUX_ARCH}" in
 esac
 
 PLATFORM_ARGS=()
+SAVE_ARGS=()
 if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
     PLATFORM_ARGS=("--platform" "linux/${LINUX_ARCH}")
+elif [ "${CONTAINER_RUNTIME}" == "podman" ]; then
+    SAVE_ARGS=("--format=docker-archive")
 fi
 
 for IMAGE in "${VLLM_SIMULATOR_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_IMAGE}"; do
     if ! "${CONTAINER_RUNTIME}" image inspect "${IMAGE}" > /dev/null 2>&1; then
         echo "Image ${IMAGE} not found locally, pulling..."
-        "${CONTAINER_RUNTIME}" pull "${PLATFORM_ARGS[@]}" "${IMAGE}"
+        "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}"
     fi
     echo "Loading ${IMAGE} into kind cluster..."
-    "${CONTAINER_RUNTIME}" save "${PLATFORM_ARGS[@]}" "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+    "${CONTAINER_RUNTIME}" save ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
 done
 
 # ------------------------------------------------------------------------------

@@ -8,10 +8,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	sessionaffinity "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/sessionaffinity"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -37,13 +36,13 @@ func TestSessionAffinity_Score(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		req        *scheduling.LLMRequest
+		req        *scheduling.InferenceRequest
 		input      []scheduling.Endpoint
 		wantScores map[scheduling.Endpoint]float64
 	}{
 		{
 			name: "selects correct endpoint : endpointB",
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				Headers: map[string]string{"x-session-token": validSessionTokenForEndpointB},
 			},
 			input: inputEndpoints,
@@ -54,7 +53,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 		},
 		{
 			name: "no session token",
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				Headers: map[string]string{},
 			},
 			// both endpoints get score 0.0
@@ -66,7 +65,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 		},
 		{
 			name: "invalid session token",
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				Headers: map[string]string{"x-session-token": "garbage-token"},
 			},
 			// expect same behavior as no session token
@@ -78,7 +77,7 @@ func TestSessionAffinity_Score(t *testing.T) {
 		},
 		{
 			name:  "no endpoints available",
-			req:   &scheduling.LLMRequest{},
+			req:   &scheduling.InferenceRequest{},
 			input: []scheduling.Endpoint{},
 			// returns empty score map
 			wantScores: map[scheduling.Endpoint]float64{},

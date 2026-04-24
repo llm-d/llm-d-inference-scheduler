@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"time"
 
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"google.golang.org/grpc"
@@ -12,6 +11,8 @@ import (
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func createModelServersFromYaml(yaml string, extra map[string]string) []string {

@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-
 	k8stypes "k8s.io/apimachinery/pkg/types" // Import config for thresholds
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	loadaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loadaware"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
@@ -40,14 +39,14 @@ func TestLoadBasedScorer(t *testing.T) {
 	tests := []struct {
 		name       string
 		scorer     scheduling.Scorer
-		req        *scheduling.LLMRequest
+		req        *scheduling.InferenceRequest
 		input      []scheduling.Endpoint
 		wantScores map[scheduling.Endpoint]float64
 	}{
 		{
 			name:   "load based scorer",
 			scorer: loadaware.NewLoadAware(utils.NewTestContext(t), 10),
-			req: &scheduling.LLMRequest{
+			req: &scheduling.InferenceRequest{
 				TargetModel: "critical",
 			},
 			input: []scheduling.Endpoint{

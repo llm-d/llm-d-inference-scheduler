@@ -8,13 +8,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -208,16 +209,16 @@ func newMockSchedulerProfile() scheduling.SchedulerProfile {
 
 type mockSchedulerProfile struct{}
 
-func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.LLMRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
+func (p *mockSchedulerProfile) Run(_ context.Context, _ *scheduling.InferenceRequest, _ *scheduling.CycleState, _ []scheduling.Endpoint) (*scheduling.ProfileRunResult, error) {
 	return &scheduling.ProfileRunResult{}, nil
 }
 
 // creates and returns llm completion request forthe given prompt
-func createRequest(prompt string) *scheduling.LLMRequest {
-	return &scheduling.LLMRequest{
-		Body: &scheduling.LLMRequestBody{
-			Completions: &scheduling.CompletionsRequest{
-				Prompt: scheduling.Prompt{Raw: prompt},
+func createRequest(prompt string) *scheduling.InferenceRequest {
+	return &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{
+				Prompt: fwkrh.Prompt{Raw: prompt},
 			},
 		},
 	}
@@ -359,7 +360,7 @@ func TestPdProfileHandler_PickSeries(t *testing.T) {
 	}
 
 	type testData struct {
-		request          *scheduling.LLMRequest
+		request          *scheduling.InferenceRequest
 		cachedTokens     int
 		expectedProfiles []string
 	}
@@ -527,7 +528,7 @@ func TestPdProfileHandler_ProcessResults(t *testing.T) {
 			assert.NoError(t, err)
 
 			headers := make(map[string]string)
-			req := &scheduling.LLMRequest{
+			req := &scheduling.InferenceRequest{
 				Headers: headers,
 			}
 			result, err := handler.ProcessResults(context.Background(), &scheduling.CycleState{}, req, tt.profileResults)

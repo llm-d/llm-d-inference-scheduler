@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -18,12 +20,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
-	approxprefix "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
@@ -81,9 +84,10 @@ type PluginConfig struct {
 
 // compile-time type assertions
 var (
-	_ scheduling.Scorer                = &Scorer{}
-	_ requestcontrol.PrepareDataPlugin = &Scorer{}
-	_ requestcontrol.PreRequest        = &Scorer{}
+	_ scheduling.Scorer           = &Scorer{}
+	_ requestcontrol.DataProducer = &Scorer{}
+	_ requestcontrol.PreRequest   = &Scorer{}
+	_ fwkdl.EndpointExtractor     = &Scorer{}
 )
 
 // speculativeEntries holds the data needed to evict speculative entries
@@ -190,24 +194,7 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 	pool.Start(ctx)
 
 	subscribersManager := kvevents.NewSubscriberManager(pool)
-	var subscribersCache *ttlcache.Cache[string, struct{}]
 
-	// initialize the subscribers cache only if endpoint discovery is enabled
-	if config.KVEventsConfig.DiscoverPods {
-		// initialize the subscribers TTL cache
-		subscriptionTimeout := 10 * time.Minute
-		subscribersCache = ttlcache.New[string, struct{}](
-			ttlcache.WithTTL[string, struct{}](subscriptionTimeout),
-		)
-		subscribersCache.OnEviction(func(ctx context.Context, reason ttlcache.EvictionReason,
-			item *ttlcache.Item[string, struct{}],
-		) {
-			if reason == ttlcache.EvictionReasonExpired {
-				subscribersManager.RemoveSubscriber(ctx, item.Key())
-			}
-		})
-		go cleanCachePeriodically(ctx, subscribersCache, subscriptionTimeout)
-	}
 	if config.KVEventsConfig.ZMQEndpoint != "" {
 		// setup local subscriber to support global socket mode
 		if err := subscribersManager.EnsureSubscriber(ctx, "local-subscriber",
@@ -256,7 +243,6 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
 		kvBlockScorer:      kvBlockScorer,
-		subscribersCache:   subscribersCache,
 		subscribersManager: subscribersManager,
 		kvEventsConfig:     config.KVEventsConfig,
 		pluginState:        plugin.NewPluginState(ctx),
@@ -264,6 +250,7 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 		speculativeTTL:     speculativeTTL,
 		blockSizeTokens:    config.TokenProcessorConfig.BlockSize,
 		speculativeEnabled: config.SpeculativeIndexing,
+		subscriberCtx:      ctx,
 	}, nil
 }
 
@@ -277,16 +264,14 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 // PreRequest to proactively populate the index with expected cache entries
 // immediately after a routing decision, closing the blind spot between the
 // routing decision and the arrival of actual KV events from the engine.
+//
+// The scorer also implements EndpointExtractor to react to endpoint lifecycle
+// events from the data layer's endpoint-notification-source: an add/update
+// installs a per-pod ZMQ subscriber, a delete removes it.
 type Scorer struct {
 	typedName      plugin.TypedName
 	kvCacheIndexer kvCacheIndexer
 
-	// until the IGW data-layer is ready to provide endpoint events,
-	// we maintain a TTL cache of known endpoints that are discovered through
-	// the scoring process. If a endpoint is not in the received endpoints list
-	// during scoring for a certain period, we consider it gone and
-	// stop its KV events subscription.
-	subscribersCache   *ttlcache.Cache[string, struct{}]
 	subscribersManager *kvevents.SubscriberManager
 	kvEventsConfig     *kvevents.Config
 
@@ -308,6 +293,23 @@ type Scorer struct {
 
 	// speculativeEnabled controls whether speculative indexing is active.
 	speculativeEnabled bool
+
+	// extractorActive is set the first time ExtractEndpoint is invoked,
+	// signalling that the data layer's endpoint-notification-source is wired
+	// for this scorer. Once set, the legacy in-Score subscriber discovery
+	// path becomes a no-op so the data layer is the sole authority over
+	// per-pod subscriber lifecycle.
+	extractorActive atomic.Bool
+
+	// subscriberCtx is the long-lived context used to start ZMQ subscribers.
+	// SubscriberManager binds each subscriber's goroutine lifetime to the
+	// context passed in to EnsureSubscriber, so any caller-scoped context
+	// (e.g. the request ctx in the legacy in-Score path) would tear the
+	// subscriber down as soon as the caller returned. Using the plugin's
+	// construction-time ctx keeps subscribers alive for the EPP's lifetime,
+	// matching the original behavior of `context.Background()` in the
+	// pre-refactor code.
+	subscriberCtx context.Context
 }
 
 // TypedName returns the typed name of the plugin.
@@ -345,7 +347,7 @@ func (s *Scorer) Consumes() map[string]any {
 // are saved to PluginState for reuse by Score() and PreRequest().
 // This is a no-op when speculative indexing is disabled.
 func (s *Scorer) PrepareRequestData(ctx context.Context,
-	request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) error {
+	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) error {
 	if !s.speculativeEnabled {
 		return nil
 	}
@@ -411,7 +413,7 @@ func (s *Scorer) PrepareRequestData(ctx context.Context,
 // If PrepareRequestData was called beforehand, Score reuses the pre-computed
 // results from PluginState. Otherwise, it falls back to computing scores
 // directly via getScores (backward compatible).
-func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
+func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
 	// Start tracing span for scoring operation
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(ctx, "llm_d.epp.scorer.prefix_cache",
@@ -427,26 +429,14 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 		attribute.Int("llm_d.scorer.candidate_endpoints", len(endpoints)),
 	)
 
-	// Handle pod discovery and subscriber management
-	if s.kvEventsConfig.DiscoverPods {
-		// update subscribers here temporarily
-		for _, endpoint := range endpoints {
-			endpointObj := endpoint.GetMetadata()
-			if endpointObj == nil {
-				continue
-			}
-			endpointKey := endpointObj.NamespacedName.String()
-			s.subscribersCache.Set(endpointKey, struct{}{}, 0) // use default TTL
-
-			if err := s.subscribersManager.EnsureSubscriber(context.Background(), endpointKey, // dont use request ctx
-				fmt.Sprintf("tcp://%s:%d", endpointObj.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort),
-				s.kvEventsConfig.TopicFilter, true); err != nil {
-				logger.Error(err, "Failed to ensure KV-events subscriber for endpoint", "endpoint", endpointKey,
-					"endpoint", endpointObj.Address)
-				continue
-			}
-		}
-	}
+	// Backwards-compat: opportunistically subscribe to per-pod KV events for
+	// each endpoint we see in scoring. Preferred path is the data-layer
+	// EndpointExtractor (see ExtractEndpoint), which also handles teardown
+	// when pods disappear. This in-Score path keeps existing configs that
+	// don't wire the endpoint-notification-source working without changes;
+	// EnsureSubscriber is idempotent so the two paths are safe to run
+	// together.
+	s.ensureSubscribersForEndpoints(ctx, endpoints)
 
 	// Early return if request is nil
 	if request == nil {
@@ -541,7 +531,7 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 // evicted when the TTL expires.
 // This is a no-op when speculative indexing is disabled.
 func (s *Scorer) PreRequest(ctx context.Context,
-	request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+	request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
 	if !s.speculativeEnabled {
 		return
 	}
@@ -613,12 +603,105 @@ func (s *Scorer) PreRequest(ctx context.Context,
 		"ttl", s.speculativeTTL)
 }
 
+// --- EndpointExtractor implementation ---
+
+// ExpectedInputType declares the data type this extractor consumes.
+// Required by the data layer's source/extractor type-compatibility check.
+func (s *Scorer) ExpectedInputType() reflect.Type {
+	return fwkdl.EndpointEventReflectType
+}
+
+// Extract is the base Extractor entrypoint and is unused for endpoint
+// extractors — the Runtime calls ExtractEndpoint instead.
+func (s *Scorer) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
+	return nil
+}
+
+// ExtractEndpoint reacts to endpoint lifecycle events from the data layer's
+// endpoint-notification-source: an add/update installs a per-pod ZMQ
+// subscriber so KV-cache events flow into the index; a delete tears it down.
+// No-op when DiscoverPods is disabled or the namespaced name is unavailable.
+//
+// Being called at all is also the signal that the data layer is wired for
+// this scorer; the legacy in-Score discovery path turns itself off from
+// here on.
+func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent) error {
+	s.extractorActive.Store(true)
+	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
+		return nil
+	}
+	meta := event.Endpoint.GetMetadata()
+	if meta == nil || meta.NamespacedName.Name == "" {
+		return nil
+	}
+
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+	endpointKey := meta.NamespacedName.String()
+
+	switch event.Type {
+	case fwkdl.EventAddOrUpdate:
+		if err := s.ensureSubscriber(ctx, meta); err != nil {
+			return err
+		}
+		logger.V(logging.DEBUG).Info("Adding subscriber", "endpoint", endpointKey)
+	case fwkdl.EventDelete:
+		s.subscribersManager.RemoveSubscriber(ctx, endpointKey)
+		logger.V(logging.DEBUG).Info("Removed KV-events subscriber", "endpoint", endpointKey)
+	}
+	return nil
+}
+
+// ensureSubscriber installs (or refreshes) a per-pod ZMQ subscriber for the
+// given endpoint metadata. Used by both the data-layer-driven extractor path
+// and the legacy in-Score backwards-compat path. Returns nil for endpoints
+// without an address — those can't be dialed.
+//
+// The subscriber goroutine is started against subscriberCtx (plugin-lifetime),
+// not the caller ctx, so request-scoped contexts don't tear it down.
+func (s *Scorer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMetadata) error {
+	if meta == nil || meta.Address == "" {
+		return nil
+	}
+	endpointKey := meta.NamespacedName.String()
+	zmqEndpoint := fmt.Sprintf("tcp://%s:%d", meta.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort)
+
+	logger := log.FromContext(ctx).WithName(s.typedName.String())
+	if err := s.subscribersManager.EnsureSubscriber(s.subscriberCtx, endpointKey,
+		zmqEndpoint, s.kvEventsConfig.TopicFilter, true); err != nil {
+		logger.Error(err, "Failed to ensure KV-events subscriber for endpoint",
+			"endpoint", endpointKey, "address", meta.Address)
+		return fmt.Errorf("ensure subscriber for %s: %w", endpointKey, err)
+	}
+	logger.V(logging.DEBUG).Info("Ensured KV-events subscriber", "endpoint", endpointKey, "zmq", zmqEndpoint)
+	return nil
+}
+
+// ensureSubscribersForEndpoints is the backwards-compat path for configs
+// that don't wire the endpoint-notification-source: it iterates the candidate
+// endpoints presented to Score and ensures a per-pod subscriber for each.
+// Errors are logged and not returned — discovery is best-effort here, the
+// data layer remains the authoritative source when wired.
+//
+// Becomes a no-op once ExtractEndpoint has been called at least once,
+// indicating the data layer is wired and will drive subscriber lifecycle.
+func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []scheduling.Endpoint) {
+	if s.extractorActive.Load() {
+		return
+	}
+	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
+		return
+	}
+	for _, ep := range endpoints {
+		_ = s.ensureSubscriber(ctx, ep.GetMetadata())
+	}
+}
+
 // --- Internal helper methods ---
 
 // computeBlockKeys extracts block keys from an LLM request by tokenizing
 // the prompt and computing KV-block hashes.
 func (s *Scorer) computeBlockKeys(ctx context.Context,
-	request *scheduling.LLMRequest) ([]kvblock.BlockHash, error) {
+	request *scheduling.InferenceRequest) ([]kvblock.BlockHash, error) {
 	if request.Body == nil {
 		return nil, nil
 	}
@@ -659,7 +742,7 @@ func (s *Scorer) getBlockSizeTokens() int {
 // If tokenized prompt data is found in CycleState (written by the tokenizer
 // scorer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
 // Otherwise, chat completions and regular completions are tokenized internally.
-func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.LLMRequest) (map[string]float64, error) {
+func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logging.TRACE)
 

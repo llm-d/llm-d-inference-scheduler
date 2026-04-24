@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -88,7 +88,7 @@ func (f *ByLabel) WithName(name string) *ByLabel {
 
 // Filter filters out all endpoints that are not marked with one of roles from the validRoles collection
 // or has no role label in case allowsNoRolesLabel is true
-func (f *ByLabel) Filter(_ context.Context, _ *scheduling.CycleState, _ *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+func (f *ByLabel) Filter(_ context.Context, _ *scheduling.CycleState, _ *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	filteredEndpoints := []scheduling.Endpoint{}
 
 	for _, endpoint := range endpoints {
