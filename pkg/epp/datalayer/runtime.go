@@ -148,14 +148,14 @@ func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtrac
 }
 
 func (r *Runtime) validatePolling(src fwkdl.PollingDataSource, exts []fwkdl.PollingExtractor, disallowedType string) error {
-	validator, hasValidator := src.(fwkdl.ValidatingDataSource)
+	validator, hasValidator := src.(fwkdl.Validator)
 	for _, ext := range exts {
 		if disallowedType != "" && ext.TypedName().Type == disallowedType {
 			return fmt.Errorf("disallowed Extractor %s is configured for source %s",
 				ext.TypedName(), src.TypedName())
 		}
 		if hasValidator {
-			if err := validator.ValidateExtractor(ext); err != nil {
+			if err := validator.Validate(ext); err != nil {
 				return fmt.Errorf("extractor %s failed custom validation for datasource %s: %w",
 					ext.TypedName(), src.TypedName(), err)
 			}
@@ -166,7 +166,7 @@ func (r *Runtime) validatePolling(src fwkdl.PollingDataSource, exts []fwkdl.Poll
 
 func (r *Runtime) validateNotification(src fwkdl.NotificationSource, exts []fwkdl.NotificationExtractor, disallowedType string) error {
 	srcGVK := src.GVK().String()
-	validator, hasValidator := src.(fwkdl.ValidatingDataSource)
+	validator, hasValidator := src.(fwkdl.Validator)
 	for _, ext := range exts {
 		if disallowedType != "" && ext.TypedName().Type == disallowedType {
 			return fmt.Errorf("disallowed Extractor %s is configured for source %s",
@@ -177,7 +177,7 @@ func (r *Runtime) validateNotification(src fwkdl.NotificationSource, exts []fwkd
 				ext.TypedName(), ext.GVK().String(), src.TypedName(), srcGVK)
 		}
 		if hasValidator {
-			if err := validator.ValidateExtractor(ext); err != nil {
+			if err := validator.Validate(ext); err != nil {
 				return fmt.Errorf("extractor %s failed custom validation for datasource %s: %w",
 					ext.TypedName(), src.TypedName(), err)
 			}
@@ -187,14 +187,14 @@ func (r *Runtime) validateNotification(src fwkdl.NotificationSource, exts []fwkd
 }
 
 func (r *Runtime) validateEndpoint(src fwkdl.EndpointSource, exts []fwkdl.EndpointExtractor, disallowedType string) error {
-	validator, hasValidator := src.(fwkdl.ValidatingDataSource)
+	validator, hasValidator := src.(fwkdl.Validator)
 	for _, ext := range exts {
 		if disallowedType != "" && ext.TypedName().Type == disallowedType {
 			return fmt.Errorf("disallowed Extractor %s is configured for source %s",
 				ext.TypedName(), src.TypedName())
 		}
 		if hasValidator {
-			if err := validator.ValidateExtractor(ext); err != nil {
+			if err := validator.Validate(ext); err != nil {
 				return fmt.Errorf("extractor %s failed custom validation for datasource %s: %w",
 					ext.TypedName(), src.TypedName(), err)
 			}

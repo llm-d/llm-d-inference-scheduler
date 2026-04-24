@@ -71,6 +71,9 @@ type Extractor[T any] interface {
 }
 
 // PollingExtractor is an Extractor paired with a PollingDataSource.
+//
+// TODO: parametrize PollingDataSource.Poll over T and drop the `any` here so
+// polling extractors are typed end-to-end.
 type PollingExtractor = Extractor[any]
 
 // EndpointExtractor processes endpoint lifecycle events.
@@ -83,12 +86,14 @@ type NotificationExtractor interface {
 	GVK() schema.GroupVersionKind
 }
 
-// ValidatingDataSource is an optional interface that DataSources can implement
-// to perform additional custom validation when adding extractors.
-type ValidatingDataSource interface {
-	// ValidateExtractor allows the DataSource to perform additional validation
-	// beyond the standard type compatibility checks. Return an error if validation fails.
-	ValidateExtractor(extractor plugin.Plugin) error
+// Validator is an optional interface that DataSources can implement to
+// perform additional custom validation when adding extractors.
+type Validator interface {
+	// Validate allows the DataSource to perform additional validation
+	// beyond the standard type compatibility checks. Implementations type-assert
+	// to the specific extractor variant they care about. Return an error if
+	// validation fails.
+	Validate(p plugin.Plugin) error
 }
 
 // EventType identifies the type of mutation that triggered the notification.
