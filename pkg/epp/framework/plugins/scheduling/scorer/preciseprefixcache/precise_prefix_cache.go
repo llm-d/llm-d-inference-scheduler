@@ -611,12 +611,6 @@ func (s *Scorer) ExpectedInputType() reflect.Type {
 	return fwkdl.EndpointEventReflectType
 }
 
-// Extract is the base Extractor entrypoint and is unused for endpoint
-// extractors — the Runtime calls ExtractEndpoint instead.
-func (s *Scorer) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
-	return nil
-}
-
 // ExtractEndpoint reacts to endpoint lifecycle events from the data layer's
 // endpoint-notification-source: an add/update installs a per-pod ZMQ
 // subscriber so KV-cache events flow into the index; a delete tears it down.

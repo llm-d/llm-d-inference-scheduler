@@ -133,7 +133,7 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 
 		var extractors []fwkdl.NotificationExtractor
 		if rawExts, ok := r.sourceExtractors.Load(srcName); ok {
-			raw := rawExts.([]fwkdl.Extractor)
+			raw := rawExts.([]fwkdl.ExtractorBase)
 			extractors = make([]fwkdl.NotificationExtractor, len(raw))
 			for i, e := range raw {
 				extractors[i] = e.(fwkdl.NotificationExtractor)
@@ -184,10 +184,10 @@ func (r *Runtime) NewEndpoint(ctx context.Context, endpointMetadata *fwkdl.Endpo
 		return endpoint
 	}
 
-	extractors := make(map[string][]fwkdl.Extractor, len(pollers))
+	extractors := make(map[string][]fwkdl.ExtractorBase, len(pollers))
 	r.sourceExtractors.Range(func(key, val any) bool {
 		srcName := key.(string)
-		exts := val.([]fwkdl.Extractor)
+		exts := val.([]fwkdl.ExtractorBase)
 		extractors[srcName] = exts
 		return true
 	})
@@ -246,7 +246,7 @@ func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger,
 		if !ok {
 			return true
 		}
-		for _, ext := range rawExts.([]fwkdl.Extractor) {
+		for _, ext := range rawExts.([]fwkdl.ExtractorBase) {
 			if epExt, ok := ext.(fwkdl.EndpointExtractor); ok {
 				if err := epExt.ExtractEndpoint(ctx, *processed); err != nil {
 					logger.Error(err, "endpoint extractor failed", "extractor", ext.TypedName())
@@ -260,7 +260,7 @@ func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger,
 // validates the compatibility of data source and configured extractors. This includes
 // expected Extractor type, source output and extractor input type compatibility and
 // optionally source specific validation.
-func (r *Runtime) validateSourceExtractors(src fwkdl.DataSource, extractors []fwkdl.Extractor, disallowedExtractorType string) error {
+func (r *Runtime) validateSourceExtractors(src fwkdl.DataSource, extractors []fwkdl.ExtractorBase, disallowedExtractorType string) error {
 	for _, ext := range extractors {
 		// check if disallowed extractor type
 		if disallowedExtractorType != "" && ext.TypedName().Type == disallowedExtractorType {

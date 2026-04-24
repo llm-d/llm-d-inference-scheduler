@@ -61,9 +61,6 @@ func TestScorer_EndpointExtractor_InterfaceContract(t *testing.T) {
 	assert.Equal(t, fwkdl.EndpointEventReflectType, s.ExpectedInputType(),
 		"ExpectedInputType must report EndpointEvent for data-layer compatibility checks")
 
-	// Base Extract is a documented no-op; the Runtime calls ExtractEndpoint instead.
-	require.NoError(t, s.Extract(ctx, nil, nil))
-
 	var _ fwkdl.EndpointExtractor = s
 	assert.True(t, reflect.TypeOf(s).Implements(reflect.TypeFor[fwkdl.EndpointExtractor]()))
 }
