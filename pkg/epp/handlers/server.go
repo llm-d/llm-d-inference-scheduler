@@ -500,7 +500,7 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		})
 	}
 
-	// Handle skip — send response with fallback routing to Envoy.
+	// Handle skip — send response with fallback routing to the proxy.
 	if r.RequestState == RequestSkipped {
 		if r.reqHeaderResp != nil {
 			if err := srv.Send(r.reqHeaderResp); err != nil {
