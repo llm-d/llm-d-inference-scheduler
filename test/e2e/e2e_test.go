@@ -8,7 +8,7 @@ import (
 	"github.com/onsi/gomega"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 const (

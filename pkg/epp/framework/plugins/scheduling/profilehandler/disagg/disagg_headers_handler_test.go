@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	giePlugin "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	giePlugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -143,7 +143,7 @@ func TestPreRequestNilSchedulingResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -172,7 +172,7 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 
 	// Verify it correctly handles a PD-only scheduling result
 	ctx := utils.NewTestContext(t)
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -185,8 +185,8 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
-	_, encodeSet := request.Headers[common.EncoderEndpointsHeader]
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
+	_, encodeSet := request.Headers[routing.EncoderEndpointsHeader]
 	assert.False(t, encodeSet, "encode header must not be set in PD-only scenario")
 }
 
@@ -196,7 +196,7 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		TargetModel: "test-model",
 		RequestId:   "req-123",
 		Headers:     map[string]string{},
@@ -215,14 +215,14 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 func TestPreRequestPrefillProfileNotExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		Headers: map[string]string{},
 	}
 
@@ -233,7 +233,7 @@ func TestPreRequestPrefillProfileNotExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	_, exists := request.Headers[common.PrefillEndpointHeader]
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
 	assert.False(t, exists)
 }
 
@@ -241,9 +241,9 @@ func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		Headers: map[string]string{
-			common.PrefillEndpointHeader: "old-host:9999",
+			routing.PrefillEndpointHeader: "old-host:9999",
 		},
 	}
 
@@ -260,16 +260,16 @@ func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		Headers: map[string]string{
-			common.PrefillEndpointHeader: "stale-host:9999",
+			routing.PrefillEndpointHeader: "stale-host:9999",
 		},
 	}
 
@@ -280,7 +280,7 @@ func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	val := request.Headers[common.PrefillEndpointHeader]
+	val := request.Headers[routing.PrefillEndpointHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -288,7 +288,7 @@ func TestPreRequestCustomPrefillProfile(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("my-custom-prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		Headers: map[string]string{},
 	}
 
@@ -305,7 +305,7 @@ func TestPreRequestCustomPrefillProfile(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 func TestPreRequestPrefillProfileNilResult(t *testing.T) {
@@ -314,7 +314,7 @@ func TestPreRequestPrefillProfileNilResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -329,7 +329,7 @@ func TestPreRequestPrefillProfileNilResult(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	_, exists := request.Headers[common.PrefillEndpointHeader]
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
 	assert.False(t, exists)
 }
 
@@ -337,7 +337,7 @@ func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -352,7 +352,7 @@ func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	_, exists := request.Headers[common.PrefillEndpointHeader]
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
 	assert.False(t, exists)
 }
 
@@ -360,7 +360,7 @@ func TestPreRequestPrefillIPv6Address(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		Headers: map[string]string{},
 	}
 
@@ -377,7 +377,7 @@ func TestPreRequestPrefillIPv6Address(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[common.PrefillEndpointHeader])
+	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[routing.PrefillEndpointHeader])
 }
 
 // ----- Encode tests -----
@@ -386,7 +386,7 @@ func TestPreRequestEncodeProfileExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		TargetModel: "test-model",
 		RequestId:   "req-123",
 		Headers:     map[string]string{},
@@ -405,14 +405,14 @@ func TestPreRequestEncodeProfileExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -424,7 +424,7 @@ func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	_, exists := request.Headers[common.EncoderEndpointsHeader]
+	_, exists := request.Headers[routing.EncoderEndpointsHeader]
 	assert.False(t, exists)
 }
 
@@ -432,10 +432,10 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers: map[string]string{
-			common.EncoderEndpointsHeader: "old-host:9999",
+			routing.EncoderEndpointsHeader: "old-host:9999",
 		},
 	}
 
@@ -452,17 +452,17 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers: map[string]string{
-			common.EncoderEndpointsHeader: "stale-host:9999",
+			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
 	}
 
@@ -473,7 +473,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	val := request.Headers[common.EncoderEndpointsHeader]
+	val := request.Headers[routing.EncoderEndpointsHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -481,7 +481,7 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "my-custom-encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -499,14 +499,14 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeIPv6Address(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -524,7 +524,7 @@ func TestPreRequestEncodeIPv6Address(t *testing.T) {
 
 	handler.PreRequest(ctx, request, result)
 
-	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPort), request.Headers[routing.EncoderEndpointsHeader])
 }
 
 func TestPreRequestEncodeProfileNilResult(t *testing.T) {
@@ -533,7 +533,7 @@ func TestPreRequestEncodeProfileNilResult(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -548,7 +548,7 @@ func TestPreRequestEncodeProfileNilResult(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	_, exists := request.Headers[common.EncoderEndpointsHeader]
+	_, exists := request.Headers[routing.EncoderEndpointsHeader]
 	assert.False(t, exists)
 }
 
@@ -556,10 +556,10 @@ func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers: map[string]string{
-			common.EncoderEndpointsHeader: "stale-host:9999",
+			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
 	}
 
@@ -573,7 +573,7 @@ func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, result)
 	})
-	val := request.Headers[common.EncoderEndpointsHeader]
+	val := request.Headers[routing.EncoderEndpointsHeader]
 	assert.Equal(t, "", val)
 }
 
@@ -581,7 +581,7 @@ func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-123",
 		Headers:   map[string]string{},
 	}
@@ -605,5 +605,5 @@ func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 		net.JoinHostPort(testAddr, testPort),
 		net.JoinHostPort(addr2, testPort),
 	}, ",")
-	assert.Equal(t, expected, request.Headers[common.EncoderEndpointsHeader])
+	assert.Equal(t, expected, request.Headers[routing.EncoderEndpointsHeader])
 }

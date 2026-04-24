@@ -4,7 +4,8 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	compbasemetrics "k8s.io/component-base/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/metrics"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/metrics"
 )
 
 const (

@@ -10,11 +10,11 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
@@ -78,7 +78,7 @@ func (p *HeadersHandler) WithName(name string) *HeadersHandler {
 }
 
 // PreRequest wires prefill and encode SchedulerProfile results into headers to indicate disaggregation workers.
-func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLMRequest, schedulingResult *scheduling.SchedulingResult) {
+func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
 	tracer := telemetry.Tracer()
 	_, span := tracer.Start(ctx, "llm_d.epp.prerequest.disaggregation",
 		trace.WithSpanKind(trace.SpanKindInternal),
@@ -108,7 +108,7 @@ func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLM
 	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
 
 	// Prefill header
-	delete(request.Headers, common.PrefillEndpointHeader) // clear header, if already set
+	delete(request.Headers, routing.PrefillEndpointHeader) // clear header, if already set
 	prefillProfileRunResult := schedulingResult.ProfileResults[p.prefillProfile]
 	switch {
 	case prefillProfileRunResult == nil:
@@ -124,7 +124,7 @@ func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLM
 	default:
 		targetPod := prefillProfileRunResult.TargetEndpoints[0].GetMetadata()
 		prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
-		request.Headers[common.PrefillEndpointHeader] = prefillHostPort // in the form of <ip:port>
+		request.Headers[routing.PrefillEndpointHeader] = prefillHostPort // in the form of <ip:port>
 		span.SetAttributes(
 			attribute.Bool("llm_d.epp.pd.disaggregation_used", true),
 			attribute.String("llm_d.epp.pd.prefill_pod_address", targetPod.Address),
@@ -133,7 +133,7 @@ func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLM
 	}
 
 	// Encode header
-	delete(request.Headers, common.EncoderEndpointsHeader) // clear header, if already set
+	delete(request.Headers, routing.EncoderEndpointsHeader) // clear header, if already set
 	encodeProfileRunResult := schedulingResult.ProfileResults[p.encodeProfile]
 	if encodeProfileRunResult == nil {
 		span.SetAttributes(
@@ -158,7 +158,7 @@ func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.LLM
 		return // no target endpoints, no-op in this case
 	}
 
-	request.Headers[common.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
+	request.Headers[routing.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
 	span.SetAttributes(
 		attribute.Bool("llm_d.epp.encode.disaggregation_used", true),
 		attribute.String("llm_d.epp.encode.endpoints", strings.Join(encodeHostPorts, ",")),

@@ -22,9 +22,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
 	. "github.com/onsi/gomega"    // nolint:revive
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 )
 
 var _ = Describe("NIXL Connector (v2)", func() {
@@ -62,7 +63,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(routing.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -130,7 +131,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(routing.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -195,7 +196,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(routing.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -246,7 +247,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(routing.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
@@ -340,7 +341,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ResponsesPath, strings.NewReader(body))
 		Expect(err).ToNot(HaveOccurred())
-		req.Header.Add(common.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
+		req.Header.Add(routing.PrefillEndpointHeader, testInfo.prefillBackend.URL[len("http://"):])
 
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())

@@ -22,11 +22,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 // contextKey is a custom type for context keys to avoid collisions
@@ -75,7 +76,7 @@ func (s *Server) disaggregatedPrefillHandler(apiType APIType) http.HandlerFunc {
 			openAIAPIAttr(apiType),
 		)
 
-		prefillHostPorts := r.Header.Values(common.PrefillEndpointHeader)
+		prefillHostPorts := r.Header.Values(routing.PrefillEndpointHeader)
 
 		if len(prefillHostPorts) == 1 {
 			prefillHostPorts = strings.Split(prefillHostPorts[0], ",")
@@ -123,7 +124,7 @@ func (s *Server) disaggregatedPrefillHandler(apiType APIType) http.HandlerFunc {
 			s.logger.V(4).Info("SSRF protection: prefill target allowed", "target", prefillHostPort)
 		}
 
-		encoderHostPorts := r.Header.Values(common.EncoderEndpointsHeader)
+		encoderHostPorts := r.Header.Values(routing.EncoderEndpointsHeader)
 		if len(encoderHostPorts) == 1 {
 			encoderHostPorts = strings.Split(encoderHostPorts[0], ",")
 		}
