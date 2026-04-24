@@ -152,7 +152,7 @@ const (
 	// The state machine sends an ImmediateResponse(429) to Envoy.
 	RequestEvicted StreamRequestState = 8
 	// RequestSkipped indicates the request parsing was skipped.
-	// The state machine sends a HeadersResponse with fallback routing(randomly pick an endpoint from inferencePool) to Envoy.
+	// The state machine sends a RequestHeadersResponse and RequestBodyResponse with fallback routing(randomly pick an endpoint from inferencePool) to Envoy.
 	RequestSkipped StreamRequestState = 9
 )
 
@@ -327,8 +327,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				}
 
 				if parseResult.Skip {
-					logger.Info("Skipping phases as requested by parser")
-
 					if err = s.fallbackToRandomEndpoint(ctx, reqCtx, reqCtx.RequestSize); err != nil {
 						logger.Error(err, "Error falling back to random endpoint")
 						break
