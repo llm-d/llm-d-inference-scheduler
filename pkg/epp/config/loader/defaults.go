@@ -288,16 +288,17 @@ func ensureSaturationDetector(
 	return nil
 }
 
-// ensureDataLayer guarantees that the data layer is configured unless explicitly disabled.
-// If no data section is provided, the default plugins are added.
-// If a data section is explicitly provided (even empty), it is left unchanged — an empty section
-// disables metrics collection without falling back to legacy.
+// ensureDataLayer additively injects the default metrics source and extractor unless opted out.
+// Unlike other ensureXxx functions, it checks for explicit opt-out via InjectDefaults and avoids
+// double-injection when the metrics source is already present in a user-supplied config.
 func ensureDataLayer(cfg *configapi.EndpointPickerConfig, handle fwkplugin.Handle, allPlugins map[string]fwkplugin.Plugin) error {
 	if slices.Contains(cfg.FeatureGates, datalayer.EnableLegacyMetricsFeatureGate) {
 		return nil
 	}
-
-	if cfg.DataLayer != nil {
+	if cfg.DataLayer != nil && cfg.DataLayer.InjectDefaults != nil && !*cfg.DataLayer.InjectDefaults {
+		return nil
+	}
+	if cfg.DataLayer != nil && hasSourceOfType(cfg.DataLayer, sourcemetrics.MetricsDataSourceType) {
 		return nil
 	}
 
@@ -312,16 +313,26 @@ func ensureDataLayer(cfg *configapi.EndpointPickerConfig, handle fwkplugin.Handl
 		}
 	}
 
-	cfg.DataLayer = &configapi.DataLayerConfig{
-		Sources: []configapi.DataLayerSource{{
-			PluginRef: sourcemetrics.MetricsDataSourceType,
-			Extractors: []configapi.DataLayerExtractor{{
-				PluginRef: extractormetrics.MetricsExtractorType,
-			}},
-		}},
+	if cfg.DataLayer == nil {
+		cfg.DataLayer = &configapi.DataLayerConfig{}
 	}
+	cfg.DataLayer.Sources = append(cfg.DataLayer.Sources, configapi.DataLayerSource{
+		PluginRef: sourcemetrics.MetricsDataSourceType,
+		Extractors: []configapi.DataLayerExtractor{{
+			PluginRef: extractormetrics.MetricsExtractorType,
+		}},
+	})
 
 	return nil
+}
+
+func hasSourceOfType(dl *configapi.DataLayerConfig, pluginType string) bool {
+	for _, s := range dl.Sources {
+		if s.PluginRef == pluginType {
+			return true
+		}
+	}
+	return false
 }
 
 // registerDefaultPlugin instantiates a plugin with empty configuration (defaults) and adds it to both the handle and
