@@ -56,6 +56,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/contracts"
 	fccontroller "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/controller"
 	fcregistry "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/registry"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
@@ -589,6 +590,15 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 		handle.AddPlugin(p.TypedName().Name, p)
 	}
 	r.requestControlConfig.AddPlugins(dataProducers...)
+
+	// Let plugins declare their datalayer source/extractor dependencies before Configure().
+	for _, p := range handle.GetAllPlugins() {
+		if registrant, ok := p.(fwkdl.Registrant); ok {
+			if err := registrant.RegisterDependencies(r.dlRuntime); err != nil {
+				return nil, fmt.Errorf("plugin %s RegisterDependencies: %w", p.TypedName(), err)
+			}
+		}
+	}
 
 	// Sort data plugins in DAG order (topological sort). Also check DAG for cycles.
 	// This must run after auto-created producers are added so they are included in the ordering.

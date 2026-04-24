@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
@@ -39,6 +40,9 @@ type Runtime struct {
 	notifiers        sync.Map // Map of k8s notification sources (key=source name, value=NotificationSource)
 	endpointSources  sync.Map // Map of endpoint sources (key=source name, value=EndpointSource)
 	sourceExtractors sync.Map // Map sources to extractors (key=source name. value=[]Extractor)
+
+	pendingMu            sync.Mutex
+	pendingRegistrations []fwkdl.PendingRegistration // code-registered (source-type, extractor) pairs, resolved by Configure()
 
 	collectors sync.Map    // Per-endpoint poller (key=namespaced name, value=*Collector)
 	logger     logr.Logger // Set in Configure; used where no context is available (e.g. ReleaseEndpoint).
@@ -64,7 +68,8 @@ func NewRuntime(pollingInterval time.Duration) *Runtime {
 // Configure is called to transform the configuration information into the Runtime's
 // internal fields.
 func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtractorType string, logger logr.Logger) error {
-	if cfg == nil || len(cfg.Sources) == 0 {
+	hasPending := len(r.pendingRegistrations) > 0
+	if (cfg == nil || len(cfg.Sources) == 0) && !hasPending {
 		if enableNewMetrics {
 			return errors.New("data layer enabled but no data sources configured")
 		}
@@ -72,54 +77,194 @@ func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtrac
 	}
 
 	r.logger = logger
-	logger.Info("Configuring datalayer runtime", "numSources", len(cfg.Sources))
+	numSources := 0
+	if cfg != nil {
+		numSources = len(cfg.Sources)
+	}
+	logger.Info("Configuring datalayer runtime", "numSources", numSources)
 
 	pollersCount := 0
 	notifiersCount := 0
 	endpointSourcesCount := 0
-	gvkToSource := make(map[string]string, len(cfg.Sources)) // track GVK uniqueness
+	gvkToSource := make(map[string]string) // track GVK uniqueness for NotificationSources
 
-	for _, srcCfg := range cfg.Sources {
-		src := srcCfg.Plugin
-		srcName := src.TypedName().Name
+	if cfg != nil {
+		for _, srcCfg := range cfg.Sources {
+			src := srcCfg.Plugin
+			srcName := src.TypedName().Name
 
-		logger.V(logging.DEFAULT).Info("Processing source", "source", srcName, "numExtractors", len(srcCfg.Extractors))
-		if err := r.validateSourceExtractors(src, srcCfg.Extractors, disallowedExtractorType); err != nil {
-			return err
-		}
-
-		if poller, ok := src.(fwkdl.PollingDataSource); ok { // Register to appropriate map based on type
-			r.pollers.Store(srcName, poller)
-			pollersCount++
-		} else if notifier, ok := src.(fwkdl.NotificationSource); ok {
-			gvk := notifier.GVK().String()
-			if existingSource, exists := gvkToSource[gvk]; exists {
-				return fmt.Errorf("duplicate notification source GVK %s: already used by source %s, cannot add %s",
-					gvk, existingSource, src.TypedName().String())
+			logger.V(logging.DEFAULT).Info("Processing source", "source", srcName, "numExtractors", len(srcCfg.Extractors))
+			if err := r.validateSourceExtractors(src, srcCfg.Extractors, disallowedExtractorType); err != nil {
+				return err
 			}
-			r.notifiers.Store(srcName, notifier)
-			gvkToSource[gvk] = srcName
-			notifiersCount++
-		} else if epSrc, ok := src.(fwkdl.EndpointSource); ok {
-			r.endpointSources.Store(srcName, epSrc)
-			endpointSourcesCount++
-		} else {
-			return fmt.Errorf("skipping unknown datasource plugin type %s", src.TypedName().String())
+
+			if err := r.registerSource(src, gvkToSource); err != nil {
+				return err
+			}
+			switch src.(type) {
+			case fwkdl.PollingDataSource:
+				pollersCount++
+			case fwkdl.NotificationSource:
+				notifiersCount++
+			default:
+				endpointSourcesCount++
+			}
+
+			if len(srcCfg.Extractors) > 0 { // Store extractors mapped to source
+				r.sourceExtractors.Store(srcName, srcCfg.Extractors)
+			}
+
+			extractorNames := make([]string, len(srcCfg.Extractors))
+			for i, ext := range srcCfg.Extractors {
+				extractorNames[i] = ext.TypedName().String()
+			}
+			logger.V(logging.DEFAULT).Info("Source configured", "source", srcName, "extractors", extractorNames)
+		}
+	}
+
+	// Resolve code-registered pending registrations after processing user config.
+	for _, pending := range r.pendingRegistrations {
+		var gvkFilter *schema.GroupVersionKind
+		if ns, ok := pending.DefaultSource.(fwkdl.NotificationSource); ok {
+			gvk := ns.GVK()
+			gvkFilter = &gvk
+		}
+		srcName, matchedSrc := r.findSourceByType(pending.SourceType, gvkFilter)
+
+		if matchedSrc == nil {
+			if pending.DefaultSource == nil {
+				msg := fmt.Sprintf("extractor %s requires source type %s, not configured",
+					pending.Extractor.TypedName(), pending.SourceType)
+				if pending.IfMissing == fwkdl.Warn {
+					logger.Info("datalayer: skipping unresolved dependency", "reason", msg)
+					continue
+				}
+				return errors.New(msg)
+			}
+			if regErr := r.registerSource(pending.DefaultSource, gvkToSource); regErr != nil {
+				return fmt.Errorf("auto-register default source for %s: %w",
+					pending.Extractor.TypedName(), regErr)
+			}
+			srcName = pending.DefaultSource.TypedName().Name
+			matchedSrc = pending.DefaultSource
 		}
 
-		if len(srcCfg.Extractors) > 0 { // Store extractors mapped to source
-			r.sourceExtractors.Store(srcName, srcCfg.Extractors)
+		if valErr := r.validateSourceExtractors(matchedSrc, []fwkdl.ExtractorBase{pending.Extractor}, disallowedExtractorType); valErr != nil {
+			return fmt.Errorf("code-registered extractor %s incompatible with source %s: %w",
+				pending.Extractor.TypedName(), srcName, valErr)
 		}
 
-		extractorNames := make([]string, len(srcCfg.Extractors))
-		for i, ext := range srcCfg.Extractors {
-			extractorNames[i] = ext.TypedName().String()
+		existing, _ := r.sourceExtractors.Load(srcName)
+		var exts []fwkdl.ExtractorBase
+		if existing != nil {
+			exts = existing.([]fwkdl.ExtractorBase)
 		}
-		logger.V(logging.DEFAULT).Info("Source configured", "source", srcName, "extractors", extractorNames)
+
+		// Dedup by extractor type: code registration is a no-op if already wired via config.
+		pendingType := pending.Extractor.TypedName().Type
+		alreadyWired := false
+		for _, e := range exts {
+			if e.TypedName().Type == pendingType {
+				alreadyWired = true
+				break
+			}
+		}
+		if !alreadyWired {
+			r.sourceExtractors.Store(srcName, append(exts, pending.Extractor))
+		}
 	}
 
 	logger.Info("Datalayer runtime configured", "pollers", pollersCount, "notifiers", notifiersCount, "endpointSources", endpointSourcesCount)
 	return nil
+}
+
+// Register stores a pending source/extractor dependency declared by a plugin.
+// Called by plugins implementing Registrant.RegisterDependencies() before Configure() runs.
+func (r *Runtime) Register(reg fwkdl.PendingRegistration) error {
+	if reg.Extractor == nil {
+		return fmt.Errorf("plugin %s: PendingRegistration.Extractor must not be nil", reg.Owner)
+	}
+	r.pendingMu.Lock()
+	r.pendingRegistrations = append(r.pendingRegistrations, reg)
+	r.pendingMu.Unlock()
+	return nil
+}
+
+// registerSource stores src in the appropriate typed sync.Map and enforces GVK uniqueness for NotificationSources.
+func (r *Runtime) registerSource(src fwkdl.DataSource, gvkToSource map[string]string) error {
+	srcName := src.TypedName().Name
+	if poller, ok := src.(fwkdl.PollingDataSource); ok {
+		r.pollers.Store(srcName, poller)
+	} else if notifier, ok := src.(fwkdl.NotificationSource); ok {
+		gvk := notifier.GVK().String()
+		if existingSource, exists := gvkToSource[gvk]; exists {
+			return fmt.Errorf("duplicate notification source GVK %s: already used by source %s, cannot add %s",
+				gvk, existingSource, src.TypedName().String())
+		}
+		r.notifiers.Store(srcName, notifier)
+		gvkToSource[gvk] = srcName
+	} else if epSrc, ok := src.(fwkdl.EndpointSource); ok {
+		r.endpointSources.Store(srcName, epSrc)
+	} else {
+		return fmt.Errorf("skipping unknown datasource plugin type %s", src.TypedName().String())
+	}
+	return nil
+}
+
+// findSourceByType searches pollers, notifiers, and endpointSources for a source whose TypedName.Type
+// matches sourceType. For NotificationSources, also filters by GVK if gvkFilter is non-nil.
+func (r *Runtime) findSourceByType(sourceType string, gvkFilter *schema.GroupVersionKind) (string, fwkdl.DataSource) {
+	matches := func(src fwkdl.DataSource) bool {
+		if src.TypedName().Type != sourceType {
+			return false
+		}
+		if gvkFilter != nil {
+			if ns, ok := src.(fwkdl.NotificationSource); ok {
+				if ns.GVK().String() != gvkFilter.String() {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	var foundName string
+	var foundSrc fwkdl.DataSource
+
+	r.pollers.Range(func(key, val any) bool {
+		src := val.(fwkdl.PollingDataSource)
+		if matches(src) {
+			foundName, foundSrc = key.(string), src
+			return false
+		}
+		return true
+	})
+	if foundSrc != nil {
+		return foundName, foundSrc
+	}
+
+	r.notifiers.Range(func(key, val any) bool {
+		src := val.(fwkdl.NotificationSource)
+		if matches(src) {
+			foundName, foundSrc = key.(string), src
+			return false
+		}
+		return true
+	})
+	if foundSrc != nil {
+		return foundName, foundSrc
+	}
+
+	r.endpointSources.Range(func(key, val any) bool {
+		src := val.(fwkdl.EndpointSource)
+		if matches(src) {
+			foundName, foundSrc = key.(string), src
+			return false
+		}
+		return true
+	})
+
+	return foundName, foundSrc
 }
 
 // Start is called to enable the Runtime to start processing data collection. It wires
@@ -340,3 +485,4 @@ func isEmpty(m *sync.Map) bool {
 }
 
 var _ EndpointFactory = (*Runtime)(nil)
+var _ fwkdl.Registrar = (*Runtime)(nil)
