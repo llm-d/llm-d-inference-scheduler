@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
+	latencypredictor "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/predictedlatency/latencypredictorclient"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
-	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
