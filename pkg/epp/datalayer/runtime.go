@@ -179,7 +179,9 @@ func (r *Runtime) NewEndpoint(ctx context.Context, endpointMetadata *fwkdl.Endpo
 
 	if len(pollers) == 0 {
 		logger.Info("No polling sources configured, creating endpoint without collector")
-		return fwkdl.NewEndpoint(endpointMetadata, nil)
+		endpoint := fwkdl.NewEndpoint(endpointMetadata, nil)
+		r.dispatchEndpointEvent(ctx, logger, fwkdl.EndpointEvent{Type: fwkdl.EventAddOrUpdate, Endpoint: endpoint})
+		return endpoint
 	}
 
 	extractors := make(map[string][]fwkdl.Extractor, len(pollers))
