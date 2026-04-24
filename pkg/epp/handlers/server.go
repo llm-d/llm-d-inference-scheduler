@@ -151,6 +151,9 @@ const (
 	// RequestEvicted indicates the request was evicted by flow control.
 	// The state machine sends an ImmediateResponse(429) to Envoy.
 	RequestEvicted StreamRequestState = 8
+	// RequestSkipped indicates the request parsing was skipped.
+	// The state machine sends a HeadersResponse with fallback routing(randomly pick an endpoint from inferencePool) to Envoy.
+	RequestSkipped StreamRequestState = 9
 )
 
 // recvResult holds the result of a srv.Recv() call from the reader goroutine.
@@ -316,14 +319,25 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				reqCtx.RequestSize = len(body)
 				body = []byte{}
 
-				inferenceRequestBody, parseErr := s.parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
+				parseResult, parseErr := s.parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
 					logger.Error(err, "Error parsing request")
 					break
 				}
 
-				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, inferenceRequestBody)
+				if parseResult.Skip {
+					logger.Info("Skipping phases as requested by parser")
+
+					if err = s.fallbackToRandomEndpoint(ctx, reqCtx, reqCtx.RequestSize); err != nil {
+						logger.Error(err, "Error falling back to random endpoint")
+						break
+					}
+					reqCtx.RequestState = RequestSkipped
+					break
+				}
+
+				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
 				if err != nil {
 					logger.Error(err, "Error handling request")
 					break
@@ -416,6 +430,13 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger); err != nil {
 			return err
 		}
+		if reqCtx.RequestState == RequestSkipped {
+			logger.V(logutil.DEFAULT).Info("EPP skipped the request")
+			// Gracefully close the gRPC stream to stop external processing for this request.
+			// This ensures Envoy continues with the request without calling further phases.
+			// See: https://github.com/envoyproxy/envoy/blob/0533de0acca281110945e5726bbb306fbb12bde5/api/envoy/service/ext_proc/v3/external_processor.proto#L40-L41
+			return nil
+		}
 	}
 }
 
@@ -477,6 +498,25 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 				},
 			},
 		})
+	}
+
+	// Handle skip — send response with fallback routing to Envoy.
+	if r.RequestState == RequestSkipped {
+		if r.reqHeaderResp != nil {
+			if err := srv.Send(r.reqHeaderResp); err != nil {
+				logger.Error(err, "error sending response")
+				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
+			}
+		}
+		if r.reqBodyResp != nil {
+			for _, response := range r.reqBodyResp {
+				if err := srv.Send(response); err != nil {
+					logger.Error(err, "error sending response")
+					return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
+				}
+			}
+		}
+		return nil
 	}
 
 	// No switch statement as we could send multiple responses in one pass.

@@ -790,12 +790,12 @@ func TestDirector_HandleRequest(t *testing.T) {
 					reqCtx.Request.Headers[":path"] = "/v1/chat/completions"
 				}
 
-				inferenceRequestBody, parseErr := openai.NewOpenAIParser().ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
+				parseResult, parseErr := openai.NewOpenAIParser().ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				var returnedReqCtx *handlers.RequestContext
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
 				} else {
-					returnedReqCtx, err = director.HandleRequest(ctx, reqCtx, inferenceRequestBody)
+					returnedReqCtx, err = director.HandleRequest(ctx, reqCtx, parseResult.Body)
 				}
 
 				if test.wantErrCode != "" {

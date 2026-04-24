@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metadata"
 )
 
@@ -150,4 +151,63 @@ func TestGenerateRequestHeaderResponse_MergeMetadata(t *testing.T) {
 	endpointKey, ok := endpointNamespace.GetStructValue().Fields[metadata.DestinationEndpointKey]
 	assert.True(t, ok, "Expected DestinationEndpointKey to be in DestinationEndpointNamespace")
 	assert.Equal(t, "1.2.3.4:8080", endpointKey.GetStringValue(), "Unexpected value for DestinationEndpointKey")
+}
+
+func TestFallbackToRandomEndpoint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		requestSize     int
+		wantBodyRespLen int
+	}{
+		{
+			name:            "No body",
+			requestSize:     0,
+			wantBodyRespLen: 0,
+		},
+		{
+			name:            "With body",
+			requestSize:     9,
+			wantBodyRespLen: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &StreamingServer{
+				director: &mockDirectorRequest{},
+			}
+			reqCtx := &RequestContext{
+				Request:  &Request{Headers: make(map[string]string), RawBody: []byte("test body")},
+				Response: &Response{Headers: make(map[string]string)},
+			}
+
+			err := server.fallbackToRandomEndpoint(context.Background(), reqCtx, tc.requestSize)
+			assert.NoError(t, err)
+
+			if tc.wantBodyRespLen > 0 {
+				assert.NotNil(t, reqCtx.reqBodyResp)
+				assert.Len(t, reqCtx.reqBodyResp, tc.wantBodyRespLen)
+				bodyResp := reqCtx.reqBodyResp[0].GetRequestBody().GetResponse()
+				assert.NotNil(t, bodyResp.BodyMutation)
+				streamedResp := bodyResp.BodyMutation.GetStreamedResponse()
+				assert.NotNil(t, streamedResp)
+				assert.Equal(t, []byte("test body"), streamedResp.Body)
+			} else {
+				assert.Nil(t, reqCtx.reqBodyResp)
+			}
+		})
+	}
+}
+
+type mockDirectorRequest struct {
+	Director
+}
+
+func (m *mockDirectorRequest) GetRandomEndpoint() *datalayer.EndpointMetadata {
+	return &datalayer.EndpointMetadata{
+		Address: "1.2.3.4",
+		Port:    "80",
+	}
 }

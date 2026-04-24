@@ -809,7 +809,11 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				return
 			}
 
-			if diff := cmp.Diff(tt.want, got); diff != "" {
+			if got.Skip != false {
+				t.Errorf("ParseRequest() got.Skip = %v, want false", got.Skip)
+			}
+
+			if diff := cmp.Diff(tt.want, got.Body); diff != "" {
 				t.Errorf("ParseRequest() mismatch (-want +got):\n%s", diff)
 			}
 		})
