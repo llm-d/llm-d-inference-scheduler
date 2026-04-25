@@ -20,6 +20,7 @@ spec:
         - "--enable-kvcache=${KV_CACHE_ENABLED}"
         - "--kv-cache-size=1024"
         - "--block-size=16"
+        - "--zmq-endpoint=tcp://${EPP_NAME}.${NAMESPACE}.svc.cluster.local:5557"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
         - name: http
