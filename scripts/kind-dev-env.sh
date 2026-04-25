@@ -295,9 +295,17 @@ for IMAGE in "${VLLM_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_
         "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}"
     fi
     echo "Loading ${IMAGE} into kind cluster..."
-    # Use save|pipe for both runtimes: avoids KIND's --all-platforms flag which
-    # fails when only the target architecture layers are available locally.
-    "${CONTAINER_RUNTIME}" save ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+    if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
+        # KIND's `kind load` uses `ctr import --all-platforms` internally, which
+        # fails when only the target architecture's layers are locally cached
+        # (e.g. after `docker pull --platform linux/amd64` of a multi-arch image).
+        # Bypass this by piping directly to `ctr import` without --all-platforms.
+        docker save "${IMAGE}" | \
+            docker exec --privileged -i "${CLUSTER_NAME}-control-plane" \
+            ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
+    else
+        "${CONTAINER_RUNTIME}" save ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+    fi
 done
 
 # ------------------------------------------------------------------------------
