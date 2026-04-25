@@ -7,11 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	fcmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol/mocks"
-	requestcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	scheduling "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	fcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	scheduling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // --- Factory tests ---
@@ -143,7 +143,7 @@ func TestPick_RecordsEnqueueTime(t *testing.T) {
 func TestPrepareRequestData_UpdatesMetrics(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-1",
 		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
 	}
@@ -165,7 +165,7 @@ func TestPrepareRequestData_UpdatesMetrics(t *testing.T) {
 func TestPrepareRequestData_NoFairnessHeader(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-1",
 		Headers:   map[string]string{},
 	}
@@ -191,7 +191,7 @@ func TestPreRequest_RecordsWaitTime(t *testing.T) {
 	p.requestTimestamps.Store("req-1", time.Now().Add(-50*time.Millisecond))
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-1",
 		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
 	}
@@ -211,7 +211,7 @@ func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
 	p.requestTimestamps.Store("req-1", time.Now().Add(-100*time.Millisecond))
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-1",
 		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
 	}
@@ -241,7 +241,7 @@ func TestResponseComplete_NoFairnessHeader_StillCleansTimestamp(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 	p.requestTimestamps.Store("req-1", time.Now())
 
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-1",
 		Headers:   map[string]string{},
 	}
@@ -278,7 +278,7 @@ func TestFullLifecycle(t *testing.T) {
 	p := &ProgramAwarePlugin{name: "test"}
 
 	programID := "prog-integration"
-	request := &scheduling.LLMRequest{
+	request := &scheduling.InferenceRequest{
 		RequestId: "req-lifecycle",
 		Headers:   map[string]string{fairnessIDHeader: programID},
 	}

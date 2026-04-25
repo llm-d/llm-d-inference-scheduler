@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	requestcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 
 	// defaultFairnessID is the flow key assigned by the upstream framework when
 	// no x-gateway-inference-fairness-id header is present on the request.
-	// Matches the constant in sigs.k8s.io/gateway-api-inference-extension/pkg/epp/handlers/request.go.
+	// Matches the constant in github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers/request.go.
 	defaultFairnessID = "default-flow"
 )
 
@@ -99,9 +99,9 @@ type Config struct {
 // Compile-time interface assertions.
 var (
 	_ flowcontrol.FairnessPolicy       = &ProgramAwarePlugin{}
-	_ requestcontrol.PrepareDataPlugin = &ProgramAwarePlugin{}
+	_ requestcontrol.DataProducer = &ProgramAwarePlugin{}
 	_ requestcontrol.PreRequest        = &ProgramAwarePlugin{}
-	_ requestcontrol.ResponseBody      = &ProgramAwarePlugin{}
+	_ requestcontrol.ResponseBodyProcessor      = &ProgramAwarePlugin{}
 )
 
 // ProgramAwarePluginFactory creates a new ProgramAwarePlugin from JSON config.
@@ -153,6 +153,10 @@ func (p *ProgramAwarePlugin) TypedName() plugin.TypedName {
 		Name: p.name,
 	}
 }
+
+func (p *ProgramAwarePlugin) Produces() map[string]any { return nil }
+
+func (p *ProgramAwarePlugin) Consumes() map[string]any { return nil }
 
 // getStrategy returns the configured strategy, falling back to LAS for zero-value
 // plugin instances constructed directly in tests.

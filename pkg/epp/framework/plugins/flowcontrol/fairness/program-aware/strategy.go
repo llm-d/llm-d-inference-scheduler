@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	requestcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	scheduling "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	scheduling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // ScoringStrategy determines how program queues are prioritized for dispatch.
@@ -25,10 +25,10 @@ type ScoringStrategy interface {
 	Pick(bandPriority int, queues map[string]QueueInfo) (selected flowcontrol.FlowQueueAccessor, scores map[string]float64)
 
 	// OnPreRequest is called before each request dispatch to reset per-cycle state.
-	OnPreRequest(metrics *ProgramMetrics, request *scheduling.LLMRequest)
+	OnPreRequest(metrics *ProgramMetrics, request *scheduling.InferenceRequest)
 
 	// OnCompleted is called when a response finishes with actual token usage.
-	OnCompleted(metrics *ProgramMetrics, request *scheduling.LLMRequest, response *requestcontrol.Response)
+	OnCompleted(metrics *ProgramMetrics, request *scheduling.InferenceRequest, response *requestcontrol.Response)
 }
 
 // QueueInfo bundles read-only data for each queue passed to Pick.
@@ -237,12 +237,12 @@ func (s *DRRStrategy) Pick(bandPriority int, queues map[string]QueueInfo) (flowc
 }
 
 // OnPreRequest resets the quantum flag for the dispatched band.
-func (s *DRRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.LLMRequest) {
+func (s *DRRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.InferenceRequest) {
 	s.addQuantum.Store(request.Objectives.Priority, true)
 }
 
 // OnCompleted deducts actual token usage from the deficit counter.
-func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequest, response *requestcontrol.Response) {
+func (s *DRRStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.InferenceRequest, response *requestcontrol.Response) {
 	if metrics == nil || response == nil {
 		return
 	}
@@ -372,10 +372,10 @@ func (s *LASStrategy) Pick(_ int, queues map[string]QueueInfo) (flowcontrol.Flow
 }
 
 // OnPreRequest is a no-op for LAS.
-func (s *LASStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.LLMRequest) {}
+func (s *LASStrategy) OnPreRequest(_ *ProgramMetrics, _ *scheduling.InferenceRequest) {}
 
 // OnCompleted accumulates the weighted token cost into the program's attained service.
-func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.LLMRequest, response *requestcontrol.Response) {
+func (s *LASStrategy) OnCompleted(metrics *ProgramMetrics, _ *scheduling.InferenceRequest, response *requestcontrol.Response) {
 	if metrics == nil || response == nil {
 		return
 	}
@@ -465,7 +465,7 @@ func (s *RRStrategy) Pick(bandPriority int, queues map[string]QueueInfo) (flowco
 }
 
 // OnPreRequest resets the moveCursor flag for the dispatched band.
-func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.LLMRequest) {
+func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.InferenceRequest) {
 	if !s.deferCursor {
 		return
 	}
@@ -473,5 +473,5 @@ func (s *RRStrategy) OnPreRequest(_ *ProgramMetrics, request *scheduling.LLMRequ
 }
 
 // OnCompleted is a no-op for round-robin (no token tracking needed).
-func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _ *scheduling.LLMRequest, _ *requestcontrol.Response) {
+func (s *RRStrategy) OnCompleted(_ *ProgramMetrics, _ *scheduling.InferenceRequest, _ *requestcontrol.Response) {
 }

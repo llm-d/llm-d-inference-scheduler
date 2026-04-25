@@ -5,13 +5,13 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
-	requestcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	scheduling "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	scheduling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
-// --- PrepareDataPlugin interface ---
+// --- DataProducer interface ---
 
 // Produces declares what data this plugin produces. No endpoint attributes are produced.
 func (p *ProgramAwarePlugin) Produces() map[string]any {
@@ -27,7 +27,7 @@ func (p *ProgramAwarePlugin) Consumes() map[string]any {
 // the program's total request count. The enqueue timestamp for wait time calculation
 // is recorded by Pick() (in flow control), not here, since PrepareData runs after
 // the request has already left the flow control queue.
-func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *scheduling.LLMRequest, _ []scheduling.Endpoint) error {
+func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *scheduling.InferenceRequest, _ []scheduling.Endpoint) error {
 	programID := request.Headers[fairnessIDHeader]
 	if programID == "" {
 		programID = defaultFairnessID
@@ -49,7 +49,7 @@ func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *sc
 // PreRequest is called after scheduling and before the request is sent to the model server.
 // It calculates the wait time (enqueue → now) and updates the program's EWMA.
 // The enqueue timestamp was recorded by Pick() during flow control dispatch.
-func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling.LLMRequest, _ *scheduling.SchedulingResult) {
+func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, _ *scheduling.SchedulingResult) {
 	programID := request.Headers[fairnessIDHeader]
 	if programID == "" {
 		programID = defaultFairnessID
@@ -77,7 +77,7 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 // --- ResponseComplete interface ---
 
 // ResponseBody records token usage and cleans up per-request state.
-func (p *ProgramAwarePlugin) ResponseBody(ctx context.Context, request *scheduling.LLMRequest, response *requestcontrol.Response, _ *datalayer.EndpointMetadata) {
+func (p *ProgramAwarePlugin) ResponseBody(ctx context.Context, request *scheduling.InferenceRequest, response *requestcontrol.Response, _ *datalayer.EndpointMetadata) {
 	if request == nil {
 		return
 	}

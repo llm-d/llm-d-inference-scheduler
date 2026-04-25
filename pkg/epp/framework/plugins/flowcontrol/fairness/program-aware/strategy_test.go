@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol"
-	fcmocks "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/flowcontrol/mocks"
-	requestcontrol "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
-	scheduling "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	fcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	scheduling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // testDRR returns a DRRStrategy with default weights for tests.
@@ -22,9 +22,9 @@ func testDRR() *DRRStrategy {
 	}
 }
 
-// testRequest returns an LLMRequest for OnPreRequest tests.
-func testRequest() *scheduling.LLMRequest {
-	return &scheduling.LLMRequest{}
+// testRequest returns an InferenceRequest for OnPreRequest tests.
+func testRequest() *scheduling.InferenceRequest {
+	return &scheduling.InferenceRequest{}
 }
 
 func TestNewStrategy_Valid(t *testing.T) {

@@ -26,7 +26,7 @@ Incoming Request
        |             Evaluates program-level metrics to decide which
        |             program's queue to service next
        v
-  PrepareData ──── PrepareDataPlugin.PrepareRequestData()
+  PrepareData ──── DataProducer.PrepareRequestData()
        |             Associates request with its program, updates counters
        v
   Scheduling ───── (queue-scorer + max-score-picker select the best endpoint)
