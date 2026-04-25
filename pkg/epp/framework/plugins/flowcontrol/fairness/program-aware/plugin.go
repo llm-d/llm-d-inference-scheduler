@@ -154,10 +154,6 @@ func (p *ProgramAwarePlugin) TypedName() plugin.TypedName {
 	}
 }
 
-func (p *ProgramAwarePlugin) Produces() map[string]any { return nil }
-
-func (p *ProgramAwarePlugin) Consumes() map[string]any { return nil }
-
 // getStrategy returns the configured strategy, falling back to LAS for zero-value
 // plugin instances constructed directly in tests.
 func (p *ProgramAwarePlugin) getStrategy() ScoringStrategy {
