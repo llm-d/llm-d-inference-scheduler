@@ -294,7 +294,7 @@ For technical details, refer to [docs/disaggregation.md](docs/disaggregation.md)
 
 #### 1. EPD — No Disaggregation (default)
 
-Single decode deployment. No separate encoder or prefill pods:
+Unified deployment handling all stages (encode, prefill, decode) in a single pod. No separate encoder or prefill pods:
 
 ```bash
 make env-dev-kind
@@ -371,15 +371,24 @@ DISAGG_E=true DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 KV_CACHE_ENABLED=true make
 
 ### Simulator vs Real vLLM
 
-The deployment components are split into a clean base and two Kustomize overlays:
+The `deploy/components/` directory contains all reusable Kustomize components:
 
-- **Base components** (`deploy/components/vllm-{encode,prefill,decode}/`) — contain only
-  the vLLM container, routing sidecar (decode), ports, probes, and env vars. No
-  simulator-specific or production-specific configuration.
-- **Simulator overlay** (`deploy/components/overlays/simulator/`) — adds `--mode=echo`,
-  UDS tokenizer sidecar, and KV cache args. Included by default in all dev scenario overlays.
-- **Real vLLM overlay** (`deploy/components/overlays/real-vllm/`) — adds
-  `--ec-transfer-config` for encoder embeddings and a shared PVC for the encode cache.
+**vLLM workload components** — the base pods, split into three atomic building blocks:
+- `vllm-encode/` — Encoder pod (multimodal, `--mm-encoder-only`)
+- `vllm-prefill/` — Prefill pod
+- `vllm-decode/` — Decode pod with routing sidecar
+
+**Deployment overlays** — applied on top of the base components:
+- `overlays/simulator/` — adds `--mode=${VLLM_SIM_MODE}`, UDS tokenizer sidecar, KV cache args, and `--zmq-endpoint` on Decode. Included by default in all dev scenario overlays.
+- `overlays/real-vllm/` — adds `--kv-events-config` on Decode, `--ec-transfer-config` on Encode, and a shared PVC for encoder embeddings.
+
+**Infrastructure components** — shared cluster infrastructure:
+- `inference-gateway/` — Endpoint Picker (EPP) deployment, services, RBAC, InferencePool, Gateway, and HTTPRoute
+- `istio-control-plane/` — Istiod control plane (namespaces, configmaps, RBAC, webhooks)
+- `monitoring/` — Prometheus ServiceMonitors for EPP and vLLM metrics
+- `crds-gateway-api/` — Gateway API CRDs
+- `crds-gie/` — Gateway API Inference Extension CRDs
+- `crds-istio/` — Istio CRDs
 
 #### Deploying with Simulator (default)
 
@@ -405,8 +414,10 @@ DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
 
 #### Deploying with Real vLLM
 
-To deploy with a real vLLM image, create a custom overlay that replaces the simulator
-component with the real-vllm component. For example, to deploy P/D with real vLLM:
+The `deploy/components/overlays/real-vllm/` component is ready to use. It provides
+all the real vLLM-specific configuration (KV events, EC transfer, shared PVC). To use
+it, create a scenario overlay that includes it instead of the simulator overlay.
+For example, to deploy P/D with real vLLM:
 
 ```yaml
 # deploy/environments/prod/p-d/kustomization.yaml
@@ -421,7 +432,7 @@ patches:
 - path: ../../dev/p-d/patch-decode.yaml    # reuse scenario patches
 
 components:
-- ../../../components/overlays/real-vllm/  # instead of simulator
+- ../../../components/overlays/real-vllm/  # real vLLM instead of simulator
 ```
 
 Then deploy with:
@@ -432,9 +443,10 @@ VLLM_IMAGE=vllm/vllm-openai:v0.16.0 \
   | envsubst | kubectl apply -f -
 ```
 
-For encode disaggregation scenarios (E/PD, E/P/D), the real-vllm overlay automatically
-adds `--ec-transfer-config` (producer role) to the encode deployment and creates a shared
-PVC (`ec-cache-pvc`) for encoder embeddings transfer.
+For encode disaggregation scenarios (E/PD, E/P/D), the `real-vllm` overlay automatically
+adds `--kv-events-config` to the Decode deployment (per-pod ZMQ publisher for KV cache
+events), `--ec-transfer-config` (producer role) to the Encode deployment, and creates
+a shared PVC (`ec-cache-pvc`) for encoder embeddings transfer.
 
 #### Deployment Component Summary
 
