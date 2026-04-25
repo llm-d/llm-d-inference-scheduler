@@ -10,6 +10,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	fcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	requesthandling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	scheduling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
@@ -146,7 +147,7 @@ func TestDRRStrategy_OnCompleted_DeductsTokens(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddDeficit(defaultDRRQuantumTokens) // one round of quantum
 
-	resp := &requestcontrol.Response{Usage: requestcontrol.Usage{PromptTokens: 700, CompletionTokens: 300}}
+	resp := &requestcontrol.Response{Usage: requesthandling.Usage{PromptTokens: 700, CompletionTokens: 300}}
 	s.OnCompleted(m, nil, resp) // weighted cost: 700*1 + 300*2 = 1300
 	assert.Equal(t, int64(-300), m.Deficit(), "weighted 1300-token cost against 1000 quantum")
 }
@@ -156,7 +157,7 @@ func TestDRRStrategy_OnCompleted_GoesNegativeOnOveruse(t *testing.T) {
 	m := &ProgramMetrics{}
 	m.AddDeficit(defaultDRRQuantumTokens) // 1000 tokens
 
-	resp := &requestcontrol.Response{Usage: requestcontrol.Usage{PromptTokens: 1500, CompletionTokens: 500}}
+	resp := &requestcontrol.Response{Usage: requesthandling.Usage{PromptTokens: 1500, CompletionTokens: 500}}
 	s.OnCompleted(m, nil, resp) // weighted cost: 1500*1 + 500*2 = 2500
 	assert.Equal(t, int64(-1500), m.Deficit(), "deficit should be negative after overuse")
 }
@@ -432,7 +433,7 @@ func TestLASStrategy_OnCompleted_AddsService(t *testing.T) {
 	m := &ProgramMetrics{}
 
 	// 100 input + 50 output → weighted: 100*1 + 50*2 = 200
-	resp := &requestcontrol.Response{Usage: requestcontrol.Usage{PromptTokens: 100, CompletionTokens: 50}}
+	resp := &requestcontrol.Response{Usage: requesthandling.Usage{PromptTokens: 100, CompletionTokens: 50}}
 	s.OnCompleted(m, nil, resp)
 	assert.InDelta(t, 200.0, m.AttainedService(), 0.01,
 		"OnCompleted should add weighted token cost to attained service")

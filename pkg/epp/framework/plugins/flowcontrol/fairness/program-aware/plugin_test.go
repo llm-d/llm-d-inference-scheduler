@@ -11,6 +11,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	fcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	requesthandling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	scheduling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
@@ -216,7 +217,7 @@ func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
 		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
 	}
 	response := &requestcontrol.Response{
-		Usage: requestcontrol.Usage{
+		Usage: requesthandling.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 50,
 		},
@@ -306,7 +307,7 @@ func TestFullLifecycle(t *testing.T) {
 
 	// 3. ResponseComplete
 	response := &requestcontrol.Response{Headers: map[string]string{}}
-	response.Usage = requestcontrol.Usage{PromptTokens: 42, CompletionTokens: 17}
+	response.Usage = requesthandling.Usage{PromptTokens: 42, CompletionTokens: 17}
 	p.ResponseBody(context.Background(), request, response, &datalayer.EndpointMetadata{})
 	assert.Equal(t, int64(42), metrics.TotalInputTokens())
 	assert.Equal(t, int64(17), metrics.TotalOutputTokens())
