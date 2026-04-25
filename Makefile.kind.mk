@@ -12,10 +12,6 @@ env-dev-kind: image-build image-pull ## Run under kind ($(KIND_CLUSTER_NAME))
 		CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 		GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 		IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-		EPP_IMAGE=$(EPP_IMAGE) \
-		VLLM_IMAGE=${VLLM_IMAGE} \
-		SIDECAR_IMAGE=$(SIDECAR_IMAGE) \
-		UDS_TOKENIZER_IMAGE=$(UDS_TOKENIZER_IMAGE) \
 		./scripts/kind-dev-env.sh; \
 	fi
 
