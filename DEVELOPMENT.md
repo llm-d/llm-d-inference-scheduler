@@ -90,20 +90,37 @@ kubectl --context kind-llm-d-inference-scheduler-dev \
   port-forward service/inference-gateway-istio 8080:80
 ```
 
-The simulator runs with a model named `TinyLlama/TinyLlama-1.1B-Chat-v1.0`.
+The default model depends on the disaggregation scenario:
+- **EPD / P/D / DP** (no encoder): `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
+- **E/PD / E/P/D** (with encoder, `DISAGG_E=true`): `Qwen/Qwen3-VL-2B-Instruct`
+
 To confirm what model is available:
 
 ```bash
 curl -s http://localhost:8080/v1/models | jq
 ```
 
-Make a request:
+Make a text completion request:
 
 ```bash
 curl -s -w '\n' http://localhost:8080/v1/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
+
+For multimodal scenarios (`DISAGG_E=true`), send an image request:
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [{"role":"user","content":[
+      {"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"}},
+      {"type":"text","text":"What is in this image?"}
+    ]}],
+    "max_tokens": 50
+  }' | jq
 
 <details>
 <summary>Alternative access methods (NodePort, LoadBalancer)</summary>
@@ -300,6 +317,13 @@ Unified deployment handling all stages (encode, prefill, decode) in a single pod
 make env-dev-kind
 ```
 
+Verify:
+```bash
+curl -s http://localhost:30080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10}' | jq
+```
+
 #### 2. Prefill/Decode (P/D) Disaggregation
 
 Separate Prefill and Decode pods:
@@ -310,23 +334,58 @@ DISAGG_P=true make env-dev-kind
 
 > **Note:** The legacy `PD_ENABLED=true` is deprecated. Use `DISAGG_P=true` instead.
 
+Verify:
+```bash
+curl -s http://localhost:30080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10}' | jq
+```
+
 #### 3. Encode/Prefill-Decode (E/PD) Disaggregation
 
-Separate Encoder pods; Prefill and Decode combined:
+Separate Encoder pods; Prefill and Decode combined. Defaults to `Qwen/Qwen3-VL-2B-Instruct` for multimodal support:
 
 ```bash
 DISAGG_E=true make env-dev-kind
 ```
 
+Verify with an image request:
+```bash
+curl -s http://localhost:30080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [{"role":"user","content":[
+      {"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"}},
+      {"type":"text","text":"What is in this image?"}
+    ]}],
+    "max_tokens": 50
+  }' | jq
+```
+
 #### 4. Encode/Prefill/Decode (E/P/D) Disaggregation
 
-Fully disaggregated — separate Encoder, Prefill, and Decode pods:
+Fully disaggregated — separate Encoder, Prefill, and Decode pods. Defaults to `Qwen/Qwen3-VL-2B-Instruct`:
 
 ```bash
 DISAGG_E=true DISAGG_P=true make env-dev-kind
 ```
 
 > **Note:** The legacy `EPD_ENABLED=true` is deprecated. Use `DISAGG_E=true DISAGG_P=true` instead.
+
+Verify with an image request:
+```bash
+curl -s http://localhost:30080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [{"role":"user","content":[
+      {"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"}},
+      {"type":"text","text":"What is in this image?"}
+    ]}],
+    "max_tokens": 50
+  }' | jq
+```
 
 #### 5. Disaggregated Setup Verification
 

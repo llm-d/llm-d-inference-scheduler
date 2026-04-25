@@ -36,8 +36,11 @@ export EPP_TAG="${EPP_TAG:-dev}"
 EPP_IMAGE="${EPP_IMAGE:-${IMAGE_REGISTRY}/llm-d-inference-scheduler:${EPP_TAG}}"
 export EPP_IMAGE
 
-# Set the model name to deploy (EPD defaults to a multimodal model)
-if [ "${EPD_ENABLED}" == "true" ]; then
+# Set the model name to deploy.
+# When Encode disaggregation is enabled (multimodal pipeline), default to a
+# multimodal model. Otherwise use the standard text-only model.
+# Note: DISAGG_E/DISAGG_P are set later in this script, so read the raw env vars here.
+if [ "${DISAGG_E:-false}" == "true" ] || [ "${EPD_ENABLED:-false}" == "true" ] || [ "${EPD_ENABLED:-false}" == "\"true\"" ]; then
   export MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-VL-2B-Instruct}"
 else
   export MODEL_NAME="${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}"
@@ -291,8 +294,9 @@ for IMAGE in "${VLLM_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_
     # exist in the remote registry.
     # For Podman: only pull if not present locally.
     if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
-        "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}" || \
-            echo "Pull failed (image may be local-only), using cached version..."
+        # Suppress stderr for locally-built :dev images that don't exist in the registry.
+        "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}" 2>/dev/null || \
+            echo "Note: ${IMAGE} not found in registry, using local build."
     elif ! "${CONTAINER_RUNTIME}" image inspect "${IMAGE}" > /dev/null 2>&1; then
         echo "Image ${IMAGE} not found locally, pulling..."
         "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}"
