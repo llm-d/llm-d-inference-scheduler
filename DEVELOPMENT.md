@@ -442,8 +442,7 @@ PVC (`ec-cache-pvc`) for encoder embeddings transfer.
 
 | Variable | Default | Description |
 |---|---|---|
-| `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image — simulator or real (e.g., `vllm/vllm-openai:v0.16.0`) |
-| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image, used as the default for `VLLM_IMAGE` |
+| `VLLM_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM container image to deploy. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`). Defaults to the simulator image. |
 | `VLLM_SIM_MODE` | `echo` | Simulator response mode. `echo` returns the input prompt as the response (useful for routing validation). `random` returns random sentences from a pre-defined bank. Only applies when using the simulator overlay. |
 
 ### Cleanup
@@ -534,8 +533,7 @@ kubectl --context kind-e2e-tests get pods
 | `DISAGG_E` | `false` | Deploy a separate Encoder pod. See [Inference Disaggregation Modes](#inference-disaggregation-modes) |
 | `DISAGG_P` | `false` | Deploy a separate Prefill pod. See [Inference Disaggregation Modes](#inference-disaggregation-modes) |
 | `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per vLLM pod. Applies to all pod types. Set to `2`+ to enable multi-rank inference. See [Combining Scenarios with Data Parallel and KV Cache](#combining-scenarios-with-data-parallel-and-kv-cache) |
-| `VLLM_IMAGE` | `${VLLM_SIMULATOR_IMAGE}` | vLLM container image used in deployment templates. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
-| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | Simulator image. Used as the default for `VLLM_IMAGE` and loaded into the Kind cluster |
+| `VLLM_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM container image to deploy. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
 | `VLLM_SIM_MODE` | `echo` | Simulator response mode. Supported values: `echo` (returns the input prompt as the response), `random` (returns a random sentence from a pre-defined bank) |
 | `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
 | `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
