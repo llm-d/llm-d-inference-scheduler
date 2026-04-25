@@ -2,6 +2,8 @@
 # Real vLLM Overlay
 #
 # Adds real vLLM-specific configuration:
+#   - KV cache event publishing on Decode (per-pod ZMQ publisher on localhost:5557)
+#     EPP subscribes to each pod individually using the topic kv@<POD_IP>@<MODEL_NAME>
 #   - EC transfer config for encode/decode disaggregation (producer on encode,
 #     consumer on prefill/decode)
 #   - Shared PVC for encoder embeddings cache
@@ -19,6 +21,20 @@ resources:
 - pvc.yaml
 
 patches:
+# --- Decode deployment (vllm-d): KV cache event publisher ---
+# vLLM publishes KV cache events to a per-pod ZMQ socket. The EPP subscribes
+# to each pod individually using the topic kv@<POD_IP>@<MODEL_NAME>.
+- target:
+    kind: Deployment
+    name: vllm-d
+  patch: |
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: "--kv-events-config"
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://localhost:5557","topic":"kv@${POD_IP}@${MODEL_NAME}"}'
+
 # --- Encode deployment (vllm-e): EC producer ---
 - target:
     kind: Deployment

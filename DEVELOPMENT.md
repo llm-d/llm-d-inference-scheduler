@@ -440,8 +440,8 @@ PVC (`ec-cache-pvc`) for encoder embeddings transfer.
 
 | Component | What it adds | When to use |
 |---|---|---|
-| `overlays/simulator/` | `--mode=${VLLM_SIM_MODE}`, UDS tokenizer, KV cache args | Dev/test with simulator image |
-| `overlays/real-vllm/` | `--ec-transfer-config`, ec-cache PVC | Production with real vLLM image |
+| `overlays/simulator/` | `--mode=${VLLM_SIM_MODE}`, UDS tokenizer, KV cache args, `--zmq-endpoint` on Decode | Dev/test with simulator image |
+| `overlays/real-vllm/` | `--kv-events-config` on Decode (per-pod ZMQ publisher), `--ec-transfer-config` on Encode, ec-cache PVC | Production with real vLLM image |
 
 | Variable | Default | Description |
 |---|---|---|
