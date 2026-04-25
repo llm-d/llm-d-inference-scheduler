@@ -281,17 +281,23 @@ elif [ "${CONTAINER_RUNTIME}" == "podman" ]; then
 fi
 
 for IMAGE in "${VLLM_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_IMAGE}"; do
-    if ! "${CONTAINER_RUNTIME}" image inspect "${IMAGE}" > /dev/null 2>&1; then
+    # For Docker: always pull with --platform to ensure the correct architecture
+    # layers are in the local cache. A manifest-only local entry (from a previous
+    # pull without --platform) causes KIND to fail with "content digest not found".
+    # Failures are ignored for locally-built images (e.g. :dev tags) that don't
+    # exist in the remote registry.
+    # For Podman: only pull if not present locally.
+    if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
+        "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}" || \
+            echo "Pull failed (image may be local-only), using cached version..."
+    elif ! "${CONTAINER_RUNTIME}" image inspect "${IMAGE}" > /dev/null 2>&1; then
         echo "Image ${IMAGE} not found locally, pulling..."
         "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}"
     fi
     echo "Loading ${IMAGE} into kind cluster..."
-    if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
-        # kind load docker-image handles multi-arch manifests correctly for Docker
-        kind --name "${CLUSTER_NAME}" load docker-image "${IMAGE}"
-    else
-        "${CONTAINER_RUNTIME}" save ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
-    fi
+    # Use save|pipe for both runtimes: avoids KIND's --all-platforms flag which
+    # fails when only the target architecture layers are available locally.
+    "${CONTAINER_RUNTIME}" save ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
 done
 
 # ------------------------------------------------------------------------------
