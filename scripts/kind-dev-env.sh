@@ -286,7 +286,12 @@ for IMAGE in "${VLLM_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_
         "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}"
     fi
     echo "Loading ${IMAGE} into kind cluster..."
-    "${CONTAINER_RUNTIME}" save ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+    if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
+        # kind load docker-image handles multi-arch manifests correctly for Docker
+        kind --name "${CLUSTER_NAME}" load docker-image "${IMAGE}"
+    else
+        "${CONTAINER_RUNTIME}" save ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+    fi
 done
 
 # ------------------------------------------------------------------------------
