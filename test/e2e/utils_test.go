@@ -146,6 +146,24 @@ func runKustomize(kustomizeDir string) []string {
 	return strings.Split(string(session.Out.Contents()), "\n---")
 }
 
+// removeEmptyArgs strips YAML list items that are empty strings after variable
+// substitution (e.g. '- ""' produced when VLLM_EXTRA_ARGS_* is unset).
+func removeEmptyArgs(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		lines := strings.Split(input, "\n")
+		filtered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			if strings.TrimSpace(line) == `- ""` {
+				continue
+			}
+			filtered = append(filtered, line)
+		}
+		outputs[idx] = strings.Join(filtered, "\n")
+	}
+	return outputs
+}
+
 // removeEmptyLabels strips YAML lines like "llm-d.ai/role: " where the value
 // is empty after variable substitution. Kubernetes accepts empty-value labels,
 // but the test pod-selector logic treats the key's presence as meaningful.

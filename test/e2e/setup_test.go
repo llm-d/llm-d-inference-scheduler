@@ -30,6 +30,9 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${EPP_NAME}":                "e2e-epp",
 		"${NAMESPACE}":               nsName,
 		"${HF_TOKEN}":                "",
+		"${VLLM_EXTRA_ARGS_E}":       "",
+		"${VLLM_EXTRA_ARGS_P}":       "",
+		"${VLLM_EXTRA_ARGS_D}":       "",
 	}
 	for k, v := range extra {
 		subs[k] = v
@@ -38,6 +41,7 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 	manifests = substituteMany(manifests, subs)
 	// Remove labels with empty values (produced when ${DECODE_ROLE} is empty)
 	manifests = removeEmptyLabels(manifests)
+	manifests = removeEmptyArgs(manifests)
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
 	return objects

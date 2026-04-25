@@ -66,6 +66,7 @@ spec:
         - "--port=8200"
         - "--model=${MODEL_NAME}"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "${VLLM_EXTRA_ARGS_D}"
         ports:
         - name: http
           containerPort: 8200

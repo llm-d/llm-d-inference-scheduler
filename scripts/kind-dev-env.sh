@@ -127,6 +127,12 @@ export METRICS_ENDPOINT_AUTH="${METRICS_ENDPOINT_AUTH:-false}"
 # HuggingFace token for model downloads (empty for simulator)
 export HF_TOKEN="${HF_TOKEN:-}"
 
+# Extra vLLM args per pod type (empty by default). Use --flag=value format.
+# Example: VLLM_EXTRA_ARGS_D="--tensor-parallel-size=2"
+export VLLM_EXTRA_ARGS_E="${VLLM_EXTRA_ARGS_E:-}"
+export VLLM_EXTRA_ARGS_P="${VLLM_EXTRA_ARGS_P:-}"
+export VLLM_EXTRA_ARGS_D="${VLLM_EXTRA_ARGS_D:-}"
+
 # Connector types — derived from DISAGG_E and DISAGG_P
 # KV connector: needed when P is disaggregated (P/D or E/P/D)
 if [ "${DISAGG_P}" == "true" ]; then
@@ -331,7 +337,9 @@ kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} ${VLLM_IMAGE} \
   ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} ${NAMESPACE} \
   ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
-  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_SIM_MODE} ${DECODE_ROLE}' \
+  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_SIM_MODE} ${DECODE_ROLE} \
+  ${VLLM_EXTRA_ARGS_E} ${VLLM_EXTRA_ARGS_P} ${VLLM_EXTRA_ARGS_D}' \
+  | sed '/^        - ""$/d' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------

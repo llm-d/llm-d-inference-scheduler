@@ -25,6 +25,7 @@ spec:
         - "--model=${MODEL_NAME}"
         - "--port=8000"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "${VLLM_EXTRA_ARGS_P}"
         ports:
         - name: prefill-http
           containerPort: 8000
