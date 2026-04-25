@@ -330,7 +330,8 @@ const kindClusterConfig = `
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
-- extraPortMappings:
+- image: kindest/node:v1.31.2
+  extraPortMappings:
   - containerPort: 30080
     hostPort: ${PORT}
     protocol: TCP

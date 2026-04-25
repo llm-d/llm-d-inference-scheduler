@@ -235,6 +235,9 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
+  # Pin to Kubernetes 1.31+ for Gateway API v1.5.1 compatibility
+  # (requires isIP() CEL function and ValidatingAdmissionPolicy)
+  image: kindest/node:v1.31.2
   extraPortMappings:
   - containerPort: 30080
     hostPort: ${GATEWAY_HOST_PORT}
