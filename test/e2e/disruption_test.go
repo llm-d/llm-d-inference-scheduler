@@ -44,7 +44,7 @@ func sendRawCompletion() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode, nil
 }
 
@@ -346,7 +346,7 @@ func sendStreamingCompletion(connected chan<- string) error {
 		connected <- ""
 		return err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 
 	connected <- resp.Header.Get("x-inference-pod")
 	_, err = io.ReadAll(resp.Body)

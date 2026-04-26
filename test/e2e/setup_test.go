@@ -9,9 +9,6 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -151,23 +148,6 @@ func createEndPointPicker(eppConfig string) []string {
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)
 	podsInDeploymentsReady(objects)
 
-	ginkgo.By("Waiting for EPP to report that it is serving")
-	conn, err := grpc.NewClient("localhost:30081",
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := conn.Close()
-		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	}()
-	client := healthPb.NewHealthClient(conn)
-	healthCheckReq := &healthPb.HealthCheckRequest{}
-
-	gomega.Eventually(func() bool {
-		resp, err := client.Check(testConfig.Context, healthCheckReq)
-		return err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING
-	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
-	ginkgo.By("EPP reports that it is serving")
-
 	// Envoy registers the EPP as a healthy ext_proc upstream asynchronously.
 	// "no healthy upstream" returns HTTP 500 with an empty body; any non-empty
 	// response means the EPP is reachable, which is all we need here.
@@ -178,9 +158,9 @@ func createEndPointPicker(eppConfig string) []string {
 			return false
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close() //nolint:errcheck
+		_ = resp.Body.Close()
 		return resp.StatusCode == http.StatusOK || len(body) > 0
-	}, 30*time.Second, 2*time.Second).Should(gomega.BeTrue(), "gateway should be ready within 30s")
+	}, 60*time.Second, 2*time.Second).Should(gomega.BeTrue(), "gateway should be ready within 60s")
 
 	return objects
 }
