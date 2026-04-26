@@ -13,7 +13,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
 
 const (
@@ -85,9 +84,9 @@ func NewContextLengthAware(name string, params *contextLengthAwareParameters) *C
 // If filtering is enabled, endpoints that don't support the request's context length are filtered out.
 // Additionally, it scores endpoints based on how well their context length ranges match the request.
 //
-// For precise token counting, this plugin reads TokenizedPromptState from CycleState, which is
-// written by the tokenizer scorer plugin. When tokens are not available (tokenizer plugin not
-// configured), it falls back to character-based estimation.
+// For precise token counting, this plugin reads request.Body.TokenizedPrompt as
+// populated by the tokenizer DataProducer plugin. When tokens are not available
+// (tokenizer plugin not configured), it falls back to character-based estimation.
 type ContextLengthAware struct {
 	// typedName defines the plugin typed name
 	typedName plugin.TypedName
@@ -196,26 +195,22 @@ func (p *ContextLengthAware) Category() scheduling.ScorerCategory {
 }
 
 // getContextLength returns the context length (token count) for the request.
-// It reads tokenized data from CycleState (written by the tokenizer scorer plugin).
-// When tokens are not available, it falls back to character-based estimation.
+// It reads tokenized data from request.Body.TokenizedPrompt as populated by the
+// tokenizer DataProducer plugin, falling back to character-based estimation
+// when tokens are not available.
 // Returns the token count and a boolean indicating whether precise tokenization was used.
-func (p *ContextLengthAware) getContextLength(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest) (int, bool) {
+func (p *ContextLengthAware) getContextLength(ctx context.Context, _ *scheduling.CycleState, request *scheduling.InferenceRequest) (int, bool) {
 	if request == nil || request.Body == nil {
 		return 0, false
 	}
 
-	// Read tokenized prompt from CycleState, written by the tokenizer scorer plugin.
-	if cycleState != nil {
-		if tp, err := scheduling.ReadCycleStateKey[*tokenizer.TokenizedPromptState](
-			cycleState, tokenizer.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
-			return len(tp.TokenIDs), true
-		}
+	if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
+		return len(tp.TokenIDs), true
 	}
 
 	logger := log.FromContext(ctx).V(logging.DEBUG).WithName("ContextLengthAware")
-	logger.Info("TokenizedPrompt not available in CycleState, falling back to character-based estimation")
+	logger.Info("TokenizedPrompt not available, falling back to character-based estimation")
 
-	// Fall back to character-based estimation
 	return estimateContextLength(request), false
 }
 
