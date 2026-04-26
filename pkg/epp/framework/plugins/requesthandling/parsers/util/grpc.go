@@ -38,7 +38,7 @@ func ParseGrpcPayload(data []byte) ([]byte, error) {
 
 	isCompressed := data[0] == 1
 	if isCompressed {
-		// TODO(#2635): handle compressed payload.
+		// TODO(#895): handle compressed payload.
 		return nil, errors.New("compressed gRPC payload is not supported")
 	}
 	msgLen := binary.BigEndian.Uint32(data[1:5])
