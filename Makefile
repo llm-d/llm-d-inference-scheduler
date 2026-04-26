@@ -199,6 +199,10 @@ go-mod-check: image-build-builder
 	@git diff --exit-code go.mod go.sum || \
 	( echo "ERROR: go.mod/go.sum are not tidy. Run 'go mod tidy' and commit."; exit 1 )
 
+.PHONY: tidy
+tidy:
+	find . -name go.mod -execdir sh -c 'go mod tidy' \;
+
 .PHONY: clean
 clean: ## Clean build artifacts, tools and caches
 	rm -rf bin build $(BUILDER_STAMP)
