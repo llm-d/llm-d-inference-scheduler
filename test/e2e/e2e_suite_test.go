@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -200,17 +201,7 @@ func setupK8sCluster() {
 	// For Docker: pull with --platform to ensure platform-specific layers are cached
 	// before loading into KIND (avoids "content digest not found" with multi-arch images).
 	if containerRuntime == "docker" {
-		arch := func() string {
-			out, err := exec.Command("uname", "-m").Output()
-			if err != nil {
-				return "amd64"
-			}
-			m := strings.TrimSpace(string(out))
-			if m == "aarch64" || m == "arm64" {
-				return "arm64"
-			}
-			return "amd64"
-		}()
+		arch := runtime.GOARCH
 		for _, img := range []string{vllmSimImage, eppImage, sideCarImage, udsTokenizerImage} {
 			pull := exec.Command("docker", "pull", "--platform", "linux/"+arch, img)
 			pull.Stderr = ginkgo.GinkgoWriter

@@ -1,14 +1,14 @@
 package e2e
 
 import (
+	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -148,23 +148,19 @@ func createEndPointPicker(eppConfig string) []string {
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)
 	podsInDeploymentsReady(objects)
 
-	ginkgo.By("Waiting for EPP to report that it is serving")
-	conn, err := grpc.NewClient("localhost:30081",
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := conn.Close()
-		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	}()
-	client := healthPb.NewHealthClient(conn)
-	healthCheckReq := &healthPb.HealthCheckRequest{}
-
+	// Envoy registers the EPP as a healthy ext_proc upstream asynchronously.
+	// "no healthy upstream" returns HTTP 500 with empty body; any non-empty
+	// response (200 or 500-with-body) means EPP is reachable from Envoy.
+	ginkgo.By("Waiting for gateway to be ready")
 	gomega.Eventually(func() bool {
-		resp, err := client.Check(testConfig.Context, healthCheckReq)
-		return err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING
-	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
-	ginkgo.By("EPP reports that it is serving")
-	time.Sleep(2 * time.Second)
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%s/v1/models", port))
+		if err != nil {
+			return false
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK || len(body) > 0
+	}, readyTimeout, 2*time.Second).Should(gomega.BeTrue(), "gateway should be ready within the ready timeout")
 
 	return objects
 }
