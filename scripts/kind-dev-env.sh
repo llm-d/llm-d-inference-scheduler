@@ -332,15 +332,7 @@ kubectl kustomize --enable-helm deploy/components/crds-istio |
 # Development Environment
 # ------------------------------------------------------------------------------
 
-# Select scenario overlay based on disaggregation flags and vLLM image type.
-# Simulator overlays (deploy/environments/dev/) include --mode=echo, UDS tokenizer, etc.
-# Real vLLM overlays (deploy/environments/dev/real-vllm/) include --kv-events-config, etc.
-# Detection: if VLLM_IMAGE contains "llm-d-inference-sim" it is the simulator.
-if echo "${VLLM_IMAGE}" | grep -q "llm-d-inference-sim"; then
-  ENV_BASE="deploy/environments/dev"
-else
-  ENV_BASE="deploy/environments/dev/real-vllm"
-fi
+ENV_BASE="deploy/environments/dev"
 
 if [ "${DISAGG_E}" == "true" ] && [ "${DISAGG_P}" == "true" ]; then
   KUSTOMIZE_DIR="${ENV_BASE}/e-p-d"

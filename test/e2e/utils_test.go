@@ -324,6 +324,36 @@ func dumpPodsAndLogs() {
 	}
 
 	ginkgo.GinkgoWriter.Printf("Total pods found: %d\n\n", len(pods.Items))
+
+	// Print summary table (like kubectl get pods)
+	ginkgo.GinkgoWriter.Printf("%-55s %-8s %-22s %-8s %-6s\n", "NAME", "READY", "STATUS", "RESTARTS", "AGE")
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		ready, total := 0, len(pod.Spec.Containers)
+		restarts := int32(0)
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Ready {
+				ready++
+			}
+			restarts += cs.RestartCount
+		}
+		status := string(pod.Status.Phase)
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Waiting != nil {
+				status = cs.State.Waiting.Reason
+				break
+			}
+		}
+		age := ""
+		if !pod.CreationTimestamp.IsZero() {
+			d := time.Since(pod.CreationTimestamp.Time).Round(time.Second)
+			age = d.String()
+		}
+		ginkgo.GinkgoWriter.Printf("%-55s %-8s %-22s %-8d %-6s\n",
+			pod.Name, fmt.Sprintf("%d/%d", ready, total), status, restarts, age)
+	}
+	ginkgo.GinkgoWriter.Println()
+
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		ginkgo.GinkgoWriter.Printf("--- Pod: %s | Phase: %s | Node: %s ---\n",
