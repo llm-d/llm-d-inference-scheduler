@@ -53,10 +53,16 @@ const (
 )
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
+//
+// Exactly one backend block should be set: udsTokenizerConfig (gRPC over Unix
+// domain socket) or vllmHTTPRenderConfig (vLLM HTTP /render). Each backend
+// stands on its own. For backward compatibility, an empty configuration falls
+// back to udsTokenizerConfig with its default socket path.
 type tokenizerPluginConfig struct {
-	// SocketFile is the path to the Unix domain socket used to communicate
-	// with the tokenizer service. Optional, defaults to /tmp/tokenizer/tokenizer-uds.socket.
+	// TokenizerConfig configures the gRPC-over-UDS backend.
 	TokenizerConfig tokenization.UdsTokenizerConfig `json:"udsTokenizerConfig,omitempty"`
+	// VLLMHTTPRenderConfig configures the vLLM HTTP /render backend.
+	VLLMHTTPRenderConfig *vllmHTTPRenderConfig `json:"vllmHTTPRenderConfig,omitempty"`
 	// ModelName is the name of the model whose tokenizer should be loaded.
 	ModelName string `json:"modelName"`
 }
@@ -74,6 +80,9 @@ func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Han
 	if config.ModelName == "" {
 		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'modelName' must be specified", PluginType)
 	}
+	if config.VLLMHTTPRenderConfig != nil && config.TokenizerConfig.IsEnabled() {
+		return nil, fmt.Errorf("invalid configuration for '%s' plugin: only one of 'udsTokenizerConfig' or 'vllmHTTPRenderConfig' may be set", PluginType)
+	}
 
 	p, err := NewPlugin(handle.Context(), &config)
 	if err != nil {
@@ -83,16 +92,30 @@ func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Han
 	return p.WithName(name), nil
 }
 
-// NewPlugin creates a new tokenizer plugin instance and initializes the UDS tokenizer.
+// NewPlugin creates a new tokenizer plugin instance and constructs the
+// configured backend (udsTokenizerConfig or vllmHTTPRenderConfig). When no
+// backend block is set, falls back to udsTokenizerConfig with its default
+// socket path for backward compatibility.
 func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, error) {
-	tokenizer, err := tokenization.NewUdsTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize UDS tokenizer for '%s' plugin - %w", PluginType, err)
+	var (
+		tk  tokenizer
+		err error
+	)
+	if config.VLLMHTTPRenderConfig != nil {
+		tk, err = newVLLMHTTPRenderer(config.VLLMHTTPRenderConfig, config.ModelName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize vLLM HTTP renderer for '%s' plugin - %w", PluginType, err)
+		}
+	} else {
+		tk, err = tokenization.NewUdsTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize UDS tokenizer for '%s' plugin - %w", PluginType, err)
+		}
 	}
 
 	return &Plugin{
 		typedName: plugin.TypedName{Type: PluginType},
-		tokenizer: tokenizer,
+		tokenizer: tk,
 	}, nil
 }
 
