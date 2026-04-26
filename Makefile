@@ -6,6 +6,8 @@ include Makefile.tools.mk
 include Makefile.cluster.mk
 # Kind specific targets are defined in Makefile.kind.mk.
 include Makefile.kind.mk
+# Code generation targets are defined in Makefile.gen.mk
+include Makefile.gen.mk
 
 # Defaults
 TARGETOS ?= $(shell command -v go >/dev/null 2>&1 && go env GOOS || uname -s | tr '[:upper:]' '[:lower:]')
