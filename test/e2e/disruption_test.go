@@ -84,6 +84,14 @@ func eppPodReady(oldPodName string) func() bool {
 }
 
 var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disruptive"), func() {
+	ginkgo.BeforeEach(func() {
+		// Allow previous test's EPP and deployments to fully terminate and let
+		// Istio propagate the new InferencePool config before disruption tests.
+		// On slower VMs, the UDS tokenizer and EPP startup take longer, making
+		// the gateway temporarily return 500 after resource (re-)creation.
+		time.Sleep(15 * time.Second)
+	})
+
 	ginkgo.When("A decode pod is killed mid-request", func() {
 		ginkgo.It("should recover and route to surviving pods", func() {
 			infPoolObjects = createInferencePool(1, true)
@@ -93,6 +101,22 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 
 			epp := createEndPointPicker(simpleConfig)
 			ginkgo.DeferCleanup(testutils.DeleteObjects, testConfig, epp)
+
+			// Wait for gateway to be fully ready (Istio xDS propagation).
+			ginkgo.By("Waiting for gateway to be ready")
+			gomega.Eventually(func() bool {
+				body := fmt.Sprintf(`{"model":%q,"prompt":"hi","max_tokens":1}`, simModelName)
+				resp, err := http.Post(
+					fmt.Sprintf("http://localhost:%s/v1/completions", port),
+					"application/json",
+					strings.NewReader(body),
+				)
+				if err != nil {
+					return false
+				}
+				defer resp.Body.Close() //nolint:errcheck
+				return resp.StatusCode == 200
+			}, 30*time.Second, 2*time.Second).Should(gomega.BeTrue(), "gateway should be ready within 30s")
 
 			prefillPods, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())

@@ -61,13 +61,13 @@ patches:
           httpGet:
             path: /healthz
             port: 8082
-          initialDelaySeconds: 2
+          initialDelaySeconds: 5
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /healthz
             port: 8082
-          initialDelaySeconds: 2
+          initialDelaySeconds: 5
           periodSeconds: 5
         volumeMounts:
         - name: uds-socket
@@ -110,13 +110,13 @@ patches:
           httpGet:
             path: /healthz
             port: 8082
-          initialDelaySeconds: 2
+          initialDelaySeconds: 5
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /healthz
             port: 8082
-          initialDelaySeconds: 2
+          initialDelaySeconds: 5
           periodSeconds: 5
         volumeMounts:
         - name: uds-socket
@@ -159,13 +159,13 @@ patches:
           httpGet:
             path: /healthz
             port: 8082
-          initialDelaySeconds: 2
+          initialDelaySeconds: 5
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /healthz
             port: 8082
-          initialDelaySeconds: 2
+          initialDelaySeconds: 5
           periodSeconds: 5
         volumeMounts:
         - name: uds-socket
