@@ -1,7 +1,5 @@
 # OpenAI Parser Plugin
 
-## OpenAIParser
-
 **Type:** `openai-parser` | **Implementation:** [openai.go](openai.go)
 
 Parses HTTP/H2C requests and responses in the OpenAI API format. This is the default parser and is auto-injected when no parser is specified in `EndpointPickerConfig`.

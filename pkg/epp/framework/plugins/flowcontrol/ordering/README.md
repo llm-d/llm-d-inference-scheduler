@@ -27,6 +27,6 @@ To include a new ordering policy in these tests, add its factory to the local `p
 
 ## Related Documentation
 
-*  [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)
+*   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)
 *   [Architecture Overview](../../../../../../docs/architecture.md)
 *   [Fairness Overview](../fairness/README.md)

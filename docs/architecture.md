@@ -10,10 +10,10 @@
   - [Core Design Principles](#core-design-principles)
   - [Routing Flow](#routing-flow)
   - [Lifecycle Hooks](#lifecycle-hooks)
-  - [Configuration](#configuration)
-    - [`Plugins` Configuration](#plugins-configuration)
-    - [`SchedulingProfiles` Configuration](#schedulingprofiles-configuration)
-  - [Available Plugins](#available-plugins)
+- [Configuration](#configuration)
+  - [`Plugins` Configuration](#plugins-configuration)
+  - [`SchedulingProfiles` Configuration](#schedulingprofiles-configuration)
+  - [Available plugins](#available-plugins)
 - [Metric Scraping](#metric-scraping)
 - [Disaggregated Encode/Prefill/Decode (E/P/D)](#disaggregated-encodeprefilldecodesepd-epd)
 - [InferencePool & InferenceModel Design](#inferencepool--inferencemodel-design)
@@ -21,7 +21,6 @@
 - [References](#references)
 
 ---
-
 ## Overview
 
 **llm-d** is an extensible architecture designed to schedule inference requests efficiently across model-serving pods.
@@ -30,7 +29,7 @@
 
 The design enables:
 
-- Support for **multiple base models** within a shared cluster (see [serving multiple inference pools](#inferencepool--inferencemodel-design))
+- Support for **multiple base models** within a shared cluster (see [serving multiple inference pools](https://gateway-api-inference-extension.sigs.k8s.io/guides/serving-multiple-inference-pools-latest/))
 - Efficient routing based on **KV cache locality**, **session affinity**, **load**, and
 **model metadata**
 - Disaggregated **Prefill/Decode (P/D)** execution
@@ -61,12 +60,13 @@ The inference scheduler is built on top of:
 - An [EPP] (Endpoint Picker), making scheduling decisions, as the control plane.
   The llm-d inference scheduler extends the EPP in [GIE] with state of the art
   scheduling algorithms.
-- An optional BBR (Body Based Routing) component, to associate requests with
+- An optional [BBR] (Body Based Routing) component, to associate requests with
   their corresponding model before the EPP is consulted.
 
 [Envoy]:https://www.envoyproxy.io/
-[EPP]:../cmd/epp/
-[GIE]:../README.md#relation-to-gie-igw
+[EPP]:https://gateway-api-inference-extension.sigs.k8s.io/#endpoint-picker
+[BBR]:https://gateway-api-inference-extension.sigs.k8s.io/#concepts-and-definitions
+[GIE]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
 
 ---
 
@@ -76,7 +76,7 @@ The inference scheduler is built on top of:
 
 Routing decisions are governed by dynamic components:
 
-- **Profile Handlers**: Implement `scheduling.ProfileHandler` and control which scheduling profiles run and in what order
+- **Profile Handlers**:  Control which scheduling profiles run and in what order
 - **Filters**: Exclude pods based on static or dynamic criteria
 - **Scorers**: Assign scores to candidate pods
 - **Scrapers**: Collect pod metadata and metrics for scorers
@@ -120,10 +120,9 @@ A [sample filter plugin guide](./create_new_filter.md) is provided to illustrate
 - `Post-choice`
 - `After-response`
 
-
 ---
 
-### Configuration
+## Configuration
 
 The inference scheduler relies on a YAML-based configuration—provided either as a file or an in-line parameter—to determine which lifecycle hooks (plugins) are active.
 
@@ -220,8 +219,6 @@ schedulingProfiles:
 If the configuration is in a file, the EPP command line argument `--configFile` should be used
  to specify the full path of the file in question. If the configuration is passed as in-line
  text the EPP command line argument `--configText` should be used.
-
----
 
 ### Available plugins
 

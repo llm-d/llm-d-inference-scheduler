@@ -1,7 +1,5 @@
 # Static Usage Limit Policy Plugin
 
-## StaticUsageLimitPolicy
-
 **Type:** `static-usage-limit-policy` | **Implementation:** [usagelimitpolicy.go](usagelimitpolicy.go)
 
 A usage limit policy that applies a fixed admission ceiling across all priority levels. The Flow Controller uses this ceiling to gate how much of the pool's capacity can be consumed before requests are queued.

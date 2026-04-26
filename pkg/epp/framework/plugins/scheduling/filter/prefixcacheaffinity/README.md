@@ -1,8 +1,8 @@
 # Prefix Cache Affinity Filter (`prefix-cache-affinity-filter`)
 
-## When to use this filter
-
 **Type:** `prefix-cache-affinity-filter` | **Implementation:** [plugin.go](plugin.go)
+
+## When to use this filter
 
 Enable this filter when your workload has repeated or similar prompts across requests (e.g.,
 shared system prompts, multi-turn conversations, or RAG pipelines with overlapping context).
@@ -74,7 +74,7 @@ Can be instantiated multiple times with different thresholds (e.g., 0.99 for glo
 ## Dependencies
 
 - Reads `PrefixCacheMatchInfo` from endpoint attributes (from [`prefix-cache-scorer`](../../scorer/prefix/README.md))
-- Reads `LatencyPredictionInfo` for TTFT load gate (from [`predicted-latency-producer`](../../../../requestcontrol/dataproducer/predictedlatency/README.md))
+- Reads `LatencyPredictionInfo` for TTFT load gate (from [`predicted-latency-producer`](../../../requestcontrol/dataproducer/predictedlatency/README.md))
 
 **Configuration Example:**
 ```yaml

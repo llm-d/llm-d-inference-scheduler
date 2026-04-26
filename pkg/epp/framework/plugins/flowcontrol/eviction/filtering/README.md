@@ -1,7 +1,5 @@
 # Eviction Sheddable Filter Plugin
 
-## SheddableFilter
-
 **Type:** `eviction-sheddable-filter` | **Implementation:** [sheddable.go](sheddable.go)
 
 An eviction filter policy that restricts the eviction queue to sheddable requests only. A request is sheddable when its priority is negative (`priority < 0`), following the project-wide convention in `pkg/epp/util/request.IsSheddable`.

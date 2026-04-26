@@ -6,9 +6,9 @@ It is registered as type `kv-cache-utilization-scorer` and runs as a scheduling 
 
 > Note: This scorer is included in the default out-of-the-box configuration.
 
-## What it does
-
 **Type:** `kv-cache-utilization-scorer` | **Implementation:** [kvcache_utilization.go](kvcache_utilization.go)
+
+## What it does
 
 For each candidate endpoint, the plugin computes:
 

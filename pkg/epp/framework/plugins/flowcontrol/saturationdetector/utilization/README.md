@@ -6,9 +6,9 @@ It is registered as type `utilization-detector` and runs as a saturation detecto
 
 > Note: This plugin is auto-injected when flow control is enabled — you do not need to declare it explicitly.
 
-## What it does
-
 **Type:** `utilization-detector` | **Implementation:** [detector.go](detector.go)
+
+## What it does
 
 This plugin uses a two-tier approach to manage average pool load and protect individual endpoints.
 

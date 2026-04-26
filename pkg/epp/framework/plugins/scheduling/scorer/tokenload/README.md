@@ -4,9 +4,9 @@ This plugin scores candidate endpoints based on the estimated number of in-fligh
 
 It is registered as type `token-load-scorer` and runs as a scheduling scorer.
 
-## What it does
-
 **Type:** `token-load-scorer` | **Implementation:** [token_load.go](token_load.go)
+
+## What it does
 
 For each scheduling cycle, the plugin reads the `InFlightLoad` attribute from each endpoint and computes a normalized score based on the total estimated tokens in flight:
 

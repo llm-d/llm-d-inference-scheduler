@@ -99,6 +99,7 @@ spec:
 | `encode` | Encode stage only |
 | `prefill` | Prefill stage only |
 | `decode` | Decode stage only |
+| `both` | Prefill + Decode (alias for `prefill-decode`) |
 | `encode-prefill` | Encode + Prefill |
 | `prefill-decode` | Prefill + Decode |
 | `encode-prefill-decode` | All stages (monolithic) |
@@ -131,7 +132,7 @@ plugins:
 
 **Type:** `prefill-filter`
 
-Filters out pods not marked as prefill. Retains pods whose `llm-d.ai/role` value is `prefill`, `encode-prefill`, `prefill-decode`, or `encode-prefill-decode`.
+Filters out pods not marked as prefill. Retains pods whose `llm-d.ai/role` value is `prefill`, `encode-prefill`, `prefill-decode`, `both`, or `encode-prefill-decode`.
 
 #### Config
 
@@ -153,7 +154,7 @@ plugins:
 
 **Type:** `decode-filter`
 
-Filters out pods not authorized for the decode stage. Retains pods whose `llm-d.ai/role` value is `decode`, `prefill-decode`, or `encode-prefill-decode`. Pods that completely lack the `llm-d.ai/role` label are not filtered out.
+Filters out pods not authorized for the decode stage. Retains pods whose `llm-d.ai/role` value is `decode`, `prefill-decode`, `both`, or `encode-prefill-decode`. Pods that completely lack the `llm-d.ai/role` label are not filtered out.
 
 #### Config
 

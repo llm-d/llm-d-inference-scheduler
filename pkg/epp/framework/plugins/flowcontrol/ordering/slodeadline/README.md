@@ -4,9 +4,9 @@ It is registered as type `slo-deadline-ordering-policy` and runs as an ordering 
 
 The SLO Deadline ordering policy selects requests based on a deadline derived from a Service Level Objective (SLO) specified in the request headers.
 
-## Why Choose This Policy?
-
 **Type:** `slo-deadline-ordering-policy` | **Implementation:** [slo_deadline.go](slo_deadline.go)
+
+## Why Choose This Policy?
 
 - **Header-Driven SLOs:** Ideal for systems where clients or upstream proxies specify latency targets (e.g., Time-To-First-Token) dynamically per request.
 - **Dynamic Prioritization:** Allows prioritizing urgent requests (with tight deadlines) over less urgent ones on the fly.

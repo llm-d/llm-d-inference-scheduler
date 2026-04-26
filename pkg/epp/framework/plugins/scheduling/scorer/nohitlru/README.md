@@ -1,7 +1,5 @@
 # No-Hit LRU Scorer
 
-## NoHitLRUScorer
-
 **Type:** `no-hit-lru-scorer` | **Implementation:** [no_hit_lru.go](no_hit_lru.go)
 
 Scores pods based on least-recently-used (LRU) ordering for cold requests (requests with no KV cache hits). Helps evenly distribute cache growth across pods, since cold requests result in new KV blocks being created.

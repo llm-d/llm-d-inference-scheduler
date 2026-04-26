@@ -2,9 +2,9 @@
 
 Trains XGBoost models via a sidecar and generates per-endpoint TTFT/TPOT predictions.
 
-## Interfaces
-
 **Type:** `predicted-latency-producer` | **Implementation:** [plugin.go](plugin.go)
+
+## Interfaces
 
 PrepareDataPlugin, PreRequest, ResponseHeader, ResponseBody, Producer, Consumer
 

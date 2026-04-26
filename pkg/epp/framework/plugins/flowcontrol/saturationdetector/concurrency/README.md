@@ -4,9 +4,9 @@ Synchronous saturation detection and scheduling filter mechanism based on active
 
 It is registered as type `concurrency-detector` and runs as a saturation detector and scheduling filter.
 
-## What it does
-
 **Type:** `concurrency-detector` | **Implementation:** [detector.go](detector.go)
+
+## What it does
 
 This plugin uses a two-tier approach to manage average pool load and protect individual endpoints.
 

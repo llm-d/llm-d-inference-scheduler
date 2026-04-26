@@ -1,7 +1,5 @@
 # Passthrough Parser Plugin
 
-## PassthroughParser
-
 **Type:** `passthrough-parser` | **Implementation:** [passthrough.go](passthrough.go)
 
 A model-agnostic parser that passes requests through without interpreting the payload. Use this parser when the request format is not supported by the OpenAI or vLLM gRPC parsers.

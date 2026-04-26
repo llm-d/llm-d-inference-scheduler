@@ -21,7 +21,7 @@
 
 **Type:** `disagg-profile-handler` | **Implementation:** [disagg_profile_handler.go](disagg_profile_handler.go)
 
-Selects the scheduling profiles to use when running with disaggregation. Supports monolithic (D), two-stage (P/D), three-stage (E/P/D), and encode-prefill (E/PD) modes.
+Selects the scheduling profiles to use when running with disaggregation. Supports monolithic (EPD), two-stage (P/D), three-stage (E/P/D), and encode-prefill (E/PD) modes.
 
 > Note: When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
 

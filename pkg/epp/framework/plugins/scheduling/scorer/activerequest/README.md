@@ -1,7 +1,5 @@
 # Active Request Scorer
 
-## ActiveRequestScorer
-
 **Type:** `active-request-scorer` | **Implementation:** [active_request.go](active_request.go)
 
 Scores pods based on the number of active requests being served per pod. Each request is tracked individually with its own TTL to ensure accurate timeout handling.

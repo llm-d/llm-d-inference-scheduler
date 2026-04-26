@@ -1,7 +1,5 @@
 # Load Aware Scorer
 
-## LoadAwareScorer
-
 **Type:** `load-aware-scorer` | **Implementation:** [load_aware.go](load_aware.go)
 
 Scores pods based on their load, measured by the number of requests concurrently being processed. Uses a configurable threshold to determine when a pod is considered overloaded.
@@ -31,5 +29,3 @@ schedulingProfiles:
 ## Related Documentation
 
 - [Architecture Overview](../../../../../../../docs/architecture.md)
-- [Queue Depth Scorer](../queuedepth/)
-- [Running Requests Scorer](../runningrequests/)

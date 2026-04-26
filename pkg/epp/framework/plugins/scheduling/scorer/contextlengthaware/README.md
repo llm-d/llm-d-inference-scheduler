@@ -1,7 +1,5 @@
 # Context Length Aware Scorer
 
-## ContextLengthAwareScorer
-
 **Type:** `context-length-aware` | **Implementation:** [context_length_aware.go](context_length_aware.go)
 
 Routes inference requests based on context length (token count), with optional filtering. Scoring is always applied; filtering is off by default. Enables optimized resource allocation by directing requests to pods configured for specific context length ranges.

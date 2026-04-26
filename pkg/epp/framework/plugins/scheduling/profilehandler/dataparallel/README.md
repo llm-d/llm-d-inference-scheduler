@@ -2,8 +2,6 @@
 
 > **Deprecated:** Use `single-profile-handler` with Istio >= 1.28.1 instead. See [single/](../single/).
 
-## DataParallelProfileHandler
-
 **Type:** `data-parallel-profile-handler` | **Implementation:** [dp_profile_handler.go](dp_profile_handler.go)
 
 Provides a profile handler for data-parallel inference routing, where a request is scheduled to one pod among multiple replicas serving the same model. Injects the `X-Data-Parallel-Endpoint` header pointing to the selected pod and rewrites the target port to `primaryPort`.

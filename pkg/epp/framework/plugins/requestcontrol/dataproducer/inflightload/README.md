@@ -1,7 +1,5 @@
 # In-Flight Load Producer Plugin
 
-## InFlightLoadProducer
-
 **Type:** `inflight-load-producer` | **Implementation:** [producer.go](producer.go)
 
 Tracks real-time in-flight request and token counts per endpoint by hooking into the request lifecycle. Writes an `InFlightLoad` attribute onto each endpoint in the `PrepareRequestData` phase, consumed by the [`token-load-scorer`](../../../scheduling/scorer/tokenload/README.md) and the `concurrency-detector`.
