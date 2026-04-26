@@ -59,9 +59,16 @@ const (
 )
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
+//
+// Exactly one backend block should be set: udsTokenizerConfig (gRPC over Unix
+// domain socket) or vllmHTTP (vLLM HTTP /render). Each backend stands on its
+// own. For backward compatibility, an empty configuration falls back to
+// udsTokenizerConfig with its default socket path.
 type tokenizerPluginConfig struct {
-	// TokenizerConfig is the UDS tokenizer config. Optional; defaults apply.
+	// TokenizerConfig configures the gRPC-over-UDS backend.
 	TokenizerConfig tokenization.UdsTokenizerConfig `json:"udsTokenizerConfig,omitempty"`
+	// VLLMHTTPConfig configures the vLLM HTTP /render backend.
+	VLLMHTTPConfig *vllmHTTPConfig `json:"vllmHTTP,omitempty"`
 	// ModelName is the name of the model whose tokenizer should be loaded.
 	ModelName string `json:"modelName"`
 }
@@ -78,6 +85,9 @@ func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Han
 
 	if config.ModelName == "" {
 		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'modelName' must be specified", PluginType)
+	}
+	if config.VLLMHTTPConfig != nil && config.TokenizerConfig.IsEnabled() {
+		return nil, fmt.Errorf("invalid configuration for '%s' plugin: only one of 'udsTokenizerConfig' or 'vllmHTTP' may be set", PluginType)
 	}
 
 	p, err := NewPlugin(handle.Context(), &config)
@@ -101,16 +111,30 @@ func LegacyPluginFactory(name string, rawParameters json.RawMessage, handle plug
 	return PluginFactory(name, rawParameters, handle)
 }
 
-// NewPlugin creates a new tokenizer plugin instance and initializes the UDS tokenizer.
+// NewPlugin creates a new tokenizer plugin instance and constructs the
+// configured backend (udsTokenizerConfig or vllmHTTP). When no backend block
+// is set, falls back to udsTokenizerConfig with its default socket path for
+// backward compatibility.
 func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, error) {
-	tokenizer, err := tokenization.NewUdsTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize UDS tokenizer for '%s' plugin - %w", PluginType, err)
+	var (
+		tk  tokenizer
+		err error
+	)
+	if config.VLLMHTTPConfig != nil {
+		tk, err = newVLLMHTTPRenderer(config.VLLMHTTPConfig, config.ModelName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize vLLM HTTP renderer for '%s' plugin - %w", PluginType, err)
+		}
+	} else {
+		tk, err = tokenization.NewUdsTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize UDS tokenizer for '%s' plugin - %w", PluginType, err)
+		}
 	}
 
 	return &Plugin{
 		typedName: plugin.TypedName{Type: PluginType},
-		tokenizer: tokenizer,
+		tokenizer: tk,
 	}, nil
 }
 
