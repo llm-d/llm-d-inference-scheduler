@@ -1,8 +1,13 @@
-# Sample EPP configuration for running with KvCache and load aware scorers
-#
+# Sample EPP configuration with the precise-prefix-cache scorer.
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
+  - type: tokenizer
+    parameters:
+      modelName: hf-repo/model-name           # set to the model used in the vLLM deployment
+  - type: endpoint-notification-source
+  - type: metrics-data-source
+  - type: core-metrics-extractor
   - type: single-profile-handler
   - type: decode-filter
   - type: precise-prefix-cache-scorer
@@ -11,15 +16,26 @@ plugins:
         blockSize: 64                 # must match vLLM block size
         hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
       indexerConfig:
+        tokenizersPoolConfig:
+          modelName: hf-repo/model-name
         kvBlockIndexConfig:
           enableMetrics: true           # enable kv-block index metrics (prometheus)
   - type: kv-cache-utilization-scorer
   - type: queue-scorer
   - type: max-score-picker
+dataLayer:
+  sources:
+    - pluginRef: metrics-data-source
+      extractors:
+        - pluginRef: core-metrics-extractor
+    - pluginRef: endpoint-notification-source
+      extractors:
+        - pluginRef: precise-prefix-cache-scorer
 schedulingProfiles:
   - name: default
     plugins:
       - pluginRef: decode-filter
+      - pluginRef: tokenizer
       - pluginRef: precise-prefix-cache-scorer
         weight: 2.0
       - pluginRef: kv-cache-utilization-scorer

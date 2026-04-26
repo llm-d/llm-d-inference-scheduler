@@ -4,7 +4,7 @@ metadata:
   name: qwen-prefiller
   labels:
     app: qwen-prefiller
-    llm-d.ai/inferenceServing: "true"
+    llm-d.ai/inference-serving: "true"
     llm-d.ai/model: "qwen2-0-5b"
     llm-d.ai/role: "prefill"
 spec:

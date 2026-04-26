@@ -92,7 +92,7 @@ func (p *OpenAIParser) WithName(name string) *OpenAIParser {
 }
 
 // ParseRequest parses the request body and headers and returns a map representation.
-func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.InferenceRequestBody, error) {
+func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
 	bodyMap := make(map[string]any)
 	if err := json.Unmarshal(body, &bodyMap); err != nil {
 		return nil, fmt.Errorf("error unmarshaling request bodyMap: %w", err)
@@ -105,7 +105,7 @@ func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers ma
 	if stream, ok := bodyMap["stream"].(bool); ok && stream {
 		extractedBody.Stream = true
 	}
-	return extractedBody, nil
+	return &fwkrh.ParseResult{Body: extractedBody, Skip: false}, nil
 }
 
 // ParseResponse extracts usage metadata from the provider's response.
