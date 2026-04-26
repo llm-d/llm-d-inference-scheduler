@@ -197,6 +197,27 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
+	// For Docker: pull with --platform to ensure platform-specific layers are cached
+	// before loading into KIND (avoids "content digest not found" with multi-arch images).
+	if containerRuntime == "docker" {
+		arch := func() string {
+			out, err := exec.Command("uname", "-m").Output()
+			if err != nil {
+				return "amd64"
+			}
+			m := strings.TrimSpace(string(out))
+			if m == "aarch64" || m == "arm64" {
+				return "arm64"
+			}
+			return "amd64"
+		}()
+		for _, img := range []string{vllmSimImage, eppImage, sideCarImage, udsTokenizerImage} {
+			pull := exec.Command("docker", "pull", "--platform", "linux/"+arch, img)
+			pull.Stderr = ginkgo.GinkgoWriter
+			_ = pull.Run() // ignore failure — image may be local-only
+		}
+	}
+
 	kindLoadImage(vllmSimImage)
 	kindLoadImage(eppImage)
 	kindLoadImage(sideCarImage)
@@ -206,10 +227,28 @@ func setupK8sCluster() {
 func kindLoadImage(image string) {
 	ginkgo.By(fmt.Sprintf("Loading %s into the cluster %s using %s", image, kindClusterName, containerRuntime))
 
-	command := exec.Command("kind", "--name", kindClusterName, "load", "docker-image", image)
-	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	if containerRuntime == "docker" {
+		// Use docker save | ctr import to avoid KIND's --all-platforms flag which
+		// fails when only the target architecture layers are locally cached.
+		nodeName := kindClusterName + "-control-plane"
+		save := exec.Command("docker", "save", image)
+		importCmd := exec.Command("docker", "exec", "--privileged", "-i", nodeName,
+			"ctr", "--namespace=k8s.io", "images", "import", "--digests", "--snapshotter=overlayfs", "-")
+		pipe, err := save.StdoutPipe()
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		importCmd.Stdin = pipe
+		importCmd.Stdout = ginkgo.GinkgoWriter
+		importCmd.Stderr = ginkgo.GinkgoWriter
+		gomega.Expect(save.Start()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(importCmd.Start()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(save.Wait()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(importCmd.Wait()).ShouldNot(gomega.HaveOccurred())
+	} else {
+		command := exec.Command("kind", "--name", kindClusterName, "load", "docker-image", image)
+		session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	}
 }
 
 func setupK8sClient() {
