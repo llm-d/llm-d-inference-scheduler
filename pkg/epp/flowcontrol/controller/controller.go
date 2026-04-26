@@ -22,11 +22,9 @@ limitations under the License.
 package controller
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -326,7 +324,7 @@ func (fc *FlowController) tryDistribution(
 	// We must create a fresh FlowItem on each attempt as finalization is per-lifecycle.
 	item := internal.NewItem(req, effectiveTTL, enqueueTime)
 
-	candidates, err := fc.selectDistributionCandidates(conn)
+	candidate, err := fc.selectDistributionCandidate(conn)
 	if err != nil {
 		outcome := types.QueueOutcomeRejectedOther
 		if errors.Is(err, errNoShards) {
@@ -337,7 +335,7 @@ func (fc *FlowController) tryDistribution(
 		return item, finalErr
 	}
 
-	outcome, err := fc.distributeRequest(reqCtx, item, candidates)
+	outcome, err := fc.distributeRequest(reqCtx, item, candidate)
 	if err == nil {
 		// Success: Ownership of the item has been transferred to the processor.
 		return item, nil
@@ -406,36 +404,23 @@ type candidate struct {
 	byteSize  uint64
 }
 
-// selectDistributionCandidates identifies all Active shards for the leased flow and ranks them by the current byte size
+// selectDistributionCandidate identifies all Active shards for the leased flow and ranks them by the current byte size
 // of that flow's queue, from least to most loaded.
-func (fc *FlowController) selectDistributionCandidates(conn contracts.ActiveFlowConnection) ([]candidate, error) {
-	shards := conn.ActiveShards()
-	if len(shards) == 0 {
+func (fc *FlowController) selectDistributionCandidate(conn contracts.ActiveFlowConnection) (*candidate, error) {
+	shard := conn.GetShard()
+	if shard == nil {
 		return nil, fmt.Errorf("%w for flow %s", errNoShards, conn.FlowKey())
 	}
 
-	candidates := make([]candidate, 0, len(shards))
-	for _, shard := range shards {
-		worker := fc.getOrStartWorker(shard)
-		mq, err := shard.ManagedQueue(conn.FlowKey())
-		if err != nil {
-			fc.logger.Error(err,
-				"Invariant violation. Failed to get ManagedQueue for a leased flow on an Active shard. Skipping shard.",
-				"flowKey", conn.FlowKey(), "shardID", shard.ID())
-			continue
-		}
-		candidates = append(candidates, candidate{worker.processor, shard.ID(), mq.FlowQueueAccessor().ByteSize()})
-	}
-
-	if len(candidates) == 0 {
+	worker := fc.getOrStartWorker(shard)
+	mq, err := shard.ManagedQueue(conn.FlowKey())
+	if err != nil {
+		fc.logger.Error(err,
+			"Invariant violation. Failed to get ManagedQueue for a leased flow on an Active shard. Skipping shard.",
+			"flowKey", conn.FlowKey(), "shardID", shard.ID())
 		return nil, fmt.Errorf("%w for flow %s", errNoShards, conn.FlowKey())
 	}
-
-	slices.SortFunc(candidates, func(a, b candidate) int {
-		return cmp.Compare(a.byteSize, b.byteSize)
-	})
-
-	return candidates, nil
+	return &candidate{worker.processor, shard.ID(), mq.FlowQueueAccessor().ByteSize()}, nil
 }
 
 // distributeRequest implements a flow-aware, two-phase "Join-Shortest-Queue-by-Bytes" (JSQ-Bytes) distribution strategy
@@ -456,22 +441,19 @@ func (fc *FlowController) selectDistributionCandidates(conn contracts.ActiveFlow
 func (fc *FlowController) distributeRequest(
 	ctx context.Context,
 	item *internal.FlowItem,
-	candidates []candidate,
+	candidate *candidate,
 ) (types.QueueOutcome, error) {
 	reqID := item.OriginalRequest().ID()
-	for _, c := range candidates {
-		if err := c.processor.Submit(item); err == nil {
-			return types.QueueOutcomeNotYetFinalized, nil
-		}
-		fc.logger.V(logutil.TRACE).Info("Processor busy during fast failover, trying next candidate",
-			"shardID", c.shardID, "requestID", reqID)
+	if err := candidate.processor.Submit(item); err == nil {
+		return types.QueueOutcomeNotYetFinalized, nil
 	}
+	fc.logger.V(logutil.TRACE).Info("Processor busy during fast failover, trying next candidate",
+		"shardID", candidate.shardID, "requestID", reqID)
 
-	// All processors are busy. Attempt a single blocking submission to the least-loaded candidate.
-	bestCandidate := candidates[0]
+	// processor are busy. Attempt a single blocking submission to the candidate.
 	fc.logger.V(logutil.TRACE).Info("All processors busy, attempting blocking submit to best candidate",
-		"shardID", bestCandidate.shardID, "requestID", reqID)
-	err := bestCandidate.processor.SubmitOrBlock(ctx, item)
+		"shardID", candidate.shardID, "requestID", reqID)
+	err := candidate.processor.SubmitOrBlock(ctx, item)
 	if err != nil {
 		return types.QueueOutcomeRejectedOther, fmt.Errorf("%w: request not accepted: %w", types.ErrRejected, err)
 	}
@@ -528,8 +510,8 @@ func (fc *FlowController) getOrStartWorker(shard contracts.RegistryShard) *manag
 func (fc *FlowController) reconcileProcessors() {
 	stats := fc.registry.ShardStats()
 	activeShards := sets.New[string]()
-	for _, s := range stats {
-		activeShards.Insert(s.ID)
+	if stats != nil {
+		activeShards.Insert(stats.ID)
 	}
 
 	fc.workers.Range(func(key, value any) bool {
