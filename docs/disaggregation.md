@@ -404,7 +404,7 @@ The `prefix-based-pd-decider` plugin makes the disaggregation decision according
 **Parameter:**
 
 - `nonCachedTokens`: Number of non-cached tokens that trigger disaggregation
-  - If set to 0, disaggregation never occurs for all requests
+  - If set to 0, disaggregation never occurs for any request
 
 **Feature Gate Requirement**
 To activate this decider, ensure the following feature gate is enabled in your EndpointPickerConfig
