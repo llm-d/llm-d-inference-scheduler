@@ -80,6 +80,11 @@ func (p *VertexAIParser) WithName(name string) *VertexAIParser {
 }
 
 // ParseRequest parses the gRPC request body and headers and returns an InferenceRequestBody.
+// It handles Vertex AI ChatCompletions requests by unmarshaling the gRPC payload into a
+// ChatCompletionsRequest protobuf message. This message embeds an HttpBody containing the
+// actual request payload as an OpenAI-compatible JSON string. The parser extracts this JSON
+// data and delegates the parsing to the OpenAI parser.
+// See: https://github.com/googleapis/googleapis/blob/89c3153888201c9e80bc5ec78d6ffca0debe6b52/google/cloud/aiplatform/v1beta1/prediction_service.proto#L235
 func (p *VertexAIParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
 	path := headers[grpcutil.MethodPathKey]
 
