@@ -3,6 +3,10 @@
 KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
 KIND_GATEWAY_HOST_PORT ?= 30080
 
+.PHONY: image-kind
+image-kind: ## Reload the EPP image into the kind cluster $(KIND_CLUSTER_NAME)
+	KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) ./scripts/load_image.sh $(EPP_IMAGE) $(SIDECAR_IMAGE)
+
 .PHONY: env-dev-kind
 env-dev-kind: image-build image-pull ## Run under kind ($(KIND_CLUSTER_NAME))
 	@if [ "$$PD_ENABLED" = "true" ] && [ "$$KV_CACHE_ENABLED" = "true" ]; then \
