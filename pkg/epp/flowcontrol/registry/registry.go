@@ -334,11 +334,9 @@ func (fr *FlowRegistry) Stats() contracts.AggregateStats {
 	return stats
 }
 
-// ShardStats returns a slice of statistics, one for each internal shard.
-func (fr *FlowRegistry) ShardStats() []contracts.ShardStats {
-	shardStats := make([]contracts.ShardStats, 1)
-	shardStats[0] = fr.shard.Stats()
-	return shardStats
+// ShardStats returns statistics for the internal shard.
+func (fr *FlowRegistry) ShardStats() *contracts.ShardStats {
+	return fr.shard.Stats()
 }
 
 // --- Garbage Collection ---

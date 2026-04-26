@@ -266,7 +266,7 @@ func (s *registryShard) AllOrderedPriorityLevels() []int {
 // Note on Concurrency: Statistics are aggregated using high-performance, lock-free atomic updates.
 // The returned stats represent a near-consistent snapshot. We acquire a Read Lock to ensure that
 // configuration metadata (like names and capacity limits) remains stable during the iteration.
-func (s *registryShard) Stats() contracts.ShardStats {
+func (s *registryShard) Stats() *contracts.ShardStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -293,7 +293,7 @@ func (s *registryShard) Stats() contracts.ShardStats {
 		}
 		return true
 	})
-	return stats
+	return &stats
 }
 
 //  --- Internal Administrative/Lifecycle Methods ---
