@@ -1,6 +1,9 @@
 package e2e
 
 import (
+	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -164,7 +167,20 @@ func createEndPointPicker(eppConfig string) []string {
 		return err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING
 	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
 	ginkgo.By("EPP reports that it is serving")
-	time.Sleep(2 * time.Second)
+
+	// Envoy registers the EPP as a healthy ext_proc upstream asynchronously.
+	// "no healthy upstream" returns HTTP 500 with an empty body; any non-empty
+	// response means the EPP is reachable, which is all we need here.
+	ginkgo.By("Waiting for gateway to be ready")
+	gomega.Eventually(func() bool {
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%s/v1/models", port))
+		if err != nil {
+			return false
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close() //nolint:errcheck
+		return resp.StatusCode == http.StatusOK || len(body) > 0
+	}, 30*time.Second, 2*time.Second).Should(gomega.BeTrue(), "gateway should be ready within 30s")
 
 	return objects
 }
