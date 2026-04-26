@@ -332,15 +332,24 @@ kubectl kustomize --enable-helm deploy/components/crds-istio |
 # Development Environment
 # ------------------------------------------------------------------------------
 
-# Select scenario overlay based on disaggregation flags
-if [ "${DISAGG_E}" == "true" ] && [ "${DISAGG_P}" == "true" ]; then
-  KUSTOMIZE_DIR="deploy/environments/dev/e-p-d"
-elif [ "${DISAGG_E}" == "true" ]; then
-  KUSTOMIZE_DIR="deploy/environments/dev/e-pd"
-elif [ "${DISAGG_P}" == "true" ]; then
-  KUSTOMIZE_DIR="deploy/environments/dev/p-d"
+# Select scenario overlay based on disaggregation flags and vLLM image type.
+# Simulator overlays (deploy/environments/dev/) include --mode=echo, UDS tokenizer, etc.
+# Real vLLM overlays (deploy/environments/dev/real-vllm/) include --kv-events-config, etc.
+# Detection: if VLLM_IMAGE contains "llm-d-inference-sim" it is the simulator.
+if echo "${VLLM_IMAGE}" | grep -q "llm-d-inference-sim"; then
+  ENV_BASE="deploy/environments/dev"
 else
-  KUSTOMIZE_DIR="deploy/environments/dev/epd"
+  ENV_BASE="deploy/environments/dev/real-vllm"
+fi
+
+if [ "${DISAGG_E}" == "true" ] && [ "${DISAGG_P}" == "true" ]; then
+  KUSTOMIZE_DIR="${ENV_BASE}/e-p-d"
+elif [ "${DISAGG_E}" == "true" ]; then
+  KUSTOMIZE_DIR="${ENV_BASE}/e-pd"
+elif [ "${DISAGG_P}" == "true" ]; then
+  KUSTOMIZE_DIR="${ENV_BASE}/p-d"
+else
+  KUSTOMIZE_DIR="${ENV_BASE}/epd"
 fi
 
 TEMP_FILE=$(mktemp)

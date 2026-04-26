@@ -47,13 +47,13 @@ patches:
       path: /spec/template/spec/containers/0/args/-
       value: '{"ec_connector": "ECExampleConnector", "ec_role": "ec_producer", "ec_connector_extra_config": {"shared_storage_path": "/shared-ec-cache"}}'
     - op: add
-      path: /spec/template/spec/containers/0/volumeMounts/-
+      path: /spec/template/spec/containers/0/volumeMounts
       value:
-        name: ec-cache
+      - name: ec-cache
         mountPath: /shared-ec-cache
     - op: add
-      path: /spec/template/spec/volumes/-
+      path: /spec/template/spec/volumes
       value:
-        name: ec-cache
+      - name: ec-cache
         persistentVolumeClaim:
           claimName: ec-cache-pvc

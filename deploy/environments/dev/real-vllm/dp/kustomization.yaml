@@ -1,0 +1,11 @@
+# ------------------------------------------------------------------------------
+# Data Parallel — Real vLLM
+# ------------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../../../components/vllm-decode/
+
+components:
+- ../../../../components/overlays/real-vllm/
