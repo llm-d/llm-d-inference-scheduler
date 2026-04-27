@@ -1,13 +1,11 @@
 # Prefix Cache Scorer Plugin
 
-This plugin scores candidate endpoints by estimating **prompt prefix cache reuse** on each model server.
+**Type:** `prefix-cache-scorer`
 
-It is registered as type `prefix-cache-scorer` and runs as a scheduling scorer.
+This plugin scores candidate endpoints by estimating **prompt prefix cache reuse** on each model server.
 
 > [!NOTE]
 > This scorer is included in the default out-of-the-box configuration.
-
-**Type:** `prefix-cache-scorer`
 
 ## What it does
 

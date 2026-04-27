@@ -1,10 +1,8 @@
 # Concurrency Detector Plugin
 
-Synchronous saturation detection and scheduling filter mechanism based on active in-flight request accounting.
-
-It is registered as type `concurrency-detector` and runs as a saturation detector and scheduling filter.
-
 **Type:** `concurrency-detector`
+
+Synchronous saturation detection and scheduling filter mechanism based on active in-flight request accounting.
 
 ## What it does
 

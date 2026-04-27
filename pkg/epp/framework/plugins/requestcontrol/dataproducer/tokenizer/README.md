@@ -44,7 +44,7 @@ The plugin supports two modes selected at build time:
 
 ### Scorer Mode (default)
 
-Registered under `scorers:` in config. Always returns zero scores — its sole purpose is to make token IDs available to downstream scorers (e.g. [`precise-prefix-cache-scorer`](../../../scheduling/scorer/preciseprefixcache/README.md), [`context-length-aware`](../../../scheduling/scorer/contextlengthaware/README.md)) without those scorers needing to re-tokenize.
+Registered under `scorers:` in config. Always returns zero scores — its sole purpose is to make token IDs available to downstream scorers (e.g. `precise-prefix-cache-scorer`, `context-length-aware`) without those scorers needing to re-tokenize.
 
 ```yaml
 - type: tokenizer

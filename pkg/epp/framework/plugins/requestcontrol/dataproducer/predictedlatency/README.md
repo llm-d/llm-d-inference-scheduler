@@ -1,8 +1,8 @@
 # Predicted Latency Producer (`predicted-latency-producer`)
 
-Trains XGBoost models via a sidecar and generates per-endpoint TTFT/TPOT predictions.
-
 **Type:** `predicted-latency-producer`
+
+Trains XGBoost models via a sidecar and generates per-endpoint TTFT/TPOT predictions.
 
 ## Interfaces
 
@@ -21,15 +21,15 @@ PrepareDataPlugin, PreRequest, ResponseHeader, ResponseBody, Producer, Consumer
 
 ## Config
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `samplingMean` | `float64` | No | `1000` | Mean interval for decode token sampling |
-| `maxDecodeTokenSamplesForPrediction` | `int` | No | `0` | Max tokens to sample for TPOT prediction (0 = disabled) |
-| `sloBufferFactor` | `float64` | No | `1.0` | Multiplier for SLO headroom calculation |
-| `contextTTL` | `duration` | No | `5m` | TTL for per-request context in the cache |
-| `streamingMode` | `bool` | No | `false` | Record TTFT on first chunk (true) vs EOS (false) |
-| `endpointRoleLabel` | `string` | No | `""` | Label key for disaggregated serving roles |
-| `predictInPrepareData` | `bool` | No | `true` | Enable/disable bulk predictions. Set false for training-only mode |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `samplingMean` | `1000` | Mean interval for decode token sampling |
+| `maxDecodeTokenSamplesForPrediction` | `0` | Max tokens to sample for TPOT prediction (0 = disabled) |
+| `sloBufferFactor` | `1.0` | Multiplier for SLO headroom calculation |
+| `contextTTL` | `5m` | TTL for per-request context in the cache |
+| `streamingMode` | `false` | Record TTFT on first chunk (true) vs EOS (false) |
+| `endpointRoleLabel` | `""` | Label key for disaggregated serving roles |
+| `predictInPrepareData` | `true` | Enable/disable bulk predictions. Set false for training-only mode |
 
 ## Default Behavior (`streamingMode: false`)
 

@@ -1,13 +1,13 @@
 # Latency Scorer Plugin (`latency-scorer`)
 
+**Type:** `latency-scorer`
+
 Scores endpoints based on predicted latency headroom, defined as the gap between the predicted
 request latency and the user's SLO. Endpoints with more favorable headroom get higher
 scores and are more likely to be selected by the picker. For negative headroom
 (all endpoints violate SLO), idle endpoints are preferred.
 
 ## Inputs
-
-**Type:** `latency-scorer`
 
 - `LatencyPredictionInfo` endpoint attribute:
   - `TTFTHeadroom` / `TPOTHeadroom` - `SLO - predicted` (positive = meets SLO, negative = violates)

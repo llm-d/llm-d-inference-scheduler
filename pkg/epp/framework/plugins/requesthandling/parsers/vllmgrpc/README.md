@@ -8,15 +8,6 @@ Extracts model name, prompt content, and token metadata from the gRPC request bi
 
 **Parameters:** None.
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: vllmgrpc-parser
-    name: vllmgrpc-parser
-parser:
-  pluginRef: vllmgrpc-parser
-```
-
 ---
 
 ## Related Documentation

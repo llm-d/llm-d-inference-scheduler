@@ -8,15 +8,6 @@ A model-agnostic parser that passes requests through without interpreting the pa
 
 **Parameters:** None.
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: passthrough-parser
-    name: passthrough-parser
-parser:
-  pluginRef: passthrough-parser
-```
-
 ---
 
 ## Related Documentation

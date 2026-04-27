@@ -1,10 +1,8 @@
 # SLO Deadline Ordering Policy
 
-It is registered as type `slo-deadline-ordering-policy` and runs as an ordering policy.
+**Type:** `slo-deadline-ordering-policy`
 
 The SLO Deadline ordering policy selects requests based on a deadline derived from a Service Level Objective (SLO) specified in the request headers.
-
-**Type:** `slo-deadline-ordering-policy`
 
 ## Why Choose This Policy?
 
@@ -55,3 +53,4 @@ orderingPolicyRef: slo-deadline-ordering-policy
 
 ## Related Documentation
 *   [Ordering Overview](../README.md)
+

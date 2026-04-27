@@ -1,13 +1,11 @@
 # Utilization Detector Plugin
 
-Reactive saturation detection and scheduling filter based on telemetry from LLM serving backends.
+**Type:** `utilization-detector`
 
-It is registered as type `utilization-detector` and runs as a saturation detector and scheduling filter.
+Reactive saturation detection and scheduling filter based on telemetry from LLM serving backends.
 
 > [!NOTE]
 > This plugin is framework-injected by default when flow control is enabled. You do not need to explicitly declare it in your configuration.
-
-**Type:** `utilization-detector`
 
 ## What it does
 

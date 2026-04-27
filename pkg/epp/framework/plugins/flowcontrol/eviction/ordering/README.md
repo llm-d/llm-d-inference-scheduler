@@ -10,13 +10,6 @@ Eviction ordering:
 
 **Parameters:** None.
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: eviction-priority-then-time-ordering
-    name: eviction-priority-then-time-ordering
-```
-
 ---
 
 ## Related Documentation

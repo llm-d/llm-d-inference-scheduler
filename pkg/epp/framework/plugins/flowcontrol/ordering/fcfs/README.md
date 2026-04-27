@@ -1,13 +1,11 @@
 # First-Come, First-Served (FCFS) Ordering Policy
 
-It is registered as type `fcfs-ordering-policy` and runs as an ordering policy.
+**Type:** `fcfs-ordering-policy`
 
 > [!NOTE]
 > This plugin is framework-injected by default when flow control is enabled. You do not need to explicitly declare it in your configuration.
 
 The First-Come, First-Served (FCFS) ordering policy selects requests based on their arrival order at the Flow Control layer.
-
-**Type:** `fcfs-ordering-policy`
 
 ## Why Choose This Policy?
 

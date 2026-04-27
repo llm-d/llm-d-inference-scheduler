@@ -1,8 +1,8 @@
 # Latency SLO Admitter (`latency-slo-admitter`)
 
-Rejects sheddable requests when no endpoint can meet latency SLO constraints.
-
 **Type:** `latency-slo-admitter`
+
+Rejects sheddable requests when no endpoint can meet latency SLO constraints.
 
 ## Interface
 

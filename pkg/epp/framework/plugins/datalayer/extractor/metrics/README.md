@@ -9,7 +9,7 @@ The Core Metrics Extractor is a data layer plugin responsible for extracting mod
 
 ## What it does
 
-1.  Receives a `PrometheusMetricMap` from a metrics data source (e.g., [`metrics-data-source`](../../source/metrics/README.md)).
+1.  Receives a `PrometheusMetricMap` from a metrics data source (e.g., `metrics-data-source`).
 2.  Identifies the inference engine type of the endpoint (e.g., vLLM, SGLang, Triton) using a Pod label.
 3.  Looks up the metric specifications for that engine.
 4.  Extracts values for standard metrics:
@@ -78,3 +78,4 @@ metadata:
     inference.networking.k8s.io/engine-type: my-custom-engine
 
 ```
+

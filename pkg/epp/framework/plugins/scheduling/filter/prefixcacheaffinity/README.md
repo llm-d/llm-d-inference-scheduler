@@ -26,14 +26,14 @@ any picker, but the choice of picker creates a trade-off:
   highest-scoring endpoint, which maximizes cache hits but causes **hot-spotting** — many
   concurrent requests with similar prompts all land on the same endpoint, overloading it and
   degrading TTFT.
-- **With [`weighted-random-picker`](../../picker/weightedrandom/README.md)**: requests spread across endpoints proportional to their
+- **With `weighted-random-picker`**: requests spread across endpoints proportional to their
   cache scores. This avoids hot-spotting but dilutes cache affinity — requests are frequently
   sent to endpoints with low or zero cache hits, losing the prefill savings that prefix
   caching provides.
 
 This filter resolves the trade-off by operating as a **pre-filter** rather than a scorer.
 It narrows the candidate set to only the sticky endpoints (those above `affinityThreshold`),
-then passes them to downstream plugins. When paired with [`weighted-random-picker`](../../picker/weightedrandom/README.md), requests
+then passes them to downstream plugins. When paired with `weighted-random-picker`, requests
 are spread across the sticky set — maintaining cache affinity while distributing load. The
 TTFT load gate (`maxTTFTPenaltyMs`) adds automatic back-off: if sticky endpoints become
 overloaded and their predicted TTFT exceeds non-sticky endpoints by more than the configured
@@ -73,8 +73,8 @@ Can be instantiated multiple times with different thresholds (e.g., 0.99 for glo
 
 ## Dependencies
 
-- Reads `PrefixCacheMatchInfo` from endpoint attributes (from [`prefix-cache-scorer`](../../scorer/prefix/README.md))
-- Reads `LatencyPredictionInfo` for TTFT load gate (from [`predicted-latency-producer`](../../../requestcontrol/dataproducer/predictedlatency/README.md))
+- Reads `PrefixCacheMatchInfo` from endpoint attributes (from `prefix-cache-scorer`)
+- Reads `LatencyPredictionInfo` for TTFT load gate (from `predicted-latency-producer`)
 
 **Configuration Example:**
 ```yaml

@@ -2,20 +2,14 @@
 
 **Type:** `openai-parser`
 
-Parses HTTP/H2C requests and responses in the OpenAI API format. This plugin is framework-injected by default if no other parser is specified in `EndpointPickerConfig`. You do not need to explicitly declare it in your configuration.
+Parses HTTP/H2C requests and responses in the OpenAI API format. 
+
+> [!NOTE]
+> This plugin is framework-injected by default if no other parser is specified in `EndpointPickerConfig`. You do not need to explicitly declare it in your configuration.
 
 Supports all standard OpenAI-compatible endpoints: completions, chat/completions, conversations, responses, and embeddings. Extracts model name, prompt content, token counts, and streaming mode from the request body and response.
 
 **Parameters:** None.
-
-**Configuration Example:**
-```yaml
-plugins:
-  - type: openai-parser
-    name: openai-parser
-parser:
-  pluginRef: openai-parser
-```
 
 ---
 

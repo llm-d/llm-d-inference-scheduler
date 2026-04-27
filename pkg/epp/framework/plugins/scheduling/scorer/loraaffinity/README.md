@@ -1,10 +1,8 @@
 # LoRA Affinity Scorer Plugin
 
-This plugin scores candidate endpoints based on whether a requested LoRA adapter is already loaded (or likely to load quickly) on each model server.
-
-It is registered as type `lora-affinity-scorer` and runs as a scheduling scorer.
-
 **Type:** `lora-affinity-scorer`
+
+This plugin scores candidate endpoints based on whether a requested LoRA adapter is already loaded (or likely to load quickly) on each model server.
 
 ## What it does
 

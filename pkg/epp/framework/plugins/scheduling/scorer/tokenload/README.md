@@ -1,10 +1,8 @@
 # Token Load Scorer Plugin
 
-This plugin scores candidate endpoints based on the estimated number of in-flight tokens currently being processed by each model server.
-
-It is registered as type `token-load-scorer` and runs as a scheduling scorer.
-
 **Type:** `token-load-scorer`
+
+This plugin scores candidate endpoints based on the estimated number of in-flight tokens currently being processed by each model server.
 
 ## What it does
 

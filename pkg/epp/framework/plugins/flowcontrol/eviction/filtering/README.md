@@ -8,13 +8,6 @@ Non-sheddable requests (priority >= 0) are never eligible for eviction, ensuring
 
 **Parameters:** None.
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: eviction-sheddable-filter
-    name: eviction-sheddable-filter
-```
-
 ---
 
 ## Related Documentation

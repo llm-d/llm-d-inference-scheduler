@@ -1,13 +1,11 @@
 # Queue Depth Scorer Plugin
 
-This plugin scores candidate endpoints by current waiting-queue depth.
+**Type:** `queue-scorer`
 
-It is registered as type `queue-scorer` and runs as a scheduling scorer.
+This plugin scores candidate endpoints by current waiting-queue depth.
 
 > [!NOTE]
 > This scorer is included in the default out-of-the-box configuration.
-
-**Type:** `queue-scorer`
 
 ## What it does
 

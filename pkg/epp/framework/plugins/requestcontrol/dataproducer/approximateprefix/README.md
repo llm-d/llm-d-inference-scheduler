@@ -2,7 +2,7 @@
 
 **Type:** `approx-prefix-cache-producer`
 
-Prepares per-endpoint prefix cache match data consumed by the [`prefix-cache-affinity-filter`](../../../scheduling/filter/prefixcacheaffinity/README.md) and [`prefix-cache-scorer`](../../../scheduling/scorer/prefix/README.md). Runs in the request handling's `DataProducer` phase before scheduling.
+Prepares per-endpoint prefix cache match data consumed by the `prefix-cache-affinity-filter` and `prefix-cache-scorer`. Runs in the request handling's `DataProducer` phase before scheduling.
 
 For each request, the plugin hashes the prompt into fixed-size blocks and looks up which endpoints have recently served requests with a matching prefix. It writes a `PrefixCacheMatchInfo` attribute onto each candidate endpoint, then records the selected endpoint(s) in the index after scheduling completes (via `PreRequest`).
 

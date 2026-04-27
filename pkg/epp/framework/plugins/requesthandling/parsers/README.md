@@ -4,18 +4,18 @@ This directory contains parser plugins used to parse and understand the payloads
 
 ## Supported Parsers
 
-*   **[`openai-parser`](openai/README.md)**: The default parser, supporting the [OpenAI API](https://developers.openai.com/api/reference/overview). This is used when no parser is explicitly specified in the `EndpointPickerConfig`.
-*   **[`vllmgrpc-parser`](vllmgrpc/README.md)**: A parser designed to handle requests specifically for the [vLLM gRPC API](https://docs.vllm.ai/en/latest/api/vllm/entrypoints/grpc_server/).
-*   **[`passthrough-parser`](passthrough/README.md)**: A model-agnostic parser that supports any request format by passing the request body through without interpretation.
-    *   **Drawback**: EPP cannot parse the payload, so payload-related scheduling scorers (e.g., [`prefix-cache-scorer`](../../scheduling/scorer/prefix/README.md)) are not supported.
+*   **`openai-parser`**: The default parser, supporting the [OpenAI API](https://developers.openai.com/api/reference/overview). This is used when no parser is explicitly specified in the `EndpointPickerConfig`.
+*   **`vllmgrpc-parser`**: A parser designed to handle requests specifically for the [vLLM gRPC API](https://docs.vllm.ai/en/latest/api/vllm/entrypoints/grpc_server/).
+*   **`passthrough-parser`**: A model-agnostic parser that supports any request format by passing the request body through without interpretation.
+    *   **Drawback**: EPP cannot parse the payload, so payload-related scheduling scorers (e.g., `prefix-cache-scorer`) are not supported.
 
 ## Configuration
 
 Parsers are configured via the `parser` section in the `EndpointPickerConfig` YAML file. You must first instantiate the parser plugin in the `plugins` section, and then reference its name in the `parser` section. 
 
-If no parser is specified, [`openai-parser`](openai/README.md) is used as the fallback.
+If no parser is specified, `openai-parser` is used as the fallback.
 
-Here is an example configuration using the [`vllmgrpc-parser`](vllmgrpc/README.md):
+Here is an example configuration using the `vllmgrpc-parser`:
 
 ```yaml
 apiVersion: inference.networking.x-k8s.io/v1alpha1

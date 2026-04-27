@@ -1,10 +1,8 @@
 # Earliest Deadline First (EDF) Ordering Policy
 
-It is registered as type `edf-ordering-policy` and runs as an ordering policy.
+**Type:** `edf-ordering-policy`
 
 The Earliest Deadline First (EDF) ordering policy selects requests based on their absolute deadline, prioritizing requests that are closest to expiring.
-
-**Type:** `edf-ordering-policy`
 
 ## Why Choose This Policy?
 

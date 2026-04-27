@@ -1,10 +1,8 @@
 # Running Requests Size Scorer Plugin
 
-This plugin scores candidate endpoints based on how many requests are currently running on each model server.
-
-It is registered as type `running-requests-size-scorer` and runs as a scheduling scorer.
-
 **Type:** `running-requests-size-scorer`
+
+This plugin scores candidate endpoints based on how many requests are currently running on each model server.
 
 ## What it does
 

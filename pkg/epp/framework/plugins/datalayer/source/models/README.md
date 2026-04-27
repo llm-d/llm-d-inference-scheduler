@@ -2,22 +2,18 @@
 
 **Type:** `models-data-source`
 
-The Models Data Source polls inference server pods for model information and passes the response to a paired [`models-data-extractor`](../../extractor/models/README.md) extractor.
+The Models Data Source polls inference server pods for model information and passes the response to a paired `models-data-extractor` extractor.
 
 ## What it does
 
 1. Iterates over every ready endpoint associated with the `InferencePool`.
 2. Issues a `GET <scheme>://<endpoint-ip>:<port>/<path>` request to each endpoint.
-3. Parses the OpenAI-compatible `/v1/models` response.
-4. Forwards the parsed response to any extractors wired to this source via `data: sources:`.
+3. Parses the `/v1/models` response.
+4. Returns the parsed response to the datalayer runtime, which forwards it to any extractors wired to this source via `data: sources:`.
 
 ## Inputs consumed
 
 - Pod list from the `InferencePool` (polled individually on each scheduling cycle).
-
-## Attributes produced
-
-None directly. The parsed API response is forwarded to the attached extractors, which store it as endpoint attributes.
 
 ## Configuration
 

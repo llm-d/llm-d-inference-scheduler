@@ -24,9 +24,9 @@ so their state is re-evaluated.
 
 ## Config
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `epsilonExploreNeg` | `float64` | No | `0.01` | Probability of selecting negative tier when both exist |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `epsilonExploreNeg` | `0.01` | Probability of selecting negative tier when both exist |
 
 ## Inputs
 

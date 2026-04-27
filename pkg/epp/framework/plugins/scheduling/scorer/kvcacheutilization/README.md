@@ -1,13 +1,11 @@
 # KV Cache Utilization Scorer Plugin
 
-This plugin scores candidate endpoints using each endpoint's current KV-cache utilization.
+**Type:** `kv-cache-utilization-scorer`
 
-It is registered as type `kv-cache-utilization-scorer` and runs as a scheduling scorer.
+This plugin scores candidate endpoints using each endpoint's current KV-cache utilization.
 
 > [!NOTE]
 > This scorer is included in the default out-of-the-box configuration.
-
-**Type:** `kv-cache-utilization-scorer`
 
 ## What it does
 
