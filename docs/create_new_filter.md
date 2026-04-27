@@ -32,7 +32,7 @@ Key upstream types used in the signature:
 - [`scheduling.LLMRequest`](../pkg/epp/framework/interface/scheduling/types.go) — parsed request with model, body, headers, and objectives
 - [`scheduling.Endpoint`](../pkg/epp/framework/interface/scheduling/types.go) — candidate endpoint interface with metadata and metrics
 
-The `Filter` function accepts the request and a slice of candidate endpoints. Each endpoint exposes relevant inference metrics and attributes which can be used to make scheduling decisions. The function returns a (possibly smaller) slice of endpoints which satisfy the filtering criteria.
+The `Filter` function accepts the request and a slice of candidate endpoints. Each endpoint exposes relevant inference attributes, such a model server metrics, which can be used to make scheduling decisions. The function returns a (possibly smaller) slice of endpoints which satisfy the filtering criteria.
 
 ## Filter Execution
 
