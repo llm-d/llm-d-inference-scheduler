@@ -199,21 +199,9 @@ If the configuration is in a file, the EPP command line argument `--configFile` 
 
 This section describes how to setup the various plugins available with the llm-d-inference-scheduler
 
-#### DisaggHeadersHandler
-
-Sets headers for use in disaggregated prefill/decode and encode/prefill/decode
-
-- **Type**: `disagg-headers-handler`
-- **Parameters**:
-  - `prefillProfile`: specifies the name of the profile used for the prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-  - `encodeProfile`: specifies the name of the profile used for the encode scheduling. Only needed if the encode profile is not named `encode`.
-
----
-
 #### DisaggProfileHandler
 
-
-Selects the profiles to use when running with disaggregation
+Selects the profiles to use when running with disaggregation and sets the prefill/encode routing headers (previously handled by the now-removed `disagg-headers-handler` plugin).
 
 - **Type**: `disagg-profile-handler`
 - **Parameters**:
@@ -747,7 +735,6 @@ The following is an example of what a configuration for disaggregated Prefill/De
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     maxPrefixBlocksToMatch: 256

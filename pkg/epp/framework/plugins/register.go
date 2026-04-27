@@ -23,9 +23,10 @@ func RegisterAllPlugins() {
 	plugin.Register(bylabel.EncodeRoleType, bylabel.EncodeRoleFactory)
 	plugin.Register(bylabel.DecodeRoleType, bylabel.DecodeRoleFactory)
 	plugin.Register(bylabel.PrefillRoleType, bylabel.PrefillRoleFactory)
-	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.HeadersHandlerFactory)
-	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
-	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
+	// Legacy no-op aliases - existing YAML configs continue to work.
+	// disagg-headers-handler functionality is now built into disagg-profile-handler.
+	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.LegacyHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
+	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.LegacyHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
 	plugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
 	plugin.Register(disagg.DisaggProfileHandlerType, disagg.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.

@@ -4,18 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
+
+func TestMain(m *testing.M) {
+	plugin.Register(DisaggHeadersHandlerType, LegacyHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
+	plugin.Register(PrefillHeaderHandlerType, LegacyHeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
+	os.Exit(m.Run())
+}
 
 // ── Shared test helpers ──────────────────────────────────────────────────────
 
@@ -1289,4 +1301,533 @@ func TestHandler_Factory_NilDeciders(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ── PreRequest tests (relocated from disagg_headers_handler_test.go) ────────
+
+const (
+	testAddr     = "10.0.0.5"
+	testIPv6Addr = "fd00::1"
+)
+
+func makeEndpointByAddr(addr string) scheduling.Endpoint {
+	return scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{Namespace: "default", Name: "prefill-pod"},
+			Address:        addr,
+			Port:           testPodPort,
+		},
+		&fwkdl.Metrics{},
+		nil,
+	)
+}
+
+func makeEncodeEndpoint(addr string) scheduling.Endpoint {
+	return scheduling.NewEndpoint(
+		&fwkdl.EndpointMetadata{
+			NamespacedName: k8stypes.NamespacedName{Namespace: "default", Name: "encode-pod"},
+			Address:        addr,
+			Port:           testPodPort,
+		},
+		&fwkdl.Metrics{},
+		nil,
+	)
+}
+
+func TestLegacyHeadersHandlerFactory(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handle := plugin.NewEppHandle(ctx, nil)
+
+	tests := []struct {
+		name    string
+		typeStr string
+	}{
+		{
+			name:    "disagg-headers-handler legacy type is registered",
+			typeStr: DisaggHeadersHandlerType,
+		},
+		{
+			name:    "prefill-header-handler legacy type is registered",
+			typeStr: PrefillHeaderHandlerType,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			factory, ok := plugin.Registry[tt.typeStr]
+			require.True(t, ok, "%s must be in the registry", tt.typeStr)
+
+			p, err := factory("compat-handler", nil, handle)
+			require.NoError(t, err)
+			require.NotNil(t, p)
+
+			assert.Equal(t, "compat-handler", p.TypedName().Name)
+
+			_, isProfileHandler := p.(scheduling.ProfileHandler)
+			assert.False(t, isProfileHandler, "legacy no-op plugin must NOT implement ProfileHandler")
+
+			_, isPreRequest := p.(requestcontrol.PreRequest)
+			assert.False(t, isPreRequest, "legacy no-op plugin must NOT implement PreRequest")
+		})
+	}
+}
+
+func TestPreRequestNilRequest(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	result := &scheduling.SchedulingResult{
+		ProfileResults: map[string]*scheduling.ProfileRunResult{},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, nil, result)
+	})
+}
+
+func TestPreRequestNilSchedulingResult(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, nil)
+	})
+}
+
+// ----- Backward compatibility -----
+
+func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handle := plugin.NewEppHandle(ctx, nil)
+
+	factory, ok := plugin.Registry[PrefillHeaderHandlerType]
+	require.True(t, ok, "prefill-header-handler must be in the registry")
+
+	raw := json.RawMessage(`{"prefillProfile": "prefill"}`)
+	p, err := factory("compat-handler", raw, handle)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+
+	assert.Equal(t, "compat-handler", p.TypedName().Name)
+	_, isProfileHandler := p.(scheduling.ProfileHandler)
+	assert.False(t, isProfileHandler, "legacy no-op plugin must NOT be a ProfileHandler")
+}
+
+// ----- Prefill tests -----
+
+func TestPreRequestPrefillProfileExists(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		TargetModel: "test-model",
+		RequestId:   "req-123",
+		Headers:     map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"prefill": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEndpointByAddr(testAddr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testAddr, testPodPort), request.Headers[routing.PrefillEndpointHeader])
+}
+
+func TestPreRequestPrefillProfileNotExists(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		Headers: map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults:     map[string]*scheduling.ProfileRunResult{},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
+	assert.False(t, exists)
+}
+
+func TestPreRequestClearsExistingPrefillHeader(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		Headers: map[string]string{
+			routing.PrefillEndpointHeader: "old-host:9999",
+		},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"prefill": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEndpointByAddr(testAddr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testAddr, testPodPort), request.Headers[routing.PrefillEndpointHeader])
+}
+
+func TestPreRequestClearsHeaderWhenNoPrefillResult(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		Headers: map[string]string{
+			routing.PrefillEndpointHeader: "stale-host:9999",
+		},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults:     map[string]*scheduling.ProfileRunResult{},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	val := request.Headers[routing.PrefillEndpointHeader]
+	assert.Equal(t, "", val)
+}
+
+func TestPreRequestCustomPrefillProfile(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "my-custom-prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		Headers: map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"my-custom-prefill": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEndpointByAddr(testAddr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testAddr, testPodPort), request.Headers[routing.PrefillEndpointHeader])
+}
+
+func TestPreRequestPrefillProfileNilResult(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"prefill": nil,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, result)
+	})
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
+	assert.False(t, exists)
+}
+
+func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"prefill": {TargetEndpoints: []scheduling.Endpoint{}},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, result)
+	})
+	_, exists := request.Headers[routing.PrefillEndpointHeader]
+	assert.False(t, exists)
+}
+
+func TestPreRequestPrefillIPv6Address(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		Headers: map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"prefill": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEndpointByAddr(testIPv6Addr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPodPort), request.Headers[routing.PrefillEndpointHeader])
+}
+
+// ----- Encode tests -----
+
+func TestPreRequestEncodeProfileExists(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		TargetModel: "test-model",
+		RequestId:   "req-123",
+		Headers:     map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"encode": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEncodeEndpoint(testAddr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testAddr, testPodPort), request.Headers[routing.EncoderEndpointsHeader])
+}
+
+func TestPreRequestEncodeProfileNotExists(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults:     map[string]*scheduling.ProfileRunResult{},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	_, exists := request.Headers[routing.EncoderEndpointsHeader]
+	assert.False(t, exists)
+}
+
+func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers: map[string]string{
+			routing.EncoderEndpointsHeader: "old-host:9999",
+		},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"encode": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEncodeEndpoint(testAddr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testAddr, testPodPort), request.Headers[routing.EncoderEndpointsHeader])
+}
+
+func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers: map[string]string{
+			routing.EncoderEndpointsHeader: "stale-host:9999",
+		},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults:     map[string]*scheduling.ProfileRunResult{},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	val := request.Headers[routing.EncoderEndpointsHeader]
+	assert.Equal(t, "", val)
+}
+
+func TestPreRequestEncodeCustomProfile(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "my-custom-encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"my-custom-encode": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEncodeEndpoint(testAddr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testAddr, testPodPort), request.Headers[routing.EncoderEndpointsHeader])
+}
+
+func TestPreRequestEncodeIPv6Address(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"encode": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEncodeEndpoint(testIPv6Addr),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	assert.Equal(t, net.JoinHostPort(testIPv6Addr, testPodPort), request.Headers[routing.EncoderEndpointsHeader])
+}
+
+func TestPreRequestEncodeProfileNilResult(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"encode": nil,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, result)
+	})
+	_, exists := request.Headers[routing.EncoderEndpointsHeader]
+	assert.False(t, exists)
+}
+
+func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers: map[string]string{
+			routing.EncoderEndpointsHeader: "stale-host:9999",
+		},
+	}
+
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"encode": {TargetEndpoints: []scheduling.Endpoint{}},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		handler.PreRequest(ctx, request, result)
+	})
+	val := request.Headers[routing.EncoderEndpointsHeader]
+	assert.Equal(t, "", val)
+}
+
+func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	handler := NewDisaggProfileHandler("decode", "prefill", "encode", nil, nil).WithName("test")
+
+	request := &scheduling.InferenceRequest{
+		RequestId: "req-123",
+		Headers:   map[string]string{},
+	}
+
+	addr2 := "10.0.0.6"
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"encode": {
+				TargetEndpoints: []scheduling.Endpoint{
+					makeEncodeEndpoint(testAddr),
+					makeEncodeEndpoint(addr2),
+				},
+			},
+		},
+	}
+
+	handler.PreRequest(ctx, request, result)
+
+	expected := strings.Join([]string{
+		net.JoinHostPort(testAddr, testPodPort),
+		net.JoinHostPort(addr2, testPodPort),
+	}, ",")
+	assert.Equal(t, expected, request.Headers[routing.EncoderEndpointsHeader])
 }

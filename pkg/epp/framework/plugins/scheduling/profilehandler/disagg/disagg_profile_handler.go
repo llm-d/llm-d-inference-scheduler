@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	dl_prefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
@@ -24,6 +28,16 @@ import (
 const (
 	// DisaggProfileHandlerType is the canonical type for the unified disaggregation profile handler.
 	DisaggProfileHandlerType = "disagg-profile-handler"
+
+	// DisaggHeadersHandlerType is preserved as a legacy alias.
+	//
+	// Deprecated: use DisaggProfileHandlerType instead.
+	DisaggHeadersHandlerType = "disagg-headers-handler"
+
+	// PrefillHeaderHandlerType is a deprecated alias for DisaggHeadersHandlerType.
+	//
+	// Deprecated: use DisaggProfileHandlerType instead.
+	PrefillHeaderHandlerType = "prefill-header-handler"
 
 	defaultDecodeProfile  = "decode"
 	defaultPrefillProfile = "prefill"
@@ -185,10 +199,40 @@ func NewDisaggProfileHandler(decodeProfile, prefillProfile, encodeProfile string
 	)
 }
 
+// ── Legacy no-op factory ────────────────────────────────────────────────────
+
+// legacyHeadersPlugin is a no-op plugin returned for deprecated type names
+// (disagg-headers-handler, prefill-header-handler). It implements only
+// plugin.Plugin so it is invisible to the profile-handler and pre-request
+// pipelines — its sole purpose is to let old YAML configs load without error.
+type legacyHeadersPlugin struct {
+	typedName plugin.TypedName
+}
+
+func (l *legacyHeadersPlugin) TypedName() plugin.TypedName { return l.typedName }
+
+// LegacyHeadersHandlerFactory creates a no-op plugin and logs a deprecation
+// warning. Use it for Registry entries of DisaggHeadersHandlerType and
+// PrefillHeaderHandlerType so that old configs keep loading while the actual
+// PreRequest logic lives in Handler.
+func LegacyHeadersHandlerFactory(name string, _ json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	logger := log.FromContext(handle.Context())
+	logger.Info("DEPRECATION: plugin type is deprecated and has no effect; "+
+		"PreRequest headers are now handled by disagg-profile-handler. "+
+		"Remove this entry from your config.",
+		"pluginType", name)
+	return &legacyHeadersPlugin{
+		typedName: plugin.TypedName{Type: name, Name: name},
+	}, nil
+}
+
 // ── Shared implementation ───────────────────────────────────────────────────
 
-// compile-time assertion
-var _ scheduling.ProfileHandler = &Handler{}
+// compile-time assertions
+var (
+	_ scheduling.ProfileHandler  = &Handler{}
+	_ requestcontrol.PreRequest  = &Handler{}
+)
 
 // Handler is the unified disaggregation profile handler.
 // It drives one or more of the following stages, each optional except decode:
@@ -344,4 +388,94 @@ func (h *Handler) ProcessResults(
 		PrimaryProfileName: h.decodeProfile,
 		ProfileResults:     updatedResults,
 	}, nil
+}
+
+// ── PreRequest (relocated from disagg_headers_handler.go) ───────────────────
+
+// PreRequest wires prefill and encode SchedulerProfile results into headers
+// so the sidecar knows which pods to contact for disaggregated work.
+func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
+	tracer := telemetry.Tracer()
+	_, span := tracer.Start(ctx, "llm_d.epp.prerequest.disaggregation",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	if request == nil {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.disagg.reason", "request_is_nil"),
+		)
+		return
+	}
+	if schedulingResult == nil {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.disagg.reason", "scheduling_result_is_nil"),
+		)
+		return
+	}
+
+	if request.TargetModel != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+	}
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+
+	// Prefill header
+	delete(request.Headers, routing.PrefillEndpointHeader)
+	prefillProfileRunResult := schedulingResult.ProfileResults[h.prefillProfile]
+	switch {
+	case prefillProfileRunResult == nil:
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.String("llm_d.epp.pd.reason", "no_prefill_profile_result"),
+		)
+	case len(prefillProfileRunResult.TargetEndpoints) == 0:
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", false),
+			attribute.String("llm_d.epp.pd.reason", "no_prefill_profile_target_endpoints"),
+		)
+	default:
+		targetPod := prefillProfileRunResult.TargetEndpoints[0].GetMetadata()
+		prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
+		request.Headers[routing.PrefillEndpointHeader] = prefillHostPort
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.pd.disaggregation_used", true),
+			attribute.String("llm_d.epp.pd.prefill_pod_address", targetPod.Address),
+			attribute.String("llm_d.epp.pd.prefill_pod_port", targetPod.Port),
+		)
+	}
+
+	// Encode header
+	delete(request.Headers, routing.EncoderEndpointsHeader)
+	encodeProfileRunResult := schedulingResult.ProfileResults[h.encodeProfile]
+	if encodeProfileRunResult == nil {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.encode.reason", "no_encode_profile_result"),
+		)
+		return
+	}
+
+	var encodeHostPorts []string
+	for _, endpoint := range encodeProfileRunResult.TargetEndpoints {
+		targetEndpoint := endpoint.GetMetadata()
+		encodeHostPort := net.JoinHostPort(targetEndpoint.Address, targetEndpoint.Port)
+		encodeHostPorts = append(encodeHostPorts, encodeHostPort)
+	}
+	if len(encodeHostPorts) == 0 {
+		span.SetAttributes(
+			attribute.Bool("llm_d.epp.encode.disaggregation_used", false),
+			attribute.String("llm_d.epp.encode.reason", "no_encode_profile_target_endpoints"),
+		)
+		return
+	}
+
+	request.Headers[routing.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
+	span.SetAttributes(
+		attribute.Bool("llm_d.epp.encode.disaggregation_used", true),
+		attribute.String("llm_d.epp.encode.endpoints", strings.Join(encodeHostPorts, ",")),
+	)
 }
