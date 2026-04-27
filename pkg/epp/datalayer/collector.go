@@ -27,6 +27,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 )
 
 // TODO:
@@ -39,6 +40,8 @@ import (
 const (
 	defaultCollectionTimeout = time.Second
 )
+
+var collectorLogger = log.Log.WithName("datalayer-collector")
 
 // Ticker implements a time source for periodic invocation.
 // The Ticker is passed in as parameter a Collector to allow control over time
@@ -65,163 +68,117 @@ func (t *TimeTicker) Channel() <-chan time.Time {
 	return t.C
 }
 
-// Collector runs the data collection for a single endpoint.
+// Collector runs data collection for a single endpoint.
 type Collector struct {
-	// per-endpoint context and cancellation
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	// goroutine management
-	startOnce sync.Once
-	stopOnce  sync.Once
-
-	// done is closed when the collection goroutine exits, allowing Stop to block until it is safe
-	// to inspect internal state (e.g., in tests).
-	done chan struct{}
-
-	// lastPollErrors and lastExtractErrors track the last error per source/extractor
-	// for change-only logging. Only accessed from the collection goroutine — no synchronization required.
-	lastPollErrors    map[string]error
-	lastExtractErrors map[string]error
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	stopped bool
 }
 
 // NewCollector returns a new collector.
 func NewCollector() *Collector {
-	return &Collector{
-		done:              make(chan struct{}),
-		lastPollErrors:    make(map[string]error),
-		lastExtractErrors: make(map[string]error),
-	}
+	return &Collector{}
 }
 
-// Start initiates data source collection for the endpoint.
-// All sources must implement PollingDataSource. Validation is performed by the caller.
+// Start launches the collection goroutine.
 func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.ExtractorBase) error {
-	// Validate sources slice is not empty
 	if len(pollers) == 0 {
 		return errors.New("cannot start collector with empty sources")
 	}
-
 	for _, src := range pollers {
 		if src == nil {
 			return errors.New("cannot add nil data source")
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
-	return c.startCollection(ctx, ticker, ep, pollers, extractors)
-}
-
-func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.ExtractorBase) error {
-	var ready chan struct{}
-	started := false
-
-	// Pre-compute poll-based extractors upfront to avoid repeated type assertions in the hot loop.
+	// Filter to poll-capable extractors up front so the hot loop avoids per-tick type assertions.
 	pollingExtractors := make(map[string][]fwkdl.Extractor, len(extractors))
 	for name, exts := range extractors {
 		for _, ext := range exts {
-			if poller, ok := ext.(fwkdl.Extractor); ok {
-				pollingExtractors[name] = append(pollingExtractors[name], poller)
+			if e, ok := ext.(fwkdl.Extractor); ok {
+				pollingExtractors[name] = append(pollingExtractors[name], e)
 			}
 		}
 	}
 
-	c.startOnce.Do(func() {
-		logger := log.FromContext(ctx).WithValues("endpoint", ep.GetMetadata().GetIPAddress())
-		c.ctx, c.cancel = context.WithCancel(ctx)
-		started = true
-		ready = make(chan struct{})
-
-		go func(endpoint fwkdl.Endpoint, sources []fwkdl.PollingDataSource, exts map[string][]fwkdl.Extractor) {
-			logger.V(logging.DEFAULT).Info("starting collection")
-
-			defer func() {
-				logger.V(logging.DEFAULT).Info("terminating collection")
-				ticker.Stop()
-				close(c.done)
-			}()
-
-			close(ready) // signal ready to accept ticks
-
-			for {
-				select {
-				case <-c.ctx.Done(): // per endpoint context cancelled
-					return
-				case <-ticker.Channel():
-					for _, src := range sources {
-						tn := src.TypedName()
-						key := tn.String()
-
-						ctx, cancel := context.WithTimeout(c.ctx, defaultCollectionTimeout)
-						data, err := src.Poll(ctx, endpoint)
-						cancel()
-
-						logErrorTransition(logger, c.lastPollErrors, key, "poll", "source", err)
-						if err != nil {
-							continue
-						}
-
-						if srcExtractors, ok := exts[tn.Name]; ok && data != nil {
-							for _, ext := range srcExtractors {
-								extKey := ext.TypedName().String()
-								extErr := ext.Extract(ctx, data, endpoint)
-								logErrorTransition(logger, c.lastExtractErrors, extKey, "extract", "extractor", extErr)
-							}
-						}
-					}
-				}
-			}
-		}(ep, pollers, pollingExtractors)
-	})
-
-	if !started {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cancel != nil {
 		return errors.New("collector start called multiple times")
 	}
-
-	// Wait for goroutine to signal readiness.
-	// The use of ready channel is mostly to make the function testable, by ensuring
-	// synchronous order of events. Ignoring test requirements, one could let the
-	// go routine start at some arbitrary point in the future, possibly after this
-	// function has returned.
-	select {
-	case <-ready:
-		return nil
-	case <-ctx.Done():
-		if c.cancel != nil {
-			c.cancel() // ensure clean up
-		}
-		return ctx.Err()
-	}
-}
-
-// Stop terminates the collector and waits for the collection goroutine to exit.
-func (c *Collector) Stop() error {
-	if c.ctx == nil || c.cancel == nil {
-		return errors.New("collector stop called before start")
-	}
-
-	stopped := false
-	c.stopOnce.Do(func() {
-		stopped = true
-		c.cancel()
-	})
-
-	if !stopped {
-		return errors.New("collector stop called multiple times")
-	}
-	<-c.done
+	ctx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	go c.run(ctx, ticker, ep, pollers, pollingExtractors)
 	return nil
 }
 
-// logErrorTransition logs only when the error state transitions (nil→non-nil or non-nil→nil).
-// errs is updated in place. verb is the operation name ("poll"/"extract"); fieldName is the log key.
-func logErrorTransition(logger logr.Logger, errs map[string]error, key, verb, fieldName string, err error) {
-	prev, seen := errs[key]
-	if (err != nil) != (seen && prev != nil) {
-		if err != nil {
-			logger.Error(err, verb+" failed", fieldName, key)
-		} else {
-			logger.V(logging.DEFAULT).Info(verb+" recovered", fieldName, key)
+// Stop signals the collection goroutine to exit. Idempotent.
+func (c *Collector) Stop() {
+	var msg string
+	c.mu.Lock()
+	switch {
+	case c.cancel == nil:
+		msg = "Stop called before successful Start"
+	case c.stopped:
+		msg = "Stop called more than once"
+	default:
+		c.stopped = true
+		c.cancel()
+	}
+	c.mu.Unlock()
+	if msg != "" {
+		collectorLogger.Info(msg)
+	}
+}
+
+func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) {
+	defer ticker.Stop()
+	logger := log.FromContext(ctx).WithValues("endpoint", ep.GetMetadata().GetIPAddress())
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.Channel():
+			for _, src := range pollers {
+				if ctx.Err() != nil {
+					return
+				}
+				c.pollOne(ctx, src, ep, extractors, logger)
+			}
 		}
-		errs[key] = err
+	}
+}
+
+func (c *Collector) pollOne(ctx context.Context, src fwkdl.PollingDataSource, ep fwkdl.Endpoint, extractors map[string][]fwkdl.Extractor, logger logr.Logger) {
+	tn := src.TypedName()
+
+	pollCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
+	data, err := src.Poll(pollCtx, ep)
+	cancel()
+	if err != nil {
+		metrics.DataLayerPollErrorsTotal.WithLabelValues(tn.Type).Inc()
+		logger.V(logging.DEBUG).Info("poll failed", "source", tn, "err", err)
+		return
+	}
+	if data == nil {
+		return
+	}
+
+	for _, ext := range extractors[tn.Name] {
+		if ctx.Err() != nil {
+			return
+		}
+		extCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
+		err := ext.Extract(extCtx, data, ep)
+		cancel()
+		if err != nil {
+			extName := ext.TypedName()
+			metrics.DataLayerExtractErrorsTotal.WithLabelValues(tn.Type, extName.Type).Inc()
+			logger.V(logging.DEBUG).Info("extract failed", "source", tn, "extractor", extName, "err", err)
+		}
 	}
 }
