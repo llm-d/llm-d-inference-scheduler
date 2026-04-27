@@ -98,10 +98,10 @@ type Config struct {
 
 // Compile-time interface assertions.
 var (
-	_ flowcontrol.FairnessPolicy       = &ProgramAwarePlugin{}
-	_ requestcontrol.DataProducer = &ProgramAwarePlugin{}
-	_ requestcontrol.PreRequest        = &ProgramAwarePlugin{}
-	_ requestcontrol.ResponseBodyProcessor      = &ProgramAwarePlugin{}
+	_ flowcontrol.FairnessPolicy           = &ProgramAwarePlugin{}
+	_ requestcontrol.DataProducer          = &ProgramAwarePlugin{}
+	_ requestcontrol.PreRequest            = &ProgramAwarePlugin{}
+	_ requestcontrol.ResponseBodyProcessor = &ProgramAwarePlugin{}
 )
 
 // ProgramAwarePluginFactory creates a new ProgramAwarePlugin from JSON config.

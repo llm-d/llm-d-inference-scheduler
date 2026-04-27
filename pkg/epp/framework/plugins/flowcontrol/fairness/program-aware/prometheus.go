@@ -1,9 +1,9 @@
 package programaware
 
 import (
+	metricsutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	compbasemetrics "k8s.io/component-base/metrics"
-	metricsutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/metrics"
 )
 
 const programAwareSubsystem = "program_aware"

@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	requestcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	scheduling "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // --- DataProducer interface ---
