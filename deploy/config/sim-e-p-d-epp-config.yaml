@@ -4,7 +4,6 @@ kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
 plugins:
-- type: disagg-headers-handler
 - type: queue-scorer
 - type: encode-filter
 - type: prefill-filter

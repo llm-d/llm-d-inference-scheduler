@@ -1,6 +1,6 @@
 # Disaggregated Profile Handler, PreRequest, and Decider Plugins
 
-Plugins for disaggregated inference scheduling: a profile handler that selects the active stages: EPD (no disaggregation), P/D (Prefill/Decode), E/P/D (Encode/Prefill/Decode), or E/PD (Encode/Prefill-Decode), a headers handler that routes pods across stages, and decider plugins that control whether each disaggregation stage runs per request.
+Plugins for disaggregated inference scheduling: a profile handler that selects the active stages: EPD (no disaggregation), P/D (Prefill/Decode), E/P/D (Encode/Prefill/Decode), or E/PD (Encode/Prefill-Decode), legacy headers handlers (deprecated) kept for backward compatibility, and decider plugins that control whether each disaggregation stage runs per request.
 
 ## Contents
 
@@ -8,7 +8,7 @@ Plugins for disaggregated inference scheduling: a profile handler that selects t
   - [DisaggProfileHandler](#disaggprofilehandler)
   - [PdProfileHandler (Deprecated)](#pdprofilehandler-deprecated)
 - [PreRequest Plugins](#prerequest-plugins)
-  - [DisaggHeadersHandler](#disaggheadershandler)
+  - [DisaggHeadersHandler (Deprecated)](#disaggheadershandler-deprecated)
   - [PrefillHeaderHandler (Deprecated)](#prefillheaderhandler-deprecated)
 - [Decider Plugins](#decider-plugins)
   - [PrefixBasedPDDecider](#prefixbasedpddecider)
@@ -100,10 +100,16 @@ plugins:
 
 ## PreRequest Plugins
 
-### DisaggHeadersHandler
+### DisaggHeadersHandler (Deprecated)
 
 **Type:** `disagg-headers-handler`
 **Interfaces**: `requestcontrol.PreRequest`
+
+> **Deprecated:** Use `disagg-profile-handler` instead.
+>
+> `disagg-profile-handler` now implements `requestcontrol.PreRequest` natively.
+>
+> Planned removal: `v0.11`.
 
 Sets HTTP routing headers on the outgoing request so the inference proxy can forward prefill and encode work to the selected disaggregated pods.
 
@@ -152,7 +158,9 @@ plugins:
 **Type:** `prefill-header-handler`
 **Interfaces**: `requestcontrol.PreRequest`
 
-> **Deprecated:** Use `disagg-headers-handler` instead.
+> **Deprecated:** Use `disagg-profile-handler` instead.
+>
+> Planned removal: `v0.11`.
 
 ---
 
