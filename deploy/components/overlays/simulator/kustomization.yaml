@@ -83,60 +83,11 @@ patches:
       - name: uds-socket
         emptyDir: {}
 
-# --- Prefill deployment (vllm-p) ---
+# --- Prefill and Encode deployments (vllm-p, vllm-e) ---
 # No initContainers in base, so create the array
 - target:
     kind: Deployment
-    name: vllm-p
-  patch: |
-    - op: add
-      path: /spec/template/spec/initContainers
-      value:
-      - name: uds-tokenizer
-        image: ${UDS_TOKENIZER_IMAGE}
-        imagePullPolicy: IfNotPresent
-        restartPolicy: Always
-        env:
-        - name: LOG_LEVEL
-          value: "DEBUG"
-        - name: PROBE_PORT
-          value: "8082"
-        - name: HF_TOKEN
-          value: "${HF_TOKEN}"
-        ports:
-        - name: health
-          containerPort: 8082
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8082
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 8082
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        volumeMounts:
-        - name: uds-socket
-          mountPath: /tmp/tokenizer
-    - op: add
-      path: /spec/template/spec/containers/0/volumeMounts
-      value:
-      - name: uds-socket
-        mountPath: /tmp/tokenizer
-    - op: add
-      path: /spec/template/spec/volumes
-      value:
-      - name: uds-socket
-        emptyDir: {}
-
-# --- Encode deployment (vllm-e) ---
-# No initContainers in base, so create the array
-- target:
-    kind: Deployment
-    name: vllm-e
+    name: "vllm-[pe]"
   patch: |
     - op: add
       path: /spec/template/spec/initContainers

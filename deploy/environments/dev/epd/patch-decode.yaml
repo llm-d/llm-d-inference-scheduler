@@ -6,7 +6,7 @@ spec:
   template:
     metadata:
       labels:
-        llm-d.ai/role: ${DECODE_ROLE}
+        llm-d.ai/role: encode-prefill-decode
     spec:
       initContainers:
       - name: routing-sidecar
@@ -22,36 +22,31 @@ spec:
         - "--block-size=16"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         - "--zmq-endpoint=tcp://${EPP_NAME}.${NAMESPACE}.svc.cluster.local:5557"
+        - "${VLLM_EXTRA_ARGS_D}"
         ports:
         - name: http
           containerPort: 8000
           protocol: TCP
         - name: rank1
-          $patch: delete
+          containerPort: 8001
         - name: rank2
-          $patch: delete
+          containerPort: 8002
         - name: rank3
-          $patch: delete
+          containerPort: 8003
         - name: rank4
-          $patch: delete
+          containerPort: 8004
         - name: rank5
-          $patch: delete
+          containerPort: 8005
         - name: rank6
-          $patch: delete
+          containerPort: 8006
         - name: rank7
-          $patch: delete
+          containerPort: 8007
         readinessProbe:
           httpGet:
-            path: /v1/models
             port: 8000
-          initialDelaySeconds: 2
-          periodSeconds: 5
         livenessProbe:
           httpGet:
-            path: /v1/models
             port: 8000
-          initialDelaySeconds: 2
-          periodSeconds: 10
         env:
         - name: PORT
           value: "8000"

@@ -92,18 +92,33 @@ spec:
         - name: rank7
           containerPort: 8207
           protocol: TCP
+        # Startup Probe: Wait for model to load during initialization
+        # Protects liveness/readiness probes from firing too early
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8200
+          failureThreshold: 60  # Allow up to 10 minutes (60 * 10s)
+          periodSeconds: 10
+          timeoutSecond: 5
+        # Readiness Probe: Is the model loaded and ready?
+        # Controls traffic routing, removes from service if failing
         readinessProbe:
           httpGet:
-            path: /v1/models
+            path: /health # Use /health/ready if available in your version
             port: 8200
-          initialDelaySeconds: 2
           periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        # Liveness Probe: Is the server process alive?
+        # Simple health check, restarts container if failing
         livenessProbe:
           httpGet:
-            path: /v1/models
+            path: /health
             port: 8200
-          initialDelaySeconds: 2
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         env:
         - name: POD_IP
           valueFrom:

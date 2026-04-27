@@ -9,6 +9,6 @@ kind: Kustomization
 
 resources:
 - deployment.yaml
-# PVC (pvc.yaml) is NOT included here by default — it is added by scenario
-# overlays that need it. The e2e test utils don't support PVC creation, and
-# the simulator tolerates missing PVCs. Real vLLM overlays must add the PVC.
+# A PVC (pvc.yaml) for shared encoder embeddings cache is NOT included here by default 
+# - it is added by scenario overlays that need it. The e2e test utils don't support PVC 
+# creation, and the simulator tolerates missing PVCs. Real vLLM overlays must add the PVC.
