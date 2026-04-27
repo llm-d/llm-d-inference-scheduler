@@ -1,6 +1,6 @@
 # Prefix Cache Affinity Filter (`prefix-cache-affinity-filter`)
 
-**Type:** `prefix-cache-affinity-filter` | **Implementation:** [plugin.go](plugin.go)
+**Type:** `prefix-cache-affinity-filter`
 
 ## When to use this filter
 
@@ -90,9 +90,3 @@ schedulingProfiles:
     plugins:
       - pluginRef: prefix-affinity
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

@@ -7,7 +7,7 @@ scores and are more likely to be selected by the picker. For negative headroom
 
 ## Inputs
 
-**Type:** `latency-scorer` | **Implementation:** [plugin.go](plugin.go)
+**Type:** `latency-scorer`
 
 - `LatencyPredictionInfo` endpoint attribute:
   - `TTFTHeadroom` / `TPOTHeadroom` - `SLO - predicted` (positive = meets SLO, negative = violates)
@@ -86,9 +86,3 @@ combination of KV cache utilization, queue depth, and prefix cache score.
 | `compositeKVWeight` | `float64` | No | `1` | KV cache weight in composite fallback. Range: [0, ∞) |
 | `compositeQueueWeight` | `float64` | No | `1` | Queue depth weight in composite fallback. Range: [0, ∞) |
 | `compositePrefixWeight` | `float64` | No | `1` | Prefix cache weight in composite fallback. Range: [0, ∞) |
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

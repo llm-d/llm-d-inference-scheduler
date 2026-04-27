@@ -4,7 +4,7 @@ It is registered as type `edf-ordering-policy` and runs as an ordering policy.
 
 The Earliest Deadline First (EDF) ordering policy selects requests based on their absolute deadline, prioritizing requests that are closest to expiring.
 
-**Type:** `edf-ordering-policy` | **Implementation:** [edf.go](edf.go)
+**Type:** `edf-ordering-policy`
 
 ## Why Choose This Policy?
 
@@ -48,7 +48,5 @@ orderingPolicyRef: edf-ordering-policy
 - **Computational Overhead:** Maintaining a priority heap incurs higher CPU overhead ($O(\log n)$ for insertions and deletions) compared to a simple FIFO list ($O(1)$).
 
 ## Related Documentation
-
-*   [Architecture Overview](../../../../../../../docs/architecture.md)
 *   [Ordering Overview](../README.md)
 *   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

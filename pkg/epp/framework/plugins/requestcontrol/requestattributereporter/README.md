@@ -1,6 +1,6 @@
 # Request Attribute Reporter Plugin
 
-**Type:** `request-attribute-reporter` | **Implementation:** [plugin.go](plugin.go)
+**Type:** `request-attribute-reporter`
 
 ## Overview
 

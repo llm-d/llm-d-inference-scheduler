@@ -1,14 +1,15 @@
 # Core Metrics Extractor
 
-**Type:** `core-metrics-extractor` | **Implementation:** [extractor.go](extractor.go)
+**Type:** `core-metrics-extractor`
 
-> Note: This plugin is auto-injected together with `metrics-data-source` when the data layer is enabled — you do not need to declare it explicitly.
+> [!NOTE]
+> This plugin is framework-injected by default together with `metrics-data-source` when the data layer is enabled. You do not need to explicitly declare it in your configuration, but it can be disabled if metrics collection is unnecessary.
 
 The Core Metrics Extractor is a data layer plugin responsible for extracting model server metrics from a data source and storing them as endpoint attributes. It supports multiple inference engines and can be configured to map engine-specific metric names to a standard set of internal keys.
 
 ## What it does
 
-1.  Receives a [`PrometheusMetricMap`](../../source/metrics/types.go#L25) from a metrics data source (e.g., [`metrics-data-source`](../../source/metrics/README.md)).
+1.  Receives a `PrometheusMetricMap` from a metrics data source (e.g., [`metrics-data-source`](../../source/metrics/README.md)).
 2.  Identifies the inference engine type of the endpoint (e.g., vLLM, SGLang, Triton) using a Pod label.
 3.  Looks up the metric specifications for that engine.
 4.  Extracts values for standard metrics:
@@ -18,10 +19,6 @@ The Core Metrics Extractor is a data layer plugin responsible for extracting mod
     -   **LoRA Adapters**: Information about active and waiting LoRA adapters.
     -   **Cache Configuration**: Block size and total number of GPU blocks.
 5.  Stores these values as attributes on the endpoint, making them available to scheduling plugins.
-
-## Inputs consumed
-
--   [`PrometheusMetricMap`](../../source/metrics/types.go#L25): A map of Prometheus metric families, typically produced by [`metrics-data-source`](../../source/metrics/README.md).
 
 ## Attributes produced
 
@@ -81,11 +78,3 @@ metadata:
     inference.networking.k8s.io/engine-type: my-custom-engine
 
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)
-- [Metrics Data Source](../../source/metrics/README.md)
-

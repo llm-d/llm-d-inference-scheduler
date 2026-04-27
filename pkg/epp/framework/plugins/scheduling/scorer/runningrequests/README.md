@@ -4,7 +4,7 @@ This plugin scores candidate endpoints based on how many requests are currently 
 
 It is registered as type `running-requests-size-scorer` and runs as a scheduling scorer.
 
-**Type:** `running-requests-size-scorer` | **Implementation:** [runningrequest.go](runningrequest.go)
+**Type:** `running-requests-size-scorer`
 
 ## What it does
 
@@ -47,9 +47,3 @@ schedulingProfiles:
       - pluginRef: running-requests
         weight: 1
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

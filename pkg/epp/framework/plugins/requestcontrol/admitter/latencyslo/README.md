@@ -2,7 +2,7 @@
 
 Rejects sheddable requests when no endpoint can meet latency SLO constraints.
 
-**Type:** `latency-slo-admitter` | **Implementation:** [plugin.go](plugin.go)
+**Type:** `latency-slo-admitter`
 
 ## Interface
 
@@ -46,9 +46,3 @@ schedulingProfiles:
     plugins:
       - pluginRef: latency-admitter
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

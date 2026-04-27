@@ -1,6 +1,6 @@
 # Weighted Random Picker
 
-**Type:** `weighted-random-picker` | **Implementation:** [picker.go](picker.go)
+**Type:** `weighted-random-picker`
 
 Selects endpoint(s) randomly, where the probability of an endpoint being selected is proportional to its score.
 

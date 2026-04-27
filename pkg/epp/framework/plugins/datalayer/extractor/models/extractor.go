@@ -11,35 +11,35 @@ import (
 )
 
 const (
-	modelsAttributeKey  = "/v1/models"
-	modelsExtractorType = "model-server-protocol-models"
+	ModelsAttributeKey  = "/v1/models"
+	ModelsExtractorType = "models-data-extractor"
 )
 
-// ModelInfoCollection defines models' data returned from /v1/models API
-type ModelInfoCollection []ModelInfo
+// ModelDataCollection defines models' data returned from /v1/models API
+type ModelDataCollection []ModelData
 
-// ModelInfo defines model's data returned from /v1/models API
-type ModelInfo struct {
+// ModelData defines model's data returned from /v1/models API
+type ModelData struct {
 	ID     string `json:"id"`
 	Parent string `json:"parent,omitempty"`
 }
 
 // String returns a string representation of the model info
-func (m *ModelInfo) String() string {
+func (m *ModelData) String() string {
 	return fmt.Sprintf("%+v", *m)
 }
 
 // Clone returns a full copy of the object
-func (m ModelInfoCollection) Clone() fwkdl.Cloneable {
+func (m ModelDataCollection) Clone() fwkdl.Cloneable {
 	if m == nil {
 		return nil
 	}
-	clone := make([]ModelInfo, len(m))
+	clone := make([]ModelData, len(m))
 	copy(clone, m)
-	return (*ModelInfoCollection)(&clone)
+	return (*ModelDataCollection)(&clone)
 }
 
-func (m ModelInfoCollection) String() string {
+func (m ModelDataCollection) String() string {
 	if m == nil {
 		return "[]"
 	}
@@ -53,7 +53,7 @@ func (m ModelInfoCollection) String() string {
 // ModelResponse is the response from /v1/models API
 type ModelResponse struct {
 	Object string      `json:"object"`
-	Data   []ModelInfo `json:"data"`
+	Data   []ModelData `json:"data"`
 }
 
 // ModelsResponseType is the type of models response
@@ -70,8 +70,8 @@ type ModelExtractor struct {
 func NewModelExtractor() (*ModelExtractor, error) {
 	return &ModelExtractor{
 		typedName: fwkplugin.TypedName{
-			Type: modelsExtractorType,
-			Name: modelsExtractorType,
+			Type: ModelsExtractorType,
+			Name: ModelsExtractorType,
 		},
 	}, nil
 }
@@ -100,6 +100,6 @@ func (me *ModelExtractor) Extract(_ context.Context, data any, ep fwkdl.Endpoint
 		return fmt.Errorf("unexpected input in Extract: %T", data)
 	}
 
-	ep.GetAttributes().Put(modelsAttributeKey, ModelInfoCollection(models.Data))
+	ep.GetAttributes().Put(ModelsAttributeKey, ModelDataCollection(models.Data))
 	return nil
 }

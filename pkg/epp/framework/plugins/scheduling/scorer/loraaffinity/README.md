@@ -4,7 +4,7 @@ This plugin scores candidate endpoints based on whether a requested LoRA adapter
 
 It is registered as type `lora-affinity-scorer` and runs as a scheduling scorer.
 
-**Type:** `lora-affinity-scorer` | **Implementation:** [lora_affinity.go](lora_affinity.go)
+**Type:** `lora-affinity-scorer`
 
 ## What it does
 
@@ -43,9 +43,3 @@ schedulingProfiles:
       - pluginRef: lora-affinity
         weight: 1
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

@@ -4,7 +4,7 @@ Label-based filters that retain or remove candidate pods based on Kubernetes lab
 
 ## ByLabel
 
-**Type:** `by-label` | **Implementation:** [filter.go](filter.go)
+**Type:** `by-label`
 
 ### Behavior
 
@@ -40,13 +40,14 @@ In this example:
 
 ## ByLabelSelector
 
-**Type:** `by-label-selector` | **Implementation:** [selector.go](selector.go)
+**Type:** `by-label-selector`
 
 ### Behavior
 
 Filters out pods using a standard Kubernetes label selector.
 
-> Note: Only the matching labels feature of Kubernetes label selectors is supported.
+> [!NOTE]
+> Only the matching labels feature of Kubernetes label selectors is supported.
 
 ### Config
 
@@ -76,8 +77,6 @@ In this example:
 ---
 
 ## Role-Based Filters
-
-**Implementation:** [roles.go](roles.go)
 
 Pre-configured `by-label` filters for disaggregated inference architectures. Each checks the `llm-d.ai/role` label on candidate pods.
 
@@ -173,6 +172,4 @@ plugins:
 ---
 
 ## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)
 - [Creating a Custom Filter](../../../../../../../docs/create_new_filter.md)

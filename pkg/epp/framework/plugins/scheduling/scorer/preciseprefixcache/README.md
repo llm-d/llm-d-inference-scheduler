@@ -1,6 +1,6 @@
 # Precise Prefix Cache Scorer
 
-**Type:** `precise-prefix-cache-scorer` | **Implementation:** [precise_prefix_cache.go](precise_prefix_cache.go)
+**Type:** `precise-prefix-cache-scorer`
 
 The `precise-prefix-cache-scorer` scores a request based on KV-cache localities.
 Similarly to the IGW `prefix-cache-scorer`, it provides a score based on the number of
@@ -171,7 +171,3 @@ plugins:
         blockSize: 64
         hashSeed: "42"
 ```
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

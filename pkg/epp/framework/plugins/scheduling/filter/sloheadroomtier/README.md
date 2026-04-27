@@ -1,6 +1,6 @@
 # SLO Headroom Tier Filter (`slo-headroom-tier-filter`)
 
-**Type:** `slo-headroom-tier-filter` | **Implementation:** [plugin.go](plugin.go)
+**Type:** `slo-headroom-tier-filter`
 
 Probabilistic filter that selects endpoints based on predicted latency headroom
 (SLO - predicted). Splits endpoints into positive (meets SLO) and negative (violates SLO)
@@ -45,9 +45,3 @@ schedulingProfiles:
     plugins:
       - pluginRef: slo-tier
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

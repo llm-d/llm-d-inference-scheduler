@@ -1,6 +1,6 @@
 # Random Picker
 
-**Type:** `random-picker` | **Implementation:** [picker.go](picker.go)
+**Type:** `random-picker`
 
 Selects endpoint(s) uniformly at random, ignoring any scores calculated by scorer plugins.
 

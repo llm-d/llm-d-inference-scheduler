@@ -2,11 +2,12 @@
 
 It is registered as type `fcfs-ordering-policy` and runs as an ordering policy.
 
-> Note: This is the default ordering policy when flow control is enabled — you do not need to declare it explicitly.
+> [!NOTE]
+> This plugin is framework-injected by default when flow control is enabled. You do not need to explicitly declare it in your configuration.
 
 The First-Come, First-Served (FCFS) ordering policy selects requests based on their arrival order at the Flow Control layer.
 
-**Type:** `fcfs-ordering-policy` | **Implementation:** [fcfs.go](fcfs.go)
+**Type:** `fcfs-ordering-policy`
 
 ## Why Choose This Policy?
 
@@ -49,7 +50,5 @@ orderingPolicyRef: fcfs-ordering-policy
 - **No Urgency Awareness:** It does not consider deadlines or request priority; a request that has already timed out on the client side might still be processed if it was the oldest in the queue.
 
 ## Related Documentation
-
-*   [Architecture Overview](../../../../../../../docs/architecture.md)
 *   [Ordering Overview](../README.md)
 *   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

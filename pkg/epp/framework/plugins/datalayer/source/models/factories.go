@@ -14,7 +14,7 @@ const (
 	// ModelsDataSourceType is models data source type
 	ModelsDataSourceType = "models-data-source"
 	// ModelsExtractorType is models extractor type
-	ModelsExtractorType = "model-server-protocol-models"
+	ModelsExtractorType = extmodels.ModelsExtractorType
 )
 
 // Configuration parameters for models data source.

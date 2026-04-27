@@ -1,6 +1,6 @@
 # Active Request Scorer
 
-**Type:** `active-request-scorer` | **Implementation:** [active_request.go](active_request.go)
+**Type:** `active-request-scorer`
 
 Scores pods based on the number of active requests being served per pod. Each request is tracked individually with its own TTL to ensure accurate timeout handling.
 
@@ -26,9 +26,3 @@ schedulingProfiles:
       - pluginRef: active-tracker
         weight: 5
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

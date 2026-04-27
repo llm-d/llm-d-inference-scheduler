@@ -1,6 +1,6 @@
 # Approximate Prefix Cache Producer Plugin
 
-**Type:** `approx-prefix-cache-producer` | **Implementation:** [plugin.go](plugin.go)
+**Type:** `approx-prefix-cache-producer`
 
 Prepares per-endpoint prefix cache match data consumed by the [`prefix-cache-affinity-filter`](../../../scheduling/filter/prefixcacheaffinity/README.md) and [`prefix-cache-scorer`](../../../scheduling/scorer/prefix/README.md). Runs in the `PrepareRequestData` phase before scheduling.
 
@@ -32,7 +32,5 @@ schedulingProfiles:
 ---
 
 ## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)
 - [Prefix Cache Scorer](../../../scheduling/scorer/prefix/README.md)
 - [Prefix Cache Affinity Filter](../../../scheduling/filter/prefixcacheaffinity/README.md)

@@ -4,9 +4,10 @@ The Global Strict fairness policy is a greedy strategy that operates across all 
 
 It is registered as type `global-strict-fairness-policy` and runs as a fairness policy.
 
-> Note: This plugin is auto-injected when flow control is enabled — you do not need to declare it explicitly.
+> [!NOTE]
+> This plugin is framework-injected by default when flow control is enabled. You do not need to explicitly declare it in your configuration.
 
-**Type:** `global-strict-fairness-policy` | **Implementation:** [global_strict.go](global_strict.go)
+**Type:** `global-strict-fairness-policy`
 
 ## Why choose this policy?
 
@@ -50,7 +51,5 @@ All flows in the band **MUST** use compatible `OrderingPolicy` types (i.e., iden
 *   **Performance**: High efficiency due to statelessness and lack of cycle management.
 
 ## Related Documentation
-
-*   [Architecture Overview](../../../../../../../docs/architecture.md)
 *   [Fairness Overview](../README.md)
 *   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

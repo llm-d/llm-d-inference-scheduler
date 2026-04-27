@@ -1,6 +1,6 @@
 # vLLM gRPC Parser Plugin
 
-**Type:** `vllmgrpc-parser` | **Implementation:** [vllmgrpc.go](vllmgrpc.go)
+**Type:** `vllmgrpc-parser`
 
 Parses H2C (HTTP/2 cleartext) requests and responses in the vLLM gRPC API format. Use this parser when the EPP fronts a vLLM instance that serves its gRPC inference API.
 
@@ -20,6 +20,4 @@ parser:
 ---
 
 ## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)
 - [Parsers Index](../README.md)

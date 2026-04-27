@@ -4,7 +4,7 @@ The Round Robin fairness policy selects a queue from a priority band using a sim
 
 It is registered as type `round-robin-fairness-policy` and runs as a fairness policy.
 
-**Type:** `round-robin-fairness-policy` | **Implementation:** [roundrobin.go](roundrobin.go)
+**Type:** `round-robin-fairness-policy`
 
 ## What it does
 
@@ -37,7 +37,5 @@ fairnessPolicyRef: round-robin-fairness-policy
 *   **Fair Isolation**: Guarantees that no single flow can starve others.
 
 ## Related Documentation
-
-*   [Architecture Overview](../../../../../../../docs/architecture.md)
 *   [Fairness Overview](../README.md)
 *   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

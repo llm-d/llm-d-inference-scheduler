@@ -4,7 +4,7 @@ This plugin scores candidate endpoints based on the estimated number of in-fligh
 
 It is registered as type `token-load-scorer` and runs as a scheduling scorer.
 
-**Type:** `token-load-scorer` | **Implementation:** [token_load.go](token_load.go)
+**Type:** `token-load-scorer`
 
 ## What it does
 
@@ -49,9 +49,3 @@ schedulingProfiles:
       - pluginRef: token-load
         weight: 1
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

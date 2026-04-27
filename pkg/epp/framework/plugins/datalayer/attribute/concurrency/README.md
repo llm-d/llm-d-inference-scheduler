@@ -16,9 +16,3 @@ Captures the current real-time load of an endpoint as tracked by the EPP.
 The following plugins produce this attribute:
 
 - **`inflight-load-producer`** (Request Control): Tracks real-time token and request counters as they are dispatched and completed by the EPP.
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

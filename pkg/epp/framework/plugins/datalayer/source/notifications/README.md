@@ -1,7 +1,7 @@
 # Notification Data Sources
 
-**Type:** `k8s-notification-source` | **Implementation:** [k8s_datasource.go](k8s_datasource.go)  
-**Type:** `endpoint-notification-source` | **Implementation:** [endpoint_datasource.go](endpoint_datasource.go)
+**Type:** `k8s-notification-source`  
+**Type:** `endpoint-notification-source`
 
 This package provides two event-driven `DataSource` plugins for the EPP data layer:
 
@@ -145,9 +145,3 @@ func (e *EndpointEventLogger) ExtractEndpoint(_ context.Context, event fwkdl.End
 	return nil
 }
 ```
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)

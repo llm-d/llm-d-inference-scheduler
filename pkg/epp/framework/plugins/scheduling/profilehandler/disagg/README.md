@@ -19,11 +19,12 @@
 
 ### DisaggProfileHandler
 
-**Type:** `disagg-profile-handler` | **Implementation:** [disagg_profile_handler.go](disagg_profile_handler.go)
+**Type:** `disagg-profile-handler`
 
 Selects the scheduling profiles to use when running with disaggregation. Supports monolithic (EPD), two-stage (P/D), three-stage (E/P/D), and encode-prefill (E/PD) modes.
 
-> Note: When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
+> [!NOTE]
+> When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
 
 **Parameters:**
 - `profiles` (optional): Names of scheduling profiles to use. Defaults match the profile names.
@@ -61,7 +62,7 @@ plugins:
 
 ### PdProfileHandler (Deprecated)
 
-**Type:** `pd-profile-handler` | **Implementation:** [pd_profile_handler.go](pd_profile_handler.go)
+**Type:** `pd-profile-handler`
 
 > **Deprecated:** Use `disagg-profile-handler` instead.
 
@@ -71,7 +72,7 @@ plugins:
 
 ### DisaggHeadersHandler
 
-**Type:** `disagg-headers-handler` | **Implementation:** [disagg_headers_handler.go](disagg_headers_handler.go)
+**Type:** `disagg-headers-handler`
 
 Sets headers for use in disaggregated prefill/decode and encode/prefill/decode.
 
@@ -99,7 +100,7 @@ plugins:
 
 ### PrefillHeaderHandler (Deprecated)
 
-**Type:** `prefill-header-handler` | **Implementation:** [disagg_headers_handler.go](disagg_headers_handler.go)
+**Type:** `prefill-header-handler`
 
 > **Deprecated:** Use `disagg-headers-handler` instead.
 
@@ -109,11 +110,12 @@ plugins:
 
 ### PrefixBasedPDDecider
 
-**Type:** `prefix-based-pd-decider` | **Implementation:** [prefix_based_pd_decider.go](prefix_based_pd_decider.go)
+**Type:** `prefix-based-pd-decider`
 
 Makes P/D disaggregation decisions based on KV cache prefix matching. Disaggregates only when the non-cached portion of the user input exceeds a threshold, avoiding disaggregation overhead for short or well-cached requests.
 
-> Note: The `prepareDataPlugins` feature gate must be enabled.
+> [!NOTE]
+> The `prepareDataPlugins` feature gate must be enabled.
 
 **Parameters:**
 - `nonCachedTokens` (int, required): Length in tokens of the uncached portion of the user input above which disaggregated P/D is triggered.
@@ -138,7 +140,7 @@ In this example:
 
 ### AlwaysDisaggPDDecider
 
-**Type:** `always-disagg-pd-decider` | **Implementation:** [always_disagg_pd_decider.go](always_disagg_pd_decider.go)
+**Type:** `always-disagg-pd-decider`
 
 Always approves P/D disaggregation for every request. Useful for testing or forcing disaggregation unconditionally.
 
@@ -157,7 +159,7 @@ plugins:
 
 ### AlwaysDisaggMultimodalDecider
 
-**Type:** `always-disagg-multimodal-decider` | **Implementation:** [always_disagg_mm_decider.go](always_disagg_mm_decider.go)
+**Type:** `always-disagg-multimodal-decider`
 
 Approves encode disaggregation for requests that contain multimodal content (images, audio). Text-only requests are not disaggregated.
 
@@ -183,6 +185,5 @@ In this example:
 ## Related Documentation
 
 - [Disaggregation Architecture](../../../../../../../docs/disaggregation.md)
-- [Architecture Overview](../../../../../../../docs/architecture.md)
 - [SingleProfileHandler](../single/)
 - [Filter Plugins](../../filter/bylabel/README.md)

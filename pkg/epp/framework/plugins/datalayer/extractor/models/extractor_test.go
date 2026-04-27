@@ -58,7 +58,7 @@ func TestExtractorExtract(t *testing.T) {
 			name: "valid models response",
 			data: &ModelResponse{
 				Object: "list",
-				Data: []ModelInfo{
+				Data: []ModelData{
 					{
 						ID: model,
 					},
@@ -82,12 +82,12 @@ func TestExtractorExtract(t *testing.T) {
 			}()
 
 			attr := ep.GetAttributes()
-			before, ok := attr.Get(modelsAttributeKey)
+			before, ok := attr.Get(ModelsAttributeKey)
 			if ok && before != nil {
 				t.Error("expected empty attributes")
 			}
 			err := extractor.Extract(ctx, tt.data, ep)
-			after, ok := attr.Get(modelsAttributeKey)
+			after, ok := attr.Get(ModelsAttributeKey)
 			if !ok && tt.updated {
 				t.Error("expected updated attributes")
 			}

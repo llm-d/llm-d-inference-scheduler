@@ -11,10 +11,4 @@ The HTTP Data Source is a base implementation for data layer sources that retrie
 
 ## Usage in Other Plugins
 
-The [`metrics-data-source`](../metrics/README.md) uses [`HTTPDataSource`](datasource.go#L32) as its underlying implementation, providing it with a Prometheus-specific parser.
-
----
-
-## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)
+The [`metrics-data-source`](../metrics/README.md) uses `HTTPDataSource` as its underlying implementation, providing it with a Prometheus-specific parser.

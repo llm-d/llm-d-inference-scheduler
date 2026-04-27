@@ -1,6 +1,6 @@
 # Tokenizer Plugin
 
-**Type:** `tokenizer` | **Interfaces:** [`scheduling.Scorer`](../../../../interface/scheduling/plugins.go) (default) · [`requestcontrol.DataProducer`](../../../../interface/requestcontrol/plugins.go) (build-tag)
+**Type:** `tokenizer` | **Interfaces:** `scheduling.Scorer` (default) · `requestcontrol.DataProducer` (build-tag)
 
 Converts incoming LLM prompts (both standard text completions and multi-modal chat messages) into token IDs for downstream filters and scorers. Communicates via Unix Domain Socket (UDS) with a tokenizer service from [`github.com/llm-d/llm-d-kv-cache`](https://github.com/llm-d/llm-d-kv-cache), which runs as a separate sidecar container alongside the EPP pod. An embedded (in-process) alternative is also available in the same package. Fail-open: tokenization errors are logged and scheduling continues without token data.
 
@@ -124,7 +124,5 @@ schedulingProfiles:
 ```
 
 ## Related Documentation
-
-- [Architecture Overview](../../../../../../../docs/architecture.md)
 - [Precise Prefix Cache Scorer](../../../scheduling/scorer/preciseprefixcache/README.md)
 - [Context Length Aware Scorer](../../../scheduling/scorer/contextlengthaware/README.md)
