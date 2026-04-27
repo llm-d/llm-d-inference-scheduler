@@ -201,6 +201,8 @@ This section describes how to setup the various plugins available with the llm-d
 
 #### DisaggHeadersHandler
 
+> **Deprecated**: `disagg-profile-handler` now handles PreRequest headers natively. This plugin is no longer needed when using `disagg-profile-handler`.
+
 Sets headers for use in disaggregated prefill/decode and encode/prefill/decode
 
 - **Type**: `disagg-headers-handler`
@@ -212,8 +214,7 @@ Sets headers for use in disaggregated prefill/decode and encode/prefill/decode
 
 #### DisaggProfileHandler
 
-
-Selects the profiles to use when running with disaggregation
+Selects the profiles to use when running with disaggregation and sets the prefill/encode routing headers.
 
 - **Type**: `disagg-profile-handler`
 - **Parameters**:
@@ -747,7 +748,6 @@ The following is an example of what a configuration for disaggregated Prefill/De
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     maxPrefixBlocksToMatch: 256
@@ -778,7 +778,7 @@ schedulingProfiles:
 ```
 
 Several things should be noted:
-1. The `PrefillHeader`, `DisaggProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
+1. The `DisaggProfileHandler`, `DecodeFilter`, `PrefillFilter` and the `PrefixCachePlugin`
  plugins must be in the list of plugins instantiated.
 2. There must be two scheduler profiles defined.
 3. The scheduler profile for prefill, must include the `PrefillFilter`

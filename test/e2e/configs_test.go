@@ -60,7 +60,6 @@ schedulingProfiles:
 const epdEncodeDecodeConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: disagg-headers-handler
 - type: encode-filter
 - type: decode-filter
 - type: max-score-picker
@@ -83,7 +82,6 @@ schedulingProfiles:
 const epdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefill-header-handler
 - type: encode-filter
 - type: prefill-filter
 - type: decode-filter
@@ -124,7 +122,6 @@ schedulingProfiles:
 const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     blockSizeTokens: 16
