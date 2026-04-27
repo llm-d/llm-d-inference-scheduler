@@ -293,39 +293,19 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 			return nil, fmt.Errorf("the plugin %s is not a fwkdl.DataSource", source.PluginRef)
 		}
 
-		sourceConfig := datalayer.DataSourceConfig{Plugin: sourcePlugin}
+		plugins := make([]fwkplugin.Plugin, 0, len(source.Extractors))
+		for _, e := range source.Extractors {
+			p := handle.Plugin(e.PluginRef)
+			if p == nil {
+				return nil, fmt.Errorf("extractor plugin %s not found (required by source %s)",
+					e.PluginRef, source.PluginRef)
+			}
+			plugins = append(plugins, p)
+		}
 
-		switch sourcePlugin.(type) {
-		case fwkdl.PollingDataSource:
-			for _, extractor := range source.Extractors {
-				ext, ok := handle.Plugin(extractor.PluginRef).(fwkdl.PollingExtractor)
-				if !ok {
-					return nil, fmt.Errorf("plugin %s is not a fwkdl.PollingExtractor (required by source %s)",
-						extractor.PluginRef, source.PluginRef)
-				}
-				sourceConfig.PollingExtractors = append(sourceConfig.PollingExtractors, ext)
-			}
-		case fwkdl.NotificationSource:
-			for _, extractor := range source.Extractors {
-				ext, ok := handle.Plugin(extractor.PluginRef).(fwkdl.NotificationExtractor)
-				if !ok {
-					return nil, fmt.Errorf("plugin %s is not a fwkdl.NotificationExtractor (required by source %s)",
-						extractor.PluginRef, source.PluginRef)
-				}
-				sourceConfig.NotificationExtractors = append(sourceConfig.NotificationExtractors, ext)
-			}
-		case fwkdl.EndpointSource:
-			for _, extractor := range source.Extractors {
-				ext, ok := handle.Plugin(extractor.PluginRef).(fwkdl.EndpointExtractor)
-				if !ok {
-					return nil, fmt.Errorf("plugin %s is not a fwkdl.EndpointExtractor (required by source %s)",
-						extractor.PluginRef, source.PluginRef)
-				}
-				sourceConfig.EndpointExtractors = append(sourceConfig.EndpointExtractors, ext)
-			}
-		default:
-			return nil, fmt.Errorf("source %s does not implement a known DataSource variant (polling/notification/endpoint)",
-				source.PluginRef)
+		sourceConfig := datalayer.DataSourceConfig{Plugin: sourcePlugin}
+		if err := sourceConfig.ResolveExtractors(plugins); err != nil {
+			return nil, fmt.Errorf("source %s: %w", source.PluginRef, err)
 		}
 
 		cfg.Sources = append(cfg.Sources, sourceConfig)
