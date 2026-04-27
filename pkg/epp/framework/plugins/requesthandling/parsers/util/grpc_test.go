@@ -25,32 +25,32 @@ import (
 
 func TestParseGrpcPayload(t *testing.T) {
 	tests := []struct {
-		name          string
-		data          []byte
-		want          []byte
-		wantErr   string
+		name    string
+		data    []byte
+		want    []byte
+		wantErr string
 	}{
 		{
-			name:        "too short header",
-			data:        []byte{0, 0, 0, 0},
-			want:        nil,
+			name:    "too short header",
+			data:    []byte{0, 0, 0, 0},
+			want:    nil,
 			wantErr: "invalid gRPC frame: expected at least 5 bytes for header, got 4",
 		},
 		{
-			name:        "compressed payload not supported",
-			data:        []byte{1, 0, 0, 0, 0},
-			want:        nil,
+			name:    "compressed payload not supported",
+			data:    []byte{1, 0, 0, 0, 0},
+			want:    nil,
 			wantErr: "compressed gRPC payload is not supported",
 		},
 		{
 			name: "incomplete payload",
 			data: func() []byte {
 				b := make([]byte, 5)
-				b[0] = 0 // not compressed
+				b[0] = 0                               // not compressed
 				binary.BigEndian.PutUint32(b[1:5], 10) // indicates 10 bytes
-				return append(b, []byte("12345")...) // only 5 bytes follow
+				return append(b, []byte("12345")...)   // only 5 bytes follow
 			}(),
-			want:        nil,
+			want:    nil,
 			wantErr: "incomplete gRPC payload: header indicates 10 bytes, but only 5 bytes are available",
 		},
 		{
@@ -61,7 +61,7 @@ func TestParseGrpcPayload(t *testing.T) {
 				binary.BigEndian.PutUint32(b[1:5], 5)
 				return append(b, []byte("hello")...)
 			}(),
-			want:        []byte("hello"),
+			want:    []byte("hello"),
 			wantErr: "",
 		},
 	}
@@ -69,7 +69,7 @@ func TestParseGrpcPayload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseGrpcPayload(tt.data)
-			
+
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("got error nil, want %q", tt.wantErr)
@@ -79,11 +79,11 @@ func TestParseGrpcPayload(t *testing.T) {
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			
+
 			want := tt.want
 			if diff := cmp.Diff(want, got); diff != "" {
 				t.Errorf("ParseGrpcPayload() mismatch (-want +got):\n%s", diff)

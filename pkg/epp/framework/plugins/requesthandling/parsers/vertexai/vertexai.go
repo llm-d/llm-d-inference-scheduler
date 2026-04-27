@@ -27,6 +27,7 @@ import (
 	"cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	grpcutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/util"
 	"google.golang.org/genproto/googleapis/api/httpbody"
@@ -86,7 +87,7 @@ func (p *VertexAIParser) WithName(name string) *VertexAIParser {
 // data and delegates the parsing to the OpenAI parser.
 // See: https://github.com/googleapis/googleapis/blob/89c3153888201c9e80bc5ec78d6ffca0debe6b52/google/cloud/aiplatform/v1beta1/prediction_service.proto#L235
 func (p *VertexAIParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
-	path := headers[grpcutil.MethodPathKey]
+	path := headers[parsers.MethodPathKey]
 
 	switch {
 	case strings.HasSuffix(path, chatCompletionsMethod):
@@ -109,7 +110,7 @@ func (p *VertexAIParser) ParseRequest(ctx context.Context, body []byte, headers 
 		// Use OpenAI parser to parse the JSON payload
 		// Clone headers and set path to /chat/completions to make OpenAI parser recognize it
 		headersCopy := maps.Clone(headers)
-		headersCopy[":path"] = openAIChatCompletionsPath
+		headersCopy[parsers.MethodPathKey] = openAIChatCompletionsPath
 		parseResult, err := p.openAIParser.ParseRequest(ctx, jsonBytes, headersCopy)
 		if err != nil {
 			return nil, fmt.Errorf("parsing ChatCompletionsRequest: %w", err)

@@ -29,6 +29,7 @@ import (
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers"
 	grpcutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/util"
 	pb "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/gen"
 )
@@ -38,7 +39,6 @@ const (
 
 	gRPCPayloadHeaderLen = 5
 
-	methodPathKey    = ":path"
 	vllmGeneratePath = "/vllm.grpc.engine.VllmEngine/Generate"
 	vllmEmbedPath    = "/vllm.grpc.engine.VllmEngine/Embed"
 )
@@ -88,7 +88,7 @@ func (p *VllmGRPCParser) ParseRequest(ctx context.Context, body []byte, headers 
 		return nil, errors.New("invalid or unsupported gRPC payload")
 	}
 
-	path := headers[methodPathKey]
+	path := headers[parsers.MethodPathKey]
 	switch path {
 	case vllmEmbedPath:
 		var req pb.EmbedRequest
@@ -115,7 +115,7 @@ func (p *VllmGRPCParser) ParseRequest(ctx context.Context, body []byte, headers 
 		return &fwkrh.ParseResult{Body: extractedBody, Skip: false}, nil
 
 	default:
-		logger.V(logutil.TRACE).Info("unsupported gRPC path, skipping", "path", headers[":path"])
+		logger.V(logutil.TRACE).Info("unsupported gRPC path, skipping", "path", headers[parsers.MethodPathKey])
 		return &fwkrh.ParseResult{Skip: true}, nil
 	}
 }
