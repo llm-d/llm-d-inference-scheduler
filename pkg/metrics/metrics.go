@@ -45,11 +45,37 @@ var (
 		},
 		[]string{"model_name", "decision_type"},
 	)
+
+	// Data-layer counters: label values must be plugin TypedName.Type only —
+	// never per-instance or runtime-variable strings (cardinality).
+
+	DataLayerPollErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: SchedulerSubsystem,
+			Name:      "datalayer_poll_errors_total",
+			Help:      metrics.HelpMsgWithStability("Data-source poll errors per source type.", compbasemetrics.ALPHA),
+		},
+		[]string{"source_type"},
+	)
+
+	DataLayerExtractErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: SchedulerSubsystem,
+			Name:      "datalayer_extract_errors_total",
+			Help:      metrics.HelpMsgWithStability("Extract errors per source/extractor type.", compbasemetrics.ALPHA),
+		},
+		[]string{"source_type", "extractor_type"},
+	)
 )
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
-	return []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount}
+	return []prometheus.Collector{
+		SchedulerPDDecisionCount,
+		SchedulerDisaggDecisionCount,
+		DataLayerPollErrorsTotal,
+		DataLayerExtractErrorsTotal,
+	}
 }
 
 // RecordPDDecision increments the counter for a specific P/D routing decision.
