@@ -42,6 +42,15 @@ jobs:
       - name: Sanity check repo contents
         run: ls -la
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify go.mod and go.sum are tidy
+        run: go mod tidy -diff
+
       - name: Create and resolve Go cache volumes
         id: go-cache
         run: |
