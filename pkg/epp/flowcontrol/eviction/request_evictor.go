@@ -27,15 +27,12 @@ import (
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
-var _ requestcontrol.PreRequest = &RequestEvictor{}
-var _ requestcontrol.ResponseBodyProcessor = &RequestEvictor{}
-
 // RequestEvictor tracks in-flight requests via RequestControl hooks and provides eviction capability.
+// It is a builtin component wired directly by the EPP, not a user-configurable plugin.
 type RequestEvictor struct {
 	queue            *EvictionQueue
 	evictor          Evictor
@@ -59,10 +56,6 @@ func NewRequestEvictor(
 // The ext_proc Process() goroutine uses this to look up eviction channels for dispatched requests.
 func (p *RequestEvictor) EvictionRegistry() *EvictionRegistry {
 	return p.evictionRegistry
-}
-
-func (p *RequestEvictor) TypedName() plugin.TypedName {
-	return plugin.TypedName{Type: "EvictionPlugin", Name: "eviction"}
 }
 
 // PreRequest is called after scheduling, before the request reaches the model server.
