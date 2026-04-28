@@ -121,6 +121,11 @@ export VLLM_DATA_PARALLEL_SIZE="${VLLM_DATA_PARALLEL_SIZE:-1}"
 # vLLM mode: echo for simulator, empty for real vLLM
 export VLLM_SIM_MODE="${VLLM_SIM_MODE:-echo}"
 
+# Role label for the vllm-d pod in the EPD (no-disaggregation) scenario.
+# Empty by default — Kubernetes accepts empty label values, and the EPD patch
+# uses this to optionally mark the unified pod's role.
+export DECODE_ROLE="${DECODE_ROLE:-}"
+
 # Kubernetes namespace for all deployed resources
 export NAMESPACE="${NAMESPACE:-default}"
 
@@ -209,6 +214,10 @@ if [ "${PROM_ENABLED}" == "true" ]; then
   fi
 fi
 
+# TARGET_PORTS is substituted directly into the `targetPorts: ${TARGET_PORTS}` field
+# in deploy/components/inference-gateway/inference-pools.yaml. Each item must be
+# indented with exactly 2 spaces to match the indentation of that field. If the
+# field is ever reindented in inference-pools.yaml, update the indentation here too.
 NEW_LINE=$'\n'
 TARGET_PORTS="${NEW_LINE}  - number: 8000"
 for ((i = 1; i < VLLM_DATA_PARALLEL_SIZE; ++i)); do
@@ -263,7 +272,14 @@ ${CONTAINER_RUNTIME} exec ${CONTAINER_NAME} /bin/bash -c "sysctl net.ipv4.conf.a
 kubectl --context ${KUBE_CONTEXT} -n kube-system wait --for=condition=Ready --all pods --timeout=300s
 
 echo "Waiting for local-path-storage pods to be created..."
-until kubectl --context ${KUBE_CONTEXT} -n local-path-storage get pods -o name | grep -q pod/; do
+deadline=$(( $(date +%s) + 120 ))
+until kubectl --context ${KUBE_CONTEXT} -n local-path-storage get pods -o name 2>/dev/null | grep -q pod/; do
+  if (( $(date +%s) >= deadline )); then
+    echo "ERROR: local-path-storage pods did not appear within 120s" >&2
+    kubectl --context ${KUBE_CONTEXT} get namespaces >&2 || true
+    kubectl --context ${KUBE_CONTEXT} -n local-path-storage get pods >&2 || true
+    exit 1
+  fi
   sleep 2
 done
 kubectl --context ${KUBE_CONTEXT} -n local-path-storage wait --for=condition=Ready --all pods --timeout=300s
@@ -286,47 +302,76 @@ elif [ "${CONTAINER_RUNTIME}" == "podman" ]; then
     SAVE_ARGS=("--format=docker-archive")
 fi
 
-for IMAGE in "${VLLM_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_IMAGE}"; do
-    # For Docker: always pull with --platform to ensure the correct architecture
-    # layers are in the local cache. A manifest-only local entry (from a previous
-    # pull without --platform) causes KIND to fail with "content digest not found".
-    # Failures are ignored for locally-built images (e.g. :dev tags) that don't
-    # exist in the remote registry.
-    # For Podman: only pull if not present locally.
+pull_image() {
+    local image="$1"
     if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
-        # Suppress stderr for locally-built :dev images that don't exist in the registry.
-        "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}" 2>/dev/null || \
-            echo "Note: ${IMAGE} not found in registry, using local build."
-    elif ! "${CONTAINER_RUNTIME}" image inspect "${IMAGE}" > /dev/null 2>&1; then
-        echo "Image ${IMAGE} not found locally, pulling..."
-        "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${IMAGE}"
+        # Pull with --platform to ensure platform-specific layers are cached.
+        # If the pull fails, check for a local image (e.g. a locally-built :dev tag)
+        # before giving up — only treat the failure as non-fatal when the image
+        # already exists locally. Real failures (network, auth) are surfaced as errors.
+        if ! "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${image}" 2>/dev/null; then
+            if "${CONTAINER_RUNTIME}" image inspect "${image}" > /dev/null 2>&1; then
+                echo "Note: ${image} not found in registry, using local build."
+            else
+                echo "Error: failed to pull ${image} and no local image found." >&2
+                return 1
+            fi
+        fi
+    elif ! "${CONTAINER_RUNTIME}" image inspect "${image}" > /dev/null 2>&1; then
+        echo "Image ${image} not found locally, pulling..."
+        "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${image}"
     fi
-    echo "Loading ${IMAGE} into kind cluster..."
+}
+
+load_image() {
+    local image="$1"
+    echo "Loading ${image} into kind cluster..."
     if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
         # KIND's `kind load` uses `ctr import --all-platforms` internally, which
         # fails when only the target architecture's layers are locally cached
         # (e.g. after `docker pull --platform linux/amd64` of a multi-arch image).
         # Bypass this by piping directly to `ctr import` without --all-platforms.
-        docker save "${IMAGE}" | \
+        docker save "${image}" | \
             docker exec --privileged -i "${CLUSTER_NAME}-control-plane" \
             ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
     else
-        "${CONTAINER_RUNTIME}" save ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${IMAGE}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
+        "${CONTAINER_RUNTIME}" save ${SAVE_ARGS[@]+"${SAVE_ARGS[@]}"} "${image}" | kind --name "${CLUSTER_NAME}" load image-archive /dev/stdin
     fi
+}
+
+for IMAGE in "${VLLM_IMAGE}" "${EPP_IMAGE}" "${SIDECAR_IMAGE}" "${UDS_TOKENIZER_IMAGE}"; do
+    pull_image "${IMAGE}"
+    load_image "${IMAGE}"
 done
 
 # ------------------------------------------------------------------------------
 # CRD Deployment (Gateway API + GIE)
 # ------------------------------------------------------------------------------
 
-kubectl kustomize deploy/components/crds-gateway-api |
-	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
+# apply_crds retries the kustomize+apply pipeline up to 3 times with a 5-second
+# backoff. etcd occasionally times out on large CRD sets (e.g. Istio); retrying
+# is safe because --server-side --force-conflicts is idempotent.
+apply_crds() {
+    local kustomize_extra_flags="$1"
+    local kustomize_dir="$2"
+    local attempt max_attempts=3
+    for attempt in $(seq 1 ${max_attempts}); do
+        if kubectl kustomize ${kustomize_extra_flags} "${kustomize_dir}" \
+               | kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -; then
+            return 0
+        fi
+        if [ "${attempt}" -lt "${max_attempts}" ]; then
+            echo "CRD apply failed (attempt ${attempt}/${max_attempts}), retrying in 5s..." >&2
+            sleep 5
+        fi
+    done
+    echo "Error: CRD apply failed after ${max_attempts} attempts: ${kustomize_dir}" >&2
+    return 1
+}
 
-kubectl kustomize deploy/components/crds-gie |
-	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
-
-kubectl kustomize --enable-helm deploy/components/crds-istio |
-	kubectl --context ${KUBE_CONTEXT} apply --server-side --force-conflicts -f -
+apply_crds ""               deploy/components/crds-gateway-api
+apply_crds ""               deploy/components/crds-gie
+apply_crds "--enable-helm"  deploy/components/crds-istio
 
 # ------------------------------------------------------------------------------
 # Development Environment
@@ -364,9 +409,27 @@ kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} \
   ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} ${NAMESPACE} \
   ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE} \
-  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_SIM_MODE} ${DECODE_ROLE} \
-  ${VLLM_EXTRA_ARGS_E} ${VLLM_EXTRA_ARGS_P} ${VLLM_EXTRA_ARGS_D}' \
-  | sed '/^        - ""$/d' \
+  ${KV_CONNECTOR_TYPE} ${EC_CONNECTOR_TYPE} ${CONNECTOR_TYPE} ${KV_CACHE_ENABLED} ${HF_TOKEN} ${VLLM_SIM_MODE} \
+  ${DECODE_ROLE} ${VLLM_EXTRA_ARGS_E} ${VLLM_EXTRA_ARGS_P} ${VLLM_EXTRA_ARGS_D}' \
+  | awk '
+    /^[[:space:]]*-[[:space:]]+".*"[[:space:]]*$/ {
+      match($0, /^[[:space:]]*/); indent = substr($0, 1, RLENGTH)
+      content = $0
+      sub(/^[[:space:]]*-[[:space:]]+"/, "", content)
+      sub(/"[[:space:]]*$/, "", content)
+      if (content == "") { next }
+      if (substr(content, 1, 2) == "--") {
+        n = split(content, flags, " --")
+        for (i = 1; i <= n; i++) {
+          flag = flags[i]
+          if (i > 1) flag = "--" flag
+          if (flag != "") print indent "- \"" flag "\""
+        }
+        next
+      }
+    }
+    { print }
+  ' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
 # ------------------------------------------------------------------------------
@@ -374,13 +437,13 @@ kubectl kustomize --enable-helm ${KUSTOMIZE_DIR} \
 # ------------------------------------------------------------------------------
 
 # Wait for all control-plane deployments to be ready
-kubectl --context ${KUBE_CONTEXT} -n llm-d-istio-system wait --for=condition=available --timeout=300s deployment --all
+kubectl --context ${KUBE_CONTEXT} -n llm-d-istio-system wait --for=condition=available --timeout=600s deployment --all
 
 # Wait for all deployments to be ready
-kubectl --context ${KUBE_CONTEXT} -n default wait --for=condition=available --timeout=300s deployment --all
+kubectl --context ${KUBE_CONTEXT} -n default wait --for=condition=available --timeout=600s deployment --all
 
 # Wait for the gateway to be ready
-kubectl --context ${KUBE_CONTEXT} wait gateway/inference-gateway --for=condition=Programmed --timeout=300s
+kubectl --context ${KUBE_CONTEXT} wait gateway/inference-gateway --for=condition=Programmed --timeout=600s
 
 # ------------------------------------------------------------------------------
 # Prometheus Monitoring (optional)

@@ -6,7 +6,7 @@ spec:
   template:
     metadata:
       labels:
-        llm-d.ai/role: encode-prefill-decode
+        llm-d.ai/role: ${DECODE_ROLE}
     spec:
       initContainers:
       - name: routing-sidecar
@@ -24,6 +24,7 @@ spec:
         - "--zmq-endpoint=tcp://${EPP_NAME}.${NAMESPACE}.svc.cluster.local:5557"
         - "${VLLM_EXTRA_ARGS_D}"
         ports:
+        - $patch: replace
         - name: http
           containerPort: 8000
           protocol: TCP
@@ -45,6 +46,9 @@ spec:
           httpGet:
             port: 8000
         livenessProbe:
+          httpGet:
+            port: 8000
+        startupProbe:
           httpGet:
             port: 8000
         env:

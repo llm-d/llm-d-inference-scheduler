@@ -6,11 +6,10 @@ scenario-specific patches. The atomic components live in `deploy/components/`:
 
 | Component | Description |
 |-----------|-------------|
-| `vllm-decode/` | Decode pod — always deployed, includes routing sidecar |
+| `vllm-decode/` | Decode pod — always deployed, includes routing sidecar (removed in EPD scenario) |
 | `vllm-prefill/` | Prefill pod — deployed when `DISAGG_P=true` |
 | `vllm-encode/` | Encoder pod — deployed when `DISAGG_E=true` |
 | `overlays/simulator/` | Adds `--mode=${VLLM_SIM_MODE}`, UDS tokenizer, KV cache and ZMQ args |
-| `overlays/real-vllm/` | Adds `--kv-events-config` on Decode, `--ec-transfer-config` on Encode, ec-cache PVC |
 
 These overlays are used by both `scripts/kind-dev-env.sh` (for local KIND clusters)
 and e2e tests (via `kustomize build` + env var substitution).
@@ -34,7 +33,7 @@ options that combine with any disaggregation mode — they are not separate scen
 |-----------|-------------|
 | `base-kind-istio/` | Istio control plane + inference gateway (EPP, services, RBAC, InferencePool, Gateway, HTTPRoute). Applied separately by `kind-dev-env.sh` before the scenario overlay |
 | `e2e-infra/` | Test-specific infrastructure: NodePort services for health/metrics and envoy proxy config used by e2e tests |
-| `kubernetes-kgateway/` | Alternative gateway configuration using Kubernetes Gateway API (instead of Istio) |
+| `kubernetes-kgateway/` | Alternative gateway configuration using Kubernetes Gateway API instead of Istio |
 
 ## Scenario Selection
 
@@ -73,8 +72,15 @@ Variables substituted at deploy time via `envsubst` or Go test `substituteMany`:
 | `POOL_NAME` | InferencePool name | `food-review-inference-pool` |
 | `VLLM_REPLICA_COUNT_E` | Encode deployment replicas | `1` |
 | `VLLM_REPLICA_COUNT_P` | Prefill deployment replicas | `1` |
-| `VLLM_REPLICA_COUNT_D` | Decode deployment replicas | `2` |
+| `VLLM_REPLICA_COUNT_D` | Decode deployment replicas | `1` |
 | `VLLM_DATA_PARALLEL_SIZE` | Data parallel rank count per vLLM pod — applies to ALL pod types (encode, prefill, decode) | `1` |
 | `CONNECTOR_TYPE` | KV connector for P/D | `nixlv2` |
+| `KV_CONNECTOR_TYPE` | KV connector type (derived from `CONNECTOR_TYPE`) | `nixlv2` |
 | `EC_CONNECTOR_TYPE` | EC connector for E scenarios | `ec-example` |
 | `KV_CACHE_ENABLED` | Enable KV cache scoring | `false` |
+| `HF_TOKEN` | HuggingFace token for downloading real models (empty for simulator) | `` |
+| `NAMESPACE` | Kubernetes namespace for all resources | `default` |
+| `DECODE_ROLE` | `llm-d.ai/role` label on the EPD decode pod (empty = no label) | `` |
+| `VLLM_EXTRA_ARGS_E` | Extra flags appended to Encoder vLLM args (`--flag=value` format) | `` |
+| `VLLM_EXTRA_ARGS_P` | Extra flags appended to Prefill vLLM args (`--flag=value` format) | `` |
+| `VLLM_EXTRA_ARGS_D` | Extra flags appended to Decode vLLM args (`--flag=value` format) | `` |

@@ -41,8 +41,6 @@ const (
 	simModelName = "food-review"
 	// kvModelName is the model name used in KV tests.
 	kvModelName = "Qwen/Qwen2.5-1.5B-Instruct"
-	// safeKvModelName is the safe form of the model name used in KV tests
-	safeKvModelName = "qwen-qwen2-5-1-5b-instruct"
 	// envoyManifest is the manifest for the envoy proxy test resources.
 	envoyManifest = "../../deploy/environments/dev/e2e-infra/envoy.yaml"
 	// eppManifest is the manifest for the deployment of the EPP
@@ -325,6 +323,9 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	}
 
 	infPoolYaml := testutils.ReadYaml(inferExtManifest)
+	// targetPorts is substituted into `targetPorts: ${TARGET_PORTS}` in inference-pools.yaml.
+	// Each item must use 2-space indentation to match that field's level in the YAML.
+	// If the field is ever reindented in inference-pools.yaml, update the format string here too.
 	var targetPortsBuilder strings.Builder
 	for idx := range numTargetPorts {
 		fmt.Fprintf(&targetPortsBuilder, "\n  - number: %d", 8000+idx)

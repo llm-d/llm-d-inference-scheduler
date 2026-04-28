@@ -9,10 +9,12 @@ spec:
   selector:
     matchLabels:
       app: ${POOL_NAME}
+      llm-d.ai/component: prefill
   template:
     metadata:
       labels:
         app: ${POOL_NAME}
+        llm-d.ai/component: prefill
         llm-d.ai/role: prefill
     spec:
       containers:
@@ -59,7 +61,7 @@ spec:
             port: 8000
           failureThreshold: 60  # Allow up to 10 minutes (60 * 10s)
           periodSeconds: 10
-          timeoutSecond: 5
+          timeoutSeconds: 5
         # Readiness Probe: Is the model loaded and ready?
         # Controls traffic routing, removes from service if failing
         readinessProbe:

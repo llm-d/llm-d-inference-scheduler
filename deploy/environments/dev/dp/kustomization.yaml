@@ -1,0 +1,24 @@
+# ------------------------------------------------------------------------------
+# Data Parallel Development Environment
+#
+# Decode deployment with routing sidecar for multi-rank routing.
+# Set VLLM_DATA_PARALLEL_SIZE to the number of ranks (e.g. 2).
+#
+# Note: VLLM_DATA_PARALLEL_SIZE applies to ALL vLLM pod types (encode, prefill,
+# decode) — not just decode. When combining DP with disaggregation, each pod
+# type runs with the same data-parallel-size.
+#
+# This overlay uses the simulator component. For real vLLM, create a production
+# overlay that uses overlays/real-vllm/ instead of overlays/simulator/.
+# ------------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../../components/vllm-decode/
+
+patches:
+- path: patch-decode.yaml
+
+components:
+- ../../../components/overlays/simulator/

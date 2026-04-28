@@ -174,8 +174,8 @@ func removeEmptyLabels(inputs []string) []string {
 		filtered := make([]string, 0, len(lines))
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
-			// Skip lines like "llm-d.ai/role: " (key with empty value)
-			if strings.HasSuffix(trimmed, ": ") || strings.HasSuffix(trimmed, ":") {
+			// Skip lines like "llm-d.ai/role:" (key with empty value after TrimSpace)
+			if strings.HasSuffix(trimmed, ":") {
 				if strings.Contains(trimmed, "llm-d.ai/role") {
 					continue
 				}

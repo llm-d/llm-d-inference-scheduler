@@ -121,7 +121,7 @@ curl -s http://localhost:8080/v1/chat/completions \
     ]}],
     "max_tokens": 50
   }' | jq
-
+```
 <details>
 <summary>Alternative access methods (NodePort, LoadBalancer)</summary>
 
@@ -472,6 +472,9 @@ DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
 ```
 
 #### Deploying with Real vLLM
+
+> [!NOTE]
+> The section will be updated soon
 
 The `deploy/components/overlays/real-vllm/` component is ready to use. It provides
 all the real vLLM-specific configuration (KV events, EC transfer, shared PVC). To use

@@ -9,10 +9,12 @@ spec:
   selector:
     matchLabels:
       app: ${POOL_NAME}
+      llm-d.ai/component: decode
   template:
     metadata:
       labels:
         app: ${POOL_NAME}
+        llm-d.ai/component: decode
     spec:
       initContainers:
       # Routing sidecar - proxies requests from port 8000 to vllm on port 8200
@@ -58,8 +60,7 @@ spec:
               fieldPath: status.podIP
       containers:
       - name: vllm
-        # VLLM_IMAGE can be a simulator (e.g. llm-d-inference-sim) or a real
-        # vLLM image (e.g. vllm/vllm-openai:v0.16.0)
+        # VLLM_IMAGE can be a simulator (e.g. llm-d-inference-sim) or a real vLLM image (e.g. vllm/vllm-openai:v0.16.0)
         image: ${VLLM_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
@@ -100,7 +101,7 @@ spec:
             port: 8200
           failureThreshold: 60  # Allow up to 10 minutes (60 * 10s)
           periodSeconds: 10
-          timeoutSecond: 5
+          timeoutSeconds: 5
         # Readiness Probe: Is the model loaded and ready?
         # Controls traffic routing, removes from service if failing
         readinessProbe:

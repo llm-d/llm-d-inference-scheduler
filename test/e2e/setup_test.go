@@ -18,7 +18,6 @@ import (
 func createModelServersFromKustomize(kustomizeDir string, extra map[string]string) []string {
 	subs := map[string]string{
 		"${MODEL_NAME}":              simModelName,
-		"${MODEL_NAME_SAFE}":         simModelName,
 		"${POOL_NAME}":               poolName,
 		"${VLLM_IMAGE}":              vllmSimImage,
 		"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
@@ -57,7 +56,6 @@ func createModelServersDecode(replicas int) []string {
 func createModelServersDecodeKV(replicas int) []string {
 	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
 		"${MODEL_NAME}":           kvModelName,
-		"${MODEL_NAME_SAFE}":      safeKvModelName,
 		"${KV_CACHE_ENABLED}":     "true",
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
 	})
