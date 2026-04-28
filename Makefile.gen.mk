@@ -42,8 +42,8 @@ generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Golang code from pr
 	PATH="$(LOCALBIN):$$PATH" $(PROTOC) \
 		-I pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/proto \
 		-I . \
-		--go_out=module=llm-d/llm-d-inference-scheduler:. \
-		--go-grpc_out=module=llm-d/llm-d-inference-scheduler:. \
+		--go_out=module=github.com/llm-d/llm-d-inference-scheduler:. \
+		--go-grpc_out=module=github.com/llm-d/llm-d-inference-scheduler:. \
 		pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/proto/*.proto
 
 .PHONY: protoc-gen-go
