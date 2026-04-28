@@ -19,7 +19,7 @@ PROTOC_GEN_GO_GRPC_VERSION ?= v1.5.1
 generate: controller-gen code-generator tidy ## Generate WebhookConfiguration, ClusterRole, CustomResourceDefinition objects, code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate/boilerplate.generatego.txt" paths="./..."
 	$(CONTROLLER_GEN) crd output:dir="./config/crd/bases" paths="./..."
-	./hack/update-codegen.sh
+	./hack/update-codegen.sh $(LOCALBIN)
 
 # Use same code-generator version as k8s.io/api
 CODEGEN_VERSION := $(shell go list -m -f '{{.Version}}' k8s.io/api)

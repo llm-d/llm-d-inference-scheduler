@@ -23,8 +23,8 @@ set -o pipefail
 
 SCRIPT_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 echo "$SCRIPT_ROOT script"
-CODEGEN_PKG=${2:-bin}
 echo $CODEGEN_PKG
+CODEGEN_PKG=${1:-bin}
 source "${CODEGEN_PKG}/kube_codegen.sh"
 THIS_PKG="github.com/llm-d/llm-d-inference-scheduler"
 
