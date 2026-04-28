@@ -181,10 +181,13 @@ jobs:
 
       - name: Free disk space
         run: |
+          df -h /
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/hostedtoolcache
           docker image prune -af
+          docker builder prune -af
+          df -h /
+
 
       - name: Run make test-e2e
         shell: bash
