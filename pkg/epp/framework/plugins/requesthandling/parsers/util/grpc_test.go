@@ -45,10 +45,11 @@ func TestParseGrpcPayload(t *testing.T) {
 		{
 			name: "incomplete payload",
 			data: func() []byte {
-				b := make([]byte, 5)
+				b := make([]byte, 10)
 				b[0] = 0                               // not compressed
 				binary.BigEndian.PutUint32(b[1:5], 10) // indicates 10 bytes
-				return append(b, []byte("12345")...)   // only 5 bytes follow
+				copy(b[5:], []byte("12345"))
+				return b
 			}(),
 			want:    nil,
 			wantErr: "incomplete gRPC payload: header indicates 10 bytes, but only 5 bytes are available",
@@ -56,10 +57,11 @@ func TestParseGrpcPayload(t *testing.T) {
 		{
 			name: "success exact size",
 			data: func() []byte {
-				b := make([]byte, 5)
+				b := make([]byte, 10)
 				b[0] = 0 // not compressed
 				binary.BigEndian.PutUint32(b[1:5], 5)
-				return append(b, []byte("hello")...)
+				copy(b[5:], []byte("hello"))
+				return b
 			}(),
 			want:    []byte("hello"),
 			wantErr: "",

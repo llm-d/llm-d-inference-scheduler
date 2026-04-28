@@ -37,8 +37,6 @@ import (
 const (
 	VllmGRPCParserType = "vllmgrpc-parser"
 
-	gRPCPayloadHeaderLen = 5
-
 	vllmGeneratePath = "/vllm.grpc.engine.VllmEngine/Generate"
 	vllmEmbedPath    = "/vllm.grpc.engine.VllmEngine/Embed"
 )
