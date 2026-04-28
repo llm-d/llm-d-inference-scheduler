@@ -31,7 +31,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkflowcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
@@ -105,6 +104,9 @@ func InstantiateAndConfigure(
 
 	if err := validateConfig(rawConfig); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+	if err := validateDataLayer(rawConfig, handle); err != nil {
+		return nil, fmt.Errorf("data layer validation failed: %w", err)
 	}
 
 	schedulerConfig, err := buildSchedulerConfig(rawConfig.SchedulingProfiles, handle)
@@ -288,10 +290,11 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 	}
 
 	for _, source := range rawDataConfig.Sources {
-		sourcePlugin, ok := handle.Plugin(source.PluginRef).(fwkdl.DataSource)
-		if !ok {
-			return nil, fmt.Errorf("the plugin %s is not a fwkdl.DataSource", source.PluginRef)
+		src, err := datalayer.ResolveSource(handle, source.PluginRef)
+		if err != nil {
+			return nil, err
 		}
+		sourceConfig := datalayer.DataSourceConfig{Plugin: src}
 
 		plugins := make([]fwkplugin.Plugin, 0, len(source.Extractors))
 		for _, e := range source.Extractors {
@@ -303,7 +306,6 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 			plugins = append(plugins, p)
 		}
 
-		sourceConfig := datalayer.DataSourceConfig{Plugin: sourcePlugin}
 		if err := sourceConfig.ResolveExtractors(plugins); err != nil {
 			return nil, fmt.Errorf("source %s: %w", source.PluginRef, err)
 		}

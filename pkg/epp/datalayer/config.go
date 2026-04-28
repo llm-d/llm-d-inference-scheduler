@@ -46,6 +46,20 @@ type DataSourceConfig struct {
 	EndpointExtractors []fwkdl.EndpointExtractor
 }
 
+// ResolveSource looks up ref via handle and asserts the plugin implements
+// DataSource.
+func ResolveSource(handle fwkplugin.Handle, ref string) (fwkdl.DataSource, error) {
+	p := handle.Plugin(ref)
+	if p == nil {
+		return nil, fmt.Errorf("source plugin %q not registered", ref)
+	}
+	src, ok := p.(fwkdl.DataSource)
+	if !ok {
+		return nil, fmt.Errorf("source plugin %q does not implement DataSource", ref)
+	}
+	return src, nil
+}
+
 // ResolveExtractors routes plugins into the field matching this source's
 // variant, type-asserting each to the variant's extractor interface.
 func (c *DataSourceConfig) ResolveExtractors(plugins []fwkplugin.Plugin) error {

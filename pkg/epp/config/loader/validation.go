@@ -23,6 +23,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
 // validateConfig performs a deep validation of the configuration integrity.
@@ -36,6 +38,20 @@ func validateConfig(cfg *configapi.EndpointPickerConfig) error {
 	}
 	if err := validateSaturationDetector(cfg); err != nil {
 		return fmt.Errorf("saturation detector validation failed: %w", err)
+	}
+	return nil
+}
+
+// validateDataLayer checks that every source plugin ref resolves and implements
+// DataSource, so buildDataLayerConfig can construct sources without re-checking.
+func validateDataLayer(cfg *configapi.EndpointPickerConfig, handle fwkplugin.Handle) error {
+	if cfg.DataLayer == nil {
+		return nil
+	}
+	for _, source := range cfg.DataLayer.Sources {
+		if _, err := datalayer.ResolveSource(handle, source.PluginRef); err != nil {
+			return err
+		}
 	}
 	return nil
 }
