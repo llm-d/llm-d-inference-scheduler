@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package discovery defines the BackendDiscovery abstraction for populating
+// Package discovery defines the DiscoveryPlugin abstraction for populating
 // the datastore with inference server endpoints independently of Kubernetes.
 package discovery
 
@@ -26,18 +26,18 @@ import (
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 )
 
-// BackendDiscovery discovers inference backends and drives their lifecycle in the datastore.
+// DiscoveryPlugin discovers inference endpoints and drives their lifecycle in the datastore.
 // Implementations must also implement fwkplugin.Plugin so they can be registered in the
-// plugin registry and selected via EndpointPickerConfig.backendDiscovery.pluginRef.
-type BackendDiscovery interface {
+// plugin registry and selected via EndpointPickerConfig.discovery.pluginRef.
+type DiscoveryPlugin interface {
 	// Start begins discovery. It should:
-	//   1. Enumerate all known backends, calling notifier.Upsert for each.
+	//   1. Enumerate all known endpoints, calling notifier.Upsert for each.
 	//   2. Continue watching for changes until ctx is cancelled.
 	// Blocks until ctx is cancelled or a fatal error occurs.
 	Start(ctx context.Context, notifier Notifier) error
 }
 
-// Notifier is the callback through which BackendDiscovery communicates backend state
+// Notifier is the callback through which DiscoveryPlugin communicates endpoint state
 // to the datastore.
 //
 // Ordering contract: the datastore processes Upsert and Delete calls in the order
@@ -46,8 +46,8 @@ type BackendDiscovery interface {
 // them. For example, an Upsert followed by a Delete for the same endpoint must
 // arrive in that order, or the endpoint will be incorrectly left in the datastore.
 type Notifier interface {
-	// Upsert adds or updates one or more backends in the datastore.
+	// Upsert adds or updates one or more endpoints in the datastore.
 	Upsert(endpoints []*fwkdl.EndpointMetadata)
-	// Delete removes a backend from the datastore by its namespaced name.
+	// Delete removes an endpoint from the datastore by its namespaced name.
 	Delete(id types.NamespacedName)
 }
