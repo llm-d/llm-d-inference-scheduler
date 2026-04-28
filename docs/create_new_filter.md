@@ -6,8 +6,7 @@ This tutorial outlines the steps needed for creating and hooking a new filter
  for the llm-d-inference-scheduler.
  
 The tutorial demonstrates the coding of a new filter, which selects inference
- serving Pods based on their labels. All relevant code is contained in the
- [`bylabel`](../pkg/epp/framework/plugins/scheduling/filter/bylabel/) package.
+ serving Pods based on their labels. All relevant code is contained in the `bylabel` package.
 
 ## Introduction to filtering
 
@@ -21,46 +20,18 @@ Plugins are used to modify llm-d-inference-scheduler's default behavior. Filter 
  in some cases it may be desirable to create and deploy custom filtering code to
  match your specific requirements.
 
-Filters implement the [`scheduling.Filter`](../pkg/epp/framework/interface/scheduling/plugins.go) interface and execute early in the scheduling pipeline:
+Filters implement the `scheduling.Filter` interface and execute early in the scheduling pipeline:
 
 ```go
-Filter(ctx context.Context, state *scheduling.CycleState, request *scheduling.LLMRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint
+Filter(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest, pods []scheduling.Endpoint) []scheduling.Endpoint
 ```
 
 Key upstream types used in the signature:
-- [`scheduling.CycleState`](../pkg/epp/framework/interface/scheduling/cycle_state.go) — thread-safe per-request state shared across plugins
-- [`scheduling.LLMRequest`](../pkg/epp/framework/interface/scheduling/types.go) — parsed request with model, body, headers, and objectives
-- [`scheduling.Endpoint`](../pkg/epp/framework/interface/scheduling/types.go) — candidate endpoint interface with metadata and metrics
+- `scheduling.CycleState` — thread-safe per-request state shared across plugins
+- `scheduling.InferenceRequest` — parsed request with model, body, headers, and objectives
+- `scheduling.Endpoint` — candidate endpoint interface with metadata and metrics
 
 The `Filter` function accepts the request and a slice of candidate endpoints. Each endpoint exposes relevant inference attributes, such a model server metrics, which can be used to make scheduling decisions. The function returns a (possibly smaller) slice of endpoints which satisfy the filtering criteria.
-
-## Filter Execution
-
-Filters execute in the order defined in configuration:
-
-```
-All Endpoints → Filter 1 → Filter 2 → Filter 3 → Filtered Endpoints
-```
-
-**Example:**
-```yaml
-filters:
-  - type: by-label
-    name: gpu-filter
-    config:
-      label: "gpu.type"
-      validValues: ["a100"]
-  
-  - type: by-label-selector
-    name: model-filter
-    config:
-      labelSelector:
-        matchLabels:
-          model: "llama-3"
-  
-  - type: decode-filter
-    name: role-filter
-```
 
 ## Code walkthrough
 

@@ -3,6 +3,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,15 +14,17 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	extmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/http"
 )
 
 func TestDatasource(t *testing.T) {
-	source, err := http.NewHTTPDataSource("https", "/models", true, ModelsDataSourceType,
-		"models-data-source", parseModels, extmodels.ModelsResponseType)
+	srcPlugin, err := ModelDataSourceFactory("models-data-source",
+		json.RawMessage(`{"scheme":"https","path":"/models","insecureSkipVerify":true}`), nil)
 	assert.Nil(t, err, "failed to create http datasource")
-	extractor, err := extmodels.NewModelExtractor()
+	source := srcPlugin.(fwkdl.PollingDataSource)
+
+	extPlugin, err := extmodels.ModelServerExtractorFactory("models-data-extractor", nil, nil)
 	assert.Nil(t, err, "failed to create extractor")
+	extractor := extPlugin.(fwkdl.Extractor)
 
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{

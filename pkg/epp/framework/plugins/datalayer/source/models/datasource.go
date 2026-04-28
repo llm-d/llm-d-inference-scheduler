@@ -10,14 +10,17 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/http"
 )
 
+const ModelsDataSourceType = "models-data-source"
+
+// Default values for the models data source configuration.
 const (
-	// ModelsDataSourceType is models data source type
-	ModelsDataSourceType = "models-data-source"
-	// ModelsExtractorType is models extractor type
-	ModelsExtractorType = extmodels.ModelsExtractorType
+	defaultModelsScheme             = "http"
+	defaultModelsPath               = "/v1/models"
+	defaultModelsInsecureSkipVerify = true
 )
 
-// Configuration parameters for models data source.
+// modelsDatasourceParams holds the configuration parameters for the models data source plugin.
+// These values can be specified in the EndpointPickerConfig under the plugin's `parameters` field.
 type modelsDatasourceParams struct {
 	// Scheme defines the protocol scheme used in models retrieval (e.g., "http").
 	Scheme string `json:"scheme"`
@@ -25,6 +28,14 @@ type modelsDatasourceParams struct {
 	Path string `json:"path"`
 	// InsecureSkipVerify defines whether model server certificate should be verified or not.
 	InsecureSkipVerify bool `json:"insecureSkipVerify"`
+}
+
+// NewHTTPModelsDataSource constructs a ModelsDataSource with the given scheme and path.
+// InsecureSkipVerify defaults to true (matching the factory default).
+// Use this function directly in tests to bypass JSON parameter marshaling.
+func NewHTTPModelsDataSource(scheme, path, name string) (*http.HTTPDataSource, error) {
+	return http.NewHTTPDataSource(scheme, path, defaultModelsInsecureSkipVerify,
+		ModelsDataSourceType, name, parseModels, extmodels.ModelsResponseType)
 }
 
 // ModelDataSourceFactory is a factory function used to instantiate data layer's
@@ -48,18 +59,12 @@ func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugin.Ha
 	return ds, nil
 }
 
-// ModelServerExtractorFactory is a factory function used to instantiate data layer's models
-// Extractor plugins specified in a configuration.
-func ModelServerExtractorFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	extractor, err := extmodels.NewModelExtractor()
-	if err != nil {
-		return nil, err
-	}
-	return extractor.WithName(name), nil
-}
-
 func defaultDataSourceConfigParams() *modelsDatasourceParams {
-	return &modelsDatasourceParams{Scheme: "http", Path: "/v1/models", InsecureSkipVerify: true}
+	return &modelsDatasourceParams{
+		Scheme:             defaultModelsScheme,
+		Path:               defaultModelsPath,
+		InsecureSkipVerify: defaultModelsInsecureSkipVerify,
+	}
 }
 
 func parseModels(data io.Reader) (any, error) {

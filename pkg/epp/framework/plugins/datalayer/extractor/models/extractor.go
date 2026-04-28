@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -67,13 +68,13 @@ type ModelExtractor struct {
 }
 
 // NewModelExtractor returns a new model extractor.
-func NewModelExtractor() (*ModelExtractor, error) {
+func NewModelExtractor() *ModelExtractor {
 	return &ModelExtractor{
 		typedName: fwkplugin.TypedName{
 			Type: ModelsExtractorType,
 			Name: ModelsExtractorType,
 		},
-	}, nil
+	}
 }
 
 // TypedName returns the type and name of the ModelExtractor.
@@ -81,15 +82,17 @@ func (me *ModelExtractor) TypedName() fwkplugin.TypedName {
 	return me.typedName
 }
 
-// WithName sets the name of the extractor.
-func (me *ModelExtractor) WithName(name string) *ModelExtractor {
-	me.typedName.Name = name
-	return me
-}
-
 // ExpectedInputType defines the type expected by ModelExtractor.
 func (me *ModelExtractor) ExpectedInputType() reflect.Type {
 	return ModelsResponseType
+}
+
+// ModelServerExtractorFactory is a factory function used to instantiate data layer's
+// models extractor plugins specified in a configuration.
+func ModelServerExtractorFactory(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
+	extractor := NewModelExtractor()
+	extractor.typedName.Name = name
+	return extractor, nil
 }
 
 // Extract transforms the data source output into a concrete attribute that

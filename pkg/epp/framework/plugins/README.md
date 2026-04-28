@@ -2,11 +2,11 @@
 
 
 ### Overview
-This directory contains all built-in plugins for the llm-d-inferece-scheduler.
+This directory contains all built-in plugins shipped with the llm-d-inference-scheduler. Custom plugins can be added by implementing the corresponding interfaces listed under each category below.
 
 ### Available plugins
 
-The available plugins are grouped into five core categories based on their role within the request processing pipeline, as outlined below. For more detailed information, please refer to the README files located alongside each plugin's source code.
+The available plugins are grouped into five conceptual pipeline stages below. Note that these stages do not map 1:1 to the subdirectory structure — folders (`datalayer/`, `scheduling/`, `flowcontrol/`, etc.) reflect code organization by component type, while the stages reflect execution order. For more detailed information, please refer to the README files located alongside each plugin's source code.
 
 ```mermaid
 flowchart LR
@@ -49,7 +49,7 @@ flowchart LR
 
 - **[Profile Handlers & Deciders](scheduling/profilehandler/)**: Orchestrates the selection and execution order of scheduling profiles. Every configuration must include exactly one handler.
   - **Default:** `single-profile-handler`
-  - **Interface:** `ProfileHandler`]
+  - **Interface:** `ProfileHandler`
   - **Reference**: [scheduling/profilehandler/](scheduling/profilehandler/)
 
 #### 3. Filtering
@@ -60,7 +60,7 @@ flowchart LR
 
 #### 4. Scoring & Selection
 
-- **[Scorers](scheduling/scorer/)**: Scores pods using metrics such as [KV-cache prefix matching](scheduling/scorer/preciseprefixcache/), [session affinity](scheduling/scorer/sessionaffinity/), [current load](scheduling/scorer/loadaware/), and [active request counts](scheduling/scorer/activerequest/). Each scorer returns a value in `[0, 1]` per pod; that value is multiplied by the scorer's `weight` (set in `schedulingProfiles`) and accumulated across all scorers into a final score per pod. The pod with the highest total is selected. Weight controls each scorer's relative influence — omitting it defaults to `0`, meaning the scorer has no effect.
+- **[Scorers](scheduling/scorer/)**: Scores pods using metrics such as [KV-cache prefix matching](scheduling/scorer/preciseprefixcache/), [session affinity](scheduling/scorer/sessionaffinity/), [current load](scheduling/scorer/loadaware/), and [active request counts](scheduling/scorer/activerequest/). Each scorer returns a value in `[0, 1]` per pod; that value is multiplied by the scorer's `weight` (set in `schedulingProfiles`) and accumulated across all scorers into a final score per pod. The configured Picker then selects the final endpoint(s) from the scored set. Weight controls each scorer's relative influence — omitting it defaults to `0`, meaning the scorer has no effect.
   - **Interface:** `Scorer`
   - **Reference**: [scheduling/scorer/](scheduling/scorer/)
 

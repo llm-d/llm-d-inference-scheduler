@@ -12,16 +12,17 @@ import (
 func TestExtractorExtract(t *testing.T) {
 	ctx := context.Background()
 
-	extractor, err := NewModelExtractor()
+	extPlugin, err := ModelServerExtractorFactory("test-extractor", nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create extractor: %v", err)
 	}
+	extractor := extPlugin.(fwkdl.Extractor)
 
-	if exType := extractor.TypedName().Type; exType == "" {
+	if exType := extPlugin.TypedName().Type; exType == "" {
 		t.Error("empty extractor type")
 	}
 
-	if exName := extractor.TypedName().Name; exName == "" {
+	if exName := extPlugin.TypedName().Name; exName == "" {
 		t.Error("empty extractor name")
 	}
 
