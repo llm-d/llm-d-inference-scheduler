@@ -176,6 +176,7 @@ If the configuration is in a file, the EPP command line argument `--configFile` 
 
 
 To learn more about the available plugins, check the README files provided alongside their respective source code.
+
 ---
 
 ## Metric Scraping
