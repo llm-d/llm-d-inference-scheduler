@@ -453,7 +453,7 @@ func (d *Director) runPrepareDataPlugins(ctx context.Context,
 	if len(d.requestControlPlugins.prepareDataPlugins) == 0 {
 		return nil
 	}
-	return prepareDataPluginsWithTimeout(prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, ctx, request, endpoints)
+	return prepareDataPluginsWithTimeout(ctx, prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, request, endpoints)
 }
 
 func (d *Director) runAdmissionPlugins(ctx context.Context,

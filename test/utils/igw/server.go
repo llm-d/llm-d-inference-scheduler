@@ -78,12 +78,12 @@ func PrepareForTestStreamingServer(objectives []*v1alpha2.InferenceObjective, po
 	return ctx, cancel, ds, pmc
 }
 
-func SetupTestStreamingServer(t *testing.T, ctx context.Context, streamingServer pb.ExternalProcessorServer) (*bufconn.Listener, chan error) {
+func SetupTestStreamingServer(ctx context.Context, t *testing.T, streamingServer pb.ExternalProcessorServer) (*bufconn.Listener, chan error) {
 	testListener = bufconn.Listen(bufSize)
 
 	errChan := make(chan error)
 	go func() {
-		err := LaunchTestGRPCServer(streamingServer, ctx, testListener)
+		err := LaunchTestGRPCServer(ctx, streamingServer, testListener)
 		if err != nil {
 			t.Error("Error launching listener", err)
 		}
@@ -120,7 +120,7 @@ func GetStreamingServerClient(ctx context.Context, t *testing.T) (pb.ExternalPro
 }
 
 // LaunchTestGRPCServer actually starts the server (enables testing)
-func LaunchTestGRPCServer(s pb.ExternalProcessorServer, ctx context.Context, listener net.Listener) error {
+func LaunchTestGRPCServer(ctx context.Context, s pb.ExternalProcessorServer, listener net.Listener) error {
 	grpcServer := grpc.NewServer()
 
 	pb.RegisterExternalProcessorServer(grpcServer, s)

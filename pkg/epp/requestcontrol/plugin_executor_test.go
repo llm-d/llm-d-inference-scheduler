@@ -100,9 +100,9 @@ func TestPrepareDataPluginsWithTimeout_CancelsPluginContext(t *testing.T) {
 	plugin.wg.Add(1)
 
 	err := prepareDataPluginsWithTimeout(
+		context.Background(),
 		20*time.Millisecond,
 		[]fwk.DataProducer{plugin},
-		context.Background(),
 		&schedulingtypes.InferenceRequest{},
 		nil,
 	)
@@ -198,7 +198,7 @@ func TestPrepareDataPluginsWithTimeout(t *testing.T) {
 			ctx, cancel := tc.ctxFn()
 			defer cancel()
 
-			err := prepareDataPluginsWithTimeout(tc.timeout, tc.plugins, ctx, &schedulingtypes.InferenceRequest{}, nil)
+			err := prepareDataPluginsWithTimeout(ctx, tc.timeout, tc.plugins, &schedulingtypes.InferenceRequest{}, nil)
 
 			if tc.expectSuccess {
 				assert.NoError(t, err)
@@ -334,7 +334,7 @@ func TestExecutePluginsAsDAG(t *testing.T) {
 				plugin.execTime = time.Time{}
 			}
 
-			err := executePluginsAsDAG(tc.plugins, context.Background(), &schedulingtypes.InferenceRequest{}, nil)
+			err := executePluginsAsDAG(context.Background(), tc.plugins, &schedulingtypes.InferenceRequest{}, nil)
 
 			if tc.expectErr {
 				assert.Error(t, err)

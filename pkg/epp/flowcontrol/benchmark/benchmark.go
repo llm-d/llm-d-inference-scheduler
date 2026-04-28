@@ -192,8 +192,8 @@ func (r *benchRequest) ReceivedTimestamp() time.Time                   { return 
 
 // setupRegistry provisions the concrete FlowRegistry.
 func setupRegistry(
-	b *testing.B,
 	ctx context.Context,
+	b *testing.B,
 	handle plugin.Handle,
 	s shardCount,
 	p priorityLevels,
@@ -232,8 +232,8 @@ func setupRegistry(
 
 // setupBenchmarkHarness creates the standard SUT environment.
 func setupBenchmarkHarness(
-	b *testing.B,
 	ctx context.Context,
+	b *testing.B,
 	s shardCount,
 	p priorityLevels,
 	limit egressConcurrencyLimit,
@@ -255,7 +255,7 @@ func setupBenchmarkHarness(
 	}
 	handle.AddPlugin(registry.DefaultOrderingPolicyRef, oPolicy)
 
-	reg := setupRegistry(b, ctx, handle, s, p)
+	reg := setupRegistry(ctx, b, handle, s, p)
 
 	detector := customDetector
 	if detector == nil {
