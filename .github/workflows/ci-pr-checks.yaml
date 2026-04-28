@@ -178,6 +178,13 @@ jobs:
           retention-days: 400
           overwrite: true
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/hostedtoolcache
+          docker image prune -af
+
       - name: Run make test-e2e
         shell: bash
         run: make test-e2e
