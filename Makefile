@@ -203,7 +203,7 @@ go-mod-check: image-build-builder
 
 .PHONY: tidy
 tidy:
-	find . -name go.mod -execdir sh -c 'go mod tidy' \;
+	go mod tidy
 
 .PHONY: clean
 clean: ## Clean build artifacts, tools and caches
