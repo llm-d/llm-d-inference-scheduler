@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2025 The Kubernetes Authors.
+# Copyright 2025, 2026 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,8 +22,6 @@ set -o pipefail
 #go run ./pkg/generator
 
 SCRIPT_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
-echo "$SCRIPT_ROOT script"
-echo $CODEGEN_PKG
 CODEGEN_PKG=${1:-bin}
 source "${CODEGEN_PKG}/kube_codegen.sh"
 THIS_PKG="github.com/llm-d/llm-d-inference-scheduler"
@@ -38,9 +36,9 @@ kube::codegen::gen_register \
     "${SCRIPT_ROOT}"
 
 kube::codegen::gen_client \
---with-watch \
---with-applyconfig \
---output-dir "${SCRIPT_ROOT}/client-go" \
---output-pkg "${THIS_PKG}/client-go" \
---boilerplate "${SCRIPT_ROOT}/hack/boilerplate/boilerplate.generatego.txt" \
-"${SCRIPT_ROOT}"
+    --with-watch \
+    --with-applyconfig \
+    --output-dir "${SCRIPT_ROOT}/client-go" \
+    --output-pkg "${THIS_PKG}/client-go" \
+    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate/boilerplate.generatego.txt" \
+    "${SCRIPT_ROOT}"
