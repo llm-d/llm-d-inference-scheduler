@@ -240,11 +240,7 @@ func (opts *Options) Validate() error {
 	}
 
 	// Validate logging options.
-	if err := opts.LoggingOptions.Validate(); err != nil {
-		return err
-	}
-
-	return nil
+	return opts.LoggingOptions.Validate()
 }
 
 func removeDuplicatePorts(ports []int) []int {

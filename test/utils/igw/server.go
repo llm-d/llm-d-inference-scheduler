@@ -132,11 +132,7 @@ func LaunchTestGRPCServer(ctx context.Context, s pb.ExternalProcessorServer, lis
 		grpcServer.GracefulStop()
 	}()
 
-	if err := grpcServer.Serve(listener); err != nil {
-		return err
-	}
-
-	return nil
+	return grpcServer.Serve(listener)
 }
 
 func CheckEnvoyGRPCHeaders(t *testing.T, response *pb.CommonResponse, expectedHeaders map[string]string) bool {
