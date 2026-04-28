@@ -132,7 +132,13 @@ func (s *Server) startHTTP(ctx context.Context) error {
 }
 
 // Passthrough decoder handler
-func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureSkipVerify bool) *httputil.ReverseProxy {
+// If Config.DecoderHandlerFactory is set, it is used to create the handler;
+// otherwise, a default reverse proxy is created.
+func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureSkipVerify bool) http.Handler {
+	if s.config.DecoderHandlerFactory != nil {
+		return s.config.DecoderHandlerFactory(decoderURL)
+	}
+
 	decoderProxy := httputil.NewSingleHostReverseProxy(decoderURL)
 	decoderProxy.Transport = s.newProxyTransport(decoderURL.Scheme, decoderInsecureSkipVerify)
 	decoderProxy.ErrorHandler = func(res http.ResponseWriter, _ *http.Request, err error) {
