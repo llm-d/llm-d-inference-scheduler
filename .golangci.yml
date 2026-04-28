@@ -57,6 +57,7 @@ linters:
         - name: error-strings
         - name: error-naming
         - name: if-return
+        - name: increment-decrement
         - name: package-comments
         - name: range
         - name: time-naming
