@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
@@ -133,6 +134,24 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		updated := replaceCachedTokens(body, 7)
 		Expect(string(updated)).To(ContainSubstring(`"cached_tokens":7`))
 		Expect(string(updated)).To(ContainSubstring("data: [DONE]"))
+	})
+
+	It("should buffer streamed usage chunks split before the data prefix", func() {
+		recorder := httptest.NewRecorder()
+		recorder.Header().Set("Content-Type", "text/event-stream")
+		writer := newCachedTokensResponseWriter(recorder, 7, true)
+
+		n, err := writer.Write([]byte("da"))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(n).To(Equal(2))
+		Expect(recorder.Body.String()).To(BeEmpty())
+
+		chunk := []byte("ta: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"prompt_tokens_details\":{\"cached_tokens\":49}}}\n\ndata: [DONE]\n")
+		n, err = writer.Write(chunk)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(n).To(Equal(len(chunk)))
+		Expect(recorder.Body.String()).To(ContainSubstring(`"cached_tokens":7`))
+		Expect(recorder.Body.String()).To(ContainSubstring("data: [DONE]"))
 	})
 
 	// Responses API tests — exercise the same NIXL v2 connector with

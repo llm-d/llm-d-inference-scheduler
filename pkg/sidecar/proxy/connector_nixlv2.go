@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -289,6 +290,8 @@ type cachedTokensResponseWriter struct {
 	cachedTokens int
 	enabled      bool
 	wroteHeader  bool
+	streamMode   bool
+	streamBuffer []byte
 }
 
 func newCachedTokensResponseWriter(w http.ResponseWriter, cachedTokens int, enabled bool) http.ResponseWriter {
@@ -315,6 +318,9 @@ func (w *cachedTokensResponseWriter) Write(body []byte) (int, error) {
 		return w.ResponseWriter.Write(body)
 	}
 	updated := replaceCachedTokens(body, w.cachedTokens)
+	if w.shouldBufferSSE(body) {
+		updated = w.replaceCachedTokensSSEChunk(body)
+	}
 	if !w.wroteHeader {
 		w.Header().Del("Content-Length")
 	}
@@ -329,6 +335,34 @@ func (w *cachedTokensResponseWriter) Flush() {
 	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (w *cachedTokensResponseWriter) shouldBufferSSE(body []byte) bool {
+	if w.streamMode {
+		return true
+	}
+	contentType := w.Header().Get("Content-Type")
+	if strings.Contains(contentType, "text/event-stream") || bytes.HasPrefix(body, []byte("data:")) {
+		w.streamMode = true
+		return true
+	}
+	return false
+}
+
+func (w *cachedTokensResponseWriter) replaceCachedTokensSSEChunk(body []byte) []byte {
+	w.streamBuffer = append(w.streamBuffer, body...)
+	updated := make([]byte, 0, len(w.streamBuffer))
+	for {
+		lineEnd := bytes.IndexByte(w.streamBuffer, '\n')
+		if lineEnd < 0 {
+			break
+		}
+		line := w.streamBuffer[:lineEnd+1]
+		replacedLine, _ := replaceCachedTokensSSELine(line, w.cachedTokens)
+		updated = append(updated, replacedLine...)
+		w.streamBuffer = w.streamBuffer[lineEnd+1:]
+	}
+	return updated
 }
 
 func extractCachedTokens(response map[string]any) (int, bool) {
@@ -399,29 +433,16 @@ func replaceCachedTokensSSE(body []byte, cachedTokens int) ([]byte, bool) {
 		if len(line) == 0 {
 			continue
 		}
-		trimmedLine := bytes.TrimRight(line, "\r\n")
-		lineEnding := line[len(trimmedLine):]
-		data, ok := bytes.CutPrefix(trimmedLine, []byte("data: "))
+		replacedLine, ok := replaceCachedTokensSSELine(line, cachedTokens)
 		if !ok {
-			updated = append(updated, line...)
+			updated = append(updated, replacedLine...)
 			continue
 		}
 		processed = true
-		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-			updated = append(updated, line...)
-			continue
-		}
-		replacedData, isJSON := replaceCachedTokensJSON(data, cachedTokens)
-		if !isJSON {
-			updated = append(updated, line...)
-			continue
-		}
-		if !bytes.Equal(replacedData, data) {
+		if !bytes.Equal(replacedLine, line) {
 			changed = true
 		}
-		updated = append(updated, []byte("data: ")...)
-		updated = append(updated, replacedData...)
-		updated = append(updated, lineEnding...)
+		updated = append(updated, replacedLine...)
 	}
 
 	if !processed {
@@ -430,6 +451,27 @@ func replaceCachedTokensSSE(body []byte, cachedTokens int) ([]byte, bool) {
 	if !changed {
 		return body, true
 	}
+	return updated, true
+}
+
+func replaceCachedTokensSSELine(line []byte, cachedTokens int) ([]byte, bool) {
+	trimmedLine := bytes.TrimRight(line, "\r\n")
+	lineEnding := line[len(trimmedLine):]
+	data, ok := bytes.CutPrefix(trimmedLine, []byte("data: "))
+	if !ok {
+		return line, false
+	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		return line, true
+	}
+	replacedData, isJSON := replaceCachedTokensJSON(data, cachedTokens)
+	if !isJSON {
+		return line, true
+	}
+	updated := make([]byte, 0, len(line))
+	updated = append(updated, []byte("data: ")...)
+	updated = append(updated, replacedData...)
+	updated = append(updated, lineEnding...)
 	return updated, true
 }
 
