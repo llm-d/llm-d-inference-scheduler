@@ -792,7 +792,7 @@ func TestActivePortFiltering(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "8000,8002",
+				activePortsAnnotation: "8000,8002",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -827,7 +827,7 @@ func TestActivePortFiltering(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "",
+				activePortsAnnotation: "",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -959,7 +959,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "8000,8001,8002",
+				activePortsAnnotation: "8000,8001,8002",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -978,7 +978,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "8000",
+				activePortsAnnotation: "8000",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -997,7 +997,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "",
+				activePortsAnnotation: "",
 			},
 		},
 		Status: corev1.PodStatus{

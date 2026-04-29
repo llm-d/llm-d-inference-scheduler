@@ -26,7 +26,7 @@ const (
 	DefaultEngineType = "default"
 
 	// DefaultEngineTypeLabelKey is the default label on Pods that indicates the inference engine type.
-	DefaultEngineTypeLabelKey = "inference.networking.k8s.io/engine-type"
+	DefaultEngineTypeLabelKey = "llm-d.ai/engine-type"
 )
 
 // MappingRegistry holds multiple metric mappings for different inference engines.

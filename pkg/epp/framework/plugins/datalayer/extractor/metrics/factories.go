@@ -65,7 +65,7 @@ type (
 	// modelServerExtractorParams holds the configuration parameters for the core metrics extractor plugin.
 	modelServerExtractorParams struct {
 		// EngineLabelKey is the Pod label key used to identify the engine type.
-		// Defaults to "inference.networking.k8s.io/engine-type".
+		// Defaults to "llm-d.ai/engine-type".
 		EngineLabelKey string `json:"engineLabelKey"`
 		// DefaultEngine specifies which engine to use as the default for unlabeled Pods.
 		// Can be any engine name from EngineConfigs. Defaults to "vllm".

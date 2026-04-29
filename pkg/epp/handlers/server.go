@@ -167,7 +167,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 	// Start tracing span for the request
 	tracer := otel.Tracer(
-		"gateway-api-inference-extension/epp/extproc",
+		"llm-d-inference-scheduler/epp/extproc",
 		trace.WithInstrumentationVersion(version.BuildRef),
 		trace.WithInstrumentationAttributes(
 			attribute.String("commit-sha", version.CommitSHA),
