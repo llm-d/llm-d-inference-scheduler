@@ -52,7 +52,6 @@ plugins:
   name: vllm-models-source
   parameters:
     scheme: "https"
-    path: "/v1/models"
     insecureSkipVerify: false
 - type: models-data-extractor
   name: vllm-models-extractor

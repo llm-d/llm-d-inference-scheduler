@@ -27,7 +27,6 @@ Filter(ctx context.Context, cycleState *scheduling.CycleState, request *scheduli
 ```
 
 Key upstream types used in the signature:
-- `scheduling.CycleState` — thread-safe per-request state shared across plugins
 - `scheduling.InferenceRequest` — parsed request with model, body, headers, and objectives
 - `scheduling.Endpoint` — candidate endpoint interface with metadata and metrics
 
