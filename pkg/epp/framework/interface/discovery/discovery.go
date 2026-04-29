@@ -41,13 +41,13 @@ type DiscoveryPlugin interface {
 // to the datastore.
 //
 // Ordering contract: the datastore processes Upsert and Delete calls in the order
-// they are received. Plugin implementations MUST preserve event order — do not
-// buffer, coalesce, or dispatch calls concurrently in a way that could reorder
-// them. For example, an Upsert followed by a Delete for the same endpoint must
-// arrive in that order, or the endpoint will be incorrectly left in the datastore.
+// they are received. Plugin implementations MUST preserve event order -- do not
+// buffer or dispatch calls concurrently in a way that could reorder them. For
+// example, an Upsert followed by a Delete for the same endpoint must arrive in
+// that order, or the endpoint will be incorrectly left in the datastore.
 type Notifier interface {
-	// Upsert adds or updates one or more endpoints in the datastore.
-	Upsert(endpoints []*fwkdl.EndpointMetadata)
+	// Upsert adds or updates an endpoint in the datastore.
+	Upsert(endpoint *fwkdl.EndpointMetadata)
 	// Delete removes an endpoint from the datastore by its namespaced name.
 	Delete(id types.NamespacedName)
 }
