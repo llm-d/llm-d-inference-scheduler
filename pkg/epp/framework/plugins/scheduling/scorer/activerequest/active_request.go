@@ -46,9 +46,10 @@ type Parameters struct {
 	// (pods with request count > idleThreshold). This creates a scoring gap
 	// between idle and busy pods.
 	// Range: 0.0 to 1.0
-	// Default: 1.0 (no gap, current behavior)
+	// Default: 1.0 (no gap, current behavior). Pointer so an unset value is
+	// distinguishable from an explicit 0.0.
 	// Example: 0.5 means idle pods get 1.0, busiest pod gets 0.0, least busy gets 0.5
-	MaxBusyScore float64 `json:"maxBusyScore"`
+	MaxBusyScore *float64 `json:"maxBusyScore,omitempty"`
 }
 
 // requestEntry represents a single request in the cache
@@ -120,8 +121,13 @@ func NewActiveRequest(ctx context.Context, params *Parameters) *ActiveRequest {
 
 	// Set max busy score (default: 1.0)
 	maxBusyScore := 1.0
-	if params != nil && params.MaxBusyScore >= 0 && params.MaxBusyScore <= 1.0 {
-		maxBusyScore = params.MaxBusyScore
+	if params != nil && params.MaxBusyScore != nil {
+		v := *params.MaxBusyScore
+		if v >= 0 && v <= 1.0 {
+			maxBusyScore = v
+		} else {
+			logger.Info("Ignoring out-of-range maxBusyScore; using default 1.0", "provided", v)
+		}
 	}
 
 	if idleThreshold != 0 || maxBusyScore != 1.0 {
