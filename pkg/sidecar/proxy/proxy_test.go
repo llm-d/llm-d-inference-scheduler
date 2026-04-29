@@ -333,8 +333,8 @@ var _ = Describe("Custom ProxyHandlerFactory", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			cfg := Config{
-				Port:                 "0",
-				DecoderURL:           targetURL,
+				Port:                  "0",
+				DecoderURL:            targetURL,
 				DecoderHandlerFactory: customFactory,
 			}
 			proxy := NewProxy(cfg)

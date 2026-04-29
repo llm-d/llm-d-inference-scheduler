@@ -174,7 +174,7 @@ type Config struct {
 	InferencePoolName string
 	// PoolGroup is the API group of the InferencePool resource.
 	PoolGroup string
-	
+
 	// DecoderHandlerFactory is an optional custom handler factory for the decoder proxy.
 	// If set, it replaces the default reverse proxy handler.
 	DecoderHandlerFactory ProxyHandlerFactory
@@ -188,19 +188,52 @@ type Config struct {
 
 // MarshalJSON implements json.Marshaler for Config.
 // It overrides the default marshaling of DecoderURL (*url.URL) to serialize it as a string.
+// It also excludes function type fields (ProxyHandlerFactory) which cannot be marshaled.
 func (c Config) MarshalJSON() ([]byte, error) {
-	// alias avoids infinite recursion when calling json.Marshal below
-	type alias Config
 	decoderURL := ""
 	if c.DecoderURL != nil {
 		decoderURL = c.DecoderURL.String()
 	}
 	return json.Marshal(struct {
-		alias
-		DecoderURL string
+		Port                           string `json:"Port"`
+		DecoderURL                     string `json:"DecoderURL"`
+		KVConnector                    string `json:"KVConnector"`
+		ECConnector                    string `json:"ECConnector"`
+		DataParallelSize               int    `json:"DataParallelSize"`
+		MaxIdleConnsPerHost            int    `json:"MaxIdleConnsPerHost"`
+		EnablePrefillerSampling        bool   `json:"EnablePrefillerSampling"`
+		UseTLSForPrefiller             bool   `json:"UseTLSForPrefiller"`
+		UseTLSForDecoder               bool   `json:"UseTLSForDecoder"`
+		UseTLSForEncoder               bool   `json:"UseTLSForEncoder"`
+		InsecureSkipVerifyForPrefiller bool   `json:"InsecureSkipVerifyForPrefiller"`
+		InsecureSkipVerifyForEncoder   bool   `json:"InsecureSkipVerifyForEncoder"`
+		InsecureSkipVerifyForDecoder   bool   `json:"InsecureSkipVerifyForDecoder"`
+		SecureServing                  bool   `json:"SecureServing"`
+		CertPath                       string `json:"CertPath"`
+		EnableSSRFProtection           bool   `json:"EnableSSRFProtection"`
+		InferencePoolNamespace         string `json:"InferencePoolNamespace"`
+		InferencePoolName              string `json:"InferencePoolName"`
+		PoolGroup                      string `json:"PoolGroup"`
 	}{
-		alias:      alias(c),
-		DecoderURL: decoderURL,
+		Port:                           c.Port,
+		DecoderURL:                     decoderURL,
+		KVConnector:                    c.KVConnector,
+		ECConnector:                    c.ECConnector,
+		DataParallelSize:               c.DataParallelSize,
+		MaxIdleConnsPerHost:            c.MaxIdleConnsPerHost,
+		EnablePrefillerSampling:        c.EnablePrefillerSampling,
+		UseTLSForPrefiller:             c.UseTLSForPrefiller,
+		UseTLSForDecoder:               c.UseTLSForDecoder,
+		UseTLSForEncoder:               c.UseTLSForEncoder,
+		InsecureSkipVerifyForPrefiller: c.InsecureSkipVerifyForPrefiller,
+		InsecureSkipVerifyForEncoder:   c.InsecureSkipVerifyForEncoder,
+		InsecureSkipVerifyForDecoder:   c.InsecureSkipVerifyForDecoder,
+		SecureServing:                  c.SecureServing,
+		CertPath:                       c.CertPath,
+		EnableSSRFProtection:           c.EnableSSRFProtection,
+		InferencePoolNamespace:         c.InferencePoolNamespace,
+		InferencePoolName:              c.InferencePoolName,
+		PoolGroup:                      c.PoolGroup,
 	})
 }
 
