@@ -316,3 +316,143 @@ var _ = Describe("Reverse Proxy", func() {
 		})
 	})
 })
+
+var _ = Describe("Custom ProxyHandlerFactory", func() {
+	When("a custom handler factory is provided", func() {
+		It("should use the custom factory for decoder proxy", func() {
+			customHandlerCalled := false
+			customFactory := func(targetURL *url.URL) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					customHandlerCalled = true
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte("custom handler response"))
+				})
+			}
+
+			targetURL, err := url.Parse("http://localhost:8001")
+			Expect(err).ToNot(HaveOccurred())
+
+			cfg := Config{
+				Port:                  "0",
+				DecoderURL:            targetURL,
+				DecoderHandlerFactory: customFactory,
+			}
+			proxy := NewProxy(cfg)
+
+			proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+			handler := proxy.createDecoderProxyHandler(targetURL, false)
+			Expect(handler).ToNot(BeNil())
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			Expect(customHandlerCalled).To(BeTrue())
+			Expect(rec.Code).To(Equal(http.StatusOK))
+			Expect(rec.Body.String()).To(Equal("custom handler response"))
+		})
+
+		It("should use the custom factory for prefiller proxy", func() {
+			customHandlerCalled := false
+			customFactory := func(targetURL *url.URL) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					customHandlerCalled = true
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte("custom prefiller response"))
+				})
+			}
+
+			targetURL, err := url.Parse("http://localhost:8001")
+			Expect(err).ToNot(HaveOccurred())
+
+			cfg := Config{
+				Port:                    "0",
+				DecoderURL:              targetURL,
+				PrefillerHandlerFactory: customFactory,
+			}
+			proxy := NewProxy(cfg)
+
+			handler, err := proxy.prefillerProxyHandler("localhost:9000")
+			Expect(err).ToNot(HaveOccurred())
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			Expect(customHandlerCalled).To(BeTrue())
+			Expect(rec.Code).To(Equal(http.StatusOK))
+			Expect(rec.Body.String()).To(Equal("custom prefiller response"))
+		})
+
+		It("should use the custom factory for encoder proxy", func() {
+			customHandlerCalled := false
+			customFactory := func(targetURL *url.URL) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					customHandlerCalled = true
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte("custom encoder response"))
+				})
+			}
+
+			targetURL, err := url.Parse("http://localhost:8001")
+			Expect(err).ToNot(HaveOccurred())
+
+			cfg := Config{
+				Port:                  "0",
+				DecoderURL:            targetURL,
+				EncoderHandlerFactory: customFactory,
+			}
+			proxy := NewProxy(cfg)
+
+			handler, err := proxy.encoderProxyHandler("localhost:9000")
+			Expect(err).ToNot(HaveOccurred())
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			Expect(customHandlerCalled).To(BeTrue())
+			Expect(rec.Code).To(Equal(http.StatusOK))
+			Expect(rec.Body.String()).To(Equal("custom encoder response"))
+		})
+
+		It("should fall back to default reverse proxy when factory is nil", func() {
+			targetURL, err := url.Parse("http://localhost:8001")
+			Expect(err).ToNot(HaveOccurred())
+
+			cfg := Config{
+				Port:       "0",
+				DecoderURL: targetURL,
+			}
+			proxy := NewProxy(cfg)
+
+			proxy.allowlistValidator = &AllowlistValidator{enabled: false}
+			handler := proxy.createDecoderProxyHandler(targetURL, false)
+			Expect(handler).ToNot(BeNil())
+		})
+
+		It("should preserve handler factories in Clone via config", func() {
+			customFactory := func(targetURL *url.URL) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+			}
+
+			targetURL, err := url.Parse("http://localhost:8001")
+			Expect(err).ToNot(HaveOccurred())
+
+			cfg := Config{
+				Port:                    "0",
+				DecoderURL:              targetURL,
+				DecoderHandlerFactory:   customFactory,
+				PrefillerHandlerFactory: customFactory,
+				EncoderHandlerFactory:   customFactory,
+			}
+			proxy := NewProxy(cfg)
+
+			clone := proxy.Clone()
+
+			Expect(clone.config.DecoderHandlerFactory).ToNot(BeNil())
+			Expect(clone.config.PrefillerHandlerFactory).ToNot(BeNil())
+			Expect(clone.config.EncoderHandlerFactory).ToNot(BeNil())
+		})
+	})
+})

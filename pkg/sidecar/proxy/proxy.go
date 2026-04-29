@@ -174,23 +174,66 @@ type Config struct {
 	InferencePoolName string
 	// PoolGroup is the API group of the InferencePool resource.
 	PoolGroup string
+
+	// DecoderHandlerFactory is an optional custom handler factory for the decoder proxy.
+	// If set, it replaces the default reverse proxy handler.
+	DecoderHandlerFactory ProxyHandlerFactory
+	// PrefillerHandlerFactory is an optional custom handler factory for the prefiller proxy.
+	// If set, it replaces the default reverse proxy handler.
+	PrefillerHandlerFactory ProxyHandlerFactory
+	// EncoderHandlerFactory is an optional custom handler factory for the encoder proxy.
+	// If set, it replaces the default reverse proxy handler.
+	EncoderHandlerFactory ProxyHandlerFactory
 }
 
 // MarshalJSON implements json.Marshaler for Config.
 // It overrides the default marshaling of DecoderURL (*url.URL) to serialize it as a string.
+// It also excludes function type fields (ProxyHandlerFactory) which cannot be marshaled.
 func (c Config) MarshalJSON() ([]byte, error) {
-	// alias avoids infinite recursion when calling json.Marshal below
-	type alias Config
 	decoderURL := ""
 	if c.DecoderURL != nil {
 		decoderURL = c.DecoderURL.String()
 	}
 	return json.Marshal(struct {
-		alias
-		DecoderURL string
+		Port                           string `json:"Port"`
+		DecoderURL                     string `json:"DecoderURL"`
+		KVConnector                    string `json:"KVConnector"`
+		ECConnector                    string `json:"ECConnector"`
+		DataParallelSize               int    `json:"DataParallelSize"`
+		MaxIdleConnsPerHost            int    `json:"MaxIdleConnsPerHost"`
+		EnablePrefillerSampling        bool   `json:"EnablePrefillerSampling"`
+		UseTLSForPrefiller             bool   `json:"UseTLSForPrefiller"`
+		UseTLSForDecoder               bool   `json:"UseTLSForDecoder"`
+		UseTLSForEncoder               bool   `json:"UseTLSForEncoder"`
+		InsecureSkipVerifyForPrefiller bool   `json:"InsecureSkipVerifyForPrefiller"`
+		InsecureSkipVerifyForEncoder   bool   `json:"InsecureSkipVerifyForEncoder"`
+		InsecureSkipVerifyForDecoder   bool   `json:"InsecureSkipVerifyForDecoder"`
+		SecureServing                  bool   `json:"SecureServing"`
+		CertPath                       string `json:"CertPath"`
+		EnableSSRFProtection           bool   `json:"EnableSSRFProtection"`
+		InferencePoolNamespace         string `json:"InferencePoolNamespace"`
+		InferencePoolName              string `json:"InferencePoolName"`
+		PoolGroup                      string `json:"PoolGroup"`
 	}{
-		alias:      alias(c),
-		DecoderURL: decoderURL,
+		Port:                           c.Port,
+		DecoderURL:                     decoderURL,
+		KVConnector:                    c.KVConnector,
+		ECConnector:                    c.ECConnector,
+		DataParallelSize:               c.DataParallelSize,
+		MaxIdleConnsPerHost:            c.MaxIdleConnsPerHost,
+		EnablePrefillerSampling:        c.EnablePrefillerSampling,
+		UseTLSForPrefiller:             c.UseTLSForPrefiller,
+		UseTLSForDecoder:               c.UseTLSForDecoder,
+		UseTLSForEncoder:               c.UseTLSForEncoder,
+		InsecureSkipVerifyForPrefiller: c.InsecureSkipVerifyForPrefiller,
+		InsecureSkipVerifyForEncoder:   c.InsecureSkipVerifyForEncoder,
+		InsecureSkipVerifyForDecoder:   c.InsecureSkipVerifyForDecoder,
+		SecureServing:                  c.SecureServing,
+		CertPath:                       c.CertPath,
+		EnableSSRFProtection:           c.EnableSSRFProtection,
+		InferencePoolNamespace:         c.InferencePoolNamespace,
+		InferencePoolName:              c.InferencePoolName,
+		PoolGroup:                      c.PoolGroup,
 	})
 }
 
@@ -206,6 +249,10 @@ func (c Config) String() string {
 type pdConnectorRunner func(http.ResponseWriter, *http.Request, string, APIType)
 
 type epdProtocolRunner func(http.ResponseWriter, *http.Request, string, []string)
+
+// ProxyHandlerFactory creates an http.Handler for the given target URL.
+// If provided, it replaces the default reverse proxy handler.
+type ProxyHandlerFactory func(targetURL *url.URL) http.Handler
 
 // Server is the reverse proxy server
 type Server struct {
@@ -402,12 +449,15 @@ func (s *Server) createRoutes() *http.ServeMux {
 }
 
 // createProxyHandler creates a reverse proxy handler for the given host:port.
-// It uses the provided cache, URL prefix, and TLS settings.
+// It uses the provided cache, URL prefix, TLS settings, and optional handler factory.
+// If proxyFactory is provided, it is used to create the handler; otherwise, a default
+// reverse proxy is created.
 func (s *Server) createProxyHandler(
 	hostPort string,
 	cache *lru.Cache[string, http.Handler],
 	urlPrefix string,
 	insecureSkipVerify bool,
+	proxyFactory ProxyHandlerFactory,
 ) (http.Handler, error) {
 	// Check cache first
 	proxy, exists := cache.Get(hostPort)
@@ -424,8 +474,14 @@ func (s *Server) createProxyHandler(
 		return nil, err
 	}
 
-	newProxy := httputil.NewSingleHostReverseProxy(u)
-	newProxy.Transport = s.newProxyTransport(u.Scheme, insecureSkipVerify)
+	var newProxy http.Handler
+	if proxyFactory != nil {
+		newProxy = proxyFactory(u)
+	} else {
+		rp := httputil.NewSingleHostReverseProxy(u)
+		rp.Transport = s.newProxyTransport(u.Scheme, insecureSkipVerify)
+		newProxy = rp
+	}
 	cache.Add(hostPort, newProxy)
 
 	return newProxy, nil
@@ -437,6 +493,7 @@ func (s *Server) prefillerProxyHandler(hostPort string) (http.Handler, error) {
 		s.prefillerProxies,
 		s.prefillerURLPrefix,
 		s.config.InsecureSkipVerifyForPrefiller,
+		s.config.PrefillerHandlerFactory,
 	)
 }
 
@@ -446,5 +503,6 @@ func (s *Server) encoderProxyHandler(hostPort string) (http.Handler, error) {
 		s.encoderProxies,
 		s.encoderURLPrefix,
 		s.config.InsecureSkipVerifyForEncoder,
+		s.config.EncoderHandlerFactory,
 	)
 }
