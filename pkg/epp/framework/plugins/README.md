@@ -1,6 +1,6 @@
 # Plugins
 
-This directory contains the available plugins. To see how they fit into the request processing lifecycle, check out the [Endpoint Picker (EPP) design](https://github.com/llm-d/llm-d/tree/main/docs/wip-docs-new/architecture/core/epp).
+This directory contains the available plugins. For detailed information on individual plugins, please refer to the README.md located within each plugin's respective directory. To understand how they integrate into the incoming request processing lifecycle, see the [Endpoint Picker (EPP) design](https://github.com/llm-d/llm-d/tree/main/docs/wip-docs-new/architecture/core/epp) document.
 
 ## Related Documentation
 

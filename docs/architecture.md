@@ -174,8 +174,7 @@ If the configuration is in a file, the EPP command line argument `--configFile` 
 
 ### Available plugins
 
-
-To learn more about the available plugins, check the README files provided alongside their respective source code.
+To learn more about the available plugins, check the plugins [README.md](../pkg/epp/framework/plugins/README.md) file.
 
 ---
 
