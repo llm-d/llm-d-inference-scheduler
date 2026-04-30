@@ -1,28 +1,33 @@
 # ByLabel Filter Plugins
 
-Label-based filters that retain or remove candidate pods based on Kubernetes label values. Includes two general-purpose filters and three pre-configured role filters for disaggregated inference architectures.
+**Interfaces**: `scheduling.Filter`
+
+Label-based filters that retain or remove candidate pods based on Kubernetes label values.
+
+---
 
 ## ByLabel
 
 **Type:** `by-label`
 
-### Behavior
+### What it does
 
-Filters out pods that do not have a specific label with one of the allowed values. Pods missing the label are either filtered out or retained based on the `allowsNoLabel` setting.
+Retains only candidate pods that carry a specific Kubernetes label with one of a set of allowed values; pods missing the label are included or excluded based on `allowsNoLabel`.
 
-### Config
+### Inputs consumed
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
+- Pod Kubernetes labels (read from the candidate pod's metadata).
+
+### Configuration
+
+#### Parameters
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
 | `label` | `string` | Yes | — | The name of the Kubernetes label to inspect on each pod. |
 | `validValues` | `[]string` | Yes (unless `allowsNoLabel=true`) | — | List of acceptable label values. A pod is kept if its value matches any entry. |
 | `allowsNoLabel` | `bool` | No | `false` | If `true`, pods that lack the label entirely are included. If `false`, they are filtered out. |
 
-### Inputs
-
-- Pod Kubernetes labels (read from the candidate pod's metadata).
-
-**Configuration Example:**
+#### Example
 ```yaml
 plugins:
   - type: by-label
@@ -32,9 +37,9 @@ plugins:
       allowsNoLabel: false
 ```
 
-In this example:
-- Only pods labeled with the specific GPU type (`gpu.type=a100`) are selected.
-- Pods missing the `gpu.type` label are not considered for scheduling.
+### Limitations
+
+- Only exact string equality is checked — no wildcards, prefix matching, or regular expressions.
 
 ---
 
@@ -42,24 +47,22 @@ In this example:
 
 **Type:** `by-label-selector`
 
-### Behavior
+### What it does
 
-Filters out pods using a standard Kubernetes label selector.
+Retains only candidate pods that match a Kubernetes label selector; all `matchLabels` key-value pairs must match (AND logic).
 
-> [!NOTE]
-> Only the matching labels feature of Kubernetes label selectors is supported.
-
-### Config
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `matchLabels` | `map[string]string` | Yes | — | Map of `{key: value}` pairs. All pairs must match (AND logic). |
-
-### Inputs
+### Inputs consumed
 
 - Pod Kubernetes labels (read from the candidate pod's metadata).
 
-**Configuration Example:**
+### Configuration
+
+#### Parameters
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `matchLabels` | `map[string]string` | Yes | — | Map of `{key: value}` pairs. All pairs must match (AND logic). |
+
+#### Example
 ```yaml
 plugins:
   - type: by-label-selector
@@ -69,10 +72,9 @@ plugins:
         hardware-type: H100
 ```
 
-In this example:
-- Only pods that have **both** labels `inference-role=decode` **and** `hardware-type=H100` will be selected.
-- Pods missing either label, or having a different value, are **filtered out**.
-- All key-value pairs in `matchLabels` must match (**AND** logic).
+### Limitations
+
+- Only `matchLabels` is supported; `matchExpressions` is not.
 
 ---
 
@@ -98,78 +100,75 @@ spec:
 | `encode` | Encode stage only |
 | `prefill` | Prefill stage only |
 | `decode` | Decode stage only |
-| `both` | Prefill + Decode (alias for `prefill-decode`) |
 | `encode-prefill` | Encode + Prefill |
 | `prefill-decode` | Prefill + Decode |
 | `encode-prefill-decode` | All stages (monolithic) |
+| `both` | Prefill + Decode (alias for `prefill-decode`) — **Deprecated**, use `prefill-decode` instead |
 
 ### EncodeRole Filter
 
-#### Behavior
-
 **Type:** `encode-filter`
 
-Filters out pods not marked as encode. Retains pods whose `llm-d.ai/role` value is `encode`, `encode-prefill`, or `encode-prefill-decode`.
+#### What it does
 
-#### Config
+Retains pods whose `llm-d.ai/role` value is `encode`, `encode-prefill`, or `encode-prefill-decode`; all other pods are filtered out.
 
-No parameters.
-
-#### Inputs
+#### Inputs consumed
 
 - `llm-d.ai/role` pod label.
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: encode-filter
-```
+#### Configuration
+
+##### Parameters
+
+None.
+
+---
 
 ### PrefillRole Filter
 
-#### Behavior
-
 **Type:** `prefill-filter`
 
-Filters out pods not marked as prefill. Retains pods whose `llm-d.ai/role` value is `prefill`, `encode-prefill`, `prefill-decode`, `both`, or `encode-prefill-decode`.
+#### What it does
 
-#### Config
+Retains pods whose `llm-d.ai/role` value is `prefill`, `encode-prefill`, `prefill-decode`, `both`, or `encode-prefill-decode`; all other pods are filtered out.
 
-No parameters.
-
-#### Inputs
+#### Inputs consumed
 
 - `llm-d.ai/role` pod label.
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: prefill-filter
-```
+#### Configuration
+
+##### Parameters
+
+None.
+
+---
 
 ### DecodeRole Filter
 
-#### Behavior
-
 **Type:** `decode-filter`
 
-Filters out pods not authorized for the decode stage. Retains pods whose `llm-d.ai/role` value is `decode`, `prefill-decode`, `both`, or `encode-prefill-decode`. Pods that completely lack the `llm-d.ai/role` label are not filtered out.
+#### What it does
 
-#### Config
+Retains pods whose `llm-d.ai/role` value is `decode`, `prefill-decode`, `both`, or `encode-prefill-decode`; pods that completely lack the `llm-d.ai/role` label are also retained.
 
-No parameters.
-
-#### Inputs
+#### Inputs consumed
 
 - `llm-d.ai/role` pod label.
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: decode-filter
-```
+#### Configuration
+
+##### Parameters
+
+None.
+
+#### Limitations
+
+- Pods without the `llm-d.ai/role` label are passed through (not filtered out), unlike `encode-filter` and `prefill-filter` which exclude unlabeled pods.
 
 ---
 
 ## Related Documentation
 - [Creating a Custom Filter](../../../../../../../docs/create_new_filter.md)
+- [Disaggregated Inference Serving in llm-d](../../../../../../../docs/disaggregation.md)

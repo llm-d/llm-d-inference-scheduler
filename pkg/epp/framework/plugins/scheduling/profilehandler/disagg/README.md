@@ -1,5 +1,7 @@
 # Disaggregated Profile Handler, PreRequest, and Decider Plugins
 
+Plugins for disaggregated inference scheduling: a profile handler that selects the active stages: EPD (no disaggregation), P/D (Prefill/Decode), E/P/D (Encode/Prefill/Decode), or E/PD (Encode/Prefill-Decode), a headers handler that routes pods across stages, and decider plugins that control whether each disaggregation stage runs per request.
+
 ## Contents
 
 - [Profile Handlers](#profile-handlers)
@@ -20,28 +22,47 @@
 ### DisaggProfileHandler
 
 **Type:** `disagg-profile-handler`
+**Interfaces**: `scheduling.ProfileHandler`
 
-Selects the scheduling profiles to use when running with disaggregation. Supports monolithic (EPD), two-stage (P/D), three-stage (E/P/D), and encode-prefill (E/PD) modes.
+Orchestrates up to three scheduling stages per request — decode (always), and optionally encode and prefill — based on which decider plugins are configured.
 
-> [!NOTE]
-> When using this plugin with P/D disaggregation, you must also have a PrefixCachePlugin configured in the prefill and decode scheduling profiles.
+#### What it does
 
-**Parameters:**
-- `profiles` (optional): Names of scheduling profiles to use. Defaults match the profile names.
-  - `decode` (string, optional, default: `"decode"`): Name of the decode scheduling profile.
-  - `prefill` (string, optional, default: `"prefill"`): Name of the prefill scheduling profile.
-  - `encode` (string, optional, default: `"encode"`): Name of the encode scheduling profile.
-- `deciders` (optional): Decider plugins that control whether each disaggregation stage runs.
-  - `prefill` (string, optional): Name of the prefill decider plugin. When set, enables P/D disaggregation.
-  - `encode` (string, optional): Name of the encode decider plugin. When set, enables E disaggregation.
+Runs each scheduling stage in sequence and assembles the final result from all stages that ran.
 
-**Configuration Example — Decode-only (no disaggregation):**
+1. Run the decode profile (always).
+2. If an encode decider is configured and approves the request, run the encode profile.
+3. If a prefill decider is configured and approves the request, run the prefill profile.
+4. Return the assembled scheduling result with decode as the primary profile.
+
+#### How It Works
+
+The handler is invoked repeatedly by the framework until all stages are complete. Each optional stage is gated by a decider: if the decider returns false for a request, the stage is marked as skipped so the handler doesn't revisit it on the next invocation. If the decode stage finds no suitable endpoint, all remaining stages are skipped and the request fails.
+
+#### Inputs consumed
+
+- `PrefixCacheMatchInfo` — endpoint attribute from `approx-prefix-cache-producer`, read by the configured prefill decider (e.g. `prefix-based-pd-decider`) when deciding whether to run the prefill stage.
+
+#### Configuration
+
+##### Parameters
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `profiles.decode` | `string` | No | `"decode"` | Name of the decode scheduling profile. |
+| `profiles.prefill` | `string` | No | `"prefill"` | Name of the prefill scheduling profile. |
+| `profiles.encode` | `string` | No | `"encode"` | Name of the encode scheduling profile. |
+| `deciders.prefill` | `string` | No | — | Name of the prefill decider plugin. When set, enables P/D disaggregation. |
+| `deciders.encode` | `string` | No | — | Name of the encode decider plugin. When set, enables E disaggregation. |
+
+##### Example
+
+Decode-only (no disaggregation):
 ```yaml
 plugins:
   - type: disagg-profile-handler
 ```
 
-**Configuration Example — P/D disaggregation:**
+P/D disaggregation:
 ```yaml
 plugins:
   - type: disagg-profile-handler
@@ -50,7 +71,7 @@ plugins:
         prefill: prefix-based-pd-decider
 ```
 
-**Configuration Example — E/P/D disaggregation:**
+E/P/D disaggregation:
 ```yaml
 plugins:
   - type: disagg-profile-handler
@@ -60,9 +81,18 @@ plugins:
         encode: always-disagg-multimodal-decider
 ```
 
+#### Limitations
+
+- Without a configured decider, the corresponding stage is disabled for all requests — this is a static decision at startup, not per-request.
+- The names in `deciders.prefill` and `deciders.encode` must match plugin names declared earlier in the same configuration.
+- When using P/D disaggregation, a `PrefixCachePlugin` must be configured in the prefill and decode scheduling profiles.
+
+---
+
 ### PdProfileHandler (Deprecated)
 
 **Type:** `pd-profile-handler`
+**Interfaces**: `scheduling.ProfileHandler`
 
 > **Deprecated:** Use `disagg-profile-handler` instead.
 
@@ -73,17 +103,36 @@ plugins:
 ### DisaggHeadersHandler
 
 **Type:** `disagg-headers-handler`
+**Interfaces**: `requestcontrol.PreRequest`
 
-Sets headers for use in disaggregated prefill/decode and encode/prefill/decode.
+Sets HTTP routing headers on the outgoing request so the inference proxy can forward prefill and encode work to the selected disaggregated pods.
 
-- **`x-prefiller-host-port`** — `<ip:port>` of the selected prefill pod. Absent when P/D disaggregation was skipped.
-- **`x-encoder-hosts-ports`** — comma-separated `<ip:port>` list of selected encode pods. Absent when encode disaggregation was skipped.
+#### What it does
 
-**Parameters:**
-- `prefillProfile` (string, optional): Name of the profile used for prefill scheduling. Only needed if the prefill profile is not named `prefill`.
-- `encodeProfile` (string, optional): Name of the profile used for encode scheduling. Only needed if the encode profile is not named `encode`.
+Reads the scheduling result and writes pod addresses as request headers for each disaggregated stage that ran.
 
-**Configuration Example:**
+1. If a prefill endpoint was selected, write its `ip:port` to `x-prefiller-host-port`.
+2. If one or more encode endpoints were selected, write their comma-separated `ip:port` list to `x-encoder-hosts-ports`.
+3. If a stage did not run or found no endpoints, that header is omitted.
+
+#### Inputs consumed
+
+- `SchedulingResult.ProfileResults` — per-profile endpoint selections produced by `disagg-profile-handler`.
+
+#### Output produced
+
+- `x-prefiller-host-port` request header — `<ip:port>` of the selected prefill pod; absent when P/D disaggregation was skipped.
+- `x-encoder-hosts-ports` request header — comma-separated `<ip:port>` list of selected encode pods; absent when encode disaggregation was skipped.
+
+#### Configuration
+
+##### Parameters
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `prefillProfile` | `string` | No | `"prefill"` | Name of the profile used for prefill scheduling. Only needed if the prefill profile is not named `prefill`. |
+| `encodeProfile` | `string` | No | `"encode"` | Name of the profile used for encode scheduling. Only needed if the encode profile is not named `encode`. |
+
+##### Example
 ```yaml
 plugins:
   - type: disagg-headers-handler
@@ -101,6 +150,7 @@ plugins:
 ### PrefillHeaderHandler (Deprecated)
 
 **Type:** `prefill-header-handler`
+**Interfaces**: `requestcontrol.PreRequest`
 
 > **Deprecated:** Use `disagg-headers-handler` instead.
 
@@ -112,15 +162,34 @@ plugins:
 
 **Type:** `prefix-based-pd-decider`
 
-Makes P/D disaggregation decisions based on KV cache prefix matching. Disaggregates only when the non-cached portion of the user input exceeds a threshold, avoiding disaggregation overhead for short or well-cached requests.
+Decides per-request whether P/D disaggregation should run, based on how much of the prompt is already cached on the selected decode pod.
 
-> [!NOTE]
-> The `prepareDataPlugins` feature gate must be enabled.
+#### What it does
 
-**Parameters:**
-- `nonCachedTokens` (int, required): Length in tokens of the uncached portion of the user input above which disaggregated P/D is triggered.
+Compares the uncached portion of the request prompt against a configurable threshold, triggering P/D disaggregation only when the uncached suffix is long enough to justify the overhead.
 
-**Configuration Example:**
+1. Estimate the prompt token count from the request body 
+2. Read `PrefixCacheMatchInfo` from the decode endpoint attributes.
+3. Compute uncached suffix length.
+4. Return true (disaggregate) if uncached tokens ≥ `nonCachedTokens`.
+
+#### How It Works
+
+Token count is estimated by dividing raw character length by 4 (a fixed approximation). Prefix cache state is read from the `PrefixCacheMatchInfo` attribute on the decode endpoint, populated by `approx-prefix-cache-producer`. If the attribute is absent or malformed, disaggregation is skipped. Setting `nonCachedTokens: 0` disables the decider entirely (always returns false).
+
+#### Inputs consumed
+
+- `PrefixCacheMatchInfo` — endpoint attribute from `approx-prefix-cache-producer`, read from the decode endpoint.
+- Request body (prompt text or chat messages, used to estimate token count).
+
+#### Configuration
+
+##### Parameters
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `nonCachedTokens` | `int` | No | `0` | Uncached token threshold above which P/D disaggregation is triggered. `0` disables the decider. |
+
+##### Example
 ```yaml
 featureGates:
 - prepareDataPlugins
@@ -134,56 +203,59 @@ plugins:
         prefill: prefix-based-pd-decider
 ```
 
-In this example:
-- P/D disaggregation is triggered only when 512 or more tokens of the input are uncached.
-- The `disagg-profile-handler` references the decider by its type name.
+#### Limitations
+
+- `nonCachedTokens: 0` disables disaggregation entirely (the decider always returns false).
+- Token count is estimated (characters ÷ 4), not exact; behavior may differ for non-ASCII content.
+- Requires `PrefixCacheMatchInfo` on the decode endpoint; if absent, disaggregation is skipped with an error log.
+- Requires the `prepareDataPlugins` feature gate to be enabled.
+
+---
 
 ### AlwaysDisaggPDDecider
 
 **Type:** `always-disagg-pd-decider`
 
-Always approves P/D disaggregation for every request. Useful for testing or forcing disaggregation unconditionally.
+Unconditionally approves P/D disaggregation for every request, regardless of cache state or prompt length.
 
-**Parameters:** None.
+#### What it does
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: always-disagg-pd-decider
-    name: always-pd
-  - type: disagg-profile-handler
-    parameters:
-      deciders:
-        prefill: always-pd
-```
+Returns true for every request. Useful for testing or environments where P/D disaggregation should always run.
+
+#### Inputs consumed
+
+None — ignores request content and endpoint state.
+
+#### Configuration
+
+##### Parameters
+
+None.
+
+---
 
 ### AlwaysDisaggMultimodalDecider
 
 **Type:** `always-disagg-multimodal-decider`
 
-Approves encode disaggregation for requests that contain multimodal content (images, audio). Text-only requests are not disaggregated.
+Approves encode disaggregation for requests that contain multimodal content (images, audio, video); passes text-only requests through without disaggregation.
 
-**Parameters:** None.
+#### What it does
 
-**Configuration Example:**
-```yaml
-plugins:
-  - type: always-disagg-multimodal-decider
-    name: mm-decider
-  - type: disagg-profile-handler
-    parameters:
-      deciders:
-        encode: mm-decider
-```
+Inspects the chat completions message content blocks for `image_url`, `video_url`, or `input_audio` types and returns true when any such block is found.
 
-In this example:
-- Encode disaggregation is triggered only for requests containing multimodal content (image URLs, audio).
-- Text-only requests proceed through decode-only scheduling.
+#### Inputs consumed
+
+- Request body (`ChatCompletions.Messages`) — inspected for multimodal content blocks.
+
+#### Configuration
+
+##### Parameters
+
+None.
 
 ---
 
 ## Related Documentation
 
 - [Disaggregation Architecture](../../../../../../../docs/disaggregation.md)
-- [SingleProfileHandler](../single/)
-- [Filter Plugins](../../filter/bylabel/README.md)
