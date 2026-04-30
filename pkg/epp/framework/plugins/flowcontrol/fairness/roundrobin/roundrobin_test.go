@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	frameworkmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 )
 
 var (
@@ -50,11 +50,11 @@ func TestRoundRobin_Pick_Logic(t *testing.T) {
 	state := policy.NewState(ctx)
 
 	// Setup: Three non-empty queues
-	queue1 := &frameworkmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
-	queue2 := &frameworkmocks.MockFlowQueueAccessor{LenV: 2, FlowKeyV: flow2Key}
-	queue3 := &frameworkmocks.MockFlowQueueAccessor{LenV: 3, FlowKeyV: flow3Key}
+	queue1 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
+	queue2 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 2, FlowKeyV: flow2Key}
+	queue3 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 3, FlowKeyV: flow3Key}
 
-	mockBand := &frameworkmocks.MockPriorityBandAccessor{
+	mockBand := &fwkfcmocks.MockPriorityBandAccessor{
 		PolicyStateV: state,
 		FlowKeysFunc: func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{flow3Key, flow1Key, flow2Key} }, // Unsorted to test sorting
 		QueueFunc: func(id string) flowcontrol.FlowQueueAccessor {
@@ -100,11 +100,11 @@ func TestRoundRobin_Pick_SkipsEmptyQueues(t *testing.T) {
 
 	// Setup: Two non-empty queues and one empty queue
 	flowEmptyKey := flowcontrol.FlowKey{ID: "flowEmpty", Priority: 0}
-	queue1 := &frameworkmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
-	queueEmpty := &frameworkmocks.MockFlowQueueAccessor{LenV: 0, FlowKeyV: flowEmptyKey}
-	queue3 := &frameworkmocks.MockFlowQueueAccessor{LenV: 3, FlowKeyV: flow3Key}
+	queue1 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
+	queueEmpty := &fwkfcmocks.MockFlowQueueAccessor{LenV: 0, FlowKeyV: flowEmptyKey}
+	queue3 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 3, FlowKeyV: flow3Key}
 
-	mockBand := &frameworkmocks.MockPriorityBandAccessor{
+	mockBand := &fwkfcmocks.MockPriorityBandAccessor{
 		PolicyStateV: state,
 		FlowKeysFunc: func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{flow1Key, flowEmptyKey, flow3Key} },
 		QueueFunc: func(id string) flowcontrol.FlowQueueAccessor {
@@ -144,9 +144,9 @@ func TestRoundRobin_Pick_HandlesDynamicFlows(t *testing.T) {
 	state := policy.NewState(ctx)
 
 	// Initial setup
-	queue1 := &frameworkmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
-	queue2 := &frameworkmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow2Key}
-	mockBand := &frameworkmocks.MockPriorityBandAccessor{
+	queue1 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow1Key}
+	queue2 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow2Key}
+	mockBand := &fwkfcmocks.MockPriorityBandAccessor{
 		PolicyStateV: state,
 		FlowKeysFunc: func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{flow1Key, flow2Key} },
 		QueueFunc: func(id string) flowcontrol.FlowQueueAccessor {
@@ -164,7 +164,7 @@ func TestRoundRobin_Pick_HandlesDynamicFlows(t *testing.T) {
 	assert.Equal(t, "flow1", selected.FlowKey().ID, "First selection should be flow1")
 
 	// --- Simulate adding a flow ---
-	queue3 := &frameworkmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow3Key}
+	queue3 := &fwkfcmocks.MockFlowQueueAccessor{LenV: 1, FlowKeyV: flow3Key}
 	mockBand.FlowKeysFunc = func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{flow1Key, flow2Key, flow3Key} }
 	mockBand.QueueFunc = func(id string) flowcontrol.FlowQueueAccessor {
 		switch id {
@@ -211,14 +211,14 @@ func TestRoundRobin_Pick_Concurrency(t *testing.T) {
 			state := policy.NewState(ctx) // Shared state for all goroutines
 
 			// Setup: Three non-empty queues
-			queues := []*frameworkmocks.MockFlowQueueAccessor{
+			queues := []*fwkfcmocks.MockFlowQueueAccessor{
 				{LenV: 1, FlowKeyV: flow1Key},
 				{LenV: 2, FlowKeyV: flow2Key},
 				{LenV: 3, FlowKeyV: flow3Key},
 			}
 			numQueues := int64(len(queues))
 
-			mockBand := &frameworkmocks.MockPriorityBandAccessor{
+			mockBand := &fwkfcmocks.MockPriorityBandAccessor{
 				PolicyStateV: state,
 				FlowKeysFunc: func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{flow1Key, flow2Key, flow3Key} },
 				QueueFunc: func(id string) flowcontrol.FlowQueueAccessor {

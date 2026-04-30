@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
 
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 const (
@@ -63,9 +63,9 @@ const (
 	statusNotFound   = "HTTP_STATUS=404"
 )
 
-// newInferenceObjective creates an InferenceObjective in the given namespace for testutils.
+// newInferenceObjective creates an InferenceObjective in the given namespace for igwtestutils.
 func newInferenceObjective(ns string) *v1alpha2.InferenceObjective {
-	return testutils.MakeModelWrapper(types.NamespacedName{Name: "inferenceobjective-sample", Namespace: ns}).
+	return igwtestutils.MakeModelWrapper(types.NamespacedName{Name: "inferenceobjective-sample", Namespace: ns}).
 		SetPriority(2).
 		SetPoolRef(modelServerName).
 		Obj()
@@ -116,7 +116,7 @@ func verifyTrafficRouting() {
 		// Skip embeddings API if server returns 404 (not all models support embeddings).
 		if t.api == apiEmbeddings {
 			probeCmd := getCurlCommand(envoyName, testConfig.NsName, envoyPort, modelName, curlTimeout, t.api, t.promptOrMessages, false)
-			probeResp, probeErr := testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, probeCmd)
+			probeResp, probeErr := igwtestutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, probeCmd)
 			if probeErr == nil && strings.Contains(probeResp, statusNotFound) {
 				ginkgo.Skip("Skipping " + apiEmbeddings + ": server returned 404 (embeddings may not be supported by this model)")
 			}
@@ -163,7 +163,7 @@ func verifyTrafficRouting() {
 			var err error
 			// Repeatedly send a message until we get a successful response.
 			for attempt := 0; attempt <= maxRetries; attempt++ {
-				resp, err = testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, curlCmd)
+				resp, err = igwtestutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, curlCmd)
 				if err == nil && strings.Contains(resp, statusOK) {
 					break // Success!
 				}
@@ -217,7 +217,7 @@ func verifyMetrics() {
 
 	semaphore := make(chan struct{}, maxConcurrentRequests)
 	execFn := func(cmd []string) (string, error) {
-		return testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, cmd)
+		return igwtestutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, cmd)
 	}
 
 	errorGood := generateTraffic(curlCmd, batches, semaphore, execFn, backoff, statusOK)
@@ -287,7 +287,7 @@ func verifyMetrics() {
 
 	gomega.Eventually(func() error {
 		// Execute the metrics scrape command inside the curl pod.
-		resp, err := testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, metricScrapeCmd)
+		resp, err := igwtestutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, metricScrapeCmd)
 		if err != nil {
 			return err
 		}
@@ -428,7 +428,7 @@ func buildTargetPorts(start int, count int) []v1.Port {
 
 // waitForDeploymentRollout waits until the Deployment has completed its update.
 // It ensures that the new version is fully rolled out and available.
-func waitForDeploymentRollout(tc *testutils.TestConfig, deploy *appsv1.Deployment) {
+func waitForDeploymentRollout(tc *igwtestutils.TestConfig, deploy *appsv1.Deployment) {
 	ginkgo.By(fmt.Sprintf("Waiting for Deployment %s/%s to complete rollout", deploy.Namespace, deploy.Name))
 
 	key := types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}
@@ -464,7 +464,7 @@ func waitForDeploymentRollout(tc *testutils.TestConfig, deploy *appsv1.Deploymen
 }
 
 // waitForDeploymentReady waits for the Deployment to have all replicas ready.
-func waitForDeploymentReady(tc *testutils.TestConfig, deploy *appsv1.Deployment) {
+func waitForDeploymentReady(tc *igwtestutils.TestConfig, deploy *appsv1.Deployment) {
 	ginkgo.By(fmt.Sprintf("waiting for Deployment %s/%s to be ready", deploy.Namespace, deploy.Name))
 
 	key := types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}

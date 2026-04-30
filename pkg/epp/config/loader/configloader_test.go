@@ -37,10 +37,10 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/registry"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	fwkflowcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	flowcontrolmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	fwkfc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	extractormetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/metrics"
 	sourcemetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
@@ -52,7 +52,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
-	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 // Define constants for test plugins.
@@ -647,7 +647,7 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			}
 
 			// 2. Instantiate & Configure
-			handle := utils.NewTestHandle(context.Background())
+			handle := igwtestutils.NewTestHandle(context.Background())
 			cfg, err := InstantiateAndConfigure(rawConfig, handle, logger)
 
 			if tc.wantErr {
@@ -667,7 +667,7 @@ func TestInstantiateAndConfigure(t *testing.T) {
 // logs a warning but does not return an error.
 func TestBuildDataLayerConfigEmptySourcesWarning(t *testing.T) {
 	t.Parallel()
-	handle := utils.NewTestHandle(context.Background())
+	handle := igwtestutils.NewTestHandle(context.Background())
 	cfg, err := buildDataLayerConfig(
 		&configapi.DataLayerConfig{Sources: []configapi.DataLayerSource{}},
 		handle,
@@ -698,13 +698,13 @@ func (m *mockPlugin) TypedName() fwkplugin.TypedName { return m.t }
 type mockScorer struct{ mockPlugin }
 
 // compile-time type assertion
-var _ framework.Scorer = &mockScorer{}
+var _ fwksched.Scorer = &mockScorer{}
 
-func (m *mockScorer) Category() framework.ScorerCategory {
-	return framework.Distribution
+func (m *mockScorer) Category() fwksched.ScorerCategory {
+	return fwksched.Distribution
 }
 
-func (m *mockScorer) Score(context.Context, *framework.CycleState, *framework.InferenceRequest, []framework.Endpoint) map[framework.Endpoint]float64 {
+func (m *mockScorer) Score(context.Context, *fwksched.CycleState, *fwksched.InferenceRequest, []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
 	return nil
 }
 
@@ -712,9 +712,9 @@ func (m *mockScorer) Score(context.Context, *framework.CycleState, *framework.In
 type mockPicker struct{ mockPlugin }
 
 // compile-time type assertion
-var _ framework.Picker = &mockPicker{}
+var _ fwksched.Picker = &mockPicker{}
 
-func (m *mockPicker) Pick(context.Context, *framework.CycleState, []*framework.ScoredEndpoint) *framework.ProfileRunResult {
+func (m *mockPicker) Pick(context.Context, *fwksched.CycleState, []*fwksched.ScoredEndpoint) *fwksched.ProfileRunResult {
 	return nil
 }
 
@@ -722,14 +722,14 @@ func (m *mockPicker) Pick(context.Context, *framework.CycleState, []*framework.S
 type mockHandler struct{ mockPlugin }
 
 // compile-time type assertion
-var _ framework.ProfileHandler = &mockHandler{}
+var _ fwksched.ProfileHandler = &mockHandler{}
 
-func (m *mockHandler) Pick(context.Context, *framework.CycleState, *framework.InferenceRequest, map[string]framework.SchedulerProfile,
-	map[string]*framework.ProfileRunResult) map[string]framework.SchedulerProfile {
+func (m *mockHandler) Pick(context.Context, *fwksched.CycleState, *fwksched.InferenceRequest, map[string]fwksched.SchedulerProfile,
+	map[string]*fwksched.ProfileRunResult) map[string]fwksched.SchedulerProfile {
 	return nil
 }
-func (m *mockHandler) ProcessResults(context.Context, *framework.CycleState, *framework.InferenceRequest,
-	map[string]*framework.ProfileRunResult) (*framework.SchedulingResult, error) {
+func (m *mockHandler) ProcessResults(context.Context, *fwksched.CycleState, *fwksched.InferenceRequest,
+	map[string]*fwksched.ProfileRunResult) (*fwksched.SchedulingResult, error) {
 	return nil, errors.New("sentinel error for mock handler")
 }
 
@@ -740,7 +740,7 @@ type mockSource struct{ mockPlugin }
 type mockSaturationDetector struct{ mockPlugin }
 
 // compile-time type assertion
-var _ fwkflowcontrol.SaturationDetector = &mockSaturationDetector{}
+var _ fwkfc.SaturationDetector = &mockSaturationDetector{}
 
 func (m *mockSaturationDetector) Saturation(ctx context.Context, endpoints []fwkdl.Endpoint) float64 {
 	return 0.5
@@ -828,12 +828,12 @@ func registerTestPlugins(t *testing.T) {
 	})
 
 	fwkplugin.Register(globalstrict.GlobalStrictFairnessPolicyType, func(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
-		return &flowcontrolmocks.MockFairnessPolicy{
+		return &fwkfcmocks.MockFairnessPolicy{
 			TypedNameV: fwkplugin.TypedName{Name: name, Type: globalstrict.GlobalStrictFairnessPolicyType},
 		}, nil
 	})
 	fwkplugin.Register(fcfs.FCFSOrderingPolicyType, func(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
-		return &flowcontrolmocks.MockOrderingPolicy{
+		return &fwkfcmocks.MockOrderingPolicy{
 			TypedNameV: fwkplugin.TypedName{Name: name, Type: fcfs.FCFSOrderingPolicyType},
 		}, nil
 	})
@@ -925,7 +925,7 @@ func TestEnsureSaturationDetector(t *testing.T) {
 				PluginRef: "existing-plugin",
 			},
 		}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 		allPlugins := map[string]fwkplugin.Plugin{
 			"existing-plugin": &mockSaturationDetector{},
 		}
@@ -941,7 +941,7 @@ func TestEnsureSaturationDetector(t *testing.T) {
 				PluginRef: "",
 			},
 		}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 		allPlugins := map[string]fwkplugin.Plugin{
 			"utilization-detector": &mockSaturationDetector{},
 		}
