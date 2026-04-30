@@ -28,11 +28,11 @@ THIS_PKG="github.com/llm-d/llm-d-inference-scheduler"
 
 
 kube::codegen::gen_helpers \
-    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate/boilerplate.generatego.txt" \
+    --boilerplate "/dev/null" \
     "${SCRIPT_ROOT}"
 
 kube::codegen::gen_register \
-    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate/boilerplate.generatego.txt" \
+    --boilerplate "/dev/null" \
     "${SCRIPT_ROOT}"
 
 kube::codegen::gen_client \
@@ -40,5 +40,5 @@ kube::codegen::gen_client \
     --with-applyconfig \
     --output-dir "${SCRIPT_ROOT}/client-go" \
     --output-pkg "${THIS_PKG}/client-go" \
-    --boilerplate "${SCRIPT_ROOT}/hack/boilerplate/boilerplate.generatego.txt" \
+    --boilerplate "/dev/null" \
     "${SCRIPT_ROOT}"
