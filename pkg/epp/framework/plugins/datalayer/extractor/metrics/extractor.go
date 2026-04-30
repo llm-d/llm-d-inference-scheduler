@@ -206,7 +206,7 @@ func getEngineTypeFromEndpoint(ep fwkdl.Endpoint, labelKey string) string {
 
 	engineType, ok := meta.Labels[labelKey]
 	if !ok || engineType == "" {
-		engineType, ok = meta.Labels[LegacyGAIEEngineTypeLabelKey]
+		engineType, ok = meta.Labels[legacyGAIEEngineTypeLabelKey]
 		if !ok || engineType == "" {
 			return DefaultEngineType
 		}

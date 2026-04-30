@@ -28,9 +28,9 @@ const (
 	// DefaultEngineTypeLabelKey is the default label on Pods that indicates the inference engine type.
 	DefaultEngineTypeLabelKey = "llm-d.ai/engine-type"
 
-	// LegacyGAIEEngineTypeLabelKey is the legacy GAIE label key, kept for backward compatibility.
+	// legacyGAIEEngineTypeLabelKey is the legacy GAIE label key, kept for backward compatibility.
 	// Deprecated: use DefaultEngineTypeLabelKey instead; this may be removed in a future release.
-	LegacyGAIEEngineTypeLabelKey = "inference.networking.k8s.io/engine-type"
+	legacyGAIEEngineTypeLabelKey = "inference.networking.k8s.io/engine-type"
 )
 
 // MappingRegistry holds multiple metric mappings for different inference engines.

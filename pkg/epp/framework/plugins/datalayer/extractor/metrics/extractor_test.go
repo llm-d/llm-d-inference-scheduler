@@ -681,7 +681,7 @@ func TestGetEngineTypeFromEndpoint(t *testing.T) {
 		},
 		{
 			name:     "legacy GAIE label key fallback",
-			labels:   map[string]string{LegacyGAIEEngineTypeLabelKey: "sglang"},
+			labels:   map[string]string{legacyGAIEEngineTypeLabelKey: "sglang"},
 			labelKey: DefaultEngineTypeLabelKey,
 			want:     "sglang",
 		},
@@ -689,7 +689,7 @@ func TestGetEngineTypeFromEndpoint(t *testing.T) {
 			name: "new label key takes precedence over legacy GAIE key",
 			labels: map[string]string{
 				DefaultEngineTypeLabelKey:    "vllm",
-				LegacyGAIEEngineTypeLabelKey: "sglang",
+				legacyGAIEEngineTypeLabelKey: "sglang",
 			},
 			labelKey: DefaultEngineTypeLabelKey,
 			want:     "vllm",
