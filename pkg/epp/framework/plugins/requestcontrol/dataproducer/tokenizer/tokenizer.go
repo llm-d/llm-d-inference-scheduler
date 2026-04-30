@@ -188,7 +188,8 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequ
 
 // multiModalFeaturesToSlice converts the tokenizer's map-based MultiModalFeatures
 // into the flat []MultiModalFeature slice used by the scheduling interface.
-// Within each modality, items follow the order returned by the tokenizer.
+// Within each modality, items follow the index order from the tokenizer.
+// Ordering across modalities is undefined; consumers must not rely on it.
 func multiModalFeaturesToSlice(mmf *tokenization.MultiModalFeatures) []scheduling.MultiModalFeature {
 	if mmf == nil || len(mmf.MMHashes) == 0 {
 		return nil

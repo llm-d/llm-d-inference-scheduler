@@ -22,7 +22,6 @@ import (
 
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,7 +31,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -101,15 +99,15 @@ func TestScorer_UsesTokenizedPrompt(t *testing.T) {
 		},
 	}
 
-	// Write tokenized prompt to CycleState (as the tokenizer scorer would).
 	cycleState := scheduling.NewCycleState()
-	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
-		TokenIDs: tokenIDs,
-	})
-
 	request := &scheduling.InferenceRequest{
 		RequestID:   "test-tokenized",
 		TargetModel: "test-model",
+		Body: &fwkrh.InferenceRequestBody{
+			TokenizedPrompt: &scheduling.TokenizedPrompt{
+				TokenIDs: tokenIDs,
+			},
+		},
 	}
 
 	scorer.Score(ctx, cycleState, request, testEndpoints)
@@ -136,24 +134,18 @@ func TestScorer_PassesExtraFeaturesToScoreTokens(t *testing.T) {
 		},
 	}
 
-	mmFeatures := &tokenization.MultiModalFeatures{
-		MMHashes: map[string][]string{
-			"image": {"abc123"},
-		},
-		MMPlaceholders: map[string][]kvblock.PlaceholderRange{
-			"image": {{Offset: 2, Length: 4}},
-		},
-	}
-
 	cycleState := scheduling.NewCycleState()
-	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
-		TokenIDs:   tokenIDs,
-		MMFeatures: mmFeatures,
-	})
-
 	request := &scheduling.InferenceRequest{
 		RequestID:   "test-mm",
 		TargetModel: "test-model",
+		Body: &fwkrh.InferenceRequestBody{
+			TokenizedPrompt: &scheduling.TokenizedPrompt{
+				TokenIDs: tokenIDs,
+				MultiModalFeatures: []scheduling.MultiModalFeature{
+					{Modality: "image", Hash: "abc123", Offset: 2, Length: 4},
+				},
+			},
+		},
 	}
 
 	scorer.Score(ctx, cycleState, request, testEndpoints)
@@ -182,14 +174,14 @@ func TestScorer_NilExtraFeaturesForTextOnly(t *testing.T) {
 	}
 
 	cycleState := scheduling.NewCycleState()
-	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
-		TokenIDs:   tokenIDs,
-		MMFeatures: nil,
-	})
-
 	request := &scheduling.InferenceRequest{
 		RequestID:   "test-text-only",
 		TargetModel: "test-model",
+		Body: &fwkrh.InferenceRequestBody{
+			TokenizedPrompt: &scheduling.TokenizedPrompt{
+				TokenIDs: tokenIDs,
+			},
+		},
 	}
 
 	scorer.Score(ctx, cycleState, request, testEndpoints)
@@ -217,17 +209,13 @@ func TestScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 		},
 	}
 
-	// Write empty token IDs to CycleState.
 	cycleState := scheduling.NewCycleState()
-	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
-		TokenIDs: []uint32{},
-	})
-
 	request := &scheduling.InferenceRequest{
 		RequestID:   "test-skip-empty",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
-			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
+			TokenizedPrompt: &scheduling.TokenizedPrompt{TokenIDs: []uint32{}},
+			Completions:     &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
 		},
 	}
 

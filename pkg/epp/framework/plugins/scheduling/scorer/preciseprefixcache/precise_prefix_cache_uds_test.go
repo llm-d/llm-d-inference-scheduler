@@ -18,7 +18,6 @@ import (
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -826,16 +825,33 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 		),
 	}
 
-	// Write tokenized state with MM features to CycleState (simulating tokenizer plugin).
-	cycleState := scheduling.NewCycleState()
-	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
-		TokenIDs:   tokens,
-		MMFeatures: mmFeatures,
-	})
+	// Convert mmFeatures to the flat []MultiModalFeature used by the scheduling interface.
+	var mmSlice []scheduling.MultiModalFeature
+	for modality, hashes := range mmFeatures.MMHashes {
+		placeholders := mmFeatures.MMPlaceholders[modality]
+		for i, hash := range hashes {
+			feat := scheduling.MultiModalFeature{
+				Modality: scheduling.Modality(modality),
+				Hash:     hash,
+			}
+			if i < len(placeholders) {
+				feat.Offset = placeholders[i].Offset
+				feat.Length = placeholders[i].Length
+			}
+			mmSlice = append(mmSlice, feat)
+		}
+	}
 
+	cycleState := scheduling.NewCycleState()
 	request := &scheduling.InferenceRequest{
 		RequestID:   "test-mm-e2e",
 		TargetModel: mmModelName,
+		Body: &fwkrh.InferenceRequestBody{
+			TokenizedPrompt: &scheduling.TokenizedPrompt{
+				TokenIDs:           tokens,
+				MultiModalFeatures: mmSlice,
+			},
+		},
 	}
 
 	scores := prefixCacheScorer.Score(ctx, cycleState, request, endpoints)

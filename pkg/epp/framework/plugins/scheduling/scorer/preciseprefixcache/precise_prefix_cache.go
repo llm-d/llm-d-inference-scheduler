@@ -347,7 +347,8 @@ func (s *Scorer) Consumes() map[string]any {
 // are saved to PluginState for reuse by Score() and PreRequest().
 // This is a no-op when speculative indexing is disabled.
 func (s *Scorer) PrepareRequestData(ctx context.Context,
-	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) error {
+	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint,
+) error {
 	if !s.speculativeEnabled {
 		return nil
 	}
@@ -462,7 +463,7 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 	} else {
 		// Fallback: compute scores directly (backward compatible path).
 		var scoreErr error
-		scores, scoreErr = s.getScores(ctx, cycleState, request)
+		scores, scoreErr = s.getScores(ctx, request)
 		if scoreErr != nil {
 			logger.Error(scoreErr, "Failed to get endpoint scores")
 			span.SetStatus(codes.Error, scoreErr.Error())
@@ -531,7 +532,8 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 // evicted when the TTL expires.
 // This is a no-op when speculative indexing is disabled.
 func (s *Scorer) PreRequest(ctx context.Context,
-	request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
+	request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult,
+) {
 	if !s.speculativeEnabled {
 		return
 	}
@@ -695,7 +697,8 @@ func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []
 // computeBlockKeys extracts block keys from an LLM request by tokenizing
 // the prompt and computing KV-block hashes.
 func (s *Scorer) computeBlockKeys(ctx context.Context,
-	request *scheduling.InferenceRequest) ([]kvblock.BlockHash, error) {
+	request *scheduling.InferenceRequest,
+) ([]kvblock.BlockHash, error) {
 	if request.Body == nil {
 		return nil, nil
 	}
@@ -733,10 +736,10 @@ func (s *Scorer) getBlockSizeTokens() int {
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
 // based on the provided LLM request.
-// If tokenized prompt data is found in CycleState (written by the tokenizer
-// scorer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
+// If tokenized prompt data is found on the request body (written by the tokenizer
+// data producer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
 // Otherwise, chat completions and regular completions are tokenized internally.
-func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest) (map[string]float64, error) {
+func (s *Scorer) getScores(ctx context.Context, request *scheduling.InferenceRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logging.TRACE)
 
@@ -744,17 +747,11 @@ func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleStat
 		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"isCompletions", request.Body != nil && request.Body.Completions != nil)
 
-	// Read tokenized prompt from CycleState, written by the tokenizer scorer plugin.
-	if tp, err := scheduling.ReadCycleStateKey[*tokenizer.TokenizedPromptState](
-		cycleState, tokenizer.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
-		traceLogger.Info("tokens found in CycleState, skipping tokenization")
+	// Read tokenized prompt from the request body, written by the tokenizer data producer plugin.
+	if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
+		traceLogger.Info("tokens found in request body, skipping tokenization")
 
-		var extraFeatures []*kvblock.BlockExtraFeatures
-		if tp.MMFeatures != nil {
-			extraFeatures = kvblock.ComputeBlockExtraFeatures(
-				tp.MMFeatures.MMHashes, tp.MMFeatures.MMPlaceholders,
-				s.blockSizeTokens, len(tp.TokenIDs))
-		}
+		extraFeatures := computeExtraFeatures(tp.MultiModalFeatures, s.blockSizeTokens, len(tp.TokenIDs))
 
 		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tp.TokenIDs, request.TargetModel, nil, extraFeatures)
 		if err != nil {
@@ -797,4 +794,26 @@ func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleStat
 	}
 
 	return nil, errors.New("no valid input found in request")
+}
+
+// computeExtraFeatures converts the flat []MultiModalFeature slice from the
+// scheduling interface into the map-based form required by ComputeBlockExtraFeatures.
+// Items are appended to each modality's slice in the order they appear in features,
+// preserving the per-modality index correspondence between hashes and placeholder ranges.
+func computeExtraFeatures(features []scheduling.MultiModalFeature, blockSize, numTokens int) []*kvblock.BlockExtraFeatures {
+	if len(features) == 0 {
+		return nil
+	}
+
+	mmHashes := make(map[string][]string)
+	mmPlaceholders := make(map[string][]kvblock.PlaceholderRange)
+	for _, f := range features {
+		mod := string(f.Modality)
+		mmHashes[mod] = append(mmHashes[mod], f.Hash)
+		mmPlaceholders[mod] = append(mmPlaceholders[mod], kvblock.PlaceholderRange{
+			Offset: f.Offset,
+			Length: f.Length,
+		})
+	}
+	return kvblock.ComputeBlockExtraFeatures(mmHashes, mmPlaceholders, blockSize, numTokens)
 }
