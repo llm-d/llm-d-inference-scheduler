@@ -19,8 +19,10 @@ import (
 
 // RegisterAllPlugins registers the factory functions of all plugins in this repository.
 func RegisterAllPlugins() {
-	plugin.Register(bylabel.ByLabelType, bylabel.Factory)
-	plugin.Register(bylabel.ByLabelSelectorType, bylabel.SelectorFactory)
+	plugin.Register(bylabel.LabelSelectorFilterType, bylabel.SelectorFactory)
+	// Legacy aliases - existing YAML configs using by-label-selector or by-label continue to work.
+	plugin.Register(bylabel.ByLabelSelectorType, bylabel.DeprecatedSelectorFactory) //nolint:staticcheck // intentional: keep backward compatibility
+	plugin.Register(bylabel.ByLabelType, bylabel.Factory)                           //nolint:staticcheck // intentional: keep backward compatibility
 	plugin.Register(bylabel.EncodeRoleType, bylabel.EncodeRoleFactory)
 	plugin.Register(bylabel.DecodeRoleType, bylabel.DecodeRoleFactory)
 	plugin.Register(bylabel.PrefillRoleType, bylabel.PrefillRoleFactory)

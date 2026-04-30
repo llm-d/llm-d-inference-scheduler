@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const (
-	// ByLabelType is the type of the ByLabel filter
+	// ByLabelType is the type of the ByLabel filter.
+	//
+	// Deprecated: Use LabelSelectorFilterType for generic label-based filtering,
+	// or the role-specific filters (decode-filter, prefill-filter, encode-filter) for role-based filtering.
 	ByLabelType = "by-label"
 )
 
@@ -23,7 +28,15 @@ type byLabelParameters struct {
 var _ scheduling.Filter = &ByLabel{} // validate interface conformance
 
 // Factory defines the factory function for the ByLabel filter.
-func Factory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+//
+// Deprecated: Use SelectorFactory for generic label-based filtering,
+// or the role-specific filters (decode-filter, prefill-filter, encode-filter) for role-based filtering.
+func Factory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	if handle != nil {
+		log.FromContext(handle.Context()).Info("Deprecated: plugin type 'by-label' is deprecated, " +
+			"use 'label-selector-filter' for generic label filtering or " +
+			"'decode-filter'/'prefill-filter'/'encode-filter' for role-based filtering")
+	}
 	parameters := byLabelParameters{}
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
@@ -43,7 +56,7 @@ func Factory(name string, rawParameters json.RawMessage, _ plugin.Handle) (plugi
 	return NewByLabel(name, parameters.Label, parameters.AllowsNoLabel, parameters.ValidValues...), nil
 }
 
-// NewByLabel creates and returns an instance of the RoleBasedFilter based on the input parameters
+// NewByLabel creates and returns an instance of the ByLabel filter based on the input parameters
 // name - the filter name
 // labelName - the name of the label to use
 // allowsNoLabel - if true endpoints without given label will be considered as valid (not filtered out)
