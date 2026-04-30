@@ -1,0 +1,43 @@
+# EPP configuration using the tokenizer plugin's vLLM HTTP /render backend.
+#
+# The tokenizer plugin calls a co-located vLLM render sidecar over HTTP and
+# writes request.Body.TokenizedPrompt for downstream scorers. Sidecar:
+#   command: ["vllm", "launch", "render"]
+#   args:    ["${MODEL_NAME}", "--port=8000"]
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
+plugins:
+- type: tokenizer
+  parameters:
+    modelName: "${MODEL_NAME}"
+    vllmHTTPRenderConfig:
+      url: "http://localhost:8000"
+      # timeout: "5s"
+      # mmTimeout: "30s"
+- type: precise-prefix-cache-scorer
+  parameters:
+    tokenProcessorConfig:
+      blockSize: 16
+      hashSeed: "42"
+    kvEventsConfig:
+      zmqEndpoint: tcp://0.0.0.0:5557
+    indexerConfig:
+      # Embedded HF tokenizer — used only if the HTTP backend fails.
+      tokenizersPoolConfig:
+        modelName: "${MODEL_NAME}"
+        hf:
+          tokenizersCacheDir: "/cache/tokenizers"
+      kvBlockIndexConfig:
+        enableMetrics: false
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: precise-prefix-cache-scorer
+    weight: 10
