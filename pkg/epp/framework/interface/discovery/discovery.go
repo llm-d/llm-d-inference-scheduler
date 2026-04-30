@@ -24,21 +24,32 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
 // DiscoveryPlugin discovers inference endpoints and drives their lifecycle in the datastore.
-// Implementations must also implement fwkplugin.Plugin so they can be registered in the
-// plugin registry and selected via EndpointPickerConfig.discovery.pluginRef.
+// Implementations are registered in the plugin registry and selected via
+// EndpointPickerConfig.discovery.pluginRef.
 type DiscoveryPlugin interface {
-	// Start begins discovery. It should:
-	//   1. Enumerate all known endpoints, calling notifier.Upsert for each.
-	//   2. Continue watching for changes until ctx is cancelled.
-	// Blocks until ctx is cancelled or a fatal error occurs.
+	fwkplugin.Plugin
+
+	// Start begins discovery and blocks in the caller's goroutine until ctx is
+	// cancelled or a fatal error occurs. It is the caller's responsibility to
+	// invoke Start in a dedicated goroutine.
+	//
+	// Implementations SHOULD enumerate all currently known endpoints via
+	// notifier.Upsert before entering the watch loop, to avoid serving an empty
+	// datastore at startup. Implementations that guarantee no missed events
+	// through their watch mechanism (e.g. a Kubernetes list+watch) may fold the
+	// initial enumeration into the watch sequence instead.
 	Start(ctx context.Context, notifier Notifier) error
 }
 
 // Notifier is the callback through which DiscoveryPlugin communicates endpoint state
 // to the datastore.
+//
+// Notifier is NOT goroutine-safe. All calls must be made sequentially from a
+// single goroutine. This is the source of the ordering contract below.
 //
 // Ordering contract: the datastore processes Upsert and Delete calls in the order
 // they are received. Plugin implementations MUST preserve event order -- do not
