@@ -91,6 +91,40 @@ func TestLoadRawConfiguration(t *testing.T) {
 			want: &configapi.EndpointPickerConfig{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "EndpointPickerConfig",
+					APIVersion: "llm-d.ai/v1alpha1",
+				},
+				Plugins: []configapi.PluginSpec{
+					{Name: "test1", Type: testPluginType, Parameters: json.RawMessage(`{"threshold":10}`)},
+					{Name: "profileHandler", Type: testProfileHandler},
+					{Name: testScorerType, Type: testScorerType, Parameters: json.RawMessage(`{"blockSize":32}`)},
+					{Name: "testPicker", Type: testPickerType},
+				},
+				SchedulingProfiles: []configapi.SchedulingProfile{
+					{
+						Name: "default",
+						Plugins: []configapi.SchedulingPlugin{
+							{PluginRef: "test1"},
+							{PluginRef: testScorerType, Weight: ptr.To(50.0)},
+							{PluginRef: "testPicker"},
+						},
+					},
+				},
+				FeatureGates: configapi.FeatureGates{
+					datalayer.ExperimentalDatalayerFeatureGate,
+					flowcontrol.FeatureGate,
+				},
+				SaturationDetector: &configapi.SaturationDetectorConfig{
+					PluginRef: "utilization-detector",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "Success - using deprecated Groupname",
+			configText: successDeprecatedText,
+			want: &configapi.EndpointPickerConfig{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "EndpointPickerConfig",
 					APIVersion: "inference.networking.x-k8s.io/v1alpha1",
 				},
 				Plugins: []configapi.PluginSpec{
@@ -125,7 +159,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 			want: &configapi.EndpointPickerConfig{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "EndpointPickerConfig",
-					APIVersion: "inference.networking.x-k8s.io/v1alpha1",
+					APIVersion: "llm-d.ai/v1alpha1",
 				},
 				Plugins: []configapi.PluginSpec{
 					{Name: "test1", Type: testPluginType, Parameters: json.RawMessage(`{"threshold":10}`)},
@@ -139,7 +173,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 			configText: "",
 			want: &configapi.EndpointPickerConfig{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: "inference.networking.x-k8s.io/v1alpha1",
+					APIVersion: "llm-d.ai/v1alpha1",
 					Kind:       "EndpointPickerConfig",
 				},
 				FeatureGates: configapi.FeatureGates{}, // Empty means datalayer enabled (default behavior)
