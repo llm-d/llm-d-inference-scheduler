@@ -27,6 +27,7 @@ import (
 )
 
 var (
+	ExtractorBaseType         = reflect.TypeFor[ExtractorBase]()
 	ExtractorType             = reflect.TypeFor[Extractor]()
 	NotificationExtractorType = reflect.TypeFor[NotificationExtractor]()
 	NotificationEventType     = reflect.TypeFor[NotificationEvent]()
@@ -56,11 +57,20 @@ type PollingDataSource interface {
 	Poll(ctx context.Context, ep Endpoint) (any, error)
 }
 
-// Extractor transforms raw data into structured attributes.
-type Extractor interface {
+// ExtractorBase is the common base for all extractor variants.
+// It provides identity and type-compatibility information without
+// prescribing how extraction is triggered.
+type ExtractorBase interface {
 	plugin.Plugin
 	// ExpectedInputType defines the type expected by the extractor.
 	ExpectedInputType() reflect.Type
+}
+
+// Extractor transforms raw data from a PollingDataSource into structured
+// attributes. Used only with poll-based sources; the Runtime calls Extract
+// on each tick with the data returned by the source's Poll method.
+type Extractor interface {
+	ExtractorBase
 	// Extract transforms the raw data source output into a concrete structured
 	// attribute, stored on the given endpoint.
 	Extract(ctx context.Context, data any, ep Endpoint) error
@@ -71,7 +81,7 @@ type Extractor interface {
 type ValidatingDataSource interface {
 	// ValidateExtractor allows the DataSource to perform additional validation
 	// beyond the standard type compatibility checks. Return an error if validation fails.
-	ValidateExtractor(extractor Extractor) error
+	ValidateExtractor(extractor ExtractorBase) error
 }
 
 // EventType identifies the type of mutation that triggered the notification.
@@ -111,9 +121,10 @@ type NotificationSource interface {
 }
 
 // NotificationExtractor processes k8s object events pushed from a
-// NotificationSource.
+// NotificationSource. The Runtime calls ExtractNotification directly;
+// Extract from the base Extractor interface is never invoked on this type.
 type NotificationExtractor interface {
-	Extractor
+	ExtractorBase
 	// GVK returns the GroupVersionKind this extractor handles.
 	GVK() schema.GroupVersionKind
 	// ExtractNotification processes a notification event. Called synchronously
@@ -142,9 +153,10 @@ type EndpointSource interface {
 }
 
 // EndpointExtractor processes endpoint lifecycle events pushed from an
-// EndpointSource. Called synchronously by the Runtime in event order.
+// EndpointSource. The Runtime calls ExtractEndpoint directly;
+// Extract from the base Extractor interface is never invoked on this type.
 type EndpointExtractor interface {
-	Extractor
+	ExtractorBase
 	// ExtractEndpoint processes an endpoint lifecycle event.
 	ExtractEndpoint(ctx context.Context, event EndpointEvent) error
 }

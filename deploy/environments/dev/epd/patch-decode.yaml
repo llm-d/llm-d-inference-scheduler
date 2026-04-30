@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-d
+spec:
+  template:
+    metadata:
+      labels:
+        llm-d.ai/role: ${DECODE_ROLE}
+    spec:
+      initContainers:
+      - name: routing-sidecar
+        $patch: delete
+      containers:
+      - name: vllm
+        args:
+        - "--mode=${VLLM_SIM_MODE}"
+        - "--port=8000"
+        - "--model=${MODEL_NAME}"
+        - "--enable-kvcache=${KV_CACHE_ENABLED}"
+        - "--kv-cache-size=1024"
+        - "--block-size=16"
+        - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "--zmq-endpoint=tcp://${EPP_NAME}.${NAMESPACE}.svc.cluster.local:5557"
+        - "${VLLM_EXTRA_ARGS_D}"
+        ports:
+        - $patch: replace
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        - name: rank1
+          containerPort: 8001
+        - name: rank2
+          containerPort: 8002
+        - name: rank3
+          containerPort: 8003
+        - name: rank4
+          containerPort: 8004
+        - name: rank5
+          containerPort: 8005
+        - name: rank6
+          containerPort: 8006
+        - name: rank7
+          containerPort: 8007
+        readinessProbe:
+          httpGet:
+            port: 8000
+        livenessProbe:
+          httpGet:
+            port: 8000
+        startupProbe:
+          httpGet:
+            port: 8000
+        env:
+        - name: PORT
+          value: "8000"

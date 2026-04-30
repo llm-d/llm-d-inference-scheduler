@@ -37,7 +37,9 @@ The plugin populates several standard keys on the endpoint:
 
 The plugin config supports:
 
--   `engineLabelKey`: The Pod label key used to identify the engine type. Defaults to `inference.networking.k8s.io/engine-type`.
+-   `engineLabelKey`: The Pod label key used to identify the engine type. Defaults to `llm-d.ai/engine-type`. 
+    The deprecated GAIE key `inference.networking.k8s.io/engine-type` is also supported as a fallback, 
+    but will be removed in a future release.
 -   `defaultEngine`: The engine type to use if the label is missing. Defaults to `vllm`.
 -   `engineConfigs`: A list of engine-specific metric specifications.
 
@@ -54,7 +56,7 @@ To correctly establish the mapping, model server Pods should be labeled using th
 ```yaml
 metadata:
   labels:
-    inference.networking.k8s.io/engine-type: vllm # other options: sglang, trtllm-serve, triton-tensorrt-llm 
+    llm-d.ai/engine-type: vllm # other options: sglang, trtllm-serve, triton-tensorrt-llm 
 
 ```
 
@@ -76,7 +78,7 @@ and the model server deployment Pods should have the label:
 ```yaml
 metadata:
   labels:
-    inference.networking.k8s.io/engine-type: my-custom-engine
+    llm-d.ai/engine-type: my-custom-engine
 
 ```
 

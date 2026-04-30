@@ -15,8 +15,13 @@ Documentation for developing the inference scheduler.
     - [Development Cycle](#development-cycle)
     - [Debugging](#debugging)
     - [Inference Disaggregation Modes](#inference-disaggregation-modes)
-      - [1. Prefill/Decode (P/D) Disaggregation](#1-prefilldecode-pd-disaggregation)
-      - [2. Encode/Prefill/Decode (E/P/D) Disaggregation](#2-encodeprefilldecode-epd-disaggregation)
+      - [1. EPD — No Disaggregation (default)](#1-epd--no-disaggregation-default)
+      - [2. Prefill/Decode (P/D) Disaggregation](#2-prefilldecode-pd-disaggregation)
+      - [3. Encode/Prefill-Decode (E/PD) Disaggregation](#3-encodeprefill-decode-epd-disaggregation)
+      - [4. Encode/Prefill/Decode (E/P/D) Disaggregation](#4-encodeprefilldecode-epd-disaggregation)
+      - [5. Disaggregated Setup Verification](#5-disaggregated-setup-verification)
+      - [Combining Scenarios with Data Parallel and KV Cache](#combining-scenarios-with-data-parallel-and-kv-cache)
+    - [Simulator vs Real vLLM](#simulator-vs-real-vllm)
     - [Cleanup](#cleanup)
   - [Running Tests](#running-tests)
     - [Unit Tests](#unit-tests)
@@ -39,7 +44,7 @@ Documentation for developing the inference scheduler.
 This repo builds the **Endpoint Picker Plugin (EPP)**, the inference scheduling component
 that routes requests to vLLM backends. The EPP runs alongside a Gateway API implementation
 and picks backends based on KV cache state, prefill locality, and load. A second binary,
-the **P/D sidecar** (`cmd/pd-sidecar/`), handles prefill/decode disaggregation routing.
+the **routing sidecar** (`cmd/pd-sidecar/`), handles disaggregation routing.
 
 The KIND environment is the easiest way to get started: one command, no cloud account.
 A real Kubernetes cluster setup is covered later for shared or production-like testing.
@@ -85,14 +90,17 @@ kubectl --context kind-llm-d-inference-scheduler-dev \
   port-forward service/inference-gateway-istio 8080:80
 ```
 
-The simulator runs with a model named `TinyLlama/TinyLlama-1.1B-Chat-v1.0`.
+The default model depends on the disaggregation scenario:
+- **EPD / P/D** (no encoder): `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
+- **E/PD / E/P/D** (with encoder, `DISAGG_E=true`): `Qwen/Qwen3-VL-2B-Instruct`
+
 To confirm what model is available:
 
 ```bash
 curl -s http://localhost:8080/v1/models | jq
 ```
 
-Make a request:
+Make a text completion request:
 
 ```bash
 curl -s -w '\n' http://localhost:8080/v1/completions \
@@ -100,6 +108,20 @@ curl -s -w '\n' http://localhost:8080/v1/completions \
   -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10,"temperature":0}' | jq
 ```
 
+For multimodal scenarios (`DISAGG_E=true`), send an image request:
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [{"role":"user","content":[
+      {"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"}},
+      {"type":"text","text":"What is in this image?"}
+    ]}],
+    "max_tokens": 50
+  }' | jq
+```
 <details>
 <summary>Alternative access methods (NodePort, LoadBalancer)</summary>
 
@@ -256,40 +278,124 @@ kubectl debug -it <pod-name> -n <namespace> \
 
 ### Inference Disaggregation Modes
 
-You can deploy the inference stack in disaggregated modes to optimize performance by separating specific stages of the LLM pipeline into dedicated pods. For technical details on the advanced disaggregation strategies, refer to [docs/disaggregation.md](docs/disaggregation.md).
+The deployment uses three atomic Kustomize components (`vllm-encode`, `vllm-prefill`,
+`vllm-decode`) that compose to form any disaggregation scenario. Disaggregation is
+controlled by two independent boolean flags:
 
-#### 1. Prefill/Decode (P/D) Disaggregation
+| Flag | Default | Meaning |
+|---|---|---|
+| `DISAGG_E` | `false` | Deploy a separate **Encoder** pod |
+| `DISAGG_P` | `false` | Deploy a separate **Prefill** pod |
 
-In this mode, Prefill and Decode run on independent deployments.
+The combination of these flags determines the scenario:
 
-To deploy a P/D-enabled Kind environment:
+| `DISAGG_E` | `DISAGG_P` | Scenario | Components |
+|---|---|---|---|
+| `false` | `false` | EPD (default) | decode only |
+| `false` | `true` | P/D | prefill + decode |
+| `true` | `false` | E/PD | encode + decode |
+| `true` | `true` | E/P/D | encode + prefill + decode |
+
+Data parallel and KV cache are orthogonal options that can be combined with any scenario:
+
+| Variable | Default | Description |
+|---|---|---|
+| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per vLLM pod. Applies to ALL pod types (encode, prefill, decode). Set to `2`+ to enable |
+| `KV_CACHE_ENABLED` | `false` | Enable KV cache-aware scheduling |
+| `VLLM_EXTRA_ARGS_E` | _(empty)_ | Additional flags appended to the Encoder vLLM container args. Use `--flag=value` format. Example: `--mm-processor-kwargs={}` |
+| `VLLM_EXTRA_ARGS_P` | _(empty)_ | Additional flags appended to the Prefill vLLM container args. Use `--flag=value` format. Example: `--gpu-memory-utilization=0.9` |
+| `VLLM_EXTRA_ARGS_D` | _(empty)_ | Additional flags appended to the Decode vLLM container args. Use `--flag=value` format. Example: `--tensor-parallel-size=2` |
+
+For technical details, refer to [docs/disaggregation.md](docs/disaggregation.md) and
+[deploy/environments/dev/README.md](deploy/environments/dev/README.md).
+
+#### 1. EPD — No Disaggregation (default)
+
+Unified deployment handling all stages (encode, prefill, decode) in a single pod. No separate encoder or prefill pods:
 
 ```bash
-PD_ENABLED=true make env-dev-kind
+make env-dev-kind
 ```
 
-To verify the setup, follow the same steps described in the [Accessing the Gateway](#accessing-the-gateway) section above.
+Verify:
+```bash
+curl -s http://localhost:30080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10}' | jq
+```
 
-#### 2. Encode/Prefill/Decode (E/P/D) Disaggregation
+#### 2. Prefill/Decode (P/D) Disaggregation
 
-This multimodal configuration introduces a standalone Encoder pod for compute-intensive image and video embeddings, while decoupling Prefill and Decode into specialized deployments.
-
-To deploy an E/P/D-enabled Kind environment:
+Separate Prefill and Decode pods:
 
 ```bash
-EPD_ENABLED=true make env-dev-kind
+DISAGG_P=true make env-dev-kind
 ```
 
-<details>
-<summary>E/P/D Setup Verification</summary>
+> **Note:** The legacy `PD_ENABLED=true` is deprecated. Use `DISAGG_P=true` instead.
 
-1. Port-forward the Gateway:
+Verify:
+```bash
+curl -s http://localhost:30080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"TinyLlama/TinyLlama-1.1B-Chat-v1.0","prompt":"hi","max_tokens":10}' | jq
+```
+
+#### 3. Encode/Prefill-Decode (E/PD) Disaggregation
+
+Separate Encoder pods; Prefill and Decode combined. Defaults to `Qwen/Qwen3-VL-2B-Instruct` for multimodal support:
 
 ```bash
-kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio-nodeport 8080:80
+DISAGG_E=true make env-dev-kind
 ```
-2. Test the Pipeline:
-Run an image-based inference request to ensure the E/P/D components are communicating correctly:
+
+Verify with an image request:
+```bash
+curl -s http://localhost:30080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [{"role":"user","content":[
+      {"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"}},
+      {"type":"text","text":"What is in this image?"}
+    ]}],
+    "max_tokens": 50
+  }' | jq
+```
+
+#### 4. Encode/Prefill/Decode (E/P/D) Disaggregation
+
+Fully disaggregated — separate Encoder, Prefill, and Decode pods. Defaults to `Qwen/Qwen3-VL-2B-Instruct`:
+
+```bash
+DISAGG_E=true DISAGG_P=true make env-dev-kind
+```
+
+> **Note:** The legacy `EPD_ENABLED=true` is deprecated. Use `DISAGG_E=true DISAGG_P=true` instead.
+
+Verify with an image request:
+```bash
+curl -s http://localhost:30080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "Qwen/Qwen3-VL-2B-Instruct",
+    "messages": [{"role":"user","content":[
+      {"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg"}},
+      {"type":"text","text":"What is in this image?"}
+    ]}],
+    "max_tokens": 50
+  }' | jq
+```
+
+#### 5. Disaggregated Setup Verification
+
+After deploying any disaggregation mode, verify with a basic request:
+
+```bash
+kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio 8080:80
+```
+
+For multimodal disaggregation (E/PD, E/P/D), test with an image request to verify the encoder stage is working:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -308,7 +414,113 @@ curl http://localhost:8080/v1/chat/completions \
     "max_tokens": 100
   }'
 ```
-</details>
+
+### Combining Scenarios with Data Parallel and KV Cache
+
+```bash
+# P/D with 2-rank data parallel decode
+DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+
+# EPD with KV cache-aware scheduling
+KV_CACHE_ENABLED=true make env-dev-kind
+
+# Fully disaggregated E/P/D with data parallel and KV cache
+DISAGG_E=true DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 KV_CACHE_ENABLED=true make env-dev-kind
+```
+
+### Simulator vs Real vLLM
+
+The `deploy/components/` directory contains all reusable Kustomize components:
+
+**vLLM workload components** — the base pods, split into three atomic building blocks:
+- `vllm-encode/` — Encoder pod (multimodal, `--mm-encoder-only`)
+- `vllm-prefill/` — Prefill pod
+- `vllm-decode/` — Decode pod with routing sidecar
+
+**Deployment overlays** — applied on top of the base components:
+- `overlays/simulator/` — adds `--mode=${VLLM_SIM_MODE}`, UDS tokenizer sidecar, KV cache args, and `--zmq-endpoint` on Decode. Included by default in all dev scenario overlays.
+- `overlays/real-vllm/` — adds `--kv-events-config` on Decode, `--ec-transfer-config` on Encode, and a shared PVC for encoder embeddings.
+
+**Infrastructure components** — shared cluster infrastructure:
+- `inference-gateway/` — Endpoint Picker (EPP) deployment, services, RBAC, InferencePool, Gateway, and HTTPRoute
+- `istio-control-plane/` — Istiod control plane (namespaces, configmaps, RBAC, webhooks)
+- `monitoring/` — Prometheus ServiceMonitors for EPP and vLLM metrics
+- `crds-gateway-api/` — Gateway API CRDs
+- `crds-gie/` — Gateway API Inference Extension CRDs
+- `crds-istio/` — Istio CRDs
+
+#### Deploying with Simulator (default)
+
+The dev scenario overlays include the simulator component by default. No extra flags needed:
+
+```bash
+# EPD — no disaggregation (default)
+make env-dev-kind
+
+# P/D — prefill + decode
+DISAGG_P=true make env-dev-kind
+
+# E/PD — encode + prefill-decode
+DISAGG_E=true make env-dev-kind
+
+# E/P/D — encode + prefill + decode (fully disaggregated)
+DISAGG_E=true DISAGG_P=true make env-dev-kind
+
+# Any mode with data parallel
+VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 make env-dev-kind
+```
+
+#### Deploying with Real vLLM
+
+> [!NOTE]
+> The section will be updated soon
+
+The `deploy/components/overlays/real-vllm/` component is ready to use. It provides
+all the real vLLM-specific configuration (KV events, EC transfer, shared PVC). To use
+it, create a scenario overlay that includes it instead of the simulator overlay.
+For example, to deploy P/D with real vLLM:
+
+```yaml
+# deploy/environments/prod/p-d/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../../components/vllm-prefill/
+- ../../../components/vllm-decode/
+
+patches:
+- path: ../../dev/p-d/patch-decode.yaml    # reuse scenario patches
+
+components:
+- ../../../components/overlays/real-vllm/  # real vLLM instead of simulator
+```
+
+Then deploy with:
+
+```bash
+VLLM_IMAGE=vllm/vllm-openai:v0.16.0 \
+  kubectl kustomize deploy/environments/prod/p-d \
+  | envsubst | kubectl apply -f -
+```
+
+For encode disaggregation scenarios (E/PD, E/P/D), the `real-vllm` overlay automatically
+adds `--kv-events-config` to the Decode deployment (per-pod ZMQ publisher for KV cache
+events), `--ec-transfer-config` (producer role) to the Encode deployment, and creates
+a shared PVC (`ec-cache-pvc`) for encoder embeddings transfer.
+
+#### Deployment Component Summary
+
+| Component | What it adds | When to use |
+|---|---|---|
+| `overlays/simulator/` | `--mode=${VLLM_SIM_MODE}`, UDS tokenizer, KV cache args, `--zmq-endpoint` on Decode | Dev/test with simulator image |
+| `overlays/real-vllm/` | `--kv-events-config` on Decode (per-pod ZMQ publisher), `--ec-transfer-config` on Encode, ec-cache PVC | Production with real vLLM image |
+
+| Variable | Default | Description |
+|---|---|---|
+| `VLLM_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM container image to deploy. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`). Defaults to the simulator image. |
+| `VLLM_SIM_MODE` | `echo` | Simulator response mode. `echo` returns the input prompt as the response (useful for routing validation). `random` returns random sentences from a pre-defined bank. Only applies when using the simulator overlay. |
 
 ### Cleanup
 
@@ -395,7 +607,14 @@ kubectl --context kind-e2e-tests get pods
 | `CONTAINER_RUNTIME` | `docker` | Container runtime used to load images into Kind (`docker` or `podman`) |
 | `READY_TIMEOUT` | `3m` | How long to wait for resources to become ready |
 | `EPP_IMAGE` | `ghcr.io/llm-d/llm-d-inference-scheduler:dev` | EPP image loaded into the Kind cluster |
-| `VLLM_SIMULATOR_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM simulator image loaded into the Kind cluster |
+| `DISAGG_E` | `false` | Deploy a separate Encoder pod. See [Inference Disaggregation Modes](#inference-disaggregation-modes) |
+| `DISAGG_P` | `false` | Deploy a separate Prefill pod. See [Inference Disaggregation Modes](#inference-disaggregation-modes) |
+| `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per vLLM pod. Applies to all pod types. Set to `2`+ to enable multi-rank inference. See [Combining Scenarios with Data Parallel and KV Cache](#combining-scenarios-with-data-parallel-and-kv-cache) |
+| `VLLM_EXTRA_ARGS_E` | _(empty)_ | Additional flags for the Encoder vLLM container (e.g. `--mm-processor-kwargs={}`) |
+| `VLLM_EXTRA_ARGS_P` | _(empty)_ | Additional flags for the Prefill vLLM container (e.g. `--gpu-memory-utilization=0.9`) |
+| `VLLM_EXTRA_ARGS_D` | _(empty)_ | Additional flags for the Decode vLLM container (e.g. `--tensor-parallel-size=2`) |
+| `VLLM_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM container image to deploy. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
+| `VLLM_SIM_MODE` | `echo` | Simulator response mode. Supported values: `echo` (returns the input prompt as the response), `random` (returns a random sentence from a pre-defined bank) |
 | `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-routing-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
 | `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
 
@@ -596,7 +815,7 @@ export EPP_TAG="<YOUR_TAG>"
 **2. vLLM replica count:**
 
 ```bash
-export VLLM_REPLICA_COUNT=2
+export VLLM_REPLICA_COUNT_D=2
 ```
 
 **3. Model name:**

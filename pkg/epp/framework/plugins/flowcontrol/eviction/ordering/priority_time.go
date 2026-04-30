@@ -25,7 +25,7 @@ import (
 
 // PriorityThenTimeOrderingType evicts the lowest priority request first,
 // breaking ties by newest dispatch time (least KV-cache investment).
-const PriorityThenTimeOrderingType = "eviction-priority-then-time-ordering"
+const PriorityThenTimeOrderingType = "priority-then-time-eviction-order-policy"
 
 func init() {
 	plugin.Register(PriorityThenTimeOrderingType, PriorityThenTimeOrderingFactory)

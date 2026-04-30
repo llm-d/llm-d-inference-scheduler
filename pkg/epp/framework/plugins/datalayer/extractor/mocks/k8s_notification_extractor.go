@@ -65,11 +65,6 @@ func (m *NotificationExtractor) ExpectedInputType() reflect.Type {
 	return reflect.TypeFor[fwkdl.NotificationEvent]()
 }
 
-// Extract is the Extractor interface method — no-op for notification extractors.
-func (m *NotificationExtractor) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
-	return nil
-}
-
 func (m *NotificationExtractor) GVK() schema.GroupVersionKind {
 	return m.gvk
 }

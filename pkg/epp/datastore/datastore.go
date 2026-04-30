@@ -50,7 +50,12 @@ const (
 	// activePortsAnnotation is used to specify which ports on a pod should be considered
 	// as active for inference traffic. The value should be a comma-separated list of port numbers.
 	// Example: "8000,8001,8002"
-	activePortsAnnotation = "inference.networking.k8s.io/active-ports"
+	activePortsAnnotation = "llm-d.ai/active-ports"
+
+	// legacyGAIEActivePortsAnnotation is the legacy GAIE active ports annotation key, kept for backward compatibility.
+	//
+	// Deprecated: use activePortsAnnotation instead; this may be removed in a future release.
+	legacyGAIEActivePortsAnnotation = "inference.networking.k8s.io/active-ports"
 )
 
 // The datastore is a local cache of relevant data for the given InferencePool (currently all pulled from k8s-api)
@@ -424,7 +429,10 @@ func extractActivePorts(pod *corev1.Pod, targetPorts []int) sets.Set[int] {
 	annotations := pod.GetAnnotations()
 	portsAnnotation, ok := annotations[activePortsAnnotation]
 	if !ok {
-		return allPorts
+		portsAnnotation, ok = annotations[legacyGAIEActivePortsAnnotation]
+		if !ok {
+			return allPorts
+		}
 	}
 
 	activePorts := sets.New[int]()
