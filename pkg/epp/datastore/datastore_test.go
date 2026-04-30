@@ -1288,6 +1288,33 @@ func TestExtractActivePorts(t *testing.T) {
 			validPorts:    []int{8000, 8001, 8002},
 			expectedPorts: sets.New(8000),
 		},
+		{
+			name: "Pod with legacy GAIE annotation key",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-pod",
+					Namespace:   "default",
+					Annotations: map[string]string{legacyGAIEActivePortsAnnotation: "8000,8001"},
+				},
+			},
+			validPorts:    []int{8000, 8001, 8002},
+			expectedPorts: sets.New(8000, 8001),
+		},
+		{
+			name: "New annotation key takes precedence over legacy GAIE key",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						activePortsAnnotation:           "8000",
+						legacyGAIEActivePortsAnnotation: "8001",
+					},
+				},
+			},
+			validPorts:    []int{8000, 8001, 8002},
+			expectedPorts: sets.New(8000),
+		},
 	}
 
 	for _, tt := range tests {
