@@ -42,7 +42,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/version"
 )
@@ -112,7 +112,7 @@ type RequestContext struct {
 	RequestRunning            bool
 	Request                   *Request
 
-	SchedulingRequest *schedulingtypes.InferenceRequest
+	SchedulingRequest *fwksched.InferenceRequest
 
 	RequestState         StreamRequestState
 	modelServerStreaming bool

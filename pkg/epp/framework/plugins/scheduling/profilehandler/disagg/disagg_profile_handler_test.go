@@ -13,7 +13,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -107,8 +107,8 @@ func injectPrefixCache(profileResults map[string]*scheduling.ProfileRunResult, c
 		return
 	}
 	for _, ep := range res.TargetEndpoints {
-		ep.Put(approxprefix.PrefixCacheMatchInfoKey,
-			approxprefix.NewPrefixCacheMatchInfo(cachedTokens, inputTokens, 1))
+		ep.Put(attrprefix.PrefixCacheMatchInfoKey,
+			attrprefix.NewPrefixCacheMatchInfo(cachedTokens, inputTokens, 1))
 	}
 }
 

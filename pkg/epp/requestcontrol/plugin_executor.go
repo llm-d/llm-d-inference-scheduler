@@ -21,14 +21,14 @@ import (
 	"errors"
 	"time"
 
-	fwk "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // executePluginsAsDAG executes PrepareData plugins as a DAG based on their dependencies asynchronously.
 // So, a plugin is executed only after all its dependencies have been executed.
 // If there is a cycle or any plugin fails with error, it returns an error.
-func executePluginsAsDAG(ctx context.Context, plugins []fwk.DataProducer, request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
+func executePluginsAsDAG(ctx context.Context, plugins []fwkrc.DataProducer, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	for _, plugin := range plugins {
 		if err := plugin.PrepareRequestData(ctx, request, endpoints); err != nil {
 			return errors.New("prepare data plugin " + plugin.TypedName().String() + " failed: " + err.Error())
@@ -40,8 +40,8 @@ func executePluginsAsDAG(ctx context.Context, plugins []fwk.DataProducer, reques
 // prepareDataPluginsWithTimeout executes the PrepareRequestData plugins with retries and timeout.
 // The child context is cancelled when the timeout fires so plugins can observe cancellation
 // (e.g. abort outbound HTTP calls) and avoid committing state after the director has moved on.
-func prepareDataPluginsWithTimeout(ctx context.Context, timeout time.Duration, plugins []fwk.DataProducer,
-	request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
+func prepareDataPluginsWithTimeout(ctx context.Context, timeout time.Duration, plugins []fwkrc.DataProducer,
+	request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

@@ -31,7 +31,7 @@ import (
 	fctypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/types"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
 )
 
@@ -69,7 +69,7 @@ func TestLegacyAdmissionController_Admit(t *testing.T) {
 	t.Parallel()
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
 	reqCtx := &handlers.RequestContext{
-		SchedulingRequest: &schedulingtypes.InferenceRequest{RequestId: "test-req"},
+		SchedulingRequest: &fwksched.InferenceRequest{RequestId: "test-req"},
 		Request: &handlers.Request{
 			Metadata: map[string]any{},
 		},
@@ -180,7 +180,7 @@ func TestFlowControlRequestAdapter(t *testing.T) {
 				fairnessID:       tc.fairnessID,
 				priority:         tc.priority,
 				requestByteSize:  tc.requestByteSize,
-				inferenceRequest: &schedulingtypes.InferenceRequest{RequestId: tc.requestID},
+				inferenceRequest: &fwksched.InferenceRequest{RequestId: tc.requestID},
 			}
 
 			assert.Equal(t, tc.requestID, fcReq.ID(), "ID() mismatch")
@@ -195,7 +195,7 @@ func TestFlowControlAdmissionController_Admit(t *testing.T) {
 	t.Parallel()
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
 	reqCtx := &handlers.RequestContext{
-		SchedulingRequest: &schedulingtypes.InferenceRequest{RequestId: "test-req"},
+		SchedulingRequest: &fwksched.InferenceRequest{RequestId: "test-req"},
 		Request: &handlers.Request{
 			Metadata: map[string]any{},
 		},

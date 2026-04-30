@@ -38,7 +38,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metadata"
 	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
-	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 const (
@@ -127,16 +127,16 @@ func runStreamingTest(t *testing.T, streamInRequest bool, streamingResponse bool
 		CreationTimestamp(metav1.Unix(1000, 0)).ObjRef()
 
 	director := &testDirector{}
-	ctx, cancel, ds, _ := utils.PrepareForTestStreamingServer([]*v1alpha2.InferenceObjective{model},
+	ctx, cancel, ds, _ := igwtestutils.PrepareForTestStreamingServer([]*v1alpha2.InferenceObjective{model},
 		[]*v1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: podName}}}, "test-pool1", namespace, poolPort)
 	streamingServer := handlers.NewStreamingServer(ds, director, openai.NewOpenAIParser())
 
-	testListener, errChan := utils.SetupTestStreamingServer(ctx, t, streamingServer)
-	process, conn := utils.GetStreamingServerClient(ctx, t)
+	testListener, errChan := igwtestutils.SetupTestStreamingServer(ctx, t, streamingServer)
+	process, conn := igwtestutils.GetStreamingServerClient(ctx, t)
 	defer conn.Close()
 
 	// Send request headers - no response expected
-	headers := utils.BuildEnvoyGRPCHeaders(map[string]string{
+	headers := igwtestutils.BuildEnvoyGRPCHeaders(map[string]string{
 		"x-test":                   "body",
 		":method":                  "POST",
 		metadata.FlowFairnessIDKey: "a-very-interesting-fairness-id",
@@ -180,7 +180,7 @@ func runStreamingTest(t *testing.T, streamInRequest bool, streamingResponse bool
 			responseReqHeaders.GetRequestHeaders().Response.HeaderMutation == nil ||
 			responseReqHeaders.GetRequestHeaders().Response.HeaderMutation.SetHeaders == nil {
 			t.Error("Invalid request headers response")
-		} else if !utils.CheckEnvoyGRPCHeaders(t, responseReqHeaders.GetRequestHeaders().Response, expectedRequestHeaders) {
+		} else if !igwtestutils.CheckEnvoyGRPCHeaders(t, responseReqHeaders.GetRequestHeaders().Response, expectedRequestHeaders) {
 			t.Error("Incorrect request headers")
 		}
 	}
@@ -216,10 +216,10 @@ func runStreamingTest(t *testing.T, streamInRequest bool, streamingResponse bool
 	// Send response headers
 	if streamingResponse {
 		// If response is streaming, the header should have text/event-stream.
-		headers = utils.BuildEnvoyGRPCHeaders(map[string]string{"x-test": "body", ":method": "POST", "content-type": "text/event-stream"}, true)
+		headers = igwtestutils.BuildEnvoyGRPCHeaders(map[string]string{"x-test": "body", ":method": "POST", "content-type": "text/event-stream"}, true)
 		expectedResponseHeaders = map[string]string{"x-went-into-resp-headers": "true", ":method": "POST", "x-test": "body", "content-type": "text/event-stream"}
 	} else {
-		headers = utils.BuildEnvoyGRPCHeaders(map[string]string{"x-test": "body", ":method": "POST"}, false)
+		headers = igwtestutils.BuildEnvoyGRPCHeaders(map[string]string{"x-test": "body", ":method": "POST"}, false)
 	}
 
 	request = &pb.ProcessingRequest{
@@ -241,7 +241,7 @@ func runStreamingTest(t *testing.T, streamInRequest bool, streamingResponse bool
 			response.GetResponseHeaders().Response.HeaderMutation == nil ||
 			response.GetResponseHeaders().Response.HeaderMutation.SetHeaders == nil {
 			t.Error("Invalid response")
-		} else if !utils.CheckEnvoyGRPCHeaders(t, response.GetResponseHeaders().Response, expectedResponseHeaders) {
+		} else if !igwtestutils.CheckEnvoyGRPCHeaders(t, response.GetResponseHeaders().Response, expectedResponseHeaders) {
 			t.Error("Incorrect response headers")
 		}
 	}
@@ -417,16 +417,16 @@ func TestServer_Skip(t *testing.T) {
 	model := testutil.MakeInferenceObjective("v1").
 		CreationTimestamp(metav1.Unix(1000, 0)).ObjRef()
 
-	ctx, cancel, ds, _ := utils.PrepareForTestStreamingServer([]*v1alpha2.InferenceObjective{model},
+	ctx, cancel, ds, _ := igwtestutils.PrepareForTestStreamingServer([]*v1alpha2.InferenceObjective{model},
 		[]*v1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: podName}}}, "test-pool1", namespace, poolPort)
 	streamingServer := handlers.NewStreamingServer(ds, director, mockPar)
 
-	testListener, errChan := utils.SetupTestStreamingServer(ctx, t, streamingServer)
-	process, conn := utils.GetStreamingServerClient(ctx, t)
+	testListener, errChan := igwtestutils.SetupTestStreamingServer(ctx, t, streamingServer)
+	process, conn := igwtestutils.GetStreamingServerClient(ctx, t)
 	defer conn.Close()
 
 	// Send request headers
-	headers := utils.BuildEnvoyGRPCHeaders(map[string]string{
+	headers := igwtestutils.BuildEnvoyGRPCHeaders(map[string]string{
 		"x-request-id": "test-request-id",
 	}, false)
 	request := &pb.ProcessingRequest{

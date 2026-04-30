@@ -26,19 +26,19 @@ import (
 	"k8s.io/utils/ptr"
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
-	flowcontrolif "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	fwkfc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/usagelimits"
-	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 func TestNewConfigFromAPI(t *testing.T) {
 	t.Parallel()
 
-	handle := utils.NewTestHandle(context.Background())
+	handle := igwtestutils.NewTestHandle(context.Background())
 	handle.AddPlugin(globalstrict.GlobalStrictFairnessPolicyType, &mocks.MockFairnessPolicy{
 		TypedNameV: fwkplugin.TypedName{
 			Name: globalstrict.GlobalStrictFairnessPolicyType,
@@ -201,4 +201,4 @@ func (p *constantPointEightPolicy) ComputeLimit(_ context.Context, _ float64, pr
 }
 
 // compile-time check that constantPointEightPolicy satisfies the interface.
-var _ flowcontrolif.UsageLimitPolicy = (*constantPointEightPolicy)(nil)
+var _ fwkfc.UsageLimitPolicy = (*constantPointEightPolicy)(nil)

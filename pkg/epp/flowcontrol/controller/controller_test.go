@@ -43,7 +43,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/types"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	frameworkmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/usagelimits"
 )
 
@@ -295,7 +295,7 @@ type stubManagedQueue struct {
 func (s *stubManagedQueue) ByteSize() uint64 { return s.byteSizeV }
 
 func (s *stubManagedQueue) FlowQueueAccessor() flowcontrol.FlowQueueAccessor {
-	return &frameworkmocks.MockFlowQueueAccessor{ByteSizeV: s.byteSizeV}
+	return &fwkfcmocks.MockFlowQueueAccessor{ByteSizeV: s.byteSizeV}
 }
 
 // mockShardBuilder is a fixture to declaratively build mock `contracts.RegistryShard` for tests.
@@ -324,8 +324,8 @@ func (b *mockShardBuilder) build() contracts.RegistryShard {
 
 var defaultFlowKey = flowcontrol.FlowKey{ID: "test-flow", Priority: 100}
 
-func newTestRequest(key flowcontrol.FlowKey) *frameworkmocks.MockFlowControlRequest {
-	return &frameworkmocks.MockFlowControlRequest{
+func newTestRequest(key flowcontrol.FlowKey) *fwkfcmocks.MockFlowControlRequest {
+	return &fwkfcmocks.MockFlowControlRequest{
 		FlowKeyV:  key,
 		ByteSizeV: 100,
 		IDV:       "req-" + key.ID,
@@ -514,7 +514,7 @@ func TestFlowController_EnqueueAndWait(t *testing.T) {
 					}
 					h.mockProcessorFactory.processors["shard-B"] = &mockShardProcessor{
 						SubmitFunc: func(item *internal.FlowItem) error {
-							item.SetHandle(&frameworkmocks.MockQueueItemHandle{})
+							item.SetHandle(&fwkfcmocks.MockQueueItemHandle{})
 							go item.FinalizeWithOutcome(types.QueueOutcomeDispatched, nil)
 							return nil
 						},
@@ -741,7 +741,7 @@ func TestFlowController_EnqueueAndWait(t *testing.T) {
 			h.mockProcessorFactory.processors["shard-A"] = &mockShardProcessor{
 				SubmitFunc: func(item *internal.FlowItem) error {
 					// The processor accepts the item but then asynchronously finalizes it with ErrShardDraining.
-					item.SetHandle(&frameworkmocks.MockQueueItemHandle{})
+					item.SetHandle(&fwkfcmocks.MockQueueItemHandle{})
 					go item.FinalizeWithOutcome(types.QueueOutcomeRejectedOther, contracts.ErrShardDraining)
 					return nil
 				},
@@ -790,7 +790,7 @@ func TestFlowController_EnqueueAndWait(t *testing.T) {
 			// Configure the processor to accept the item but never finalize it, simulating a queued request.
 			h.mockProcessorFactory.processors["shard-A"] = &mockShardProcessor{
 				SubmitFunc: func(item *internal.FlowItem) error {
-					item.SetHandle(&frameworkmocks.MockQueueItemHandle{})
+					item.SetHandle(&fwkfcmocks.MockQueueItemHandle{})
 					itemSubmitted <- item
 					return nil
 				},
@@ -867,7 +867,7 @@ func TestFlowController_EnqueueAndWait(t *testing.T) {
 			// Configure the processor to accept the item but never finalize it.
 			h.mockProcessorFactory.processors["shard-A"] = &mockShardProcessor{
 				SubmitFunc: func(item *internal.FlowItem) error {
-					item.SetHandle(&frameworkmocks.MockQueueItemHandle{})
+					item.SetHandle(&fwkfcmocks.MockQueueItemHandle{})
 					itemSubmitted <- item
 					return nil
 				},
@@ -1251,7 +1251,7 @@ func setupRegistryForConcurrency(t *testing.T, numShards int, flowKey flowcontro
 			AllOrderedPriorityLevelsFunc: func() []int { return []int{flowKey.Priority} },
 			PriorityBandAccessorFunc: func(priority int) (flowcontrol.PriorityBandAccessor, error) {
 				if priority == flowKey.Priority {
-					return &frameworkmocks.MockPriorityBandAccessor{
+					return &fwkfcmocks.MockPriorityBandAccessor{
 						PriorityV: priority,
 						IterateQueuesFunc: func(f func(flowcontrol.FlowQueueAccessor) bool) {
 							f(currentQueue.FlowQueueAccessor())
@@ -1261,7 +1261,7 @@ func setupRegistryForConcurrency(t *testing.T, numShards int, flowKey flowcontro
 				return nil, fmt.Errorf("unexpected priority %d", priority)
 			},
 			FairnessPolicyFunc: func(_ int) (flowcontrol.FairnessPolicy, error) {
-				return &frameworkmocks.MockFairnessPolicy{
+				return &fwkfcmocks.MockFairnessPolicy{
 					PickFunc: func(_ context.Context, _ flowcontrol.PriorityBandAccessor) (flowcontrol.FlowQueueAccessor, error) {
 						return currentQueue.FlowQueueAccessor(), nil
 					},
