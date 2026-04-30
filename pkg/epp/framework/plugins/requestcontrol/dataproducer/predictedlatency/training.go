@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	latencypredictor "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/predictedlatency/latencypredictorclient"
@@ -36,7 +35,7 @@ func buildPredictionRequest(
 	endpointRoleLabel string,
 	targetEndpointMetadata *fwkdl.EndpointMetadata,
 	metrics *fwkdl.Metrics,
-	prompt string,
+	inputTokenCount int,
 	generatedTokens int,
 	prefixCacheScore float64,
 ) latencypredictor.PredictionRequest {
@@ -47,7 +46,7 @@ func buildPredictionRequest(
 
 	return latencypredictor.PredictionRequest{
 		KVCachePercentage:  metrics.KVCacheUsagePercent,
-		InputTokenLength:   len(strings.Fields(prompt)),
+		InputTokenLength:   inputTokenCount,
 		NumRequestWaiting:  metrics.WaitingQueueSize,
 		NumRequestRunning:  metrics.RunningRequestsSize,
 		NumTokensGenerated: generatedTokens,
@@ -61,7 +60,7 @@ func buildTrainingEntry(
 	endpointRoleLabel string,
 	targetEndpointMetadata *fwkdl.EndpointMetadata,
 	m *fwkdl.Metrics,
-	prompt string,
+	inputTokenCount int,
 	actualTTFT float64,
 	actualTPOT float64,
 	timestamp time.Time,
@@ -75,7 +74,7 @@ func buildTrainingEntry(
 
 	return latencypredictor.TrainingEntry{
 		KVCachePercentage:  m.KVCacheUsagePercent,
-		InputTokenLength:   len(strings.Fields(prompt)),
+		InputTokenLength:   inputTokenCount,
 		ActualTTFT:         actualTTFT,
 		ActualTPOT:         actualTPOT,
 		Timestamp:          timestamp,
@@ -103,7 +102,7 @@ func recordTTFTTrainingData(
 		endpointRoleLabel,
 		targetEndpointMetadata,
 		m,
-		predictedLatencyCtx.promptText,
+		predictedLatencyCtx.inputTokenCount,
 		predictedLatencyCtx.ttft,
 		0,
 		now,
@@ -159,16 +158,16 @@ func bulkPredictWithMetrics(
 	metricsStates []*fwkdl.Metrics,
 	endpointRoleLabel string,
 	targetEndpointsMetadatas []*fwkdl.EndpointMetadata,
-	prompts []string,
+	inputTokenCounts []int,
 	generatedTokenCounts []int,
 	prefixCacheScores []float64,
 	prefillTokensInFlights []int64,
 ) ([]*latencypredictor.PredictionResponse, error) {
 	logger := log.FromContext(ctx)
 
-	if len(targetEndpointsMetadatas) != len(metricsStates) || len(metricsStates) != len(prompts) || len(prompts) != len(generatedTokenCounts) || len(generatedTokenCounts) != len(prefixCacheScores) {
-		return nil, fmt.Errorf("input slice lengths must match: endpoints=%d, metrics=%d, prompts=%d, tokenCounts=%d, prefixScores=%d",
-			len(targetEndpointsMetadatas), len(metricsStates), len(prompts), len(generatedTokenCounts), len(prefixCacheScores))
+	if len(targetEndpointsMetadatas) != len(metricsStates) || len(metricsStates) != len(inputTokenCounts) || len(inputTokenCounts) != len(generatedTokenCounts) || len(generatedTokenCounts) != len(prefixCacheScores) {
+		return nil, fmt.Errorf("input slice lengths must match: endpoints=%d, metrics=%d, inputTokenCounts=%d, tokenCounts=%d, prefixScores=%d",
+			len(targetEndpointsMetadatas), len(metricsStates), len(inputTokenCounts), len(generatedTokenCounts), len(prefixCacheScores))
 	}
 
 	if len(metricsStates) == 0 {
@@ -193,7 +192,7 @@ func bulkPredictWithMetrics(
 			endpointRoleLabel,
 			targetEndpointsMetadatas[i],
 			metricsStates[i],
-			prompts[i],
+			inputTokenCounts[i],
 			generatedTokenCounts[i],
 			prefixCacheScores[i],
 		)

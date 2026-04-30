@@ -25,13 +25,16 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const nilStr = "<nil>"
+const (
+	nilStr = "<nil>"
+	// ModalityImage is the only currently supported modality.
+	ModalityImage Modality = "image"
+	// This is an estimation of character per token used to generate token hint for InferenceRequestBody.
+	AverageCharactersPerToken = 4
+)
 
 // Modality identifies the type of multimodal content in a prompt.
 type Modality string
-
-// ModalityImage is the only currently supported modality.
-const ModalityImage Modality = "image"
 
 // RequestPayload represents a strongly-typed unmarshaled request payload or raw bytes.
 type RequestPayload interface {
@@ -143,17 +146,20 @@ func (r *InferenceRequestBody) PromptText() string {
 	}
 }
 
-// InputTokenCountHint returns a best-effort input token count when the
-// caller knows it exactly (token-ID inputs), or -1 when the count has
-// to be estimated from text.
+// InputTokenCountHint returns a best-effort input token count.
+// If the input is token based, the return value is the number of token as is.
+// If the input is character based, it is using (length_of_the_prompt / AverageCharactersPerToken) to estimate the token count.
 func (r *InferenceRequestBody) InputTokenCountHint() int {
-	if r.Completions != nil {
-		return r.Completions.Prompt.TokenCountHint()
+	if r.Completions != nil && len(r.Completions.Prompt.TokenIDs) > 0 {
+		return len(r.Completions.Prompt.TokenIDs)
 	}
-	if r.Embeddings != nil {
-		return r.Embeddings.Input.TokenCountHint()
+	if r.Embeddings != nil && len(r.Embeddings.Input.TokenIDs) > 0 {
+		return len(r.Embeddings.Input.TokenIDs)
 	}
-	return -1
+	if len(r.PromptText()) == 0 {
+		return 0
+	}
+	return max(1, len(r.PromptText())/AverageCharactersPerToken) // Make sure the tokenCountHint is at least 1 when prompt is not zero.
 }
 
 func (r *InferenceRequestBody) CacheSalt() string {
@@ -243,13 +249,6 @@ func (p *Prompt) UnmarshalJSON(data []byte) error {
 	default:
 		return errors.New("prompt: must be a string or an array")
 	}
-}
-
-func (p Prompt) TokenCountHint() int {
-	if len(p.TokenIDs) > 0 {
-		return len(p.TokenIDs)
-	}
-	return -1
 }
 
 func (p Prompt) MarshalJSON() ([]byte, error) {
@@ -388,13 +387,6 @@ func (e *EmbeddingsInput) UnmarshalJSON(data []byte) error {
 	default:
 		return errors.New("embeddings input: must be a string or an array")
 	}
-}
-
-func (e EmbeddingsInput) TokenCountHint() int {
-	if len(e.TokenIDs) > 0 {
-		return len(e.TokenIDs)
-	}
-	return -1
 }
 
 func (e EmbeddingsInput) PlainText() string {

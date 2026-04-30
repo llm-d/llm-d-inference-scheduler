@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -259,7 +258,6 @@ type predictedLatencyCtx struct {
 	tpotObservations          []float64
 	predictedTPOTObservations []float64
 
-	promptText      string
 	inputTokenCount int
 
 	prefixCacheScoresForEndpoints map[string]float64
@@ -275,14 +273,13 @@ type predictedLatencyCtx struct {
 }
 
 func newPredictedLatencyContext(request *framework.InferenceRequest) *predictedLatencyCtx {
-	var promptText string
+	var inputTokenHint int
 	if request.Body != nil {
-		promptText = request.Body.PromptText()
+		inputTokenHint = request.Body.InputTokenCountHint()
 	}
 	return &predictedLatencyCtx{
 		schedulingRequest:             *request,
-		promptText:                    promptText,
-		inputTokenCount:               len(strings.Fields(promptText)),
+		inputTokenCount:               inputTokenHint,
 		lastSeenMetrics:               make(map[string]*fwkdl.Metrics),
 		prefixCacheScoresForEndpoints: make(map[string]float64),
 		predictionsForScheduling:      make(map[string]endpointPredictionResult),
