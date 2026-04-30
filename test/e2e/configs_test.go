@@ -274,3 +274,20 @@ schedulingProfiles:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
 `
+
+// EPP configuration for running with Request Control settings
+const requestControlConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+- type: approx-prefix-cache-producer
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+requestControl:
+  prepareDataTimeout: 1s
+`

@@ -38,6 +38,7 @@ import (
 	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/scheduling"
 )
 
@@ -139,6 +140,8 @@ func InstantiateAndConfigure(
 		return nil, fmt.Errorf("parse config build failed: %w", err)
 	}
 
+	requestControlConfig := buildRequestControlConfig(rawConfig.RequestControl)
+
 	plugin, ok := handle.GetAllPluginsWithNames()[rawConfig.SaturationDetector.PluginRef]
 	if !ok {
 		return nil, fmt.Errorf("saturation detector plugin '%s' not found", rawConfig.SaturationDetector.PluginRef)
@@ -149,11 +152,12 @@ func InstantiateAndConfigure(
 	}
 
 	return &config.Config{
-		SchedulerConfig:    schedulerConfig,
-		SaturationDetector: saturationDetector,
-		DataConfig:         dataConfig,
-		FlowControlConfig:  flowControlConfig,
-		ParserConfig:       parserConfig,
+		SchedulerConfig:      schedulerConfig,
+		SaturationDetector:   saturationDetector,
+		DataConfig:           dataConfig,
+		FlowControlConfig:    flowControlConfig,
+		ParserConfig:         parserConfig,
+		RequestControlConfig: requestControlConfig,
 	}, nil
 }
 
@@ -306,4 +310,15 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 		}
 	}
 	return &cfg, nil
+}
+
+func buildRequestControlConfig(rawConfig *configapi.RequestControlConfig) *requestcontrol.Config {
+	cfg := requestcontrol.NewConfig()
+	if rawConfig == nil {
+		return cfg
+	}
+	if rawConfig.PrepareDataTimeout != nil {
+		cfg.WithPrepareDataTimeout(rawConfig.PrepareDataTimeout.Duration)
+	}
+	return cfg
 }

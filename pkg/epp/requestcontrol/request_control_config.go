@@ -17,8 +17,16 @@ limitations under the License.
 package requestcontrol
 
 import (
+	"time"
+
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwk "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+)
+
+const (
+	// defaultPrepareDataTimeout is the default timeout applied to PrepareData plugins
+	// if no explicit timeout is provided in the configuration.
+	DefaultPrepareDataTimeout = 400 * time.Millisecond
 )
 
 // NewConfig creates a new Config object and returns its pointer.
@@ -29,16 +37,30 @@ func NewConfig() *Config {
 		preRequestPlugins:        []fwk.PreRequest{},
 		responseReceivedPlugins:  []fwk.ResponseHeaderProcessor{},
 		responseStreamingPlugins: []fwk.ResponseBodyProcessor{},
+		prepareDataTimeout:       defaultPrepareDataTimeout,
 	}
 }
 
-// Config provides a configuration for the requestcontrol plugins.
+// Config provides a configuration for the requestcontrol plugins and related execution settings.
 type Config struct {
 	admissionPlugins         []fwk.Admitter
 	prepareDataPlugins       []fwk.DataProducer
 	preRequestPlugins        []fwk.PreRequest
 	responseReceivedPlugins  []fwk.ResponseHeaderProcessor
 	responseStreamingPlugins []fwk.ResponseBodyProcessor
+	// prepareDataTimeout defines the total time allowed for all PrepareData plugins to execute.
+	prepareDataTimeout time.Duration
+}
+
+// WithPrepareDataTimeout sets the total timeout for the execution of PrepareData plugins.
+func (c *Config) WithPrepareDataTimeout(timeout time.Duration) *Config {
+	c.prepareDataTimeout = timeout
+	return c
+}
+
+// PrepareDataTimeout returns the total timeout for the execution of PrepareData plugins.
+func (c *Config) PrepareDataTimeout() time.Duration {
+	return c.prepareDataTimeout
 }
 
 // WithPreRequestPlugins sets the given plugins as the PreRequest plugins.

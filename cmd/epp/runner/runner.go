@@ -576,6 +576,7 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	}
 
 	r.schedulerConfig = cfg.SchedulerConfig
+	r.requestControlConfig = cfg.RequestControlConfig
 
 	// Add requestControl plugins
 	r.requestControlConfig.AddPlugins(handle.GetAllPlugins()...)

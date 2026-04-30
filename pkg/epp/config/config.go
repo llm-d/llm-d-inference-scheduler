@@ -21,14 +21,16 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol"
 	fwkflowcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/scheduling"
 )
 
 // Config is the configuration loaded from the text based configuration
 type Config struct {
-	SchedulerConfig    *scheduling.SchedulerConfig
-	SaturationDetector fwkflowcontrol.SaturationDetector
-	DataConfig         *datalayer.Config
-	FlowControlConfig  *flowcontrol.Config
-	ParserConfig       *handlers.Config
+	SchedulerConfig      *scheduling.SchedulerConfig
+	SaturationDetector   fwkflowcontrol.SaturationDetector
+	DataConfig           *datalayer.Config
+	FlowControlConfig    *flowcontrol.Config
+	ParserConfig         *handlers.Config
+	RequestControlConfig *requestcontrol.Config
 }

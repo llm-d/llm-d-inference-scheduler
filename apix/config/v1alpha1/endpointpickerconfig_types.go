@@ -67,6 +67,10 @@ type EndpointPickerConfig struct {
 	// Parser specifies the parsing logic used by the EPP to process protocol messages.
 	// If unspecified, default parsing behavior will be applied.
 	Parser *ParserConfig `json:"parser,omitempty"`
+
+	// +optional
+	// RequestControl configures the Request Control layer.
+	RequestControl *RequestControlConfig `json:"requestControl,omitempty"`
 }
 
 func (cfg EndpointPickerConfig) String() string {
@@ -91,6 +95,9 @@ func (cfg EndpointPickerConfig) String() string {
 	}
 	if cfg.Parser != nil {
 		parts = append(parts, fmt.Sprintf("Parser: %v", cfg.Parser))
+	}
+	if cfg.RequestControl != nil {
+		parts = append(parts, fmt.Sprintf("RequestControl: %v", cfg.RequestControl))
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
 }
@@ -417,5 +424,24 @@ func (pbc PriorityBandConfig) String() string {
 		parts = append(parts, "OrderingPolicyRef: "+pbc.OrderingPolicyRef)
 	}
 
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// RequestControlConfig contains the configuration for the request control layer.
+type RequestControlConfig struct {
+	// +optional
+	// PrepareDataTimeout defines the timeout for PrepareData plugins.
+	// If omitted, defaults to 400ms.
+	PrepareDataTimeout *metav1.Duration `json:"prepareDataTimeout,omitempty"`
+}
+
+func (rcc *RequestControlConfig) String() string {
+	if rcc == nil {
+		return nilString
+	}
+	var parts []string
+	if rcc.PrepareDataTimeout != nil {
+		parts = append(parts, fmt.Sprintf("PrepareDataTimeout: %s", rcc.PrepareDataTimeout.Duration))
+	}
 	return "{" + strings.Join(parts, ", ") + "}"
 }
