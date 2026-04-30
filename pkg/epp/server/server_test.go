@@ -131,7 +131,7 @@ func runStreamingTest(t *testing.T, streamInRequest bool, streamingResponse bool
 		[]*v1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: podName}}}, "test-pool1", namespace, poolPort)
 	streamingServer := handlers.NewStreamingServer(ds, director, openai.NewOpenAIParser())
 
-	testListener, errChan := utils.SetupTestStreamingServer(t, ctx, streamingServer)
+	testListener, errChan := utils.SetupTestStreamingServer(ctx, t, streamingServer)
 	process, conn := utils.GetStreamingServerClient(ctx, t)
 	defer conn.Close()
 
@@ -421,7 +421,7 @@ func TestServer_Skip(t *testing.T) {
 		[]*v1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: podName}}}, "test-pool1", namespace, poolPort)
 	streamingServer := handlers.NewStreamingServer(ds, director, mockPar)
 
-	testListener, errChan := utils.SetupTestStreamingServer(t, ctx, streamingServer)
+	testListener, errChan := utils.SetupTestStreamingServer(ctx, t, streamingServer)
 	process, conn := utils.GetStreamingServerClient(ctx, t)
 	defer conn.Close()
 

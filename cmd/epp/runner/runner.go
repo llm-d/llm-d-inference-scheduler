@@ -629,10 +629,7 @@ func (r *Runner) configureAndStartDatalayer(ctx context.Context, enableNewMetric
 		return err
 	}
 
-	if err := r.dlRuntime.Start(ctx, mgr); err != nil {
-		return err
-	}
-	return nil
+	return r.dlRuntime.Start(ctx, mgr)
 }
 
 func (r *Runner) setupMetricsCollection(enableNewMetrics bool, opts *runserver.Options, pmc backendmetrics.PodMetricsClient) datalayer.EndpointFactory {
