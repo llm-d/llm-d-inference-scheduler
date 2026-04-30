@@ -37,9 +37,6 @@ const (
 	// It selects the request with the earliest SLO-based deadline.
 	// For detailed documentation, see README.md.
 	SLODeadlineOrderingPolicyType = "slo-deadline-ordering-policy"
-
-	// sloTtftHeader is the request header name for SLO time-to-first-token in milliseconds.
-	sloTtftHeader = "x-slo-ttft-ms"
 )
 
 func SLODeadlineOrderingPolicyFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
@@ -95,11 +92,11 @@ func calculateSLODeadline(item flowcontrol.QueueItemAccessor) time.Time {
 	if infReq == nil || infReq.Headers == nil {
 		return sloMaxDeadlineTime
 	}
-	sloTtft := request.GetHeader(infReq.Headers, sloTtftHeader)
-	if sloTtft == "" {
+	sloTTFT := request.GetHeader(infReq.Headers, request.TTFTSLOMsHeaderKey)
+	if sloTTFT == "" {
 		return sloMaxDeadlineTime
 	}
-	ms, err := strconv.ParseInt(strings.TrimSpace(sloTtft), 10, 64)
+	ms, err := strconv.ParseInt(strings.TrimSpace(sloTTFT), 10, 64)
 	if err != nil || ms < 0 {
 		return sloMaxDeadlineTime
 	}

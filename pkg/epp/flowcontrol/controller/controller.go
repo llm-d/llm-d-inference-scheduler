@@ -41,6 +41,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/contracts"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/controller/internal"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/types"
+	fwkrequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/common/request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 )
@@ -225,21 +226,27 @@ func (fc *FlowController) EnqueueAndWait(
 	flowKey := req.FlowKey()
 	priority := strconv.Itoa(flowKey.Priority)
 	reqBytes := req.ByteSize()
+	sloClass := metrics.ClassifySLO(extractHeader(req, fwkrequest.TTFTSLOMsHeaderKey))
+	metrics.RecordFlowControlSLOIncomingRequest(sloClass, req.InferencePoolName())
 	metrics.IncFlowControlQueueSize(
 		flowKey.ID, priority,
 		req.InferencePoolName(),
+		sloClass,
 		req.ModelName(), req.TargetModelName())
 	defer metrics.DecFlowControlQueueSize(
 		flowKey.ID, priority,
 		req.InferencePoolName(),
+		sloClass,
 		req.ModelName(), req.TargetModelName())
 	metrics.AddFlowControlQueueBytes(
 		flowKey.ID, priority,
 		req.InferencePoolName(),
+		sloClass,
 		req.ModelName(), req.TargetModelName(), reqBytes)
 	defer metrics.SubFlowControlQueueBytes(
 		flowKey.ID, priority,
 		req.InferencePoolName(),
+		sloClass,
 		req.ModelName(), req.TargetModelName(), reqBytes)
 
 	// 1. Create the derived context that governs this request's lifecycle (Parent Cancellation + TTL).
@@ -302,6 +309,14 @@ func (fc *FlowController) EnqueueAndWait(
 	}
 
 	return finalOutcome, err
+}
+
+func extractHeader(req flowcontrol.FlowControlRequest, name string) string {
+	infReq := req.InferenceRequest()
+	if infReq == nil || infReq.Headers == nil {
+		return ""
+	}
+	return fwkrequest.GetHeader(infReq.Headers, name)
 }
 
 var errNoShards = errors.New("no viable active shards available")
