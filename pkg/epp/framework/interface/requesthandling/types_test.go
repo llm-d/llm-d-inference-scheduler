@@ -295,13 +295,22 @@ func TestInferenceRequestBody_InputTokenCountHint(t *testing.T) {
 			wantHint: 3,
 		},
 		{
-			name: "completions with text returns -1",
+			name: "completions with text returns estimated count",
 			body: &InferenceRequestBody{
 				Completions: &CompletionsRequest{
 					Prompt: Prompt{Raw: "hello"},
 				},
 			},
-			wantHint: -1,
+			wantHint: 1, // len("hello") / 4 = 5 / 4 = 1
+		},
+		{
+			name: "completions with text length < 4 returns estimated count",
+			body: &InferenceRequestBody{
+				Completions: &CompletionsRequest{
+					Prompt: Prompt{Raw: "hel"},
+				},
+			},
+			wantHint: 1, // max(1, len("hel") / 4) = 1
 		},
 		{
 			name: "embeddings with token IDs returns count",
@@ -313,18 +322,36 @@ func TestInferenceRequestBody_InputTokenCountHint(t *testing.T) {
 			wantHint: 4,
 		},
 		{
-			name: "embeddings with text returns -1",
+			name: "embeddings with text returns estimated count",
 			body: &InferenceRequestBody{
 				Embeddings: &EmbeddingsRequest{
 					Input: EmbeddingsInput{Raw: "hello"},
 				},
 			},
-			wantHint: -1,
+			wantHint: 1, // len("hello") / 4 = 5 / 4 = 1
 		},
 		{
-			name:     "empty body returns -1",
+			name:     "empty body returns 0",
 			body:     &InferenceRequestBody{},
-			wantHint: -1,
+			wantHint: 0, // len("") / 4 = 0
+		},
+		{
+			name: "completions with long text returns estimated count",
+			body: &InferenceRequestBody{
+				Completions: &CompletionsRequest{
+					Prompt: Prompt{Raw: "This is a longer prompt with more characters."},
+				},
+			},
+			wantHint: 11, // len("This is a longer prompt with more characters.") = 45. 45 / 4 = 11
+		},
+		{
+			name: "completions with short text returns at least 1",
+			body: &InferenceRequestBody{
+				Completions: &CompletionsRequest{
+					Prompt: Prompt{Raw: "123"},
+				},
+			},
+			wantHint: 1, // len("123") = 3. max(1, 3/4) = 1
 		},
 	}
 

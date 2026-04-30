@@ -171,12 +171,11 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 
 	// Prepare InferenceRequest (needed for both saturation detection and Scheduler)
 	reqCtx.SchedulingRequest = &fwksched.InferenceRequest{
-		RequestId:        reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey],
-		TargetModel:      reqCtx.TargetModelName,
-		Body:             inferenceRequestBody,
-		Headers:          reqCtx.Request.Headers,
-		Objectives:       requestObjectives,
-		RequestSizeBytes: reqCtx.RequestSize,
+		RequestId:   reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey],
+		TargetModel: reqCtx.TargetModelName,
+		Body:        inferenceRequestBody,
+		Headers:     reqCtx.Request.Headers,
+		Objectives:  requestObjectives,
 	}
 
 	logger = logger.WithValues("objectiveKey", reqCtx.ObjectiveKey, "incomingModelName", reqCtx.IncomingModelName, "targetModelName", reqCtx.TargetModelName, "priority", infObjective.Spec.Priority)

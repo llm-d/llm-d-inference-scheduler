@@ -59,7 +59,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 3, // 3/4 (input tokens) + 3/4*1.5 (output tokens) = 3
+			expected: 3, // 3 chars -> 1 input token. 1 + round(1 * 1.5) = 3
 		},
 		{
 			name: "Completions Request",
@@ -70,7 +70,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 8, // 8/4 (input tokens) + 8/4*1.5 (output tokens) = 8
+			expected: 8, // 13 / 4 = 3. output = round(3 * 1.5) = 5. total = 8
 		},
 		{
 			name: "Completions with empty prompt",
@@ -81,7 +81,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 3,
+			expected: 0, // 0 / 4 = 0
 		},
 		{
 			name: "Completions with exactly 4 characters",
@@ -92,7 +92,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 3,
+			expected: 3, // 4 / 4 = 1. output = round(1 * 1.5) = 2. total = 3
 		},
 		{
 			name: "Chat Completions Request with Structured content",
@@ -115,7 +115,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 18,
+			expected: 15, // len is 27. 27 / 4 = 6. output = round(6 * 1.5) = 9. total = 15
 		},
 		{
 			name: "Chat Completions with Raw content",
@@ -133,7 +133,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 13,
+			expected: 13, // len is 21. 21 / 4 = 5. output = round(5 * 1.5) = 8. total = 13
 		},
 		{
 			name: "Chat Completions with multiple messages",
@@ -161,9 +161,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			// PromptText() joins messages with a trailing space separator ("Hi Hello " = 9 chars),
-			// so the estimate is higher than summing per-message lengths individually (7 chars).
-			expected: 8,
+			expected: 5, // len is 11. 11 / 4 = 2. output = round(2 * 1.5) = 3. total = 5
 		},
 		{
 			name: "Chat Completions with empty messages",
@@ -174,7 +172,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 3,
+			expected: 0, // 0 / 4 = 0
 		},
 		{
 			name: "Responses API with string input",
@@ -185,7 +183,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 23,
+			expected: 23, // len is 37. 37 / 4 = 9. output = round(9 * 1.5) = 14. total = 23
 		},
 		{
 			name: "Responses API with structured input",
@@ -198,7 +196,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 23,
+			expected: 20, // len is 35. 35 / 4 = 8. output = round(8 * 1.5) = 12. total = 20
 		},
 		{
 			name: "Conversations API",
@@ -211,7 +209,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 					},
 				},
 			},
-			expected: 35,
+			expected: 33, // len is 55. 55 / 4 = 13. output = round(13 * 1.5) = 20. total = 33
 		},
 	}
 
@@ -225,8 +223,7 @@ func TestSimpleTokenEstimator_Estimate(t *testing.T) {
 
 func TestSimpleTokenEstimator_Estimate_CustomConfig(t *testing.T) {
 	estimator := &SimpleTokenEstimator{
-		CharactersPerToken: 2.0,
-		OutputRatio:        2.0,
+		outputRatio: 2.0,
 	}
 
 	testCases := []struct {
@@ -243,7 +240,7 @@ func TestSimpleTokenEstimator_Estimate_CustomConfig(t *testing.T) {
 					},
 				},
 			},
-			expected: 3,
+			expected: 0, // 0 / 4 = 0
 		},
 		{
 			name: "4 chars with custom config",
@@ -254,7 +251,7 @@ func TestSimpleTokenEstimator_Estimate_CustomConfig(t *testing.T) {
 					},
 				},
 			},
-			expected: 6,
+			expected: 3, // 4 / 4 = 1. output = round(1 * 2.0) = 2. total = 3
 		},
 		{
 			name: "More than 4 chars with custom config",
@@ -265,7 +262,7 @@ func TestSimpleTokenEstimator_Estimate_CustomConfig(t *testing.T) {
 					},
 				},
 			},
-			expected: 39,
+			expected: 18, // len is 25. 25 / 4 = 6. output = round(6 * 2.0) = 12. total = 18
 		},
 	}
 

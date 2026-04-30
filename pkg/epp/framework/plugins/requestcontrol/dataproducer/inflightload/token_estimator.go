@@ -29,15 +29,13 @@ type TokenEstimator interface {
 
 // SimpleTokenEstimator estimates tokens from character count. tokens = characters / CharactersPerToken.
 type SimpleTokenEstimator struct {
-	CharactersPerToken float64
-	OutputRatio        float64
+	outputRatio float64
 }
 
 // NewSimpleTokenEstimator returns a SimpleTokenEstimator with default 4.0 chars per token.
 func NewSimpleTokenEstimator() TokenEstimator {
 	return &SimpleTokenEstimator{
-		CharactersPerToken: 4.0,
-		OutputRatio:        1.5,
+		outputRatio: 1.5,
 	}
 }
 
@@ -46,27 +44,10 @@ func NewSimpleTokenEstimator() TokenEstimator {
 // to avoid allocations. Otherwise, input tokens are estimated from prompt/message character count
 // using CharactersPerToken; output tokens are estimated as inputTokens * OutputRatio.
 func (e *SimpleTokenEstimator) Estimate(request *framework.InferenceRequest) int64 {
-	if request == nil {
+	if request == nil || request.Body == nil {
 		return 0
 	}
-	// Prefer request body size when available: avoids PlainText() and reduces GC pressure.
-	var inputTokens int64
-	switch {
-	case request.RequestSizeBytes > 0:
-		inputTokens = max(int64(request.RequestSizeBytes)/4, 1)
-	case request.Body != nil:
-		hint := request.Body.InputTokenCountHint()
-		if hint >= 0 {
-			inputTokens = int64(hint)
-		} else {
-			// Fallback: character count from prompt text across all API types
-			// (completions, chat/completions, responses, conversations).
-			chars := len(request.Body.PromptText())
-			inputTokens = int64(math.Max(1, math.Round(float64(chars)/e.CharactersPerToken)))
-		}
-	default:
-		return 0
-	}
-	outputTokens := int64(math.Round(float64(inputTokens) * e.OutputRatio))
-	return inputTokens + outputTokens
+	inputToken := int64(request.Body.InputTokenCountHint())
+	outputTokens := int64(math.Round(float64(inputToken) * e.outputRatio))
+	return inputToken + outputTokens
 }
