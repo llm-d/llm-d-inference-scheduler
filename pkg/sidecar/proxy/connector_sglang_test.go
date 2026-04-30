@@ -80,18 +80,19 @@ var _ = Describe("SGLang Connector", func() {
 		}
 
 		// Because SGLang connector sends requests concurrently (prefill in goroutine),
-		// we sleep a tiny bit to ensure the prefill handler has time to finish processing.
-		time.Sleep(100 * time.Millisecond)
+		// wait until the prefill handler has finished processing before reading its state.
+		Eventually(testInfo.prefillHandler.RequestCount.Load).Should(Equal(int32(1)))
 
 		// Validate prefill request
-		Expect(testInfo.prefillHandler.RequestCount.Load()).To(BeNumerically("==", 1))
-		Expect(testInfo.prefillHandler.CompletionRequests).To(HaveLen(1))
-		prq1 := testInfo.prefillHandler.CompletionRequests[0]
+		prefillReqs := testInfo.prefillHandler.GetCompletionRequests()
+		Expect(prefillReqs).To(HaveLen(1))
+		prq1 := prefillReqs[0]
 
 		// Validate decode request
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
-		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
-		drq1 := testInfo.decodeHandler.CompletionRequests[0]
+		decodeReqs := testInfo.decodeHandler.GetCompletionRequests()
+		Expect(decodeReqs).To(HaveLen(1))
+		drq1 := decodeReqs[0]
 
 		// Bootstrap validations for prefill
 		Expect(prq1).To(HaveKey(requestFieldBootstrapHost))

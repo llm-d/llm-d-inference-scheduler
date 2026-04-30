@@ -42,6 +42,11 @@ API implementation must utilize [Envoy] and support [ext-proc], as this is the
 callback mechanism the EPP relies on to make routing decisions to model serving
 workloads currently.
 
+> [!NOTE]
+> The project provides tools for automatic Envoy installation. However, if you install or
+> configure it yourself, please note that the only supported [request_body_mode and response_body_mode](https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/ext_proc/v3/external_processor.proto)
+> is `FULL_DUPLEX_STREAMED`
+
 [Kubernetes]:https://kubernetes.io
 [Architecture Documentation]:docs/architecture.md
 [Gateway API Inference Extension (GIE)]:https://github.com/kubernetes-sigs/gateway-api-inference-extension
