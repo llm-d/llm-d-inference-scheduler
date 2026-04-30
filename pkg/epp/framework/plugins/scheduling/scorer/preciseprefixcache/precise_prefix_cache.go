@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync/atomic"
 	"time"
 
@@ -605,19 +604,7 @@ func (s *Scorer) PreRequest(ctx context.Context,
 
 // --- EndpointExtractor implementation ---
 
-// ExpectedInputType declares the data type this extractor consumes.
-// Required by the data layer's source/extractor type-compatibility check.
-func (s *Scorer) ExpectedInputType() reflect.Type {
-	return fwkdl.EndpointEventReflectType
-}
-
-// Extract is the base Extractor entrypoint and is unused for endpoint
-// extractors — the Runtime calls ExtractEndpoint instead.
-func (s *Scorer) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
-	return nil
-}
-
-// ExtractEndpoint reacts to endpoint lifecycle events from the data layer's
+// Extract reacts to endpoint lifecycle events from the data layer's
 // endpoint-notification-source: an add/update installs a per-pod ZMQ
 // subscriber so KV-cache events flow into the index; a delete tears it down.
 // No-op when DiscoverPods is disabled or the namespaced name is unavailable.
@@ -625,9 +612,15 @@ func (s *Scorer) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
 // Being called at all is also the signal that the data layer is wired for
 // this scorer; the legacy in-Score discovery path turns itself off from
 // here on.
-func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent) error {
+//
+// Endpoint context is carried in event.Endpoint; the WithEndpoint option
+// (if passed) is ignored.
+func (s *Scorer) Extract(ctx context.Context, event fwkdl.EndpointEvent, _ ...fwkdl.ExtractOption) error {
 	s.extractorActive.Store(true)
 	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
+		return nil
+	}
+	if event.Endpoint == nil {
 		return nil
 	}
 	meta := event.Endpoint.GetMetadata()

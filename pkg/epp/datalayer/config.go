@@ -17,19 +17,78 @@ limitations under the License.
 package datalayer
 
 import (
+	"fmt"
+
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
 // Config defines the configuration of EPP data layer, as the set of DataSources
-// and Extractors defined on them. Both poll-based and event-driven (notification)
-// sources are stored in Sources. Differentiation by type of source is handled during
-// the set-up phase.
+// and Extractors defined on them.
 type Config struct {
-	Sources []DataSourceConfig // the data sources configured in the data layer
+	Sources []DataSourceConfig
 }
 
-// DataSourceConfig defines the configuration of a specific DataSource
+// DataSourceConfig defines the configuration of a specific DataSource.
+//
+// Each source pairs with extractors of exactly one variant (polling,
+// notification, or endpoint) — the variant is determined by the source's
+// interface type. Exactly one of the *Extractors fields is populated by
+// ResolveExtractors; the Runtime reads the field matching the source's variant.
 type DataSourceConfig struct {
-	Plugin     fwkdl.DataSource  // the data source plugin instance
-	Extractors []fwkdl.Extractor // extractors defined for the data source
+	Plugin fwkdl.DataSource
+
+	// Populated when Plugin is a PollingDataSource.
+	PollingExtractors []fwkdl.PollingExtractor
+	// Populated when Plugin is a NotificationSource.
+	NotificationExtractors []fwkdl.NotificationExtractor
+	// Populated when Plugin is an EndpointSource.
+	EndpointExtractors []fwkdl.EndpointExtractor
+}
+
+// ResolveSource looks up ref via handle and asserts the plugin implements
+// DataSource.
+func ResolveSource(handle fwkplugin.Handle, ref string) (fwkdl.DataSource, error) {
+	p := handle.Plugin(ref)
+	if p == nil {
+		return nil, fmt.Errorf("source plugin %q not registered", ref)
+	}
+	src, ok := p.(fwkdl.DataSource)
+	if !ok {
+		return nil, fmt.Errorf("source plugin %q does not implement DataSource", ref)
+	}
+	return src, nil
+}
+
+// ResolveExtractors routes plugins into the field matching this source's
+// variant, type-asserting each to the variant's extractor interface.
+func (c *DataSourceConfig) ResolveExtractors(plugins []fwkplugin.Plugin) error {
+	var err error
+	switch c.Plugin.(type) {
+	case fwkdl.PollingDataSource:
+		c.PollingExtractors, err = assertAll[fwkdl.PollingExtractor](plugins, "PollingExtractor")
+	case fwkdl.NotificationSource:
+		c.NotificationExtractors, err = assertAll[fwkdl.NotificationExtractor](plugins, "NotificationExtractor")
+	case fwkdl.EndpointSource:
+		c.EndpointExtractors, err = assertAll[fwkdl.EndpointExtractor](plugins, "EndpointExtractor")
+	default:
+		return fmt.Errorf("source %s does not implement a known DataSource variant (polling/notification/endpoint)",
+			c.Plugin.TypedName())
+	}
+	return err
+}
+
+// assertAll type-asserts each plugin to the variant interface E and returns
+// the typed slice. Returns an error naming the first plugin that doesn't
+// implement T.
+func assertAll[T fwkplugin.Plugin](plugins []fwkplugin.Plugin, variant string) ([]T, error) {
+	out := make([]T, 0, len(plugins))
+	for _, p := range plugins {
+		e, ok := p.(T)
+		if !ok {
+			return nil, fmt.Errorf("plugin %s is not a %s", p.TypedName(), variant)
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }

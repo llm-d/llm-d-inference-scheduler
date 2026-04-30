@@ -31,7 +31,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkflowcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
@@ -105,6 +104,9 @@ func InstantiateAndConfigure(
 
 	if err := validateConfig(rawConfig); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+	if err := validateDataLayer(rawConfig, handle); err != nil {
+		return nil, fmt.Errorf("data layer validation failed: %w", err)
 	}
 
 	schedulerConfig, err := buildSchedulerConfig(rawConfig.SchedulingProfiles, handle)
@@ -288,22 +290,27 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 	}
 
 	for _, source := range rawDataConfig.Sources {
-		if sourcePlugin, ok := handle.Plugin(source.PluginRef).(fwkdl.DataSource); ok {
-			sourceConfig := datalayer.DataSourceConfig{
-				Plugin:     sourcePlugin,
-				Extractors: []fwkdl.Extractor{},
-			}
-			for _, extractor := range source.Extractors {
-				if extractorPlugin, ok := handle.Plugin(extractor.PluginRef).(fwkdl.Extractor); ok {
-					sourceConfig.Extractors = append(sourceConfig.Extractors, extractorPlugin)
-				} else {
-					return nil, fmt.Errorf("the plugin %s is not a fwkdl.Extractor", source.PluginRef)
-				}
-			}
-			cfg.Sources = append(cfg.Sources, sourceConfig)
-		} else {
-			return nil, fmt.Errorf("the plugin %s is not a fwkdl.DataSource", source.PluginRef)
+		src, err := datalayer.ResolveSource(handle, source.PluginRef)
+		if err != nil {
+			return nil, err
 		}
+		sourceConfig := datalayer.DataSourceConfig{Plugin: src}
+
+		plugins := make([]fwkplugin.Plugin, 0, len(source.Extractors))
+		for _, e := range source.Extractors {
+			p := handle.Plugin(e.PluginRef)
+			if p == nil {
+				return nil, fmt.Errorf("extractor plugin %s not found (required by source %s)",
+					e.PluginRef, source.PluginRef)
+			}
+			plugins = append(plugins, p)
+		}
+
+		if err := sourceConfig.ResolveExtractors(plugins); err != nil {
+			return nil, fmt.Errorf("source %s: %w", source.PluginRef, err)
+		}
+
+		cfg.Sources = append(cfg.Sources, sourceConfig)
 	}
 	return &cfg, nil
 }

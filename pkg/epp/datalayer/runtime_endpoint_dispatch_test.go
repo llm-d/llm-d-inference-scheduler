@@ -42,8 +42,8 @@ func TestNewEndpointDispatchesEventWithNoPollers(t *testing.T) {
 	cfg := &Config{
 		Sources: []DataSourceConfig{
 			{
-				Plugin:     epSrc,
-				Extractors: []fwkdl.Extractor{extractor},
+				Plugin:             epSrc,
+				EndpointExtractors: []fwkdl.EndpointExtractor{extractor},
 			},
 		},
 	}

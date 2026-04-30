@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -84,17 +85,17 @@ func (me *ModelExtractor) WithName(name string) *ModelExtractor {
 	return me
 }
 
-// ExpectedInputType defines the type expected by ModelExtractor.
-func (me *ModelExtractor) ExpectedInputType() reflect.Type {
-	return ModelsResponseType
-}
-
 // Extract transforms the data source output into a concrete attribute that
-// is stored on the given endpoint.
-func (me *ModelExtractor) Extract(_ context.Context, data any, ep fwkdl.Endpoint) error {
+// is stored on the given endpoint (carried via the WithEndpoint option).
+func (me *ModelExtractor) Extract(_ context.Context, data any, opts ...fwkdl.ExtractOption) error {
 	models, ok := data.(*ModelResponse)
 	if !ok {
 		return fmt.Errorf("unexpected input in Extract: %T", data)
+	}
+
+	ep := fwkdl.ApplyExtractOptions(opts).Endpoint
+	if ep == nil {
+		return errors.New("Extract called without an endpoint option")
 	}
 
 	ep.GetAttributes().Put(modelsAttributeKey, ModelInfoCollection(models.Data))

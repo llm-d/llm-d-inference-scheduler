@@ -149,7 +149,7 @@ func TestInFlightLoadProducer_NotificationCleanup(t *testing.T) {
 		Endpoint: newStubSchedulingEndpoint(endpointName),
 	}
 
-	err := producer.ExtractEndpoint(ctx, eventEndpoint)
+	err := producer.Extract(ctx, eventEndpoint)
 	require.NoError(t, err)
 
 	// Verify Cleanup

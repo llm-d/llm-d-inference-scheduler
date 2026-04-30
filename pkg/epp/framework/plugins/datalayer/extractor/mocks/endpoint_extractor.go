@@ -18,7 +18,6 @@ package mocks
 
 import (
 	"context"
-	"reflect"
 	"sync"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
@@ -41,7 +40,7 @@ func NewEndpointExtractor(name string) *EndpointExtractor {
 	return &EndpointExtractor{name: name}
 }
 
-// WithExtractError configures the extractor to return an error on ExtractEndpoint.
+// WithExtractError configures the extractor to return an error on Extract.
 func (m *EndpointExtractor) WithExtractError(err error) *EndpointExtractor {
 	m.extractErr = err
 	return m
@@ -51,17 +50,8 @@ func (m *EndpointExtractor) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Type: "mock-endpoint-extractor", Name: m.name}
 }
 
-func (m *EndpointExtractor) ExpectedInputType() reflect.Type {
-	return fwkdl.EndpointEventReflectType
-}
-
-// Extract is the base Extractor interface method — no-op for endpoint extractors.
-func (m *EndpointExtractor) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
-	return nil
-}
-
-// ExtractEndpoint records the event and returns any configured error.
-func (m *EndpointExtractor) ExtractEndpoint(_ context.Context, event fwkdl.EndpointEvent) error {
+// Extract records the event and returns any configured error.
+func (m *EndpointExtractor) Extract(_ context.Context, event fwkdl.EndpointEvent, _ ...fwkdl.ExtractOption) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.events = append(m.events, event)
