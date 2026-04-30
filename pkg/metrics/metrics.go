@@ -6,6 +6,7 @@ import (
 	compbasemetrics "k8s.io/component-base/metrics"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/metrics"
+	programaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/program-aware"
 )
 
 const (
@@ -49,7 +50,12 @@ var (
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
-	return []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount}
+	base := []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount}
+	pa := programaware.GetCollectors()
+	collectors := make([]prometheus.Collector, 0, len(base)+len(pa))
+	collectors = append(collectors, base...)
+	collectors = append(collectors, pa...)
+	return collectors
 }
 
 // RecordPDDecision increments the counter for a specific P/D routing decision.
