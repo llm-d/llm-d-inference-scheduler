@@ -101,8 +101,8 @@ func TestMetricsParityStandard(t *testing.T) {
 			defer srv.Close()
 
 			ctx := context.Background()
-			pmMetrics, pmErr := parseWithBackendPodMetrics(t, ctx, srv.URL)
-			dlMetrics, dlErr := parseWithDatalayerMetrics(t, ctx, srv.URL)
+			pmMetrics, pmErr := parseWithBackendPodMetrics(ctx, t, srv.URL)
+			dlMetrics, dlErr := parseWithDatalayerMetrics(ctx, t, srv.URL)
 
 			assert.Equal(t, pmErr != nil, dlErr != nil,
 				"Error mismatch!\nPodMetrics err: %v\nDatalayer err: %v", pmErr, dlErr)
@@ -179,8 +179,8 @@ func TestMetricsParityMultiLoRA(t *testing.T) {
 			defer srv.Close()
 
 			ctx := context.Background()
-			pmMetrics, pmErr := parseWithBackendPodMetrics(t, ctx, srv.URL)
-			dlMetrics, dlErr := parseWithDatalayerMetrics(t, ctx, srv.URL)
+			pmMetrics, pmErr := parseWithBackendPodMetrics(ctx, t, srv.URL)
+			dlMetrics, dlErr := parseWithDatalayerMetrics(ctx, t, srv.URL)
 
 			assert.Equal(t, pmErr != nil, dlErr != nil,
 				"Error mismatch!\nPodMetrics err: %v\nDatalayer err: %v", pmErr, dlErr)
@@ -200,8 +200,8 @@ func TestMetricsParityTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	pmMetrics, pmErr := parseWithBackendPodMetrics(t, ctx, srv.URL)
-	dlMetrics, dlErr := parseWithDatalayerMetrics(t, ctx, srv.URL)
+	pmMetrics, pmErr := parseWithBackendPodMetrics(ctx, t, srv.URL)
+	dlMetrics, dlErr := parseWithDatalayerMetrics(ctx, t, srv.URL)
 
 	// Both should timeout and error
 	assert.Error(t, pmErr, "PodMetrics should have timed out")
@@ -246,8 +246,8 @@ func TestMetricsParityMalformed(t *testing.T) {
 			defer srv.Close()
 
 			ctx := context.Background()
-			pmMetrics, pmErr := parseWithBackendPodMetrics(t, ctx, srv.URL)
-			dlMetrics, dlErr := parseWithDatalayerMetrics(t, ctx, srv.URL)
+			pmMetrics, pmErr := parseWithBackendPodMetrics(ctx, t, srv.URL)
+			dlMetrics, dlErr := parseWithDatalayerMetrics(ctx, t, srv.URL)
 
 			// Both should handle errors similarly
 			if (pmErr != nil) != (dlErr != nil) {
@@ -273,7 +273,7 @@ type MetricMock struct {
 }
 
 // parseWithBackendPodMetrics uses the backend.PodMetrics implementation
-func parseWithBackendPodMetrics(t *testing.T, ctx context.Context, urlStr string) (*fwkdl.Metrics, error) {
+func parseWithBackendPodMetrics(ctx context.Context, t *testing.T, urlStr string) (*fwkdl.Metrics, error) {
 	t.Helper()
 
 	mapping, err := NewMetricMapping(
@@ -308,7 +308,7 @@ func parseWithBackendPodMetrics(t *testing.T, ctx context.Context, urlStr string
 }
 
 // parseWithDatalayerMetrics uses the datalayer source + extractor implementation
-func parseWithDatalayerMetrics(t *testing.T, ctx context.Context, urlStr string) (*fwkdl.Metrics, error) {
+func parseWithDatalayerMetrics(ctx context.Context, t *testing.T, urlStr string) (*fwkdl.Metrics, error) {
 	t.Helper()
 
 	parsedURL, err := url.Parse(urlStr)

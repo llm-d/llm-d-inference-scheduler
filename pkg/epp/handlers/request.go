@@ -43,10 +43,7 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
 		// More context: https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/526
 		// The above PR will address endpoint admission, but currently any request without a body will be
 		// routed to a random upstream endpoint.
-		if err := s.fallbackToRandomEndpoint(ctx, reqCtx, 0); err != nil {
-			return err
-		}
-		return nil
+		return s.fallbackToRandomEndpoint(ctx, reqCtx, 0)
 	}
 
 	for _, header := range req.RequestHeaders.Headers.Headers {

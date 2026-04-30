@@ -50,11 +50,14 @@ linters:
     revive: # see https://github.com/mgechev/revive#available-rules for all options
       rules:
         - name: blank-imports
+        - name: context-as-argument
         - name: context-keys-type
         - name: dot-imports
         - name: error-return
         - name: error-strings
         - name: error-naming
+        - name: if-return
+        - name: increment-decrement
         - name: package-comments
         - name: range
         - name: time-naming
