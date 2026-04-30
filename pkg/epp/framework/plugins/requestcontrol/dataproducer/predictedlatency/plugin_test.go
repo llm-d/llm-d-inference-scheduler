@@ -135,7 +135,7 @@ func createTestChatCompletionsInferenceRequest(reqID string, ttftSLO, tpotSLO fl
 
 func createTestInferenceRequestWithBody(reqID string, ttftSLO, tpotSLO float64, body *fwkrh.InferenceRequestBody) *fwksched.InferenceRequest {
 	headers := make(map[string]string)
-	headers[reqcommon.RequestIdHeaderKey] = reqID
+	headers[reqcommon.RequestIDHeaderKey] = reqID
 	if ttftSLO > 0 {
 		headers["x-ttft-slo"] = fmt.Sprintf("%f", ttftSLO)
 	}
@@ -385,7 +385,7 @@ func TestSloContextStoreEviction(t *testing.T) {
 
 	req := &fwksched.InferenceRequest{
 		Headers: map[string]string{
-			reqcommon.RequestIdHeaderKey: requestID,
+			reqcommon.RequestIDHeaderKey: requestID,
 		},
 	}
 

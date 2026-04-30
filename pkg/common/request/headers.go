@@ -17,5 +17,5 @@ limitations under the License.
 package request
 
 const (
-	RequestIdHeaderKey = "x-request-id"
+	RequestIDHeaderKey = "x-request-id"
 )

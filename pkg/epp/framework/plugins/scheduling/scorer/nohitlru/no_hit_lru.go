@@ -263,7 +263,7 @@ func (s *NoHitLRU) Score(ctx context.Context, cycleState *scheduling.CycleState,
 
 	// Store the cold request state in plugin state for PreRequest to use
 	coldState := &coldRequestState{isCold: isCold}
-	s.pluginState.Write(request.RequestId, plugin.StateKey(s.typedName.String()), coldState)
+	s.pluginState.Write(request.RequestID, plugin.StateKey(s.typedName.String()), coldState)
 
 	if !isCold {
 		logger.Info("Cache hit detected, returning neutral scores")
@@ -285,9 +285,9 @@ func (s *NoHitLRU) PreRequest(ctx context.Context, request *scheduling.Inference
 	}
 
 	// Read the cold request state we stored in Score
-	coldState, err := plugin.ReadPluginStateKey[*coldRequestState](s.pluginState, request.RequestId, plugin.StateKey(s.typedName.String()))
+	coldState, err := plugin.ReadPluginStateKey[*coldRequestState](s.pluginState, request.RequestID, plugin.StateKey(s.typedName.String()))
 	// After fetching the cold state, drop it from the plugin state immediately (otherwise it will hang around until it becomes stale).
-	s.pluginState.Delete(request.RequestId)
+	s.pluginState.Delete(request.RequestID)
 
 	if err != nil {
 		logger.Info("No cold request state found, treating as non-cold request", "error", err)
@@ -317,5 +317,5 @@ func (s *NoHitLRU) moveTargetPodToFront(ctx context.Context, request *scheduling
 	var present struct{} // dummy value
 	s.lruCache.Add(endpointName, present)
 
-	logger.Info("Updated LRU cache for cold request", "profile", profileName, "endpoint", endpointName, "requestId", request.RequestId)
+	logger.Info("Updated LRU cache for cold request", "profile", profileName, "endpoint", endpointName, "requestId", request.RequestID)
 }

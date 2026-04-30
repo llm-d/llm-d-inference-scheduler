@@ -39,7 +39,7 @@ func RegisterAsDefaultProducer(pluginType string, factory FactoryFunc, key strin
 }
 
 // Registry is a mapping from plugin type to Factory function.
-var Registry map[string]FactoryFunc = map[string]FactoryFunc{}
+var Registry = map[string]FactoryFunc{}
 
 // DefaultProducerRegistry maps a data key to the plugin type that is the default producer for it.
 // Populated via RegisterAsDefaultProducer.

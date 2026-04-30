@@ -424,7 +424,7 @@ func TestInstantiateAndConfigure(t *testing.T) {
 		},
 		{
 			name:       "Error (Instantiation) - Invalid JSON Parameters",
-			configText: errorBadPluginJsonText,
+			configText: errorBadPluginJSONText,
 			wantErr:    true,
 		},
 		{

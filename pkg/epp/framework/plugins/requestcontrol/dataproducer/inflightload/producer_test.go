@@ -249,7 +249,7 @@ func (f *stubSchedulingEndpoint) Keys() []string { return f.attr.Keys() }
 
 func makeTokenRequest(requestID, prompt string) *schedulingtypes.InferenceRequest {
 	return &schedulingtypes.InferenceRequest{
-		RequestId: requestID,
+		RequestID: requestID,
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: prompt}},
 		},

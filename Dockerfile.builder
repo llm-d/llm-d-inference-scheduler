@@ -11,7 +11,14 @@ ARG KUSTOMIZE_VERSION=v5.6.0
 ARG DOCKER_VERSION=29.3.0
 ARG DOCKER_BUILDX_VERSION=v0.32.1
 
-RUN dnf install -y podman && dnf clean all
+RUN dnf install -y podman gcc-toolset-12 && dnf clean all
+
+# The base image ships GCC 8 (RHEL 8 default), which lacks the ARM64 LSE
+# atomic emulation helpers (__aarch64_ldadd8_sync etc.) required by Go's
+# race detector. gcc-toolset-12 provides GCC 12 which includes them.
+# TODO: remove gcc-toolset-12 once this base image is updated to RHEL 9
+#       (GCC 11+ ships natively there and includes the helpers).
+ENV PATH=/opt/rh/gcc-toolset-12/root/usr/bin:$PATH
 
 # Install docker CLI and buildx plugin
 RUN ARCH=$(uname -m) && \

@@ -159,7 +159,7 @@ func (p *prepareData) PrepareRequestData(ctx context.Context, request *framework
 
 	// Store the state in shared plugin state for later use in PreRequest.
 	// NOTE: We use the prefix plugin's type name as part of the key so that the scorer can read it.
-	p.pluginState.Write(request.RequestId, plugin.StateKey(ApproxPrefixCachePluginType), state)
+	p.pluginState.Write(request.RequestID, plugin.StateKey(ApproxPrefixCachePluginType), state)
 
 	return nil
 }
@@ -168,7 +168,7 @@ func (p *prepareData) PrepareRequestData(ctx context.Context, request *framework
 // It updates the indexer with the prefix hashes for the selected endpoint(s).
 func (p *prepareData) PreRequest(ctx context.Context, request *framework.InferenceRequest, schedulingResult *framework.SchedulingResult) {
 	// Delete the state to avoid memory leak.
-	defer p.pluginState.Delete(request.RequestId)
+	defer p.pluginState.Delete(request.RequestID)
 	primaryProfileResult := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
 	if len(primaryProfileResult.TargetEndpoints) == 0 {
 		return
@@ -183,9 +183,9 @@ func (p *prepareData) PreRequest(ctx context.Context, request *framework.Inferen
 	}
 
 	// Read state saved during PrepareRequestData.
-	state, err := plugin.ReadPluginStateKey[*SchedulingContextState](p.pluginState, request.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state, err := plugin.ReadPluginStateKey[*SchedulingContextState](p.pluginState, request.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to read prefix plugin state", "requestID", request.RequestId)
+		log.FromContext(ctx).Error(err, "failed to read prefix plugin state", "requestID", request.RequestID)
 		return
 	}
 

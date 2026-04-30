@@ -273,8 +273,8 @@ plugins:
   type: test-profile-handler
 `
 
-// errorBadPluginJsonText has invalid JSON in parameters (string where int expected).
-const errorBadPluginJsonText = `
+// errorBadPluginJSONText has invalid JSON in parameters (string where int expected).
+const errorBadPluginJSONText = `
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:

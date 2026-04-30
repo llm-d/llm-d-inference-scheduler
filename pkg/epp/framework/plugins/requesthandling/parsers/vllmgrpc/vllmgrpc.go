@@ -283,9 +283,9 @@ func parseGrpcPayload(data []byte) ([]byte, error) {
 func convertEmbedToInferenceRequestBody(pbReq *pb.EmbedRequest) (*fwkrh.InferenceRequestBody, error) {
 	var body *fwkrh.InferenceRequestBody
 	if pbReq.Tokenized != nil {
-		inputIds := pbReq.GetTokenized().InputIds
-		tokenIDs := make([]uint32, len(inputIds))
-		copy(tokenIDs, inputIds)
+		inputIDs := pbReq.GetTokenized().InputIds
+		tokenIDs := make([]uint32, len(inputIDs))
+		copy(tokenIDs, inputIDs)
 		body = &fwkrh.InferenceRequestBody{
 			Embeddings: &fwkrh.EmbeddingsRequest{
 				Input: fwkrh.EmbeddingsInput{

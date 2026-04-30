@@ -395,7 +395,7 @@ func (s *Scorer) PrepareRequestData(ctx context.Context,
 	}
 
 	// 6. Save to PluginState for Score() and PreRequest()
-	s.pluginState.Write(request.RequestId, stateKey, &precisePluginState{
+	s.pluginState.Write(request.RequestID, stateKey, &precisePluginState{
 		blockKeys: blockKeys,
 		scores:    scores,
 	})
@@ -449,14 +449,14 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	if request.RequestId != "" {
-		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+	if request.RequestID != "" {
+		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 	}
 
 	// Try to reuse pre-computed scores from PrepareRequestData
 	var scores map[string]float64
 	if pluginStateData, err := plugin.ReadPluginStateKey[*precisePluginState](
-		s.pluginState, request.RequestId, stateKey); err == nil {
+		s.pluginState, request.RequestID, stateKey); err == nil {
 		scores = pluginStateData.scores
 		debugLogger.Info("Reusing pre-computed scores from PrepareRequestData")
 	} else {
@@ -540,13 +540,13 @@ func (s *Scorer) PreRequest(ctx context.Context,
 
 	// 1. Read block keys from PluginState
 	state, err := plugin.ReadPluginStateKey[*precisePluginState](
-		s.pluginState, request.RequestId, stateKey)
+		s.pluginState, request.RequestID, stateKey)
 	if err != nil {
 		logger.V(logging.TRACE).Info("No plugin state found for PreRequest, skipping speculative indexing",
-			"requestID", request.RequestId)
+			"requestID", request.RequestID)
 		return
 	}
-	s.pluginState.Delete(request.RequestId)
+	s.pluginState.Delete(request.RequestID)
 
 	if len(state.blockKeys) == 0 {
 		return
@@ -591,13 +591,13 @@ func (s *Scorer) PreRequest(ctx context.Context,
 	}
 
 	// 5. Register in TTL cache for automatic eviction
-	s.speculativeCache.Set(request.RequestId, &speculativeEntries{
+	s.speculativeCache.Set(request.RequestID, &speculativeEntries{
 		blockKeys:  state.blockKeys,
 		podEntries: allPodEntries,
 	}, s.speculativeTTL)
 
 	logger.V(logging.TRACE).Info("Added speculative entries",
-		"requestID", request.RequestId,
+		"requestID", request.RequestID,
 		"pod", speculativePod.PodIdentifier,
 		"blockKeys", len(state.blockKeys),
 		"ttl", s.speculativeTTL)
