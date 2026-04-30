@@ -20,18 +20,22 @@ package tokenizer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
+
+// compile-time type assertion.
+var _ requestcontrol.DataProducer = &Plugin{}
 
 type tokenizer interface {
 	Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
@@ -45,11 +49,6 @@ const (
 	// TokenizedPromptKey is the data key advertised by this plugin to indicate
 	// that it produces tokenized prompt data.
 	TokenizedPromptKey = "TokenizedPrompt"
-
-	// TokenizedPromptStateKey is the CycleState key used by the tokenizer scorer
-	// to store tokenized prompt data for downstream consumers.
-	// Namespaced by PluginType to avoid collisions with other plugins.
-	TokenizedPromptStateKey = plugin.StateKey(PluginType + "." + TokenizedPromptKey)
 )
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
@@ -96,51 +95,6 @@ func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, err
 	}, nil
 }
 
-// TokenizedPromptState holds the tokenization result for a single request,
-// stored in CycleState for consumption by downstream scorers.
-// This follows the standard IGW pattern where scorers share data via CycleState
-// (same as NoHitLRU reading from prefix-cache scorer).
-type TokenizedPromptState struct {
-	TokenIDs   []uint32
-	MMFeatures *tokenization.MultiModalFeatures
-}
-
-// Clone implements plugin.StateData.
-func (t *TokenizedPromptState) Clone() plugin.StateData {
-	if t == nil {
-		return nil
-	}
-	ids := make([]uint32, len(t.TokenIDs))
-	copy(ids, t.TokenIDs)
-	return &TokenizedPromptState{TokenIDs: ids, MMFeatures: cloneMMFeatures(t.MMFeatures)}
-}
-
-// cloneMMFeatures deep-copies the maps/slices so cloned CycleState entries
-// are fully independent and safe from concurrent mutation.
-func cloneMMFeatures(src *tokenization.MultiModalFeatures) *tokenization.MultiModalFeatures {
-	if src == nil {
-		return nil
-	}
-	dst := &tokenization.MultiModalFeatures{}
-	if src.MMHashes != nil {
-		dst.MMHashes = make(map[string][]string, len(src.MMHashes))
-		for k, v := range src.MMHashes {
-			cp := make([]string, len(v))
-			copy(cp, v)
-			dst.MMHashes[k] = cp
-		}
-	}
-	if src.MMPlaceholders != nil {
-		dst.MMPlaceholders = make(map[string][]kvblock.PlaceholderRange, len(src.MMPlaceholders))
-		for k, v := range src.MMPlaceholders {
-			cp := make([]kvblock.PlaceholderRange, len(v))
-			copy(cp, v)
-			dst.MMPlaceholders[k] = cp
-		}
-	}
-	return dst
-}
-
 // Plugin tokenizes the prompt in the incoming request and stores
 // the result in CycleState for downstream consumers (scorers).
 type Plugin struct {
@@ -159,15 +113,45 @@ func (p *Plugin) WithName(name string) *Plugin {
 	return p
 }
 
+// Produces returns the data keys this plugin produces.
+func (p *Plugin) Produces() map[string]any {
+	return map[string]any{TokenizedPromptKey: scheduling.TokenizedPrompt{}}
+}
+
+// Consumes returns the data keys this plugin requires.
+func (p *Plugin) Consumes() map[string]any {
+	return nil
+}
+
+// PrepareRequestData tokenizes the request prompt and stores the result
+// on the InferenceRequest so that scorers and filters can use it.
+// If the request already contains tokenized data, it is left unchanged.
+// Returns an error if the request body is nil or if the tokenizer fails.
+func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.InferenceRequest, pods []scheduling.Endpoint) error {
+	tp, err := p.tokenize(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	request.Body.TokenizedPrompt = tp
+	return nil
+}
+
 // tokenize extracts token IDs and optional multimodal features from the request.
-// Returns (nil, nil) on error or unsupported type.
-func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequest) ([]uint32, *tokenization.MultiModalFeatures) {
+// Returns the existing TokenizedPrompt unchanged if one is already set.
+// Returns (nil, nil) if the request has no recognized body type to tokenize.
+// Returns a non-nil error if the request body is nil or if the tokenizer fails.
+func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequest) (*fwkrh.TokenizedPrompt, error) {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logging.TRACE)
 
 	if request.Body == nil {
-		traceLogger.Info("Request body is nil, skipping tokenization")
-		return nil, nil
+		return nil, errors.New("request body is nil")
+	}
+
+	if request.Body.TokenizedPrompt != nil {
+		traceLogger.Info("TokenizedPrompt already present, skipping")
+		return request.Body.TokenizedPrompt, nil
 	}
 
 	traceLogger.Info("Request body present",
@@ -192,12 +176,40 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequ
 	}
 
 	if err != nil {
-		logger.Error(err, "Tokenization failed, skipping")
-		return nil, nil
+		return nil, fmt.Errorf("tokenization failed: %w", err)
 	}
 
 	traceLogger.Info("Tokenization succeeded", "tokenCount", len(tokenIDs))
-	return tokenIDs, mmFeatures
+	return &scheduling.TokenizedPrompt{
+		TokenIDs:           tokenIDs,
+		MultiModalFeatures: multiModalFeaturesToSlice(mmFeatures),
+	}, nil
+}
+
+// multiModalFeaturesToSlice converts the tokenizer's map-based MultiModalFeatures
+// into the flat []MultiModalFeature slice used by the scheduling interface.
+// Within each modality, items follow the order returned by the tokenizer.
+func multiModalFeaturesToSlice(mmf *tokenization.MultiModalFeatures) []scheduling.MultiModalFeature {
+	if mmf == nil || len(mmf.MMHashes) == 0 {
+		return nil
+	}
+
+	var features []scheduling.MultiModalFeature
+	for modality, hashes := range mmf.MMHashes {
+		placeholders := mmf.MMPlaceholders[modality]
+		for i, hash := range hashes {
+			feat := scheduling.MultiModalFeature{
+				Modality: scheduling.Modality(modality),
+				Hash:     hash,
+			}
+			if i < len(placeholders) {
+				feat.Offset = placeholders[i].Offset
+				feat.Length = placeholders[i].Length
+			}
+			features = append(features, feat)
+		}
+	}
+	return features
 }
 
 // ChatCompletionsToRenderChatRequest converts a ChatCompletionsRequest to a

@@ -18,8 +18,10 @@ package tokenizer
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -47,6 +50,136 @@ func newTestPlugin(tok tokenizer) *Plugin {
 	return &Plugin{
 		typedName: plugin.TypedName{Type: PluginType, Name: "test"},
 		tokenizer: tok,
+	}
+}
+
+func TestPrepareRequestData(t *testing.T) {
+	fakeTokenIDs := []uint32{10, 20, 30}
+	fakeMMFeatures := &tokenization.MultiModalFeatures{
+		MMHashes:       map[string][]string{"image": {"hash1"}},
+		MMPlaceholders: map[string][]kvblock.PlaceholderRange{"image": {{Offset: 2, Length: 4}}},
+	}
+
+	tok := &mockTokenizer{
+		renderFunc: func(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
+			return fakeTokenIDs, nil, nil
+		},
+		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+			return fakeTokenIDs, nil, nil
+		},
+	}
+	tokWithMM := &mockTokenizer{
+		renderChatFunc: func(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+			return fakeTokenIDs, fakeMMFeatures, nil
+		},
+	}
+
+	tests := []struct {
+		name          string
+		request       *scheduling.InferenceRequest
+		tokenizer     tokenizer
+		wantErr       string
+		wantTokenized *scheduling.TokenizedPrompt
+	}{
+		{
+			name:    "nil body returns error",
+			request: &scheduling.InferenceRequest{Body: nil},
+			wantErr: "request body is nil",
+		},
+		{
+			name: "already tokenized is left unchanged",
+			request: &scheduling.InferenceRequest{
+				Body: &fwkrh.InferenceRequestBody{
+					TokenizedPrompt: &scheduling.TokenizedPrompt{TokenIDs: []uint32{1, 2, 3}},
+				},
+			},
+			tokenizer:     tok,
+			wantTokenized: &scheduling.TokenizedPrompt{TokenIDs: []uint32{1, 2, 3}},
+		},
+		{
+			name: "unsupported body type leaves TokenizedPrompt nil",
+			request: &scheduling.InferenceRequest{
+				Body: &fwkrh.InferenceRequestBody{},
+			},
+			tokenizer: tok,
+		},
+		{
+			name: "tokenizer error is returned",
+			request: &scheduling.InferenceRequest{
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "fail"}},
+				},
+			},
+			tokenizer: &mockTokenizer{
+				renderFunc: func(string) ([]uint32, []tokenizerTypes.Offset, error) {
+					return nil, nil, errors.New("tokenizer exploded")
+				},
+			},
+			wantErr: "tokenization failed",
+		},
+		{
+			name: "completions tokenized successfully with nil MM features",
+			request: &scheduling.InferenceRequest{
+				Body: &fwkrh.InferenceRequestBody{
+					Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
+				},
+			},
+			tokenizer:     tok,
+			wantTokenized: &scheduling.TokenizedPrompt{TokenIDs: fakeTokenIDs, MultiModalFeatures: nil},
+		},
+		{
+			name: "chat completions tokenized successfully",
+			request: &scheduling.InferenceRequest{
+				Body: &fwkrh.InferenceRequestBody{
+					ChatCompletions: &fwkrh.ChatCompletionsRequest{
+						Messages: []fwkrh.Message{{Role: "user", Content: fwkrh.Content{Raw: "hello"}}},
+					},
+				},
+			},
+			tokenizer:     tok,
+			wantTokenized: &scheduling.TokenizedPrompt{TokenIDs: fakeTokenIDs},
+		},
+		{
+			name: "multimodal chat completions stores MM features",
+			request: &scheduling.InferenceRequest{
+				Body: &fwkrh.InferenceRequestBody{
+					ChatCompletions: &fwkrh.ChatCompletionsRequest{
+						Messages: []fwkrh.Message{
+							{Role: "user", Content: fwkrh.Content{
+								Structured: []fwkrh.ContentBlock{
+									{Type: "text", Text: "describe this"},
+									{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "data:image/png;base64,abc"}},
+								},
+							}},
+						},
+					},
+				},
+			},
+			tokenizer: tokWithMM,
+			wantTokenized: &scheduling.TokenizedPrompt{
+				TokenIDs: fakeTokenIDs,
+				MultiModalFeatures: []scheduling.MultiModalFeature{
+					{Modality: "image", Hash: "hash1", Offset: 2, Length: 4},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := utils.NewTestContext(t)
+			p := newTestPlugin(tt.tokenizer)
+
+			err := p.PrepareRequestData(ctx, tt.request, nil)
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTokenized, tt.request.Body.TokenizedPrompt)
+		})
 	}
 }
 
