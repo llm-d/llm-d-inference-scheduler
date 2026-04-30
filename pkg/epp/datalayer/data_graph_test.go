@@ -31,7 +31,7 @@ import (
 	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	fwksch "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const mockProducedDataKey = "mockProducedData"
@@ -62,7 +62,7 @@ func (m *mockPrepareRequestDataP) Consumes() map[string]any {
 	return m.consumes
 }
 
-func (m *mockPrepareRequestDataP) PrepareRequestData(ctx context.Context, request *fwksch.InferenceRequest, endpoints []fwksch.Endpoint) error {
+func (m *mockPrepareRequestDataP) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	endpoints[0].Put(mockProducedDataKey, &mockProducedDataType{value: 42})
 	return nil
 }
@@ -80,7 +80,7 @@ func (m *typedMockPlugin) TypedName() fwkplugin.TypedName {
 
 func (m *typedMockPlugin) Produces() map[string]any { return m.produces }
 func (m *typedMockPlugin) Consumes() map[string]any { return nil }
-func (m *typedMockPlugin) PrepareRequestData(ctx context.Context, request *fwksch.InferenceRequest, endpoints []fwksch.Endpoint) error {
+func (m *typedMockPlugin) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	return nil
 }
 
@@ -94,7 +94,7 @@ func (m *MockConsumerFairnessPolicy) Consumes() map[string]any {
 }
 
 type MockSchedulingPlugin struct {
-	fwksch.Scorer
+	fwksched.Scorer
 	consumes map[string]any
 }
 

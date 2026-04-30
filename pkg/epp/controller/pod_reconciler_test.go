@@ -37,7 +37,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
-	utiltest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
+	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 )
 
 var (
@@ -69,7 +69,7 @@ func TestPodReconciler(t *testing.T) {
 					},
 				},
 			},
-			incomingPod: utiltest.FromBase(basePod3).
+			incomingPod: testutil.FromBase(basePod3).
 				Labels(map[string]string{"some-key": "some-val"}).
 				ReadyCondition().ObjRef(),
 			wantPods: []*corev1.Pod{basePod1, basePod2, basePod3},
@@ -87,7 +87,7 @@ func TestPodReconciler(t *testing.T) {
 					},
 				},
 			},
-			incomingPod: utiltest.FromBase(basePod11).
+			incomingPod: testutil.FromBase(basePod11).
 				Labels(map[string]string{"some-key": "some-val"}).
 				ReadyCondition().ObjRef(),
 			wantPods: []*corev1.Pod{basePod11, basePod2},
@@ -105,7 +105,7 @@ func TestPodReconciler(t *testing.T) {
 					},
 				},
 			},
-			incomingPod: utiltest.FromBase(basePod1).
+			incomingPod: testutil.FromBase(basePod1).
 				Labels(map[string]string{"some-key": "some-val"}).
 				DeletionTimestamp().
 				ReadyCondition().ObjRef(),
@@ -140,7 +140,7 @@ func TestPodReconciler(t *testing.T) {
 					},
 				},
 			},
-			incomingPod: utiltest.FromBase(basePod3).
+			incomingPod: testutil.FromBase(basePod3).
 				Labels(map[string]string{"some-key": "some-val"}).ObjRef(),
 			wantPods: []*corev1.Pod{basePod1, basePod2},
 		},
@@ -157,7 +157,7 @@ func TestPodReconciler(t *testing.T) {
 					},
 				},
 			},
-			incomingPod: utiltest.FromBase(basePod1).
+			incomingPod: testutil.FromBase(basePod1).
 				Labels(map[string]string{"some-wrong-key": "some-val"}).
 				ReadyCondition().ObjRef(),
 			wantPods: []*corev1.Pod{basePod2},
@@ -175,7 +175,7 @@ func TestPodReconciler(t *testing.T) {
 					},
 				},
 			},
-			incomingPod: utiltest.FromBase(basePod1).
+			incomingPod: testutil.FromBase(basePod1).
 				Labels(map[string]string{"some-wrong-key": "some-val"}).
 				ReadyCondition().ObjRef(),
 			wantPods: []*corev1.Pod{basePod2},

@@ -24,7 +24,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
 
@@ -35,7 +35,7 @@ type Plugin struct {
 
 // compile-time type assertions
 var (
-	_ framework.Scorer = &Plugin{}
+	_ fwksched.Scorer = &Plugin{}
 )
 
 const (
@@ -71,8 +71,8 @@ func (p *Plugin) TypedName() plugin.TypedName {
 }
 
 // Category returns the preference the scorer applies (Affinity).
-func (p *Plugin) Category() framework.ScorerCategory {
-	return framework.Affinity
+func (p *Plugin) Category() fwksched.ScorerCategory {
+	return fwksched.Affinity
 }
 
 // WithName sets the name of the plugin instance.
@@ -92,8 +92,8 @@ func (p *Plugin) Consumes() map[string]any {
 }
 
 // Score returns the scoring result for the given list of pods based on prefix cache match info.
-func (p *Plugin) Score(ctx context.Context, _ *framework.CycleState, _ *framework.InferenceRequest, endpoints []framework.Endpoint) map[framework.Endpoint]float64 {
-	scores := make(map[framework.Endpoint]float64, len(endpoints))
+func (p *Plugin) Score(ctx context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
+	scores := make(map[fwksched.Endpoint]float64, len(endpoints))
 	logger := log.FromContext(ctx)
 
 	for _, endpoint := range endpoints {

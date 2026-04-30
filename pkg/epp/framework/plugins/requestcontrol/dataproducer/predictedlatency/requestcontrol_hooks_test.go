@@ -32,7 +32,7 @@ import (
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -44,15 +44,15 @@ const (
 
 // Helper functions
 
-func createTestSchedulingResult(metadata *fwkdl.EndpointMetadata) *schedulingtypes.SchedulingResult {
+func createTestSchedulingResult(metadata *fwkdl.EndpointMetadata) *fwksched.SchedulingResult {
 
 	mockPod := createTestEndpoint(metadata.NamespacedName.Name, kvUsage, runningRequests, waitingQueue)
 
-	return &schedulingtypes.SchedulingResult{
+	return &fwksched.SchedulingResult{
 		PrimaryProfileName: "default",
-		ProfileResults: map[string]*schedulingtypes.ProfileRunResult{
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
 			"default": {
-				TargetEndpoints: []schedulingtypes.Endpoint{mockPod},
+				TargetEndpoints: []fwksched.Endpoint{mockPod},
 			},
 		},
 	}
@@ -89,7 +89,7 @@ func TestNewPredictedLatencyContext(t *testing.T) {
 }
 
 func TestNewPredictedLatencyContext_NilBody(t *testing.T) {
-	request := &schedulingtypes.InferenceRequest{
+	request := &fwksched.InferenceRequest{
 		Headers: map[string]string{reqcommon.RequestIdHeaderKey: "test-nil-body"},
 		Body:    nil,
 	}
@@ -167,8 +167,8 @@ func TestPredictedLatency_PreRequest_EmptySchedulingResult(t *testing.T) {
 	ctx := context.Background()
 	request := createTestInferenceRequest("test", 100, 50)
 
-	schedulingResult := &schedulingtypes.SchedulingResult{
-		ProfileResults: map[string]*schedulingtypes.ProfileRunResult{},
+	schedulingResult := &fwksched.SchedulingResult{
+		ProfileResults: map[string]*fwksched.ProfileRunResult{},
 	}
 
 	// Call PreRequest with empty scheduling result
@@ -1004,7 +1004,7 @@ func TestPredictedLatency_MultipleRequests_SamePod(t *testing.T) {
 	schedulingResult := createTestSchedulingResult(endpoint.GetMetadata())
 
 	// Create and set SLO contexts
-	for _, req := range []*schedulingtypes.InferenceRequest{request1, request2, request3} {
+	for _, req := range []*fwksched.InferenceRequest{request1, request2, request3} {
 		predictedLatencyCtx := newPredictedLatencyContext(req)
 		predictedLatencyCtx.avgTPOTSLO = 50
 		router.setPredictedLatencyContextForRequest(req, predictedLatencyCtx)

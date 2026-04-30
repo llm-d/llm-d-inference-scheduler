@@ -8,11 +8,11 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/config/loader"
-	giePlugins "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins"
 	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache"
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
-	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 func TestScorer(t *testing.T) {
@@ -53,14 +53,14 @@ schedulingProfiles:
 			if err != nil {
 				t.Fatalf("unexpected error from LoadConfigPhaseOne: %v", err)
 			}
-			handle := utils.NewTestHandle(ctx)
+			handle := igwtestutils.NewTestHandle(ctx)
 			_, err = loader.InstantiateAndConfigure(rawConfig, handle, logr.Discard())
 			if err != nil {
 				t.Fatalf("unexpected error from LoadConfigPhaseTwo: %v", err)
 			}
 			fmt.Println("all plugins", handle.GetAllPluginsWithNames())
 
-			_, err = giePlugins.PluginByType[*preciseprefixcache.Scorer](handle, test.pluginName)
+			_, err = fwkplugin.PluginByType[*preciseprefixcache.Scorer](handle, test.pluginName)
 			if err != nil {
 				t.Fatalf("expected Scorer, but got error: %v", err)
 			}

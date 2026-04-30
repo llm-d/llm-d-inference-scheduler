@@ -40,7 +40,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/types"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	fwmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/usagelimits"
 )
 
@@ -192,7 +192,7 @@ func (h *testHarness) waitForFinalization(item *FlowItem) (types.QueueOutcome, e
 // newTestItem creates a new FlowItem for testing purposes.
 func (h *testHarness) newTestItem(id string, key flowcontrol.FlowKey, ttl time.Duration) *FlowItem {
 	h.t.Helper()
-	req := fwmocks.NewMockFlowControlRequest(100, id, key)
+	req := fwkfcmocks.NewMockFlowControlRequest(100, id, key)
 	return NewItem(req, ttl, h.clock.Now())
 }
 
@@ -237,7 +237,7 @@ func (h *testHarness) allOrderedPriorityLevels() []int {
 // priorityBandAccessor provides the mock implementation for the `RegistryShard` interface. It acts as a factory for a
 // fully-configured, stateless mock that is safe for concurrent use.
 func (h *testHarness) priorityBandAccessor(p int) (flowcontrol.PriorityBandAccessor, error) {
-	band := &fwmocks.MockPriorityBandAccessor{PriorityV: p}
+	band := &fwkfcmocks.MockPriorityBandAccessor{PriorityV: p}
 
 	// Safely get a snapshot of the flow IDs under a lock.
 	h.mu.Lock()
@@ -263,7 +263,7 @@ func (h *testHarness) priorityBandAccessor(p int) (flowcontrol.PriorityBandAcces
 
 // fairnessPolicy provides the mock implementation for the RegistryShard interface.
 func (h *testHarness) fairnessPolicy(p int) (flowcontrol.FairnessPolicy, error) {
-	policy := &fwmocks.MockFairnessPolicy{}
+	policy := &fwkfcmocks.MockFairnessPolicy{}
 	// If the test provided a custom implementation, use it.
 	if h.fairnessPolicyPick != nil {
 		policy.PickFunc = h.fairnessPolicyPick
