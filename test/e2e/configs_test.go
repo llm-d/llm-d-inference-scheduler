@@ -25,7 +25,7 @@ schedulingProfiles:
 const deprecatedPdConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefill-header-handler
+- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     blockSizeTokens: 16
