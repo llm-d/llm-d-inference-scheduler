@@ -15,6 +15,7 @@ spec:
       labels:
         app: ${POOL_NAME}
         llm-d.ai/component: decode
+        llm-d.ai/role: ${DECODE_ROLE}
     spec:
       initContainers:
       # Routing sidecar - proxies requests from port 8000 to vllm on port 8200

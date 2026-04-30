@@ -9,7 +9,7 @@ scenario-specific patches. The atomic components live in `deploy/components/`:
 | `vllm-decode/` | Decode pod — always deployed, includes routing sidecar (removed in EPD scenario) |
 | `vllm-prefill/` | Prefill pod — deployed when `DISAGG_P=true` |
 | `vllm-encode/` | Encoder pod — deployed when `DISAGG_E=true` |
-| `overlays/simulator/` | Adds `--mode=${VLLM_SIM_MODE}`, UDS tokenizer, KV cache and ZMQ args |
+| `overlays/simulator/` | Adds `--mode=${VLLM_SIM_MODE}`, UDS tokenizer, KV cache and ZMQ args (included by all scenario overlays) |
 
 These overlays are used by both `scripts/kind-dev-env.sh` (for local KIND clusters)
 and e2e tests (via `kustomize build` + env var substitution).
@@ -22,10 +22,11 @@ and e2e tests (via `kustomize build` + env var substitution).
 | `p-d/` | false | true | prefill + decode | Separate Prefill and Decode pods with KV cache transfer |
 | `e-pd/` | true | false | encode + decode | Separate Encoder, combined Prefill-Decode with EC transfer |
 | `e-p-d/` | true | true | encode + prefill + decode | Fully disaggregated: separate Encoder, Prefill, and Decode |
-| `dp/` | — | — | decode | Data parallel decode (routing sidecar required for multi-rank routing) |
 
 Data parallel (`VLLM_DATA_PARALLEL_SIZE`) and KV cache (`KV_CACHE_ENABLED`) are independent
-options that combine with any disaggregation mode — they are not separate scenarios.
+options that combine with any disaggregation mode — they are not separate scenarios. Data
+parallel uses the same overlay as the chosen disaggregation mode; set
+`VLLM_DATA_PARALLEL_SIZE=2` (or higher) to enable multi-rank routing within any scenario.
 
 ## Shared Infrastructure
 
@@ -52,8 +53,9 @@ DISAGG_E=true ./scripts/kind-dev-env.sh
 # Encode / Prefill / Decode (fully disaggregated)
 DISAGG_E=true DISAGG_P=true ./scripts/kind-dev-env.sh
 
-# Data Parallel (any mode)
+# Data parallel — combine with any disaggregation mode
 VLLM_DATA_PARALLEL_SIZE=2 ./scripts/kind-dev-env.sh
+DISAGG_P=true VLLM_DATA_PARALLEL_SIZE=2 ./scripts/kind-dev-env.sh
 ```
 
 ## Key Environment Variables
@@ -80,7 +82,6 @@ Variables substituted at deploy time via `envsubst` or Go test `substituteMany`:
 | `KV_CACHE_ENABLED` | Enable KV cache scoring | `false` |
 | `HF_TOKEN` | HuggingFace token for downloading real models (empty for simulator) | `` |
 | `NAMESPACE` | Kubernetes namespace for all resources | `default` |
-| `DECODE_ROLE` | `llm-d.ai/role` label on the EPD decode pod (empty = no label) | `` |
 | `VLLM_EXTRA_ARGS_E` | Extra flags appended to Encoder vLLM args (`--flag=value` format) | `` |
 | `VLLM_EXTRA_ARGS_P` | Extra flags appended to Prefill vLLM args (`--flag=value` format) | `` |
 | `VLLM_EXTRA_ARGS_D` | Extra flags appended to Decode vLLM args (`--flag=value` format) | `` |

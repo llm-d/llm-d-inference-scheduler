@@ -91,7 +91,7 @@ kubectl --context kind-llm-d-inference-scheduler-dev \
 ```
 
 The default model depends on the disaggregation scenario:
-- **EPD / P/D / DP** (no encoder): `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
+- **EPD / P/D** (no encoder): `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
 - **E/PD / E/P/D** (with encoder, `DISAGG_E=true`): `Qwen/Qwen3-VL-2B-Instruct`
 
 To confirm what model is available:
@@ -815,7 +815,7 @@ export EPP_TAG="<YOUR_TAG>"
 **2. vLLM replica count:**
 
 ```bash
-export VLLM_REPLICA_COUNT=2
+export VLLM_REPLICA_COUNT_D=2
 ```
 
 **3. Model name:**

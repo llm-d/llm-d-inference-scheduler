@@ -15,9 +15,6 @@ const (
 	// epdDeploymentDir references the Kustomize directory for the non-disaggregated
 	// EPD scenario — single deployment, no routing sidecar, vLLM on port 8000
 	epdDeploymentDir = "../../deploy/environments/dev/epd"
-	// dpDeploymentDir references the Kustomize directory for data parallel
-	// — keeps the routing sidecar for multi-rank routing
-	dpDeploymentDir = "../../deploy/environments/dev/dp"
 	// pdDisaggDir references the Kustomize directory for the deployment
 	// running vLLM with P/D (connector type is configurable via ${CONNECTOR_TYPE})
 	pdDisaggDir = "../../deploy/environments/dev/p-d"
