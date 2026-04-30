@@ -51,7 +51,9 @@ const (
 	// as active for inference traffic. The value should be a comma-separated list of port numbers.
 	// Example: "8000,8001,8002"
 	activePortsAnnotation = "llm-d.ai/active-ports"
+
 	// legacyGAIEActivePortsAnnotation is the legacy GAIE active ports annotation key, kept for backward compatibility.
+	//
 	// Deprecated: use activePortsAnnotation instead; this may be removed in a future release.
 	legacyGAIEActivePortsAnnotation = "inference.networking.k8s.io/active-ports"
 )
