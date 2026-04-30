@@ -104,7 +104,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "no candidate endpoints",
 			req: &fwkschd.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "any-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -118,7 +118,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "one decode endpoint, long prompt",
 			req: &fwkschd.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -133,7 +133,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "one prefill endpoint, long prompt",
 			req: &fwkschd.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -148,7 +148,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "1P1D - long prompt",
 			req: &fwkschd.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -164,7 +164,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "1P1Dshort",
 			req: &fwkschd.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -181,7 +181,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "TestRolesWithNoDecode",
 			req: &fwkschd.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -213,7 +213,7 @@ func TestPDSchedule(t *testing.T) {
 		{
 			name: "1P2D - long prompt",
 			req: &fwkschd.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{

@@ -456,7 +456,7 @@ type ContentBlock struct {
 }
 
 type ImageBlock struct {
-	Url string `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
 }
 
 type AudioBlock struct {
@@ -465,7 +465,7 @@ type AudioBlock struct {
 }
 
 type VideoBlock struct {
-	Url string `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
 }
 
 // UnmarshalJSON allow use both format

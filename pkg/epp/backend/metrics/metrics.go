@@ -76,9 +76,9 @@ func NewPodMetricsClientImpl(logger logr.Logger, config Config) (PodMetricsClien
 	}
 	verifyMetricMapping(logger, *mapping)
 
-	var metricsHttpClient *http.Client
+	var metricsHTTPClient *http.Client
 	if config.ModelServerMetricsScheme == "https" {
-		metricsHttpClient = &http.Client{
+		metricsHTTPClient = &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
 					InsecureSkipVerify: config.ModelServerMetricsHTTPSInsecure,
@@ -86,13 +86,13 @@ func NewPodMetricsClientImpl(logger logr.Logger, config Config) (PodMetricsClien
 			},
 		}
 	} else {
-		metricsHttpClient = http.DefaultClient
+		metricsHTTPClient = http.DefaultClient
 	}
 	return &PodMetricsClientImpl{
 		MetricMapping:            mapping,
 		ModelServerMetricsPath:   config.ModelServerMetricsPath,
 		ModelServerMetricsScheme: config.ModelServerMetricsScheme,
-		Client:                   metricsHttpClient,
+		Client:                   metricsHTTPClient,
 	}, nil
 }
 

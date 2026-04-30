@@ -32,7 +32,7 @@ func createEndpoint(nsn k8stypes.NamespacedName, ipaddr string, labels map[strin
 
 func createRequest() *scheduling.InferenceRequest {
 	return &scheduling.InferenceRequest{
-		RequestId: "test-request",
+		RequestID: "test-request",
 	}
 }
 
@@ -275,7 +275,7 @@ func TestContextLengthAwareWithTokenizedPromptInCycleState(t *testing.T) {
 	})
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-request",
+		RequestID:   "test-request",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -311,7 +311,7 @@ func TestContextLengthAwareFallbackWithoutTokenizedPrompt(t *testing.T) {
 	plugin := NewContextLengthAware("test-fallback", params)
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-request",
+		RequestID:   "test-request",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{

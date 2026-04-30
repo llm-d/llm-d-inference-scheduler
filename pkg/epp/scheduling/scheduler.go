@@ -88,7 +88,7 @@ func (s *Scheduler) Schedule(ctx context.Context, request *framework.InferenceRe
 	}
 
 	if len(profileRunResults) == 0 {
-		err = fmt.Errorf("failed to run any scheduler profile for request %s", request.RequestId)
+		err = fmt.Errorf("failed to run any scheduler profile for request %s", request.RequestID)
 		return nil, err
 	}
 

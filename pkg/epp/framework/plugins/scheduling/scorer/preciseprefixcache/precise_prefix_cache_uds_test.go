@@ -85,7 +85,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body:        nil,
 			},
@@ -129,7 +129,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -204,7 +204,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -314,7 +314,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -385,7 +385,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -459,7 +459,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -507,7 +507,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -834,7 +834,7 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 	})
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-mm-e2e",
+		RequestID:   "test-mm-e2e",
 		TargetModel: mmModelName,
 	}
 

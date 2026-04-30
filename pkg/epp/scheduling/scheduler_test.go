@@ -66,7 +66,7 @@ func TestSchedule(t *testing.T) {
 		{
 			name: "no candidate endpoints",
 			req: &fwksched.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "any-model",
 			},
 			input:   []fwksched.Endpoint{},
@@ -76,7 +76,7 @@ func TestSchedule(t *testing.T) {
 		{
 			name: "finds optimal endpoint",
 			req: &fwksched.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "critical",
 			},
 			// pod2 will be picked because it has relatively low queue size, with the requested

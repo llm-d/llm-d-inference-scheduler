@@ -291,15 +291,15 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 		switch v := req.Request.(type) {
 		case *extProcPb.ProcessingRequest_RequestHeaders:
-			requestID := envoy.ExtractHeaderValue(v, reqcommon.RequestIdHeaderKey)
+			requestID := envoy.ExtractHeaderValue(v, reqcommon.RequestIDHeaderKey)
 			// request ID is a must for maintaining a state per request in plugins that hold internal state and use PluginState.
 			// if request id was not supplied as a header, we generate it ourselves.
 			if len(requestID) == 0 {
 				requestID = uuid.NewString()
 				loggerTrace.Info("RequestID header is not found in the request, generated a request id")
-				reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey] = requestID // update in headers so director can consume it
+				reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey] = requestID // update in headers so director can consume it
 			}
-			logger = logger.WithValues(reqcommon.RequestIdHeaderKey, requestID)
+			logger = logger.WithValues(reqcommon.RequestIDHeaderKey, requestID)
 			logger.V(logutil.DEFAULT).Info("EPP received request") // Request ID will be logged too as part of logger context values.
 			loggerTrace = logger.V(logutil.TRACE)
 			ctx = log.IntoContext(ctx, logger)
@@ -345,7 +345,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				// Setting evictCh from nil to a real channel dynamically enables the
 				// eviction case in the main select.
 				if s.evictionLookup != nil {
-					evictionRequestID = reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey]
+					evictionRequestID = reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey]
 					evictCh = s.evictionLookup.Get(evictionRequestID)
 				}
 
@@ -572,9 +572,8 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		// Trailers in requests are not guaranteed
 		if err := srv.Send(r.respTrailerResp); err != nil {
 			return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
-		} else {
-			logger.V(logutil.DEBUG).Info("EPP sent trailer back to proxy")
 		}
+		logger.V(logutil.DEBUG).Info("EPP sent trailer back to proxy")
 	}
 	return nil
 }

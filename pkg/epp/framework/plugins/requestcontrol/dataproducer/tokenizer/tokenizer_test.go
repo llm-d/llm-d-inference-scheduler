@@ -137,7 +137,7 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 				{Role: "user", Content: fwkrh.Content{
 					Structured: []fwkrh.ContentBlock{
 						{Type: "text", Text: "Describe this image"},
-						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,abc123"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "data:image/png;base64,abc123"}},
 					},
 				}},
 			},
@@ -157,8 +157,8 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 				{Role: "user", Content: fwkrh.Content{
 					Structured: []fwkrh.ContentBlock{
 						{Type: "text", Text: "Compare these two images"},
-						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,img1"}},
-						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,img2"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "data:image/png;base64,img1"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "data:image/png;base64,img2"}},
 					},
 				}},
 			},
@@ -179,7 +179,7 @@ func TestChatCompletionsToRenderChatRequest_MultimodalContent(t *testing.T) {
 				{Role: "user", Content: fwkrh.Content{
 					Structured: []fwkrh.ContentBlock{
 						{Type: "text", Text: "What is in this image?"},
-						{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://example.com/img.jpg"}},
+						{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/img.jpg"}},
 					},
 				}},
 				{Role: "assistant", Content: fwkrh.Content{Raw: "I see a dog."}},

@@ -63,6 +63,7 @@ type Datastore interface {
 	PoolGet() (*datalayer.EndpointPool, error)
 	PoolHasSynced() bool
 	PoolLabelsMatch(podLabels map[string]string) bool
+	WithEndpointPool(pool *datalayer.EndpointPool) Datastore
 
 	// InferenceObjective operations
 	ObjectiveSet(infObjective *v1alpha2.InferenceObjective)
@@ -90,7 +91,7 @@ var _ Datastore = &datastore{}
 
 // NewDatastore creates a new data store.
 // TODO: modelServerMetricsPort is being deprecated
-func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory, modelServerMetricsPort int32) *datastore {
+func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory, modelServerMetricsPort int32) Datastore {
 	// Initialize with defaults
 	return &datastore{
 		parentCtx:              parentCtx,
@@ -122,7 +123,7 @@ type datastore struct {
 	epf                    datalayer.EndpointFactory
 }
 
-func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) *datastore {
+func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) Datastore {
 	ds.pool = pool
 	return ds
 }

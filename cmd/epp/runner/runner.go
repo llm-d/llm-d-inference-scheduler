@@ -445,14 +445,13 @@ func setupDatastore(ctx context.Context, epFactory datalayer.EndpointFactory, mo
 
 	if startCrdReconcilers {
 		return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort), nil
-	} else {
-		endpointPool, err := NewEndpointPoolFromOptions(namespace, name, endpointSelector, endpointTargetPorts)
-		if err != nil {
-			setupLog.Error(err, "Failed to construct endpoint pool from options")
-			return nil, err
-		}
-		return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort).WithEndpointPool(endpointPool), nil
 	}
+	endpointPool, err := NewEndpointPoolFromOptions(namespace, name, endpointSelector, endpointTargetPorts)
+	if err != nil {
+		setupLog.Error(err, "Failed to construct endpoint pool from options")
+		return nil, err
+	}
+	return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort).WithEndpointPool(endpointPool), nil
 }
 
 // registerInTreePlugins registers the factory functions of all known plugins
