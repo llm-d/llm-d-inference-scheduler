@@ -115,13 +115,23 @@ func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl
 	var ready chan struct{}
 	started := false
 
+	// Pre-compute poll-based extractors upfront to avoid repeated type assertions in the hot loop.
+	pollingExtractors := make(map[string][]fwkdl.Extractor, len(extractors))
+	for name, exts := range extractors {
+		for _, ext := range exts {
+			if poller, ok := ext.(fwkdl.Extractor); ok {
+				pollingExtractors[name] = append(pollingExtractors[name], poller)
+			}
+		}
+	}
+
 	c.startOnce.Do(func() {
 		logger := log.FromContext(ctx).WithValues("endpoint", ep.GetMetadata().GetIPAddress())
 		c.ctx, c.cancel = context.WithCancel(ctx)
 		started = true
 		ready = make(chan struct{})
 
-		go func(endpoint fwkdl.Endpoint, sources []fwkdl.PollingDataSource, exts map[string][]fwkdl.ExtractorBase) {
+		go func(endpoint fwkdl.Endpoint, sources []fwkdl.PollingDataSource, exts map[string][]fwkdl.Extractor) {
 			logger.V(logging.DEFAULT).Info("starting collection")
 
 			defer func() {
@@ -153,16 +163,14 @@ func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl
 						if srcExtractors, ok := exts[tn.Name]; ok && data != nil {
 							for _, ext := range srcExtractors {
 								extKey := ext.TypedName().String()
-								if poller, ok := ext.(fwkdl.Extractor); ok {
-									extErr := poller.Extract(ctx, data, endpoint)
-									logErrorTransition(logger, c.lastExtractErrors, extKey, "extract", "extractor", extErr)
-								}
+								extErr := ext.Extract(ctx, data, endpoint)
+								logErrorTransition(logger, c.lastExtractErrors, extKey, "extract", "extractor", extErr)
 							}
 						}
 					}
 				}
 			}
-		}(ep, pollers, extractors)
+		}(ep, pollers, pollingExtractors)
 	})
 
 	if !started {
