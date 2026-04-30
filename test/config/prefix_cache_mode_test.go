@@ -16,6 +16,10 @@ import (
 )
 
 func TestScorer(t *testing.T) {
+	if _, err := os.Stat("/tmp/tokenizer/tokenizer-uds.socket"); err != nil {
+		t.Skipf("tokenizer UDS socket unavailable: %v", err)
+	}
+
 	tests := []struct {
 		name       string
 		pluginName string
@@ -31,6 +35,9 @@ plugins:
 - name: precisePrefixCache
   type: precise-prefix-cache-scorer
   parameters:
+    indexerConfig:
+      tokenizersPoolConfig:
+        modelName: "test-model"
     kvEventsConfig:
       zmqEndpoint: "tcp://localhost:5557"
 - name: profileHandler
