@@ -48,13 +48,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 )
 
-const (
-	// TODO(https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2081):
-	// Make this timeout configurable per-plugin or globally via the Director configuration to support plugins with
-	// varying latency profiles.
-	prepareDataTimeout = 400 * time.Millisecond
-)
-
 // Datastore defines the interface required by the Director.
 type Datastore interface {
 	PoolGet() (*datalayer.EndpointPool, error)
@@ -78,12 +71,12 @@ func NewDirectorWithConfig(
 	config *Config,
 ) *Director {
 	return &Director{
-		datastore:             datastore,
-		scheduler:             scheduler,
-		admissionController:   admissionController,
-		endpointCandidates:    endpointCandidates,
-		requestControlPlugins: *config,
-		defaultPriority:       0, // define default priority explicitly
+		datastore:            datastore,
+		scheduler:            scheduler,
+		admissionController:  admissionController,
+		endpointCandidates:   endpointCandidates,
+		requestControlConfig: *config,
+		defaultPriority:      0, // define default priority explicitly
 	}
 }
 
@@ -113,11 +106,11 @@ type responseBodyQueue struct {
 // - Preparing the request context for the Envoy ext_proc filter to route the request.
 // - Running PostResponse plugins.
 type Director struct {
-	datastore             Datastore
-	scheduler             Scheduler
-	admissionController   AdmissionController
-	endpointCandidates    contracts.EndpointCandidates
-	requestControlPlugins Config
+	datastore            Datastore
+	scheduler            Scheduler
+	admissionController  AdmissionController
+	endpointCandidates   contracts.EndpointCandidates
+	requestControlConfig Config
 	// we just need a pointer to an int variable since priority is a pointer in InferenceObjective
 	// no need to set this in the constructor, since the value we want is the default int val
 	// and value types cannot be nil
@@ -350,7 +343,7 @@ func (d *Director) toSchedulerEndpoints(endpoints []fwkdl.Endpoint) []fwksched.E
 
 // HandleResponseHeader is called when the response headers are received.
 func (d *Director) HandleResponseHeader(ctx context.Context, reqCtx *handlers.RequestContext) *handlers.RequestContext {
-	if len(d.requestControlPlugins.responseReceivedPlugins) == 0 {
+	if len(d.requestControlConfig.responseReceivedPlugins) == 0 {
 		return reqCtx
 	}
 	response := &fwk.Response{
@@ -375,7 +368,7 @@ func (d *Director) HandleResponseHeader(ctx context.Context, reqCtx *handlers.Re
 func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.RequestContext, endOfStream bool) *handlers.RequestContext {
 	logger := log.FromContext(ctx).WithValues("stage", "bodyChunk")
 	logger.V(logutil.TRACE).Info("Entering HandleResponseBodyChunk")
-	if len(d.requestControlPlugins.responseStreamingPlugins) == 0 {
+	if len(d.requestControlConfig.responseStreamingPlugins) == 0 {
 		logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyChunk")
 		return reqCtx
 	}
@@ -439,7 +432,7 @@ func (d *Director) GetRandomEndpoint() *fwkdl.EndpointMetadata {
 func (d *Director) runPreRequestPlugins(ctx context.Context, request *fwksched.InferenceRequest,
 	schedulingResult *fwksched.SchedulingResult) {
 	loggerDebug := log.FromContext(ctx).V(logutil.DEBUG)
-	for _, plugin := range d.requestControlPlugins.preRequestPlugins {
+	for _, plugin := range d.requestControlConfig.preRequestPlugins {
 		loggerDebug.Info("Running PreRequest plugin", "plugin", plugin.TypedName())
 		before := time.Now()
 		plugin.PreRequest(ctx, request, schedulingResult)
@@ -450,16 +443,16 @@ func (d *Director) runPreRequestPlugins(ctx context.Context, request *fwksched.I
 
 func (d *Director) runPrepareDataPlugins(ctx context.Context,
 	request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
-	if len(d.requestControlPlugins.prepareDataPlugins) == 0 {
+	if len(d.requestControlConfig.prepareDataPlugins) == 0 {
 		return nil
 	}
-	return prepareDataPluginsWithTimeout(prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, ctx, request, endpoints)
+	return prepareDataPluginsWithTimeout(d.requestControlConfig.prepareDataTimeout, d.requestControlConfig.prepareDataPlugins, ctx, request, endpoints)
 }
 
 func (d *Director) runAdmissionPlugins(ctx context.Context,
 	request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) bool {
 	loggerDebug := log.FromContext(ctx).V(logutil.DEBUG)
-	for _, plugin := range d.requestControlPlugins.admissionPlugins {
+	for _, plugin := range d.requestControlConfig.admissionPlugins {
 		loggerDebug.Info("Running AdmitRequest plugin", "plugin", plugin.TypedName())
 		if denyReason := plugin.AdmitRequest(ctx, request, endpoints); denyReason != nil {
 			loggerDebug.Info("AdmitRequest plugin denied the request", "plugin", plugin.TypedName(), "reason", denyReason.Error())
@@ -472,7 +465,7 @@ func (d *Director) runAdmissionPlugins(ctx context.Context,
 
 func (d *Director) runResponseHeaderPlugins(ctx context.Context, request *fwksched.InferenceRequest, response *fwk.Response, targetEndpoint *fwkdl.EndpointMetadata) {
 	loggerDebug := log.FromContext(ctx).V(logutil.DEBUG)
-	for _, plugin := range d.requestControlPlugins.responseReceivedPlugins {
+	for _, plugin := range d.requestControlConfig.responseReceivedPlugins {
 		loggerDebug.Info("Running ResponseReceived plugin", "plugin", plugin.TypedName())
 		before := time.Now()
 		plugin.ResponseHeader(ctx, request, response, targetEndpoint)
@@ -483,7 +476,7 @@ func (d *Director) runResponseHeaderPlugins(ctx context.Context, request *fwksch
 
 func (d *Director) runResponseBodyPlugins(ctx context.Context, request *fwksched.InferenceRequest, response *fwk.Response, targetEndpoint *fwkdl.EndpointMetadata) {
 	loggerTrace := log.FromContext(ctx).V(logutil.TRACE)
-	for _, plugin := range d.requestControlPlugins.responseStreamingPlugins {
+	for _, plugin := range d.requestControlConfig.responseStreamingPlugins {
 		loggerTrace.Info("Running ResponseStreaming plugin", "plugin", plugin.TypedName())
 		before := time.Now()
 		plugin.ResponseBody(ctx, request, response, targetEndpoint)

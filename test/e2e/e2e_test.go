@@ -83,6 +83,26 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
+	ginkgo.When("Running a configuration with Request Control", func() {
+		ginkgo.It("should run successfully", func() {
+			infPoolObjects = createInferencePool(1, true)
+
+			modelServers := createModelServersDecode(1)
+
+			epp := createEndPointPicker(requestControlConfig)
+
+			_, decodePods := getModelServerPods(podSelector, prefillSelector, decodeSelector)
+			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
+
+			nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
+			gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
+			gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
+
+			testutils.DeleteObjects(testConfig, epp)
+			testutils.DeleteObjects(testConfig, modelServers)
+		})
+	})
+
 	ginkgo.When("Running a PD configuration (deprecated pd-profile-handler)", func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
