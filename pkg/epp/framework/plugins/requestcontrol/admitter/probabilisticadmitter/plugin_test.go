@@ -21,10 +21,10 @@ import (
 	"math"
 	"testing"
 
-	k8stypes "k8s.io/apimachinery/pkg/types"
+	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 func newEndpoint(name string, queueSize int, kvFraction float64) schedulingtypes.Endpoint {
