@@ -282,22 +282,23 @@ plugins:
 
 ---
 
-#### ByLabelSelector
+#### LabelSelectorFilter
 
 Filters out pods using a standard Kubernetes label selector.
 
-> [!NOTE]
->  Only the matching labels feature of Kubernetes label selectors is supported.
-
-- **Type**: `by-label-selector`
+- **Type**: `label-selector-filter`
 - **Parameters**: A standard Kubernetes label selector.
   - `matchLabels`: map of `{key,value}` pairs. If more than one pair are in the map, all of the keys are checked and the results are combined with AND logic.
+  - `matchExpressions`: list of label selector requirements. Each requirement specifies a `key`, an `operator` (`In`, `NotIn`, `Exists`, `DoesNotExist`), and optionally a list of `values`.
+
+> [!NOTE]
+> The previous type name `by-label-selector` is deprecated but still accepted for backward compatibility.
 
 Example configuration with the above parameters set:
 
 ```yaml
 plugins:
-  - type: by-label-selector
+  - type: label-selector-filter
     parameters:
       matchLabels:
         inference-role: decode
@@ -313,7 +314,10 @@ In this example:
 
 ---
 
-#### ByLabel
+#### ByLabel (Deprecated)
+
+> [!WARNING]
+> The `by-label` filter is deprecated. Use `label-selector-filter` for generic label-based filtering, or the role-specific filters (`decode-filter`, `prefill-filter`, `encode-filter`) for role-based filtering.
 
 Filters out pods that do not have a specific label with one of the allowed values. Pods missing the label are either filtered out or retained based on the `allowsNoLabel` setting.
 
@@ -352,7 +356,7 @@ Filters out pods that are not marked either as decode or both prefill and decode
 
 #### PrefillFilter
 
-Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`, `encode-prefill`, `prefill-decode` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
+Filters out pods that are not marked as prefill. The filter looks for the label `llm-d.ai/role`, with a value of `prefill`, `encode-prefill`, `prefill-decode` or `encode-prefill-decode`. Pods missing the label are filtered out.
 
 - **Type**: `prefill-filter`
 - **Parameters**: None
@@ -361,7 +365,7 @@ Filters out pods that are not marked as prefill. The filter looks for the label 
 
 #### EncodeFilter
 
-Filters out pods that are not marked as encode. The filter looks for the label `llm-d.ai/role`, with a value of `encode`, `encode-prefill` or `encode-prefill-decode`. In addition pods that are missing the label will not be filtered out.
+Filters out pods that are not marked as encode. The filter looks for the label `llm-d.ai/role`, with a value of `encode`, `encode-prefill` or `encode-prefill-decode`. Pods missing the label are filtered out.
 
 - **Type**: `encode-filter`
 - **Parameters**: None
