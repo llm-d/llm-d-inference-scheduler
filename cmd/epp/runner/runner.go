@@ -73,6 +73,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/usagelimits"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/admitter/latencyslo"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/admitter/probabilisticadmitter"
 	reqdataprodprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/approximateprefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/inflightload"
 	latencyproducer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/predictedlatency"
@@ -482,6 +483,7 @@ func (r *Runner) registerInTreePlugins() {
 
 	// Latency predictor plugins
 	fwkplugin.Register(latencyslo.LatencyAdmissionPluginType, latencyslo.LatencyAdmissionFactory)
+	fwkplugin.Register(probabilisticadmitter.Type, probabilisticadmitter.Factory)
 
 	// Latency scoring and filtering plugins
 	fwkplugin.Register(prefixcacheaffinity.PluginType, prefixcacheaffinity.Factory)
