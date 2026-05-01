@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package discovery defines the DiscoveryPlugin abstraction for populating
+// Package discovery defines the EndpointDiscovery abstraction for populating
 // the datastore with inference server endpoints independently of Kubernetes.
 package discovery
 
@@ -27,10 +27,10 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
-// DiscoveryPlugin discovers inference endpoints and drives their lifecycle in the datastore.
+// EndpointDiscovery discovers inference endpoints and drives their lifecycle in the datastore.
 // Implementations are registered in the plugin registry and selected via
 // EndpointPickerConfig.discovery.pluginRef.
-type DiscoveryPlugin interface {
+type EndpointDiscovery interface {
 	fwkplugin.Plugin
 
 	// Start begins discovery and blocks in the caller's goroutine until ctx is
@@ -45,7 +45,7 @@ type DiscoveryPlugin interface {
 	Start(ctx context.Context, notifier Notifier) error
 }
 
-// Notifier is the callback through which DiscoveryPlugin communicates endpoint state
+// Notifier is the callback through which EndpointDiscovery communicates endpoint state
 // to the datastore.
 //
 // Notifier is NOT goroutine-safe. All calls must be made sequentially from a
