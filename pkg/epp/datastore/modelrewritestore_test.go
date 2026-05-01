@@ -22,9 +22,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 )
 
 func TestModelRewriteStore(t *testing.T) {

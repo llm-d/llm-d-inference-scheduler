@@ -20,9 +20,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 )
 
 // modelRewriteStore encapsulates the logic for storing and retrieving

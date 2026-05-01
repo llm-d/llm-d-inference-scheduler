@@ -24,6 +24,7 @@ import (
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	pb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -33,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/backend/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
