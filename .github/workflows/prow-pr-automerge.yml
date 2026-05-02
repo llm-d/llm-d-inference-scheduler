@@ -1,10 +1,18 @@
-# This Github workflow will check every 5m for PRs with the lgtm label and will attempt to automatically merge them.
-# If the hold label is present, it will block automatic merging.
+# Merges PRs with the lgtm label. Blocks if hold label is present.
+# Event-driven triggers handle immediate merges; cron fallback catches edge cases.
 
 name: "Prow merge on lgtm label"
 on:
+  pull_request:
+    types: [labeled]
+  check_suite:
+    types: [completed]
   schedule:
-  - cron: "*/5 * * * *" # every 5 minutes
+  - cron: "*/30 * * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   auto-merge:
@@ -15,4 +23,3 @@ jobs:
           jobs: 'lgtm'
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           merge-method: 'squash'
-          
