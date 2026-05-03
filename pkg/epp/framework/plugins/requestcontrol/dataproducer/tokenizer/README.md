@@ -2,9 +2,9 @@
 
 **Type:** `tokenizer`
 
-Tokenizes the request prompt (text completions and multi-modal chat) and publishes the result on `request.Body.TokenizedPrompt` for downstream consumers (scorers, filters, other data producers). Communicates over a Unix domain socket with a tokenizer sidecar from [`github.com/llm-d/llm-d-kv-cache`](https://github.com/llm-d/llm-d-kv-cache). Fail-open: tokenization errors are logged and scheduling continues with `TokenizedPrompt` left nil.
+Tokenizes the request prompt (text completions and multi-modal chat) and publishes the result on `InferenceRequestBody.TokenizedPrompt` for downstream consumers (scorers, filters, other data producers). Communicates over a Unix domain socket with a tokenizer sidecar from [`github.com/llm-d/llm-d-kv-cache`](https://github.com/llm-d/llm-d-kv-cache). Fail-open: tokenization errors are logged and scheduling continues with `TokenizedPrompt` left nil.
 
-Implements `requestcontrol.DataProducer` and runs in the `PrepareRequestData` phase, before filters and scorers. The plugin is idempotent: if `request.Body.TokenizedPrompt` is already populated by an earlier producer, tokenization is skipped. Multi-modal features are flattened into the upstream list shape, sorted by placeholder offset.
+Implements `requestcontrol.DataProducer` and runs in the `PrepareRequestData` phase, before filters and scorers. The plugin is idempotent: if `InferenceRequestBody.TokenizedPrompt` is already populated by an earlier producer, tokenization is skipped. Multi-modal features are flattened into the upstream list shape, sorted by placeholder offset.
 
 **Parameters:**
 - `modelName` (string, required): Model name whose tokenizer to load.

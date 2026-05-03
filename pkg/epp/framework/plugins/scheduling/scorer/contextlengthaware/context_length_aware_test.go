@@ -240,7 +240,7 @@ func TestCalculateRangeScoreFallback(t *testing.T) {
 	})
 }
 
-// TokenizedPrompt tests — plugin reads tokens from request.Body.TokenizedPrompt
+// TokenizedPrompt tests — plugin reads tokens from InferenceRequestBody.TokenizedPrompt
 // as populated by the tokenizer DataProducer plugin.
 
 func TestContextLengthAwareWithTokenizedPromptOnRequest(t *testing.T) {

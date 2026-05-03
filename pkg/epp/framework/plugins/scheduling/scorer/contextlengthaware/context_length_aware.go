@@ -84,7 +84,7 @@ func NewContextLengthAware(name string, params *contextLengthAwareParameters) *C
 // If filtering is enabled, endpoints that don't support the request's context length are filtered out.
 // Additionally, it scores endpoints based on how well their context length ranges match the request.
 //
-// For precise token counting, this plugin reads request.Body.TokenizedPrompt as
+// For precise token counting, this plugin reads InferenceRequestBody.TokenizedPrompt as
 // populated by the tokenizer DataProducer plugin. When tokens are not available
 // (tokenizer plugin not configured), it falls back to character-based estimation.
 type ContextLengthAware struct {
@@ -195,7 +195,7 @@ func (p *ContextLengthAware) Category() scheduling.ScorerCategory {
 }
 
 // getContextLength returns the context length (token count) for the request.
-// It reads tokenized data from request.Body.TokenizedPrompt as populated by the
+// It reads tokenized data from InferenceRequestBody.TokenizedPrompt as populated by the
 // tokenizer DataProducer plugin, falling back to character-based estimation
 // when tokens are not available.
 // Returns the token count and a boolean indicating whether precise tokenization was used.

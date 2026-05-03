@@ -95,7 +95,7 @@ func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, err
 }
 
 // Plugin tokenizes the prompt in the incoming request and writes the result to
-// request.Body.TokenizedPrompt for downstream DataProducer / scoring plugins.
+// InferenceRequestBody.TokenizedPrompt for downstream DataProducer / scoring plugins.
 type Plugin struct {
 	typedName plugin.TypedName
 	tokenizer tokenizer
@@ -126,7 +126,7 @@ func (p *Plugin) Consumes() map[string]any {
 }
 
 // PrepareRequestData tokenizes the request prompt and stores the result on
-// request.Body.TokenizedPrompt (TokenIDs + MultiModalFeatures in flat shape).
+// InferenceRequestBody.TokenizedPrompt (TokenIDs + MultiModalFeatures in flat shape).
 // Fail-open: errors are logged; TokenizedPrompt is left nil. If the request
 // already carries a TokenizedPrompt, tokenization is skipped.
 func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.InferenceRequest, _ []scheduling.Endpoint) error {
