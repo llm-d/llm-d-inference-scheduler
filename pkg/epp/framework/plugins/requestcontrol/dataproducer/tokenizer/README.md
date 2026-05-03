@@ -1,6 +1,6 @@
 # Token Producer Plugin
 
-**Type:** `token-producer` (legacy alias `tokenizer` continues to work for backward compatibility and will be removed in a future release)
+**Type:** `token-producer`
 
 Tokenizes the request prompt (text completions and multi-modal chat) and publishes the result on `InferenceRequestBody.TokenizedPrompt` for downstream consumers (scorers, filters, other data producers). Communicates over a Unix domain socket with a tokenizer sidecar from [`github.com/llm-d/llm-d-kv-cache`](https://github.com/llm-d/llm-d-kv-cache). Fail-open: tokenization errors are logged and scheduling continues with `TokenizedPrompt` left nil.
 
@@ -13,6 +13,9 @@ Implements `requestcontrol.DataProducer` and runs in the `PrepareRequestData` ph
 - `udsTokenizerConfig.maxRetries` (int, optional, default: `3`): Maximum retry attempts on transport errors.
 
 Defaults shown above are the library defaults from `tokenization.UdsTokenizerConfig`.
+
+> [!NOTE]
+> Legacy alias `tokenizer` continues to work for backward compatibility and will be removed in a future release.
 
 **Configuration Example:**
 ```yaml
