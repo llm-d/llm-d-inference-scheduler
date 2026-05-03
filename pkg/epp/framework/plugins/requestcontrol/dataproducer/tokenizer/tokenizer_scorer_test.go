@@ -66,13 +66,13 @@ func TestTokenizerScorer_Score(t *testing.T) {
 	}{
 		{
 			name:    "skips nil body",
-			request: &scheduling.InferenceRequest{RequestId: "nil-body", Body: nil},
+			request: &scheduling.InferenceRequest{RequestID: "nil-body", Body: nil},
 			wantNil: true,
 		},
 		{
 			name: "skips unsupported request type",
 			request: &scheduling.InferenceRequest{
-				RequestId: "unsupported",
+				RequestID: "unsupported",
 				Body:      &fwkrh.InferenceRequestBody{},
 			},
 			wantNil: true,
@@ -80,7 +80,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 		{
 			name: "tokenizes completions and writes to CycleState",
 			request: &scheduling.InferenceRequest{
-				RequestId: "completions",
+				RequestID: "completions",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
 						Prompt: fwkrh.Prompt{Raw: "The quick brown fox"},
@@ -93,7 +93,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 		{
 			name: "tokenizes chat completions and writes to CycleState",
 			request: &scheduling.InferenceRequest{
-				RequestId: "chat",
+				RequestID: "chat",
 				Body: &fwkrh.InferenceRequestBody{
 					ChatCompletions: &fwkrh.ChatCompletionsRequest{
 						Messages: []fwkrh.Message{
@@ -108,7 +108,7 @@ func TestTokenizerScorer_Score(t *testing.T) {
 		{
 			name: "fail-open on tokenization error",
 			request: &scheduling.InferenceRequest{
-				RequestId: "fail-open",
+				RequestID: "fail-open",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "fail"}},
 				},
@@ -168,7 +168,7 @@ func TestTokenizerScorer_SkipsWhenAlreadyInCycleState(t *testing.T) {
 	p := newTestPlugin(tok)
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "already-tokenized",
+		RequestID: "already-tokenized",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
 		},
@@ -203,7 +203,7 @@ func TestTokenizerScorer_RenderChat_WritesMMFeaturesToCycleState(t *testing.T) {
 	cycleState := scheduling.NewCycleState()
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "mm-chat",
+		RequestID: "mm-chat",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
 				Messages: []fwkrh.Message{
@@ -242,7 +242,7 @@ func TestTokenizerScorer_RenderChat_ForwardsStructuredContent(t *testing.T) {
 	cycleState := scheduling.NewCycleState()
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "mm-structured",
+		RequestID: "mm-structured",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
 				Messages: []fwkrh.Message{
@@ -250,7 +250,7 @@ func TestTokenizerScorer_RenderChat_ForwardsStructuredContent(t *testing.T) {
 					{Role: "user", Content: fwkrh.Content{
 						Structured: []fwkrh.ContentBlock{
 							{Type: "text", Text: "Describe this image"},
-							{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "data:image/png;base64,abc"}},
+							{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "data:image/png;base64,abc"}},
 						},
 					}},
 				},
@@ -291,7 +291,7 @@ func TestTokenizerScorer_Render_NilMMFeatures(t *testing.T) {
 	cycleState := scheduling.NewCycleState()
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "text-completions",
+		RequestID: "text-completions",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},
 		},

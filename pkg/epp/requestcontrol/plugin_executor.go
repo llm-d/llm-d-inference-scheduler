@@ -28,7 +28,7 @@ import (
 // executePluginsAsDAG executes PrepareData plugins as a DAG based on their dependencies asynchronously.
 // So, a plugin is executed only after all its dependencies have been executed.
 // If there is a cycle or any plugin fails with error, it returns an error.
-func executePluginsAsDAG(plugins []fwk.DataProducer, ctx context.Context, request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
+func executePluginsAsDAG(ctx context.Context, plugins []fwk.DataProducer, request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
 	for _, plugin := range plugins {
 		if err := plugin.PrepareRequestData(ctx, request, endpoints); err != nil {
 			return errors.New("prepare data plugin " + plugin.TypedName().String() + " failed: " + err.Error())
@@ -40,14 +40,14 @@ func executePluginsAsDAG(plugins []fwk.DataProducer, ctx context.Context, reques
 // prepareDataPluginsWithTimeout executes the PrepareRequestData plugins with retries and timeout.
 // The child context is cancelled when the timeout fires so plugins can observe cancellation
 // (e.g. abort outbound HTTP calls) and avoid committing state after the director has moved on.
-func prepareDataPluginsWithTimeout(timeout time.Duration, plugins []fwk.DataProducer,
-	ctx context.Context, request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
+func prepareDataPluginsWithTimeout(ctx context.Context, timeout time.Duration, plugins []fwk.DataProducer,
+	request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- executePluginsAsDAG(plugins, ctx, request, endpoints)
+		errCh <- executePluginsAsDAG(ctx, plugins, request, endpoints)
 	}()
 
 	select {

@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
 - namespaces.yaml
 - configmaps.yaml
-- deployments.yaml
+- deployment.yaml
 - hpa.yaml
 - policies.yaml
 - rbac.yaml

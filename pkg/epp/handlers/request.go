@@ -43,14 +43,7 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
 		// More context: https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/526
 		// The above PR will address endpoint admission, but currently any request without a body will be
 		// routed to a random upstream endpoint.
-		endpoint := s.director.GetRandomEndpoint()
-		if endpoint == nil {
-			return errcommon.Error{Code: errcommon.Internal, Msg: "no pods available in datastore"}
-		}
-		reqCtx.TargetEndpoint = endpoint.GetIPAddress() + ":" + endpoint.GetPort()
-		reqCtx.RequestSize = 0
-		reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
-		return nil
+		return s.fallbackToRandomEndpoint(ctx, reqCtx, 0)
 	}
 
 	for _, header := range req.RequestHeaders.Headers.Headers {
@@ -69,6 +62,21 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
 		reqCtx.FairnessID = metadata.DefaultFairnessID
 	}
 
+	return nil
+}
+
+func (s *StreamingServer) fallbackToRandomEndpoint(ctx context.Context, reqCtx *RequestContext, requestSize int) error {
+	endpoint := s.director.GetRandomEndpoint()
+	if endpoint == nil {
+		return errcommon.Error{Code: errcommon.Internal, Msg: "no pods available in datastore"}
+	}
+	reqCtx.TargetEndpoint = endpoint.GetIPAddress() + ":" + endpoint.GetPort()
+	reqCtx.RequestSize = requestSize
+	reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
+
+	if requestSize > 0 {
+		reqCtx.reqBodyResp = envoy.GenerateRequestBodyResponses(reqCtx.Request.RawBody)
+	}
 	return nil
 }
 

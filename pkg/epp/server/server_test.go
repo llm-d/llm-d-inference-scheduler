@@ -24,11 +24,14 @@ import (
 	"testing"
 
 	pb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	extv1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/openai"
@@ -128,7 +131,7 @@ func runStreamingTest(t *testing.T, streamInRequest bool, streamingResponse bool
 		[]*v1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: podName}}}, "test-pool1", namespace, poolPort)
 	streamingServer := handlers.NewStreamingServer(ds, director, openai.NewOpenAIParser())
 
-	testListener, errChan := utils.SetupTestStreamingServer(t, ctx, streamingServer)
+	testListener, errChan := utils.SetupTestStreamingServer(ctx, t, streamingServer)
 	process, conn := utils.GetStreamingServerClient(ctx, t)
 	defer conn.Close()
 
@@ -379,5 +382,94 @@ func (ts *testDirector) HandleResponseBody(ctx context.Context, reqCtx *handlers
 	return reqCtx
 }
 func (ts *testDirector) GetRandomEndpoint() *fwkdl.EndpointMetadata {
+	return &fwkdl.EndpointMetadata{
+		Address: podAddress,
+		Port:    strconv.Itoa(int(poolPort)),
+	}
+}
+
+type mockParser struct {
+	skip bool
+}
+
+func (m *mockParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
+	return &fwkrh.ParseResult{Skip: m.skip, Body: &fwkrh.InferenceRequestBody{}}, nil
+}
+
+func (m *mockParser) ParseResponse(ctx context.Context, body []byte, headers map[string]string, endofStream bool) (*fwkrh.ParsedResponse, error) {
+	return nil, nil
+}
+
+func (m *mockParser) SupportedAppProtocols() []extv1.AppProtocol {
 	return nil
+}
+
+func (m *mockParser) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: "mock-parser", Name: "mock-parser"}
+}
+
+func TestServer_Skip(t *testing.T) {
+	t.Parallel()
+
+	director := &testDirector{}
+	mockPar := &mockParser{skip: true}
+
+	model := testutil.MakeInferenceObjective("v1").
+		CreationTimestamp(metav1.Unix(1000, 0)).ObjRef()
+
+	ctx, cancel, ds, _ := utils.PrepareForTestStreamingServer([]*v1alpha2.InferenceObjective{model},
+		[]*v1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: podName}}}, "test-pool1", namespace, poolPort)
+	streamingServer := handlers.NewStreamingServer(ds, director, mockPar)
+
+	testListener, errChan := utils.SetupTestStreamingServer(ctx, t, streamingServer)
+	process, conn := utils.GetStreamingServerClient(ctx, t)
+	defer conn.Close()
+
+	// Send request headers
+	headers := utils.BuildEnvoyGRPCHeaders(map[string]string{
+		"x-request-id": "test-request-id",
+	}, false)
+	request := &pb.ProcessingRequest{
+		Request: &pb.ProcessingRequest_RequestHeaders{
+			RequestHeaders: headers,
+		},
+	}
+	err := process.Send(request)
+	require.NoError(t, err)
+
+	// Send request body (which will trigger ParseRequest)
+	request = &pb.ProcessingRequest{
+		Request: &pb.ProcessingRequest_RequestBody{
+			RequestBody: &pb.HttpBody{
+				Body:        []byte(`{"model":"test"}`),
+				EndOfStream: true,
+			},
+		},
+	}
+	err = process.Send(request)
+	require.NoError(t, err)
+
+	// Receive request headers and check
+	response, err := process.Recv()
+	require.NoError(t, err)
+
+	if response == nil || response.GetRequestHeaders() == nil {
+		t.Fatal("Expected RequestHeaders response")
+	}
+
+	// Receive request body and check
+	response, err = process.Recv()
+	require.NoError(t, err)
+
+	if response == nil || response.GetRequestBody() == nil {
+		t.Fatal("Expected RequestBody response")
+	}
+
+	// Verify that the stream is closed by checking if Recv returns EOF or error
+	_, err = process.Recv()
+	require.Error(t, err, "Expected error or EOF when receiving after skip")
+
+	cancel()
+	<-errChan
+	testListener.Close()
 }

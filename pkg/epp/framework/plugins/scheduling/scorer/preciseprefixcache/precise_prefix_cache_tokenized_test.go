@@ -108,7 +108,7 @@ func TestScorer_UsesTokenizedPrompt(t *testing.T) {
 	})
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-tokenized",
+		RequestID:   "test-tokenized",
 		TargetModel: "test-model",
 	}
 
@@ -152,7 +152,7 @@ func TestScorer_PassesExtraFeaturesToScoreTokens(t *testing.T) {
 	})
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-mm",
+		RequestID:   "test-mm",
 		TargetModel: "test-model",
 	}
 
@@ -188,7 +188,7 @@ func TestScorer_NilExtraFeaturesForTextOnly(t *testing.T) {
 	})
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-text-only",
+		RequestID:   "test-text-only",
 		TargetModel: "test-model",
 	}
 
@@ -287,7 +287,7 @@ func TestScorer_SkipsTokenizedPromptWhenEmpty(t *testing.T) {
 	})
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-skip-empty",
+		RequestID:   "test-skip-empty",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "hello"}},

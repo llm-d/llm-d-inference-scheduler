@@ -792,7 +792,7 @@ func TestActivePortFiltering(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "8000,8002",
+				activePortsAnnotation: "8000,8002",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -827,7 +827,7 @@ func TestActivePortFiltering(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "",
+				activePortsAnnotation: "",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -959,7 +959,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "8000,8001,8002",
+				activePortsAnnotation: "8000,8001,8002",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -978,7 +978,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "8000",
+				activePortsAnnotation: "8000",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -997,7 +997,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				"inference.networking.k8s.io/active-ports": "",
+				activePortsAnnotation: "",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -1283,6 +1283,33 @@ func TestExtractActivePorts(t *testing.T) {
 					Name:        "test-pod",
 					Namespace:   "default",
 					Annotations: map[string]string{activePortsAnnotation: "8000,9000"},
+				},
+			},
+			validPorts:    []int{8000, 8001, 8002},
+			expectedPorts: sets.New(8000),
+		},
+		{
+			name: "Pod with legacy GAIE annotation key",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-pod",
+					Namespace:   "default",
+					Annotations: map[string]string{legacyGAIEActivePortsAnnotation: "8000,8001"},
+				},
+			},
+			validPorts:    []int{8000, 8001, 8002},
+			expectedPorts: sets.New(8000, 8001),
+		},
+		{
+			name: "New annotation key takes precedence over legacy GAIE key",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						activePortsAnnotation:           "8000",
+						legacyGAIEActivePortsAnnotation: "8001",
+					},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},

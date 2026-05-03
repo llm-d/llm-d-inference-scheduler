@@ -205,7 +205,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 							Structured: []fwkrh.ContentBlock{
 								{
 									Type:     "image_url",
-									ImageURL: fwkrh.ImageBlock{Url: "https://example.com/images/dui.jpg."},
+									ImageURL: fwkrh.ImageBlock{URL: "https://example.com/images/dui.jpg."},
 								},
 							},
 						}},
@@ -274,7 +274,7 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 								},
 								{
 									Type:     "video_url",
-									VideoURL: fwkrh.VideoBlock{Url: "https://example.com/video.mp4"},
+									VideoURL: fwkrh.VideoBlock{URL: "https://example.com/video.mp4"},
 								},
 							},
 						}},
@@ -809,7 +809,11 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				return
 			}
 
-			if diff := cmp.Diff(tt.want, got); diff != "" {
+			if got.Skip != false {
+				t.Errorf("ParseRequest() got.Skip = %v, want false", got.Skip)
+			}
+
+			if diff := cmp.Diff(tt.want, got.Body); diff != "" {
 				t.Errorf("ParseRequest() mismatch (-want +got):\n%s", diff)
 			}
 		})

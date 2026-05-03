@@ -151,6 +151,9 @@ const (
 	// RequestEvicted indicates the request was evicted by flow control.
 	// The state machine sends an ImmediateResponse(429) to Envoy.
 	RequestEvicted StreamRequestState = 8
+	// RequestSkipped indicates the request parsing was skipped.
+	// The state machine sends a RequestHeadersResponse and RequestBodyResponse with fallback routing(randomly pick an endpoint from inferencePool) to Envoy.
+	RequestSkipped StreamRequestState = 9
 )
 
 // recvResult holds the result of a srv.Recv() call from the reader goroutine.
@@ -164,7 +167,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 	// Start tracing span for the request
 	tracer := otel.Tracer(
-		"gateway-api-inference-extension/epp/extproc",
+		"llm-d-inference-scheduler/epp/extproc",
 		trace.WithInstrumentationVersion(version.BuildRef),
 		trace.WithInstrumentationAttributes(
 			attribute.String("commit-sha", version.CommitSHA),
@@ -288,15 +291,15 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 		switch v := req.Request.(type) {
 		case *extProcPb.ProcessingRequest_RequestHeaders:
-			requestID := envoy.ExtractHeaderValue(v, reqcommon.RequestIdHeaderKey)
+			requestID := envoy.ExtractHeaderValue(v, reqcommon.RequestIDHeaderKey)
 			// request ID is a must for maintaining a state per request in plugins that hold internal state and use PluginState.
 			// if request id was not supplied as a header, we generate it ourselves.
 			if len(requestID) == 0 {
 				requestID = uuid.NewString()
 				loggerTrace.Info("RequestID header is not found in the request, generated a request id")
-				reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey] = requestID // update in headers so director can consume it
+				reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey] = requestID // update in headers so director can consume it
 			}
-			logger = logger.WithValues(reqcommon.RequestIdHeaderKey, requestID)
+			logger = logger.WithValues(reqcommon.RequestIDHeaderKey, requestID)
 			logger.V(logutil.DEFAULT).Info("EPP received request") // Request ID will be logged too as part of logger context values.
 			loggerTrace = logger.V(logutil.TRACE)
 			ctx = log.IntoContext(ctx, logger)
@@ -316,14 +319,23 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				reqCtx.RequestSize = len(body)
 				body = []byte{}
 
-				inferenceRequestBody, parseErr := s.parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
+				parseResult, parseErr := s.parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
 					logger.Error(err, "Error parsing request")
 					break
 				}
 
-				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, inferenceRequestBody)
+				if parseResult.Skip {
+					if err = s.fallbackToRandomEndpoint(ctx, reqCtx, reqCtx.RequestSize); err != nil {
+						logger.Error(err, "Error falling back to random endpoint")
+						break
+					}
+					reqCtx.RequestState = RequestSkipped
+					break
+				}
+
+				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
 				if err != nil {
 					logger.Error(err, "Error handling request")
 					break
@@ -333,7 +345,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				// Setting evictCh from nil to a real channel dynamically enables the
 				// eviction case in the main select.
 				if s.evictionLookup != nil {
-					evictionRequestID = reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey]
+					evictionRequestID = reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey]
 					evictCh = s.evictionLookup.Get(evictionRequestID)
 				}
 
@@ -416,6 +428,13 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger); err != nil {
 			return err
 		}
+		if reqCtx.RequestState == RequestSkipped {
+			logger.V(logutil.DEFAULT).Info("EPP skipped the request")
+			// Gracefully close the gRPC stream to stop external processing for this request.
+			// This ensures Envoy continues with the request without calling further phases.
+			// See: https://github.com/envoyproxy/envoy/blob/0533de0acca281110945e5726bbb306fbb12bde5/api/envoy/service/ext_proc/v3/external_processor.proto#L40-L41
+			return nil
+		}
 	}
 }
 
@@ -479,6 +498,25 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		})
 	}
 
+	// Handle skip — send response with fallback routing to the proxy.
+	if r.RequestState == RequestSkipped {
+		if r.reqHeaderResp != nil {
+			if err := srv.Send(r.reqHeaderResp); err != nil {
+				logger.Error(err, "error sending response")
+				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
+			}
+		}
+		if r.reqBodyResp != nil {
+			for _, response := range r.reqBodyResp {
+				if err := srv.Send(response); err != nil {
+					logger.Error(err, "error sending response")
+					return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
+				}
+			}
+		}
+		return nil
+	}
+
 	// No switch statement as we could send multiple responses in one pass.
 	if r.RequestState == RequestReceived && r.reqHeaderResp != nil {
 		loggerTrace.Info("Sending request header response", "obj", r.reqHeaderResp)
@@ -534,9 +572,8 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		// Trailers in requests are not guaranteed
 		if err := srv.Send(r.respTrailerResp); err != nil {
 			return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
-		} else {
-			logger.V(logutil.DEBUG).Info("EPP sent trailer back to proxy")
 		}
+		logger.V(logutil.DEBUG).Info("EPP sent trailer back to proxy")
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,6 +68,33 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 	gomega.Expect(resp.Choices[0].Text).Should(gomega.Equal(prompt))
 
 	return extractInferenceHeaders(httpResp)
+}
+
+// tryCompletion is like runCompletion but returns an error instead of asserting,
+// intended for use inside Eventually blocks where transient failures are acceptable.
+func tryCompletion(prompt string, theModel openai.CompletionNewParamsModel) (string, string, string, error) {
+	var httpResp *http.Response
+	completionParams := openai.CompletionNewParams{
+		Prompt: openai.CompletionNewParamsPromptUnion{OfString: openai.String(prompt)},
+		Model:  theModel,
+	}
+	resp, err := newOpenAIClient().Completions.New(
+		testConfig.Context,
+		completionParams,
+		option.WithResponseInto(&httpResp),
+		option.WithRequestTimeout(readyTimeout),
+	)
+	if err != nil {
+		return "", "", "", err
+	}
+	if httpResp == nil {
+		return "", "", "", errors.New("missing http response")
+	}
+	if len(resp.Choices) != 1 {
+		return "", "", "", fmt.Errorf("expected 1 choice, got %d", len(resp.Choices))
+	}
+	ns, pod, p := extractInferenceHeaders(httpResp)
+	return ns, pod, p, nil
 }
 
 func runChatCompletion(prompt, modelName string) (string, string, string) {

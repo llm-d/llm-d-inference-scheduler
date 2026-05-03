@@ -257,7 +257,7 @@ func checkPodStatus(testConfig *TestConfig, pod *corev1.Pod, conditions []corev1
 	for _, want := range conditions {
 		for _, c := range fetchedPod.Status.Conditions {
 			if c.Type == want.Type && c.Status == want.Status {
-				found += 1
+				found++
 			}
 		}
 	}
@@ -300,7 +300,7 @@ func checkDeploymentStatus(ctx context.Context, cli client.Client, deploy *appsv
 	for _, want := range conditions {
 		for _, c := range fetchedDeploy.Status.Conditions {
 			if c.Type == want.Type && c.Status == want.Status {
-				found += 1
+				found++
 			}
 		}
 	}
@@ -336,7 +336,7 @@ func checkCrdStatus(
 	for _, want := range conditions {
 		for _, c := range fetchedCrd.Status.Conditions {
 			if c.Type == want.Type && c.Status == want.Status {
-				found += 1
+				found++
 			}
 		}
 	}

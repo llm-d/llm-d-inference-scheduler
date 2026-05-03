@@ -1,67 +1,79 @@
 package e2e
 
 import (
+	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func createModelServersFromYaml(yaml string, extra map[string]string) []string {
+func createModelServersFromKustomize(kustomizeDir string, extra map[string]string) []string {
 	subs := map[string]string{
-		"${MODEL_NAME}":           simModelName,
-		"${MODEL_NAME_SAFE}":      simModelName,
-		"${POOL_NAME}":            poolName,
-		"${VLLM_SIMULATOR_IMAGE}": vllmSimImage,
-		"${UDS_TOKENIZER_IMAGE}":  udsTokenizerImage,
+		"${MODEL_NAME}":              simModelName,
+		"${POOL_NAME}":               poolName,
+		"${VLLM_IMAGE}":              vllmSimImage,
+		"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
+		"${SIDECAR_IMAGE}":           sideCarImage,
+		"${VLLM_DATA_PARALLEL_SIZE}": "1",
+		"${VLLM_SIM_MODE}":           "echo",
+		"${KV_CACHE_ENABLED}":        "false",
+		"${DECODE_ROLE}":             "",
+		"${EPP_NAME}":                "e2e-epp",
+		"${NAMESPACE}":               nsName,
+		"${HF_TOKEN}":                "",
+		"${VLLM_EXTRA_ARGS_E}":       "",
+		"${VLLM_EXTRA_ARGS_P}":       "",
+		"${VLLM_EXTRA_ARGS_D}":       "",
 	}
 	for k, v := range extra {
 		subs[k] = v
 	}
-	manifests := testutils.ReadYaml(yaml)
+	manifests := runKustomize(kustomizeDir)
 	manifests = substituteMany(manifests, subs)
+	// Remove labels with empty values (produced when ${DECODE_ROLE} is empty)
+	manifests = removeEmptyLabels(manifests)
+	manifests = removeEmptyArgs(manifests)
 	objects := testutils.CreateObjsFromYaml(testConfig, manifests)
 	podsInDeploymentsReady(objects)
 	return objects
 }
 
 func createModelServersDecode(replicas int) []string {
-	return createModelServersFromYaml(simDeployment, map[string]string{
-		"${KV_CACHE_ENABLED}":   "false",
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
+		"${KV_CACHE_ENABLED}":     "false",
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
 	})
 }
 
 func createModelServersDecodeKV(replicas int) []string {
-	return createModelServersFromYaml(simDeployment, map[string]string{
-		"${MODEL_NAME}":         kvModelName,
-		"${MODEL_NAME_SAFE}":    safeKvModelName,
-		"${KV_CACHE_ENABLED}":   "true",
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
+		"${MODEL_NAME}":           kvModelName,
+		"${KV_CACHE_ENABLED}":     "true",
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
 	})
 }
 
 func createModelServersDecodeDP(replicas int) []string {
-	return createModelServersFromYaml(simDPDeployment, map[string]string{
-		"${SIDECAR_IMAGE}":      sideCarImage,
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize("../../deploy/components/vllm-decode", map[string]string{
+		"${VLLM_REPLICA_COUNT_D}":    strconv.Itoa(replicas),
+		"${VLLM_DATA_PARALLEL_SIZE}": "2",
+		"${DECODE_ROLE}":             "decode",
+		"${VLLM_EXTRA_ARGS_D}":       "--mode=echo",
 	})
 }
 
 func createModelServersPDWithConnector(prefillReplicas, decodeReplicas int, connector string) []string {
-	return createModelServersFromYaml(simPDDisaggDeployment, map[string]string{
+	return createModelServersFromKustomize(pdDisaggDir, map[string]string{
 		"${KV_CACHE_ENABLED}":     "false",
 		"${CONNECTOR_TYPE}":       connector,
-		"${SIDECAR_IMAGE}":        sideCarImage,
-		"${VLLM_REPLICA_COUNT}":   "0",
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 		"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 	})
@@ -77,9 +89,8 @@ func createModelServersPDSharedStorage(decodeReplicas int) []string {
 
 // createModelServersEpDDisagg creates model server resources for E/PD (encode + prefill/decode) testing.
 func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
-	return createModelServersFromYaml(simEpDDisaggDeployment, map[string]string{
+	return createModelServersFromKustomize(ePdDisaggDir, map[string]string{
 		"${EC_CONNECTOR_TYPE}":    "ec-example",
-		"${SIDECAR_IMAGE}":        sideCarImage,
 		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 	})
@@ -87,10 +98,9 @@ func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
 
 // createModelServersEPDDisagg creates model server resources for E/P/D (encode/prefill/decode) testing.
 func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas int) []string {
-	return createModelServersFromYaml(simEPDDisaggDeployment, map[string]string{
+	return createModelServersFromKustomize(ePDDisaggDir, map[string]string{
 		"${KV_CONNECTOR_TYPE}":    "shared-storage",
 		"${EC_CONNECTOR_TYPE}":    "ec-example",
-		"${SIDECAR_IMAGE}":        sideCarImage,
 		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
 		"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
@@ -99,8 +109,9 @@ func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas
 
 // createModelServersEPDUnified creates model server resources for EPD (one deployment for encode/prefill/decode) testing.
 func createModelServersEPDUnified(replicas int) []string {
-	return createModelServersFromYaml(simEPDUnifiedDeployment, map[string]string{
-		"${VLLM_REPLICA_COUNT}": strconv.Itoa(replicas),
+	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
+		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
+		"${DECODE_ROLE}":          "encode-prefill-decode",
 	})
 }
 
@@ -125,32 +136,30 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_IMAGE}":           eppImage,
-			"${UDS_TOKENIZER_IMAGE}": udsTokenizerImage,
-			"${NAMESPACE}":           nsName,
-			"${POOL_NAME}":           simModelName + "-inference-pool",
+			"${EPP_NAME}":              "e2e-epp",
+			"${EPP_IMAGE}":             eppImage,
+			"${UDS_TOKENIZER_IMAGE}":   udsTokenizerImage,
+			"${NAMESPACE}":             nsName,
+			"${POOL_NAME}":             simModelName + "-inference-pool",
+			"${METRICS_ENDPOINT_AUTH}": "false",
 		})
 
 	objects = append(objects, testutils.CreateObjsFromYaml(testConfig, eppYamls)...)
 	podsInDeploymentsReady(objects)
 
-	ginkgo.By("Waiting for EPP to report that it is serving")
-	conn, err := grpc.NewClient("localhost:30081",
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err := conn.Close()
-		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	}()
-	client := healthPb.NewHealthClient(conn)
-	healthCheckReq := &healthPb.HealthCheckRequest{}
-
+	// Envoy registers the EPP as a healthy ext_proc upstream asynchronously.
+	// "no healthy upstream" returns HTTP 500 with empty body; any non-empty
+	// response (200 or 500-with-body) means EPP is reachable from Envoy.
+	ginkgo.By("Waiting for gateway to be ready")
 	gomega.Eventually(func() bool {
-		resp, err := client.Check(testConfig.Context, healthCheckReq)
-		return err == nil && resp.Status == healthPb.HealthCheckResponse_SERVING
-	}, 40*time.Second, 2*time.Second).Should(gomega.BeTrue())
-	ginkgo.By("EPP reports that it is serving")
-	time.Sleep(2 * time.Second)
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%s/v1/models", port))
+		if err != nil {
+			return false
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK || len(body) > 0
+	}, readyTimeout, 2*time.Second).Should(gomega.BeTrue(), "gateway should be ready within the ready timeout")
 
 	return objects
 }

@@ -771,7 +771,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				reqCtx := &handlers.RequestContext{
 					Request: &handlers.Request{
 						Headers: map[string]string{
-							reqcommon.RequestIdHeaderKey: "test-req-id-" + test.name, // Ensure a default request ID
+							reqcommon.RequestIDHeaderKey: "test-req-id-" + test.name, // Ensure a default request ID
 						},
 					},
 					ObjectiveKey:    test.inferenceObjectiveName,
@@ -790,12 +790,12 @@ func TestDirector_HandleRequest(t *testing.T) {
 					reqCtx.Request.Headers[":path"] = "/v1/chat/completions"
 				}
 
-				inferenceRequestBody, parseErr := openai.NewOpenAIParser().ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
+				parseResult, parseErr := openai.NewOpenAIParser().ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				var returnedReqCtx *handlers.RequestContext
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
 				} else {
-					returnedReqCtx, err = director.HandleRequest(ctx, reqCtx, inferenceRequestBody)
+					returnedReqCtx, err = director.HandleRequest(ctx, reqCtx, parseResult.Body)
 				}
 
 				if test.wantErrCode != "" {
@@ -1189,7 +1189,7 @@ func TestDirector_HandleResponseReceived(t *testing.T) {
 	reqCtx := &handlers.RequestContext{
 		Request: &handlers.Request{
 			Headers: map[string]string{
-				reqcommon.RequestIdHeaderKey: "test-req-id-for-response",
+				reqcommon.RequestIDHeaderKey: "test-req-id-for-response",
 			},
 		},
 		Response: &handlers.Response{ // Simulate some response headers
@@ -1201,7 +1201,7 @@ func TestDirector_HandleResponseReceived(t *testing.T) {
 
 	director.HandleResponseHeader(ctx, reqCtx)
 
-	if diff := cmp.Diff("test-req-id-for-response", pr1.lastRespOnResponse.RequestId); diff != "" {
+	if diff := cmp.Diff("test-req-id-for-response", pr1.lastRespOnResponse.RequestID); diff != "" {
 		t.Errorf("Scheduler.OnResponse RequestId mismatch (-want +got):\n%s", diff)
 	}
 	if diff := cmp.Diff(reqCtx.Response.Headers, pr1.lastRespOnResponse.Headers); diff != "" {
@@ -1224,7 +1224,7 @@ func TestDirector_HandleResponseBody(t *testing.T) {
 	reqCtx := &handlers.RequestContext{
 		Request: &handlers.Request{
 			Headers: map[string]string{
-				reqcommon.RequestIdHeaderKey: "test-req-id-for-streaming",
+				reqcommon.RequestIDHeaderKey: "test-req-id-for-streaming",
 			},
 		},
 		Response: &handlers.Response{
@@ -1256,7 +1256,7 @@ func TestDirector_HandleResponseBody(t *testing.T) {
 	assert.Equal(t, 3, len(resps), "Should have received 3 streaming calls")
 
 	for i, resp := range resps {
-		assert.Equal(t, "test-req-id-for-streaming", resp.RequestId)
+		assert.Equal(t, "test-req-id-for-streaming", resp.RequestID)
 		assert.Equal(t, reqCtx.Response.Headers, resp.Headers)
 		assert.Equal(t, "namespace1/test-pod-name", targetPods[i])
 		if i < 2 {
@@ -1287,7 +1287,7 @@ func TestDirector_HandleResponseBody_ChunkOrdering(t *testing.T) {
 			Request: &handlers.Request{
 				Headers: map[string]string{
 					// All chunks share the same request ID so they go through the same queue.
-					reqcommon.RequestIdHeaderKey: "ordering-test-request",
+					reqcommon.RequestIDHeaderKey: "ordering-test-request",
 				},
 			},
 			Response: &handlers.Response{
@@ -1303,7 +1303,7 @@ func TestDirector_HandleResponseBody_ChunkOrdering(t *testing.T) {
 	finalReqCtx := &handlers.RequestContext{
 		Request: &handlers.Request{
 			Headers: map[string]string{
-				reqcommon.RequestIdHeaderKey: "ordering-test-request",
+				reqcommon.RequestIDHeaderKey: "ordering-test-request",
 			},
 		},
 		Response: &handlers.Response{

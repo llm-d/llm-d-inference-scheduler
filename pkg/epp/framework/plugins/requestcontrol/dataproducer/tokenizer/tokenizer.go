@@ -253,7 +253,7 @@ func ChatCompletionsToRenderChatRequest(chat *fwkrh.ChatCompletionsRequest) *tok
 			conv.Content.Structured = append(conv.Content.Structured, tokenizerTypes.ContentBlock{
 				Type:     block.Type,
 				Text:     block.Text,
-				ImageURL: tokenizerTypes.ImageBlock{URL: block.ImageURL.Url},
+				ImageURL: tokenizerTypes.ImageBlock{URL: block.ImageURL.URL},
 			})
 		}
 		conversation = append(conversation, conv)

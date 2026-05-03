@@ -166,8 +166,8 @@ func (h *PdProfileHandler) Pick(ctx context.Context, _ *scheduling.CycleState, r
 		if request.TargetModel != "" {
 			span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 		}
-		if request.RequestId != "" {
-			span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+		if request.RequestID != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 		}
 	}
 

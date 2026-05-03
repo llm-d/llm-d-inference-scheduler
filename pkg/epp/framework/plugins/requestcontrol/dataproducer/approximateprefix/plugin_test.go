@@ -51,7 +51,7 @@ func TestPrepareRequestData(t *testing.T) {
 
 	// First request to populate cache.
 	req1 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -66,7 +66,7 @@ func TestPrepareRequestData(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify state was written to PluginState
-	state, err := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state, err := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	assert.NoError(t, err)
 	assert.NotNil(t, state)
 	assert.Equal(t, 2, len(state.PrefixHashes)) // "aaaabbbb" with blockSize 4 (1 token * 4 chars) -> 2 blocks
@@ -91,7 +91,7 @@ func TestPreRequest(t *testing.T) {
 
 	endpoint1 := fwksched.NewEndpoint(&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1", Namespace: "default"}}, fwkdl.NewMetrics(), fwkdl.NewAttributes())
 	req1 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -173,7 +173,7 @@ func TestPrefixPluginCompletion(t *testing.T) {
 
 	// First request.
 	req1 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -182,7 +182,7 @@ func TestPrefixPluginCompletion(t *testing.T) {
 		},
 	}
 	_ = p.PrepareRequestData(context.Background(), req1, endpoints)
-	state, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	// Input size is 6, block size is 4, so 1 body block. Total hashes = 1 (model only is not a block)
 	assert.Equal(t, 2, len(state.PrefixHashes))
 
@@ -199,7 +199,7 @@ func TestPrefixPluginCompletion(t *testing.T) {
 
 	// Third request shares partial prefix with first one.
 	req3 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -240,7 +240,7 @@ func TestPrefixPluginChatCompletionsGrowth(t *testing.T) {
 
 	// First request with initial conversation
 	req1 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -252,7 +252,7 @@ func TestPrefixPluginChatCompletionsGrowth(t *testing.T) {
 		},
 	}
 	_ = p.PrepareRequestData(context.Background(), req1, endpoints)
-	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	initialHashCount := len(state1.PrefixHashes)
 	assert.Greater(t, initialHashCount, 0)
 
@@ -268,7 +268,7 @@ func TestPrefixPluginChatCompletionsGrowth(t *testing.T) {
 
 	// Second request adds assistant response and new user message
 	req2 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -282,7 +282,7 @@ func TestPrefixPluginChatCompletionsGrowth(t *testing.T) {
 		},
 	}
 	_ = p.PrepareRequestData(context.Background(), req2, endpoints)
-	state2, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req2.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state2, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req2.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	extendedHashCount := len(state2.PrefixHashes)
 	assert.Greater(t, extendedHashCount, initialHashCount)
 
@@ -305,7 +305,7 @@ func TestPrefixPluginChatCompletionsMultimodalSameUrlMatches(t *testing.T) {
 	endpoints := []fwksched.Endpoint{endpoint1}
 
 	req1 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -315,7 +315,7 @@ func TestPrefixPluginChatCompletionsMultimodalSameUrlMatches(t *testing.T) {
 						Content: fwkrh.Content{
 							Structured: []fwkrh.ContentBlock{
 								{Type: "text", Text: "Describe"},
-								{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://storage.googleapis.com/abc1/sample1.jpg"}},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://storage.googleapis.com/abc1/sample1.jpg"}},
 							},
 						},
 					},
@@ -324,7 +324,7 @@ func TestPrefixPluginChatCompletionsMultimodalSameUrlMatches(t *testing.T) {
 		},
 	}
 	_ = p.PrepareRequestData(context.Background(), req1, endpoints)
-	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	initialHashCount := len(state1.PrefixHashes)
 	assert.Greater(t, initialHashCount, 0)
 
@@ -338,7 +338,7 @@ func TestPrefixPluginChatCompletionsMultimodalSameUrlMatches(t *testing.T) {
 	p.wg.Wait()
 
 	req2 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -348,7 +348,7 @@ func TestPrefixPluginChatCompletionsMultimodalSameUrlMatches(t *testing.T) {
 						Content: fwkrh.Content{
 							Structured: []fwkrh.ContentBlock{
 								{Type: "text", Text: "Describe"},
-								{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://storage.googleapis.com/abc1/sample1.jpg"}},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://storage.googleapis.com/abc1/sample1.jpg"}},
 							},
 						},
 					},
@@ -377,7 +377,7 @@ func TestPrefixPluginChatCompletionsMultimodalDifferentUrlPartialMatch(t *testin
 	endpoints := []fwksched.Endpoint{endpoint1}
 
 	req1 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -387,7 +387,7 @@ func TestPrefixPluginChatCompletionsMultimodalDifferentUrlPartialMatch(t *testin
 						Content: fwkrh.Content{
 							Structured: []fwkrh.ContentBlock{
 								{Type: "text", Text: "Describe"},
-								{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://storage.googleapis.com/bucket1/sample1.jpg"}},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://storage.googleapis.com/bucket1/sample1.jpg"}},
 							},
 						},
 					},
@@ -396,7 +396,7 @@ func TestPrefixPluginChatCompletionsMultimodalDifferentUrlPartialMatch(t *testin
 		},
 	}
 	_ = p.PrepareRequestData(context.Background(), req1, endpoints)
-	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	initialHashCount := len(state1.PrefixHashes)
 	assert.Greater(t, initialHashCount, 0)
 
@@ -410,7 +410,7 @@ func TestPrefixPluginChatCompletionsMultimodalDifferentUrlPartialMatch(t *testin
 	p.wg.Wait()
 
 	req2 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model1",
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -420,7 +420,7 @@ func TestPrefixPluginChatCompletionsMultimodalDifferentUrlPartialMatch(t *testin
 						Content: fwkrh.Content{
 							Structured: []fwkrh.ContentBlock{
 								{Type: "text", Text: "Describe"},
-								{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://storage.googleapis.com/bucket2/sample2.jpg"}},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://storage.googleapis.com/bucket2/sample2.jpg"}},
 							},
 						},
 					},
@@ -447,7 +447,7 @@ func TestPrefixPluginAutoTune(t *testing.T) {
 	endpoints := []fwksched.Endpoint{endpoint}
 
 	req := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -467,7 +467,7 @@ func TestPrefixPluginAutoTune(t *testing.T) {
 	p, _ := newPrepareData(context.Background(), config, nil)
 
 	_ = p.PrepareRequestData(context.Background(), req, endpoints)
-	state, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	// 128 chars / (16 tokens * 4 chars/token) = 2 blocks
 	assert.Equal(t, 2, len(state.PrefixHashes), "Should use pod block size (16 tokens) -> 2 body blocks")
 
@@ -503,7 +503,7 @@ func TestMaxPrefixTokensToMatch(t *testing.T) {
 
 	// Prompt is 16 chars = 4 blocks at blockSize 4 chars, but should be capped to 2.
 	req := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -515,7 +515,7 @@ func TestMaxPrefixTokensToMatch(t *testing.T) {
 	err = p.PrepareRequestData(context.Background(), req, []fwksched.Endpoint{endpoint})
 	assert.NoError(t, err)
 
-	state, err := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state, err := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(state.PrefixHashes), "should cap at MaxPrefixTokensToMatch/BlockSizeTokens = 2 blocks")
 
@@ -530,7 +530,7 @@ func TestMaxPrefixTokensToMatch(t *testing.T) {
 	assert.NoError(t, err)
 
 	req2 := &fwksched.InferenceRequest{
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -542,7 +542,7 @@ func TestMaxPrefixTokensToMatch(t *testing.T) {
 	err = p2.PrepareRequestData(context.Background(), req2, []fwksched.Endpoint{endpoint})
 	assert.NoError(t, err)
 
-	state2, err := plugin.ReadPluginStateKey[*SchedulingContextState](p2.PluginState(), req2.RequestId, plugin.StateKey(ApproxPrefixCachePluginType))
+	state2, err := plugin.ReadPluginStateKey[*SchedulingContextState](p2.PluginState(), req2.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(state2.PrefixHashes), "should fall back to MaxPrefixBlocksToMatch when MaxPrefixTokensToMatch is 0")
 }
@@ -566,7 +566,7 @@ func BenchmarkPrefixPluginStress(b *testing.B) {
 			}, nil, fwkdl.NewAttributes())
 			endpoints := []fwksched.Endpoint{endpoint}
 			req := &fwksched.InferenceRequest{
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 				TargetModel: "model-stress",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -578,7 +578,7 @@ func BenchmarkPrefixPluginStress(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				_ = p.PrepareRequestData(context.Background(), req, endpoints)
-				p.PluginState().Delete(req.RequestId)
+				p.PluginState().Delete(req.RequestID)
 			}
 		})
 	}

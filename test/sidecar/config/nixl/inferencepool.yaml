@@ -5,7 +5,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      llm-d.ai/inferenceServing: "true"
+      llm-d.ai/inference-serving: "true"
       llm-d.ai/model: qwen2-0-5b
   endpointPickerRef:
     name: qwen2-0-5b-epp

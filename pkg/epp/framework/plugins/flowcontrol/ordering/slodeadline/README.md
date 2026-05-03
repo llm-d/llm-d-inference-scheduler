@@ -1,6 +1,6 @@
 # SLO Deadline Ordering Policy
 
-It is registered as type `slo-deadline-ordering-policy` and runs as an ordering policy.
+**Type:** `slo-deadline-ordering-policy`
 
 The SLO Deadline ordering policy selects requests based on a deadline derived from a Service Level Objective (SLO) specified in the request headers.
 
@@ -52,6 +52,5 @@ orderingPolicyRef: slo-deadline-ordering-policy
 - **Computational Overhead:** Similar to EDF, maintaining a priority heap incurs higher CPU overhead ($O(\log n)$) than a simple FIFO list.
 
 ## Related Documentation
-
 *   [Ordering Overview](../README.md)
-*   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)
+

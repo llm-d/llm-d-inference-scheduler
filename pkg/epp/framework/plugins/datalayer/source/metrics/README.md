@@ -1,8 +1,11 @@
 # Metrics Data Source
 
-The Metrics Data Source is a data layer plugin that polls a Prometheus-compatible metrics endpoint of a model server and parses the response into a structured format for extraction.
+**Type:** `metrics-data-source`
 
-It is registered as type `metrics-data-source` and runs as a data layer source.
+> [!NOTE]
+> This plugin is enabled by default together with `core-metrics-extractor`. You do not need to explicitly declare it in your configuration, but it can be disabled if metrics collection is unnecessary.
+
+The Metrics Data Source is a data layer plugin that polls a Prometheus-compatible metrics endpoint of a model server and parses the response into a structured format for extraction.
 
 ## What it does
 

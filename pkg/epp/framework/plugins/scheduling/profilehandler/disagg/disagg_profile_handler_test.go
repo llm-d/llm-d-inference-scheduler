@@ -77,7 +77,7 @@ func completionsRequest(prompt string) *scheduling.InferenceRequest {
 func chatRequest(hasImage, hasVideo, hasAudio bool) *scheduling.InferenceRequest {
 	blocks := []fwkrh.ContentBlock{{Type: "text", Text: "describe this"}}
 	if hasImage {
-		blocks = append(blocks, fwkrh.ContentBlock{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://example.com/img.jpg"}})
+		blocks = append(blocks, fwkrh.ContentBlock{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/img.jpg"}})
 	}
 	if hasVideo {
 		blocks = append(blocks, fwkrh.ContentBlock{Type: "video_url"})

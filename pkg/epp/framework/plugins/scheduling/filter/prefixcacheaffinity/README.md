@@ -1,5 +1,7 @@
 # Prefix Cache Affinity Filter (`prefix-cache-affinity-filter`)
 
+**Type:** `prefix-cache-affinity-filter`
+
 ## When to use this filter
 
 Enable this filter when your workload has repeated or similar prompts across requests (e.g.,
@@ -63,13 +65,28 @@ Can be instantiated multiple times with different thresholds (e.g., 0.99 for glo
 
 ## Config
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `affinityThreshold` | 0.80 | Prefix cache score threshold for stickiness |
-| `explorationProbability` | 0.01 | Probability of skipping the gate |
-| `maxTTFTPenaltyMs` | 5000 | Max TTFT penalty (ms) before breaking stickiness. 0 = always stick |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `affinityThreshold` | `float64` | No | `0.80` | Prefix cache score threshold for stickiness |
+| `explorationProbability` | `float64` | No | `0.01` | Probability of skipping the gate |
+| `maxTTFTPenaltyMs` | `float64` | No | `5000` | Max TTFT penalty (ms) before breaking stickiness. 0 = always stick |
 
 ## Dependencies
 
 - Reads `PrefixCacheMatchInfo` from endpoint attributes (from `prefix-cache-scorer`)
 - Reads `LatencyPredictionInfo` for TTFT load gate (from `predicted-latency-producer`)
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: prefix-cache-affinity-filter
+    name: prefix-affinity
+    parameters:
+      affinityThreshold: 0.80
+      explorationProbability: 0.01
+      maxTTFTPenaltyMs: 5000
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: prefix-affinity
+```

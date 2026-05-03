@@ -1,8 +1,6 @@
 # ------------------------------------------------------------------------------
 # Custom Resource Definitions (CRDs) for Gateway API Inference Extension (GIE)
 #
-# This deploys the GIE CRDs from the local directory.
-#
 # **Warning**: CRDs are cluster-level, so in a shared development environment
 # this needs to be done in a controlled and communicated manner.
 # ------------------------------------------------------------------------------

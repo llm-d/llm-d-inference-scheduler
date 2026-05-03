@@ -1,5 +1,7 @@
 # Request Attribute Reporter Plugin
 
+**Type:** `request-attribute-reporter`
+
 ## Overview
 
 This plugin for the Endpoint Picker (EPP) allows you to report a value calculating from the request back to the downstream proxy (e.g., Envoy). The value is calculated based on data extracted from the model server's response body. This information is returned as dynamic metadata in the `ext_proc` response.
@@ -22,7 +24,7 @@ The primary purpose of this plugin is to provide visibility into resource consum
 The plugin is configured within the EPP server's configuration file (provided via `--config-file` or `--config-text`). It uses the `request-attribute-reporter` type.
 
 ```yaml
-apiVersion: config.apix.gateway-api-inference-extension.sigs.k8s.io/v1alpha1
+apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
   - name: total-tokens-cost-reporter

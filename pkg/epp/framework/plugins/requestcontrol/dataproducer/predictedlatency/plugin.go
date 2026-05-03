@@ -28,10 +28,10 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	latencypredictor "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/predictedlatency/latencypredictorclient"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
@@ -51,8 +51,8 @@ const (
 	// TPOTSLOHeaderKey is the header key for the TPOT SLO.
 	TPOTSLOHeaderKey = "x-slo-tpot-ms"
 
-	// Experimental_DefaultPrefillProfile is the default profile name for prefill endpoints in disaggregated serving.
-	Experimental_DefaultPrefillProfile = "prefill"
+	// ExperimentalDefaultPrefillProfile is the default profile name for prefill endpoints in disaggregated serving.
+	ExperimentalDefaultPrefillProfile = "prefill"
 )
 
 // PredictedLatency is the latency data provider plugin. It handles:
@@ -290,7 +290,7 @@ func newPredictedLatencyContext(request *framework.InferenceRequest) *predictedL
 }
 
 func (s *PredictedLatency) getPredictedLatencyContextForRequest(request *framework.InferenceRequest) (*predictedLatencyCtx, error) {
-	id := request.Headers[reqcommon.RequestIdHeaderKey]
+	id := request.Headers[reqcommon.RequestIDHeaderKey]
 	if item := s.sloContextStore.Get(id); item != nil {
 		return item.Value(), nil
 	}
@@ -298,12 +298,12 @@ func (s *PredictedLatency) getPredictedLatencyContextForRequest(request *framewo
 }
 
 func (s *PredictedLatency) setPredictedLatencyContextForRequest(request *framework.InferenceRequest, ctx *predictedLatencyCtx) {
-	id := request.Headers[reqcommon.RequestIdHeaderKey]
+	id := request.Headers[reqcommon.RequestIDHeaderKey]
 	s.sloContextStore.Set(id, ctx, ttlcache.DefaultTTL)
 }
 
 func (s *PredictedLatency) deletePredictedLatencyContextForRequest(request *framework.InferenceRequest) {
-	id := request.Headers[reqcommon.RequestIdHeaderKey]
+	id := request.Headers[reqcommon.RequestIDHeaderKey]
 	s.sloContextStore.Delete(id)
 }
 

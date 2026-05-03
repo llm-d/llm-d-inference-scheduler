@@ -96,7 +96,7 @@ func NewCollector() *Collector {
 
 // Start initiates data source collection for the endpoint.
 // All sources must implement PollingDataSource. Validation is performed by the caller.
-func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) error {
+func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.ExtractorBase) error {
 	// Validate sources slice is not empty
 	if len(pollers) == 0 {
 		return errors.New("cannot start collector with empty sources")
@@ -111,9 +111,19 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint,
 	return c.startCollection(ctx, ticker, ep, pollers, extractors)
 }
 
-func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) error {
+func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.ExtractorBase) error {
 	var ready chan struct{}
 	started := false
+
+	// Pre-compute poll-based extractors upfront to avoid repeated type assertions in the hot loop.
+	pollingExtractors := make(map[string][]fwkdl.Extractor, len(extractors))
+	for name, exts := range extractors {
+		for _, ext := range exts {
+			if poller, ok := ext.(fwkdl.Extractor); ok {
+				pollingExtractors[name] = append(pollingExtractors[name], poller)
+			}
+		}
+	}
 
 	c.startOnce.Do(func() {
 		logger := log.FromContext(ctx).WithValues("endpoint", ep.GetMetadata().GetIPAddress())
@@ -160,7 +170,7 @@ func (c *Collector) startCollection(ctx context.Context, ticker Ticker, ep fwkdl
 					}
 				}
 			}
-		}(ep, pollers, extractors)
+		}(ep, pollers, pollingExtractors)
 	})
 
 	if !started {

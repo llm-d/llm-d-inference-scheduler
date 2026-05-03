@@ -1,8 +1,8 @@
 # Random Picker
 
-Selects endpoint(s) uniformly at random, ignoring any scores calculated by scorer plugins.
+**Type:** `random-picker`
 
-It is registered as type `random-picker` and runs as a scheduling picker.
+Selects endpoint(s) uniformly at random, ignoring any scores calculated by scorer plugins.
 
 ## What it does
 

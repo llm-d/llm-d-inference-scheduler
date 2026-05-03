@@ -1,5 +1,8 @@
 # Notification Data Sources
 
+**Type:** `k8s-notification-source`  
+**Type:** `endpoint-notification-source`
+
 This package provides two event-driven `DataSource` plugins for the EPP data layer:
 
 - **`k8s-notification-source`** — watches a single Kubernetes GVK (e.g. `Pod`, `Service`) and

@@ -1,8 +1,8 @@
 # Weighted Random Picker
 
-Selects endpoint(s) randomly, where the probability of an endpoint being selected is proportional to its score.
+**Type:** `weighted-random-picker`
 
-It is registered as type `weighted-random-picker` and runs as a scheduling picker.
+Selects endpoint(s) randomly, where the probability of an endpoint being selected is proportional to its score.
 
 ## What it does
 

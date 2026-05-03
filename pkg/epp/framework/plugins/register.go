@@ -3,7 +3,8 @@ package plugins
 
 import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
+	extmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
+	srcmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/models"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/dataparallel"
@@ -36,8 +37,8 @@ func RegisterAllPlugins() {
 	plugin.Register(sessionaffinity.SessionAffinityType, sessionaffinity.Factory)
 	plugin.Register(activerequest.ActiveRequestType, activerequest.Factory)
 	plugin.Register(nohitlru.NoHitLRUType, nohitlru.Factory)
-	plugin.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
-	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
+	plugin.Register(srcmodels.ModelsDataSourceType, srcmodels.ModelDataSourceFactory)
+	plugin.Register(extmodels.ModelsExtractorType, extmodels.ModelServerExtractorFactory)
 	// pd decider plugins
 	plugin.Register(disagg.PrefixBasedPDDeciderPluginType, disagg.PrefixBasedPDDeciderPluginFactory)
 	plugin.Register(disagg.AlwaysDisaggPDDeciderPluginType, disagg.AlwaysDisaggPDDeciderPluginFactory)

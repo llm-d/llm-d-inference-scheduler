@@ -22,9 +22,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	latencypredictor "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/predictedlatency/latencypredictorclient"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
@@ -62,20 +62,20 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 		Namespace: targetMetadata.NamespacedName.Namespace,
 	}
 
-	logger.V(logutil.TRACE).Info("request ID for SLO tracking", "requestID", request.Headers[reqcommon.RequestIdHeaderKey], "endpointName", endpointName)
-	if request.Headers[reqcommon.RequestIdHeaderKey] == "" {
+	logger.V(logutil.TRACE).Info("request ID for SLO tracking", "requestID", request.Headers[reqcommon.RequestIDHeaderKey], "endpointName", endpointName)
+	if request.Headers[reqcommon.RequestIDHeaderKey] == "" {
 		logger.V(logutil.DEBUG).Error(errors.New("missing request ID"), "PredictedLatency.PreRequest: Request is missing request ID header")
 		return
 	}
 
-	id := request.Headers[reqcommon.RequestIdHeaderKey]
+	id := request.Headers[reqcommon.RequestIDHeaderKey]
 
 	actual, _ := t.runningRequestLists.LoadOrStore(endpointName, newRequestPriorityQueue())
 	endpointRequestList := actual.(*requestPriorityQueue)
 
 	predictedLatencyCtx, err := t.getPredictedLatencyContextForRequest(request)
 	if err != nil {
-		id := request.Headers[reqcommon.RequestIdHeaderKey]
+		id := request.Headers[reqcommon.RequestIDHeaderKey]
 		logger.V(logutil.DEBUG).Info("PredictedLatency.PreRequest: Failed to get SLO context for request", "error", err, "requestID", id)
 		return
 	}
@@ -86,7 +86,7 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 	}
 
 	predictedLatencyCtx.targetMetadata = targetMetadata
-	if prefillResult, exists := schedulingResult.ProfileResults[Experimental_DefaultPrefillProfile]; exists && prefillResult != nil && len(prefillResult.TargetEndpoints) > 0 {
+	if prefillResult, exists := schedulingResult.ProfileResults[ExperimentalDefaultPrefillProfile]; exists && prefillResult != nil && len(prefillResult.TargetEndpoints) > 0 {
 		prefillMetadata := prefillResult.TargetEndpoints[0].GetMetadata()
 		predictedLatencyCtx.prefillTargetMetadata = prefillMetadata
 		logger.V(logutil.DEBUG).Info("Prefill target identified for request", "requestID", id, "prefillEndpoint", prefillMetadata.NamespacedName.String())
@@ -132,7 +132,7 @@ func (t *PredictedLatency) ResponseBody(ctx context.Context, request *scheduling
 	now := time.Now()
 	predictedLatencyCtx, err := t.getPredictedLatencyContextForRequest(request)
 	if err != nil {
-		id := request.Headers[reqcommon.RequestIdHeaderKey]
+		id := request.Headers[reqcommon.RequestIDHeaderKey]
 		logger.V(logutil.DEBUG).Info("PredictedLatency.ResponseBody: Failed to get SLO context", "error", err, "requestID", id)
 		return
 	}
@@ -215,7 +215,7 @@ func (t *PredictedLatency) ResponseBody(ctx context.Context, request *scheduling
 			t.decrementEndpointCounter(&t.prefillTokensInFlight, decodePodKey, int64(predictedLatencyCtx.inputTokenCount))
 		}
 
-		id := request.Headers[reqcommon.RequestIdHeaderKey]
+		id := request.Headers[reqcommon.RequestIDHeaderKey]
 		t.removeRequestFromQueue(id, predictedLatencyCtx)
 		t.deletePredictedLatencyContextForRequest(request)
 	}
@@ -268,7 +268,7 @@ func processFirstTokenForLatencyPrediction(
 	predictedLatencyCtx.generatedTokenCount = 1
 
 	if prefillTargetMetadata := predictedLatencyCtx.prefillTargetMetadata; prefillTargetMetadata != nil {
-		prefillMetrics, err := getLatestMetricsForProfile(predictedLatencyCtx, Experimental_DefaultPrefillProfile)
+		prefillMetrics, err := getLatestMetricsForProfile(predictedLatencyCtx, ExperimentalDefaultPrefillProfile)
 		if err == nil {
 			prefillPrefixCacheScore := predictedLatencyCtx.prefixCacheScoresForEndpoints[prefillTargetMetadata.NamespacedName.Name]
 			logger.V(logutil.DEBUG).Info("Recording prefill TTFT training data",
@@ -300,7 +300,7 @@ func processFirstTokenForLatencyPrediction(
 func initializeSampler(ctx context.Context, predictedLatencyCtx *predictedLatencyCtx, samplingMean float64, maxDecodeTokenSamplesForPrediction int) {
 	if predictedLatencyCtx.decodeTokenSampler == nil {
 		logger := log.FromContext(ctx)
-		requestID := predictedLatencyCtx.schedulingRequest.Headers[reqcommon.RequestIdHeaderKey]
+		requestID := predictedLatencyCtx.schedulingRequest.Headers[reqcommon.RequestIDHeaderKey]
 		predictedLatencyCtx.decodeTokenSampler = newDecodeTokenSampler(requestID, samplingMean, maxDecodeTokenSamplesForPrediction)
 		logger.V(logutil.DEBUG).Info("Initialized token sampler for first token", "request_id", requestID, "next_prediction_token", predictedLatencyCtx.decodeTokenSampler.getNextSampleToken())
 	}
@@ -334,7 +334,7 @@ func processTokenForLatencyPrediction(
 	logger := log.FromContext(ctx)
 
 	if predictedLatencyCtx.decodeTokenSampler == nil {
-		requestID := predictedLatencyCtx.schedulingRequest.Headers[reqcommon.RequestIdHeaderKey]
+		requestID := predictedLatencyCtx.schedulingRequest.Headers[reqcommon.RequestIDHeaderKey]
 		predictedLatencyCtx.decodeTokenSampler = newDecodeTokenSampler(requestID, samplingMean, maxDecodeTokenSamplesForPrediction)
 		logger.V(logutil.DEBUG).Info("Initialized token sampler for subsequent tokens", "request_id", requestID, "next_prediction_token", predictedLatencyCtx.decodeTokenSampler.getNextSampleToken())
 	}

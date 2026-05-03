@@ -18,7 +18,6 @@ package vllmgrpc
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,15 +29,14 @@ import (
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers"
+	grpcutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/util"
 	pb "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/gen"
 )
 
 const (
 	VllmGRPCParserType = "vllmgrpc-parser"
 
-	gRPCPayloadHeaderLen = 5
-
-	methodPathKey    = ":path"
 	vllmGeneratePath = "/vllm.grpc.engine.VllmEngine/Generate"
 	vllmEmbedPath    = "/vllm.grpc.engine.VllmEngine/Embed"
 )
@@ -80,27 +78,43 @@ func (p *VllmGRPCParser) SupportedAppProtocols() []v1.AppProtocol {
 }
 
 // ParseRequest parses the gRPC request body and headers and returns an InferenceRequestBody.
-func (p *VllmGRPCParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.InferenceRequestBody, error) {
+func (p *VllmGRPCParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
 	logger := log.FromContext(ctx)
 
-	path := headers[methodPathKey]
+	parsedPayload, err := grpcutil.ParseGrpcPayload(body)
+	if err != nil {
+		return nil, errors.New("invalid or unsupported gRPC payload")
+	}
+
+	path := headers[parsers.MethodPathKey]
 	switch path {
 	case vllmEmbedPath:
-		extractedBody, err := convertEmbedToInferenceRequestBody(body)
+		var req pb.EmbedRequest
+		if err := proto.Unmarshal(parsedPayload, &req); err != nil {
+			return nil, fmt.Errorf("unmarshaling EmbedRequest: %w", err)
+		}
+		extractedBody, err := convertEmbedToInferenceRequestBody(&req)
 		if err != nil {
-			return nil, fmt.Errorf("parsing gRPC payload for Embed: %w", err)
+			return nil, err
 		}
 		logger.V(logutil.TRACE).Info("parsed EmbedRequest")
-		return extractedBody, nil
+		return &fwkrh.ParseResult{Body: extractedBody, Skip: false}, nil
+
 	case vllmGeneratePath:
-		extractedBody, err := convertToInferenceRequestBody(body)
+		var req pb.GenerateRequest
+		if err := proto.Unmarshal(parsedPayload, &req); err != nil {
+			return nil, fmt.Errorf("unmarshaling GenerateRequest: %w", err)
+		}
+		extractedBody, err := convertToInferenceRequestBody(&req)
 		if err != nil {
-			return nil, fmt.Errorf("parsing gRPC payload for Generate: %w", err)
+			return nil, err
 		}
 		logger.V(logutil.TRACE).Info("parsed GenerateRequest")
-		return extractedBody, nil
+		return &fwkrh.ParseResult{Body: extractedBody, Skip: false}, nil
+
 	default:
-		return nil, fmt.Errorf("unsupported gRPC path: %s", headers[":path"])
+		logger.V(logutil.TRACE).Info("unsupported gRPC path, skipping", "path", headers[parsers.MethodPathKey])
+		return &fwkrh.ParseResult{Skip: true}, nil
 	}
 }
 
@@ -167,23 +181,14 @@ func requestControlUsage(promptToken, completionToken, cachedToken int) *fwkrh.U
 }
 
 func toGenerateResponse(payload []byte, resp *pb.GenerateResponse) error {
-	parsedPayload, compressed, err := parseGrpcPayload(payload)
+	parsedPayload, err := grpcutil.ParseGrpcPayload(payload)
 	if err != nil {
-		return errors.New("not able to parse payload")
+		return err
 	}
-	if compressed {
-		// TODO(#2635): handle compressed payload.
-		return errors.New("compressed vllmgrpc payload is not supported")
-	}
-
 	return proto.Unmarshal(parsedPayload, resp)
 }
 
-func convertToInferenceRequestBody(payload []byte) (*fwkrh.InferenceRequestBody, error) {
-	pbReq := &pb.GenerateRequest{}
-	if err := toGenerateRequest(payload, pbReq); err != nil {
-		return nil, err
-	}
+func convertToInferenceRequestBody(pbReq *pb.GenerateRequest) (*fwkrh.InferenceRequestBody, error) {
 	var body *fwkrh.InferenceRequestBody
 	switch pbReq.Input.(type) {
 	case *pb.GenerateRequest_Text:
@@ -251,48 +256,12 @@ func convertMultiModalFeatures(mmInputs *pb.MultimodalInputs) []fwkrh.MultiModal
 	return features
 }
 
-// parseGrpcPayload extracts the message payload and its compression status from a gRPC frame.
-// A standard gRPC frame consists of a 1-byte compression flag, a 4-byte message length,
-// and the actual message payload.
-func parseGrpcPayload(data []byte) ([]byte, bool, error) {
-	if len(data) < gRPCPayloadHeaderLen {
-		return nil, false, fmt.Errorf("invalid gRPC frame: expected at least %d bytes for header, got %d", gRPCPayloadHeaderLen, len(data))
-	}
-
-	// gRPC frame header: [Compression Flag (1 byte)] [Message Length (4 bytes)]
-	// Compression Flag 0 = uncompressed, 1 = compressed
-	isCompressed := data[0] == 1
-	msgLen := binary.BigEndian.Uint32(data[1:5])
-
-	if uint32(len(data)) < gRPCPayloadHeaderLen+msgLen {
-		return nil, false, fmt.Errorf("incomplete gRPC payload: header indicates %d bytes, but only %d bytes are available", msgLen, uint32(len(data))-gRPCPayloadHeaderLen)
-	}
-	return data[gRPCPayloadHeaderLen : gRPCPayloadHeaderLen+msgLen], isCompressed, nil
-}
-
-func toGenerateRequest(payload []byte, req *pb.GenerateRequest) error {
-	parsedPayload, compressed, err := parseGrpcPayload(payload)
-	if err != nil {
-		return errors.New("not able to parse payload")
-	}
-	if compressed {
-		// TODO(#2635): handle compressed payload.
-		return errors.New("compressed vllmgrpc payload is not supported")
-	}
-
-	return proto.Unmarshal(parsedPayload, req)
-}
-
-func convertEmbedToInferenceRequestBody(payload []byte) (*fwkrh.InferenceRequestBody, error) {
-	pbReq := &pb.EmbedRequest{}
-	if err := toEmbedRequest(payload, pbReq); err != nil {
-		return nil, err
-	}
+func convertEmbedToInferenceRequestBody(pbReq *pb.EmbedRequest) (*fwkrh.InferenceRequestBody, error) {
 	var body *fwkrh.InferenceRequestBody
 	if pbReq.Tokenized != nil {
-		inputIds := pbReq.GetTokenized().InputIds
-		tokenIDs := make([]uint32, len(inputIds))
-		copy(tokenIDs, inputIds)
+		inputIDs := pbReq.GetTokenized().InputIds
+		tokenIDs := make([]uint32, len(inputIDs))
+		copy(tokenIDs, inputIDs)
 		body = &fwkrh.InferenceRequestBody{
 			Embeddings: &fwkrh.EmbeddingsRequest{
 				Input: fwkrh.EmbeddingsInput{
@@ -307,26 +276,10 @@ func convertEmbedToInferenceRequestBody(payload []byte) (*fwkrh.InferenceRequest
 	return body, nil
 }
 
-func toEmbedRequest(payload []byte, req *pb.EmbedRequest) error {
-	parsedPayload, compressed, err := parseGrpcPayload(payload)
-	if err != nil {
-		return errors.New("not able to parse payload")
-	}
-	if compressed {
-		return errors.New("compressed vllmgrpc payload is not supported")
-	}
-
-	return proto.Unmarshal(parsedPayload, req)
-}
-
 func toEmbedResponse(payload []byte, resp *pb.EmbedResponse) error {
-	parsedPayload, compressed, err := parseGrpcPayload(payload)
+	parsedPayload, err := grpcutil.ParseGrpcPayload(payload)
 	if err != nil {
-		return errors.New("not able to parse payload")
+		return err
 	}
-	if compressed {
-		return errors.New("compressed vllmgrpc payload is not supported")
-	}
-
 	return proto.Unmarshal(parsedPayload, resp)
 }

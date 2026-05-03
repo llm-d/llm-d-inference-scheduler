@@ -46,6 +46,13 @@ type ChatCompletionHandler struct {
 	mu                  sync.Mutex
 }
 
+// GetCompletionRequests returns a snapshot of the received requests, safe for concurrent access.
+func (cc *ChatCompletionHandler) GetCompletionRequests() []map[string]any {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return append([]map[string]any(nil), cc.CompletionRequests...)
+}
+
 func (cc *ChatCompletionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cc.RequestCount.Add(1)
 

@@ -19,9 +19,9 @@ package predictedlatency
 import (
 	"testing"
 
+	latencypredictor "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/predictedlatency/latencypredictorclient"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/types"
-	latencypredictor "sigs.k8s.io/gateway-api-inference-extension/sidecars/latencypredictorasync"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
@@ -178,7 +178,7 @@ func TestValidatePrediction_PrefillEndpointNeutralizeTPOT(t *testing.T) {
 
 	// Simulate the fix logic from generatePredictions
 	if config.EndpointRoleLabel != "" && prefillEp.GetMetadata().Labels != nil {
-		if prefillEp.GetMetadata().Labels[config.EndpointRoleLabel] == Experimental_DefaultPrefillProfile {
+		if prefillEp.GetMetadata().Labels[config.EndpointRoleLabel] == ExperimentalDefaultPrefillProfile {
 			predResult.TPOTValid = true
 			predResult.Headroom = 0
 			predResult.IsValid = predResult.TTFTValid
@@ -198,7 +198,7 @@ func TestValidatePrediction_PrefillEndpointNeutralizeTPOT(t *testing.T) {
 		Headroom:  -969,
 	}
 	if config.EndpointRoleLabel != "" && decodeEp.GetMetadata().Labels != nil {
-		if decodeEp.GetMetadata().Labels[config.EndpointRoleLabel] == Experimental_DefaultPrefillProfile {
+		if decodeEp.GetMetadata().Labels[config.EndpointRoleLabel] == ExperimentalDefaultPrefillProfile {
 			decodeResult.TPOTValid = true
 			decodeResult.Headroom = 0
 			decodeResult.IsValid = decodeResult.TTFTValid
