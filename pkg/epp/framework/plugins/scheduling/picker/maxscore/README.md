@@ -5,7 +5,7 @@
 Selects the endpoint(s) with the highest score calculated during the scoring phase.
 
 > [!NOTE]
-> This plugin is framework-injected by default if no other picker is specified. You do not need to explicitly declare it in your configuration.
+> This plugin is enabled by default if no other picker is specified. You do not need to explicitly declare it in your configuration.
 
 ## What it does
 
