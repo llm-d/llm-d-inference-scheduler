@@ -16,8 +16,6 @@ Defaults shown above are the library defaults from `tokenization.UdsTokenizerCon
 
 **Configuration Example:**
 ```yaml
-featureGates:
-- prepareDataPlugins
 plugins:
   - type: tokenizer
     parameters:
@@ -35,7 +33,7 @@ schedulingProfiles:
         weight: 10
 ```
 
-The framework auto-registers any plugin implementing `requestcontrol.DataProducer` into the `PrepareRequestData` phase; no separate `prepareData:` block is required. The `prepareDataPlugins` feature gate must be enabled.
+The framework auto-registers any plugin implementing `requestcontrol.DataProducer` into the `PrepareRequestData` phase; no separate `prepareData:` block is required.
 
 ---
 
