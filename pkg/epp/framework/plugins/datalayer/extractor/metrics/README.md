@@ -3,7 +3,7 @@
 **Type:** `core-metrics-extractor`
 
 > [!NOTE]
-> This plugin is framework-injected by default together with `metrics-data-source` when the data layer is enabled. You do not need to explicitly declare it in your configuration, but it can be disabled if metrics collection is unnecessary.
+> This plugin is enabled by default together with `metrics-data-source`. You do not need to explicitly declare it in your configuration, but it can be disabled if metrics collection is unnecessary.
 
 The Core Metrics Extractor is a data layer plugin responsible for extracting model server metrics from a data source and storing them as endpoint attributes. It supports multiple inference engines and can be configured to map engine-specific metric names to a standard set of internal keys.
 
