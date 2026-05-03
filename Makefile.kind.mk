@@ -4,7 +4,7 @@ KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
 KIND_GATEWAY_HOST_PORT ?= 30080
 
 .PHONY: image-kind
-image-kind: ## Reload the EPP image into the kind cluster $(KIND_CLUSTER_NAME)
+image-kind: ## Reload the EPP and SideCar images into the kind cluster $(KIND_CLUSTER_NAME)
 	KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) ./scripts/load_image.sh $(EPP_IMAGE) $(SIDECAR_IMAGE)
 
 .PHONY: env-dev-kind
