@@ -177,10 +177,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Print all flag values
+	// Print flag values, skipping deprecated metric flags configured via engineConfigs
 	flags := make(map[string]any)
 	pflag.VisitAll(func(f *pflag.Flag) {
-		flags[f.Name] = f.Value
+		if !runserver.IsDeprecatedMetricFlag(f.Name) {
+			flags[f.Name] = f.Value
+		}
 	})
 	setupLog.Info("Flags processed", "flags", flags)
 
