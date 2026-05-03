@@ -253,7 +253,7 @@ To accommodate this **without code changes**, you can configure the **EndpointPi
 Below is a minimal `EndpointPickerConfig` for P/D disaggregation using custom labels:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
@@ -306,7 +306,7 @@ schedulingProfiles:
 Below is an `EndpointPickerConfig` for full E/P/D disaggregation using custom labels:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
