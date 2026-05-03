@@ -4,8 +4,6 @@
 
 This plugin scores candidate endpoints by current waiting-queue depth.
 
-> [!NOTE]
-> This scorer is included in the default out-of-the-box configuration.
 
 ## What it does
 
