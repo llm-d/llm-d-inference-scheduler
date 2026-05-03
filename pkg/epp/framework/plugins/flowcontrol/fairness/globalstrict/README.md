@@ -5,7 +5,7 @@
 The Global Strict fairness policy is a greedy strategy that operates across all flows within a Priority Band. By ignoring flow boundaries and selecting the flow with the "best" item according to the configured Ordering Policy, this policy effectively transforms the multi-queue Priority Band into a single logical queue.
 
 > [!NOTE]
-> This plugin is framework-injected by default when flow control is enabled. You do not need to explicitly declare it in your configuration.
+> This plugin is enabled by default when flow control is enabled. You do not need to explicitly declare it in your configuration.
 
 ## Why choose this policy?
 
