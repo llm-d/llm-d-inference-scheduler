@@ -1,6 +1,6 @@
-# Tokenizer Plugin
+# Token Producer Plugin
 
-**Type:** `tokenizer`
+**Type:** `token-producer` (legacy alias `tokenizer` continues to work for backward compatibility and will be removed in a future release)
 
 Tokenizes the request prompt (text completions and multi-modal chat) and publishes the result on `InferenceRequestBody.TokenizedPrompt` for downstream consumers (scorers, filters, other data producers). Communicates over a Unix domain socket with a tokenizer sidecar from [`github.com/llm-d/llm-d-kv-cache`](https://github.com/llm-d/llm-d-kv-cache). Fail-open: tokenization errors are logged and scheduling continues with `TokenizedPrompt` left nil.
 
@@ -17,7 +17,7 @@ Defaults shown above are the library defaults from `tokenization.UdsTokenizerCon
 **Configuration Example:**
 ```yaml
 plugins:
-  - type: tokenizer
+  - type: token-producer
     parameters:
       modelName: "llama-3-8b"
       udsTokenizerConfig:

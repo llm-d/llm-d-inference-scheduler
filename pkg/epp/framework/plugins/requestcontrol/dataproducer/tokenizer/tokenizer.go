@@ -43,8 +43,14 @@ type tokenizer interface {
 }
 
 const (
-	// PluginType is the type name used to register the tokenizer plugin.
-	PluginType = "tokenizer"
+	// PluginType is the canonical type name used to register the plugin.
+	PluginType = "token-producer"
+
+	// LegacyPluginType is the previous type name. Existing YAML configs that
+	// reference it continue to work. Will be removed in a future release.
+	//
+	// Deprecated: use PluginType ("token-producer") instead.
+	LegacyPluginType = "tokenizer"
 
 	// TokenizedPromptKey is the data key advertised by this plugin to indicate
 	// that it produces tokenized prompt data on InferenceRequestBody.TokenizedPrompt.
