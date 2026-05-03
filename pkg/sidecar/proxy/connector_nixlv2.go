@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -187,6 +188,7 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	if !ok {
 		s.logger.Info("warning: missing 'kv_transfer_params' field in prefiller response")
 	}
+	pCachedTokens, hasPCachedTokens := extractCachedTokens(prefillerResponse)
 
 	s.logger.V(5).Info("received prefiller response", requestFieldKVTransferParams, pKVTransferParams)
 
@@ -244,13 +246,14 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	// 2. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(w, dreq)
+	decodeWriter := newCachedTokensResponseWriter(w, pCachedTokens, hasPCachedTokens)
+	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeWriter, dreq)
 	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.data_parallel", dataParallelUsed))
 
 	if !dataParallelUsed {
 		s.logger.V(4).Info("sending request to decoder", "to", s.config.DecoderURL.Host)
 		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.config.DecoderURL.Host))
-		s.decoderProxy.ServeHTTP(w, dreq)
+		s.decoderProxy.ServeHTTP(decodeWriter, dreq)
 	}
 
 	decodeDuration := time.Since(decodeStart)
@@ -280,4 +283,216 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 			attribute.Float64("llm_d.pd_proxy.coordinator_overhead_ms", float64(coordinatorOverhead.Milliseconds())),
 		)
 	}
+}
+
+type cachedTokensResponseWriter struct {
+	http.ResponseWriter
+	cachedTokens int
+	enabled      bool
+	wroteHeader  bool
+	streamMode   bool
+	streamBuffer []byte
+}
+
+func newCachedTokensResponseWriter(w http.ResponseWriter, cachedTokens int, enabled bool) http.ResponseWriter {
+	if !enabled {
+		return w
+	}
+	return &cachedTokensResponseWriter{
+		ResponseWriter: w,
+		cachedTokens:   cachedTokens,
+		enabled:        enabled,
+	}
+}
+
+func (w *cachedTokensResponseWriter) WriteHeader(statusCode int) {
+	if w.enabled {
+		w.Header().Del("Content-Length")
+	}
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *cachedTokensResponseWriter) Write(body []byte) (int, error) {
+	if !w.enabled {
+		return w.ResponseWriter.Write(body)
+	}
+	updated := replaceCachedTokens(body, w.cachedTokens)
+	if w.shouldBufferSSE(body) {
+		updated = w.replaceCachedTokensSSEChunk(body)
+	}
+	if !w.wroteHeader {
+		w.Header().Del("Content-Length")
+	}
+	_, err := w.ResponseWriter.Write(updated)
+	if err != nil {
+		return 0, err
+	}
+	return len(body), nil
+}
+
+func (w *cachedTokensResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *cachedTokensResponseWriter) shouldBufferSSE(body []byte) bool {
+	if w.streamMode {
+		return true
+	}
+	contentType := w.Header().Get("Content-Type")
+	if strings.Contains(contentType, "text/event-stream") || bytes.HasPrefix(body, []byte("data:")) {
+		w.streamMode = true
+		return true
+	}
+	return false
+}
+
+func (w *cachedTokensResponseWriter) replaceCachedTokensSSEChunk(body []byte) []byte {
+	w.streamBuffer = append(w.streamBuffer, body...)
+	updated := make([]byte, 0, len(w.streamBuffer))
+	for {
+		lineEnd := bytes.IndexByte(w.streamBuffer, '\n')
+		if lineEnd < 0 {
+			break
+		}
+		line := w.streamBuffer[:lineEnd+1]
+		replacedLine, _ := replaceCachedTokensSSELine(line, w.cachedTokens)
+		updated = append(updated, replacedLine...)
+		w.streamBuffer = w.streamBuffer[lineEnd+1:]
+	}
+	return updated
+}
+
+func extractCachedTokens(response map[string]any) (int, bool) {
+	usage, ok := response["usage"].(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	return cachedTokensFromUsage(usage)
+}
+
+func cachedTokensFromUsage(usage map[string]any) (int, bool) {
+	for _, field := range []string{"prompt_tokens_details", "prompt_token_details"} {
+		details, ok := usage[field].(map[string]any)
+		if !ok {
+			continue
+		}
+		return intValue(details["cached_tokens"])
+	}
+	return 0, false
+}
+
+func intValue(value any) (int, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
+func replaceCachedTokens(body []byte, cachedTokens int) []byte {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return body
+	}
+	if updated, ok := replaceCachedTokensJSON(body, cachedTokens); ok {
+		return updated
+	}
+	if updated, ok := replaceCachedTokensSSE(body, cachedTokens); ok {
+		return updated
+	}
+	return body
+}
+
+func replaceCachedTokensJSON(body []byte, cachedTokens int) ([]byte, bool) {
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, false
+	}
+	if !setCachedTokens(response, cachedTokens) {
+		return body, true
+	}
+	updated, err := json.Marshal(response)
+	if err != nil {
+		return body, true
+	}
+	return updated, true
+}
+
+func replaceCachedTokensSSE(body []byte, cachedTokens int) ([]byte, bool) {
+	lines := bytes.SplitAfter(body, []byte("\n"))
+	updated := make([]byte, 0, len(body))
+	changed := false
+	processed := false
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		replacedLine, ok := replaceCachedTokensSSELine(line, cachedTokens)
+		if !ok {
+			updated = append(updated, replacedLine...)
+			continue
+		}
+		processed = true
+		if !bytes.Equal(replacedLine, line) {
+			changed = true
+		}
+		updated = append(updated, replacedLine...)
+	}
+
+	if !processed {
+		return nil, false
+	}
+	if !changed {
+		return body, true
+	}
+	return updated, true
+}
+
+func replaceCachedTokensSSELine(line []byte, cachedTokens int) ([]byte, bool) {
+	trimmedLine := bytes.TrimRight(line, "\r\n")
+	lineEnding := line[len(trimmedLine):]
+	data, ok := bytes.CutPrefix(trimmedLine, []byte("data: "))
+	if !ok {
+		return line, false
+	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		return line, true
+	}
+	replacedData, isJSON := replaceCachedTokensJSON(data, cachedTokens)
+	if !isJSON {
+		return line, true
+	}
+	updated := make([]byte, 0, len(line))
+	updated = append(updated, []byte("data: ")...)
+	updated = append(updated, replacedData...)
+	updated = append(updated, lineEnding...)
+	return updated, true
+}
+
+func setCachedTokens(response map[string]any, cachedTokens int) bool {
+	usage, ok := response["usage"].(map[string]any)
+	if !ok {
+		return false
+	}
+	changed := false
+	for _, field := range []string{"prompt_tokens_details", "prompt_token_details"} {
+		details, ok := usage[field].(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, ok := details["cached_tokens"]; !ok {
+			continue
+		}
+		if current, ok := intValue(details["cached_tokens"]); !ok || current != cachedTokens {
+			details["cached_tokens"] = cachedTokens
+			changed = true
+		}
+	}
+	return changed
 }

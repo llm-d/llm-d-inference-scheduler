@@ -18,8 +18,10 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
@@ -100,8 +102,56 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(testInfo.decodeHandler.RequestCount.Load()).To(BeNumerically("==", 1))
 		Expect(testInfo.decodeHandler.CompletionRequests).To(HaveLen(1))
 
+		responseBody, err := io.ReadAll(rp.Body)
+		Expect(err).ToNot(HaveOccurred())
+		var response map[string]any
+		Expect(json.Unmarshal(responseBody, &response)).To(Succeed())
+		usage := response["usage"].(map[string]any)
+		details := usage["prompt_tokens_details"].(map[string]any)
+		Expect(details["cached_tokens"]).To(BeNumerically("==", 7))
+
 		testInfo.cancelFn()
 		<-testInfo.stoppedCh
+	})
+
+	It("should replace cached tokens in JSON responses", func() {
+		body := []byte(`{"usage":{"prompt_tokens":64,"prompt_tokens_details":{"cached_tokens":49}}}`)
+		Expect(replaceCachedTokens(body, 7)).To(Equal([]byte(`{"usage":{"prompt_tokens":64,"prompt_tokens_details":{"cached_tokens":7}}}`)))
+	})
+
+	It("should not extract cached tokens when prefill response has none", func() {
+		prefillResponse := map[string]any{
+			requestFieldKVTransferParams: map[string]any{
+				requestFieldRemoteBlockIDs: []any{float64(1), float64(2), float64(3)},
+			},
+		}
+		_, ok := extractCachedTokens(prefillResponse)
+		Expect(ok).To(BeFalse())
+	})
+
+	It("should replace cached tokens in streamed usage chunks", func() {
+		body := []byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"prompt_tokens_details\":{\"cached_tokens\":49}}}\n\ndata: [DONE]\n")
+		updated := replaceCachedTokens(body, 7)
+		Expect(string(updated)).To(ContainSubstring(`"cached_tokens":7`))
+		Expect(string(updated)).To(ContainSubstring("data: [DONE]"))
+	})
+
+	It("should buffer streamed usage chunks split before the data prefix", func() {
+		recorder := httptest.NewRecorder()
+		recorder.Header().Set("Content-Type", "text/event-stream")
+		writer := newCachedTokensResponseWriter(recorder, 7, true)
+
+		n, err := writer.Write([]byte("da"))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(n).To(Equal(2))
+		Expect(recorder.Body.String()).To(BeEmpty())
+
+		chunk := []byte("ta: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"prompt_tokens_details\":{\"cached_tokens\":49}}}\n\ndata: [DONE]\n")
+		n, err = writer.Write(chunk)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(n).To(Equal(len(chunk)))
+		Expect(recorder.Body.String()).To(ContainSubstring(`"cached_tokens":7`))
+		Expect(recorder.Body.String()).To(ContainSubstring("data: [DONE]"))
 	})
 
 	// Responses API tests — exercise the same NIXL v2 connector with
