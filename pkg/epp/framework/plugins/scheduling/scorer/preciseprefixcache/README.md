@@ -3,7 +3,7 @@
 **Type:** `precise-prefix-cache-scorer`
 
 The `precise-prefix-cache-scorer` scores a request based on KV-cache localities.
-Similarly to the IGW `prefix-cache-scorer`, it provides a score based on the number of
+Similarly to the `prefix-cache-scorer`, it provides a score based on the number of
  matching KV-cache blocks between the request's prompt and the KV-cache contents of each pod.
  However, unlike the IGW `prefix-cache-scorer`, which relies on estimations based on scheduling history,
  the `precise-prefix-cache-scorer` tracks the real-time KV-cache states across the vLLM instances to
