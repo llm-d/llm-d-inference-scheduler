@@ -112,6 +112,7 @@ func NewOptions() *Options {
 			PoolGroup:               DefaultPoolGroup,
 			InferencePoolNamespace:  os.Getenv("INFERENCE_POOL_NAMESPACE"),
 			InferencePoolName:       os.Getenv("INFERENCE_POOL_NAME"),
+			DecodeChunkSize:         0,
 		},
 		vllmPort:      "8001",
 		inferencePool: os.Getenv("INFERENCE_POOL"),
@@ -140,6 +141,7 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&opts.EnableSSRFProtection, "enable-ssrf-protection", opts.EnableSSRFProtection, "enable SSRF protection using InferencePool allowlisting")
 	fs.BoolVar(&opts.EnablePrefillerSampling, "enable-prefiller-sampling", opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
 	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
+	fs.IntVar(&opts.DecodeChunkSize, "decode-chunk-size", opts.DecodeChunkSize, "enables chunked decode mode when > 0; value is the token budget per chunk. For best performance should be a multiple of the block size.")
 
 	fs.StringSliceVar(&opts.enableTLS, "enable-tls", opts.enableTLS, "stages to enable TLS for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
 	fs.StringSliceVar(&opts.tlsInsecureSkipVerify, "tls-insecure-skip-verify", opts.tlsInsecureSkipVerify, "stages to skip TLS verification for. Supported: "+supportedTLSStageNamesStr+". Can be specified multiple times or as comma-separated values.")
@@ -274,6 +276,11 @@ func (opts *Options) Validate() error {
 				return errors.New("--inference-pool cannot have empty namespace or name")
 			}
 		}
+	}
+
+	// Validate chunked decode
+	if opts.DecodeChunkSize < 0 {
+		return fmt.Errorf("--decode-chunk-size must be a non-negative integer (0 disables chunked decode), got %d", opts.DecodeChunkSize)
 	}
 
 	// Validate SSRF protection requirements
