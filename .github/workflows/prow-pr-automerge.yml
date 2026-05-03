@@ -1,14 +1,11 @@
 # Merges PRs with the lgtm label. Blocks if hold label is present.
-# Event-driven triggers handle immediate merges; cron fallback catches edge cases.
 
 name: "Prow merge on lgtm label"
 on:
   pull_request:
     types: [labeled]
-  check_suite:
-    types: [completed]
   schedule:
-  - cron: "*/30 * * * *"
+  - cron: "*/10 * * * *"
 
 permissions:
   contents: write
