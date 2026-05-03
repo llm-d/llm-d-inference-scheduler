@@ -249,6 +249,13 @@ test-integration: image-build-builder ## Run integration tests (requires KUBECON
 	$(BUILDER_RUN_CLUSTER) 'go test -v -race -tags=integration_tests -coverprofile=$(COVERAGE_DIR)/integration.out -covermode=atomic ./test/integration/'
 	$(BUILDER_RUN) 'go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1'
 
+.PHONY: test-integration-hermetic
+test-integration-hermetic: image-build-builder ## Run hermetic integration tests (envtest, no cluster required)
+	@mkdir -p $(COVERAGE_DIR)
+	@printf "\033[33;1m==== Running Hermetic Integration Tests ====\033[0m\n"
+	$(BUILDER_RUN) 'CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$(setup-envtest use $$ENVTEST_K8S_VERSION --bin-dir $$ENVTEST_ASSETS_DIR -p path)" go test -v -race -coverprofile=$(COVERAGE_DIR)/integration-hermetic.out -covermode=atomic ./test/integration/igw/...'
+	$(BUILDER_RUN) 'go tool cover -func=$(COVERAGE_DIR)/integration-hermetic.out | tail -1'
+
 .PHONY: test-e2e
 test-e2e: image-build-builder image-build image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
