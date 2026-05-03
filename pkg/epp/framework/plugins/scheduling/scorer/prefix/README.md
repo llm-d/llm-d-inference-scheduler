@@ -4,8 +4,6 @@
 
 This plugin scores candidate endpoints by estimating **prompt prefix cache reuse** on each model server.
 
-> [!NOTE]
-> This scorer is included in the default out-of-the-box configuration.
 
 ## What it does
 
