@@ -27,6 +27,12 @@ The plugin config supports:
 
 - `maxNumOfEndpoints` (default 1)
   - The maximum number of endpoints to pick and return. Must be > 0. If more candidates are available than this limit, only the top subset is returned.
+- `topK` (optional, integer; default `0` = disabled)
+  - Absolute cap on the candidate-pool size before A-Res sampling. Candidates are sorted by score, descending. Combinable with `topKPercent` — when both are set, the more restrictive bound wins.
+- `topKPercent` (optional, 1-100; default `0` = disabled)
+  - Percentage cap on the candidate-pool size before A-Res sampling, computed as `ceil(N * P / 100)`. Useful when fleet size varies (autoscaling).
+- `minTopK` (default 2)
+  - Floor on the post-filter pool size when `topK`/`topKPercent` is set. Prevents collapse to a single candidate (which would degenerate into argmax). Set to `1` to allow argmax. Ignored when neither `topK` nor `topKPercent` is set.
 
 > [!TIP]
 > In most production scenarios, `maxNumOfEndpoints` is left at its default value of `1` to select a single target endpoint for the request.
