@@ -237,7 +237,7 @@ func estimateContextLength(request *scheduling.InferenceRequest) int {
 
 	// Handle regular completions
 	if request.Body.Completions != nil {
-		totalChars += len(request.Body.Completions.Prompt.Raw)
+		totalChars += len(request.Body.Completions.Prompt.PlainText())
 	}
 
 	// Convert characters to approximate token count

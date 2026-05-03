@@ -477,6 +477,88 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 			},
 		},
 		{
+			// This test verifies independent per-prompt scoring for []string prompts.
+			// Each pod has exactly 1 matching block from a different prompt.
+			// With independent scoring: both pods get raw score 1 → equal → normalized 1.0.
+			// With the old concatenated approach: the joined text produces different block keys
+			// that don't match any cached data → all pods get 0.
+			name: "string array prompt - independent per-prompt scoring",
+			endpoints: []scheduling.Endpoint{
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
+						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
+						Address:        "10.0.0.1",
+						Port:           "8080",
+					},
+					nil,
+					nil,
+				),
+				scheduling.NewEndpoint(
+					&fwkdl.EndpointMetadata{
+						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
+						Address:        "10.0.0.2",
+						Port:           "8080",
+					},
+					nil,
+					nil,
+				),
+			},
+			request: &scheduling.LLMRequest{
+				RequestId:   "test-request",
+				TargetModel: "test-model",
+				Body: &scheduling.LLMRequestBody{
+					Completions: &scheduling.CompletionsRequest{
+						Prompt: scheduling.Prompt{
+							Strings: []string{
+								prompt,
+								"A second completely different prompt about machine learning and neural networks.",
+							},
+						},
+					},
+				},
+			},
+			kvBlockData: func(req *scheduling.LLMRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
+				require.NotNil(t, req.Completions, "req expected to use Completions API")
+				prompts := req.Completions.Prompt.Strings
+				require.Len(t, prompts, 2)
+
+				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
+				require.NoError(t, err)
+
+				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
+				require.NoError(t, err)
+
+				tokens1, _, err := testTokenizer.Render(prompts[0])
+				require.NoError(t, err)
+				keys1 := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens1, model)
+				require.GreaterOrEqual(t, len(keys1), 1, "first prompt needs at least 1 chunk")
+
+				tokens2, _, err := testTokenizer.Render(prompts[1])
+				require.NoError(t, err)
+				keys2 := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens2, model)
+				require.GreaterOrEqual(t, len(keys2), 1, "second prompt needs at least 1 chunk")
+
+				// Pod A: first block of prompt 1 only
+				// Pod B: first block of prompt 2 only
+				return map[kvblock.BlockHash][]kvblock.PodEntry{
+					keys1[0]: {
+						{PodIdentifier: "10.0.0.1:8080"},
+					},
+					keys2[0]: {
+						{PodIdentifier: "10.0.0.2:8080"},
+					},
+				}
+			},
+			wantScoresByAddress: map[string]float64{
+				// Independent scoring: pod-a gets 1 from prompt1, pod-b gets 1 from prompt2.
+				// Both raw scores are equal (min=max) → normalized to 1.0.
+				// With the old concatenated approach, the joined text's block keys wouldn't
+				// match either prompt's cached blocks, so both pods would score 0.
+				"10.0.0.1:8080": 1.0,
+				"10.0.0.2:8080": 1.0,
+			},
+		},
+		{
 			name: "all endpoints have equal prefix length",
 			endpoints: []scheduling.Endpoint{
 				scheduling.NewEndpoint(
@@ -671,6 +753,46 @@ func TestPrepareRequestData_PopulatesPluginState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, state)
 	assert.NotEmpty(t, state.blockKeys, "block keys should be populated after PrepareRequestData")
+}
+
+// TestPrepareRequestData_StringArrayPrompt verifies that PrepareRequestData handles
+// []string prompts by computing block keys per string independently and aggregating scores.
+func TestPrepareRequestData_StringArrayPrompt(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	scorer := newTestScorer(t)
+
+	request := &scheduling.LLMRequest{
+		RequestId:   "test-string-array-prepare",
+		TargetModel: "test-model",
+		Body: &scheduling.LLMRequestBody{
+			Completions: &scheduling.CompletionsRequest{
+				Prompt: scheduling.Prompt{
+					Strings: []string{
+						"One morning, when Gregor Samsa woke from troubled dreams, " +
+							"he found himself transformed in his bed into a horrible vermin.",
+						"A second completely different prompt about machine learning.",
+					},
+				},
+			},
+		},
+	}
+
+	endpoints := []scheduling.Endpoint{
+		scheduling.NewEndpoint(
+			&fwkdl.EndpointMetadata{
+				NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
+				Address:        "10.0.0.1",
+				Port:           "8080",
+			}, nil, nil),
+	}
+
+	err := scorer.PrepareRequestData(ctx, request, endpoints)
+	require.NoError(t, err)
+
+	state, err := readPrecisePluginState(scorer.pluginState, request.RequestId)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	assert.NotEmpty(t, state.blockKeys, "block keys should be populated for []string prompt")
 }
 
 // TestScoreReusesPluginState verifies that Score() picks up the pre-computed

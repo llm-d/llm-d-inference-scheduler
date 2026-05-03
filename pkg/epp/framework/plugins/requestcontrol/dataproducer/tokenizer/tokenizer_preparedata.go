@@ -47,13 +47,18 @@ func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.Inf
 		return nil
 	}
 
-	tokenIDs, _ := p.tokenize(ctx, request)
-	if tokenIDs == nil {
+	allTokenIDs, _ := p.tokenize(ctx, request)
+	if len(allTokenIDs) == 0 {
 		return nil
 	}
 
+	// Flatten per-prompt tokens into a single slice for the GAIE TokenizedPrompt
+	var flat []uint32
+	for _, ids := range allTokenIDs {
+		flat = append(flat, ids...)
+	}
 	request.TokenizedPrompt = &scheduling.TokenizedPrompt{
-		TokenIDs: tokenIDs,
+	TokenIDs: slices.Concat(allTokenIDs...)
 	}
 
 	return nil

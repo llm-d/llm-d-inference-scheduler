@@ -307,6 +307,55 @@ func TestTokenizerScorer_Render_NilMMFeatures(t *testing.T) {
 	assert.Nil(t, stored.MMFeatures, "MMFeatures should be nil for text-only completions")
 }
 
+func TestTokenizerScorer_StringArrayPrompt(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+
+	renderCalls := map[string][]uint32{
+		"hello": {10, 20},
+		"world": {30, 40, 50},
+	}
+	tok := &mockTokenizer{
+		renderFunc: func(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
+			ids, ok := renderCalls[prompt]
+			if !ok {
+				t.Fatalf("unexpected Render call for %q", prompt)
+			}
+			return ids, nil, nil
+		},
+	}
+	p := newTestPlugin(tok)
+	cycleState := scheduling.NewCycleState()
+
+	request := &scheduling.LLMRequest{
+		RequestId: "string-array",
+		Body: &scheduling.LLMRequestBody{
+			Completions: &scheduling.CompletionsRequest{
+				Prompt: scheduling.Prompt{
+					Strings: []string{"hello", "world"},
+				},
+			},
+		},
+	}
+
+	scores := p.Score(ctx, cycleState, request, testEndpoints)
+	for _, score := range scores {
+		assert.Equal(t, float64(0), score)
+	}
+
+	stored, err := scheduling.ReadCycleStateKey[*TokenizedPromptState](
+		cycleState, TokenizedPromptStateKey)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+
+	// TokenIDs should be the flattened concatenation
+	assert.Equal(t, []uint32{10, 20, 30, 40, 50}, stored.TokenIDs)
+
+	// PerPromptTokens should have 2 separate prompt token slices
+	require.Len(t, stored.PerPromptTokens, 2)
+	assert.Equal(t, []uint32{10, 20}, stored.PerPromptTokens[0])
+	assert.Equal(t, []uint32{30, 40, 50}, stored.PerPromptTokens[1])
+}
+
 func TestTokenizerScorer_Category(t *testing.T) {
 	p := newTestPlugin(nil)
 	assert.Equal(t, scheduling.Affinity, p.Category())

@@ -101,8 +101,9 @@ func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, err
 // This follows the standard IGW pattern where scorers share data via CycleState
 // (same as NoHitLRU reading from prefix-cache scorer).
 type TokenizedPromptState struct {
-	TokenIDs   []uint32
-	MMFeatures *tokenization.MultiModalFeatures
+	TokenIDs        []uint32   // Concatenated token IDs (single prompt or flattened multi-prompt)
+	PerPromptTokens [][]uint32 // Per-prompt token slices; set only for []string prompts (len > 1)
+	MMFeatures      *tokenization.MultiModalFeatures
 }
 
 // Clone implements plugin.StateData.
@@ -112,7 +113,20 @@ func (t *TokenizedPromptState) Clone() plugin.StateData {
 	}
 	ids := make([]uint32, len(t.TokenIDs))
 	copy(ids, t.TokenIDs)
-	return &TokenizedPromptState{TokenIDs: ids, MMFeatures: cloneMMFeatures(t.MMFeatures)}
+	var perPrompt [][]uint32
+	if t.PerPromptTokens != nil {
+		perPrompt = make([][]uint32, len(t.PerPromptTokens))
+		for i, p := range t.PerPromptTokens {
+			cp := make([]uint32, len(p))
+			copy(cp, p)
+			perPrompt[i] = cp
+		}
+	}
+	return &TokenizedPromptState{
+		TokenIDs:        ids,
+		PerPromptTokens: perPrompt,
+		MMFeatures:      cloneMMFeatures(t.MMFeatures),
+	}
 }
 
 // cloneMMFeatures deep-copies the maps/slices so cloned CycleState entries
@@ -160,8 +174,8 @@ func (p *Plugin) WithName(name string) *Plugin {
 }
 
 // tokenize extracts token IDs and optional multimodal features from the request.
-// Returns (nil, nil) on error or unsupported type.
-func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequest) ([]uint32, *tokenization.MultiModalFeatures) {
+// Returns one []uint32 per prompt: single prompt = [[tokens]], []string = [[t1],[t2],...].
+func (p *Plugin) tokenize(ctx context.Context, request *scheduling.LLMRequest) ([][]uint32, *tokenization.MultiModalFeatures) {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	traceLogger := logger.V(logging.TRACE)
 
@@ -174,18 +188,40 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequ
 		"hasCompletions", request.Body.Completions != nil,
 		"hasChatCompletions", request.Body.ChatCompletions != nil)
 
-	var tokenIDs []uint32
+	var allTokenIDs [][]uint32
 	var mmFeatures *tokenization.MultiModalFeatures
 	var err error
 
 	switch {
 	case request.Body.Completions != nil:
-		traceLogger.Info("Calling Render for completions", "prompt", request.Body.Completions.Prompt)
-		tokenIDs, _, err = p.tokenizer.Render(request.Body.Completions.Prompt.Raw)
+		prompt := request.Body.Completions.Prompt
+		if len(prompt.Strings) > 0 {
+			allTokenIDs = make([][]uint32, 0, len(prompt.Strings))
+			for _, promptStr := range prompt.Strings {
+				traceLogger.Info("Calling Render for completions string", "promptLength", len(promptStr))
+				sTokenIDs, _, err := p.tokenizer.Render(promptStr)
+				if renderErr != nil {
+					logger.Error(renderErr, "String tokenization failed, skipping")
+					continue
+				}
+				allTokenIDs = append(allTokenIDs, sTokenIDs)
+			}
+		} else {
+			traceLogger.Info("Calling Render for completions", "prompt", prompt)
+    tokenIDs, _, err := p.tokenizer.Render(prompt.PlainText())
+			tokenIDs, _, err = p.tokenizer.Render(prompt.PlainText())
+			if err == nil {
+				allTokenIDs = [][]uint32{tokenIDs}
+			}
+		}
 	case request.Body.ChatCompletions != nil:
 		renderReq := ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))
+       tokenIDs, mmFeatures, err := p.tokenizer.RenderChat(renderReq)
 		tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(renderReq)
+		if err == nil {
+			allTokenIDs = [][]uint32{tokenIDs}
+		}
 	default:
 		traceLogger.Info("Unsupported request type, skipping tokenization")
 		return nil, nil
@@ -196,8 +232,12 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequ
 		return nil, nil
 	}
 
-	traceLogger.Info("Tokenization succeeded", "tokenCount", len(tokenIDs))
-	return tokenIDs, mmFeatures
+	totalTokens := 0
+	for _, ids := range allTokenIDs {
+		totalTokens += len(ids)
+	}
+   traceLogger.Info("Tokenization succeeded", "promptCount", len(allTokenIDs))
+	return allTokenIDs, mmFeatures
 }
 
 // ChatCompletionsToRenderChatRequest converts a ChatCompletionsRequest to a
