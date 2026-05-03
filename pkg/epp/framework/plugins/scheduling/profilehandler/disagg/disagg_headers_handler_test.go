@@ -20,7 +20,6 @@ import (
 
 func TestMain(m *testing.M) {
 	giePlugin.Register(DisaggHeadersHandlerType, HeadersHandlerFactory)
-	giePlugin.Register(PrefillHeaderHandlerType, HeadersHandlerFactory) //nolint:staticcheck
 	os.Exit(m.Run())
 }
 
@@ -151,43 +150,6 @@ func TestPreRequestNilSchedulingResult(t *testing.T) {
 	assert.NotPanics(t, func() {
 		handler.PreRequest(ctx, request, nil)
 	})
-}
-
-// ----- Backward compatibility -----
-
-func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
-	// Simulate what the config loader does when it reads type: prefill-header-handler from YAML
-	factory, ok := giePlugin.Registry[PrefillHeaderHandlerType]
-	require.True(t, ok, "prefill-header-handler must be in the registry")
-
-	raw := json.RawMessage(`{"prefillProfile": "prefill"}`)
-	p, err := factory("compat-handler", raw, nil)
-	require.NoError(t, err)
-	require.NotNil(t, p)
-
-	handler, ok := p.(*HeadersHandler)
-	require.True(t, ok)
-	assert.Equal(t, "prefill", handler.prefillProfile)
-	assert.Equal(t, defaultEncodeProfile, handler.encodeProfile)
-
-	// Verify it correctly handles a PD-only scheduling result
-	ctx := utils.NewTestContext(t)
-	request := &scheduling.InferenceRequest{
-		RequestID: "req-123",
-		Headers:   map[string]string{},
-	}
-	result := &scheduling.SchedulingResult{
-		PrimaryProfileName: "decode",
-		ProfileResults: map[string]*scheduling.ProfileRunResult{
-			"prefill": {TargetEndpoints: []scheduling.Endpoint{makeEndpointByAddr(testAddr)}},
-		},
-	}
-
-	handler.PreRequest(ctx, request, result)
-
-	assert.Equal(t, net.JoinHostPort(testAddr, testPort), request.Headers[routing.PrefillEndpointHeader])
-	_, encodeSet := request.Headers[routing.EncoderEndpointsHeader]
-	assert.False(t, encodeSet, "encode header must not be set in PD-only scenario")
 }
 
 // ----- Prefill tests -----

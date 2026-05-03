@@ -21,11 +21,6 @@ import (
 const (
 	// DisaggHeadersHandlerType is the type of the HeadersHandler
 	DisaggHeadersHandlerType = "disagg-headers-handler"
-
-	// PrefillHeaderHandlerType is a deprecated alias for DisaggHeadersHandlerType.
-	//
-	// Deprecated: use DisaggHeadersHandlerType instead.
-	PrefillHeaderHandlerType = "prefill-header-handler"
 )
 
 // compile-time type assertion

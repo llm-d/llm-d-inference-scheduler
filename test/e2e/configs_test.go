@@ -25,7 +25,7 @@ schedulingProfiles:
 const deprecatedPdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefill-header-handler
+- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     blockSizeTokens: 16
@@ -83,7 +83,7 @@ schedulingProfiles:
 const epdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: prefill-header-handler
+- type: disagg-headers-handler
 - type: encode-filter
 - type: prefill-filter
 - type: decode-filter
