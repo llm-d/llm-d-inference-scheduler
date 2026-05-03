@@ -59,3 +59,27 @@ type DiscoveryNotifier interface {
 	// Delete removes an endpoint from the datastore by its namespaced name.
 	Delete(id types.NamespacedName)
 }
+
+// DiscoveryBackendStore is the narrow interface required by NewDiscoveryNotifier.
+// Any store that implements BackendUpsert and BackendDelete satisfies it.
+type DiscoveryBackendStore interface {
+	BackendUpsert(ctx context.Context, meta *EndpointMetadata)
+	BackendDelete(id types.NamespacedName)
+}
+
+// NewDiscoveryNotifier wraps a DiscoveryBackendStore as a DiscoveryNotifier.
+func NewDiscoveryNotifier(store DiscoveryBackendStore) DiscoveryNotifier {
+	return &discoveryNotifier{store: store}
+}
+
+type discoveryNotifier struct {
+	store DiscoveryBackendStore
+}
+
+func (n *discoveryNotifier) Upsert(endpoint *EndpointMetadata) {
+	n.store.BackendUpsert(context.Background(), endpoint)
+}
+
+func (n *discoveryNotifier) Delete(id types.NamespacedName) {
+	n.store.BackendDelete(id)
+}

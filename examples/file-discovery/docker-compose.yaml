@@ -1,0 +1,43 @@
+services:
+  vllm-0:
+    image: vllm/vllm-openai:v0.7.3
+    command:
+      - --model=Qwen/Qwen2.5-1.5B-Instruct
+      - --port=8000
+      - --host=0.0.0.0
+      - --max-model-len=4096
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  epp:
+    image: ghcr.io/llm-d/llm-d-inference-scheduler:latest
+    command:
+      - --config-file=/etc/epp/epp-config.yaml
+      - --grpc-port=9002
+      - --grpc-health-port=9003
+      - --metrics-port=9090
+      - --secure-serving=false
+    volumes:
+      - ./epp-config.yaml:/etc/epp/epp-config.yaml
+      - ./endpoints.yaml:/etc/epp/endpoints.yaml
+    depends_on:
+      - vllm-0
+
+  envoy:
+    image: envoyproxy/envoy:distroless-v1.33.2
+    command: ["-c", "/etc/envoy/envoy.yaml"]
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml
+    depends_on:
+      - epp

@@ -18,18 +18,25 @@ package datalayer
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pod"
 )
 
 // BindNotificationSource registers a watcher/reconciler for the source's GVK.
@@ -121,4 +128,104 @@ func (rn *notificationReconciler) dispatch(ctx context.Context, log logr.Logger,
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// ---- Pod discovery binding -------------------------------------------------
+
+// PoolInfoProvider gives the pod discovery reconciler the pool state it needs
+// to filter pods and extract port information. Implemented by the datastore.
+type PoolInfoProvider interface {
+	PoolHasSynced() bool
+	PoolLabelsMatch(labels map[string]string) bool
+	PoolTargetPorts() []int
+}
+
+// BindPodDiscovery registers a pod-watching controller that translates pod
+// lifecycle events into DiscoveryNotifier.Upsert/Delete calls.
+// This centralises the controller-runtime wiring so K8s discovery plugins
+// do not duplicate the reconciler pattern from BindNotificationSource.
+func BindPodDiscovery(pool PoolInfoProvider, notifier fwkdl.DiscoveryNotifier, mgr ctrl.Manager) error {
+	r := &podDiscoveryReconciler{
+		client:   mgr.GetClient(),
+		pool:     pool,
+		notifier: notifier,
+	}
+
+	filter := predicate.Funcs{
+		CreateFunc:  func(e event.CreateEvent) bool { return pool.PoolLabelsMatch(e.Object.GetLabels()) },
+		UpdateFunc:  func(e event.UpdateEvent) bool {
+			return pool.PoolLabelsMatch(e.ObjectOld.GetLabels()) || pool.PoolLabelsMatch(e.ObjectNew.GetLabels())
+		},
+		DeleteFunc:  func(e event.DeleteEvent) bool { return pool.PoolLabelsMatch(e.Object.GetLabels()) },
+		GenericFunc: func(e event.GenericEvent) bool { return pool.PoolLabelsMatch(e.Object.GetLabels()) },
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
+		Named("pod-discovery").
+		For(&corev1.Pod{}).
+		WithEventFilter(filter).
+		Complete(r)
+}
+
+type podDiscoveryReconciler struct {
+	client   client.Client
+	pool     PoolInfoProvider
+	notifier fwkdl.DiscoveryNotifier
+}
+
+func (r *podDiscoveryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	if !r.pool.PoolHasSynced() {
+		return ctrl.Result{}, nil
+	}
+
+	pod := &corev1.Pod{}
+	if err := r.client.Get(ctx, req.NamespacedName, pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			for _, id := range allPodEndpointIDs(req.Name, req.Namespace, r.pool.PoolTargetPorts()) {
+				r.notifier.Delete(id)
+			}
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("unable to get pod: %w", err)
+	}
+
+	if !podutil.IsPodReady(pod) || !r.pool.PoolLabelsMatch(pod.Labels) {
+		for _, id := range allPodEndpointIDs(pod.Name, pod.Namespace, r.pool.PoolTargetPorts()) {
+			r.notifier.Delete(id)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	for _, meta := range podToEndpointMetadata(pod, r.pool.PoolTargetPorts()) {
+		r.notifier.Upsert(meta)
+	}
+	return ctrl.Result{}, nil
+}
+
+// podToEndpointMetadata converts a ready pod into one EndpointMetadata per active port.
+func podToEndpointMetadata(pod *corev1.Pod, targetPorts []int) []*fwkdl.EndpointMetadata {
+	metas := make([]*fwkdl.EndpointMetadata, 0, len(targetPorts))
+	for idx, port := range targetPorts {
+		metas = append(metas, &fwkdl.EndpointMetadata{
+			NamespacedName: podEndpointID(pod.Name, pod.Namespace, idx),
+			PodName:        pod.Name,
+			Address:        pod.Status.PodIP,
+			Port:           strconv.Itoa(port),
+			MetricsHost:    net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(port)),
+			Labels:         pod.GetLabels(),
+		})
+	}
+	return metas
+}
+
+func podEndpointID(podName, namespace string, idx int) types.NamespacedName {
+	return types.NamespacedName{Name: podName + "-rank-" + strconv.Itoa(idx), Namespace: namespace}
+}
+
+func allPodEndpointIDs(podName, namespace string, targetPorts []int) []types.NamespacedName {
+	ids := make([]types.NamespacedName, len(targetPorts))
+	for idx := range targetPorts {
+		ids[idx] = podEndpointID(podName, namespace, idx)
+	}
+	return ids
 }

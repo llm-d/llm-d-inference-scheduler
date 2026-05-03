@@ -67,6 +67,14 @@ type EndpointPickerConfig struct {
 	// Parser specifies the parsing logic used by the EPP to process protocol messages.
 	// If unspecified, default parsing behavior will be applied.
 	Parser *ParserConfig `json:"parser,omitempty"`
+
+	// +optional
+	// Discovery specifies which EndpointDiscovery plugin to use for populating the
+	// endpoint datastore. When set, the EPP bypasses Kubernetes CRD reconcilers and
+	// relies entirely on the referenced plugin to enumerate and track inference
+	// endpoints. This enables running the EPP without a Kubernetes cluster.
+	// If omitted, the EPP uses the default Kubernetes-based discovery.
+	Discovery *DiscoveryConfig `json:"discovery,omitempty"`
 }
 
 func (cfg EndpointPickerConfig) String() string {
@@ -91,6 +99,9 @@ func (cfg EndpointPickerConfig) String() string {
 	}
 	if cfg.Parser != nil {
 		parts = append(parts, fmt.Sprintf("Parser: %v", cfg.Parser))
+	}
+	if cfg.Discovery != nil {
+		parts = append(parts, fmt.Sprintf("Discovery: %v", cfg.Discovery))
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
 }
@@ -274,6 +285,22 @@ func (pc *ParserConfig) String() string {
 		return nilString
 	}
 	return fmt.Sprintf("{PluginRef: %s}", pc.PluginRef)
+}
+
+// DiscoveryConfig references the EndpointDiscovery plugin to use.
+type DiscoveryConfig struct {
+	// +required
+	// +kubebuilder:validation:Required
+	// PluginRef is the name of the plugin instance (from the Plugins list) that
+	// implements EndpointDiscovery.
+	PluginRef string `json:"pluginRef"`
+}
+
+func (dc *DiscoveryConfig) String() string {
+	if dc == nil {
+		return nilString
+	}
+	return fmt.Sprintf("{PluginRef: %s}", dc.PluginRef)
 }
 
 // ParserConfig contains the configuration for a parser.

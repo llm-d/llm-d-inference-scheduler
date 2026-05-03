@@ -294,6 +294,27 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 	return err
 }
 
+// WaitForShutdown blocks until ctx is cancelled. It exists as an errgroup
+// goroutine placeholder for deployments that do not use a ctrl.Manager.
+// Individual endpoint pollers start automatically when BackendUpsert calls
+// NewEndpoint -- no explicit "start" call is needed.
+func (r *Runtime) WaitForShutdown(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
+// Stop is called to terminate the Runtime's data collection. It terminates all
+// go routines used for polling data sources.
+func (r *Runtime) Stop() error {
+	r.collectors.Range(func(_, val any) bool {
+		if c, ok := val.(*Collector); ok {
+			_ = c.Stop()
+		}
+		return true
+	})
+	return nil
+}
+
 // NewEndpoint sets up data polling on the provided endpoint.
 func (r *Runtime) NewEndpoint(ctx context.Context, endpointMetadata *fwkdl.EndpointMetadata, _ PoolInfo) fwkdl.Endpoint {
 	// TODO: should we cache the sources and map after Configure? Or just replace with maps and Mutex?
