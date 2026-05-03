@@ -3,7 +3,7 @@
 **Type:** `metrics-data-source`
 
 > [!NOTE]
-> This plugin is framework-injected by default together with `core-metrics-extractor` when the data layer is enabled. You do not need to explicitly declare it in your configuration, but it can be disabled if metrics collection is unnecessary.
+> This plugin is enabled by default together with `core-metrics-extractor`. You do not need to explicitly declare it in your configuration, but it can be disabled if metrics collection is unnecessary.
 
 The Metrics Data Source is a data layer plugin that polls a Prometheus-compatible metrics endpoint of a model server and parses the response into a structured format for extraction.
 
