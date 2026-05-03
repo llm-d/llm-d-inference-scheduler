@@ -17,9 +17,11 @@ limitations under the License.
 package tokenizer
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -98,6 +101,86 @@ func TestPluginFactory_Validation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrepareRequestData_PopulatesTokenizedPrompt(t *testing.T) {
+	mm := &tokenization.MultiModalFeatures{
+		MMHashes: map[string][]string{"image": {"hash-a", "hash-b"}},
+		MMPlaceholders: map[string][]kvblock.PlaceholderRange{
+			"image": {{Offset: 3, Length: 5}, {Offset: 20, Length: 7}},
+		},
+	}
+	tok := &mockTokenizer{
+		renderChatFunc: func(_ *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+			return []uint32{1, 2, 3, 4}, mm, nil
+		},
+	}
+	p := newTestPlugin(tok)
+
+	req := &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{{Role: "user", Content: fwkrh.Content{Raw: "hi"}}},
+			},
+		},
+	}
+	require.NoError(t, p.PrepareRequestData(context.Background(), req, nil))
+	require.NotNil(t, req.Body.TokenizedPrompt)
+	assert.Equal(t, []uint32{1, 2, 3, 4}, req.Body.TokenizedPrompt.TokenIDs)
+	require.Len(t, req.Body.TokenizedPrompt.MultiModalFeatures, 2)
+
+	assert.Equal(t, 3, req.Body.TokenizedPrompt.MultiModalFeatures[0].Offset)
+	assert.Equal(t, "hash-a", req.Body.TokenizedPrompt.MultiModalFeatures[0].Hash)
+	assert.Equal(t, 20, req.Body.TokenizedPrompt.MultiModalFeatures[1].Offset)
+	assert.Equal(t, "hash-b", req.Body.TokenizedPrompt.MultiModalFeatures[1].Hash)
+	assert.Equal(t, fwkrh.ModalityImage, req.Body.TokenizedPrompt.MultiModalFeatures[0].Modality)
+}
+
+func TestPrepareRequestData_SkipsWhenAlreadyPopulated(t *testing.T) {
+	existing := &fwkrh.TokenizedPrompt{TokenIDs: []uint32{42}}
+	p := newTestPlugin(&mockTokenizer{})
+	req := &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{TokenizedPrompt: existing},
+	}
+	require.NoError(t, p.PrepareRequestData(context.Background(), req, nil))
+	assert.Same(t, existing, req.Body.TokenizedPrompt)
+}
+
+func TestPrepareRequestData_NilRequest(t *testing.T) {
+	p := newTestPlugin(&mockTokenizer{})
+	require.NoError(t, p.PrepareRequestData(context.Background(), nil, nil))
+}
+
+func TestPrepareRequestData_NilBody(t *testing.T) {
+	p := newTestPlugin(&mockTokenizer{})
+	req := &scheduling.InferenceRequest{}
+	require.NoError(t, p.PrepareRequestData(context.Background(), req, nil))
+}
+
+func TestConvertMMFeaturesRoundTrip(t *testing.T) {
+	src := &tokenization.MultiModalFeatures{
+		MMHashes: map[string][]string{"image": {"h1", "h2"}},
+		MMPlaceholders: map[string][]kvblock.PlaceholderRange{
+			"image": {{Offset: 1, Length: 2}, {Offset: 10, Length: 3}},
+		},
+	}
+	upstream := convertMMFeaturesToUpstream(src)
+	require.Len(t, upstream, 2)
+
+	hashes, ranges := ConvertMMFeaturesFromUpstream(upstream)
+	assert.Equal(t, []string{"h1", "h2"}, hashes["image"])
+	assert.Equal(t,
+		[]kvblock.PlaceholderRange{{Offset: 1, Length: 2}, {Offset: 10, Length: 3}},
+		ranges["image"],
+	)
+}
+
+func TestConvertMMFeaturesNil(t *testing.T) {
+	assert.Nil(t, convertMMFeaturesToUpstream(nil))
+	assert.Nil(t, convertMMFeaturesToUpstream(&tokenization.MultiModalFeatures{}))
+	h, r := ConvertMMFeaturesFromUpstream(nil)
+	assert.Nil(t, h)
+	assert.Nil(t, r)
 }
 
 func TestChatCompletionsToRenderChatRequest(t *testing.T) {

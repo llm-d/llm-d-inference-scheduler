@@ -14,13 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package tokenizer provides DataProducer plugin for the scheduler.
+// Package tokenizer provides a DataProducer plugin that tokenizes the request
+// prompt and publishes the result on InferenceRequestBody.TokenizedPrompt for
+// downstream consumers (scorers, filters, other data producers).
 package tokenizer
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
@@ -29,6 +32,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
@@ -43,19 +47,13 @@ const (
 	PluginType = "tokenizer"
 
 	// TokenizedPromptKey is the data key advertised by this plugin to indicate
-	// that it produces tokenized prompt data.
+	// that it produces tokenized prompt data on InferenceRequestBody.TokenizedPrompt.
 	TokenizedPromptKey = "TokenizedPrompt"
-
-	// TokenizedPromptStateKey is the CycleState key used by the tokenizer scorer
-	// to store tokenized prompt data for downstream consumers.
-	// Namespaced by PluginType to avoid collisions with other plugins.
-	TokenizedPromptStateKey = plugin.StateKey(PluginType + "." + TokenizedPromptKey)
 )
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
 type tokenizerPluginConfig struct {
-	// SocketFile is the path to the Unix domain socket used to communicate
-	// with the tokenizer service. Optional, defaults to /tmp/tokenizer/tokenizer-uds.socket.
+	// TokenizerConfig is the UDS tokenizer config. Optional; defaults apply.
 	TokenizerConfig tokenization.UdsTokenizerConfig `json:"udsTokenizerConfig,omitempty"`
 	// ModelName is the name of the model whose tokenizer should be loaded.
 	ModelName string `json:"modelName"`
@@ -96,57 +94,15 @@ func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, err
 	}, nil
 }
 
-// TokenizedPromptState holds the tokenization result for a single request,
-// stored in CycleState for consumption by downstream scorers.
-// This follows the standard IGW pattern where scorers share data via CycleState
-// (same as NoHitLRU reading from prefix-cache scorer).
-type TokenizedPromptState struct {
-	TokenIDs   []uint32
-	MMFeatures *tokenization.MultiModalFeatures
-}
-
-// Clone implements plugin.StateData.
-func (t *TokenizedPromptState) Clone() plugin.StateData {
-	if t == nil {
-		return nil
-	}
-	ids := make([]uint32, len(t.TokenIDs))
-	copy(ids, t.TokenIDs)
-	return &TokenizedPromptState{TokenIDs: ids, MMFeatures: cloneMMFeatures(t.MMFeatures)}
-}
-
-// cloneMMFeatures deep-copies the maps/slices so cloned CycleState entries
-// are fully independent and safe from concurrent mutation.
-func cloneMMFeatures(src *tokenization.MultiModalFeatures) *tokenization.MultiModalFeatures {
-	if src == nil {
-		return nil
-	}
-	dst := &tokenization.MultiModalFeatures{}
-	if src.MMHashes != nil {
-		dst.MMHashes = make(map[string][]string, len(src.MMHashes))
-		for k, v := range src.MMHashes {
-			cp := make([]string, len(v))
-			copy(cp, v)
-			dst.MMHashes[k] = cp
-		}
-	}
-	if src.MMPlaceholders != nil {
-		dst.MMPlaceholders = make(map[string][]kvblock.PlaceholderRange, len(src.MMPlaceholders))
-		for k, v := range src.MMPlaceholders {
-			cp := make([]kvblock.PlaceholderRange, len(v))
-			copy(cp, v)
-			dst.MMPlaceholders[k] = cp
-		}
-	}
-	return dst
-}
-
-// Plugin tokenizes the prompt in the incoming request and stores
-// the result in CycleState for downstream consumers (scorers).
+// Plugin tokenizes the prompt in the incoming request and writes the result to
+// request.Body.TokenizedPrompt for downstream DataProducer / scoring plugins.
 type Plugin struct {
 	typedName plugin.TypedName
 	tokenizer tokenizer
 }
+
+// compile-time assertion.
+var _ requestcontrol.DataProducer = &Plugin{}
 
 // TypedName returns the typed name of the plugin.
 func (p *Plugin) TypedName() plugin.TypedName {
@@ -157,6 +113,37 @@ func (p *Plugin) TypedName() plugin.TypedName {
 func (p *Plugin) WithName(name string) *Plugin {
 	p.typedName.Name = name
 	return p
+}
+
+// Produces returns the data keys this plugin produces.
+func (p *Plugin) Produces() map[string]any {
+	return map[string]any{TokenizedPromptKey: fwkrh.TokenizedPrompt{}}
+}
+
+// Consumes returns the data keys this plugin requires.
+func (p *Plugin) Consumes() map[string]any {
+	return nil
+}
+
+// PrepareRequestData tokenizes the request prompt and stores the result on
+// request.Body.TokenizedPrompt (TokenIDs + MultiModalFeatures in flat shape).
+// Fail-open: errors are logged; TokenizedPrompt is left nil. If the request
+// already carries a TokenizedPrompt, tokenization is skipped.
+func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.InferenceRequest, _ []scheduling.Endpoint) error {
+	if request == nil || request.Body == nil || request.Body.TokenizedPrompt != nil {
+		return nil
+	}
+
+	tokenIDs, mmFeatures := p.tokenize(ctx, request)
+	if tokenIDs == nil {
+		return nil
+	}
+
+	request.Body.TokenizedPrompt = &fwkrh.TokenizedPrompt{
+		TokenIDs:           tokenIDs,
+		MultiModalFeatures: convertMMFeaturesToUpstream(mmFeatures),
+	}
+	return nil
 }
 
 // tokenize extracts token IDs and optional multimodal features from the request.
@@ -229,4 +216,57 @@ func ChatCompletionsToRenderChatRequest(chat *fwkrh.ChatCompletionsRequest) *tok
 		AddGenerationPrompt:       chat.AddGenerationPrompt,
 		ChatTemplateKWArgs:        chat.ChatTemplateKWArgs,
 	}
+}
+
+// convertMMFeaturesToUpstream flattens the kv-cache map-shaped multimodal
+// metadata into the upstream flat list, sorted by placeholder offset so
+// consumers see items in prompt order. Returns nil when no content is present.
+func convertMMFeaturesToUpstream(src *tokenization.MultiModalFeatures) []fwkrh.MultiModalFeature {
+	if src == nil || len(src.MMHashes) == 0 {
+		return nil
+	}
+
+	var items []fwkrh.MultiModalFeature
+	for modality, hashes := range src.MMHashes {
+		ranges, ok := src.MMPlaceholders[modality]
+		if !ok {
+			continue
+		}
+		n := len(hashes)
+		if len(ranges) < n {
+			n = len(ranges)
+		}
+		for i := 0; i < n; i++ {
+			items = append(items, fwkrh.MultiModalFeature{
+				Modality: fwkrh.Modality(modality),
+				Hash:     hashes[i],
+				Offset:   ranges[i].Offset,
+				Length:   ranges[i].Length,
+			})
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Offset < items[j].Offset })
+	return items
+}
+
+// ConvertMMFeaturesFromUpstream regroups the flat list of multimodal features
+// back into the kv-cache map-shape expected by kvblock.ComputeBlockExtraFeatures.
+func ConvertMMFeaturesFromUpstream(features []fwkrh.MultiModalFeature) (map[string][]string, map[string][]kvblock.PlaceholderRange) {
+	if len(features) == 0 {
+		return nil, nil
+	}
+	hashes := make(map[string][]string)
+	ranges := make(map[string][]kvblock.PlaceholderRange)
+	for _, f := range features {
+		k := string(f.Modality)
+		hashes[k] = append(hashes[k], f.Hash)
+		ranges[k] = append(ranges[k], kvblock.PlaceholderRange{
+			Offset: f.Offset,
+			Length: f.Length,
+		})
+	}
+	return hashes, ranges
 }
