@@ -1,5 +1,10 @@
 SHELL := /usr/bin/env bash
 
+LOCALBIN ?= $(shell pwd)/bin
+HELM ?= $(LOCALBIN)/helm
+KUBECTL_VALIDATE ?= $(LOCALBIN)/kubectl-validate
+YQ ?= $(LOCALBIN)/yq
+
 # Tool checks (container runtime, kubectl, etc.) are defined in Makefile.tools.mk.
 include Makefile.tools.mk
 # Cluster (Kubernetes/OpenShift) specific targets are defined in Makefile.cluster.mk.
@@ -266,6 +271,24 @@ bench-tokenizer: image-build-builder ## Run external tokenizer + scorer benchmar
 post-deploy-test: ## Run post deployment tests
 	@echo "Success!"
 	@echo "Post-deployment tests passed."
+
+##@ Helm
+
+.PHONY: verify-helm-charts
+verify-helm-charts: helm-install kubectl-validate ## Render and validate Helm charts.
+	HELM="$(HELM)" KUBECTL_VALIDATE="$(KUBECTL_VALIDATE)" hack/verify-helm.sh $(MODE)
+
+.PHONY: verify-manifests
+verify-manifests: kubectl-validate ## Validate deployment manifests.
+	KUBECTL_VALIDATE="$(KUBECTL_VALIDATE)" hack/verify-manifests.sh
+
+.PHONY: inferencepool-helm-chart-push
+inferencepool-helm-chart-push: yq helm-install ## Package and push the InferencePool Helm chart.
+	CHART=inferencepool EXTRA_TAG="$(EXTRA_TAG)" YQ="$(YQ)" HELM="$(HELM)" ./hack/push-chart.sh
+
+.PHONY: standalone-helm-chart-push
+standalone-helm-chart-push: yq helm-install ## Package and push the standalone EPP Helm chart.
+	CHART=standalone EXTRA_TAG="$(EXTRA_TAG)" YQ="$(YQ)" HELM="$(HELM)" ./hack/push-chart.sh
 
 
 ##@ Coverage
