@@ -125,8 +125,8 @@ func runMatrixCoordinate(b *testing.B, m benchMatrix) {
 
 		// Offset the starting index per thread to prevent identical striding over the array.
 		// Multiply by a prime to guarantee threads start at different offsets.
-		threadId := globalThreadID.Add(1)
-		localIdx := int(threadId) * 9973
+		threadID := globalThreadID.Add(1)
+		localIdx := int(threadID) * 9973
 
 		for pb.Next() {
 			localIdx++
