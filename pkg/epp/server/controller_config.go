@@ -17,11 +17,11 @@ limitations under the License.
 package server
 
 import (
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 )
 
 type ControllerConfig struct {
