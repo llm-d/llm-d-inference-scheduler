@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -842,6 +843,11 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 			})
 		}
 	}
+	// Sort by Offset to mirror the tokenizer DataProducer plugin output, which
+	// emits MM features in prompt order. Map iteration above is non-deterministic.
+	sort.Slice(upstreamMM, func(i, j int) bool {
+		return upstreamMM[i].Offset < upstreamMM[j].Offset
+	})
 
 	request := &scheduling.InferenceRequest{
 		RequestID:   "test-mm-e2e",
