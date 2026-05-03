@@ -1,7 +1,6 @@
 # SingleProfileHandler
 
 **Type:** `single-profile-handler`
-**Interfaces**: `scheduling.ProfileHandler`
 
 > [!NOTE]
 > This plugin is framework-injected by default when exactly one scheduling profile is defined and no profile handler is configured. You do not need to explicitly declare it in your configuration.
