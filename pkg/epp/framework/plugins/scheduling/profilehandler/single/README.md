@@ -3,7 +3,7 @@
 **Type:** `single-profile-handler`
 
 > [!NOTE]
-> This plugin is framework-injected by default when exactly one scheduling profile is defined and no profile handler is configured. You do not need to explicitly declare it in your configuration.
+> This plugin is enabled by default when exactly one scheduling profile is defined and no profile handler is configured. You do not need to explicitly declare it in your configuration.
 
 Selects the single configured scheduling profile as the primary profile for every request.
 
