@@ -75,7 +75,7 @@ const (
 	// modelServerManifestFilepathEnvVar is the env var that holds absolute path to the manifest for the model server test resource.
 	modelServerManifestFilepathEnvVar = "MANIFEST_PATH"
 	// crdKustomizePath is the kustomize folder path for the required CRDs.
-	crdKustomizePath = "../../../config/crd/"
+	crdKustomizePath = "../../../deploy/components/crds-gie"
 )
 
 const e2eLeaderElectionEnabledEnvVar = "E2E_LEADER_ELECTION_ENABLED"
