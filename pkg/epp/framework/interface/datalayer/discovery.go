@@ -14,16 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package discovery defines the EndpointDiscovery abstraction for populating
-// the datastore with inference server endpoints independently of Kubernetes.
-package discovery
+package datalayer
 
 import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/types"
 
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
@@ -42,23 +39,23 @@ type EndpointDiscovery interface {
 	// datastore at startup. Implementations that guarantee no missed events
 	// through their watch mechanism (e.g. a Kubernetes list+watch) may fold the
 	// initial enumeration into the watch sequence instead.
-	Start(ctx context.Context, notifier Notifier) error
+	Start(ctx context.Context, notifier DiscoveryNotifier) error
 }
 
-// Notifier is the callback through which EndpointDiscovery communicates endpoint state
-// to the datastore.
+// DiscoveryNotifier is the callback through which EndpointDiscovery communicates
+// endpoint state to the datastore.
 //
-// Notifier is NOT goroutine-safe. All calls must be made sequentially from a
-// single goroutine. This is the source of the ordering contract below.
+// DiscoveryNotifier is NOT goroutine-safe. All calls must be made sequentially
+// from a single goroutine. This is the source of the ordering contract below.
 //
 // Ordering contract: the datastore processes Upsert and Delete calls in the order
 // they are received. Plugin implementations MUST preserve event order -- do not
 // buffer or dispatch calls concurrently in a way that could reorder them. For
 // example, an Upsert followed by a Delete for the same endpoint must arrive in
 // that order, or the endpoint will be incorrectly left in the datastore.
-type Notifier interface {
+type DiscoveryNotifier interface {
 	// Upsert adds or updates an endpoint in the datastore.
-	Upsert(endpoint *fwkdl.EndpointMetadata)
+	Upsert(endpoint *EndpointMetadata)
 	// Delete removes an endpoint from the datastore by its namespaced name.
 	Delete(id types.NamespacedName)
 }
