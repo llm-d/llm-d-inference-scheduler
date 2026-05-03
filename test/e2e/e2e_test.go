@@ -12,24 +12,18 @@ import (
 )
 
 const (
-	// simDeployment references the YAML file for the deployment
-	// running the vLLM simulator without PD
-	simDeployment = "./yaml/vllm-sim.yaml"
-	// simPDDisaggDeployment references the YAML file for the deployment
-	// running the vLLM simulator with PD (connector type is configurable via ${CONNECTOR_TYPE})
-	simPDDisaggDeployment = "./yaml/vllm-sim-p-d-disagg.yaml"
-	// simDPDeployment references  the YAML file for the deployment
-	// running the vLLM simulator with Data Parallel
-	simDPDeployment = "./yaml/vllm-sim-dp.yaml"
-	// simEpDDisaggDeployment references the YAML file for the deployment
-	// running the vLLM simulator with E/PD (Encode/Prefill-Decode)
-	simEpDDisaggDeployment = "./yaml/vllm-sim-e-pd-disagg.yaml"
-	// simEPDDisaggDeployment references the YAML file for the deployment
-	// running the vLLM simulator with E/P/D (Encode/Prefill/Decode)
-	simEPDDisaggDeployment = "./yaml/vllm-sim-e-p-d-disagg.yaml"
-	// simEPDUnifiedDeployment references the YAML file for the deployment
-	// running the vLLM simulator with EPD (no disaggregation)
-	simEPDUnifiedDeployment = "./yaml/vllm-sim-epd-unified.yaml"
+	// epdDeploymentDir references the Kustomize directory for the non-disaggregated
+	// EPD scenario — single deployment, no routing sidecar, vLLM on port 8000
+	epdDeploymentDir = "../../deploy/environments/dev/epd"
+	// pdDisaggDir references the Kustomize directory for the deployment
+	// running vLLM with P/D (connector type is configurable via ${CONNECTOR_TYPE})
+	pdDisaggDir = "../../deploy/environments/dev/p-d"
+	// ePdDisaggDir references the Kustomize directory for the deployment
+	// running vLLM with E/PD (Encode/Prefill-Decode)
+	ePdDisaggDir = "../../deploy/environments/dev/e-pd"
+	// ePDDisaggDir references the Kustomize directory for the deployment
+	// running vLLM with E/P/D (Encode/Prefill/Decode)
+	ePDDisaggDir = "../../deploy/environments/dev/e-p-d"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"

@@ -105,7 +105,7 @@ func (p *HeadersHandler) PreRequest(ctx context.Context, request *scheduling.Inf
 	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 
 	// Prefill header
 	delete(request.Headers, routing.PrefillEndpointHeader) // clear header, if already set

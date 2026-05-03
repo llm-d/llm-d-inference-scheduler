@@ -85,7 +85,7 @@ func BenchmarkFlowController_HighShardSort(b *testing.B) {
 func runMatrixCoordinate(b *testing.B, m benchMatrix) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	fc, detector := setupBenchmarkHarness(b, ctx, m.shards, m.priorities, m.limit, nil, nil)
+	fc, detector := setupBenchmarkHarness(ctx, b, m.shards, m.priorities, m.limit, nil, nil)
 
 	// Yield briefly to allow the background supervisor to bootstrap the data plane.
 	time.Sleep(10 * time.Millisecond)
@@ -189,7 +189,7 @@ func BenchmarkFlowController_TopologyChurn(b *testing.B) {
 		EnqueueChannelBufferSize:        100,
 	}
 
-	fc, detector := setupBenchmarkHarness(b, ctx, 4, 1, 100, nil, cfg)
+	fc, detector := setupBenchmarkHarness(ctx, b, 4, 1, 100, nil, cfg)
 
 	const numKeys = 50000
 	preAllocatedReqs := make([]*benchRequest, numKeys)
@@ -247,7 +247,7 @@ func BenchmarkFlowController_MassCancellation(b *testing.B) {
 	}
 
 	// Use the permanently saturated detector to guarantee all requests queue and definitively rot.
-	fc, _ := setupBenchmarkHarness(b, ctx, 4, 1, 100, &alwaysSaturatedDetector{}, cfg)
+	fc, _ := setupBenchmarkHarness(ctx, b, 4, 1, 100, &alwaysSaturatedDetector{}, cfg)
 
 	var timeoutCount atomic.Int64
 

@@ -11,5 +11,11 @@ spec:
     kind: Service
     port:
       number: 9002
-  targetPorts:
-  - number: ${TARGET_PORTS}
+  # TARGET_PORTS is a pre-formatted YAML block-sequence fragment produced by
+  # kind-dev-env.sh / e2e setup. It begins with a newline and carries its own
+  # "  - number: <port>" lines at this indentation level, e.g.:
+  #   - number: 8000
+  #   - number: 8001
+  # If you reindent this field, update the TARGET_PORTS builder in
+  # scripts/kind-dev-env.sh and test/e2e/e2e_suite_test.go to match.
+  targetPorts: ${TARGET_PORTS}

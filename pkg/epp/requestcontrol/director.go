@@ -149,7 +149,7 @@ func (d *Director) getInferenceObjective(ctx context.Context, reqCtx *handlers.R
 // HandleRequest orchestrates the request lifecycle.
 // It always returns the requestContext even in the error case, as the request context is used in error handling.
 func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestContext, inferenceRequestBody *fwkrh.InferenceRequestBody) (*handlers.RequestContext, error) {
-	tracer := otel.Tracer("gateway-api-inference-extension")
+	tracer := otel.Tracer("llm-d-inference-scheduler")
 	ctx, span := tracer.Start(ctx, "gateway.request_orchestration", trace.WithSpanKind(trace.SpanKindServer))
 	defer span.End()
 
@@ -171,7 +171,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 
 	// Prepare InferenceRequest (needed for both saturation detection and Scheduler)
 	reqCtx.SchedulingRequest = &fwksched.InferenceRequest{
-		RequestId:        reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey],
+		RequestID:        reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
 		TargetModel:      reqCtx.TargetModelName,
 		Body:             inferenceRequestBody,
 		Headers:          reqCtx.Request.Headers,
@@ -354,7 +354,7 @@ func (d *Director) HandleResponseHeader(ctx context.Context, reqCtx *handlers.Re
 		return reqCtx
 	}
 	response := &fwk.Response{
-		RequestId:   reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey],
+		RequestID:   reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
 		Headers:     reqCtx.Response.Headers,
 		ReqMetadata: reqCtx.Request.Metadata,
 	}
@@ -383,18 +383,18 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 	startOfStream := !reqCtx.ResponseBodyStarted
 	reqCtx.ResponseBodyStarted = true
 	response := &fwk.Response{
-		RequestId:     reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey],
+		RequestID:     reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
 		Headers:       reqCtx.Response.Headers,
 		StartOfStream: startOfStream,
 		EndOfStream:   endOfStream,
 		Usage:         reqCtx.Usage,
 	}
-	requestId := reqCtx.Request.Headers[reqcommon.RequestIdHeaderKey]
+	requestID := reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey]
 
 	if endOfStream {
 		// Drain the async queue: close the channel and wait for the goroutine to finish
 		// processing all previously queued chunks before running the final chunk synchronously.
-		if val, ok := d.responseBodyQueues.LoadAndDelete(requestId); ok {
+		if val, ok := d.responseBodyQueues.LoadAndDelete(requestID); ok {
 			q := val.(*responseBodyQueue)
 			close(q.ch)
 			<-q.done // wait for all queued chunks to be processed
@@ -410,14 +410,14 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 			response:       response,
 			targetEndpoint: reqCtx.TargetPod,
 		}
-		if val, ok := d.responseBodyQueues.Load(requestId); ok {
+		if val, ok := d.responseBodyQueues.Load(requestID); ok {
 			val.(*responseBodyQueue).ch <- work
 		} else {
 			q := &responseBodyQueue{
 				ch:   make(chan responseBodyWork, 100),
 				done: make(chan struct{}),
 			}
-			d.responseBodyQueues.Store(requestId, q)
+			d.responseBodyQueues.Store(requestID, q)
 			go d.processResponseBodyQueue(q)
 			q.ch <- work
 		}
@@ -453,7 +453,7 @@ func (d *Director) runPrepareDataPlugins(ctx context.Context,
 	if len(d.requestControlPlugins.prepareDataPlugins) == 0 {
 		return nil
 	}
-	return prepareDataPluginsWithTimeout(prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, ctx, request, endpoints)
+	return prepareDataPluginsWithTimeout(ctx, prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, request, endpoints)
 }
 
 func (d *Director) runAdmissionPlugins(ctx context.Context,

@@ -70,11 +70,6 @@ func (p *InFlightLoadProducer) ExpectedInputType() reflect.Type {
 	return datalayer.EndpointEventReflectType
 }
 
-// Extract transforms the raw data into structured attributes (not used for notifications).
-func (p *InFlightLoadProducer) Extract(context.Context, any, datalayer.Endpoint) error {
-	return nil
-}
-
 // ExtractEndpoint handles endpoint deletion events to prune stateful trackers.
 func (p *InFlightLoadProducer) ExtractEndpoint(ctx context.Context, event datalayer.EndpointEvent) error {
 	if event.Type != datalayer.EventDelete || event.Endpoint == nil {

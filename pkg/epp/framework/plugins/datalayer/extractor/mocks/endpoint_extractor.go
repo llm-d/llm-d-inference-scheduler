@@ -55,11 +55,6 @@ func (m *EndpointExtractor) ExpectedInputType() reflect.Type {
 	return fwkdl.EndpointEventReflectType
 }
 
-// Extract is the base Extractor interface method — no-op for endpoint extractors.
-func (m *EndpointExtractor) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error {
-	return nil
-}
-
 // ExtractEndpoint records the event and returns any configured error.
 func (m *EndpointExtractor) ExtractEndpoint(_ context.Context, event fwkdl.EndpointEvent) error {
 	m.mu.Lock()

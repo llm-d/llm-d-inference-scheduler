@@ -252,7 +252,7 @@ func (h *Handler) Pick(ctx context.Context, _ *scheduling.CycleState, request *s
 	if request.TargetModel != "" {
 		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
 	}
-	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestId))
+	span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 
 	// ── Stage 1: Decode ────────────────────────────────────────────────────
 	if _, executed := profileResults[h.decodeProfile]; !executed {

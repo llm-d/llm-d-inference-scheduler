@@ -1,12 +1,10 @@
 # ------------------------------------------------------------------------------
-# VLLM Simulator
+# VLLM Prefill Component
 #
-# This deploys a VLLM simulator which can be used to simulate inference for
-# small environments (e.g. Kubernetes In Docker (KIND) clusters), or for when
-# all that is needed is some basic functionality.
+# Prefill deployment for disaggregation scenarios (P/D, E/P/D).
 # ------------------------------------------------------------------------------
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-- deployments.yaml
+- deployment.yaml

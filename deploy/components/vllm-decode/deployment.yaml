@@ -1,59 +1,31 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${MODEL_NAME_SAFE}-vllm-sim
+  name: vllm-d
   labels:
     app: ${POOL_NAME}
 spec:
-  replicas: ${VLLM_REPLICA_COUNT}
+  replicas: ${VLLM_REPLICA_COUNT_D}
   selector:
     matchLabels:
       app: ${POOL_NAME}
+      llm-d.ai/component: decode
   template:
     metadata:
       labels:
         app: ${POOL_NAME}
+        llm-d.ai/component: decode
+        llm-d.ai/role: ${DECODE_ROLE}
     spec:
       initContainers:
-      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
-      # restartPolicy: Always makes this a native sidecar (K8s 1.29+):
-      # vllm-sim will not start until this container's readinessProbe passes
-      - name: uds-tokenizer
-        image: ${UDS_TOKENIZER_IMAGE}
-        imagePullPolicy: IfNotPresent
-        restartPolicy: Always
-        env:
-        - name: LOG_LEVEL
-          value: "DEBUG"
-        - name: PROBE_PORT
-          value: "8082"
-        - name: HF_TOKEN
-          value: "${HF_TOKEN}"
-        ports:
-        - name: health
-          containerPort: 8082
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8082
-          initialDelaySeconds: 10
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 8082
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        volumeMounts:
-        - name: uds-socket
-          mountPath: /tmp/tokenizer      
+      # Routing sidecar - proxies requests from port 8000 to vllm on port 8200
+      # Scenario patches add --kv-connector and/or --ec-connector args as needed
       - name: routing-sidecar
         image: ${SIDECAR_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8000"
         - "--vllm-port=8200"
-        - "--kv-connector=nixlv2"
         - "--secure-proxy=false"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
         ports:
@@ -89,17 +61,14 @@ spec:
               fieldPath: status.podIP
       containers:
       - name: vllm
-        image: ${VLLM_SIMULATOR_IMAGE}
+        # VLLM_IMAGE can be a simulator (e.g. llm-d-inference-sim) or a real vLLM image (e.g. vllm/vllm-openai:v0.16.0)
+        image: ${VLLM_IMAGE}
         imagePullPolicy: IfNotPresent
         args:
         - "--port=8200"
         - "--model=${MODEL_NAME}"
-        - "--enable-kvcache=${KV_CACHE_ENABLED}"
-        - "--kv-cache-size=1024"
-        - "--block-size=16"
-        - "--zmq-endpoint=tcp://${EPP_NAME}.default.svc.cluster.local:5557"
-        - "--event-batch-size=16"
         - "--data-parallel-size=${VLLM_DATA_PARALLEL_SIZE}"
+        - "${VLLM_EXTRA_ARGS_D}"
         ports:
         - name: http
           containerPort: 8200
@@ -125,6 +94,33 @@ spec:
         - name: rank7
           containerPort: 8207
           protocol: TCP
+        # Startup Probe: Wait for model to load during initialization
+        # Protects liveness/readiness probes from firing too early
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8200
+          failureThreshold: 60  # Allow up to 10 minutes (60 * 10s)
+          periodSeconds: 10
+          timeoutSeconds: 5
+        # Readiness Probe: Is the model loaded and ready?
+        # Controls traffic routing, removes from service if failing
+        readinessProbe:
+          httpGet:
+            path: /health # Use /health/ready if available in your version
+            port: 8200
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        # Liveness Probe: Is the server process alive?
+        # Simple health check, restarts container if failing
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8200
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         env:
         - name: POD_IP
           valueFrom:
@@ -134,11 +130,13 @@ spec:
           value: "8200"
         - name: PYTHONHASHSEED
           value: "42"
-        volumeMounts:
-        - name: uds-socket
-          mountPath: /tmp/tokenizer
-      volumes:
-      # Shared volume for Unix Domain Socket communication between the simulator and UDS tokenizer
-      - name: uds-socket
-        emptyDir: {}
-
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace

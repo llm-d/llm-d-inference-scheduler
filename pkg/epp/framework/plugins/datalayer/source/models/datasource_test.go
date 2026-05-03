@@ -30,7 +30,7 @@ func TestDatasource(t *testing.T) {
 		Sources: []datalayer.DataSourceConfig{
 			{
 				Plugin:     source,
-				Extractors: []fwkdl.Extractor{extractor},
+				Extractors: []fwkdl.ExtractorBase{extractor},
 			},
 		},
 	}

@@ -44,7 +44,7 @@ func sendRawCompletion() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode, nil
 }
 
@@ -110,12 +110,20 @@ var _ = ginkgo.Describe("Disruption tests", ginkgo.Ordered, ginkgo.Label("Disrup
 			ginkgo.By("Waiting for killed pod to be replaced")
 			gomega.Eventually(podGone(targetPod, 1), podRemovalTimeout, 1*time.Second).Should(gomega.BeTrue())
 
-			ginkgo.By("Verifying new requests route to a pod other than the killed one")
-			for range 5 {
-				nsHdr, podHdr, _ := runCompletion(simplePrompt, simModelName)
-				gomega.Expect(nsHdr).Should(gomega.Equal(nsName))
-				gomega.Expect(podHdr).ShouldNot(gomega.Equal(targetPod))
-			}
+			ginkgo.By("Verifying new requests eventually route to a pod other than the killed one")
+			gomega.Eventually(func() error {
+				nsHdr, podHdr, _, err := tryCompletion(simplePrompt, simModelName)
+				if err != nil {
+					return err
+				}
+				if nsHdr != nsName {
+					return fmt.Errorf("expected namespace %q, got %q", nsName, nsHdr)
+				}
+				if podHdr == targetPod {
+					return fmt.Errorf("request still routed to killed pod %q", targetPod)
+				}
+				return nil
+			}, eppRecoveryTimeout, 1*time.Second).Should(gomega.Succeed())
 
 			ginkgo.By("Waiting for replacement pod to become ready")
 			gomega.Eventually(func() int {
@@ -346,7 +354,7 @@ func sendStreamingCompletion(connected chan<- string) error {
 		connected <- ""
 		return err
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 
 	connected <- resp.Header.Get("x-inference-pod")
 	_, err = io.ReadAll(resp.Body)

@@ -26,7 +26,7 @@ import (
 
 // SheddableFilterType only admits sheddable requests (priority < 0) into the eviction queue.
 // This uses the project-wide definition of sheddable from requtil.IsSheddable.
-const SheddableFilterType = "eviction-sheddable-filter"
+const SheddableFilterType = "sheddable-eviction-filter"
 
 func init() {
 	plugin.Register(SheddableFilterType, SheddableFilterFactory)

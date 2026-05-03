@@ -83,7 +83,7 @@ func (p *RequestEvictor) PreRequest(
 
 	targetEndpoint := profileResult.TargetEndpoints[0]
 	metadata := targetEndpoint.GetMetadata()
-	requestID := request.Headers[reqcommon.RequestIdHeaderKey]
+	requestID := request.Headers[reqcommon.RequestIDHeaderKey]
 	if requestID == "" {
 		return
 	}
@@ -132,7 +132,7 @@ func (p *RequestEvictor) ResponseBody(
 	if request == nil {
 		return
 	}
-	requestID := request.Headers[reqcommon.RequestIdHeaderKey]
+	requestID := request.Headers[reqcommon.RequestIDHeaderKey]
 	if requestID == "" {
 		return
 	}

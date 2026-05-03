@@ -28,7 +28,7 @@ func newTestEndpoint(name string, queueSize int) scheduling.Endpoint {
 
 func newTestRequest(id string) *scheduling.InferenceRequest {
 	return &scheduling.InferenceRequest{
-		RequestId: id,
+		RequestID: id,
 	}
 }
 
@@ -145,7 +145,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 
 		scorer.PreRequest(ctx, request, schedulingResult)
 
-		assert.True(t, scorer.requestCache.Has(request.RequestId), "Expected request to be in cache")
+		assert.True(t, scorer.requestCache.Has(request.RequestID), "Expected request to be in cache")
 		assert.Equal(t, 1, scorer.getPodCount(endpointA.GetMetadata().NamespacedName.String()))
 	})
 
@@ -158,7 +158,7 @@ func TestActiveRequestScorer_PreRequest(t *testing.T) {
 
 		scorer.PreRequest(ctx, request, schedulingResult)
 
-		assert.True(t, scorer.requestCache.Has(request.RequestId), "Expected request to be in cache")
+		assert.True(t, scorer.requestCache.Has(request.RequestID), "Expected request to be in cache")
 		assert.Equal(t, 2, scorer.getPodCount(endpointA.GetMetadata().NamespacedName.String()))
 		assert.Equal(t, 1, scorer.getPodCount(endpointB.GetMetadata().NamespacedName.String()))
 	})
@@ -204,7 +204,7 @@ func TestActiveRequestScorer_ResponseBody(t *testing.T) {
 
 			scorer.ResponseBody(ctx, request, &requestcontrol.Response{EndOfStream: tt.endOfStream}, endpointA.GetMetadata())
 
-			assert.Equal(t, tt.wantInCache, scorer.requestCache.Has(request.RequestId))
+			assert.Equal(t, tt.wantInCache, scorer.requestCache.Has(request.RequestID))
 			assert.Equal(t, tt.wantHasPodCount, scorer.hasPodCount(endpointA.GetMetadata().NamespacedName.String()))
 			if tt.wantHasPodCount {
 				assert.Equal(t, tt.wantPodCount, scorer.getPodCount(endpointA.GetMetadata().NamespacedName.String()))

@@ -31,6 +31,7 @@ jobs:
               - Makefile*
               - go.mod
               - scripts/**
+              - .github/workflows/ci-pr-checks.yaml
   lint-and-test:
     needs: check-changes
     if: ${{ needs.check-changes.outputs.src == 'true' }}
@@ -38,6 +39,24 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+
+      # Custom profile with directory-only removals (run in parallel, no apt).
+      # The cleanup-profile: max is much more aggressive, it cleanups around 41GB, 
+      # but runs 3.5 mins
+      - name: Free disk space
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-cached-tools: 'true'
+          remove-swift: 'true'
+          remove-julia: 'true'
+          remove-rust: 'true'
+          remove-miniconda: 'true'
+          swapfile-size: 0
 
       - name: Sanity check repo contents
         run: ls -la
@@ -178,6 +197,10 @@ jobs:
           retention-days: 400
           overwrite: true
 
+      - name: Clean Docker system
+        shell: bash
+        run: docker system prune -af
+  
       - name: Run make test-e2e
         shell: bash
         run: make test-e2e

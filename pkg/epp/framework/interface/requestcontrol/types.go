@@ -24,8 +24,8 @@ import (
 
 // Response contains information from the response received to be passed to the Response requestcontrol plugins
 type Response struct {
-	// RequestId is the Envoy generated Id for the request being processed
-	RequestId string
+	// RequestID is the Envoy generated Id for the request being processed
+	RequestID string
 	// Headers is a map of the response headers. Nil during body processing
 	Headers map[string]string
 	// StartOfStream when true indicates that this invocation contains the first chunk of the response

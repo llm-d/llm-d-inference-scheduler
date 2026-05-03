@@ -291,13 +291,13 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 		if sourcePlugin, ok := handle.Plugin(source.PluginRef).(fwkdl.DataSource); ok {
 			sourceConfig := datalayer.DataSourceConfig{
 				Plugin:     sourcePlugin,
-				Extractors: []fwkdl.Extractor{},
+				Extractors: []fwkdl.ExtractorBase{},
 			}
 			for _, extractor := range source.Extractors {
-				if extractorPlugin, ok := handle.Plugin(extractor.PluginRef).(fwkdl.Extractor); ok {
+				if extractorPlugin, ok := handle.Plugin(extractor.PluginRef).(fwkdl.ExtractorBase); ok {
 					sourceConfig.Extractors = append(sourceConfig.Extractors, extractorPlugin)
 				} else {
-					return nil, fmt.Errorf("the plugin %s is not a fwkdl.Extractor", source.PluginRef)
+					return nil, fmt.Errorf("the plugin %s is not a fwkdl.ExtractorBase", source.PluginRef)
 				}
 			}
 			cfg.Sources = append(cfg.Sources, sourceConfig)

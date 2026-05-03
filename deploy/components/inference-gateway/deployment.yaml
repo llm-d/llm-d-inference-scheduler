@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: e2e-epp
+  name: ${EPP_NAME}
   labels:
-    app: e2e-epp
+    app: ${EPP_NAME}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: e2e-epp
+      app: ${EPP_NAME}
   template:
     metadata:
       labels:
-        app: e2e-epp
+        app: ${EPP_NAME}
     spec:
-      serviceAccountName: e2e-epp
+      serviceAccountName: ${EPP_NAME}
       terminationGracePeriodSeconds: 130
       containers:
       - name: epp
@@ -22,9 +22,9 @@ spec:
         imagePullPolicy: IfNotPresent
         args:
         - --pool-name
-        - ${POOL_NAME}
+        - "${POOL_NAME}"
         - --pool-namespace
-        - ${NAMESPACE}
+        - "${NAMESPACE}"
         - --v
         - "4"
         - --zap-encoder
@@ -35,7 +35,7 @@ spec:
         - "9003"
         - --config-file
         - "/etc/epp/epp-config.yaml"
-        - --metrics-endpoint-auth=false
+        - --metrics-endpoint-auth=${METRICS_ENDPOINT_AUTH}
         ports:
         - containerPort: 5557
         - containerPort: 9002
@@ -61,6 +61,7 @@ spec:
           mountPath: /cache
         - name: uds-socket
           mountPath: /tmp/tokenizer
+      # UDS Tokenizer sidecar - handles tokenization via gRPC over Unix Domain Socket
       - name: uds-tokenizer
         image: ${UDS_TOKENIZER_IMAGE}
         imagePullPolicy: IfNotPresent
@@ -87,11 +88,17 @@ spec:
         volumeMounts:
         - name: uds-socket
           mountPath: /tmp/tokenizer
+        - name: model-cache
+          mountPath: /models
       volumes:
       - name: epp-config
         configMap:
           name: epp-config
       - name: cache
         emptyDir: {}
+      # Shared volume for Unix Domain Socket communication between EPP and UDS tokenizer
       - name: uds-socket
+        emptyDir: {}
+      # Model cache for tokenizer configurations
+      - name: model-cache
         emptyDir: {}
