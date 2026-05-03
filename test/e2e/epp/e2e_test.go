@@ -460,7 +460,7 @@ func verifyMetrics() {
 	// Construct the metric scraping curl command using Pod IP.
 	metricScrapeCmd := getMetricsScrapeCommand(podIP, token)
 
-	modelServerPods, err := getPodsByLabel(testConfig.K8sClient, testConfig.Context, testConfig.NsName, "app", modelServerName)
+	modelServerPods, err := getPodsByLabel(testConfig.Context, testConfig.K8sClient, testConfig.NsName, "app", modelServerName)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Expected to find model server pods")
 
 	// Define the metrics we expect to see
@@ -748,7 +748,7 @@ func generateTraffic(
 }
 
 // getPodsByLabel lists pods in a given namespace that have a specific label key-value pair.
-func getPodsByLabel(k8sClient client.Client, ctx context.Context, namespace, labelKey, labelValue string) ([]corev1.Pod, error) {
+func getPodsByLabel(ctx context.Context, k8sClient client.Client, namespace, labelKey, labelValue string) ([]corev1.Pod, error) {
 	podList := &corev1.PodList{}
 	labels := map[string]string{labelKey: labelValue}
 
