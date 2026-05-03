@@ -1,11 +1,18 @@
 SHELL := /usr/bin/env bash
 
+LOCALBIN ?= $(shell pwd)/bin
+HELM ?= $(LOCALBIN)/helm
+KUBECTL_VALIDATE ?= $(LOCALBIN)/kubectl-validate
+YQ ?= $(LOCALBIN)/yq
+
 # Tool checks (container runtime, kubectl, etc.) are defined in Makefile.tools.mk.
 include Makefile.tools.mk
 # Cluster (Kubernetes/OpenShift) specific targets are defined in Makefile.cluster.mk.
 include Makefile.cluster.mk
 # Kind specific targets are defined in Makefile.kind.mk.
 include Makefile.kind.mk
+# Code generation targets are defined in Makefile.gen.mk
+include Makefile.gen.mk
 
 # Defaults
 TARGETOS ?= $(shell command -v go >/dev/null 2>&1 && go env GOOS || uname -s | tr '[:upper:]' '[:lower:]')
@@ -41,7 +48,7 @@ export BUILDER_IMAGE ?= $(BUILDER_TAG_BASE):$(BUILDER_TAG)
 NAMESPACE ?= hc4ai-operator
 LINT_NEW_ONLY ?= false # Set to true to only lint new code, false to lint all code (default matches CI behavior)
 
-CONTAINER_RUNTIME := $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
+CONTAINER_RUNTIME ?= $(shell { command -v docker >/dev/null 2>&1 && echo docker; } || { command -v podman >/dev/null 2>&1 && echo podman; } || echo "")
 export CONTAINER_RUNTIME
 
 GIT_COMMIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null)
@@ -199,6 +206,10 @@ go-mod-check: image-build-builder
 	@git diff --exit-code go.mod go.sum || \
 	( echo "ERROR: go.mod/go.sum are not tidy. Run 'go mod tidy' and commit."; exit 1 )
 
+.PHONY: tidy
+tidy:
+	go mod tidy
+
 .PHONY: clean
 clean: ## Clean build artifacts, tools and caches
 	rm -rf bin build $(BUILDER_STAMP)
@@ -249,6 +260,13 @@ test-integration: image-build-builder ## Run integration tests (requires KUBECON
 	$(BUILDER_RUN_CLUSTER) 'go test -v -race -tags=integration_tests -coverprofile=$(COVERAGE_DIR)/integration.out -covermode=atomic ./test/integration/'
 	$(BUILDER_RUN) 'go tool cover -func=$(COVERAGE_DIR)/integration.out | tail -1'
 
+.PHONY: test-integration-hermetic
+test-integration-hermetic: image-build-builder ## Run hermetic integration tests (envtest, no cluster required)
+	@mkdir -p $(COVERAGE_DIR)
+	@printf "\033[33;1m==== Running Hermetic Integration Tests ====\033[0m\n"
+	$(BUILDER_RUN) 'CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$(setup-envtest use $$ENVTEST_K8S_VERSION --bin-dir $$ENVTEST_ASSETS_DIR -p path)" go test -v -race -coverprofile=$(COVERAGE_DIR)/integration-hermetic.out -covermode=atomic ./test/integration/igw/...'
+	$(BUILDER_RUN) 'go tool cover -func=$(COVERAGE_DIR)/integration-hermetic.out | tail -1'
+
 .PHONY: test-e2e
 test-e2e: image-build-builder image-build image-pull ## Run end-to-end tests against a new kind cluster
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
@@ -266,6 +284,24 @@ bench-tokenizer: image-build-builder ## Run external tokenizer + scorer benchmar
 post-deploy-test: ## Run post deployment tests
 	@echo "Success!"
 	@echo "Post-deployment tests passed."
+
+##@ Helm
+
+.PHONY: verify-helm-charts
+verify-helm-charts: helm-install kubectl-validate ## Render and validate Helm charts.
+	HELM="$(HELM)" KUBECTL_VALIDATE="$(KUBECTL_VALIDATE)" hack/verify-helm.sh $(MODE)
+
+.PHONY: verify-manifests
+verify-manifests: kubectl-validate ## Validate deployment manifests.
+	KUBECTL_VALIDATE="$(KUBECTL_VALIDATE)" hack/verify-manifests.sh
+
+.PHONY: inferencepool-helm-chart-push
+inferencepool-helm-chart-push: yq helm-install ## Package and push the InferencePool Helm chart.
+	CHART=inferencepool EXTRA_TAG="$(EXTRA_TAG)" YQ="$(YQ)" HELM="$(HELM)" ./hack/push-chart.sh
+
+.PHONY: standalone-helm-chart-push
+standalone-helm-chart-push: yq helm-install ## Package and push the standalone EPP Helm chart.
+	CHART=standalone EXTRA_TAG="$(EXTRA_TAG)" YQ="$(YQ)" HELM="$(HELM)" ./hack/push-chart.sh
 
 
 ##@ Coverage

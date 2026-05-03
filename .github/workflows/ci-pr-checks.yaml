@@ -119,6 +119,10 @@ jobs:
         shell: bash
         run: make test-unit
 
+      - name: Run hermetic integration tests
+        shell: bash
+        run: make test-integration-hermetic
+
       - name: Compare coverage against main baseline
         if: github.event_name == 'pull_request'
         continue-on-error: true

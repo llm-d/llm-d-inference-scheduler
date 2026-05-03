@@ -47,7 +47,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/usagelimits"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker/maxscore"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/single"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/queuedepth"
@@ -288,7 +288,7 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			configText: successWithNoProfileHandlersText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
-				require.True(t, hasPluginType(handle, profile.SingleProfileHandlerType),
+				require.True(t, hasPluginType(handle, single.SingleProfileHandlerType),
 					"Defaults: SingleProfileHandler was not injected")
 			},
 		},
@@ -504,27 +504,42 @@ func TestInstantiateAndConfigure(t *testing.T) {
 			},
 		},
 		{
-			name:       "Success (DataLayer) - Empty dataLayer section disables default metrics",
+			name:       "Success (DataLayer) - Empty dataLayer section injects defaults (additive)",
 			configText: successDataLayerNoSourcesText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
-				require.NotNil(t, rawCfg.DataLayer, "DataLayer section should be present (user provided it)")
-				require.Empty(t, rawCfg.DataLayer.Sources, "No sources should be present")
-				require.Nil(t, handle.Plugin(sourcemetrics.MetricsDataSourceType), "MetricsDataSource should not be instantiated")
-				require.Nil(t, handle.Plugin(extractormetrics.MetricsExtractorType), "MetricsExtractor should not be instantiated")
-				require.NotNil(t, cfg.DataConfig, "DataConfig should still be built (just empty)")
-				require.Empty(t, cfg.DataConfig.Sources, "DataConfig should have no sources")
+				require.NotNil(t, rawCfg.DataLayer, "DataLayer section should be present")
+				require.Len(t, rawCfg.DataLayer.Sources, 1, "Default metrics source should be injected")
+				require.Equal(t, sourcemetrics.MetricsDataSourceType, rawCfg.DataLayer.Sources[0].PluginRef)
+				require.NotNil(t, handle.Plugin(sourcemetrics.MetricsDataSourceType), "MetricsDataSource should be instantiated")
+				require.NotNil(t, handle.Plugin(extractormetrics.MetricsExtractorType), "MetricsExtractor should be instantiated")
+				require.NotNil(t, cfg.DataConfig)
+				require.Len(t, cfg.DataConfig.Sources, 1)
 			},
 		},
 		{
-			name:       "Success (DataLayer) - Explicit data config preserved",
+			name:       "Success (DataLayer) - injectDefaults: false suppresses injection",
+			configText: successDataLayerOptOutText,
+			wantErr:    false,
+			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
+				require.NotNil(t, rawCfg.DataLayer)
+				require.Empty(t, rawCfg.DataLayer.Sources, "No sources should be present when InjectDefaults is false")
+				require.Nil(t, handle.Plugin(sourcemetrics.MetricsDataSourceType), "MetricsDataSource should not be instantiated")
+				require.Nil(t, handle.Plugin(extractormetrics.MetricsExtractorType), "MetricsExtractor should not be instantiated")
+				require.NotNil(t, cfg.DataConfig, "DataConfig is built but empty")
+				require.Empty(t, cfg.DataConfig.Sources)
+			},
+		},
+		{
+			name:       "Success (DataLayer) - Explicit non-metrics source gets defaults injected too",
 			configText: successDataLayerExplicitConfigText,
 			wantErr:    false,
 			validate: func(t *testing.T, handle fwkplugin.Handle, rawCfg *configapi.EndpointPickerConfig, cfg *config.Config) {
 				require.NotNil(t, rawCfg.DataLayer, "Data config should be present")
-				require.Len(t, rawCfg.DataLayer.Sources, 1)
-				require.Equal(t, "testSource", rawCfg.DataLayer.Sources[0].PluginRef,
-					"Explicit source should be preserved, not overwritten by defaults")
+				require.Len(t, rawCfg.DataLayer.Sources, 2, "User source + injected metrics source")
+				pluginRefs := []string{rawCfg.DataLayer.Sources[0].PluginRef, rawCfg.DataLayer.Sources[1].PluginRef}
+				require.Contains(t, pluginRefs, "testSource", "User source should be preserved")
+				require.Contains(t, pluginRefs, sourcemetrics.MetricsDataSourceType, "Default metrics source should be injected")
 			},
 		},
 		{
@@ -776,7 +791,7 @@ func registerTestPlugins(t *testing.T) {
 
 	// Ensure system defaults are registered too.
 	fwkplugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)
-	fwkplugin.Register(profile.SingleProfileHandlerType, profile.SingleProfileHandlerFactory)
+	fwkplugin.Register(single.SingleProfileHandlerType, single.SingleProfileHandlerFactory)
 	fwkplugin.Register(openai.OpenAIParserType, openai.OpenAIParserPluginFactory)
 	fwkplugin.Register(usagelimits.StaticUsageLimitPolicyType, usagelimits.StaticPolicyFactory)
 	// Datalayer plugins are now defaults; register their real factories.

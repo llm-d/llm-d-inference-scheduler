@@ -57,21 +57,31 @@ type MappingConfig struct {
 	CacheNumBlocks      string
 }
 
+type namedSpec struct {
+	name    string
+	spec    *Spec
+	enabled bool
+}
+
+func (m *Mapping) specs() []namedSpec {
+	var loraSpec *Spec
+	if m.LoraRequestInfo != nil {
+		loraSpec = m.LoraRequestInfo.Spec
+	}
+	return []namedSpec{
+		{"queue", m.TotalQueuedRequests, m.TotalQueuedRequests != nil},
+		{"running", m.TotalRunningRequests, m.TotalRunningRequests != nil},
+		{"kv", m.KVCacheUtilization, m.KVCacheUtilization != nil},
+		{"lora", loraSpec, m.LoraRequestInfo != nil},
+		{"cacheInfo", m.CacheInfo, m.CacheInfo != nil},
+	}
+}
+
 // String returns a human-readable representation of the Mapping, listing which specs are disabled (nil).
 func (m *Mapping) String() string {
-	specs := []struct {
-		name string
-		val  any
-	}{
-		{"queue", m.TotalQueuedRequests},
-		{"running", m.TotalRunningRequests},
-		{"kv", m.KVCacheUtilization},
-		{"lora", m.LoraRequestInfo},
-		{"cacheInfo", m.CacheInfo},
-	}
 	var disabled []string
-	for _, s := range specs {
-		if s.val == nil {
+	for _, s := range m.specs() {
+		if !s.enabled {
 			disabled = append(disabled, s.name)
 		}
 	}
@@ -79,6 +89,17 @@ func (m *Mapping) String() string {
 		return "Mapping{all specs enabled}"
 	}
 	return fmt.Sprintf("Mapping{disabled: [%s]}", strings.Join(disabled, ", "))
+}
+
+// MetricNames returns the Prometheus metric names for all enabled specs.
+func (m *Mapping) MetricNames() []string {
+	var names []string
+	for _, s := range m.specs() {
+		if s.enabled {
+			names = append(names, s.spec.Name)
+		}
+	}
+	return names
 }
 
 // NewMapping creates a metrics.Mapping from the input specification strings.

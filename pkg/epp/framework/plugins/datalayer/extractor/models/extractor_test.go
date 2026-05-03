@@ -12,16 +12,17 @@ import (
 func TestExtractorExtract(t *testing.T) {
 	ctx := context.Background()
 
-	extractor, err := NewModelExtractor()
+	extPlugin, err := ModelServerExtractorFactory("test-extractor", nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create extractor: %v", err)
 	}
+	extractor := extPlugin.(fwkdl.Extractor)
 
-	if exType := extractor.TypedName().Type; exType == "" {
+	if exType := extPlugin.TypedName().Type; exType == "" {
 		t.Error("empty extractor type")
 	}
 
-	if exName := extractor.TypedName().Name; exName == "" {
+	if exName := extPlugin.TypedName().Name; exName == "" {
 		t.Error("empty extractor name")
 	}
 
@@ -58,7 +59,7 @@ func TestExtractorExtract(t *testing.T) {
 			name: "valid models response",
 			data: &ModelResponse{
 				Object: "list",
-				Data: []ModelInfo{
+				Data: []ModelData{
 					{
 						ID: model,
 					},
@@ -82,12 +83,12 @@ func TestExtractorExtract(t *testing.T) {
 			}()
 
 			attr := ep.GetAttributes()
-			before, ok := attr.Get(modelsAttributeKey)
+			before, ok := attr.Get(ModelsAttributeKey)
 			if ok && before != nil {
 				t.Error("expected empty attributes")
 			}
 			err := extractor.Extract(ctx, tt.data, ep)
-			after, ok := attr.Get(modelsAttributeKey)
+			after, ok := attr.Get(ModelsAttributeKey)
 			if !ok && tt.updated {
 				t.Error("expected updated attributes")
 			}

@@ -1,8 +1,8 @@
 # Token Load Scorer Plugin
 
-This plugin scores candidate endpoints based on the estimated number of in-flight tokens currently being processed by each model server.
+**Type:** `token-load-scorer`
 
-It is registered as type `token-load-scorer` and runs as a scheduling scorer.
+This plugin scores candidate endpoints based on the estimated number of in-flight tokens currently being processed by each model server.
 
 ## What it does
 
@@ -33,3 +33,17 @@ The plugin consumes:
 The scorer supports the following runtime parameters:
 
 - `queueThresholdTokens` (integer, default: 4194304): The maximum number of in-flight tokens used for score normalization. Endpoints exceeding this threshold will receive a score of `0.0`. The default (4Mi tokens) is equivalent to 128 requests with an average size of 32K tokens.
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: token-load-scorer
+    name: token-load
+    parameters:
+      queueThresholdTokens: 4194304
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: token-load
+        weight: 1
+```

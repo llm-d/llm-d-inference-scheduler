@@ -213,10 +213,13 @@ func (sdc *SaturationDetectorConfig) String() string {
 
 // DataLayerConfig contains the configuration of the DataLayer feature
 type DataLayerConfig struct {
-	// +required
-	// +kubebuilder:validation:Required
+	// +optional
+	// InjectDefaults controls automatic injection of the default metrics source and extractor.
+	// Defaults to true when omitted. Set to false to disable all default source injection.
+	InjectDefaults *bool `json:"injectDefaults,omitempty"`
+	// +optional
 	// Sources is the list of sources to define to the DataLayer
-	Sources []DataLayerSource `json:"sources"`
+	Sources []DataLayerSource `json:"sources,omitempty"`
 }
 
 func (dlc *DataLayerConfig) String() string {

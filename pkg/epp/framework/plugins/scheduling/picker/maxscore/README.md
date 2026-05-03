@@ -1,8 +1,11 @@
 # Max Score Picker
 
+**Type:** `max-score-picker`
+
 Selects the endpoint(s) with the highest score calculated during the scoring phase.
 
-It is registered as type `max-score-picker` and runs as a scheduling picker.
+> [!NOTE]
+> This plugin is enabled by default if no other picker is specified. You do not need to explicitly declare it in your configuration.
 
 ## What it does
 

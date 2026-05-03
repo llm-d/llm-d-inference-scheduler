@@ -1,8 +1,11 @@
 # Core Metrics Extractor
 
-The Core Metrics Extractor is a data layer plugin responsible for extracting model server metrics from a data source and storing them as endpoint attributes. It supports multiple inference engines and can be configured to map engine-specific metric names to a standard set of internal keys.
+**Type:** `core-metrics-extractor`
 
-It is registered as type `core-metrics-extractor` and runs as a data layer extractor.
+> [!NOTE]
+> This plugin is enabled by default together with `metrics-data-source`. You do not need to explicitly declare it in your configuration, but it can be disabled if metrics collection is unnecessary.
+
+The Core Metrics Extractor is a data layer plugin responsible for extracting model server metrics from a data source and storing them as endpoint attributes. It supports multiple inference engines and can be configured to map engine-specific metric names to a standard set of internal keys.
 
 ## What it does
 
@@ -16,10 +19,6 @@ It is registered as type `core-metrics-extractor` and runs as a data layer extra
     -   **LoRA Adapters**: Information about active and waiting LoRA adapters.
     -   **Cache Configuration**: Block size and total number of GPU blocks.
 5.  Stores these values as attributes on the endpoint, making them available to scheduling plugins.
-
-## Inputs consumed
-
--   `PrometheusMetricMap`: A map of Prometheus metric families, typically produced by `metrics-data-source`.
 
 ## Attributes produced
 

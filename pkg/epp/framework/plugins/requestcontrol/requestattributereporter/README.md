@@ -1,5 +1,7 @@
 # Request Attribute Reporter Plugin
 
+**Type:** `request-attribute-reporter`
+
 ## Overview
 
 This plugin for the Endpoint Picker (EPP) allows you to report a value calculating from the request back to the downstream proxy (e.g., Envoy). The value is calculated based on data extracted from the model server's response body. This information is returned as dynamic metadata in the `ext_proc` response.

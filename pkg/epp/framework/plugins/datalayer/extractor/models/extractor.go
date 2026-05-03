@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -10,33 +11,36 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
-const modelsAttributeKey = "/v1/models"
+const (
+	ModelsAttributeKey  = "/v1/models"
+	ModelsExtractorType = "models-data-extractor"
+)
 
-// ModelInfoCollection defines models' data returned from /v1/models API
-type ModelInfoCollection []ModelInfo
+// ModelDataCollection defines models' data returned from /v1/models API
+type ModelDataCollection []ModelData
 
-// ModelInfo defines model's data returned from /v1/models API
-type ModelInfo struct {
+// ModelData defines model's data returned from /v1/models API
+type ModelData struct {
 	ID     string `json:"id"`
 	Parent string `json:"parent,omitempty"`
 }
 
 // String returns a string representation of the model info
-func (m *ModelInfo) String() string {
+func (m *ModelData) String() string {
 	return fmt.Sprintf("%+v", *m)
 }
 
 // Clone returns a full copy of the object
-func (m ModelInfoCollection) Clone() fwkdl.Cloneable {
+func (m ModelDataCollection) Clone() fwkdl.Cloneable {
 	if m == nil {
 		return nil
 	}
-	clone := make([]ModelInfo, len(m))
+	clone := make([]ModelData, len(m))
 	copy(clone, m)
-	return (*ModelInfoCollection)(&clone)
+	return (*ModelDataCollection)(&clone)
 }
 
-func (m ModelInfoCollection) String() string {
+func (m ModelDataCollection) String() string {
 	if m == nil {
 		return "[]"
 	}
@@ -50,7 +54,7 @@ func (m ModelInfoCollection) String() string {
 // ModelResponse is the response from /v1/models API
 type ModelResponse struct {
 	Object string      `json:"object"`
-	Data   []ModelInfo `json:"data"`
+	Data   []ModelData `json:"data"`
 }
 
 // ModelsResponseType is the type of models response
@@ -64,13 +68,13 @@ type ModelExtractor struct {
 }
 
 // NewModelExtractor returns a new model extractor.
-func NewModelExtractor() (*ModelExtractor, error) {
+func NewModelExtractor() *ModelExtractor {
 	return &ModelExtractor{
 		typedName: fwkplugin.TypedName{
 			Type: ModelsExtractorType,
 			Name: ModelsExtractorType,
 		},
-	}, nil
+	}
 }
 
 // TypedName returns the type and name of the ModelExtractor.
@@ -78,15 +82,17 @@ func (me *ModelExtractor) TypedName() fwkplugin.TypedName {
 	return me.typedName
 }
 
-// WithName sets the name of the extractor.
-func (me *ModelExtractor) WithName(name string) *ModelExtractor {
-	me.typedName.Name = name
-	return me
-}
-
 // ExpectedInputType defines the type expected by ModelExtractor.
 func (me *ModelExtractor) ExpectedInputType() reflect.Type {
 	return ModelsResponseType
+}
+
+// ModelServerExtractorFactory is a factory function used to instantiate data layer's
+// models extractor plugins specified in a configuration.
+func ModelServerExtractorFactory(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
+	extractor := NewModelExtractor()
+	extractor.typedName.Name = name
+	return extractor, nil
 }
 
 // Extract transforms the data source output into a concrete attribute that
@@ -97,6 +103,6 @@ func (me *ModelExtractor) Extract(_ context.Context, data any, ep fwkdl.Endpoint
 		return fmt.Errorf("unexpected input in Extract: %T", data)
 	}
 
-	ep.GetAttributes().Put(modelsAttributeKey, ModelInfoCollection(models.Data))
+	ep.GetAttributes().Put(ModelsAttributeKey, ModelDataCollection(models.Data))
 	return nil
 }
