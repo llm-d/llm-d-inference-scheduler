@@ -41,8 +41,6 @@ const (
 	defaultCollectionTimeout = time.Second
 )
 
-var collectorLogger = log.Log.WithName("datalayer-collector")
-
 // Ticker implements a time source for periodic invocation.
 // The Ticker is passed in as parameter a Collector to allow control over time
 // progress in tests, ensuring tests are deterministic and fast.
@@ -69,15 +67,20 @@ func (t *TimeTicker) Channel() <-chan time.Time {
 }
 
 // Collector runs data collection for a single endpoint.
+//
+// Lifecycle contract: any in-flight write the collection goroutine performs
+// against the endpoint completes before Stop returns. Callers may therefore
+// mutate or release endpoint state immediately after Stop returns without
+// racing the collection goroutine.
 type Collector struct {
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	stopped bool
+	mu     sync.Mutex
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // NewCollector returns a new collector.
 func NewCollector() *Collector {
-	return &Collector{}
+	return &Collector{done: make(chan struct{})}
 }
 
 // Start launches the collection goroutine.
@@ -115,27 +118,22 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint,
 	return nil
 }
 
-// Stop signals the collection goroutine to exit. Idempotent.
+// Stop cancels the collection goroutine and blocks until it has exited. Idempotent.
 func (c *Collector) Stop() {
-	var msg string
 	c.mu.Lock()
-	switch {
-	case c.cancel == nil:
-		msg = "Stop called before successful Start"
-	case c.stopped:
-		msg = "Stop called more than once"
-	default:
-		c.stopped = true
-		c.cancel()
-	}
+	cancel := c.cancel
 	c.mu.Unlock()
-	if msg != "" {
-		collectorLogger.Info(msg)
+	if cancel != nil {
+		cancel()
+		<-c.done
 	}
 }
 
 func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) {
-	defer ticker.Stop()
+	defer func() {
+		close(c.done)
+		ticker.Stop()
+	}()
 	logger := log.FromContext(ctx).WithValues("endpoint", ep.GetMetadata().GetIPAddress())
 
 	for {
@@ -157,8 +155,8 @@ func (c *Collector) pollOne(ctx context.Context, src fwkdl.PollingDataSource, ep
 	tn := src.TypedName()
 
 	pollCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
+	defer cancel()
 	data, err := src.Poll(pollCtx, ep)
-	cancel()
 	if err != nil {
 		metrics.DataLayerPollErrorsTotal.WithLabelValues(tn.Type).Inc()
 		logger.V(logging.DEBUG).Info("poll failed", "source", tn, "err", err)
