@@ -41,10 +41,8 @@ install_kind() {
 
 load_images() {
   local cluster="$1"
-  echo "Loading EPP image into kind cluster '${cluster}': ${EPP_IMAGE}"
-  kind load docker-image "${EPP_IMAGE}" --name "${cluster}"
-  echo "Loading sim image into kind cluster '${cluster}': ${SIM_IMAGE}"
-  kind load docker-image "${SIM_IMAGE}" --name "${cluster}"
+  echo "Loading EPP and sim images into kind cluster ${cluster}: ${EPP_IMAGE} ${SIM_IMAGE}"
+  CLUSTER_NAME="${cluster}" ./scripts/load_image.sh "${EPP_IMAGE}" "${SIM_IMAGE}"
 }
 
 cleanup() {

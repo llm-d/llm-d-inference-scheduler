@@ -205,18 +205,6 @@ jobs:
         shell: bash
         run: docker system prune -af
 
-      - name: Run make test-e2e-gaie
-        shell: bash
-        run: make test-e2e-gaie
-
-      - name: Clean Docker system between e2e runs
-        shell: bash
-        run: docker system prune -af
-  
       - name: Run make test-e2e
         shell: bash
         run: make test-e2e
-
-      
-
-      

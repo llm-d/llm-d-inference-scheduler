@@ -32,11 +32,11 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 	infextv1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	infextv1a2 "sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
+
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 const (

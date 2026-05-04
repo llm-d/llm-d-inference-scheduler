@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -39,6 +38,8 @@ import (
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
+
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 const (
