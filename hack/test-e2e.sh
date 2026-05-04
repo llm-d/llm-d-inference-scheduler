@@ -82,6 +82,6 @@ else
   fi
 fi
 
-echo "Found an active cluster. Running Go e2e tests in ./test/e2e/epp/..."
+echo "Running Go e2e tests in ./test/e2e/epp/..."
 MANIFEST_PATH="${MANIFEST_PATH}" E2E_IMAGE="${EPP_IMAGE}" \
   go test "${DIR}/../test/e2e/epp/" -v -timeout 45m -ginkgo.v -ginkgo.fail-fast
