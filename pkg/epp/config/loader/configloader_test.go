@@ -266,10 +266,10 @@ func TestLoadRawConfiguration(t *testing.T) {
 			diff := cmp.Diff(tc.want, got)
 			require.Empty(t, diff, "Config mismatch (-want +got):\n%s", diff)
 
-			if -1 == strings.Index(writer.String(), "deprecated") {
-				require.False(t, tc.deprecated, "Valid configuration was marked as deprecated")
-			} else {
+			if strings.Contains(writer.String(), "deprecated") {
 				require.True(t, tc.deprecated, "Deprecated configuration wasn't marked as deprecated")
+			} else {
+				require.False(t, tc.deprecated, "Valid configuration was marked as deprecated")
 			}
 		})
 	}
