@@ -284,7 +284,6 @@ plugins:
       maxPrefixBlocksToMatch: 256
       lruCapacityPerServer: 31250
   - type: max-score-picker
-  - type: disagg-headers-handler
   - type: prefix-based-pd-decider
     parameters:
       nonCachedTokens: 8
@@ -349,7 +348,6 @@ plugins:
       maxPrefixBlocksToMatch: 256
       lruCapacityPerServer: 31250
   - type: max-score-picker
-  - type: disagg-headers-handler
   - type: always-disagg-multimodal-decider
   - type: prefix-based-pd-decider
     parameters:

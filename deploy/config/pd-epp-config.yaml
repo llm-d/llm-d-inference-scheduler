@@ -4,7 +4,6 @@ kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
 plugins:
-- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     maxPrefixBlocksToMatch: 256
