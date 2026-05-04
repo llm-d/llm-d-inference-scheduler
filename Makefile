@@ -121,6 +121,12 @@ ifneq ($(filter command line environment,$(origin NAMESPACE)),)
 BUILDER_E2E_ENV_FLAGS += -e NAMESPACE=$(NAMESPACE)
 endif
 
+# GAIE e2e test variables (for test-e2e-gaie target).
+# GAIE_E2E_MANIFEST_PATH: path to the model server manifest inside the builder container
+# (/app/... prefix). Defaults to the sim-deployment in testdata. Override to use a GPU manifest.
+GAIE_E2E_MANIFEST_PATH ?=
+GAIE_E2E_IMAGE         ?= $(EPP_IMAGE)
+
 # When K8S_CONTEXT is set, mount the host kubeconfig so the e2e suite can call
 # config.GetConfigWithContext(K8S_CONTEXT) against an existing cluster instead of
 # creating a new kind cluster.
@@ -272,6 +278,15 @@ test-e2e: image-build-builder image-build image-pull ## Run end-to-end tests aga
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	$(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_E2E_FLAGS) \
 		$(BUILDER_IMAGE) ./test/scripts/run_e2e.sh
+
+
+.PHONY: test-e2e-gaie
+test-e2e-gaie: image-build-builder image-build image-pull ## Run GAIE end-to-end tests against a new kind cluster
+	@printf "\033[33;1m==== Running GAIE End to End Tests ====\033[0m\n"
+	$(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_E2E_FLAGS) \
+		-e EPP_IMAGE=$(GAIE_E2E_IMAGE) \
+		-e USE_KIND=true \
+		$(BUILDER_IMAGE) ./hack/test-e2e.sh
 
 .PHONY: bench-tokenizer
 bench-tokenizer: image-build-builder ## Run external tokenizer + scorer benchmark (requires kind cluster with EPP deployed)

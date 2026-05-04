@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -38,7 +39,6 @@ import (
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/metadata"
-	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
 )
 
 const (
@@ -136,10 +136,10 @@ var _ = ginkgo.Describe("InferencePool", func() {
 			if err == nil {
 				return errors.New("InferenceObjective resource still exists")
 			}
-			if !k8serrors.IsNotFound(err) {
+			if k8serrors.IsNotFound(err) {
 				return nil
 			}
-			return nil
+			return err
 		}, testConfig.ExistsTimeout, testConfig.Interval).Should(gomega.Succeed())
 
 		ginkgo.By("Restoring vLLM Deployment and InferencePool.")
@@ -460,7 +460,7 @@ func verifyMetrics() {
 	// Construct the metric scraping curl command using Pod IP.
 	metricScrapeCmd := getMetricsScrapeCommand(podIP, token)
 
-	modelServerPods, err := getPodsByLabel(testConfig.K8sClient, testConfig.Context, testConfig.NsName, "app", modelServerName)
+	modelServerPods, err := getPodsByLabel(testConfig.Context, testConfig.K8sClient, testConfig.NsName, "app", modelServerName)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "Expected to find model server pods")
 
 	// Define the metrics we expect to see
@@ -748,7 +748,7 @@ func generateTraffic(
 }
 
 // getPodsByLabel lists pods in a given namespace that have a specific label key-value pair.
-func getPodsByLabel(k8sClient client.Client, ctx context.Context, namespace, labelKey, labelValue string) ([]corev1.Pod, error) {
+func getPodsByLabel(ctx context.Context, k8sClient client.Client, namespace, labelKey, labelValue string) ([]corev1.Pod, error) {
 	podList := &corev1.PodList{}
 	labels := map[string]string{labelKey: labelValue}
 

@@ -22,10 +22,10 @@ The end-to-end tests are designed to validate end-to-end Gateway API Inference E
 
 Follow these steps to run the end-to-end tests:
 
-1. **Clone the Repository**: Clone the `gateway-api-inference-extension` repository:
+1. **Use this repository**: Ensure you are working from a checkout of this repository, then change to the repository root before running the tests:
 
    ```sh
-   git clone https://github.com/kubernetes-sigs/gateway-api-inference-extension.git && cd gateway-api-inference-extension
+   cd <path-to-this-repository>
    ```
 
 1. **Optional Settings**
@@ -58,10 +58,10 @@ Follow these steps to run the end-to-end tests:
      - To pause indefinitely, set it to `true`: `export E2E_PAUSE_ON_EXIT=true`
      - To pause for a specific duration, provide a duration string: `export E2E_PAUSE_ON_EXIT=10m`
 
-1. **Run the Tests**: Run the `test-e2e` target:
+1. **Run the Tests**: Run the `test-e2e-gaie` target:
 
    ```sh
-   make test-e2e
+   make test-e2e-gaie
    ```
 
    The test suite prints details for each step. Note that the `vllm-qwen3-32b` model server deployment

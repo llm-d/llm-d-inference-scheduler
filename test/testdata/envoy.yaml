@@ -181,7 +181,7 @@ data:
               tls_options:
                 alpn_protocols: ["h2"]  
           # This ensures that envoy accepts untrusted certificates. We tried to explicitly
-          # set TrustChainVerification to ACCEPT_UNSTRUSTED, but that actually didn't work
+          # set TrustChainVerification to ACCEPT_UNTRUSTED, but that actually didn't work
           # and what worked is setting the common_tls_context to empty.                
           transport_socket:
             name: "envoy.transport_sockets.tls"
