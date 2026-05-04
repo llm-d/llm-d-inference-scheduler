@@ -61,9 +61,10 @@ func init() {
 		v1.AddToGroupVersion(scheme, deprecatedSchemeGroupVersion)
 		return nil
 	})
-	_ = (&builder).AddToScheme(scheme)
 
 	utilruntime.Must(configapi.Install(scheme))
+	utilruntime.Must((&builder).AddToScheme(scheme))
+
 }
 
 // RegisterFeatureGate registers a feature gate name for validation purposes.
@@ -84,8 +85,9 @@ func LoadRawConfig(configBytes []byte, logger logr.Logger) (*configapi.EndpointP
 			return nil, nil, err
 		}
 
-		if rawConfig.GroupVersionKind().Group == deprecatedSchemeGroupVersion.Group {
-			logger.Info("The use of inference.networking.x-k8s.io/v1alpha1/EndpointPickerConfig is deprecated. Please use llm-d.ai/v1alpha1/EndpointPickerConfig instead")
+		if rawConfig.GroupVersionKind().GroupVersion() == deprecatedSchemeGroupVersion {
+			logger.Info("DEPRECATION: apiVersion inference.networking.x-k8s.io/v1alpha1/EndpointPickerConfig is deprecated",
+				"replacement", "llm-d.ai/v1alpha1/EndpointPickerConfig")
 		}
 
 		logger.Info("Loaded raw configuration", "config", rawConfig.String())
