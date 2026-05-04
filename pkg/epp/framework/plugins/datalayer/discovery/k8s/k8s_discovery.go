@@ -326,7 +326,7 @@ func (s *StaticSelectorDiscoveryPlugin) Start(ctx context.Context, notifier fwkd
 	pool := datalayer.NewEndpointPool(s.namespace, StaticSelectorPluginType)
 	pool.Selector = selectorMap
 	pool.TargetPorts = s.targetPorts
-	s.ds.PoolSetStatic(pool)
+	s.ds.WithEndpointPool(pool)
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:  pluginScheme,

@@ -87,9 +87,6 @@ type Datastore interface {
 	PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) bool
 	PodDelete(podName string)
 
-	// PoolSetStatic sets the pool without triggering a pod resync. Use this when
-	// the pool identity and selector are known statically from plugin parameters.
-	PoolSetStatic(pool *datalayer.EndpointPool)
 	// PoolTargetPorts returns the target ports of the current pool, or nil if not synced.
 	PoolTargetPorts() []int
 
@@ -389,12 +386,6 @@ func (ds *datastore) PodDelete(podName string) {
 		}
 		return true
 	})
-}
-
-func (ds *datastore) PoolSetStatic(pool *datalayer.EndpointPool) {
-	ds.mu.Lock()
-	ds.pool = pool
-	ds.mu.Unlock()
 }
 
 func (ds *datastore) PoolTargetPorts() []int {
