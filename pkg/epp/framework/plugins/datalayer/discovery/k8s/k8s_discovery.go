@@ -16,8 +16,8 @@ limitations under the License.
 
 // Package k8s provides EndpointDiscovery implementations that discover inference
 // endpoints by watching Kubernetes pods. Both plugins own their ctrl.Manager
-// internally and delegate pod reconciliation to datalayer.BindPodDiscovery,
-// eliminating duplicated controller-runtime wiring.
+// internally and use datalayer.BindNotificationSource with a podDiscoveryExtractor
+// to translate pod lifecycle events into DiscoveryNotifier calls.
 package k8s
 
 import (
@@ -48,6 +48,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	dlnotifications "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/notifications"
 )
 
 const (
@@ -94,8 +95,10 @@ func (b *baseK8sDiscovery) BindDatalayer(rt *datalayer.Runtime) { b.dlRuntime = 
 // bind pod discovery, bind notification sources if a datalayer runtime is
 // configured, then start the manager.
 func (b *baseK8sDiscovery) runManager(ctx context.Context, mgr ctrl.Manager, notifier fwkdl.DiscoveryNotifier, pluginName string) error {
-	if err := datalayer.BindPodDiscovery(b.ds, notifier, mgr); err != nil {
-		return fmt.Errorf("%s: BindPodDiscovery: %w", pluginName, err)
+	podSrc := dlnotifications.NewK8sNotificationSource("k8s-notification", "pod-discovery", podDiscoveryGVK)
+	podExt := newPodDiscoveryExtractor(b.ds, notifier)
+	if err := datalayer.BindNotificationSource(podSrc, []fwkdl.NotificationExtractor{podExt}, mgr); err != nil {
+		return fmt.Errorf("%s: pod discovery: %w", pluginName, err)
 	}
 	// If a datalayer runtime is configured, bind K8s notification sources
 	// (push-based metrics) to this manager before starting it.
