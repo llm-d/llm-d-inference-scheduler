@@ -1,16 +1,18 @@
-// Copyright 2025 The Kubernetes Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+Copyright 2026 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package probabilisticadmitter
 
@@ -90,6 +92,34 @@ func TestFactory_ZeroKVCacheUtilThreshold(t *testing.T) {
 	_, err := Factory("test", json.RawMessage(`{"kvCacheUtilThreshold":0}`), nil)
 	if err == nil {
 		t.Fatal("expected error for kvCacheUtilThreshold=0")
+	}
+}
+
+func TestFactory_NegativePower(t *testing.T) {
+	_, err := Factory("test", json.RawMessage(`{"power":-1}`), nil)
+	if err == nil {
+		t.Fatal("expected error for negative power")
+	}
+}
+
+func TestFactory_ZeroPower(t *testing.T) {
+	_, err := Factory("test", json.RawMessage(`{"power":0}`), nil)
+	if err == nil {
+		t.Fatal("expected error for zero power")
+	}
+}
+
+func TestFactory_NegativeK(t *testing.T) {
+	_, err := Factory("test", json.RawMessage(`{"k":-1}`), nil)
+	if err == nil {
+		t.Fatal("expected error for negative k")
+	}
+}
+
+func TestFactory_ZeroK(t *testing.T) {
+	_, err := Factory("test", json.RawMessage(`{"k":0}`), nil)
+	if err == nil {
+		t.Fatal("expected error for zero k")
 	}
 }
 

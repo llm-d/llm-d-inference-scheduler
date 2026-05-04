@@ -1,16 +1,18 @@
-// Copyright 2025 The Kubernetes Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+Copyright 2026 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 // Package probabilisticadmitter implements a binary-tier probabilistic admission control plugin.
 // Protected requests (priority >= 0) are always admitted; sheddable requests (priority < 0)
@@ -79,6 +81,12 @@ func Factory(name string, rawParameters json.RawMessage, _ fwkplugin.Handle) (fw
 	}
 	if params.KVCacheUtilThreshold <= 0.0 {
 		return nil, fmt.Errorf("plugin '%s': kvCacheUtilThreshold must be > 0, got %g", Type, params.KVCacheUtilThreshold)
+	}
+	if params.Power <= 0 {
+		return nil, fmt.Errorf("plugin '%s': power must be > 0, got %g", Type, params.Power)
+	}
+	if params.K <= 0 {
+		return nil, fmt.Errorf("plugin '%s': k must be > 0, got %g", Type, params.K)
 	}
 	return New(params).WithName(name), nil
 }
