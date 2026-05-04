@@ -62,8 +62,10 @@ Discovery is intentionally placed under the datalayer component because:
 
 - The datalayer already contains K8s binding code (`k8s_bind.go`) and push-based
   metrics mechanisms. Discovery is a natural peer.
-- `BindPodDiscovery` in `k8s_bind.go` is shared infrastructure used by both K8s
-  discovery plugins, eliminating duplicated controller-runtime wiring.
+- Both K8s discovery plugins use `datalayer.BindNotificationSource` with a shared
+  `podDiscoveryExtractor` (defined in `pod_extractor.go` in the `k8s` plugin package)
+  to translate pod lifecycle events into `DiscoveryNotifier` calls, eliminating
+  duplicated controller-runtime wiring.
 - When a K8s discovery plugin is configured, `dlRuntime.Start(ctx, mgr)` is called
   on the manager the plugin owns, binding any configured notification sources
   (push-based metrics) to that manager.
@@ -186,5 +188,5 @@ Client
 4. Reference it in `EndpointPickerConfig` via `discovery.pluginRef`
 
 The `file-discovery` plugin is the reference implementation for non-K8s sources.
-The `inference-pool-discovery` plugin is the reference for K8s sources that reuse
-`datalayer.BindPodDiscovery`.
+The `inference-pool-discovery` plugin is the reference for K8s sources that use
+`datalayer.BindNotificationSource` with a pod discovery extractor.

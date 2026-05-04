@@ -88,9 +88,6 @@ func (e *PodEventLogger) ExpectedInputType() reflect.Type {
 	return fwkdl.NotificationEventType
 }
 
-// Extract is the base Extractor method — not called for notification extractors.
-func (e *PodEventLogger) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error { return nil }
-
 func (e *PodEventLogger) GVK() schema.GroupVersionKind {
 	return schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
 }
@@ -132,9 +129,6 @@ func (e *EndpointEventLogger) TypedName() fwkplugin.TypedName {
 func (e *EndpointEventLogger) ExpectedInputType() reflect.Type {
 	return fwkdl.EndpointEventReflectType
 }
-
-// Extract is the base Extractor method — not called for endpoint extractors.
-func (e *EndpointEventLogger) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error { return nil }
 
 func (e *EndpointEventLogger) ExtractEndpoint(_ context.Context, event fwkdl.EndpointEvent) error {
 	action := "added/updated"
