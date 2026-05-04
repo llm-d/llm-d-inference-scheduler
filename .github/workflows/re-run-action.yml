@@ -8,6 +8,10 @@ permissions:
   contents: read
   actions: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   rerun_pr_tests:
     name: rerun_pr_tests

@@ -182,9 +182,14 @@ builder-e2e-shell: image-build-builder ## Open a shell with e2e test access
 install-hooks: ## Install git hooks
 	git config core.hooksPath hooks
 
+.PHONY: vulncheck
+vulncheck: image-build-builder ## Run govulncheck for known vulnerabilities
+	@printf "\033[33;1m==== Running govulncheck ====\033[0m\n"
+	$(BUILDER_RUN) 'go install golang.org/x/vuln/cmd/govulncheck@v1.3.0 && govulncheck ./...'
+
 .PHONY: presubmit
 presubmit: LINT_NEW_ONLY=true
-presubmit: git-branch-check signed-commits-check go-mod-check format lint
+presubmit: git-branch-check signed-commits-check go-mod-check format lint vulncheck
 
 .PHONY: git-branch-check
 git-branch-check:
