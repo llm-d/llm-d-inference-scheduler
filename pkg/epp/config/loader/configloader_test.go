@@ -20,11 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -84,6 +84,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 		configText string
 		want       *configapi.EndpointPickerConfig
 		wantErr    bool
+		deprecated bool
 	}{
 		{
 			name:       "Success - Full Configuration",
@@ -117,7 +118,8 @@ func TestLoadRawConfiguration(t *testing.T) {
 					PluginRef: "utilization-detector",
 				},
 			},
-			wantErr: false,
+			wantErr:    false,
+			deprecated: false,
 		},
 		{
 			name:       "Success - using deprecated Groupname",
@@ -151,7 +153,8 @@ func TestLoadRawConfiguration(t *testing.T) {
 					PluginRef: "utilization-detector",
 				},
 			},
-			wantErr: false,
+			wantErr:    false,
+			deprecated: true,
 		},
 		{
 			name:       "Success - No Profiles",
@@ -166,7 +169,8 @@ func TestLoadRawConfiguration(t *testing.T) {
 				},
 				FeatureGates: configapi.FeatureGates{},
 			},
-			wantErr: false,
+			wantErr:    false,
+			deprecated: false,
 		},
 		{
 			name:       "Success - Default configuration",
@@ -229,24 +233,28 @@ func TestLoadRawConfiguration(t *testing.T) {
 					},
 				},
 			},
-			wantErr: false,
+			wantErr:    false,
+			deprecated: false,
 		},
 		{
 			name:       "Error - Invalid YAML",
 			configText: errorBadYamlText,
 			wantErr:    true,
+			deprecated: false,
 		},
 		{
 			name:       "Error - Unknown Feature Gate",
 			configText: errorUnknownFeatureGateText,
 			wantErr:    true,
+			deprecated: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			logger := logging.NewTestLogger()
+			writer := &strings.Builder{}
+			logger := logging.NewTestLoggerWithWriter(writer)
 
 			got, _, err := LoadRawConfig([]byte(tc.configText), logger)
 
@@ -257,6 +265,12 @@ func TestLoadRawConfiguration(t *testing.T) {
 			require.NoError(t, err, "Expected LoadRawConfig to succeed")
 			diff := cmp.Diff(tc.want, got)
 			require.Empty(t, diff, "Config mismatch (-want +got):\n%s", diff)
+
+			if -1 == strings.Index(writer.String(), "deprecated") {
+				require.False(t, tc.deprecated, "Valid configuration was marked as deprecated")
+			} else {
+				require.True(t, tc.deprecated, "Deprecated configuration wasn't marked as deprecated")
+			}
 		})
 	}
 }
