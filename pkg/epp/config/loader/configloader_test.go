@@ -255,7 +255,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 				return
 			}
 			require.NoError(t, err, "Expected LoadRawConfig to succeed")
-			diff := cmp.Diff(tc.want, got, cmpopts.IgnoreFields(configapi.EndpointPickerConfig{}, "TypeMeta"))
+			diff := cmp.Diff(tc.want, got)
 			require.Empty(t, diff, "Config mismatch (-want +got):\n%s", diff)
 		})
 	}
