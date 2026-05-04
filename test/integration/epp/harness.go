@@ -56,7 +56,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 	eppServer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/server"
 	epptestutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
-	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration/igw"
+	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration"
 )
 
 // Global State (Initialized in TestMain)
