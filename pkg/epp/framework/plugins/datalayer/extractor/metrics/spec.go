@@ -40,7 +40,8 @@ type Spec struct {
 // metric_name{label1=value1,label2=value2}, where labels are optional.
 func parseStringToSpec(spec string) (*Spec, error) {
 	if spec == "" {
-		return nil, nil // allow empty string to represent the nil Spec
+		// allow empty string to represent the nil Spec
+		return nil, nil //nolint:nilnil
 	}
 
 	// Be liberal in accepting inputs that are missing quotes around label values,

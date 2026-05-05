@@ -19,6 +19,7 @@ package loader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -681,7 +682,7 @@ func (m *mockHandler) Pick(context.Context, *framework.CycleState, *framework.In
 }
 func (m *mockHandler) ProcessResults(context.Context, *framework.CycleState, *framework.InferenceRequest,
 	map[string]*framework.ProfileRunResult) (*framework.SchedulingResult, error) {
-	return nil, nil
+	return nil, errors.New("sentinel error for mock handler")
 }
 
 // Mock Source

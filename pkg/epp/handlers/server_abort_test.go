@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
@@ -39,13 +40,15 @@ func (m *mockProcessServer) Send(resp *extProcPb.ProcessingResponse) error {
 }
 
 // Unused methods to satisfy the interface.
-func (m *mockProcessServer) Recv() (*extProcPb.ProcessingRequest, error) { return nil, nil }
-func (m *mockProcessServer) SetHeader(metadata.MD) error                 { return nil }
-func (m *mockProcessServer) SendHeader(metadata.MD) error                { return nil }
-func (m *mockProcessServer) SetTrailer(metadata.MD)                      {}
-func (m *mockProcessServer) Context() context.Context                    { return context.Background() }
-func (m *mockProcessServer) SendMsg(any) error                           { return nil }
-func (m *mockProcessServer) RecvMsg(any) error                           { return nil }
+func (m *mockProcessServer) Recv() (*extProcPb.ProcessingRequest, error) {
+	return nil, errors.New("sentinel error for mock process server")
+}
+func (m *mockProcessServer) SetHeader(metadata.MD) error  { return nil }
+func (m *mockProcessServer) SendHeader(metadata.MD) error { return nil }
+func (m *mockProcessServer) SetTrailer(metadata.MD)       {}
+func (m *mockProcessServer) Context() context.Context     { return context.Background() }
+func (m *mockProcessServer) SendMsg(any) error            { return nil }
+func (m *mockProcessServer) RecvMsg(any) error            { return nil }
 
 func TestUpdateStateAndSendIfNeeded_Evicted(t *testing.T) {
 	t.Parallel()

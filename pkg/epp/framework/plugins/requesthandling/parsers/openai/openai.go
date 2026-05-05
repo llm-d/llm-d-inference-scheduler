@@ -115,7 +115,7 @@ func (p *OpenAIParser) ParseResponse(ctx context.Context, body []byte, headers m
 	if len(body) == 0 {
 		// An empty body can occur during streaming; for instance, Envoy proxies
 		// may emit a trailing empty body with the EndOfStream flag set to true.
-		return nil, nil
+		return nil, nil //nolint:nilnil
 	}
 
 	isStream := false
@@ -266,7 +266,8 @@ func extractUsage(responseBytes []byte) (*fwkrh.Usage, error) {
 		}
 		return &usage, nil
 	}
-	return nil, nil
+	// No usage data
+	return nil, nil //nolint:nilnil
 }
 
 // extractUsageByAPIType extracts usage statistics using the appropriate field names

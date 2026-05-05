@@ -78,5 +78,5 @@ func (p *PassthroughParser) ParseRequest(ctx context.Context, body []byte, heade
 
 // ParseResponse does nothing and returns nil.
 func (p *PassthroughParser) ParseResponse(ctx context.Context, body []byte, headers map[string]string, isEnd bool) (*fwkrh.ParsedResponse, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil
 }

@@ -18,6 +18,7 @@ package mocks
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -83,7 +84,7 @@ func (fds *MetricsDataSource) Poll(ctx context.Context, ep fwkdl.Endpoint) (any,
 			ep.UpdateMetrics(clone)
 		}
 	}
-	return nil, nil
+	return nil, errors.New("sentinel nothing polled")
 }
 
 // NotificationSource implements both DataSource and NotificationSource for testing.

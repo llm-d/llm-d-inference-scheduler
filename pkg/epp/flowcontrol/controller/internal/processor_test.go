@@ -393,7 +393,7 @@ func TestShardProcessor(t *testing.T) {
 				context.Context,
 				flowcontrol.PriorityBandAccessor,
 			) (flowcontrol.FlowQueueAccessor, error) {
-				return nil, nil
+				return nil, errors.New("sentinel no item selected")
 			}
 
 			// --- ACT ---
@@ -954,7 +954,8 @@ func TestShardProcessor(t *testing.T) {
 								context.Context,
 								flowcontrol.PriorityBandAccessor,
 							) (flowcontrol.FlowQueueAccessor, error) {
-								return nil, nil // Simulate band being empty or policy choosing to pause.
+								// Simulate band being empty or policy choosing to pause.
+								return nil, errors.New("sentinel no item selected")
 							}
 						},
 						expectDidDispatch: false,

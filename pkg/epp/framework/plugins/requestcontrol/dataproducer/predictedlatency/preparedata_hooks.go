@@ -105,12 +105,12 @@ func (s *PredictedLatency) PrepareRequestData(ctx context.Context, request *sche
 	return nil
 }
 
-func (p *PredictedLatency) Produces() map[string]any {
+func (s *PredictedLatency) Produces() map[string]any {
 	return map[string]any{
 		attrlatency.LatencyPredictionInfoKey: attrlatency.LatencyPredictionInfo{},
 	}
 }
 
-func (p *PredictedLatency) Consumes() map[string]any {
+func (s *PredictedLatency) Consumes() map[string]any {
 	return map[string]any{attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{}}
 }

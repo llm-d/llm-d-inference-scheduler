@@ -93,7 +93,7 @@ type mockDatastore struct {
 }
 
 func (ds *mockDatastore) PoolGet() (*datalayer.EndpointPool, error) {
-	return nil, nil
+	return nil, errors.New("sentinel error for mock datastore")
 }
 func (ds *mockDatastore) ObjectiveGet(_ string) *v1alpha2.InferenceObjective {
 	return nil

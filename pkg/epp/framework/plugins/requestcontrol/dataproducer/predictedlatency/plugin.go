@@ -73,7 +73,7 @@ type PredictedLatency struct {
 }
 
 // endpointCounter returns the atomic counter for the given endpoint key, creating it if necessary.
-func (t *PredictedLatency) endpointCounter(m *sync.Map, key string) *atomic.Int64 {
+func (s *PredictedLatency) endpointCounter(m *sync.Map, key string) *atomic.Int64 {
 	v, _ := m.LoadOrStore(key, new(atomic.Int64))
 	return v.(*atomic.Int64)
 }
@@ -86,7 +86,7 @@ func (t *PredictedLatency) endpointCounter(m *sync.Map, key string) *atomic.Int6
 // context after PreRequest already skipped the increment), which used to
 // break prediction requests with `greater_than_equal: 0` validation errors.
 // Decrementing a missing key is a no-op and does not create a zero entry.
-func (t *PredictedLatency) decrementEndpointCounter(m *sync.Map, key string, delta int64) {
+func (s *PredictedLatency) decrementEndpointCounter(m *sync.Map, key string, delta int64) {
 	v, ok := m.Load(key)
 	if !ok {
 		return
@@ -230,8 +230,8 @@ func (s *PredictedLatency) WithName(name string) *PredictedLatency {
 	return s
 }
 
-func (t *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *framework.InferenceRequest) *predictedLatencyCtx {
-	sloCtx, err := t.getPredictedLatencyContextForRequest(request)
+func (s *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *framework.InferenceRequest) *predictedLatencyCtx {
+	sloCtx, err := s.getPredictedLatencyContextForRequest(request)
 	if err != nil {
 		sloCtx = newPredictedLatencyContext(request)
 	}

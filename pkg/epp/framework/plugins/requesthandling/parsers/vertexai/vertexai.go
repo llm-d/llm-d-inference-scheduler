@@ -128,7 +128,8 @@ func (p *VertexAIParser) ParseRequest(ctx context.Context, body []byte, headers 
 // ParseResponse parses the response body and returns a ParsedResponse
 func (p *VertexAIParser) ParseResponse(ctx context.Context, body []byte, headers map[string]string, _ bool) (*fwkrh.ParsedResponse, error) {
 	if len(body) == 0 {
-		return nil, nil
+		// Nothing to parse
+		return nil, nil //nolint:nilnil
 	}
 
 	parsedPayload, err := grpcutil.ParseGrpcPayload(body)

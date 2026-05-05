@@ -42,22 +42,22 @@ func (e *EndpointMetadata) String() string {
 }
 
 // Clone returns a full copy of the object.
-func (p *EndpointMetadata) Clone() *EndpointMetadata {
-	if p == nil {
+func (e *EndpointMetadata) Clone() *EndpointMetadata {
+	if e == nil {
 		return nil
 	}
 
-	clonedLabels := make(map[string]string, len(p.Labels))
-	maps.Copy(clonedLabels, p.Labels)
+	clonedLabels := make(map[string]string, len(e.Labels))
+	maps.Copy(clonedLabels, e.Labels)
 	return &EndpointMetadata{
 		NamespacedName: types.NamespacedName{
-			Name:      p.NamespacedName.Name,
-			Namespace: p.NamespacedName.Namespace,
+			Name:      e.NamespacedName.Name,
+			Namespace: e.NamespacedName.Namespace,
 		},
-		PodName:     p.PodName,
-		Address:     p.Address,
-		Port:        p.Port,
-		MetricsHost: p.MetricsHost,
+		PodName:     e.PodName,
+		Address:     e.Address,
+		Port:        e.Port,
+		MetricsHost: e.MetricsHost,
 		Labels:      clonedLabels,
 	}
 }

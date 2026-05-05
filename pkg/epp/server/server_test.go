@@ -19,6 +19,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"testing"
@@ -397,7 +398,7 @@ func (m *mockParser) ParseRequest(ctx context.Context, body []byte, headers map[
 }
 
 func (m *mockParser) ParseResponse(ctx context.Context, body []byte, headers map[string]string, endofStream bool) (*fwkrh.ParsedResponse, error) {
-	return nil, nil
+	return nil, errors.New("sentinel error for mock parser")
 }
 
 func (m *mockParser) SupportedAppProtocols() []extv1.AppProtocol {

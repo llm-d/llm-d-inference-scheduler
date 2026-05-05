@@ -75,7 +75,8 @@ func (p *globalStrict) Pick(
 	flowGroup flowcontrol.PriorityBandAccessor,
 ) (flowcontrol.FlowQueueAccessor, error) {
 	if flowGroup == nil {
-		return nil, nil
+		// Nothing to pick
+		return nil, nil //nolint:nilnil
 	}
 
 	var bestQueue flowcontrol.FlowQueueAccessor
