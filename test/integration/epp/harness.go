@@ -277,7 +277,9 @@ func NewTestHarness(ctx context.Context, t *testing.T, opts ...HarnessOption) *T
 	mgrCtx, mgrCancel := context.WithCancel(ctx)
 
 	// Start Manager.
+	mgrDone := make(chan struct{})
 	go func() {
+		defer close(mgrDone)
 		if err := mgr.Start(mgrCtx); err != nil {
 			// Context cancellation is expected during teardown.
 			if !strings.Contains(err.Error(), "context canceled") {
@@ -312,6 +314,10 @@ func NewTestHarness(ctx context.Context, t *testing.T, opts ...HarnessOption) *T
 
 	t.Cleanup(func() {
 		mgrCancel()
+		// Wait for the manager (and its gRPC server) to fully stop before returning.
+		// Without this, the gRPC server may still hold its port when the next test
+		// calls GetFreePort(), causing a bind: address already in use race.
+		<-mgrDone
 		if config.Tracing {
 			_ = tp.Shutdown(ctx)
 			// Reset to no-op to avoid pollution between tests.
