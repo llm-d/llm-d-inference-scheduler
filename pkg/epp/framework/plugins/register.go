@@ -43,8 +43,8 @@ func RegisterAllPlugins() {
 	plugin.Register(disagg.PrefixBasedPDDeciderPluginType, disagg.PrefixBasedPDDeciderPluginFactory)
 	plugin.Register(disagg.AlwaysDisaggPDDeciderPluginType, disagg.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(tokenizer.PluginType, tokenizer.PluginFactory)
-	// Legacy alias - existing YAML configs using "tokenizer" continue to work.
-	plugin.Register(tokenizer.LegacyPluginType, tokenizer.PluginFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
+	// Legacy alias - existing YAML configs using "tokenizer" continue to work, with a deprecation warning.
+	plugin.Register(tokenizer.LegacyPluginType, tokenizer.LegacyPluginFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	// ep decider plugins
 	plugin.Register(disagg.AlwaysDisaggMulimodalPluginType, disagg.AlwaysDisaggMulimodalDeciderPluginFactory)
 	plugin.Register(contextlengthaware.ContextLengthAwareType, contextlengthaware.Factory)

@@ -87,6 +87,19 @@ func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Han
 	return p.WithName(name), nil
 }
 
+// LegacyPluginFactory wraps PluginFactory for the deprecated `tokenizer` type
+// name. It logs a one-time-per-instantiation deprecation warning and delegates
+// to PluginFactory. Will be removed when LegacyPluginType is removed.
+//
+// Deprecated: register PluginType ("token-producer") instead.
+func LegacyPluginFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	log.FromContext(handle.Context()).Info(
+		"DEPRECATION: plugin type '"+LegacyPluginType+"' is deprecated; use '"+PluginType+"' instead",
+		"pluginName", name,
+	)
+	return PluginFactory(name, rawParameters, handle)
+}
+
 // NewPlugin creates a new tokenizer plugin instance and initializes the UDS tokenizer.
 func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, error) {
 	tokenizer, err := tokenization.NewUdsTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
