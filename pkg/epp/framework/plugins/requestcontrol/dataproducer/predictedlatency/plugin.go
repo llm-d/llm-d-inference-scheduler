@@ -73,7 +73,7 @@ type PredictedLatency struct {
 }
 
 // endpointCounter returns the atomic counter for the given endpoint key, creating it if necessary.
-func (s *PredictedLatency) endpointCounter(m *sync.Map, key string) *atomic.Int64 {
+func (pl *PredictedLatency) endpointCounter(m *sync.Map, key string) *atomic.Int64 {
 	v, _ := m.LoadOrStore(key, new(atomic.Int64))
 	return v.(*atomic.Int64)
 }
@@ -86,7 +86,7 @@ func (s *PredictedLatency) endpointCounter(m *sync.Map, key string) *atomic.Int6
 // context after PreRequest already skipped the increment), which used to
 // break prediction requests with `greater_than_equal: 0` validation errors.
 // Decrementing a missing key is a no-op and does not create a zero entry.
-func (s *PredictedLatency) decrementEndpointCounter(m *sync.Map, key string, delta int64) {
+func (pl *PredictedLatency) decrementEndpointCounter(m *sync.Map, key string, delta int64) {
 	v, ok := m.Load(key)
 	if !ok {
 		return
@@ -221,17 +221,17 @@ func startPredictor(handle plugin.Handle) (latencypredictor.PredictorInterface, 
 	return predictor, nil
 }
 
-func (s *PredictedLatency) TypedName() plugin.TypedName {
-	return s.typedName
+func (pl *PredictedLatency) TypedName() plugin.TypedName {
+	return pl.typedName
 }
 
-func (s *PredictedLatency) WithName(name string) *PredictedLatency {
-	s.typedName.Name = name
-	return s
+func (pl *PredictedLatency) WithName(name string) *PredictedLatency {
+	pl.typedName.Name = name
+	return pl
 }
 
-func (s *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *framework.InferenceRequest) *predictedLatencyCtx {
-	sloCtx, err := s.getPredictedLatencyContextForRequest(request)
+func (pl *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *framework.InferenceRequest) *predictedLatencyCtx {
+	sloCtx, err := pl.getPredictedLatencyContextForRequest(request)
 	if err != nil {
 		sloCtx = newPredictedLatencyContext(request)
 	}
@@ -289,22 +289,22 @@ func newPredictedLatencyContext(request *framework.InferenceRequest) *predictedL
 	}
 }
 
-func (s *PredictedLatency) getPredictedLatencyContextForRequest(request *framework.InferenceRequest) (*predictedLatencyCtx, error) {
+func (pl *PredictedLatency) getPredictedLatencyContextForRequest(request *framework.InferenceRequest) (*predictedLatencyCtx, error) {
 	id := request.Headers[reqcommon.RequestIDHeaderKey]
-	if item := s.sloContextStore.Get(id); item != nil {
+	if item := pl.sloContextStore.Get(id); item != nil {
 		return item.Value(), nil
 	}
 	return nil, fmt.Errorf("SLO context not found for request ID: %s", id)
 }
 
-func (s *PredictedLatency) setPredictedLatencyContextForRequest(request *framework.InferenceRequest, ctx *predictedLatencyCtx) {
+func (pl *PredictedLatency) setPredictedLatencyContextForRequest(request *framework.InferenceRequest, ctx *predictedLatencyCtx) {
 	id := request.Headers[reqcommon.RequestIDHeaderKey]
-	s.sloContextStore.Set(id, ctx, ttlcache.DefaultTTL)
+	pl.sloContextStore.Set(id, ctx, ttlcache.DefaultTTL)
 }
 
-func (s *PredictedLatency) deletePredictedLatencyContextForRequest(request *framework.InferenceRequest) {
+func (pl *PredictedLatency) deletePredictedLatencyContextForRequest(request *framework.InferenceRequest) {
 	id := request.Headers[reqcommon.RequestIDHeaderKey]
-	s.sloContextStore.Delete(id)
+	pl.sloContextStore.Delete(id)
 }
 
 // --- Header parsing ---
@@ -326,7 +326,7 @@ func parseFloatHeader(request framework.InferenceRequest, headerName string) (fl
 	return parsedFloat, nil
 }
 
-func (s *PredictedLatency) parseSLOHeaders(ctx context.Context, request *framework.InferenceRequest, predictedLatencyCtx *predictedLatencyCtx) {
+func (pl *PredictedLatency) parseSLOHeaders(ctx context.Context, request *framework.InferenceRequest, predictedLatencyCtx *predictedLatencyCtx) {
 	logger := log.FromContext(ctx)
 	var err error
 
@@ -343,9 +343,9 @@ func (s *PredictedLatency) parseSLOHeaders(ctx context.Context, request *framewo
 
 // --- Running request queue helpers ---
 
-func (s *PredictedLatency) getEndpointMinTPOTSLO(endpoint framework.Endpoint) float64 {
+func (pl *PredictedLatency) getEndpointMinTPOTSLO(endpoint framework.Endpoint) float64 {
 	endpointName := endpoint.GetMetadata().NamespacedName
-	if runningReqs := s.getRunningRequestList(endpointName); runningReqs != nil && runningReqs.GetSize() > 0 {
+	if runningReqs := pl.getRunningRequestList(endpointName); runningReqs != nil && runningReqs.GetSize() > 0 {
 		if min := runningReqs.Peek(); min != nil {
 			return min.tpot
 		}
@@ -353,31 +353,31 @@ func (s *PredictedLatency) getEndpointMinTPOTSLO(endpoint framework.Endpoint) fl
 	return 0
 }
 
-func (s *PredictedLatency) getEndpointRunningRequestCount(endpoint framework.Endpoint) int {
+func (pl *PredictedLatency) getEndpointRunningRequestCount(endpoint framework.Endpoint) int {
 	endpointName := endpoint.GetMetadata().NamespacedName
-	if runningReqs := s.getRunningRequestList(endpointName); runningReqs != nil {
+	if runningReqs := pl.getRunningRequestList(endpointName); runningReqs != nil {
 		return runningReqs.GetSize()
 	}
 	return 0
 }
 
-func (s *PredictedLatency) getRunningRequestList(endpointName types.NamespacedName) *requestPriorityQueue {
-	if value, ok := s.runningRequestLists.Load(endpointName); ok {
+func (pl *PredictedLatency) getRunningRequestList(endpointName types.NamespacedName) *requestPriorityQueue {
+	if value, ok := pl.runningRequestLists.Load(endpointName); ok {
 		return value.(*requestPriorityQueue)
 	}
 	return nil
 }
 
-func (s *PredictedLatency) removeRequestFromEndpoint(endpointName types.NamespacedName, requestID string) {
-	if queue := s.getRunningRequestList(endpointName); queue != nil {
+func (pl *PredictedLatency) removeRequestFromEndpoint(endpointName types.NamespacedName, requestID string) {
+	if queue := pl.getRunningRequestList(endpointName); queue != nil {
 		queue.Remove(requestID)
 		if queue.GetSize() == 0 {
-			s.runningRequestLists.Delete(endpointName)
+			pl.runningRequestLists.Delete(endpointName)
 		}
 	}
 }
 
-func (s *PredictedLatency) removeRequestFromQueue(requestID string, ctx *predictedLatencyCtx) {
+func (pl *PredictedLatency) removeRequestFromQueue(requestID string, ctx *predictedLatencyCtx) {
 	if ctx == nil || ctx.targetMetadata == nil {
 		return
 	}
@@ -385,5 +385,5 @@ func (s *PredictedLatency) removeRequestFromQueue(requestID string, ctx *predict
 		Name:      ctx.targetMetadata.NamespacedName.Name,
 		Namespace: ctx.targetMetadata.NamespacedName.Namespace,
 	}
-	s.removeRequestFromEndpoint(endpointName, requestID)
+	pl.removeRequestFromEndpoint(endpointName, requestID)
 }
