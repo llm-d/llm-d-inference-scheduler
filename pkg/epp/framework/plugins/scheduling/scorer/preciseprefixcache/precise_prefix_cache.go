@@ -733,10 +733,11 @@ func (s *Scorer) getBlockSizeTokens() int {
 
 // getScores retrieves the endpoint scores from the KV-cache indexer
 // based on the provided LLM request.
-// If tokenized prompt data is found in CycleState (written by the tokenizer
-// scorer plugin), it calls ScoreTokens directly, bypassing prompt/chat tokenization.
-// Otherwise, chat completions and regular completions are tokenized internally.
-func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest) (map[string]float64, error) {
+// If tokenized prompt data is found on the request (written by the tokenizer
+// DataProducer plugin), it calls ScoreTokens directly, bypassing
+// prompt/chat tokenization. Otherwise, chat completions and regular
+// completions are tokenized internally by the kvcache indexer.
+func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, request *scheduling.InferenceRequest) (map[string]float64, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logging.TRACE)
 
@@ -744,23 +745,24 @@ func (s *Scorer) getScores(ctx context.Context, cycleState *scheduling.CycleStat
 		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
 		"isCompletions", request.Body != nil && request.Body.Completions != nil)
 
-	// Read tokenized prompt from CycleState, written by the tokenizer scorer plugin.
-	if tp, err := scheduling.ReadCycleStateKey[*tokenizer.TokenizedPromptState](
-		cycleState, tokenizer.TokenizedPromptStateKey); err == nil && len(tp.TokenIDs) > 0 {
-		traceLogger.Info("tokens found in CycleState, skipping tokenization")
+	// Prefer pre-tokenized input from the tokenizer DataProducer plugin.
+	if request.Body != nil {
+		if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
+			traceLogger.Info("tokens found on request, skipping tokenization")
 
-		var extraFeatures []*kvblock.BlockExtraFeatures
-		if tp.MMFeatures != nil {
-			extraFeatures = kvblock.ComputeBlockExtraFeatures(
-				tp.MMFeatures.MMHashes, tp.MMFeatures.MMPlaceholders,
-				s.blockSizeTokens, len(tp.TokenIDs))
-		}
+			var extraFeatures []*kvblock.BlockExtraFeatures
+			if len(tp.MultiModalFeatures) > 0 {
+				mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
+				extraFeatures = kvblock.ComputeBlockExtraFeatures(
+					mmHashes, mmPlaceholders, s.blockSizeTokens, len(tp.TokenIDs))
+			}
 
-		scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tp.TokenIDs, request.TargetModel, nil, extraFeatures)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
+			scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tp.TokenIDs, request.TargetModel, nil, extraFeatures)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
+			}
+			return scores, nil
 		}
-		return scores, nil
 	}
 
 	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.

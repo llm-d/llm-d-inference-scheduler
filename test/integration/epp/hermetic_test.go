@@ -46,7 +46,7 @@ import (
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metadata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
-	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration/igw"
+	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration"
 )
 
 const (

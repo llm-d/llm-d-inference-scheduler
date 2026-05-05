@@ -27,7 +27,7 @@ import (
 	envoyTypePb "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
-	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration/igw"
+	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration"
 )
 
 // Model name constants shared across test suites.
