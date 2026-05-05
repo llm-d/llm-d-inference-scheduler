@@ -188,6 +188,11 @@ builder-e2e-shell: image-build-builder ## Open a shell with e2e test access
 install-hooks: ## Install git hooks
 	git config core.hooksPath hooks
 
+.PHONY: upgrade-deps
+upgrade-deps: ## Upgrade all Go dependencies to latest minor/patch versions and tidy; review diff before committing
+	go get -u ./...
+	go mod tidy
+
 .PHONY: vulncheck
 vulncheck: image-build-builder ## Run govulncheck for known vulnerabilities
 	@printf "\033[33;1m==== Running govulncheck ====\033[0m\n"
