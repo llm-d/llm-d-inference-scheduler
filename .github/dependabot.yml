@@ -19,6 +19,10 @@ updates:
       # Ignore *all* updates to GAIE package - manually update go.mod only
       - dependency-name: "sigs.k8s.io/gateway-api-inference-extension"
         update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      # Ignore major and minor updates to kv-cache - v0.8.0 removed preprocessing/chat_completions
+      # which is still imported by preciseprefixcache tests; unblock once that import is removed
+      - dependency-name: "github.com/llm-d/llm-d-kv-cache"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       # Ignore major and minor version updates to k8s packages
       - dependency-name: "k8s.io/*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
