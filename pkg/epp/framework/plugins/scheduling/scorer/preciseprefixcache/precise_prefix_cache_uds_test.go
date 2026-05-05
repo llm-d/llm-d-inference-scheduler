@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -18,7 +19,6 @@ import (
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -85,7 +85,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body:        nil,
 			},
@@ -129,7 +129,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -204,7 +204,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -314,7 +314,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -385,7 +385,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -459,7 +459,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -507,7 +507,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -826,19 +826,41 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 		),
 	}
 
-	// Write tokenized state with MM features to CycleState (simulating tokenizer plugin).
-	cycleState := scheduling.NewCycleState()
-	cycleState.Write(tokenizer.TokenizedPromptStateKey, &tokenizer.TokenizedPromptState{
-		TokenIDs:   tokens,
-		MMFeatures: mmFeatures,
+	// Attach tokenized state with MM features to the request (simulating the
+	// tokenizer DataProducer plugin).
+	upstreamMM := make([]fwkrh.MultiModalFeature, 0)
+	for modality, hashes := range mmFeatures.MMHashes {
+		ranges := mmFeatures.MMPlaceholders[modality]
+		for i, h := range hashes {
+			if i >= len(ranges) {
+				break
+			}
+			upstreamMM = append(upstreamMM, fwkrh.MultiModalFeature{
+				Modality: fwkrh.Modality(modality),
+				Hash:     h,
+				Offset:   ranges[i].Offset,
+				Length:   ranges[i].Length,
+			})
+		}
+	}
+	// Sort by Offset to mirror the tokenizer DataProducer plugin output, which
+	// emits MM features in prompt order. Map iteration above is non-deterministic.
+	sort.Slice(upstreamMM, func(i, j int) bool {
+		return upstreamMM[i].Offset < upstreamMM[j].Offset
 	})
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-mm-e2e",
+		RequestID:   "test-mm-e2e",
 		TargetModel: mmModelName,
+		Body: &fwkrh.InferenceRequestBody{
+			TokenizedPrompt: &fwkrh.TokenizedPrompt{
+				TokenIDs:           tokens,
+				MultiModalFeatures: upstreamMM,
+			},
+		},
 	}
 
-	scores := prefixCacheScorer.Score(ctx, cycleState, request, endpoints)
+	scores := prefixCacheScorer.Score(ctx, scheduling.NewCycleState(), request, endpoints)
 
 	gotByAddress := make(map[string]float64)
 	for endpoint, score := range scores {

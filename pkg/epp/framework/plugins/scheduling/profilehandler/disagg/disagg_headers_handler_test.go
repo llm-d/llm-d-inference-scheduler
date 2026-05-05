@@ -144,7 +144,7 @@ func TestPreRequestNilSchedulingResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -173,7 +173,7 @@ func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 	// Verify it correctly handles a PD-only scheduling result
 	ctx := utils.NewTestContext(t)
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 	result := &scheduling.SchedulingResult{
@@ -198,7 +198,7 @@ func TestPreRequestPrefillProfileExists(t *testing.T) {
 
 	request := &scheduling.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   "req-123",
+		RequestID:   "req-123",
 		Headers:     map[string]string{},
 	}
 
@@ -315,7 +315,7 @@ func TestPreRequestPrefillProfileNilResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -338,7 +338,7 @@ func TestPreRequestPrefillEmptyTargetEndpoints(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -388,7 +388,7 @@ func TestPreRequestEncodeProfileExists(t *testing.T) {
 
 	request := &scheduling.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   "req-123",
+		RequestID:   "req-123",
 		Headers:     map[string]string{},
 	}
 
@@ -413,7 +413,7 @@ func TestPreRequestEncodeProfileNotExists(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -433,7 +433,7 @@ func TestPreRequestEncodeClearsExistingHeader(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers: map[string]string{
 			routing.EncoderEndpointsHeader: "old-host:9999",
 		},
@@ -460,7 +460,7 @@ func TestPreRequestEncodeClearsHeaderWhenNoEncodeResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers: map[string]string{
 			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
@@ -482,7 +482,7 @@ func TestPreRequestEncodeCustomProfile(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "my-custom-encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -507,7 +507,7 @@ func TestPreRequestEncodeIPv6Address(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -534,7 +534,7 @@ func TestPreRequestEncodeProfileNilResult(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 
@@ -557,7 +557,7 @@ func TestPreRequestEncodeEmptyTargetEndpoints(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers: map[string]string{
 			routing.EncoderEndpointsHeader: "stale-host:9999",
 		},
@@ -582,7 +582,7 @@ func TestPreRequestEncodeMultipleEndpoints(t *testing.T) {
 	handler := NewHeadersHandler("prefill", "encode").WithName("test")
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-123",
+		RequestID: "req-123",
 		Headers:   map[string]string{},
 	}
 

@@ -27,6 +27,7 @@ import (
 
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers"
 )
 
 const (
@@ -145,7 +146,7 @@ func (p *OpenAIParser) parseStreamResponse(chunk []byte) (*fwkrh.ParsedResponse,
 // getRequestPath extracts the request path from headers with fallback priority
 func getRequestPath(headers map[string]string) string {
 	// Try primary path header
-	if path := headers[":path"]; path != "" {
+	if path := headers[parsers.MethodPathKey]; path != "" {
 		return path
 	}
 

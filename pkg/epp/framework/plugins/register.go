@@ -3,8 +3,9 @@ package plugins
 
 import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
-	programaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/program-aware"
+	extmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
+	srcmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/models"
+  programaware "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/program-aware"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/bylabel"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/dataparallel"
@@ -24,9 +25,9 @@ func RegisterAllPlugins() {
 	plugin.Register(bylabel.EncodeRoleType, bylabel.EncodeRoleFactory)
 	plugin.Register(bylabel.DecodeRoleType, bylabel.DecodeRoleFactory)
 	plugin.Register(bylabel.PrefillRoleType, bylabel.PrefillRoleFactory)
-	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.HeadersHandlerFactory)
-	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
-	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
+	// Deprecated aliases — disagg-profile-handler now handles PreRequest natively.
+	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
+	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
 	plugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
 	plugin.Register(disagg.DisaggProfileHandlerType, disagg.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
@@ -37,12 +38,14 @@ func RegisterAllPlugins() {
 	plugin.Register(sessionaffinity.SessionAffinityType, sessionaffinity.Factory)
 	plugin.Register(activerequest.ActiveRequestType, activerequest.Factory)
 	plugin.Register(nohitlru.NoHitLRUType, nohitlru.Factory)
-	plugin.Register(models.ModelsDataSourceType, models.ModelDataSourceFactory)
-	plugin.Register(models.ModelsExtractorType, models.ModelServerExtractorFactory)
+	plugin.Register(srcmodels.ModelsDataSourceType, srcmodels.ModelDataSourceFactory)
+	plugin.Register(extmodels.ModelsExtractorType, extmodels.ModelServerExtractorFactory)
 	// pd decider plugins
 	plugin.Register(disagg.PrefixBasedPDDeciderPluginType, disagg.PrefixBasedPDDeciderPluginFactory)
 	plugin.Register(disagg.AlwaysDisaggPDDeciderPluginType, disagg.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(tokenizer.PluginType, tokenizer.PluginFactory)
+	// Legacy alias - existing YAML configs using "tokenizer" continue to work, with a deprecation warning.
+	plugin.Register(tokenizer.LegacyPluginType, tokenizer.LegacyPluginFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	// ep decider plugins
 	plugin.Register(disagg.AlwaysDisaggMulimodalPluginType, disagg.AlwaysDisaggMulimodalDeciderPluginFactory)
 	plugin.Register(contextlengthaware.ContextLengthAwareType, contextlengthaware.Factory)

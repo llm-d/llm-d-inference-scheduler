@@ -1,8 +1,11 @@
 # Global Strict Fairness Policy
 
+**Type:** `global-strict-fairness-policy`
+
 The Global Strict fairness policy is a greedy strategy that operates across all flows within a Priority Band. By ignoring flow boundaries and selecting the flow with the "best" item according to the configured Ordering Policy, this policy effectively transforms the multi-queue Priority Band into a single logical queue.
 
-It is registered as type `global-strict-fairness-policy` and runs as a fairness policy.
+> [!NOTE]
+> This plugin is enabled by default when flow control is enabled. You do not need to explicitly declare it in your configuration.
 
 ## Why choose this policy?
 
@@ -46,6 +49,5 @@ All flows in the band **MUST** use compatible `OrderingPolicy` types (i.e., iden
 *   **Performance**: High efficiency due to statelessness and lack of cycle management.
 
 ## Related Documentation
-
 *   [Fairness Overview](../README.md)
 *   [Flow Control User Guide](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.5.0/site-src/guides/flow-control.md)

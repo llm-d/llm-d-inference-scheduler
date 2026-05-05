@@ -41,7 +41,7 @@ func TestSchedulePlugins(t *testing.T) {
 		ScoreRes:  0.8,
 		FilterRes: []k8stypes.NamespacedName{{Name: "pod1"}, {Name: "pod2"}},
 	}
-	tp_filterAll := &testPlugin{
+	tpFilterAll := &testPlugin{
 		TypeRes:   "filter all",
 		FilterRes: []k8stypes.NamespacedName{},
 	}
@@ -95,7 +95,7 @@ func TestSchedulePlugins(t *testing.T) {
 		{
 			name: "filter all",
 			profile: NewSchedulerProfile().
-				WithFilters(tp1, tp_filterAll).
+				WithFilters(tp1, tpFilterAll).
 				WithScorers(NewWeightedScorer(tp1, 1), NewWeightedScorer(tp2, 1)).
 				WithPicker(pickerPlugin),
 			input: []fwksched.Endpoint{
@@ -122,7 +122,7 @@ func TestSchedulePlugins(t *testing.T) {
 			// Initialize the scheduling context
 			request := &fwksched.InferenceRequest{
 				TargetModel: "test-model",
-				RequestId:   uuid.NewString(),
+				RequestID:   uuid.NewString(),
 			}
 			// Run profile cycle
 			got, err := test.profile.Run(context.Background(), request, fwksched.NewCycleState(), test.input)
@@ -398,7 +398,7 @@ func TestRunWithOutOfRangeScores(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
 	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)
@@ -450,7 +450,7 @@ func TestFilterExecutionOrder(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
 	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)
@@ -494,7 +494,7 @@ func TestFilterExecutionOrderViaAddPlugins(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
 	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)
@@ -546,7 +546,7 @@ func TestFilterChainReceivesPreviousOutput(t *testing.T) {
 
 	request := &fwksched.InferenceRequest{
 		TargetModel: "test-model",
-		RequestId:   uuid.NewString(),
+		RequestID:   uuid.NewString(),
 	}
 
 	_, err := profile.Run(context.Background(), request, fwksched.NewCycleState(), input)

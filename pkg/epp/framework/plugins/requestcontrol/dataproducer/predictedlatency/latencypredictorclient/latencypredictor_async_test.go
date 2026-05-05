@@ -91,7 +91,7 @@ func TestLatencyPredictorIntegration(t *testing.T) {
 	}
 
 	t.Run("TestModelInfo", func(t *testing.T) {
-		testModelInfo(t, ctx, predictor)
+		testModelInfo(ctx, t, predictor)
 	})
 
 	t.Run("TestBulkTrainingData", func(t *testing.T) {
@@ -99,55 +99,55 @@ func TestLatencyPredictorIntegration(t *testing.T) {
 	})
 
 	t.Run("TestPrediction", func(t *testing.T) {
-		testPrediction(t, ctx, predictor)
+		testPrediction(ctx, t, predictor)
 	})
 
 	t.Run("TestBulkPredictions", func(t *testing.T) {
-		testBulkPredictions(t, ctx, predictor)
+		testBulkPredictions(ctx, t, predictor)
 	})
 
 	t.Run("TestBulkPredictionsStrict", func(t *testing.T) {
-		testBulkPredictionsStrict(t, ctx, predictor)
+		testBulkPredictionsStrict(ctx, t, predictor)
 	})
 
 	t.Run("TestPredictionWithPrefixCache", func(t *testing.T) {
-		testPredictionWithPrefixCache(t, ctx, predictor)
+		testPredictionWithPrefixCache(ctx, t, predictor)
 	})
 
 	t.Run("TestHTTPFallbackPrediction", func(t *testing.T) {
-		testHTTPFallbackPrediction(t, ctx, predictor)
+		testHTTPFallbackPrediction(ctx, t, predictor)
 	})
 
 	t.Run("TestLightGBMSupport", func(t *testing.T) {
-		testLightGBMSupport(t, ctx, predictor)
+		testLightGBMSupport(ctx, t, predictor)
 	})
 
 	t.Run("TestPredictionPerformance", func(t *testing.T) {
-		testPredictionPerformance(t, ctx, predictor)
+		testPredictionPerformance(ctx, t, predictor)
 	})
 
 	t.Run("TestBulkPredictionPerformance", func(t *testing.T) {
-		testBulkPredictionPerformance(t, ctx, predictor)
+		testBulkPredictionPerformance(ctx, t, predictor)
 	})
 
 	t.Run("TestHTTPOnlyPerformance", func(t *testing.T) {
-		testHTTPOnlyPerformance(t, ctx)
+		testHTTPOnlyPerformance(ctx, t)
 	})
 
 	t.Run("TestXGBoostJSONStructure", func(t *testing.T) {
-		testXGBoostJSONStructure(t, ctx, predictor)
+		testXGBoostJSONStructure(ctx, t, predictor)
 	})
 
 	t.Run("TestHTTPOnlyPrediction", func(t *testing.T) {
-		testHTTPOnlyPrediction(t, ctx)
+		testHTTPOnlyPrediction(ctx, t)
 	})
 
 	t.Run("TestMetricsRetrieval", func(t *testing.T) {
-		testMetricsRetrieval(t, ctx, predictor)
+		testMetricsRetrieval(ctx, t, predictor)
 	})
 
 	t.Run("TestLoadBalancing", func(t *testing.T) {
-		testLoadBalancing(t, ctx, predictor)
+		testLoadBalancing(ctx, t, predictor)
 	})
 
 	t.Run("TestPrefixCacheValidation", func(t *testing.T) {
@@ -159,7 +159,7 @@ func TestLatencyPredictorIntegration(t *testing.T) {
 	})
 }
 
-func testModelInfo(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testModelInfo(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing model info retrieval...")
 
 	modelInfo, err := predictor.GetModelInfo(ctx)
@@ -202,7 +202,7 @@ func testBulkTrainingData(t *testing.T, predictor *Predictor) {
 	t.Log("Training data should have been flushed to training server")
 }
 
-func testPrediction(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testPrediction(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing prediction functionality...")
 
 	// Log current predictor state
@@ -296,7 +296,7 @@ func testPrediction(t *testing.T, ctx context.Context, predictor *Predictor) {
 	}
 }
 
-func testBulkPredictions(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testBulkPredictions(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing bulk predictions with error tolerance...")
 
 	if !predictor.IsReady() {
@@ -365,7 +365,7 @@ func testBulkPredictions(t *testing.T, ctx context.Context, predictor *Predictor
 	}
 }
 
-func testBulkPredictionsStrict(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testBulkPredictionsStrict(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing strict bulk predictions...")
 
 	if !predictor.IsReady() {
@@ -424,7 +424,7 @@ func testBulkPredictionsStrict(t *testing.T, ctx context.Context, predictor *Pre
 	}
 }
 
-func testLightGBMSupport(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testLightGBMSupport(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing LightGBM support...")
 
 	currentModelType := predictor.GetCurrentModelType()
@@ -480,7 +480,7 @@ func testLightGBMSupport(t *testing.T, ctx context.Context, predictor *Predictor
 	}
 }
 
-func testPredictionWithPrefixCache(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testPredictionWithPrefixCache(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing prefix cache score impact on predictions...")
 
 	if !predictor.IsReady() {
@@ -550,7 +550,7 @@ func testPredictionWithPrefixCache(t *testing.T, ctx context.Context, predictor 
 	}
 }
 
-func testHTTPFallbackPrediction(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testHTTPFallbackPrediction(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing HTTP fallback prediction...")
 
 	modelType := predictor.GetCurrentModelType()
@@ -598,7 +598,7 @@ func testHTTPFallbackPrediction(t *testing.T, ctx context.Context, predictor *Pr
 	t.Logf("Successfully tested HTTP prediction with prefix cache")
 }
 
-func testPredictionPerformance(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testPredictionPerformance(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing prediction performance (target: < 300ms) with prefix cache scores...")
 
 	// Ensure predictor is ready
@@ -690,7 +690,7 @@ func testPredictionPerformance(t *testing.T, ctx context.Context, predictor *Pre
 	}
 }
 
-func testBulkPredictionPerformance(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testBulkPredictionPerformance(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing bulk prediction performance...")
 
 	if !predictor.IsReady() {
@@ -776,7 +776,7 @@ func testBulkPredictionPerformance(t *testing.T, ctx context.Context, predictor 
 	}
 }
 
-func testHTTPOnlyPerformance(t *testing.T, ctx context.Context) {
+func testHTTPOnlyPerformance(ctx context.Context, t *testing.T) {
 	t.Log("Testing HTTP-only prediction performance (no native XGBoost interference) with prefix cache...")
 
 	predictionURLs := os.Getenv("PREDICTION_SERVER_URL")
@@ -963,7 +963,7 @@ func testHTTPOnlyPerformance(t *testing.T, ctx context.Context) {
 	}
 }
 
-func testHTTPOnlyPrediction(t *testing.T, ctx context.Context) {
+func testHTTPOnlyPrediction(ctx context.Context, t *testing.T) {
 	t.Log("Testing HTTP-only prediction (bypassing native XGBoost) with prefix cache...")
 
 	// Create a predictor with native XGBoost disabled to force HTTP usage
@@ -1096,7 +1096,7 @@ func testHTTPOnlyPrediction(t *testing.T, ctx context.Context) {
 	t.Log("Successfully tested HTTP-only predictions with prefix cache")
 }
 
-func testLoadBalancing(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testLoadBalancing(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing load balancing across multiple prediction URLs with prefix cache...")
 
 	predictionURLs := predictor.GetPredictionURLs()
@@ -1288,7 +1288,7 @@ func testPredictionConstructors(t *testing.T) {
 	t.Log("✅ Constructor validation tests completed")
 }
 
-func testXGBoostJSONStructure(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testXGBoostJSONStructure(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing XGBoost JSON structure from server...")
 
 	if predictor.GetCurrentModelType() != xgBoostModelType {
@@ -1398,7 +1398,7 @@ func testConvertXGBoostJSON(t *testing.T, tree any) {
 	}
 }
 
-func testMetricsRetrieval(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testMetricsRetrieval(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing metrics retrieval...")
 
 	modelType := predictor.GetCurrentModelType()
@@ -1407,11 +1407,11 @@ func testMetricsRetrieval(t *testing.T, ctx context.Context, predictor *Predicto
 
 	switch modelType {
 	case bayesianRidgeModelType:
-		testBayesianRidgeMetrics(t, ctx, predictor)
+		testBayesianRidgeMetrics(ctx, t, predictor)
 	case xgBoostModelType:
-		testXGBoostMetrics(t, ctx, predictor)
+		testXGBoostMetrics(ctx, t, predictor)
 	case gbmModelType:
-		testLightGBMMetrics(t, ctx, predictor)
+		testLightGBMMetrics(ctx, t, predictor)
 	default:
 		t.Logf("Unknown model type %s, testing cached metrics only", modelType)
 	}
@@ -1435,7 +1435,7 @@ func testMetricsRetrieval(t *testing.T, ctx context.Context, predictor *Predicto
 	t.Logf("  Bayesian Ridge Ready: %t", predictor.IsBayesianRidgeReady())
 }
 
-func testBayesianRidgeMetrics(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testBayesianRidgeMetrics(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing Bayesian Ridge specific metrics with prefix cache support...")
 
 	metrics, err := predictor.GetMetrics(ctx)
@@ -1492,7 +1492,7 @@ func testBayesianRidgeMetrics(t *testing.T, ctx context.Context, predictor *Pred
 	}
 }
 
-func testXGBoostMetrics(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testXGBoostMetrics(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing XGBoost specific metrics...")
 
 	// Wait a bit for XGBoost models to potentially load
@@ -1523,7 +1523,7 @@ func testXGBoostMetrics(t *testing.T, ctx context.Context, predictor *Predictor)
 	}
 }
 
-func testLightGBMMetrics(t *testing.T, ctx context.Context, predictor *Predictor) {
+func testLightGBMMetrics(ctx context.Context, t *testing.T, predictor *Predictor) {
 	t.Log("Testing LightGBM specific metrics...")
 
 	// For LightGBM, we primarily use HTTP calls, so test the HTTP connectivity

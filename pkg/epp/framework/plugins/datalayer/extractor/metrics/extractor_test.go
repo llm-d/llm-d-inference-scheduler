@@ -665,3 +665,56 @@ func TestCoreMetricsExtractorFactoryDefaultEngine(t *testing.T) {
 		})
 	}
 }
+
+func TestGetEngineTypeFromEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		labelKey string
+		want     string
+	}{
+		{
+			name:     "new label key",
+			labels:   map[string]string{DefaultEngineTypeLabelKey: "vllm"},
+			labelKey: DefaultEngineTypeLabelKey,
+			want:     "vllm",
+		},
+		{
+			name:     "legacy GAIE label key fallback",
+			labels:   map[string]string{legacyGAIEEngineTypeLabelKey: "sglang"},
+			labelKey: DefaultEngineTypeLabelKey,
+			want:     "sglang",
+		},
+		{
+			name: "new label key takes precedence over legacy GAIE key",
+			labels: map[string]string{
+				DefaultEngineTypeLabelKey:    "vllm",
+				legacyGAIEEngineTypeLabelKey: "sglang",
+			},
+			labelKey: DefaultEngineTypeLabelKey,
+			want:     "vllm",
+		},
+		{
+			name:     "no labels returns default",
+			labels:   map[string]string{},
+			labelKey: DefaultEngineTypeLabelKey,
+			want:     DefaultEngineType,
+		},
+		{
+			name:     "nil labels returns default",
+			labels:   nil,
+			labelKey: DefaultEngineTypeLabelKey,
+			want:     DefaultEngineType,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ep := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{Labels: tt.labels}, nil)
+			got := getEngineTypeFromEndpoint(ep, tt.labelKey)
+			if got != tt.want {
+				t.Errorf("getEngineTypeFromEndpoint() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

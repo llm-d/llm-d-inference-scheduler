@@ -31,6 +31,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
+	sourcenotifications "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/notifications"
 )
 
 const (
@@ -52,6 +53,7 @@ var (
 	_ requestcontrol.ResponseBodyProcessor = &InFlightLoadProducer{}
 	_ requestcontrol.DataProducer          = &InFlightLoadProducer{}
 	_ datalayer.EndpointExtractor          = &InFlightLoadProducer{}
+	_ datalayer.Registrant                 = &InFlightLoadProducer{}
 )
 
 type InFlightLoadProducer struct {
@@ -65,14 +67,20 @@ func (p *InFlightLoadProducer) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
+// RegisterDependencies declares that this plugin needs an endpoint-notification-source to track
+// endpoint lifecycle events. The source is auto-created if not already in the config.
+func (p *InFlightLoadProducer) RegisterDependencies(r datalayer.Registrar) error {
+	return r.Register(datalayer.PendingRegistration{
+		Owner:         p.TypedName(),
+		SourceType:    sourcenotifications.EndpointNotificationSourceType,
+		Extractor:     p,
+		DefaultSource: sourcenotifications.NewEndpointDataSource(sourcenotifications.EndpointNotificationSourceType, sourcenotifications.EndpointNotificationSourceType),
+	})
+}
+
 // ExpectedInputType defines the type expected by the extractor.
 func (p *InFlightLoadProducer) ExpectedInputType() reflect.Type {
 	return datalayer.EndpointEventReflectType
-}
-
-// Extract transforms the raw data into structured attributes (not used for notifications).
-func (p *InFlightLoadProducer) Extract(context.Context, any, datalayer.Endpoint) error {
-	return nil
 }
 
 // ExtractEndpoint handles endpoint deletion events to prune stateful trackers.

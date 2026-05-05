@@ -627,14 +627,14 @@ func RecordRequestTPOTWithSLO(ctx context.Context, modelName, targetModelName st
 }
 
 // TPOT records duration of request.
-func RecordRequestPredictedTPOT(ctx context.Context, modelName, targetModelName string, predicted_tpot float64) bool {
-	if predicted_tpot < 0 {
+func RecordRequestPredictedTPOT(ctx context.Context, modelName, targetModelName string, predictedTpot float64) bool {
+	if predictedTpot < 0 {
 		log.FromContext(ctx).V(logutil.DEFAULT).Error(nil, "Predicted TPOT value must be non-negative",
-			"modelName", modelName, "targetModelName", targetModelName, "tpot", predicted_tpot)
+			"modelName", modelName, "targetModelName", targetModelName, "tpot", predictedTpot)
 		return false
 	}
-	requestPredictedTPOT.WithLabelValues(modelName, targetModelName).Observe(predicted_tpot)
-	inferenceGauges.WithLabelValues(modelName, targetModelName, typePredictedTPOT).Set(predicted_tpot)
+	requestPredictedTPOT.WithLabelValues(modelName, targetModelName).Observe(predictedTpot)
+	inferenceGauges.WithLabelValues(modelName, targetModelName, typePredictedTPOT).Set(predictedTpot)
 	return true
 }
 
@@ -686,14 +686,14 @@ func RecordRequestTTFTWithSLO(ctx context.Context, modelName, targetModelName st
 }
 
 // TPOT records duration of request.
-func RecordRequestPredictedTTFT(ctx context.Context, modelName, targetModelName string, predicted_ttft float64) bool {
-	if predicted_ttft < 0 {
+func RecordRequestPredictedTTFT(ctx context.Context, modelName, targetModelName string, predictedTtft float64) bool {
+	if predictedTtft < 0 {
 		log.FromContext(ctx).V(logutil.DEFAULT).Error(nil, "Predicted TTFT value must be non-negative",
-			"modelName", modelName, "targetModelName", targetModelName, "ttft", predicted_ttft)
+			"modelName", modelName, "targetModelName", targetModelName, "ttft", predictedTtft)
 		return false
 	}
-	requestPredictedTTFT.WithLabelValues(modelName, targetModelName).Observe(predicted_ttft)
-	inferenceGauges.WithLabelValues(modelName, targetModelName, typePredictedTTFT).Set(predicted_ttft)
+	requestPredictedTTFT.WithLabelValues(modelName, targetModelName).Observe(predictedTtft)
+	inferenceGauges.WithLabelValues(modelName, targetModelName, typePredictedTTFT).Set(predictedTtft)
 	return true
 }
 

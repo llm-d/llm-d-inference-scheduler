@@ -32,6 +32,22 @@ const (
 	DefaultPoolNamespace = "default" // default when pool namespace is empty (CLI flag default is empty)
 )
 
+// deprecatedMetricFlags lists metric flags that are superseded by engineConfigs
+// in EndpointPickerConfig. They are rejected if explicitly set and suppressed from logs.
+var deprecatedMetricFlags = map[string]struct{}{
+	"total-queued-requests-metric":     {},
+	"total-running-requests-metric":    {},
+	"kv-cache-usage-percentage-metric": {},
+	"lora-info-metric":                 {},
+	"cache-info-metric":                {},
+}
+
+// IsDeprecatedMetricFlag reports whether the given flag name is a deprecated metric flag.
+func IsDeprecatedMetricFlag(name string) bool {
+	_, ok := deprecatedMetricFlags[name]
+	return ok
+}
+
 // Options contains configuration values necessary to create and run the EPP.
 type Options struct {
 	//
@@ -226,25 +242,14 @@ func (opts *Options) Validate() error {
 	}
 
 	// Validate deprecated metric flags are not explicitly set
-	deprecatedMetricFlags := []string{
-		"total-queued-requests-metric",
-		"total-running-requests-metric",
-		"kv-cache-usage-percentage-metric",
-		"lora-info-metric",
-		"cache-info-metric",
-	}
-	for _, flagName := range deprecatedMetricFlags {
+	for flagName := range deprecatedMetricFlags {
 		if f := opts.fs.Lookup(flagName); f != nil && f.Changed {
 			return fmt.Errorf("flag %q is deprecated and cannot be used; configure metrics via engineConfigs in EndpointPickerConfig instead", flagName)
 		}
 	}
 
 	// Validate logging options.
-	if err := opts.LoggingOptions.Validate(); err != nil {
-		return err
-	}
-
-	return nil
+	return opts.LoggingOptions.Validate()
 }
 
 func removeDuplicatePorts(ports []int) []int {

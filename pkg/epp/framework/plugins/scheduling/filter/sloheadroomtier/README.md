@@ -1,5 +1,7 @@
 # SLO Headroom Tier Filter (`slo-headroom-tier-filter`)
 
+**Type:** `slo-headroom-tier-filter`
+
 Probabilistic filter that selects endpoints based on predicted latency headroom
 (SLO - predicted). Splits endpoints into positive (meets SLO) and negative (violates SLO)
 tiers and probabilistically selects one tier.
@@ -24,9 +26,22 @@ so their state is re-evaluated.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `epsilonExploreNeg` | 0.01 | Probability of selecting negative tier when both exist |
+| `epsilonExploreNeg` | `0.01` | Probability of selecting negative tier when both exist |
 
 ## Inputs
 
 - `LatencyPredictionInfo` endpoint attribute:
   - `TTFTHeadroom` / `TPOTHeadroom` for tier classification
+
+**Configuration Example:**
+```yaml
+plugins:
+  - type: slo-headroom-tier-filter
+    name: slo-tier
+    parameters:
+      epsilonExploreNeg: 0.01
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: slo-tier
+```

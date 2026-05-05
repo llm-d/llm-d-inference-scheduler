@@ -73,7 +73,7 @@ func rejectIfSheddableAndSaturated(
 	if requtil.IsSheddable(priority) {
 		if sd.Saturation(ctx, endpointCandidates.Locate(ctx, reqCtx.Request.Metadata)) >= 1.0 {
 			logger.V(logutil.TRACE).Info("Request rejected: system saturated and request is sheddable",
-				"requestID", reqCtx.SchedulingRequest.RequestId)
+				"requestID", reqCtx.SchedulingRequest.RequestID)
 			return errcommon.Error{
 				Code: errcommon.ResourceExhausted,
 				Msg:  "system saturated, sheddable request dropped",
@@ -123,7 +123,7 @@ func (lac *LegacyAdmissionController) Admit(
 	); err != nil {
 		return err
 	}
-	logger.V(logutil.TRACE).Info("Request admitted", "requestID", reqCtx.SchedulingRequest.RequestId)
+	logger.V(logutil.TRACE).Info("Request admitted", "requestID", reqCtx.SchedulingRequest.RequestID)
 	return nil
 }
 
@@ -153,7 +153,7 @@ func (fcac *FlowControlAdmissionController) Admit(
 ) error {
 	logger := log.FromContext(ctx)
 	logger.V(logutil.TRACE).Info("Executing FlowControlAdmissionController",
-		"requestID", reqCtx.SchedulingRequest.RequestId, "priority", priority, "fairnessID", reqCtx.FairnessID)
+		"requestID", reqCtx.SchedulingRequest.RequestID, "priority", priority, "fairnessID", reqCtx.FairnessID)
 
 	fcReq := &flowControlRequest{
 		fairnessID:        reqCtx.FairnessID,
@@ -168,7 +168,7 @@ func (fcac *FlowControlAdmissionController) Admit(
 
 	outcome, err := fcac.flowController.EnqueueAndWait(ctx, fcReq)
 	logger.V(logutil.DEBUG).Info("Flow control outcome",
-		"requestID", reqCtx.SchedulingRequest.RequestId, "outcome", outcome, "error", err)
+		"requestID", reqCtx.SchedulingRequest.RequestID, "outcome", outcome, "error", err)
 	return translateFlowControlOutcome(outcome, err)
 }
 
@@ -190,7 +190,7 @@ func (r *flowControlRequest) ID() string {
 	if r.inferenceRequest == nil {
 		return ""
 	}
-	return r.inferenceRequest.RequestId
+	return r.inferenceRequest.RequestID
 }
 func (r *flowControlRequest) InitialEffectiveTTL() time.Duration { return 0 } // Use controller default.
 func (r *flowControlRequest) ByteSize() uint64                   { return r.requestByteSize }

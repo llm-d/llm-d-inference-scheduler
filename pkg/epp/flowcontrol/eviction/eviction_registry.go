@@ -19,11 +19,11 @@ package eviction
 import "sync"
 
 // EvictionRegistry is a shared registry that maps request IDs to eviction channels.
-// It bridges the eviction plugin (which decides what to evict) and the ext_proc Process()
+// It bridges the RequestEvictor (which decides what to evict) and the ext_proc Process()
 // goroutine (which owns the stream needed to send ImmediateResponse).
 //
 // Lifecycle:
-//   - PreRequest: plugin creates an eviction channel and registers it via Register().
+//   - PreRequest: RequestEvictor creates an eviction channel and registers it via Register().
 //   - Process(): after HandleRequest returns, looks up the channel via Get() and selects on it.
 //   - EvictN: evictor closes the channel via the EvictionItem.EvictCh reference.
 //   - Process() defer: removes the channel via Deregister().

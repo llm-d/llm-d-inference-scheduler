@@ -178,7 +178,7 @@ func TestValidatePrediction_PrefillEndpointNeutralizeTPOT(t *testing.T) {
 
 	// Simulate the fix logic from generatePredictions
 	if config.EndpointRoleLabel != "" && prefillEp.GetMetadata().Labels != nil {
-		if prefillEp.GetMetadata().Labels[config.EndpointRoleLabel] == Experimental_DefaultPrefillProfile {
+		if prefillEp.GetMetadata().Labels[config.EndpointRoleLabel] == ExperimentalDefaultPrefillProfile {
 			predResult.TPOTValid = true
 			predResult.Headroom = 0
 			predResult.IsValid = predResult.TTFTValid
@@ -198,7 +198,7 @@ func TestValidatePrediction_PrefillEndpointNeutralizeTPOT(t *testing.T) {
 		Headroom:  -969,
 	}
 	if config.EndpointRoleLabel != "" && decodeEp.GetMetadata().Labels != nil {
-		if decodeEp.GetMetadata().Labels[config.EndpointRoleLabel] == Experimental_DefaultPrefillProfile {
+		if decodeEp.GetMetadata().Labels[config.EndpointRoleLabel] == ExperimentalDefaultPrefillProfile {
 			decodeResult.TPOTValid = true
 			decodeResult.Headroom = 0
 			decodeResult.IsValid = decodeResult.TTFTValid

@@ -187,7 +187,10 @@ func (ext *Extractor) Extract(ctx context.Context, data any, ep fwkdl.Endpoint) 
 	logger := log.FromContext(ctx).WithValues("endpoint", ep.GetMetadata().NamespacedName)
 	if updated {
 		clone.UpdateTime = time.Now()
-		logger.V(logutil.TRACE).Info("Refreshed metrics", "updated", clone)
+		logger.V(logutil.TRACE).Info("Refreshed metrics",
+			"metrics", mapping.MetricNames(),
+			"updated", clone,
+		)
 		ep.UpdateMetrics(clone)
 	}
 
@@ -206,7 +209,10 @@ func getEngineTypeFromEndpoint(ep fwkdl.Endpoint, labelKey string) string {
 
 	engineType, ok := meta.Labels[labelKey]
 	if !ok || engineType == "" {
-		return DefaultEngineType
+		engineType, ok = meta.Labels[legacyGAIEEngineTypeLabelKey]
+		if !ok || engineType == "" {
+			return DefaultEngineType
+		}
 	}
 
 	return engineType

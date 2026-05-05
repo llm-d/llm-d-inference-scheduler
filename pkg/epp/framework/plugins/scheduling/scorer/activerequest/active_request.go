@@ -251,14 +251,14 @@ func (s *ActiveRequest) PreRequest(
 		s.incrementPodCount(endpointName)
 		traceLogger.Info(
 			"Added request to cache",
-			"requestId", request.RequestId,
+			"requestId", request.RequestID,
 			"endpointName", endpointName,
 			"profileName", profileName,
 		)
 	}
 
 	// add to request cache
-	s.requestCache.Set(request.RequestId, &requestEntry{PodNames: endpointNames, RequestID: request.RequestId}, 0) // Use default TTL
+	s.requestCache.Set(request.RequestID, &requestEntry{PodNames: endpointNames, RequestID: request.RequestID}, 0) // Use default TTL
 }
 
 // ResponseBody is called after a response is sent to the client.
@@ -280,7 +280,7 @@ func (s *ActiveRequest) ResponseBody(
 		return
 	}
 
-	if item, found := s.requestCache.GetAndDelete(request.RequestId); found {
+	if item, found := s.requestCache.GetAndDelete(request.RequestID); found {
 		entry := item.Value()
 		if entry != nil {
 			for _, endpointName := range entry.PodNames {
@@ -288,10 +288,10 @@ func (s *ActiveRequest) ResponseBody(
 			}
 			traceLogger.Info("Removed request from cache", "requestEntry", entry.String())
 		} else {
-			traceLogger.Info("Request entry value is nil", "requestId", request.RequestId)
+			traceLogger.Info("Request entry value is nil", "requestId", request.RequestID)
 		}
 	} else {
-		traceLogger.Info("Request not found in cache", "requestId", request.RequestId)
+		traceLogger.Info("Request not found in cache", "requestId", request.RequestID)
 	}
 }
 

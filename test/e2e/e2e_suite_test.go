@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,23 +36,21 @@ const (
 	// xInferPoolManifest is the manifest for the inference pool CRD with 'inference.networking.x-k8s.io' group.
 	gieCrdsKustomize = "../../deploy/components/crds-gie"
 	// inferExtManifest is the manifest for the inference extension test resources.
-	inferExtManifest = "./yaml/inference-pools.yaml"
+	inferExtManifest = "../../deploy/components/inference-gateway/inference-pools.yaml"
 	// simModelName is the test model name.
 	simModelName = "food-review"
 	// kvModelName is the model name used in KV tests.
 	kvModelName = "Qwen/Qwen2.5-1.5B-Instruct"
-	// safeKvModelName is the safe form of the model name used in KV tests
-	safeKvModelName = "qwen-qwen2-5-1-5b-instruct"
 	// envoyManifest is the manifest for the envoy proxy test resources.
-	envoyManifest = "./yaml/envoy.yaml"
+	envoyManifest = "../../deploy/environments/dev/e2e-infra/envoy.yaml"
 	// eppManifest is the manifest for the deployment of the EPP
-	eppManifest = "./yaml/deployments.yaml"
+	eppManifest = "../../deploy/components/inference-gateway/deployment.yaml"
 	// rbacManifest is the manifest for the EPP's RBAC resources.
-	rbacManifest = "./yaml/rbac.yaml"
+	rbacManifest = "../../deploy/components/inference-gateway/rbac.yaml"
 	// serviceAccountManifest is the manifest for the EPP's service account resources.
-	serviceAccountManifest = "./yaml/service-accounts.yaml"
+	serviceAccountManifest = "../../deploy/components/inference-gateway/service-accounts.yaml"
 	// servicesManifest is the manifest for the EPP's service resources.
-	servicesManifest = "./yaml/services.yaml"
+	servicesManifest = "../../deploy/environments/dev/e2e-infra/services.yaml"
 )
 
 var (
@@ -66,7 +65,7 @@ var (
 
 	containerRuntime  = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppImage          = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-inference-scheduler:dev", ginkgo.GinkgoLogr)
-	vllmSimImage      = env.GetEnvString("VLLM_SIMULATOR_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:v0.8.2", ginkgo.GinkgoLogr)
+	vllmSimImage      = env.GetEnvString("VLLM_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:v0.8.2", ginkgo.GinkgoLogr)
 	sideCarImage      = env.GetEnvString("SIDECAR_IMAGE", "ghcr.io/llm-d/llm-d-routing-sidecar:dev", ginkgo.GinkgoLogr)
 	udsTokenizerImage = env.GetEnvString("UDS_TOKENIZER_IMAGE", "ghcr.io/llm-d/llm-d-uds-tokenizer:dev", ginkgo.GinkgoLogr)
 	// nsName is the namespace in which the K8S objects will be created
@@ -106,8 +105,13 @@ var _ = ginkgo.BeforeSuite(func() {
 	setupNameSpace()
 	createCRDs()
 	createEnvoy()
-	rbacObjects = testutils.ApplyYAMLFile(testConfig, rbacManifest)
-	serviceAccountObjects = testutils.ApplyYAMLFile(testConfig, serviceAccountManifest)
+	infraSubs := map[string]string{
+		"${EPP_NAME}": "e2e-epp",
+	}
+	rbacYamls := substituteMany(testutils.ReadYaml(rbacManifest), infraSubs)
+	rbacObjects = testutils.CreateObjsFromYaml(testConfig, rbacYamls)
+	saYamls := substituteMany(testutils.ReadYaml(serviceAccountManifest), infraSubs)
+	serviceAccountObjects = testutils.CreateObjsFromYaml(testConfig, saYamls)
 	serviceObjects = testutils.ApplyYAMLFile(testConfig, servicesManifest)
 
 	// Prevent failure in tests due to InferencePool not existing before the test
@@ -192,6 +196,17 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
+	// For Docker: pull with --platform to ensure platform-specific layers are cached
+	// before loading into KIND (avoids "content digest not found" with multi-arch images).
+	if containerRuntime == "docker" {
+		arch := runtime.GOARCH
+		for _, img := range []string{vllmSimImage, eppImage, sideCarImage, udsTokenizerImage} {
+			pull := exec.Command("docker", "pull", "--platform", "linux/"+arch, img)
+			pull.Stderr = ginkgo.GinkgoWriter
+			_ = pull.Run() // ignore failure — image may be local-only
+		}
+	}
+
 	kindLoadImage(vllmSimImage)
 	kindLoadImage(eppImage)
 	kindLoadImage(sideCarImage)
@@ -201,10 +216,28 @@ func setupK8sCluster() {
 func kindLoadImage(image string) {
 	ginkgo.By(fmt.Sprintf("Loading %s into the cluster %s using %s", image, kindClusterName, containerRuntime))
 
-	command := exec.Command("kind", "--name", kindClusterName, "load", "docker-image", image)
-	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	if containerRuntime == "docker" {
+		// Use docker save | ctr import to avoid KIND's --all-platforms flag which
+		// fails when only the target architecture layers are locally cached.
+		nodeName := kindClusterName + "-control-plane"
+		save := exec.Command("docker", "save", image)
+		importCmd := exec.Command("docker", "exec", "--privileged", "-i", nodeName,
+			"ctr", "--namespace=k8s.io", "images", "import", "--digests", "--snapshotter=overlayfs", "-")
+		pipe, err := save.StdoutPipe()
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		importCmd.Stdin = pipe
+		importCmd.Stdout = ginkgo.GinkgoWriter
+		importCmd.Stderr = ginkgo.GinkgoWriter
+		gomega.Expect(save.Start()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(importCmd.Start()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(save.Wait()).ShouldNot(gomega.HaveOccurred())
+		gomega.Expect(importCmd.Wait()).ShouldNot(gomega.HaveOccurred())
+	} else {
+		command := exec.Command("kind", "--name", kindClusterName, "load", "docker-image", image)
+		session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+		gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
+	}
 }
 
 func setupK8sClient() {
@@ -290,6 +323,9 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	}
 
 	infPoolYaml := testutils.ReadYaml(inferExtManifest)
+	// targetPorts is substituted into `targetPorts: ${TARGET_PORTS}` in inference-pools.yaml.
+	// Each item must use 2-space indentation to match that field's level in the YAML.
+	// If the field is ever reindented in inference-pools.yaml, update the format string here too.
 	var targetPortsBuilder strings.Builder
 	for idx := range numTargetPorts {
 		fmt.Fprintf(&targetPortsBuilder, "\n  - number: %d", 8000+idx)
@@ -298,6 +334,7 @@ func createInferencePool(numTargetPorts int, toDelete bool) []string {
 	infPoolYaml = substituteMany(infPoolYaml,
 		map[string]string{
 			"${POOL_NAME}":    poolName,
+			"${EPP_NAME}":     "e2e-epp",
 			"${TARGET_PORTS}": targetPorts,
 		})
 
@@ -324,7 +361,8 @@ const kindClusterConfig = `
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
-- extraPortMappings:
+- image: kindest/node:v1.31.2
+  extraPortMappings:
   - containerPort: 30080
     hostPort: ${PORT}
     protocol: TCP

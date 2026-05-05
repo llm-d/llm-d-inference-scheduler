@@ -56,6 +56,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/contracts"
 	fccontroller "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/controller"
 	fcregistry "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/registry"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
@@ -80,13 +81,14 @@ import (
 	testresponsereceived "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/test/responsereceived"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/passthrough"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/vertexai"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/prefixcacheaffinity"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/filter/sloheadroomtier"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker/maxscore"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker/random"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/picker/weightedrandom"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profile"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/profilehandler/single"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/kvcacheutilization"
 	latencyscorer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/latency"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/loraaffinity"
@@ -176,17 +178,19 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Print all flag values
+	// Print flag values, skipping deprecated metric flags configured via engineConfigs
 	flags := make(map[string]any)
 	pflag.VisitAll(func(f *pflag.Flag) {
-		flags[f.Name] = f.Value
+		if !runserver.IsDeprecatedMetricFlag(f.Name) {
+			flags[f.Name] = f.Value
+		}
 	})
 	setupLog.Info("Flags processed", "flags", flags)
 
 	logutil.InitLogging(&opts.ZapOptions)
 
 	if opts.Tracing {
-		err := tracing.InitTracing(ctx, setupLog, "gateway-api-inference-extension/epp")
+		err := tracing.InitTracing(ctx, setupLog, "llm-d-inference-scheduler/epp")
 		if err != nil {
 			return fmt.Errorf("failed to init tracing %w", err)
 		}
@@ -445,14 +449,13 @@ func setupDatastore(ctx context.Context, epFactory datalayer.EndpointFactory, mo
 
 	if startCrdReconcilers {
 		return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort), nil
-	} else {
-		endpointPool, err := NewEndpointPoolFromOptions(namespace, name, endpointSelector, endpointTargetPorts)
-		if err != nil {
-			setupLog.Error(err, "Failed to construct endpoint pool from options")
-			return nil, err
-		}
-		return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort).WithEndpointPool(endpointPool), nil
 	}
+	endpointPool, err := NewEndpointPoolFromOptions(namespace, name, endpointSelector, endpointTargetPorts)
+	if err != nil {
+		setupLog.Error(err, "Failed to construct endpoint pool from options")
+		return nil, err
+	}
+	return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort).WithEndpointPool(endpointPool), nil
 }
 
 // registerInTreePlugins registers the factory functions of all known plugins
@@ -461,7 +464,7 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)
 	fwkplugin.Register(random.RandomPickerType, random.RandomPickerFactory)
 	fwkplugin.Register(weightedrandom.WeightedRandomPickerType, weightedrandom.WeightedRandomPickerFactory)
-	fwkplugin.Register(profile.SingleProfileHandlerType, profile.SingleProfileHandlerFactory)
+	fwkplugin.Register(single.SingleProfileHandlerType, single.SingleProfileHandlerFactory)
 	fwkplugin.Register(kvcacheutilization.KvCacheUtilizationScorerType, kvcacheutilization.KvCacheUtilizationScorerFactory)
 	fwkplugin.Register(queuedepth.QueueScorerType, queuedepth.QueueScorerFactory)
 	fwkplugin.Register(runningrequests.RunningRequestsSizeScorerType, runningrequests.RunningRequestsSizeScorerFactory)
@@ -503,6 +506,7 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(openai.OpenAIParserType, openai.OpenAIParserPluginFactory)
 	fwkplugin.Register(vllmgrpc.VllmGRPCParserType, vllmgrpc.VllmGRPCParserPluginFactory)
 	fwkplugin.Register(passthrough.PassthroughParserType, passthrough.PassthroughParserPluginFactory)
+	fwkplugin.Register(vertexai.VertexAIParserType, vertexai.VertexAIParserPluginFactory)
 	// register saturation detector plugins
 	fwkplugin.Register(concurrency.ConcurrencyDetectorType, concurrency.ConcurrencyDetectorFactory)
 	fwkplugin.Register(utilization.UtilizationDetectorType, utilization.UtilizationDetectorFactory)
@@ -591,6 +595,15 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	}
 	r.requestControlConfig.AddPlugins(dataProducers...)
 
+	// Let plugins declare their datalayer source/extractor dependencies before Configure().
+	for _, p := range handle.GetAllPlugins() {
+		if registrant, ok := p.(fwkdl.Registrant); ok {
+			if err := registrant.RegisterDependencies(r.dlRuntime); err != nil {
+				return nil, fmt.Errorf("plugin %s RegisterDependencies: %w", p.TypedName(), err)
+			}
+		}
+	}
+
 	// Sort data plugins in DAG order (topological sort). Also check DAG for cycles.
 	// This must run after auto-created producers are added so they are included in the ordering.
 	dag, err := datalayer.ValidateAndOrderDataDependencies(handle.GetAllPlugins())
@@ -629,10 +642,7 @@ func (r *Runner) configureAndStartDatalayer(ctx context.Context, enableNewMetric
 		return err
 	}
 
-	if err := r.dlRuntime.Start(ctx, mgr); err != nil {
-		return err
-	}
-	return nil
+	return r.dlRuntime.Start(ctx, mgr)
 }
 
 func (r *Runner) setupMetricsCollection(enableNewMetrics bool, opts *runserver.Options, pmc backendmetrics.PodMetricsClient) datalayer.EndpointFactory {

@@ -79,7 +79,7 @@ func TestLLMRequestBody_PromptText(t *testing.T) {
 							Content: Content{
 								Structured: []ContentBlock{
 									{Type: "text", Text: "Describe this image:"},
-									{Type: "image_url", ImageURL: ImageBlock{Url: "http://example.com/img.png"}},
+									{Type: "image_url", ImageURL: ImageBlock{URL: "http://example.com/img.png"}},
 								},
 							},
 						},

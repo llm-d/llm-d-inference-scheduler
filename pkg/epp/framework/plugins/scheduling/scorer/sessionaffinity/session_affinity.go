@@ -96,7 +96,7 @@ func (s *SessionAffinity) ResponseBody(ctx context.Context, _ *scheduling.Infere
 	if response == nil || targetPod == nil {
 		reqID := "undefined"
 		if response != nil {
-			reqID = response.RequestId
+			reqID = response.RequestID
 		}
 		log.FromContext(ctx).V(logutil.DEBUG).Info("Session affinity scorer - skip post response because one of response, targetPod is nil", "req id", reqID)
 		return

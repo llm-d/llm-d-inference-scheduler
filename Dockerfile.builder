@@ -10,8 +10,17 @@ ARG KUBECTL_VERSION=v1.35.3
 ARG KUSTOMIZE_VERSION=v5.6.0
 ARG DOCKER_VERSION=29.3.0
 ARG DOCKER_BUILDX_VERSION=v0.32.1
+ARG ENVTEST_VERSION=release-0.19
+ARG ENVTEST_K8S_VERSION=1.31.0
 
-RUN dnf install -y podman && dnf clean all
+RUN dnf install -y podman gcc-toolset-12 && dnf clean all
+
+# The base image ships GCC 8 (RHEL 8 default), which lacks the ARM64 LSE
+# atomic emulation helpers (__aarch64_ldadd8_sync etc.) required by Go's
+# race detector. gcc-toolset-12 provides GCC 12 which includes them.
+# TODO: remove gcc-toolset-12 once this base image is updated to RHEL 9
+#       (GCC 11+ ships natively there and includes the helpers).
+ENV PATH=/opt/rh/gcc-toolset-12/root/usr/bin:$PATH
 
 # Install docker CLI and buildx plugin
 RUN ARCH=$(uname -m) && \
@@ -45,6 +54,15 @@ RUN GOARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
 
 # Install typos
 RUN curl -sSfL https://github.com/crate-ci/typos/releases/download/${TYPOS_VERSION}/typos-${TYPOS_VERSION}-$(uname -m)-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin
+
+# Install setup-envtest and pre-fetch kube test binaries so hermetic integration
+# tests don't need network at runtime. ENVTEST_ASSETS_DIR is exported so the
+# Makefile target can resolve KUBEBUILDER_ASSETS without re-running setup-envtest.
+ENV ENVTEST_ASSETS_DIR=/usr/local/kubebuilder
+RUN GOBIN=/usr/local/bin go install sigs.k8s.io/controller-runtime/tools/setup-envtest@${ENVTEST_VERSION} && \
+    setup-envtest use ${ENVTEST_K8S_VERSION} --bin-dir ${ENVTEST_ASSETS_DIR} && \
+    chmod -R a+rx ${ENVTEST_ASSETS_DIR}
+ENV ENVTEST_K8S_VERSION=${ENVTEST_K8S_VERSION}
 
 # Go caches are mounted as volumes at runtime for persistence across image rebuilds.
 # Directories are created with open permissions so non-root users (docker -u) can write.

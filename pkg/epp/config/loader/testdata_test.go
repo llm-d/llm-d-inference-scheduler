@@ -273,8 +273,8 @@ plugins:
   type: test-profile-handler
 `
 
-// errorBadPluginJsonText has invalid JSON in parameters (string where int expected).
-const errorBadPluginJsonText = `
+// errorBadPluginJSONText has invalid JSON in parameters (string where int expected).
+const errorBadPluginJSONText = `
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
@@ -504,7 +504,7 @@ featureGates:
 `
 
 // successDataLayerNoSourcesText has an explicit empty dataLayer section with no sources.
-// The loader should NOT inject defaults — the empty section signals "no metrics collection".
+// The loader should additively inject the default metrics source because InjectDefaults is unset (default: true).
 const successDataLayerNoSourcesText = `
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
@@ -518,8 +518,23 @@ schedulingProfiles:
 dataLayer: {}
 `
 
-// successDataLayerExplicitConfigText has the datalayer enabled with explicit data config.
-// The loader should preserve the user's config and NOT overwrite with defaults.
+// successDataLayerOptOutText has dataLayer with injectDefaults: false, disabling automatic injection.
+const successDataLayerOptOutText = `
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- name: maxScore
+  type: max-score-picker
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: maxScore
+dataLayer:
+  injectDefaults: false
+`
+
+// successDataLayerExplicitConfigText has the datalayer enabled with an explicit non-metrics source.
+// The loader should inject the default metrics source in addition to the user's source (additive).
 const successDataLayerExplicitConfigText = `
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
