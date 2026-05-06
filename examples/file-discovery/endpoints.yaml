@@ -1,6 +1,0 @@
-endpoints:
-  - name: vllm-0
-    address: vllm-0   # docker-compose service name; replace with IP for bare-metal
-    port: "8000"
-    labels:
-      model: Qwen/Qwen2.5-1.5B-Instruct

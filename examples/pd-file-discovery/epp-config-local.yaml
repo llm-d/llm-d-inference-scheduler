@@ -5,11 +5,23 @@ plugins:
   - name: file-discovery
     type: file-discovery
     parameters:
-      path: ./endpoints-local.yaml
+      path: ./endpoints.yaml
       watchFile: true
 
-  - name: random-picker
-    type: random-picker
+  - type: disagg-headers-handler
+
+  - type: decode-filter
+
+  - type: prefill-filter
+
+  - type: random-picker
+
+  - type: always-disagg-pd-decider
+
+  - type: disagg-profile-handler
+    parameters:
+      deciders:
+        prefill: always-disagg-pd-decider
 
   - name: metrics-source
     type: metrics-data-source
@@ -21,8 +33,13 @@ discovery:
   pluginRef: file-discovery
 
 schedulingProfiles:
-  - name: default
+  - name: decode
     plugins:
+      - pluginRef: decode-filter
+      - pluginRef: random-picker
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-filter
       - pluginRef: random-picker
 
 dataLayer:

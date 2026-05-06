@@ -70,7 +70,7 @@ static_resources:
               - endpoint:
                   address:
                     socket_address:
-                      address: 127.0.0.1   # docker-compose service name; replace with IP for bare-metal
+                      address: 127.0.0.1
                       port_value: 9002
 
 admin:

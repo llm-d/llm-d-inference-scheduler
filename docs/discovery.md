@@ -99,6 +99,9 @@ discovery:
 Reads a YAML (or JSON) file listing inference endpoints. Optionally watches for
 file changes at runtime using `fsnotify`.
 
+When using this plugin the EPP has no dependency on Kubernetes and can run in
+any environment -- bare-metal, Slurm, Ray, or a local laptop.
+
 #### Parameters
 
 | Parameter   | Type   | Required | Default | Description |
@@ -162,31 +165,212 @@ parameters. No InferencePool CRD required. Owns its own `ctrl.Manager` internall
 
 ---
 
-## Running without Kubernetes (file-discovery mode)
+## Examples
 
-See the [file-discovery example](../examples/file-discovery/README.md) for a complete
-runnable setup.
+### Example 1 -- file-discovery (no P/D disaggregation)
 
-The full stack is:
+Running components:
 
+| Component | Port |
+|-----------|------|
+| vLLM (or sim) | 8000 |
+| EPP | 9002 (gRPC), 9003 (health), 9090 (metrics) |
+| Envoy | 8081 |
+
+EPP config (`epp-config.yaml`):
+
+```yaml
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+
+plugins:
+  - name: file-discovery
+    type: file-discovery
+    parameters:
+      path: /etc/epp/endpoints.yaml
+      watchFile: true
+  - name: random-picker
+    type: random-picker
+  - name: metrics-source
+    type: metrics-data-source
+  - name: metrics-extractor
+    type: core-metrics-extractor
+
+discovery:
+  pluginRef: file-discovery
+
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: random-picker
+
+dataLayer:
+  sources:
+    - pluginRef: metrics-source
+      extractors:
+        - pluginRef: metrics-extractor
 ```
-Client
-  --> Envoy (port 8081)
-        --[ext_proc]--> EPP (port 9002)
-                          picks endpoint, sets x-gateway-destination-endpoint
-        --[ORIGINAL_DST]--> vLLM (address from header)
+
+Envoy config (`envoy.yaml`) -- ext_proc points at the EPP; all traffic is routed
+via `ORIGINAL_DST` using the `x-gateway-destination-endpoint` header the EPP sets:
+
+```yaml
+static_resources:
+  listeners:
+    - name: inference
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8081 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: inference
+                route_config:
+                  virtual_hosts:
+                    - name: inference
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: original_destination_cluster
+                            timeout: 86400s
+                http_filters:
+                  - name: envoy.filters.http.ext_proc
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: ext_proc
+                          authority: <epp-host>:9002
+                        timeout: 10s
+                      processing_mode:
+                        request_header_mode: SEND
+                        response_header_mode: SEND
+                        request_body_mode: FULL_DUPLEX_STREAMED
+                        response_body_mode: FULL_DUPLEX_STREAMED
+                        request_trailer_mode: SEND
+                        response_trailer_mode: SEND
+                      message_timeout: 1000s
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: original_destination_cluster
+      type: ORIGINAL_DST
+      connect_timeout: 1000s
+      lb_policy: CLUSTER_PROVIDED
+      original_dst_lb_config:
+        use_http_header: true
+        http_header_name: x-gateway-destination-endpoint
+    - name: ext_proc
+      type: STRICT_DNS
+      connect_timeout: 10s
+      lb_policy: LEAST_REQUEST
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: ext_proc
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: <epp-host>   # docker-compose service name or IP
+                      port_value: 9002
 ```
+
+A fully runnable docker-compose setup is in `examples/file-discovery/`.
 
 ---
 
-## Implementing a Custom Discovery Plugin
+### Example 2 -- file-discovery with P/D disaggregation
 
-1. Create a struct that embeds or satisfies `fwkdl.EndpointDiscovery` (which embeds
-   `fwkplugin.Plugin`).
-2. Write a factory: `func(name string, params json.RawMessage, handle fwkplugin.Handle) (fwkplugin.Plugin, error)`
-3. Register it: `fwkplugin.Register(MyPluginType, MyFactory)`
-4. Reference it in `EndpointPickerConfig` via `discovery.pluginRef`
+Each request is handled in two stages: the EPP selects a decode worker
+(`x-gateway-destination-endpoint`) and a prefill worker (`x-prefiller-host-port`).
+The sidecar on the decode worker reads the prefill header, issues the prefill
+request, then runs decode locally.
 
-The `file-discovery` plugin is the reference implementation for non-K8s sources.
-The `inference-pool-discovery` plugin is the reference for K8s sources that use
-`datalayer.BindNotificationSource` with a pod discovery extractor.
+Running components:
+
+| Component | Port |
+|-----------|------|
+| sim-prefill | 8000 |
+| sim-decode | 8001 |
+| sidecar-decode | 8002 (fronts sim-decode) |
+| EPP | 9002 (gRPC), 9003 (health), 9090 (metrics) |
+| Envoy | 8081 |
+
+Endpoint roles are declared via the `llm-d.ai/role` label in the endpoints file.
+
+EPP config (`epp-config.yaml`) -- note the extra disagg plugins and dual scheduling
+profiles compared to the non-P/D case:
+
+```yaml
+apiVersion: inference.networking.x-k8s.io/v1alpha1
+kind: EndpointPickerConfig
+
+plugins:
+  - name: file-discovery
+    type: file-discovery
+    parameters:
+      path: /etc/epp/endpoints.yaml
+      watchFile: true
+  - type: disagg-headers-handler
+  - type: decode-filter
+  - type: prefill-filter
+  - type: random-picker
+  - type: always-disagg-pd-decider
+  - type: disagg-profile-handler
+    parameters:
+      deciders:
+        prefill: always-disagg-pd-decider
+  - name: metrics-source
+    type: metrics-data-source
+  - name: metrics-extractor
+    type: core-metrics-extractor
+
+discovery:
+  pluginRef: file-discovery
+
+schedulingProfiles:
+  - name: decode
+    plugins:
+      - pluginRef: decode-filter
+      - pluginRef: random-picker
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-filter
+      - pluginRef: random-picker
+
+dataLayer:
+  sources:
+    - pluginRef: metrics-source
+      extractors:
+        - pluginRef: metrics-extractor
+```
+
+The Envoy config is identical to Example 1 (same `ORIGINAL_DST` + ext_proc
+wiring). The EPP and sidecar handle the P/D routing entirely through headers.
+
+A fully runnable docker-compose setup is in `examples/pd-file-discovery/`.
+
+---
+
+## Backward Compatibility
+
+When no `discovery` section is present in the EPP config, the EPP falls back to
+Kubernetes-based discovery based on which CLI flags are provided:
+
+| CLI flags | Behavior |
+|-----------|----------|
+| `--pool-name` set (default) | Uses `inference-pool-discovery` -- watches pods matching the named `InferencePool` CRD. Requires a K8s cluster with the InferencePool CRD installed. |
+| `--endpoint-selector` set | Uses `static-selector-discovery` -- watches pods matching the given label selector in K8s. No InferencePool CRD required, but still requires a K8s cluster. |
+| Neither set | EPP fails to start: `--pool-name is required when no discovery plugin is configured` |
+
+Existing deployments that rely on the `--pool-name` flag continue to work without
+any config change. The `discovery` section is only needed when using a non-K8s
+plugin such as `file-discovery`.
