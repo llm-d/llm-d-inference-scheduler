@@ -146,15 +146,43 @@ func TestPrepareRequestData_SkipsWhenAlreadyPopulated(t *testing.T) {
 	assert.Same(t, existing, req.Body.TokenizedPrompt)
 }
 
-func TestPrepareRequestData_NilRequest(t *testing.T) {
-	p := newTestPlugin(&mockTokenizer{})
-	require.NoError(t, p.PrepareRequestData(context.Background(), nil, nil))
-}
-
 func TestPrepareRequestData_NilBody(t *testing.T) {
 	p := newTestPlugin(&mockTokenizer{})
 	req := &scheduling.InferenceRequest{}
-	require.NoError(t, p.PrepareRequestData(context.Background(), req, nil))
+	err := p.PrepareRequestData(context.Background(), req, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "request body is nil")
+}
+
+func TestPrepareRequestData_TokenizerError(t *testing.T) {
+	tok := &mockTokenizer{
+		renderChatFunc: func(_ *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+			return nil, nil, assert.AnError
+		},
+	}
+	p := newTestPlugin(tok)
+	req := &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{{Role: "user", Content: fwkrh.Content{Raw: "hi"}}},
+			},
+		},
+	}
+	err := p.PrepareRequestData(context.Background(), req, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tokenization failed")
+	assert.Nil(t, req.Body.TokenizedPrompt)
+}
+
+func TestPrepareRequestData_UnsupportedBodyType(t *testing.T) {
+	p := newTestPlugin(&mockTokenizer{})
+	req := &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{}, // no Completions or ChatCompletions
+	}
+	err := p.PrepareRequestData(context.Background(), req, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported request body type")
+	assert.Nil(t, req.Body.TokenizedPrompt)
 }
 
 func TestConvertMMFeaturesRoundTrip(t *testing.T) {
