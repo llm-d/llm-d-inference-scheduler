@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -82,27 +83,23 @@ func (me *ModelExtractor) TypedName() fwkplugin.TypedName {
 	return me.typedName
 }
 
-// ExpectedInputType defines the type expected by ModelExtractor.
-func (me *ModelExtractor) ExpectedInputType() reflect.Type {
-	return ModelsResponseType
-}
-
-// ModelServerExtractorFactory is a factory function used to instantiate data layer's
-// models extractor plugins specified in a configuration.
+// ModelServerExtractorFactory instantiates the models extractor plugin.
 func ModelServerExtractorFactory(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
 	extractor := NewModelExtractor()
 	extractor.typedName.Name = name
 	return extractor, nil
 }
 
-// Extract transforms the data source output into a concrete attribute that
-// is stored on the given endpoint.
-func (me *ModelExtractor) Extract(_ context.Context, data any, ep fwkdl.Endpoint) error {
-	models, ok := data.(*ModelResponse)
+// Extract transforms the data source output into a concrete attribute stored
+// on the input's endpoint.
+func (me *ModelExtractor) Extract(_ context.Context, input fwkdl.PollingInput) error {
+	models, ok := input.Data.(*ModelResponse)
 	if !ok {
-		return fmt.Errorf("unexpected input in Extract: %T", data)
+		return fmt.Errorf("unexpected input in Extract: %T", input.Data)
 	}
-
-	ep.GetAttributes().Put(ModelsAttributeKey, ModelDataCollection(models.Data))
+	if input.Endpoint == nil {
+		return errors.New("Extract called without an endpoint")
+	}
+	input.Endpoint.GetAttributes().Put(ModelsAttributeKey, ModelDataCollection(models.Data))
 	return nil
 }

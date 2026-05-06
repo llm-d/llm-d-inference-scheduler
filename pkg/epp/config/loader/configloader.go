@@ -33,7 +33,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/config"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkfc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
@@ -310,22 +309,24 @@ func buildDataLayerConfig(rawDataConfig *configapi.DataLayerConfig, handle fwkpl
 	}
 
 	for _, source := range rawDataConfig.Sources {
-		if sourcePlugin, ok := handle.Plugin(source.PluginRef).(fwkdl.DataSource); ok {
-			sourceConfig := datalayer.DataSourceConfig{
-				Plugin:     sourcePlugin,
-				Extractors: []fwkdl.ExtractorBase{},
-			}
-			for _, extractor := range source.Extractors {
-				if extractorPlugin, ok := handle.Plugin(extractor.PluginRef).(fwkdl.ExtractorBase); ok {
-					sourceConfig.Extractors = append(sourceConfig.Extractors, extractorPlugin)
-				} else {
-					return nil, fmt.Errorf("the plugin %s is not a fwkdl.ExtractorBase", source.PluginRef)
-				}
-			}
-			cfg.Sources = append(cfg.Sources, sourceConfig)
-		} else {
-			return nil, fmt.Errorf("the plugin %s is not a fwkdl.DataSource", source.PluginRef)
+		src, err := datalayer.ResolveSource(handle, source.PluginRef)
+		if err != nil {
+			return nil, err
 		}
+		extractors := make([]fwkplugin.Plugin, 0, len(source.Extractors))
+		for _, e := range source.Extractors {
+			p := handle.Plugin(e.PluginRef)
+			if p == nil {
+				return nil, fmt.Errorf("extractor plugin %s not found (required by source %s)",
+					e.PluginRef, source.PluginRef)
+			}
+			extractors = append(extractors, p)
+		}
+
+		cfg.Sources = append(cfg.Sources, datalayer.DataSourceConfig{
+			Plugin:     src,
+			Extractors: extractors,
+		})
 	}
 	return &cfg, nil
 }

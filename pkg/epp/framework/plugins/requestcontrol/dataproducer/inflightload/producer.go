@@ -19,7 +19,6 @@ package inflightload
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -67,8 +66,8 @@ func (p *InFlightLoadProducer) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-// RegisterDependencies declares that this plugin needs an endpoint-notification-source to track
-// endpoint lifecycle events. The source is auto-created if not already in the config.
+// RegisterDependencies declares that this plugin needs an endpoint-notification-source.
+// The source is auto-created if not already in the config.
 func (p *InFlightLoadProducer) RegisterDependencies(r datalayer.Registrar) error {
 	return r.Register(datalayer.PendingRegistration{
 		Owner:         p.TypedName(),
@@ -78,13 +77,8 @@ func (p *InFlightLoadProducer) RegisterDependencies(r datalayer.Registrar) error
 	})
 }
 
-// ExpectedInputType defines the type expected by the extractor.
-func (p *InFlightLoadProducer) ExpectedInputType() reflect.Type {
-	return datalayer.EndpointEventReflectType
-}
-
-// ExtractEndpoint handles endpoint deletion events to prune stateful trackers.
-func (p *InFlightLoadProducer) ExtractEndpoint(ctx context.Context, event datalayer.EndpointEvent) error {
+// Extract handles endpoint deletion events to prune stateful trackers.
+func (p *InFlightLoadProducer) Extract(ctx context.Context, event datalayer.EndpointEvent) error {
 	if event.Type != datalayer.EventDelete || event.Endpoint == nil {
 		return nil
 	}

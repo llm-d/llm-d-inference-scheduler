@@ -73,16 +73,6 @@ func (dataSrc *HTTPDataSource) TypedName() fwkplugin.TypedName {
 	return dataSrc.typedName
 }
 
-// OutputType returns the type of data this DataSource produces.
-func (dataSrc *HTTPDataSource) OutputType() reflect.Type {
-	return dataSrc.outputType
-}
-
-// ExtractorType returns the type of Extractor this DataSource expects.
-func (dataSrc *HTTPDataSource) ExtractorType() reflect.Type {
-	return fwkdl.ExtractorType
-}
-
 // Poll fetches data for an endpoint and returns it.
 func (dataSrc *HTTPDataSource) Poll(ctx context.Context, ep fwkdl.Endpoint) (any, error) {
 	target := dataSrc.getEndpoint(ep.GetMetadata())
