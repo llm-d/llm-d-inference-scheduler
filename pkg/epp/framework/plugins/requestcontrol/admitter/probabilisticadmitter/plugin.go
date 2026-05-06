@@ -88,11 +88,11 @@ func Factory(name string, rawParameters json.RawMessage, _ fwkplugin.Handle) (fw
 	if params.K <= 0 {
 		return nil, fmt.Errorf("plugin '%s': k must be > 0, got %g", Type, params.K)
 	}
-	return New(params).WithName(name), nil
+	return newAdmitter(params).WithName(name), nil
 }
 
-// New creates a ProbabilisticAdmitter with the given parameters.
-func New(params Parameters) *ProbabilisticAdmitter {
+// newAdmitter creates a ProbabilisticAdmitter with the given parameters.
+func newAdmitter(params Parameters) *ProbabilisticAdmitter {
 	return &ProbabilisticAdmitter{
 		typedName:            fwkplugin.TypedName{Type: Type},
 		queueDepthThreshold:  float64(params.QueueDepthThreshold),

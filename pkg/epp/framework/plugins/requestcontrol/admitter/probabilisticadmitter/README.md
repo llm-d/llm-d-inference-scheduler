@@ -31,7 +31,7 @@ saturation = avg over pods of: max(WaitingQueueSize / queueDepthThreshold, KVCac
 | `request == nil` | Admit |
 | Pod has nil metrics | Treated as fully saturated (score = 1.0) |
 
-With defaults (`power=5, k=300`), shedding is ~1% at saturation 0.2 and reaches 100% at
+With defaults (`power=5, k=300`), shedding is ~2.3% at saturation 0.15 and reaches 100% at
 saturation ≈ 0.34. This creates a dead zone at low load with a steep ramp at moderate overload.
 
 ## Config
@@ -150,8 +150,9 @@ With the default parameters (`power=5`, `k=300`, `queueDepthThreshold=5`,
 
 | Cluster Saturation | Shedding Probability | Effect |
 |--------------------|----------------------|--------|
-| 0.00 – 0.15 | < 0.01% | Dead zone - no observable shedding |
-| 0.20 | ~1% | Onset - occasional shed, negligible impact on throughput |
+| 0.00 – 0.08 | < 0.01% | Dead zone - no observable shedding |
+| 0.15 | ~2.3% | Onset - occasional shed, negligible impact on throughput |
+| 0.20 | ~9.6% | Moderate shedding begins |
 | 0.30 | ~73% | Heavy shedding - most sheddable traffic rejected |
 | 0.34+ | 100% | Full shed - all sheddable traffic rejected |
 

@@ -125,7 +125,7 @@ func TestFactory_ZeroK(t *testing.T) {
 
 func TestProtectedTiersAlwaysAdmitted(t *testing.T) {
 	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 100, 0)}
-	admitter := New(defaultParams()).WithRandFn(func() float64 { return 0.0 })
+	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 
 	for _, priority := range []int{0, 100} {
 		req := &schedulingtypes.InferenceRequest{
@@ -140,7 +140,7 @@ func TestProtectedTiersAlwaysAdmitted(t *testing.T) {
 func TestDroppableRejectedAtHighSaturation(t *testing.T) {
 	// QD=100, threshold=5 → saturation=20 → prob=1.0
 	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 100, 0)}
-	admitter := New(defaultParams()).WithRandFn(func() float64 { return 0.0 })
+	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &schedulingtypes.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
@@ -151,7 +151,7 @@ func TestDroppableRejectedAtHighSaturation(t *testing.T) {
 
 func TestDroppableAdmittedAtZeroSaturation(t *testing.T) {
 	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 0, 0)}
-	admitter := New(defaultParams()).WithRandFn(func() float64 { return 0.0 })
+	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &schedulingtypes.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
@@ -166,7 +166,7 @@ func TestNilMetricsTreatedAsSaturated(t *testing.T) {
 		nil,
 		nil,
 	)
-	admitter := New(defaultParams()).WithRandFn(func() float64 { return 0.0 })
+	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &schedulingtypes.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
@@ -176,7 +176,7 @@ func TestNilMetricsTreatedAsSaturated(t *testing.T) {
 }
 
 func TestNoPods(t *testing.T) {
-	admitter := New(defaultParams())
+	admitter := newAdmitter(defaultParams())
 	req := &schedulingtypes.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
@@ -186,7 +186,7 @@ func TestNoPods(t *testing.T) {
 }
 
 func TestNilRequest(t *testing.T) {
-	admitter := New(defaultParams())
+	admitter := newAdmitter(defaultParams())
 	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 0, 0)}
 	if err := admitter.AdmitRequest(context.Background(), nil, pods); err != nil {
 		t.Errorf("nil request should admit, got: %v", err)
@@ -199,7 +199,7 @@ func TestMultiplePodsSaturationAveraging(t *testing.T) {
 		newEndpoint("pod-a", 10, 0),
 		newEndpoint("pod-b", 0, 0),
 	}
-	admitter := New(defaultParams()).WithRandFn(func() float64 { return 0.0 })
+	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &schedulingtypes.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
@@ -211,7 +211,7 @@ func TestMultiplePodsSaturationAveraging(t *testing.T) {
 func TestQuinticProperty(t *testing.T) {
 	// sat=0.272/0.8=0.34 → sat^5*300≈1.36 → prob=1.0 → reject even at rand=0.999
 	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 0, 0.272)}
-	admitter := New(defaultParams()).WithRandFn(func() float64 { return 0.999 })
+	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.999 })
 	req := &schedulingtypes.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
@@ -227,7 +227,7 @@ func TestQuinticProperty(t *testing.T) {
 func TestErrorTypeIsStructured(t *testing.T) {
 	// sat=1.0 → prob=1.0 → reject
 	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 5, 0.8)}
-	admitter := New(defaultParams()).WithRandFn(func() float64 { return 0.0 })
+	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &schedulingtypes.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
@@ -252,13 +252,13 @@ func TestProbabilisticShedding(t *testing.T) {
 	}
 
 	// rand=0.9 > prob≈0.096 → admit
-	if err := New(defaultParams()).WithRandFn(func() float64 { return 0.9 }).
+	if err := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.9 }).
 		AdmitRequest(context.Background(), req, pods); err != nil {
 		t.Errorf("expected admission with rand=0.9 > prob≈0.096, got: %v", err)
 	}
 
 	// rand=0.0 < prob≈0.096 → reject
-	if err := New(defaultParams()).WithRandFn(func() float64 { return 0.0 }).
+	if err := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 }).
 		AdmitRequest(context.Background(), req, pods); err == nil {
 		t.Error("expected rejection with rand=0.0 < prob≈0.096")
 	}
