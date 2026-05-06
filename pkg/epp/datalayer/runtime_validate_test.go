@@ -19,7 +19,7 @@ package datalayer
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
@@ -27,88 +27,77 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
 )
 
-func TestRuntimeConfigureWithNilExtractor(t *testing.T) {
-	logger := newTestLogger(t)
-	r := NewRuntime(1)
+func TestRuntimeConfigure_Validation(t *testing.T) {
+	podGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
+	svcGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Service"}
 
-	cfg := &Config{
-		Sources: []DataSourceConfig{
-			{
-				Plugin: &mocks.MetricsDataSource{},
-				// all extractor slices nil — allowed.
-			},
+	tests := []struct {
+		name      string
+		cfg       *Config
+		wantErr   bool
+		wantInErr string
+	}{
+		{
+			name: "no extractors is allowed",
+			cfg: &Config{Sources: []DataSourceConfig{
+				{Plugin: &mocks.MetricsDataSource{}},
+			}},
+			wantErr: false,
+		},
+		{
+			name: "duplicate notification GVK across sources",
+			cfg: &Config{Sources: []DataSourceConfig{
+				{Plugin: mocks.NewNotificationSource("test", "source1", podGVK)},
+				{Plugin: mocks.NewNotificationSource("test", "source2", podGVK)},
+			}},
+			wantErr:   true,
+			wantInErr: "duplicate",
+		},
+		{
+			name: "extractor variant doesn't match source variant",
+			cfg: &Config{Sources: []DataSourceConfig{
+				{
+					Plugin:     &mocks.MetricsDataSource{},
+					Extractors: []fwkplugin.Plugin{extmocks.NewEndpointExtractor("ep-ext")},
+				},
+			}},
+			wantErr:   true,
+			wantInErr: "PollingExtractor",
+		},
+		{
+			name: "notification extractor GVK doesn't match source GVK",
+			cfg: &Config{Sources: []DataSourceConfig{
+				{
+					Plugin:     mocks.NewNotificationSource("test", "source1", podGVK),
+					Extractors: []fwkplugin.Plugin{extmocks.NewNotificationExtractor("ext1").WithGVK(svcGVK)},
+				},
+			}},
+			wantErr:   true,
+			wantInErr: "GVK",
+		},
+		{
+			name: "duplicate source name within the same variant",
+			cfg: &Config{Sources: []DataSourceConfig{
+				{Plugin: mocks.NewDataSource(fwkplugin.TypedName{Type: "metrics", Name: "same"})},
+				{Plugin: mocks.NewDataSource(fwkplugin.TypedName{Type: "metrics", Name: "same"})},
+			}},
+			wantErr:   true,
+			wantInErr: "duplicate",
 		},
 	}
 
-	err := r.Configure(cfg, false, "", logger)
-	assert.NoError(t, err, "Configure should succeed with no extractors")
-}
-
-func TestRuntimeConfigureDuplicateGVKFails(t *testing.T) {
-	logger := newTestLogger(t)
-	r := NewRuntime(1)
-
-	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
-	src1 := mocks.NewNotificationSource("test", "source1", gvk)
-	src2 := mocks.NewNotificationSource("test", "source2", gvk)
-
-	cfg := &Config{
-		Sources: []DataSourceConfig{
-			{Plugin: src1},
-			{Plugin: src2},
-		},
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRuntime(1)
+			err := r.Configure(tc.cfg, false, "", newTestLogger(t))
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.wantInErr != "" {
+					require.Contains(t, err.Error(), tc.wantInErr)
+				}
+				return
+			}
+			require.NoError(t, err)
+		})
 	}
-
-	err := r.Configure(cfg, false, "", logger)
-	assert.Error(t, err, "Configure should fail with duplicate GVK")
-	assert.Contains(t, err.Error(), "duplicate", "Error should mention duplicate GVK")
-}
-
-// TestRuntimeConfigureVariantMismatch verifies that an extractor whose variant
-// interface doesn't match its source's variant is rejected at config-load.
-func TestRuntimeConfigureVariantMismatch(t *testing.T) {
-	logger := newTestLogger(t)
-	r := NewRuntime(1)
-
-	// PollingDataSource paired with an EndpointExtractor (wrong variant).
-	pollingSrc := &mocks.MetricsDataSource{}
-	endpointExt := extmocks.NewEndpointExtractor("ep-ext")
-
-	cfg := &Config{
-		Sources: []DataSourceConfig{
-			{
-				Plugin:     pollingSrc,
-				Extractors: []fwkplugin.Plugin{endpointExt},
-			},
-		},
-	}
-
-	err := r.Configure(cfg, false, "", logger)
-	assert.Error(t, err, "Configure should reject extractor that doesn't match source variant")
-	assert.Contains(t, err.Error(), "PollingExtractor", "Error should name the expected variant")
-}
-
-// TestRuntimeConfigureNotificationGVKMismatch verifies that a NotificationExtractor
-// whose GVK doesn't match its source's GVK is rejected.
-func TestRuntimeConfigureNotificationGVKMismatch(t *testing.T) {
-	logger := newTestLogger(t)
-	r := NewRuntime(1)
-
-	srcGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
-	extGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Service"}
-	src := mocks.NewNotificationSource("test", "source1", srcGVK)
-	ext := extmocks.NewNotificationExtractor("ext1").WithGVK(extGVK)
-
-	cfg := &Config{
-		Sources: []DataSourceConfig{
-			{
-				Plugin:     src,
-				Extractors: []fwkplugin.Plugin{ext},
-			},
-		},
-	}
-
-	err := r.Configure(cfg, false, "", logger)
-	assert.Error(t, err, "Configure should reject extractor with mismatched GVK")
-	assert.Contains(t, err.Error(), "GVK", "Error should mention GVK mismatch")
 }
