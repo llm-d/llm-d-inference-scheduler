@@ -322,7 +322,9 @@ func (r *Runtime) ReleaseEndpoint(ep fwkdl.Endpoint) {
 	r.dispatchEndpointEvent(context.Background(), r.logger, fwkdl.EndpointEvent{Type: fwkdl.EventDelete, Endpoint: ep})
 	key := ep.GetMetadata().GetNamespacedName()
 	if value, ok := r.collectors.LoadAndDelete(key); ok {
-		value.(*Collector).Stop()
+		if c, ok := value.(*Collector); ok {
+			c.Stop()
+		}
 	}
 }
 
