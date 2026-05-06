@@ -20,8 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	k8slog "sigs.k8s.io/controller-runtime/pkg/log"
 	infextv1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	infextv1a2 "sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
+	infextv1a2 "github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/env"
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )

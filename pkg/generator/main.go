@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-tools/pkg/markers"
 	"sigs.k8s.io/yaml"
 
-	"sigs.k8s.io/gateway-api-inference-extension/version"
+	"github.com/llm-d/llm-d-inference-scheduler/version"
 )
 
 // This generation code is largely copied from
@@ -36,7 +36,7 @@ func main() {
 	roots, err := loader.LoadRoots(
 		"k8s.io/apimachinery/pkg/runtime/schema", // Needed to parse generated register functions.
 		"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha1",
-		"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2",
+		"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2",
 		"sigs.k8s.io/gateway-api-inference-extension/api/v1",
 	)
 	if err != nil {
