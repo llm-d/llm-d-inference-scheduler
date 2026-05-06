@@ -396,9 +396,9 @@ func TestMetrics(t *testing.T) {
 				}
 				assert.EventuallyWithT(t, func(t *assert.CollectT) {
 					got := ds.PodList(test.predict)
-					metrics := []*fwkdl.Metrics{}
-					for _, one := range got {
-						metrics = append(metrics, one.GetMetrics())
+					metrics := make([]*fwkdl.Metrics, len(got))
+					for idx, one := range got {
+						metrics[idx] = one.GetMetrics()
 					}
 					diff := cmp.Diff(test.want, metrics, cmpopts.IgnoreFields(fwkdl.Metrics{}, "UpdateTime"), cmpopts.SortSlices(func(a, b *fwkdl.Metrics) bool {
 						return a.String() < b.String()
@@ -469,10 +469,13 @@ func TestPods(t *testing.T) {
 				}
 
 				test.op(ctx, ds)
-				var gotPods []*corev1.Pod
-				for _, pm := range ds.PodList(AllPodsPredicate) {
-					pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: pm.GetMetadata().PodName, Namespace: pm.GetMetadata().NamespacedName.Namespace}, Status: corev1.PodStatus{PodIP: pm.GetMetadata().GetIPAddress()}}
-					gotPods = append(gotPods, pod)
+				podList := ds.PodList(AllPodsPredicate)
+				gotPods := make([]*corev1.Pod, len(podList))
+				for idx, pm := range podList {
+					gotPods[idx] = &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: pm.GetMetadata().PodName, Namespace: pm.GetMetadata().NamespacedName.Namespace},
+						Status:     corev1.PodStatus{PodIP: pm.GetMetadata().GetIPAddress()},
+					}
 				}
 				if !cmp.Equal(gotPods, test.wantPods, cmpopts.SortSlices(func(a, b *corev1.Pod) bool { return a.Name < b.Name })) {
 					t.Errorf("got (%v) != want (%v);", gotPods, test.wantPods)
@@ -772,9 +775,10 @@ func TestEndpointMetadata(t *testing.T) {
 				}
 
 				test.op(ctx, ds)
-				var gotMetadata []*fwkdl.EndpointMetadata
-				for _, pm := range ds.PodList(AllPodsPredicate) {
-					gotMetadata = append(gotMetadata, pm.GetMetadata())
+				podList := ds.PodList(AllPodsPredicate)
+				gotMetadata := make([]*fwkdl.EndpointMetadata, len(podList))
+				for idx, pm := range podList {
+					gotMetadata[idx] = pm.GetMetadata()
 				}
 				if diff := cmp.Diff(test.wantEndpointMetas, gotMetadata, cmpopts.SortSlices(func(a, b *fwkdl.EndpointMetadata) bool { return a.NamespacedName.Name < b.NamespacedName.Name })); diff != "" {
 					t.Errorf("ConvertTo() mismatch (-want +got):\n%s", diff)
