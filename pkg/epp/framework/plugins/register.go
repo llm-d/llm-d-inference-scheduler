@@ -28,7 +28,6 @@ func RegisterAllPlugins() {
 	plugin.Register(bylabel.PrefillRoleType, bylabel.PrefillRoleFactory)
 	// Deprecated aliases — disagg-profile-handler now handles PreRequest natively.
 	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
-	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
 	plugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
 	plugin.Register(disagg.DisaggProfileHandlerType, disagg.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
