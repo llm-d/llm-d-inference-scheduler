@@ -11,6 +11,8 @@ becomes the sole source of truth for endpoint lifecycle.
 This enables the EPP to run without a Kubernetes cluster, which is valuable for RL
 training and inference workloads on Slurm, Ray, and other non-Kubernetes infrastructure.
 
+![Discovery Plugin Architecture](images/discovery-architecture.drawio.png)
+
 ---
 
 ## Core Interfaces
@@ -165,9 +167,46 @@ parameters. No InferencePool CRD required. Owns its own `ctrl.Manager` internall
 
 ---
 
+## Backward Compatibility
+
+When no `discovery` section is present in the EPP config, the EPP falls back to
+Kubernetes-based discovery based on which CLI flags are provided:
+
+| CLI flags | Behavior |
+|-----------|----------|
+| `--pool-name` set (default) | Uses `inference-pool-discovery` -- watches pods matching the named `InferencePool` CRD. Requires a K8s cluster with the InferencePool CRD installed. |
+| `--endpoint-selector` set | Uses `static-selector-discovery` -- watches pods matching the given label selector in K8s. No InferencePool CRD required, but still requires a K8s cluster. |
+| Neither set | EPP fails to start: `--pool-name is required when no discovery plugin is configured` |
+
+Existing deployments that rely on the `--pool-name` flag continue to work without
+any config change. The `discovery` section is only needed when using a non-K8s
+plugin such as `file-discovery`.
+
+---
+
 ## Examples
 
-### Example 1 -- file-discovery (no P/D disaggregation)
+### Using file-discovery
+
+Add the following plugin entry and `discovery` section to your `EndpointPickerConfig`.
+This is the same for both the non-P/D and P/D cases:
+
+```yaml
+plugins:
+  - name: file-discovery
+    type: file-discovery
+    parameters:
+      path: /etc/epp/endpoints.yaml
+      watchFile: true
+
+discovery:
+  pluginRef: file-discovery
+```
+
+See the [Appendix](#appendix----envoy-config) for the Envoy config, which is
+identical for both setups.
+
+#### Without P/D disaggregation
 
 Running components:
 
@@ -177,42 +216,93 @@ Running components:
 | EPP | 9002 (gRPC), 9003 (health), 9090 (metrics) |
 | Envoy | 8081 |
 
-EPP config (`epp-config.yaml`):
+Endpoints file:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
-kind: EndpointPickerConfig
-
-plugins:
-  - name: file-discovery
-    type: file-discovery
-    parameters:
-      path: /etc/epp/endpoints.yaml
-      watchFile: true
-  - name: random-picker
-    type: random-picker
-  - name: metrics-source
-    type: metrics-data-source
-  - name: metrics-extractor
-    type: core-metrics-extractor
-
-discovery:
-  pluginRef: file-discovery
-
-schedulingProfiles:
-  - name: default
-    plugins:
-      - pluginRef: random-picker
-
-dataLayer:
-  sources:
-    - pluginRef: metrics-source
-      extractors:
-        - pluginRef: metrics-extractor
+endpoints:
+  - name: vllm-0
+    address: 10.0.0.1
+    port: "8000"
+    labels:
+      model: Qwen/Qwen2.5-1.5B-Instruct
+  - name: vllm-1
+    address: 10.0.0.2
+    port: "8000"
+    labels:
+      model: Qwen/Qwen2.5-1.5B-Instruct
 ```
 
-Envoy config (`envoy.yaml`) -- ext_proc points at the EPP; all traffic is routed
-via `ORIGINAL_DST` using the `x-gateway-destination-endpoint` header the EPP sets:
+#### With P/D disaggregation
+
+Each request is handled in two stages: the EPP selects a decode worker
+(`x-gateway-destination-endpoint`) and a prefill worker (`x-prefiller-host-port`).
+The sidecar on the decode worker reads the prefill header, issues the prefill
+request, then runs decode locally.
+
+Running components:
+
+| Component | Port |
+|-----------|------|
+| prefill worker | 8000 |
+| decode worker | 8001 |
+| sidecar (fronts decode) | 8002 |
+| EPP | 9002 (gRPC), 9003 (health), 9090 (metrics) |
+| Envoy | 8081 |
+
+In addition to the common `file-discovery` plugin, add the disagg plugins and
+replace `schedulingProfiles` in your `EndpointPickerConfig`:
+
+```yaml
+plugins:
+  # ... file-discovery plugin from above, plus:
+  - type: disagg-headers-handler
+  - type: decode-filter
+  - type: prefill-filter
+  - type: always-disagg-pd-decider
+  - type: disagg-profile-handler
+    parameters:
+      deciders:
+        prefill: always-disagg-pd-decider
+
+schedulingProfiles:
+  - name: decode
+    plugins:
+      - pluginRef: decode-filter
+      - pluginRef: random-picker
+  - name: prefill
+    plugins:
+      - pluginRef: prefill-filter
+      - pluginRef: random-picker
+```
+
+Endpoint roles are declared via the `llm-d.ai/role` label. The decode endpoint
+points at the sidecar port (8002), which fronts the vLLM decode worker.
+
+Endpoints file:
+
+```yaml
+endpoints:
+  - name: prefill-0
+    address: 10.0.0.1
+    port: "8000"
+    labels:
+      model: Qwen/Qwen2.5-1.5B-Instruct
+      llm-d.ai/role: prefill
+  - name: decode-0
+    address: 10.0.0.2
+    port: "8002"
+    labels:
+      model: Qwen/Qwen2.5-1.5B-Instruct
+      llm-d.ai/role: decode
+```
+
+---
+
+## Appendix -- Envoy config
+
+Both examples use the same Envoy config. Envoy listens on port 8081, calls the
+EPP via ext_proc, and routes all traffic via `ORIGINAL_DST` using the
+`x-gateway-destination-endpoint` header the EPP sets.
 
 ```yaml
 static_resources:
@@ -282,95 +372,3 @@ static_resources:
                       address: <epp-host>   # docker-compose service name or IP
                       port_value: 9002
 ```
-
-A fully runnable docker-compose setup is in `examples/file-discovery/`.
-
----
-
-### Example 2 -- file-discovery with P/D disaggregation
-
-Each request is handled in two stages: the EPP selects a decode worker
-(`x-gateway-destination-endpoint`) and a prefill worker (`x-prefiller-host-port`).
-The sidecar on the decode worker reads the prefill header, issues the prefill
-request, then runs decode locally.
-
-Running components:
-
-| Component | Port |
-|-----------|------|
-| sim-prefill | 8000 |
-| sim-decode | 8001 |
-| sidecar-decode | 8002 (fronts sim-decode) |
-| EPP | 9002 (gRPC), 9003 (health), 9090 (metrics) |
-| Envoy | 8081 |
-
-Endpoint roles are declared via the `llm-d.ai/role` label in the endpoints file.
-
-EPP config (`epp-config.yaml`) -- note the extra disagg plugins and dual scheduling
-profiles compared to the non-P/D case:
-
-```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
-kind: EndpointPickerConfig
-
-plugins:
-  - name: file-discovery
-    type: file-discovery
-    parameters:
-      path: /etc/epp/endpoints.yaml
-      watchFile: true
-  - type: disagg-headers-handler
-  - type: decode-filter
-  - type: prefill-filter
-  - type: random-picker
-  - type: always-disagg-pd-decider
-  - type: disagg-profile-handler
-    parameters:
-      deciders:
-        prefill: always-disagg-pd-decider
-  - name: metrics-source
-    type: metrics-data-source
-  - name: metrics-extractor
-    type: core-metrics-extractor
-
-discovery:
-  pluginRef: file-discovery
-
-schedulingProfiles:
-  - name: decode
-    plugins:
-      - pluginRef: decode-filter
-      - pluginRef: random-picker
-  - name: prefill
-    plugins:
-      - pluginRef: prefill-filter
-      - pluginRef: random-picker
-
-dataLayer:
-  sources:
-    - pluginRef: metrics-source
-      extractors:
-        - pluginRef: metrics-extractor
-```
-
-The Envoy config is identical to Example 1 (same `ORIGINAL_DST` + ext_proc
-wiring). The EPP and sidecar handle the P/D routing entirely through headers.
-
-A fully runnable docker-compose setup is in `examples/pd-file-discovery/`.
-
----
-
-## Backward Compatibility
-
-When no `discovery` section is present in the EPP config, the EPP falls back to
-Kubernetes-based discovery based on which CLI flags are provided:
-
-| CLI flags | Behavior |
-|-----------|----------|
-| `--pool-name` set (default) | Uses `inference-pool-discovery` -- watches pods matching the named `InferencePool` CRD. Requires a K8s cluster with the InferencePool CRD installed. |
-| `--endpoint-selector` set | Uses `static-selector-discovery` -- watches pods matching the given label selector in K8s. No InferencePool CRD required, but still requires a K8s cluster. |
-| Neither set | EPP fails to start: `--pool-name is required when no discovery plugin is configured` |
-
-Existing deployments that rely on the `--pool-name` flag continue to work without
-any config change. The `discovery` section is only needed when using a non-K8s
-plugin such as `file-discovery`.
