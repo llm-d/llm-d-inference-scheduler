@@ -34,13 +34,16 @@ type Registrant interface {
 
 // PendingRegistration describes a (source-type, extractor) dependency.
 // Extractor must be non-nil; registering a DataSource without an Extractor is not supported.
+// Extractor is held as plugin.Plugin and type-asserted at resolution time to the
+// variant interface matching the resolved source (PollingExtractor /
+// NotificationExtractor / EndpointExtractor); a mismatch errors at config load.
 // If DefaultSource is nil, IfMissing governs behavior when no matching source exists.
 // If DefaultSource is non-nil, it is registered as a new source when no match is found;
 // for NotificationSources its GVK() narrows the match.
 type PendingRegistration struct {
 	Owner         plugin.TypedName // registering plugin; used as map key + error context
 	SourceType    string           // TypedName.Type to match, e.g. "endpoint-notification-source"
-	Extractor     ExtractorBase    // required; extractor to wire to the matched source
+	Extractor     plugin.Plugin    // required; type-asserted to the matched source's variant at resolution
 	DefaultSource DataSource       // nil → no auto-create; non-nil → create if absent
 	IfMissing     MissingPolicy    // applies only when DefaultSource is nil
 }
