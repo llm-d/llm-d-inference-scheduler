@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -195,17 +194,6 @@ func setupK8sCluster() {
 	session, err := gexec.Start(command, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
-
-	// For Docker: pull with --platform to ensure platform-specific layers are cached
-	// before loading into KIND (avoids "content digest not found" with multi-arch images).
-	if containerRuntime == "docker" {
-		arch := runtime.GOARCH
-		for _, img := range []string{vllmSimImage, eppImage, sideCarImage, udsTokenizerImage} {
-			pull := exec.Command("docker", "pull", "--platform", "linux/"+arch, img)
-			pull.Stderr = ginkgo.GinkgoWriter
-			_ = pull.Run() // ignore failure — image may be local-only
-		}
-	}
 
 	kindLoadImage(vllmSimImage)
 	kindLoadImage(eppImage)
