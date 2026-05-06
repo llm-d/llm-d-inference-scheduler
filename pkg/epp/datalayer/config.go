@@ -17,19 +17,52 @@ limitations under the License.
 package datalayer
 
 import (
+	"fmt"
+
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
 // Config defines the configuration of EPP data layer, as the set of DataSources
-// and Extractors defined on them. Both poll-based and event-driven (notification)
-// sources are stored in Sources. Differentiation by type of source is handled during
-// the set-up phase.
+// and Extractors defined on them.
 type Config struct {
-	Sources []DataSourceConfig // the data sources configured in the data layer
+	Sources []DataSourceConfig
 }
 
-// DataSourceConfig defines the configuration of a specific DataSource
+// DataSourceConfig defines the configuration of a specific DataSource.
+//
+// Extractors are held as plugin.Plugin and type-asserted at Configure time to
+// the variant interface matching Plugin (PollingExtractor / NotificationExtractor
+// / EndpointExtractor). Mismatches surface as config-load errors.
 type DataSourceConfig struct {
-	Plugin     fwkdl.DataSource      // the data source plugin instance
-	Extractors []fwkdl.ExtractorBase // extractors defined for the data source
+	Plugin     fwkdl.DataSource
+	Extractors []fwkplugin.Plugin
+}
+
+// ResolveSource looks up ref via handle and asserts the plugin implements DataSource.
+func ResolveSource(handle fwkplugin.Handle, ref string) (fwkdl.DataSource, error) {
+	p := handle.Plugin(ref)
+	if p == nil {
+		return nil, fmt.Errorf("source plugin %q not registered", ref)
+	}
+	src, ok := p.(fwkdl.DataSource)
+	if !ok {
+		return nil, fmt.Errorf("source plugin %q does not implement DataSource", ref)
+	}
+	return src, nil
+}
+
+// assertAll type-asserts each plugin to T and returns the typed slice.
+// T is resolved at compile time at the call site; per-element conformance is
+// checked at runtime and surfaced as an error rather than a panic.
+func assertAll[T fwkplugin.Plugin](plugins []fwkplugin.Plugin, variant string) ([]T, error) {
+	out := make([]T, 0, len(plugins))
+	for _, p := range plugins {
+		e, ok := p.(T)
+		if !ok {
+			return nil, fmt.Errorf("plugin %s is not a %s", p.TypedName(), variant)
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }

@@ -30,20 +30,11 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 )
 
-// TODO:
-// currently the data store is expected to manage the state of multiple
-// Collectors (e.g., using sync.Map mapping pod to its Collector). Alternatively,
-// this can be encapsulated in this file, providing the data store with an interface
-// to only update on endpoint addition/change and deletion. This can also be used
-// to centrally track statistics such errors, active routines, etc.
-
 const (
 	defaultCollectionTimeout = time.Second
 )
 
 // Ticker implements a time source for periodic invocation.
-// The Ticker is passed in as parameter a Collector to allow control over time
-// progress in tests, ensuring tests are deterministic and fast.
 type Ticker interface {
 	Channel() <-chan time.Time
 	Stop()
@@ -56,22 +47,16 @@ type TimeTicker struct {
 
 // NewTimeTicker returns a new time.Ticker with the configured duration.
 func NewTimeTicker(d time.Duration) Ticker {
-	return &TimeTicker{
-		Ticker: time.NewTicker(d),
-	}
+	return &TimeTicker{Ticker: time.NewTicker(d)}
 }
 
 // Channel exposes the ticker's channel.
-func (t *TimeTicker) Channel() <-chan time.Time {
-	return t.C
-}
+func (t *TimeTicker) Channel() <-chan time.Time { return t.C }
 
 // Collector runs data collection for a single endpoint.
 //
-// Lifecycle contract: any in-flight write the collection goroutine performs
-// against the endpoint completes before Stop returns. Callers may therefore
-// mutate or release endpoint state immediately after Stop returns without
-// racing the collection goroutine.
+// Lifecycle: any in-flight write the collection goroutine performs against the
+// endpoint completes before Stop returns.
 type Collector struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -84,7 +69,7 @@ func NewCollector() *Collector {
 }
 
 // Start launches the collection goroutine.
-func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.ExtractorBase) error {
+func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.PollingExtractor) error {
 	if len(pollers) == 0 {
 		return errors.New("cannot start collector with empty sources")
 	}
@@ -97,16 +82,6 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint,
 		return err
 	}
 
-	// Filter to poll-capable extractors up front so the hot loop avoids per-tick type assertions.
-	pollingExtractors := make(map[string][]fwkdl.Extractor, len(extractors))
-	for name, exts := range extractors {
-		for _, ext := range exts {
-			if e, ok := ext.(fwkdl.Extractor); ok {
-				pollingExtractors[name] = append(pollingExtractors[name], e)
-			}
-		}
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cancel != nil {
@@ -114,7 +89,7 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint,
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
-	go c.run(ctx, ticker, ep, pollers, pollingExtractors)
+	go c.run(ctx, ticker, ep, pollers, extractors)
 	return nil
 }
 
@@ -129,7 +104,7 @@ func (c *Collector) Stop() {
 	}
 }
 
-func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) {
+func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.PollingExtractor) {
 	defer func() {
 		close(c.done)
 		ticker.Stop()
@@ -151,7 +126,7 @@ func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, p
 	}
 }
 
-func (c *Collector) pollOne(ctx context.Context, src fwkdl.PollingDataSource, ep fwkdl.Endpoint, extractors map[string][]fwkdl.Extractor, logger logr.Logger) {
+func (c *Collector) pollOne(ctx context.Context, src fwkdl.PollingDataSource, ep fwkdl.Endpoint, extractors map[string][]fwkdl.PollingExtractor, logger logr.Logger) {
 	tn := src.TypedName()
 
 	pollCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
@@ -166,12 +141,13 @@ func (c *Collector) pollOne(ctx context.Context, src fwkdl.PollingDataSource, ep
 		return
 	}
 
+	input := fwkdl.NewPollingInput(data, ep)
 	for _, ext := range extractors[tn.Name] {
 		if ctx.Err() != nil {
 			return
 		}
 		extCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
-		err := ext.Extract(extCtx, data, ep)
+		err := ext.Extract(extCtx, input)
 		cancel()
 		if err != nil {
 			extName := ext.TypedName()
