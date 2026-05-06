@@ -32,8 +32,8 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
-// Runtime manages data sources, extractors, their mapping, and endpoint lifecycle.
-// Per-variant state lives in dedicated managers; Runtime routes between them.
+// Runtime routes per-variant state to the matching manager and owns
+// per-endpoint Collectors and pending dependency resolution.
 type Runtime struct {
 	pollingInterval time.Duration
 
@@ -44,14 +44,15 @@ type Runtime struct {
 	pendingMu            sync.Mutex
 	pendingRegistrations []fwkdl.PendingRegistration
 
-	collectors sync.Map    // namespaced name -> *Collector (high-churn, sync.Map is appropriate)
-	logger     logr.Logger // set in Configure
+	// sync.Map: per-pod reconciles write concurrently to this map; the variant
+	// maps inside the managers don't (write-once at Configure).
+	collectors sync.Map
+	logger     logr.Logger
 }
 
 const defaultRefreshInterval = 50 * time.Millisecond
 
-// NewRuntime returns a Runtime with the given polling interval; non-positive
-// values fall back to defaultRefreshInterval.
+// NewRuntime returns a Runtime; non-positive interval falls back to defaultRefreshInterval.
 func NewRuntime(pollingInterval time.Duration) *Runtime {
 	interval := defaultRefreshInterval
 	if pollingInterval > 0 {
@@ -66,8 +67,7 @@ func NewRuntime(pollingInterval time.Duration) *Runtime {
 	}
 }
 
-// Configure transforms cfg into the Runtime's internal state and resolves any
-// code-registered pending dependencies.
+// Configure installs cfg's sources/extractors and resolves pending dependencies.
 func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtractorType string, logger logr.Logger) error {
 	hasPending := len(r.pendingRegistrations) > 0
 	if (cfg == nil || len(cfg.Sources) == 0) && !hasPending {
@@ -108,8 +108,7 @@ func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtrac
 	return nil
 }
 
-// Register stores a pending source/extractor dependency declared by a plugin.
-// Resolved by Configure() after user config is processed.
+// Register queues a pending dependency for Configure to resolve.
 func (r *Runtime) Register(reg fwkdl.PendingRegistration) error {
 	if reg.Extractor == nil {
 		return fmt.Errorf("plugin %s: PendingRegistration.Extractor must not be nil", reg.Owner)
@@ -120,7 +119,7 @@ func (r *Runtime) Register(reg fwkdl.PendingRegistration) error {
 	return nil
 }
 
-// addSource dispatches src to the matching variant's typed handler.
+// addSource dispatches to the matching variant's handler.
 func (r *Runtime) addSource(src fwkdl.DataSource, exts []fwkplugin.Plugin, disallowedType string) error {
 	switch s := src.(type) {
 	case fwkdl.PollingDataSource:
@@ -161,8 +160,7 @@ func (r *Runtime) addEndpoint(src fwkdl.EndpointSource, exts []fwkplugin.Plugin,
 	return r.endpoint.Register(src, typed)
 }
 
-// appendPendingExtractor dispatches a single code-registered extractor to the
-// matching variant's append-with-dedup op.
+// appendPendingExtractor dispatches one code-registered extractor to the matching variant.
 func (r *Runtime) appendPendingExtractor(srcName string, src fwkdl.DataSource, ext fwkplugin.Plugin, disallowedType string) error {
 	switch s := src.(type) {
 	case fwkdl.PollingDataSource:
@@ -206,8 +204,8 @@ func (r *Runtime) appendPendingEndpoint(srcName string, src fwkdl.EndpointSource
 	return nil
 }
 
-// resolvePending matches a pending dependency to a configured source (or
-// auto-creates from DefaultSource), then appends the extractor.
+// resolvePending matches a pending dependency to a configured source, falls
+// back to its DefaultSource, then appends the extractor.
 func (r *Runtime) resolvePending(pending fwkdl.PendingRegistration, disallowedType string, logger logr.Logger) error {
 	var gvkFilter *schema.GroupVersionKind
 	if ns, ok := pending.DefaultSource.(fwkdl.NotificationSource); ok {
@@ -237,8 +235,7 @@ func (r *Runtime) resolvePending(pending fwkdl.PendingRegistration, disallowedTy
 	return r.appendPendingExtractor(srcName, matchedSrc, pending.Extractor, disallowedType)
 }
 
-// findSourceByType walks each manager looking for a source whose TypedName.Type
-// matches sourceType. For NotificationSources, also filters by GVK if non-nil.
+// findSourceByType walks all managers; gvkFilter narrows notification matches.
 func (r *Runtime) findSourceByType(sourceType string, gvkFilter *schema.GroupVersionKind) (string, fwkdl.DataSource) {
 	if name, src, ok := r.polling.FindByType(sourceType, nil); ok {
 		return name, src
@@ -271,7 +268,7 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 	return nil
 }
 
-// Stop terminates data collection and stops all per-endpoint collectors.
+// Stop halts all per-endpoint collectors.
 func (r *Runtime) Stop() error {
 	r.collectors.Range(func(_, val any) bool {
 		if c, ok := val.(*Collector); ok {
@@ -329,8 +326,7 @@ func (r *Runtime) ReleaseEndpoint(ep fwkdl.Endpoint) {
 	}
 }
 
-// dispatchEndpointEvent routes an endpoint lifecycle event to all registered
-// EndpointSources and their extractors.
+// dispatchEndpointEvent fans event out to every EndpointSource and its extractors.
 func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger, event fwkdl.EndpointEvent) {
 	if r.endpoint.IsEmpty() {
 		return
@@ -353,8 +349,8 @@ func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger,
 	}
 }
 
-// validateExtractors enforces the disallowed-type guard and dispatches the
-// source's optional Validator over the extractors.
+// validateExtractors applies the disallowed-type guard and the source's
+// optional Validator[E] to each extractor.
 func validateExtractors[E fwkplugin.Plugin](src fwkdl.DataSource, exts []E, disallowedType string) error {
 	validator, hasValidator := src.(fwkdl.Validator[E])
 	for _, ext := range exts {
@@ -384,7 +380,7 @@ func validateNotificationGVK(src fwkdl.NotificationSource, exts []fwkdl.Notifica
 	return nil
 }
 
-// assertExtractors types exts as []E and runs common validation.
+// assertExtractors types exts to []E and runs validateExtractors on the result.
 func assertExtractors[E fwkplugin.Plugin](
 	src fwkdl.DataSource, exts []fwkplugin.Plugin, variantName, disallowedType string,
 ) ([]E, error) {

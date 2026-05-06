@@ -48,14 +48,13 @@ type Extractor[T any] interface {
 }
 
 // PollingInput pairs a poll result with the endpoint it belongs to.
-// TODO: parametrize PollingDataSource.Poll over T and drop the `any` here so
-// polling is typed end-to-end.
+// TODO: parametrize PollingDataSource.Poll over T to drop this `any`.
 type PollingInput struct {
 	Data     any
 	Endpoint Endpoint
 }
 
-// NewPollingInput pairs poll data with the endpoint it belongs to.
+// NewPollingInput builds a PollingInput from poll data and its endpoint.
 func NewPollingInput(data any, ep Endpoint) PollingInput {
 	return PollingInput{Data: data, Endpoint: ep}
 }
@@ -73,10 +72,9 @@ type NotificationExtractor interface {
 	GVK() schema.GroupVersionKind
 }
 
-// Validator is an optional interface that a DataSource can implement to
-// perform additional validation on extractors of variant T. The runtime
-// asserts to Validator[E] only when E is the source's variant, so
-// implementers receive a typed extractor without further type assertions.
+// Validator is an optional source-side hook for extra extractor validation;
+// the runtime invokes Validator[E] only when E matches the source's variant,
+// so implementers receive a typed extractor.
 type Validator[T plugin.Plugin] interface {
 	Validate(T) error
 }

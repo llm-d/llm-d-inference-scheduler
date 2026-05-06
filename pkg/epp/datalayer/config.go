@@ -23,23 +23,19 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
-// Config defines the configuration of EPP data layer, as the set of DataSources
-// and Extractors defined on them.
+// Config holds the data layer's configured sources and their extractors.
 type Config struct {
 	Sources []DataSourceConfig
 }
 
-// DataSourceConfig defines the configuration of a specific DataSource.
-//
-// Extractors are held as plugin.Plugin and type-asserted at Configure time to
-// the variant interface matching Plugin (PollingExtractor / NotificationExtractor
-// / EndpointExtractor). Mismatches surface as config-load errors.
+// DataSourceConfig pairs a source plugin with its extractor plugins. Extractors
+// are typed at Configure time against Plugin's variant; mismatches error out.
 type DataSourceConfig struct {
 	Plugin     fwkdl.DataSource
 	Extractors []fwkplugin.Plugin
 }
 
-// ResolveSource looks up ref via handle and asserts the plugin implements DataSource.
+// ResolveSource looks up ref and asserts the plugin implements DataSource.
 func ResolveSource(handle fwkplugin.Handle, ref string) (fwkdl.DataSource, error) {
 	p := handle.Plugin(ref)
 	if p == nil {
@@ -52,9 +48,9 @@ func ResolveSource(handle fwkplugin.Handle, ref string) (fwkdl.DataSource, error
 	return src, nil
 }
 
-// assertAll type-asserts each plugin to T and returns the typed slice.
-// T is resolved at compile time at the call site; per-element conformance is
-// checked at runtime and surfaced as an error rather than a panic.
+// assertAll types each plugin to T. T is bound at compile time at the call
+// site; per-element conformance is a runtime check that returns an error
+// rather than panicking, because plugins arrive as the erased plugin.Plugin.
 func assertAll[T fwkplugin.Plugin](plugins []fwkplugin.Plugin, variant string) ([]T, error) {
 	out := make([]T, 0, len(plugins))
 	for _, p := range plugins {

@@ -9,10 +9,7 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
-// sourceManager owns a variant's typed source + extractor maps under a single
-// RWMutex. Adding a new variant means instantiating a new sourceManager (or
-// embedding one in a variant-specific wrapper for extra fields like
-// notificationManager's gvkToName).
+// sourceManager owns a variant's typed source + extractor maps under one RWMutex.
 type sourceManager[S fwkdl.DataSource, E fwkplugin.Plugin] struct {
 	name       string
 	mu         sync.RWMutex
@@ -28,8 +25,7 @@ func newSourceManager[S fwkdl.DataSource, E fwkplugin.Plugin](name string) *sour
 	}
 }
 
-// Register installs src and (if non-empty) exts under src's name. Returns an
-// error if a source with the same name is already registered.
+// Register installs src and exts under src's name. Errors on duplicate name.
 func (m *sourceManager[S, E]) Register(src S, exts []E) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -57,7 +53,7 @@ func (m *sourceManager[S, E]) AppendExtractor(srcName string, ext E) {
 	m.extractors[srcName] = append(m.extractors[srcName], ext)
 }
 
-// Sources returns a snapshot copy of the source map.
+// Sources returns a snapshot of the source map.
 func (m *sourceManager[S, E]) Sources() map[string]S {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -68,9 +64,7 @@ func (m *sourceManager[S, E]) Sources() map[string]S {
 	return out
 }
 
-// Extractors returns a snapshot of the extractor map. Each slice value is a
-// fresh copy; mutating the returned map or its slices does not affect the
-// manager's state.
+// Extractors returns a snapshot of the extractor map; slice values are fresh copies.
 func (m *sourceManager[S, E]) Extractors() map[string][]E {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -103,9 +97,9 @@ func (m *sourceManager[S, E]) IsEmpty() bool {
 	return len(m.sources) == 0
 }
 
-// FindByType returns the first matching source (in sorted-by-name order, so
-// behavior is stable across runs even when multiple sources share a Type).
-// match (if non-nil) is an additional filter applied to candidates.
+// FindByType returns the first source whose TypedName.Type matches; iteration
+// is sorted by name so first-match is stable across runs. match (if non-nil)
+// further filters candidates.
 func (m *sourceManager[S, E]) FindByType(sourceType string, match func(S) bool) (string, S, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -135,10 +129,10 @@ func (m *sourceManager[S, E]) Count() int {
 	return len(m.sources)
 }
 
-// notificationManager extends sourceManager with GVK uniqueness tracking.
+// notificationManager adds GVK-uniqueness tracking on top of sourceManager.
+// gvkToName is guarded by the embedded sourceManager's mu.
 type notificationManager struct {
 	*sourceManager[fwkdl.NotificationSource, fwkdl.NotificationExtractor]
-	// gvkToName is protected by the embedded sourceManager's mu (held during Register/Append).
 	gvkToName map[string]string
 }
 
@@ -149,7 +143,7 @@ func newNotificationManager() *notificationManager {
 	}
 }
 
-// Register installs src after enforcing GVK and name uniqueness within this manager.
+// Register installs src after enforcing both name and GVK uniqueness.
 func (m *notificationManager) Register(src fwkdl.NotificationSource, exts []fwkdl.NotificationExtractor) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
