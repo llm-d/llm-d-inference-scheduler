@@ -139,8 +139,7 @@ func (r *Runtime) addPolling(src fwkdl.PollingDataSource, exts []fwkplugin.Plugi
 	if err != nil {
 		return err
 	}
-	r.polling.Register(src, typed)
-	return nil
+	return r.polling.Register(src, typed)
 }
 
 func (r *Runtime) addNotification(src fwkdl.NotificationSource, exts []fwkplugin.Plugin, disallowedType string) error {
@@ -159,8 +158,7 @@ func (r *Runtime) addEndpoint(src fwkdl.EndpointSource, exts []fwkplugin.Plugin,
 	if err != nil {
 		return err
 	}
-	r.endpoint.Register(src, typed)
-	return nil
+	return r.endpoint.Register(src, typed)
 }
 
 // appendPendingExtractor dispatches a single code-registered extractor to the

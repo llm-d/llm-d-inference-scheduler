@@ -2,6 +2,7 @@ package datalayer
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
@@ -27,14 +28,20 @@ func newSourceManager[S fwkdl.DataSource, E fwkplugin.Plugin](name string) *sour
 	}
 }
 
-// Register installs src and (if non-empty) exts under src's name.
-func (m *sourceManager[S, E]) Register(src S, exts []E) {
+// Register installs src and (if non-empty) exts under src's name. Returns an
+// error if a source with the same name is already registered.
+func (m *sourceManager[S, E]) Register(src S, exts []E) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sources[src.TypedName().Name] = src
-	if len(exts) > 0 {
-		m.extractors[src.TypedName().Name] = exts
+	srcName := src.TypedName().Name
+	if _, exists := m.sources[srcName]; exists {
+		return fmt.Errorf("duplicate %s source name %q", m.name, srcName)
 	}
+	m.sources[srcName] = src
+	if len(exts) > 0 {
+		m.extractors[srcName] = exts
+	}
+	return nil
 }
 
 // AppendExtractor appends ext to srcName's extractor list, deduping by type.
@@ -96,12 +103,19 @@ func (m *sourceManager[S, E]) IsEmpty() bool {
 	return len(m.sources) == 0
 }
 
-// FindByType returns the first source whose TypedName.Type matches sourceType.
+// FindByType returns the first matching source (in sorted-by-name order, so
+// behavior is stable across runs even when multiple sources share a Type).
 // match (if non-nil) is an additional filter applied to candidates.
 func (m *sourceManager[S, E]) FindByType(sourceType string, match func(S) bool) (string, S, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for name, src := range m.sources {
+	names := make([]string, 0, len(m.sources))
+	for n := range m.sources {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		src := m.sources[name]
 		if src.TypedName().Type != sourceType {
 			continue
 		}
@@ -135,16 +149,19 @@ func newNotificationManager() *notificationManager {
 	}
 }
 
-// Register installs src after enforcing GVK uniqueness within this manager.
+// Register installs src after enforcing GVK and name uniqueness within this manager.
 func (m *notificationManager) Register(src fwkdl.NotificationSource, exts []fwkdl.NotificationExtractor) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	srcName := src.TypedName().Name
+	if _, exists := m.sources[srcName]; exists {
+		return fmt.Errorf("duplicate notification source name %q", srcName)
+	}
 	gvk := src.GVK().String()
 	if existing, exists := m.gvkToName[gvk]; exists {
 		return fmt.Errorf("duplicate notification source GVK %s: already used by source %s, cannot add %s",
 			gvk, existing, src.TypedName().String())
 	}
-	srcName := src.TypedName().Name
 	m.sources[srcName] = src
 	if len(exts) > 0 {
 		m.extractors[srcName] = exts
