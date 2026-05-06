@@ -49,7 +49,7 @@ func loadDefaultConfig() *configapi.EndpointPickerConfig {
 	prefixCacheScorerWeight := 3.0
 	return &configapi.EndpointPickerConfig{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "inference.networking.x-k8s.io/v1alpha1",
+			APIVersion: "llm-d.ai/v1alpha1",
 			Kind:       "EndpointPickerConfig",
 		},
 		FeatureGates: []string{}, // Data layer is now enabled by default (no feature gate needed)

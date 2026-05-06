@@ -22,7 +22,9 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -42,13 +44,27 @@ import (
 )
 
 var (
-	scheme                   = runtime.NewScheme()
-	registeredFeatureGatesMu sync.RWMutex
-	registeredFeatureGates   = sets.New[string]()
+	scheme                       = runtime.NewScheme()
+	registeredFeatureGatesMu     sync.RWMutex
+	registeredFeatureGates       = sets.New[string]()
+	deprecatedSchemeGroupVersion = schema.GroupVersion{Group: "inference.networking.x-k8s.io", Version: "v1alpha1"}
 )
 
 func init() {
+	// Support deprecated pseudo config CRD
+	var builder runtime.SchemeBuilder
+	(&builder).Register(func(scheme *runtime.Scheme) error {
+		scheme.AddKnownTypes(deprecatedSchemeGroupVersion,
+			&configapi.EndpointPickerConfig{},
+		)
+		// AddToGroupVersion allows the serialization of client types like ListOptions.
+		v1.AddToGroupVersion(scheme, deprecatedSchemeGroupVersion)
+		return nil
+	})
+
 	utilruntime.Must(configapi.Install(scheme))
+	utilruntime.Must((&builder).AddToScheme(scheme))
+
 }
 
 // RegisterFeatureGate registers a feature gate name for validation purposes.
@@ -68,6 +84,12 @@ func LoadRawConfig(configBytes []byte, logger logr.Logger) (*configapi.EndpointP
 		if err != nil {
 			return nil, nil, err
 		}
+
+		if rawConfig.GroupVersionKind().GroupVersion() == deprecatedSchemeGroupVersion {
+			logger.Info("DEPRECATION: apiVersion inference.networking.x-k8s.io/v1alpha1/EndpointPickerConfig is deprecated",
+				"replacement", "llm-d.ai/v1alpha1/EndpointPickerConfig")
+		}
+
 		logger.Info("Loaded raw configuration", "config", rawConfig.String())
 	} else {
 		logger.Info("A configuration wasn't specified. A default one is being used.")

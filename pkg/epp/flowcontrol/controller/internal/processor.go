@@ -388,7 +388,8 @@ func (sp *ShardProcessor) selectItem(
 		return nil, fmt.Errorf("FairnessPolicy %q failed to select queue: %w", fairnessP.TypedName(), err)
 	}
 	if queue == nil {
-		return nil, nil
+		// nothing to select
+		return nil, nil //nolint:nilnil
 	}
 	// The queue itself is responsible for explicit ordering via its configured OrderingPolicy.
 	// We simply peek at the head.

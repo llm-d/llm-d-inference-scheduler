@@ -86,7 +86,7 @@ Specifically, this configuration establishes the following components:
 The configuration text has the following form:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - ....
@@ -145,7 +145,7 @@ The fields in a schedulingProfile entry are:
 A complete configuration might look like this:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: precise-prefix-cache-scorer

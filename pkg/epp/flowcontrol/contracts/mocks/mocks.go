@@ -31,6 +31,7 @@ package mocks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -73,21 +74,21 @@ func (m *MockRegistryShard) ManagedQueue(key flowcontrol.FlowKey) (contracts.Man
 	if m.ManagedQueueFunc != nil {
 		return m.ManagedQueueFunc(key)
 	}
-	return nil, nil
+	return nil, errors.New("sentinel error for mock shard")
 }
 
 func (m *MockRegistryShard) FairnessPolicy(priority int) (flowcontrol.FairnessPolicy, error) {
 	if m.FairnessPolicyFunc != nil {
 		return m.FairnessPolicyFunc(priority)
 	}
-	return nil, nil
+	return nil, errors.New("sentinel error for mock shard")
 }
 
 func (m *MockRegistryShard) PriorityBandAccessor(priority int) (flowcontrol.PriorityBandAccessor, error) {
 	if m.PriorityBandAccessorFunc != nil {
 		return m.PriorityBandAccessorFunc(priority)
 	}
-	return nil, nil
+	return nil, errors.New("sentinel error for mock shard")
 }
 
 func (m *MockRegistryShard) AllOrderedPriorityLevels() []int {
@@ -184,7 +185,7 @@ func (m *MockSafeQueue) Remove(handle flowcontrol.QueueItemHandle) (flowcontrol.
 	if m.RemoveFunc != nil {
 		return m.RemoveFunc(handle)
 	}
-	return nil, nil
+	return nil, errors.New("sentinel error for mock queue")
 }
 
 func (m *MockSafeQueue) Cleanup(predicate contracts.PredicateFunc) []flowcontrol.QueueItemAccessor {

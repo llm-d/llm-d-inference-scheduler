@@ -51,14 +51,14 @@ type DestinationEndpointServedVerifier struct {
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
-func (f *DestinationEndpointServedVerifier) TypedName() fwkplugin.TypedName {
-	return f.typedName
+func (desv *DestinationEndpointServedVerifier) TypedName() fwkplugin.TypedName {
+	return desv.typedName
 }
 
 // WithName sets the name of the filter.
-func (f *DestinationEndpointServedVerifier) WithName(name string) *DestinationEndpointServedVerifier {
-	f.typedName.Name = name
-	return f
+func (desv *DestinationEndpointServedVerifier) WithName(name string) *DestinationEndpointServedVerifier {
+	desv.typedName.Name = name
+	return desv
 }
 
 // DestinationEndpointServedVerifierFactory defines the factory function for DestinationEndpointServedVerifier.
@@ -71,8 +71,8 @@ func NewDestinationEndpointServedVerifier() *DestinationEndpointServedVerifier {
 }
 
 // ResponseHeader is the handler for the ResponseHeader extension point.
-func (p *DestinationEndpointServedVerifier) ResponseHeader(ctx context.Context, request *schedulingtypes.InferenceRequest, response *requestcontrol.Response, _ *fwkdl.EndpointMetadata) {
-	logger := log.FromContext(ctx).WithName(p.TypedName().String())
+func (desv *DestinationEndpointServedVerifier) ResponseHeader(ctx context.Context, request *schedulingtypes.InferenceRequest, response *requestcontrol.Response, _ *fwkdl.EndpointMetadata) {
+	logger := log.FromContext(ctx).WithName(desv.TypedName().String())
 	logger.V(logging.DEBUG).Info("Verifying destination endpoint served")
 
 	reqMetadata := response.ReqMetadata

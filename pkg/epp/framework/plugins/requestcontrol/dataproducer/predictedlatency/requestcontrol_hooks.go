@@ -40,7 +40,7 @@ var _ requestcontrol.ResponseBodyProcessor = &PredictedLatency{}
 
 // --- RequestControl Hooks ---
 
-func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingtypes.InferenceRequest, schedulingResult *schedulingtypes.SchedulingResult) {
+func (pl *PredictedLatency) PreRequest(ctx context.Context, request *schedulingtypes.InferenceRequest, schedulingResult *schedulingtypes.SchedulingResult) {
 	logger := log.FromContext(ctx)
 	if request == nil {
 		logger.V(logutil.DEBUG).Info("PredictedLatency.PreRequest: request is nil, skipping")
@@ -53,7 +53,7 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 	}
 
 	targetMetadata := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName].TargetEndpoints[0].GetMetadata()
-	if !t.checkPredictor(logger, targetMetadata) {
+	if !pl.checkPredictor(logger, targetMetadata) {
 		return
 	}
 
@@ -70,10 +70,10 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 
 	id := request.Headers[reqcommon.RequestIDHeaderKey]
 
-	actual, _ := t.runningRequestLists.LoadOrStore(endpointName, newRequestPriorityQueue())
+	actual, _ := pl.runningRequestLists.LoadOrStore(endpointName, newRequestPriorityQueue())
 	endpointRequestList := actual.(*requestPriorityQueue)
 
-	predictedLatencyCtx, err := t.getPredictedLatencyContextForRequest(request)
+	predictedLatencyCtx, err := pl.getPredictedLatencyContextForRequest(request)
 	if err != nil {
 		id := request.Headers[reqcommon.RequestIDHeaderKey]
 		logger.V(logutil.DEBUG).Info("PredictedLatency.PreRequest: Failed to get SLO context for request", "error", err, "requestID", id)
@@ -100,17 +100,17 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 	decodePodKey := endpointName.String()
 	if predictedLatencyCtx.prefillTargetMetadata != nil {
 		prefillPodKey := predictedLatencyCtx.prefillTargetMetadata.NamespacedName.String()
-		t.endpointCounter(&t.prefillTokensInFlight, prefillPodKey).Add(int64(predictedLatencyCtx.inputTokenCount))
-		predictedLatencyCtx.prefillTokensAtDispatchOnPrefill = t.endpointCounter(&t.prefillTokensInFlight, prefillPodKey).Load()
+		pl.endpointCounter(&pl.prefillTokensInFlight, prefillPodKey).Add(int64(predictedLatencyCtx.inputTokenCount))
+		predictedLatencyCtx.prefillTokensAtDispatchOnPrefill = pl.endpointCounter(&pl.prefillTokensInFlight, prefillPodKey).Load()
 	}
-	t.endpointCounter(&t.prefillTokensInFlight, decodePodKey).Add(int64(predictedLatencyCtx.inputTokenCount))
-	predictedLatencyCtx.prefillTokensAtDispatch = t.endpointCounter(&t.prefillTokensInFlight, decodePodKey).Load()
+	pl.endpointCounter(&pl.prefillTokensInFlight, decodePodKey).Add(int64(predictedLatencyCtx.inputTokenCount))
+	predictedLatencyCtx.prefillTokensAtDispatch = pl.endpointCounter(&pl.prefillTokensInFlight, decodePodKey).Load()
 	predictedLatencyCtx.decodeTokensAtDispatch = 0
 
 	processPreRequestForLatencyPrediction(ctx, predictedLatencyCtx)
 }
 
-func (t *PredictedLatency) ResponseHeader(ctx context.Context, request *schedulingtypes.InferenceRequest, response *requestcontrol.Response, targetMetadata *fwkdl.EndpointMetadata) {
+func (pl *PredictedLatency) ResponseHeader(ctx context.Context, request *schedulingtypes.InferenceRequest, response *requestcontrol.Response, targetMetadata *fwkdl.EndpointMetadata) {
 	logger := log.FromContext(ctx)
 	if request == nil {
 		logger.V(logutil.DEBUG).Info("PredictedLatency.ResponseReceived: request is nil, skipping")
@@ -119,18 +119,18 @@ func (t *PredictedLatency) ResponseHeader(ctx context.Context, request *scheduli
 }
 
 // ResponseBody handles both per-chunk processing and request completion logic.
-func (t *PredictedLatency) ResponseBody(ctx context.Context, request *schedulingtypes.InferenceRequest, response *requestcontrol.Response, targetMetadata *fwkdl.EndpointMetadata) {
+func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *schedulingtypes.InferenceRequest, response *requestcontrol.Response, targetMetadata *fwkdl.EndpointMetadata) {
 	logger := log.FromContext(ctx)
 	if request == nil {
 		logger.V(logutil.DEBUG).Info("PredictedLatency.ResponseBody: request is nil, skipping")
 		return
 	}
-	if !t.checkPredictor(logger, targetMetadata) {
+	if !pl.checkPredictor(logger, targetMetadata) {
 		return
 	}
 
 	now := time.Now()
-	predictedLatencyCtx, err := t.getPredictedLatencyContextForRequest(request)
+	predictedLatencyCtx, err := pl.getPredictedLatencyContextForRequest(request)
 	if err != nil {
 		id := request.Headers[reqcommon.RequestIDHeaderKey]
 		logger.V(logutil.DEBUG).Info("PredictedLatency.ResponseBody: Failed to get SLO context", "error", err, "requestID", id)
@@ -138,25 +138,25 @@ func (t *PredictedLatency) ResponseBody(ctx context.Context, request *scheduling
 	}
 
 	if predictedLatencyCtx.ttft == 0 {
-		if t.config.StreamingMode && !response.EndOfStream {
-			processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, t.config.EndpointRoleLabel, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxDecodeTokenSamplesForPrediction)
+		if pl.config.StreamingMode && !response.EndOfStream {
+			processFirstTokenForLatencyPrediction(ctx, pl.latencypredictor, pl.config.StreamingMode, pl.config.EndpointRoleLabel, predictedLatencyCtx, now, pl.config.SamplingMean, pl.config.MaxDecodeTokenSamplesForPrediction)
 
 			// Only decrement if PreRequest actually incremented the prefill pod counter.
 			// If PrepareData timed out, PreRequest may have skipped incrementing, and
 			// decrementing here would drift the counter negative.
 			if predictedLatencyCtx.prefillTargetMetadata != nil && predictedLatencyCtx.prefillTokensAtDispatchOnPrefill > 0 {
 				prefillPodKey := predictedLatencyCtx.prefillTargetMetadata.NamespacedName.String()
-				t.decrementEndpointCounter(&t.prefillTokensInFlight, prefillPodKey, int64(predictedLatencyCtx.inputTokenCount))
+				pl.decrementEndpointCounter(&pl.prefillTokensInFlight, prefillPodKey, int64(predictedLatencyCtx.inputTokenCount))
 			}
 		}
 	} else {
-		processTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.EndpointRoleLabel, predictedLatencyCtx, targetMetadata, now, t.config.SamplingMean, t.config.MaxDecodeTokenSamplesForPrediction)
+		processTokenForLatencyPrediction(ctx, pl.latencypredictor, pl.config.EndpointRoleLabel, predictedLatencyCtx, targetMetadata, now, pl.config.SamplingMean, pl.config.MaxDecodeTokenSamplesForPrediction)
 	}
 
 	if response.EndOfStream {
 		ttftNotYetRecorded := predictedLatencyCtx.ttft == 0
-		if !t.config.StreamingMode {
-			processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, t.config.EndpointRoleLabel, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxDecodeTokenSamplesForPrediction)
+		if !pl.config.StreamingMode {
+			processFirstTokenForLatencyPrediction(ctx, pl.latencypredictor, pl.config.StreamingMode, pl.config.EndpointRoleLabel, predictedLatencyCtx, now, pl.config.SamplingMean, pl.config.MaxDecodeTokenSamplesForPrediction)
 		}
 
 		if predictedLatencyCtx.ttft > 0 {
@@ -184,7 +184,7 @@ func (t *PredictedLatency) ResponseBody(ctx context.Context, request *scheduling
 
 			if m, err := getLatestMetricsForProfile(predictedLatencyCtx, ""); err == nil {
 				entry := buildTrainingEntry(
-					t.config.EndpointRoleLabel,
+					pl.config.EndpointRoleLabel,
 					targetMetadata,
 					m,
 					predictedLatencyCtx.promptText,
@@ -196,7 +196,7 @@ func (t *PredictedLatency) ResponseBody(ctx context.Context, request *scheduling
 				)
 				entry.PrefillTokensInFlight = predictedLatencyCtx.prefillTokensAtDispatch
 				entry.DecodeTokensInFlight = predictedLatencyCtx.decodeTokensAtDispatch
-				if err := t.latencypredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
+				if err := pl.latencypredictor.AddTrainingDataBulk([]latencypredictor.TrainingEntry{entry}); err != nil {
 					logger.V(logutil.DEBUG).Error(err, "record TPOT training failed")
 				}
 			}
@@ -209,24 +209,24 @@ func (t *PredictedLatency) ResponseBody(ctx context.Context, request *scheduling
 		// here would orphan the pod's counter into negative territory.
 		if ttftNotYetRecorded && predictedLatencyCtx.prefillTargetMetadata != nil && predictedLatencyCtx.prefillTokensAtDispatchOnPrefill > 0 {
 			prefillPodKey := predictedLatencyCtx.prefillTargetMetadata.NamespacedName.String()
-			t.decrementEndpointCounter(&t.prefillTokensInFlight, prefillPodKey, int64(predictedLatencyCtx.inputTokenCount))
+			pl.decrementEndpointCounter(&pl.prefillTokensInFlight, prefillPodKey, int64(predictedLatencyCtx.inputTokenCount))
 		}
 		if predictedLatencyCtx.prefillTokensAtDispatch > 0 {
-			t.decrementEndpointCounter(&t.prefillTokensInFlight, decodePodKey, int64(predictedLatencyCtx.inputTokenCount))
+			pl.decrementEndpointCounter(&pl.prefillTokensInFlight, decodePodKey, int64(predictedLatencyCtx.inputTokenCount))
 		}
 
 		id := request.Headers[reqcommon.RequestIDHeaderKey]
-		t.removeRequestFromQueue(id, predictedLatencyCtx)
-		t.deletePredictedLatencyContextForRequest(request)
+		pl.removeRequestFromQueue(id, predictedLatencyCtx)
+		pl.deletePredictedLatencyContextForRequest(request)
 	}
 }
 
-func (t *PredictedLatency) checkPredictor(logger logr.Logger, metadata *fwkdl.EndpointMetadata) bool {
+func (pl *PredictedLatency) checkPredictor(logger logr.Logger, metadata *fwkdl.EndpointMetadata) bool {
 	if metadata == nil {
 		logger.V(logutil.TRACE).Info("PredictedLatency: Skipping hook because no target metadata was provided.")
 		return false
 	}
-	if t.latencypredictor == nil {
+	if pl.latencypredictor == nil {
 		logger.V(logutil.TRACE).Info("PredictedLatency: Skipping hook because predictor missing")
 		return false
 	}

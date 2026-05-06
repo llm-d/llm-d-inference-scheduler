@@ -38,7 +38,8 @@ func parseStringToLoRASpec(spec string) (*LoRASpec, error) {
 		return nil, err
 	}
 	if baseSpec == nil {
-		return nil, nil // empty string → disabled; preserve nil-means-disabled contract
+		// empty string → disabled; preserve nil-means-disabled contract
+		return nil, nil //nolint:nilnil
 	}
 	return &LoRASpec{Spec: baseSpec}, nil
 }

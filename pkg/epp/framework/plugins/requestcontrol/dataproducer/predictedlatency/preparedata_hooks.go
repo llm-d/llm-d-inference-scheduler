@@ -33,11 +33,11 @@ var _ requestcontrol.DataProducer = &PredictedLatency{}
 
 // PrepareRequestData prepares the SLO context for the request, including
 // parsing SLO headers, gathering prefix cache scores, and generating predictions.
-func (s *PredictedLatency) PrepareRequestData(ctx context.Context, request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
+func (pl *PredictedLatency) PrepareRequestData(ctx context.Context, request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
 	logger := log.FromContext(ctx)
-	predictedLatencyCtx := s.getOrMakePredictedLatencyContextForRequest(request)
+	predictedLatencyCtx := pl.getOrMakePredictedLatencyContextForRequest(request)
 
-	s.parseSLOHeaders(ctx, request, predictedLatencyCtx)
+	pl.parseSLOHeaders(ctx, request, predictedLatencyCtx)
 	var prefixCacheScore float64
 	for _, endpoint := range endpoints {
 
@@ -56,18 +56,18 @@ func (s *PredictedLatency) PrepareRequestData(ctx context.Context, request *sche
 		}
 		predictedLatencyCtx.prefixCacheScoresForEndpoints[endpoint.GetMetadata().NamespacedName.Name] = prefixCacheScore
 	}
-	if !s.config.PredictInPrepareData {
+	if !pl.config.PredictInPrepareData {
 		logger.V(logutil.DEBUG).Info("PredictInPrepareData disabled, skipping predictions")
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		s.setPredictedLatencyContextForRequest(request, predictedLatencyCtx)
+		pl.setPredictedLatencyContextForRequest(request, predictedLatencyCtx)
 		return nil
 	}
 
-	predictions, err := s.generatePredictions(ctx, predictedLatencyCtx, endpoints)
+	predictions, err := pl.generatePredictions(ctx, predictedLatencyCtx, endpoints)
 	if err == nil && len(predictions) == len(endpoints) {
-		s.updateRequestContextWithPredictions(predictedLatencyCtx, predictions)
+		pl.updateRequestContextWithPredictions(predictedLatencyCtx, predictions)
 
 		// Store predictions in endpoint attributes
 		for _, pred := range predictions {
@@ -79,7 +79,7 @@ func (s *PredictedLatency) PrepareRequestData(ctx context.Context, request *sche
 					pred.Headroom, // Maps to TPOTHeadroom
 					pred.TTFT,
 					pred.TPOT,
-					s.getEndpointRunningRequestCount(pred.Endpoint),
+					pl.getEndpointRunningRequestCount(pred.Endpoint),
 				)
 				pred.Endpoint.Put(attrlatency.LatencyPredictionInfoKey, latencyInfo)
 				logger.V(logutil.DEBUG).Info("Stored latency prediction in endpoint",
@@ -101,16 +101,16 @@ func (s *PredictedLatency) PrepareRequestData(ctx context.Context, request *sche
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.setPredictedLatencyContextForRequest(request, predictedLatencyCtx)
+	pl.setPredictedLatencyContextForRequest(request, predictedLatencyCtx)
 	return nil
 }
 
-func (p *PredictedLatency) Produces() map[string]any {
+func (pl *PredictedLatency) Produces() map[string]any {
 	return map[string]any{
 		attrlatency.LatencyPredictionInfoKey: attrlatency.LatencyPredictionInfo{},
 	}
 }
 
-func (p *PredictedLatency) Consumes() map[string]any {
+func (pl *PredictedLatency) Consumes() map[string]any {
 	return map[string]any{attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{}}
 }

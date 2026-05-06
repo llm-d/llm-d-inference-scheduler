@@ -25,7 +25,7 @@ func TestScorer(t *testing.T) {
 			name:       "precise prefix cache scorer",
 			pluginName: "precisePrefixCache",
 			configText: `
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - name: precisePrefixCache

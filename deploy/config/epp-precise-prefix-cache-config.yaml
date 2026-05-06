@@ -1,5 +1,5 @@
 # Sample EPP configuration with the precise-prefix-cache scorer.
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
   - type: tokenizer

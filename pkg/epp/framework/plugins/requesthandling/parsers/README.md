@@ -19,7 +19,7 @@ If no parser is specified, `openai-parser` is used as the fallback.
 Here is an example configuration using the `vllmgrpc-parser`:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - name: maxScore

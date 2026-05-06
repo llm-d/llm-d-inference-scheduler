@@ -19,14 +19,16 @@ import (
 
 // RegisterAllPlugins registers the factory functions of all plugins in this repository.
 func RegisterAllPlugins() {
-	plugin.Register(bylabel.ByLabelType, bylabel.Factory)
-	plugin.Register(bylabel.ByLabelSelectorType, bylabel.SelectorFactory)
+	plugin.Register(bylabel.LabelSelectorFilterType, bylabel.SelectorFactory)
+	// Legacy aliases - existing YAML configs using by-label-selector or by-label continue to work.
+	plugin.Register(bylabel.ByLabelSelectorType, bylabel.DeprecatedSelectorFactory) //nolint:staticcheck // intentional: keep backward compatibility
+	plugin.Register(bylabel.ByLabelType, bylabel.Factory)                           //nolint:staticcheck // intentional: keep backward compatibility
 	plugin.Register(bylabel.EncodeRoleType, bylabel.EncodeRoleFactory)
 	plugin.Register(bylabel.DecodeRoleType, bylabel.DecodeRoleFactory)
 	plugin.Register(bylabel.PrefillRoleType, bylabel.PrefillRoleFactory)
-	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.HeadersHandlerFactory)
-	// Legacy alias - existing YAML configs using prefill-header-handler continue to work.
-	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
+	// Deprecated aliases — disagg-profile-handler now handles PreRequest natively.
+	plugin.Register(disagg.DisaggHeadersHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
+	plugin.Register(disagg.PrefillHeaderHandlerType, disagg.HeadersHandlerFactory) //nolint:staticcheck // intentional: keep backward compatibility
 	plugin.Register(dataparallel.DataParallelProfileHandlerType, dataparallel.ProfileHandlerFactory)
 	plugin.Register(disagg.DisaggProfileHandlerType, disagg.HandlerFactory)
 	// Legacy aliases - existing YAML configs continue to work.
@@ -43,6 +45,8 @@ func RegisterAllPlugins() {
 	plugin.Register(disagg.PrefixBasedPDDeciderPluginType, disagg.PrefixBasedPDDeciderPluginFactory)
 	plugin.Register(disagg.AlwaysDisaggPDDeciderPluginType, disagg.AlwaysDisaggPDDeciderPluginFactory)
 	plugin.Register(tokenizer.PluginType, tokenizer.PluginFactory)
+	// Legacy alias - existing YAML configs using "tokenizer" continue to work, with a deprecation warning.
+	plugin.Register(tokenizer.LegacyPluginType, tokenizer.LegacyPluginFactory) //nolint:staticcheck // intentional: keep backward compatibility (SA1019)
 	// ep decider plugins
 	plugin.Register(disagg.AlwaysDisaggMulimodalPluginType, disagg.AlwaysDisaggMulimodalDeciderPluginFactory)
 	plugin.Register(contextlengthaware.ContextLengthAwareType, contextlengthaware.Factory)

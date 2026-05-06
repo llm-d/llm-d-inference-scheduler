@@ -29,7 +29,7 @@ import (
 
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	pb "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/vllmgrpc/api/gen"
-	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration/igw"
+	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration"
 )
 
 const (

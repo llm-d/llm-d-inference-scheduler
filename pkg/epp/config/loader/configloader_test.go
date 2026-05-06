@@ -19,12 +19,13 @@ package loader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -84,10 +85,46 @@ func TestLoadRawConfiguration(t *testing.T) {
 		configText string
 		want       *configapi.EndpointPickerConfig
 		wantErr    bool
+		deprecated bool
 	}{
 		{
 			name:       "Success - Full Configuration",
 			configText: successConfigText,
+			want: &configapi.EndpointPickerConfig{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "EndpointPickerConfig",
+					APIVersion: "llm-d.ai/v1alpha1",
+				},
+				Plugins: []configapi.PluginSpec{
+					{Name: "test1", Type: testPluginType, Parameters: json.RawMessage(`{"threshold":10}`)},
+					{Name: "profileHandler", Type: testProfileHandler},
+					{Name: testScorerType, Type: testScorerType, Parameters: json.RawMessage(`{"blockSize":32}`)},
+					{Name: "testPicker", Type: testPickerType},
+				},
+				SchedulingProfiles: []configapi.SchedulingProfile{
+					{
+						Name: "default",
+						Plugins: []configapi.SchedulingPlugin{
+							{PluginRef: "test1"},
+							{PluginRef: testScorerType, Weight: ptr.To(50.0)},
+							{PluginRef: "testPicker"},
+						},
+					},
+				},
+				FeatureGates: configapi.FeatureGates{
+					datalayer.ExperimentalDatalayerFeatureGate,
+					flowcontrol.FeatureGate,
+				},
+				SaturationDetector: &configapi.SaturationDetectorConfig{
+					PluginRef: "utilization-detector",
+				},
+			},
+			wantErr:    false,
+			deprecated: false,
+		},
+		{
+			name:       "Success - using deprecated Groupname",
+			configText: successDeprecatedText,
 			want: &configapi.EndpointPickerConfig{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "EndpointPickerConfig",
@@ -117,7 +154,8 @@ func TestLoadRawConfiguration(t *testing.T) {
 					PluginRef: "utilization-detector",
 				},
 			},
-			wantErr: false,
+			wantErr:    false,
+			deprecated: true,
 		},
 		{
 			name:       "Success - No Profiles",
@@ -125,21 +163,22 @@ func TestLoadRawConfiguration(t *testing.T) {
 			want: &configapi.EndpointPickerConfig{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "EndpointPickerConfig",
-					APIVersion: "inference.networking.x-k8s.io/v1alpha1",
+					APIVersion: "llm-d.ai/v1alpha1",
 				},
 				Plugins: []configapi.PluginSpec{
 					{Name: "test1", Type: testPluginType, Parameters: json.RawMessage(`{"threshold":10}`)},
 				},
 				FeatureGates: configapi.FeatureGates{},
 			},
-			wantErr: false,
+			wantErr:    false,
+			deprecated: false,
 		},
 		{
 			name:       "Success - Default configuration",
 			configText: "",
 			want: &configapi.EndpointPickerConfig{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: "inference.networking.x-k8s.io/v1alpha1",
+					APIVersion: "llm-d.ai/v1alpha1",
 					Kind:       "EndpointPickerConfig",
 				},
 				FeatureGates: configapi.FeatureGates{}, // Empty means datalayer enabled (default behavior)
@@ -195,24 +234,28 @@ func TestLoadRawConfiguration(t *testing.T) {
 					},
 				},
 			},
-			wantErr: false,
+			wantErr:    false,
+			deprecated: false,
 		},
 		{
 			name:       "Error - Invalid YAML",
 			configText: errorBadYamlText,
 			wantErr:    true,
+			deprecated: false,
 		},
 		{
 			name:       "Error - Unknown Feature Gate",
 			configText: errorUnknownFeatureGateText,
 			wantErr:    true,
+			deprecated: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			logger := logging.NewTestLogger()
+			writer := &strings.Builder{}
+			logger := logging.NewTestLoggerWithWriter(writer)
 
 			got, _, err := LoadRawConfig([]byte(tc.configText), logger)
 
@@ -221,8 +264,14 @@ func TestLoadRawConfiguration(t *testing.T) {
 				return
 			}
 			require.NoError(t, err, "Expected LoadRawConfig to succeed")
-			diff := cmp.Diff(tc.want, got, cmpopts.IgnoreFields(configapi.EndpointPickerConfig{}, "TypeMeta"))
+			diff := cmp.Diff(tc.want, got)
 			require.Empty(t, diff, "Config mismatch (-want +got):\n%s", diff)
+
+			if strings.Contains(writer.String(), "deprecated") {
+				require.True(t, tc.deprecated, "Deprecated configuration wasn't marked as deprecated")
+			} else {
+				require.False(t, tc.deprecated, "Valid configuration was marked as deprecated")
+			}
 		})
 	}
 }
@@ -681,7 +730,7 @@ func (m *mockHandler) Pick(context.Context, *framework.CycleState, *framework.In
 }
 func (m *mockHandler) ProcessResults(context.Context, *framework.CycleState, *framework.InferenceRequest,
 	map[string]*framework.ProfileRunResult) (*framework.SchedulingResult, error) {
-	return nil, nil
+	return nil, errors.New("sentinel error for mock handler")
 }
 
 // Mock Source

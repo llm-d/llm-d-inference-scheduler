@@ -121,6 +121,12 @@ ifneq ($(filter command line environment,$(origin NAMESPACE)),)
 BUILDER_E2E_ENV_FLAGS += -e NAMESPACE=$(NAMESPACE)
 endif
 
+# GAIE e2e test variables (for test-e2e-gaie target).
+# GAIE_E2E_MANIFEST_PATH: path to the model server manifest inside the builder container
+# (/app/... prefix). Defaults to the sim-deployment in testdata. Override to use a GPU manifest.
+GAIE_E2E_MANIFEST_PATH ?=
+GAIE_E2E_IMAGE         ?= $(EPP_IMAGE)
+
 # When K8S_CONTEXT is set, mount the host kubeconfig so the e2e suite can call
 # config.GetConfigWithContext(K8S_CONTEXT) against an existing cluster instead of
 # creating a new kind cluster.
@@ -182,9 +188,19 @@ builder-e2e-shell: image-build-builder ## Open a shell with e2e test access
 install-hooks: ## Install git hooks
 	git config core.hooksPath hooks
 
+.PHONY: upgrade-deps
+upgrade-deps: ## Upgrade all Go dependencies to latest minor/patch versions and tidy; review diff before committing
+	go get -u ./...
+	go mod tidy
+
+.PHONY: vulncheck
+vulncheck: image-build-builder ## Run govulncheck for known vulnerabilities
+	@printf "\033[33;1m==== Running govulncheck ====\033[0m\n"
+	$(BUILDER_RUN) 'go install golang.org/x/vuln/cmd/govulncheck@v1.3.0 && govulncheck ./...'
+
 .PHONY: presubmit
 presubmit: LINT_NEW_ONLY=true
-presubmit: git-branch-check signed-commits-check go-mod-check format lint
+presubmit: git-branch-check signed-commits-check go-mod-check format lint vulncheck
 
 .PHONY: git-branch-check
 git-branch-check:
@@ -264,14 +280,20 @@ test-integration: image-build-builder ## Run integration tests (requires KUBECON
 test-integration-hermetic: image-build-builder ## Run hermetic integration tests (envtest, no cluster required)
 	@mkdir -p $(COVERAGE_DIR)
 	@printf "\033[33;1m==== Running Hermetic Integration Tests ====\033[0m\n"
-	$(BUILDER_RUN) 'CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$(setup-envtest use $$ENVTEST_K8S_VERSION --bin-dir $$ENVTEST_ASSETS_DIR -p path)" go test -v -race -coverprofile=$(COVERAGE_DIR)/integration-hermetic.out -covermode=atomic ./test/integration/igw/...'
+	$(BUILDER_RUN) 'CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$(setup-envtest use $$ENVTEST_K8S_VERSION --bin-dir $$ENVTEST_ASSETS_DIR -p path)" go test -v -race -coverprofile=$(COVERAGE_DIR)/integration-hermetic.out -covermode=atomic ./test/integration/...'
 	$(BUILDER_RUN) 'go tool cover -func=$(COVERAGE_DIR)/integration-hermetic.out | tail -1'
 
 .PHONY: test-e2e
 test-e2e: image-build-builder image-build image-pull ## Run end-to-end tests against a new kind cluster
+	@printf "\033[33;1m==== Running GAIE End to End Tests ====\033[0m\n"
+	$(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_E2E_FLAGS) \
+		-e EPP_IMAGE=$(GAIE_E2E_IMAGE) \
+		-e USE_KIND=true \
+		$(BUILDER_IMAGE) ./hack/test-e2e.sh
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	$(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_E2E_FLAGS) \
 		$(BUILDER_IMAGE) ./test/scripts/run_e2e.sh
+
 
 .PHONY: bench-tokenizer
 bench-tokenizer: image-build-builder ## Run external tokenizer + scorer benchmark (requires kind cluster with EPP deployed)

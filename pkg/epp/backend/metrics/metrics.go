@@ -245,7 +245,8 @@ func (p *PodMetricsClientImpl) promToPodMetrics(
 // retrieve the latest by sorting the value.
 func (p *PodMetricsClientImpl) getLatestLoraMetric(metricFamilies map[string]*dto.MetricFamily) (*dto.Metric, error) {
 	if p.MetricMapping.LoraRequestInfo == nil {
-		return nil, nil // No LoRA metrics configured
+		// No LoRA metrics configured
+		return nil, nil //nolint:nilnil
 	}
 
 	loraRequests, ok := metricFamilies[p.MetricMapping.LoraRequestInfo.MetricName]
@@ -281,7 +282,8 @@ func (p *PodMetricsClientImpl) getLatestLoraMetric(metricFamilies map[string]*dt
 		}
 	}
 	if latest == nil {
-		return nil, nil
+		// nothing to return
+		return nil, nil //nolint:nilnil
 	}
 
 	return latest, nil // Convert nanoseconds to time.Time

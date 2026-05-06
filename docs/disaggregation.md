@@ -244,7 +244,10 @@ role: prefill
 role: decode
 ```
 
-To accommodate this **without code changes**, you can configure the **EndpointPickerConfig** to use the generic `by-label` filter plugin instead of the hardcoded `encode-filter` / `prefill-filter` / `decode-filter`.
+To accommodate this **without code changes**, you can configure the **EndpointPickerConfig** to use the generic `label-selector-filter` plugin instead of the hardcoded `encode-filter` / `prefill-filter` / `decode-filter`.
+
+> [!NOTE]
+> The previous filter type `by-label` is deprecated. Use `label-selector-filter` with standard Kubernetes label selector syntax instead.
 
 ### Configuration Examples
 
@@ -253,23 +256,27 @@ To accommodate this **without code changes**, you can configure the **EndpointPi
 Below is a minimal `EndpointPickerConfig` for P/D disaggregation using custom labels:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
 plugins:
   # Prefill selection: match Pods with label role=prefill
-  - type: by-label
+  - type: label-selector-filter
     name: "prefill-pods"
     parameters:
-      label: "role"
-      validValues: ["prefill"]
+      matchExpressions:
+        - key: "role"
+          operator: In
+          values: ["prefill"]
   # Decode selection: match Pods with label role=decode
-  - type: by-label
+  - type: label-selector-filter
     name: "decode-pods"
     parameters:
-      label: "role"
-      validValues: ["decode"]
+      matchExpressions:
+        - key: "role"
+          operator: In
+          values: ["decode"]
   - type: prefix-cache-scorer
     parameters:
       autoTune: false
@@ -277,7 +284,6 @@ plugins:
       maxPrefixBlocksToMatch: 256
       lruCapacityPerServer: 31250
   - type: max-score-picker
-  - type: disagg-headers-handler
   - type: prefix-based-pd-decider
     parameters:
       nonCachedTokens: 8
@@ -306,29 +312,35 @@ schedulingProfiles:
 Below is an `EndpointPickerConfig` for full E/P/D disaggregation using custom labels:
 
 ```yaml
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
 plugins:
   # Encoding selection: match Pods with label role=encode
-  - type: by-label
+  - type: label-selector-filter
     name: "encode-pods"
     parameters:
-      label: "role"
-      validValues: ["encode"]
+      matchExpressions:
+        - key: "role"
+          operator: In
+          values: ["encode"]
   # Prefill selection: match Pods with label role=prefill
-  - type: by-label
+  - type: label-selector-filter
     name: "prefill-pods"
     parameters:
-      label: "role"
-      validValues: ["prefill"]
+      matchExpressions:
+        - key: "role"
+          operator: In
+          values: ["prefill"]
   # Decode selection: match Pods with label role=decode
-  - type: by-label
+  - type: label-selector-filter
     name: "decode-pods"
     parameters:
-      label: "role"
-      validValues: ["decode"]
+      matchExpressions:
+        - key: "role"
+          operator: In
+          values: ["decode"]
   - type: prefix-cache-scorer
     parameters:
       autoTune: false
@@ -336,7 +348,6 @@ plugins:
       maxPrefixBlocksToMatch: 256
       lruCapacityPerServer: 31250
   - type: max-score-picker
-  - type: disagg-headers-handler
   - type: always-disagg-multimodal-decider
   - type: prefix-based-pd-decider
     parameters:

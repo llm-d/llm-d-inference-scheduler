@@ -1,11 +1,10 @@
 # Sample EPP configuration for tunning with P/D
 # Use with small hash block size for simulation purposes
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 featureGates:
 - prepareDataPlugins
 plugins:
-- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     blockSizeTokens: 16

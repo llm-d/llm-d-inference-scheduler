@@ -26,6 +26,7 @@ linters:
     - makezero
     - misspell
     - nakedret
+    - nilnil
     - perfsprint
     - prealloc
     - revive
@@ -62,6 +63,7 @@ linters:
         - name: indent-error-flow
         - name: package-comments
         - name: range
+        - name: receiver-naming
         - name: time-naming
         - name: unexported-return
         - name: var-declaration

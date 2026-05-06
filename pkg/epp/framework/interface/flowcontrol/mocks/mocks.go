@@ -18,6 +18,7 @@ package mocks
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
@@ -250,7 +251,7 @@ func (m *MockFairnessPolicy) Pick(ctx context.Context, flowGroup flowcontrol.Pri
 	if m.PickFunc != nil {
 		return m.PickFunc(ctx, flowGroup)
 	}
-	return nil, nil
+	return nil, errors.New("sentinel nothing to pick")
 }
 
 var _ flowcontrol.FairnessPolicy = &MockFairnessPolicy{}
