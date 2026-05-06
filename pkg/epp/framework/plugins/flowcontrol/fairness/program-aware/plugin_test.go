@@ -145,7 +145,7 @@ func TestPrepareRequestData_UpdatesMetrics(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-1",
+		RequestID: "req-1",
 		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
 	}
 
@@ -167,7 +167,7 @@ func TestPrepareRequestData_NoFairnessHeader(t *testing.T) {
 	p := &ProgramAwarePlugin{}
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-1",
+		RequestID: "req-1",
 		Headers:   map[string]string{},
 	}
 
@@ -193,7 +193,7 @@ func TestPreRequest_RecordsWaitTime(t *testing.T) {
 	p.programMetrics.Store("prog-a", &ProgramMetrics{})
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-1",
+		RequestID: "req-1",
 		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
 	}
 
@@ -213,7 +213,7 @@ func TestResponseComplete_RecordsTokensAndCleanup(t *testing.T) {
 	p.requestTimestamps.Store("req-1", time.Now().Add(-100*time.Millisecond))
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-1",
+		RequestID: "req-1",
 		Headers:   map[string]string{fairnessIDHeader: "prog-a"},
 	}
 	response := &requestcontrol.Response{
@@ -243,7 +243,7 @@ func TestResponseComplete_NoFairnessHeader_StillCleansTimestamp(t *testing.T) {
 	p.requestTimestamps.Store("req-1", time.Now())
 
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-1",
+		RequestID: "req-1",
 		Headers:   map[string]string{},
 	}
 
@@ -280,14 +280,14 @@ func TestFullLifecycle(t *testing.T) {
 
 	programID := "prog-integration"
 	request := &scheduling.InferenceRequest{
-		RequestId: "req-lifecycle",
+		RequestID: "req-lifecycle",
 		Headers:   map[string]string{fairnessIDHeader: programID},
 	}
 
 	// 0. Simulate Pick() recording the enqueue time (flow control layer).
 	//    In production, this happens when the request is dispatched from the queue.
 	enqueueTime := time.Now().Add(-20 * time.Millisecond) // enqueued 20ms ago
-	p.requestTimestamps.Store(request.RequestId, enqueueTime)
+	p.requestTimestamps.Store(request.RequestID, enqueueTime)
 
 	// 1. PrepareData (runs after flow control dispatch)
 	err := p.PrepareRequestData(context.Background(), request, nil)

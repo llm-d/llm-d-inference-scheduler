@@ -38,7 +38,7 @@ func (p *ProgramAwarePlugin) PrepareRequestData(ctx context.Context, request *sc
 	requestsTotal.WithLabelValues(programID).Inc()
 
 	log.FromContext(ctx).V(logutil.TRACE).Info("PrepareData: recorded program request",
-		"requestId", request.RequestId, "programId", programID,
+		"requestId", request.RequestID, "programId", programID,
 		"totalRequests", metrics.TotalRequests())
 
 	return nil
@@ -61,7 +61,7 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 	metrics.IncrementDispatched()
 	dispatchedTotal.WithLabelValues(programID).Inc()
 
-	if enqueueTimeRaw, ok := p.requestTimestamps.Load(request.RequestId); ok {
+	if enqueueTimeRaw, ok := p.requestTimestamps.Load(request.RequestID); ok {
 		enqueueTime := enqueueTimeRaw.(time.Time)
 		waitMs := float64(time.Since(enqueueTime).Milliseconds())
 		metrics.RecordWaitTime(waitMs)
@@ -69,7 +69,7 @@ func (p *ProgramAwarePlugin) PreRequest(ctx context.Context, request *scheduling
 		ewmaWaitTimeMs.WithLabelValues(programID).Set(metrics.AverageWaitTime())
 
 		log.FromContext(ctx).V(logutil.TRACE).Info("PreRequest: recorded wait time",
-			"requestId", request.RequestId, "programId", programID,
+			"requestId", request.RequestID, "programId", programID,
 			"waitMs", waitMs, "avgWaitMs", metrics.AverageWaitTime())
 	}
 }
@@ -87,7 +87,7 @@ func (p *ProgramAwarePlugin) ResponseBody(ctx context.Context, request *scheduli
 	}
 
 	// Clean up the enqueue timestamp stored by Pick().
-	p.requestTimestamps.Delete(request.RequestId)
+	p.requestTimestamps.Delete(request.RequestID)
 
 	if response != nil {
 		metrics := p.getOrCreateMetrics(programID)
@@ -107,7 +107,7 @@ func (p *ProgramAwarePlugin) ResponseBody(ctx context.Context, request *scheduli
 		serviceRateTokensPerSec.WithLabelValues(programID).Set(metrics.ServiceRate())
 
 		log.FromContext(ctx).V(logutil.TRACE).Info("ResponseComplete: recorded tokens",
-			"requestId", request.RequestId, "programId", programID,
+			"requestId", request.RequestID, "programId", programID,
 			"promptTokens", promptTokens, "completionTokens", completionTokens,
 			"attainedService", metrics.AttainedService())
 	}
