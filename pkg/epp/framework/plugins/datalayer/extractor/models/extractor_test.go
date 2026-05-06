@@ -16,7 +16,7 @@ func TestExtractorExtract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create extractor: %v", err)
 	}
-	extractor := extPlugin.(fwkdl.Extractor)
+	extractor := extPlugin.(fwkdl.PollingExtractor)
 
 	if exType := extPlugin.TypedName().Type; exType == "" {
 		t.Error("empty extractor type")
@@ -24,10 +24,6 @@ func TestExtractorExtract(t *testing.T) {
 
 	if exName := extPlugin.TypedName().Name; exName == "" {
 		t.Error("empty extractor name")
-	}
-
-	if inputType := extractor.ExpectedInputType(); inputType != ModelsResponseType {
-		t.Errorf("incorrect expected input type: %v", inputType)
 	}
 
 	ep := fwkdl.NewEndpoint(nil, nil)
@@ -87,7 +83,7 @@ func TestExtractorExtract(t *testing.T) {
 			if ok && before != nil {
 				t.Error("expected empty attributes")
 			}
-			err := extractor.Extract(ctx, tt.data, ep)
+			err := extractor.Extract(ctx, fwkdl.NewPollingInput(tt.data, ep))
 			after, ok := attr.Get(ModelsAttributeKey)
 			if !ok && tt.updated {
 				t.Error("expected updated attributes")

@@ -374,7 +374,7 @@ func parseWithDatalayerMetrics(ctx context.Context, t *testing.T, urlStr string)
 		return endpoint.GetMetrics(), err
 	}
 	if data != nil {
-		err = extractor.Extract(ctx, data, endpoint)
+		err = extractor.Extract(ctx, fwkdl.NewPollingInput(data, endpoint))
 		if err != nil {
 			return endpoint.GetMetrics(), err
 		}

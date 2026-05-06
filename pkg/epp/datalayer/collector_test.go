@@ -19,7 +19,6 @@ package datalayer
 import (
 	"context"
 	"errors"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -90,8 +89,7 @@ type stubExtractor struct {
 func (s *stubExtractor) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Type: s.kind, Name: s.kind}
 }
-func (s *stubExtractor) ExpectedInputType() reflect.Type                          { return reflect.TypeFor[any]() }
-func (s *stubExtractor) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error { return s.err }
+func (s *stubExtractor) Extract(_ context.Context, _ fwkdl.PollingInput) error { return s.err }
 
 func TestCollectorStartInputs(t *testing.T) {
 	tests := []struct {
@@ -248,10 +246,10 @@ func TestCollectorErrorMetrics(t *testing.T) {
 				src = &dataSource{kind: tt.srcType}
 			}
 
-			var extractors map[string][]fwkdl.ExtractorBase
+			var extractors map[string][]fwkdl.PollingExtractor
 			if tt.extType != "" {
 				ext := &stubExtractor{kind: tt.extType, err: tt.extErr}
-				extractors = map[string][]fwkdl.ExtractorBase{src.TypedName().Name: {ext}}
+				extractors = map[string][]fwkdl.PollingExtractor{src.TypedName().Name: {ext}}
 			}
 
 			pollBefore := testutil.ToFloat64(metrics.DataLayerPollErrorsTotal.WithLabelValues(tt.srcType))

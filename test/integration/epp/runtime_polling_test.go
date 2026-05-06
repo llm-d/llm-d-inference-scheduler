@@ -34,6 +34,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/mocks"
 	httpds "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/http"
 )
@@ -92,7 +93,7 @@ func TestRuntimePollingDispatch(t *testing.T) {
 
 			cfg := &datalayer.Config{
 				Sources: []datalayer.DataSourceConfig{
-					{Plugin: httpSrc, Extractors: []fwkdl.ExtractorBase{ext}},
+					{Plugin: httpSrc, Extractors: []fwkplugin.Plugin{ext}},
 				},
 			}
 
@@ -144,7 +145,7 @@ func TestRuntimePollingMultipleExtractors(t *testing.T) {
 
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
-			{Plugin: httpSrc, Extractors: []fwkdl.ExtractorBase{ext1, ext2}},
+			{Plugin: httpSrc, Extractors: []fwkplugin.Plugin{ext1, ext2}},
 		},
 	}
 
@@ -193,7 +194,7 @@ func TestRuntimePollingEndpointLifecycle(t *testing.T) {
 
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
-			{Plugin: httpSrc, Extractors: []fwkdl.ExtractorBase{ext}},
+			{Plugin: httpSrc, Extractors: []fwkplugin.Plugin{ext}},
 		},
 	}
 
@@ -286,7 +287,7 @@ func TestRuntimePollingHTTPError(t *testing.T) {
 
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
-			{Plugin: httpSrc, Extractors: []fwkdl.ExtractorBase{ext}},
+			{Plugin: httpSrc, Extractors: []fwkplugin.Plugin{ext}},
 		},
 	}
 

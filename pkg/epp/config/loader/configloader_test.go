@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -746,34 +745,16 @@ func (m *mockSaturationDetector) Saturation(ctx context.Context, endpoints []fwk
 	return 0.5
 }
 
-func (m *mockSource) AddExtractor(_ fwkdl.Extractor) error {
-	return nil
+// mockSource implements PollingDataSource for config-loader tests; Poll is
+// never exercised here, so the (nil, nil) return is intentional.
+func (m *mockSource) Poll(_ context.Context, _ fwkdl.Endpoint) (any, error) {
+	return nil, nil //nolint:nilnil // mock satisfies the interface; not invoked by these tests
 }
 
-func (m *mockSource) Collect(ctx context.Context, ep fwkdl.Endpoint) error {
-	return nil
-}
-
-func (m *mockSource) Extractors() []string {
-	return []string{}
-}
-
-func (m *mockSource) OutputType() reflect.Type {
-	return fwkdl.NotificationEventType
-}
-
-func (m *mockSource) ExtractorType() reflect.Type {
-	return fwkdl.ExtractorType
-}
-
-// Mock Extractor
+// mockExtractor satisfies PollingExtractor.
 type mockExtractor struct{ mockPlugin }
 
-func (m *mockExtractor) ExpectedInputType() reflect.Type {
-	return reflect.TypeFor[string]()
-}
-
-func (m *mockExtractor) Extract(ctx context.Context, data any, ep fwkdl.Endpoint) error {
+func (m *mockExtractor) Extract(_ context.Context, _ fwkdl.PollingInput) error {
 	return nil
 }
 

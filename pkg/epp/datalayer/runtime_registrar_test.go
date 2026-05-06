@@ -74,10 +74,8 @@ func TestConfigure_ExtractorWiredToUserConfiguredSource(t *testing.T) {
 	err := r.Configure(cfg, false, "", logger)
 	require.NoError(t, err)
 
-	rawExts, ok := r.sourceExtractors.Load("ep-src")
-	require.True(t, ok, "sourceExtractors should have entry for ep-src")
-	exts := rawExts.([]fwkdl.ExtractorBase)
-	require.Len(t, exts, 1)
+	exts := r.endpoint.ExtractorsFor("ep-src")
+	require.Len(t, exts, 1, "endpoint manager should have one extractor for ep-src")
 	assert.Equal(t, "ext-a", exts[0].TypedName().Name)
 }
 
@@ -100,16 +98,14 @@ func TestConfigure_DefaultSourceAutoRegisteredWhenAbsent(t *testing.T) {
 	err := r.Configure(nil, false, "", logger)
 	require.NoError(t, err)
 
-	// Source should be in endpointSources.
-	val, ok := r.endpointSources.Load(notifications.EndpointNotificationSourceType)
-	require.True(t, ok, "auto-registered source should appear in endpointSources")
-	assert.Equal(t, notifications.EndpointNotificationSourceType, val.(fwkdl.EndpointSource).TypedName().Name)
+	// Source should be in the endpoint manager.
+	src, ok := r.endpoint.Sources()[notifications.EndpointNotificationSourceType]
+	require.True(t, ok, "auto-registered source should appear in endpoint manager")
+	assert.Equal(t, notifications.EndpointNotificationSourceType, src.TypedName().Name)
 
 	// Extractor should be wired.
-	rawExts, ok := r.sourceExtractors.Load(notifications.EndpointNotificationSourceType)
-	require.True(t, ok, "extractor should be wired to auto-registered source")
-	exts := rawExts.([]fwkdl.ExtractorBase)
-	require.Len(t, exts, 1)
+	exts := r.endpoint.ExtractorsFor(notifications.EndpointNotificationSourceType)
+	require.Len(t, exts, 1, "extractor should be wired to auto-registered source")
 }
 
 func TestConfigure_FailPolicyMissingSource(t *testing.T) {
@@ -159,7 +155,7 @@ func TestConfigure_DedupByExtractorType(t *testing.T) {
 	cfg := &Config{
 		Sources: []DataSourceConfig{{
 			Plugin:     src,
-			Extractors: []fwkdl.ExtractorBase{extFromConfig},
+			Extractors: []fwkplugin.Plugin{extFromConfig},
 		}},
 	}
 
@@ -173,9 +169,7 @@ func TestConfigure_DedupByExtractorType(t *testing.T) {
 	err := r.Configure(cfg, false, "", logger)
 	require.NoError(t, err)
 
-	rawExts, ok := r.sourceExtractors.Load("ep-src")
-	require.True(t, ok)
-	exts := rawExts.([]fwkdl.ExtractorBase)
+	exts := r.endpoint.ExtractorsFor("ep-src")
 	require.Len(t, exts, 1, "code registration should be deduped; only config extractor present")
 	assert.Equal(t, "config-ext", exts[0].TypedName().Name)
 }
