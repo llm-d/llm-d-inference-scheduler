@@ -24,7 +24,6 @@ const (
 	// Deprecated: Use DisaggProfileHandlerType instead, disagg-profile-handler now implements PreRequest natively.
 	DisaggHeadersHandlerType = "disagg-headers-handler"
 )
-
 // compile-time type assertion
 var _ requestcontrol.PreRequest = &HeadersHandler{}
 
