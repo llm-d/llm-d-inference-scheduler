@@ -61,22 +61,32 @@ func (m *sourceManager[S, E]) Sources() map[string]S {
 	return out
 }
 
-// Extractors returns a snapshot copy of the extractor map.
+// Extractors returns a snapshot of the extractor map. Each slice value is a
+// fresh copy; mutating the returned map or its slices does not affect the
+// manager's state.
 func (m *sourceManager[S, E]) Extractors() map[string][]E {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make(map[string][]E, len(m.extractors))
 	for k, v := range m.extractors {
-		out[k] = v
+		dup := make([]E, len(v))
+		copy(dup, v)
+		out[k] = dup
 	}
 	return out
 }
 
-// ExtractorsFor returns the extractor slice for a specific source.
+// ExtractorsFor returns a copy of the extractor slice for a specific source.
 func (m *sourceManager[S, E]) ExtractorsFor(srcName string) []E {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.extractors[srcName]
+	src := m.extractors[srcName]
+	if src == nil {
+		return nil
+	}
+	dup := make([]E, len(src))
+	copy(dup, src)
+	return dup
 }
 
 // IsEmpty reports whether any source is registered.

@@ -113,7 +113,7 @@ type NotificationSource interface {
 	// The event object is already deep-copied.
 	// Returns the event (possibly modified) for Runtime to dispatch to extractors.
 	// Returns nil event to signal Runtime to skip extractor dispatch.
-	// TODO: ahy accept event but return *event?
+	// TODO: accept event by value but return *event — should the input be a pointer too?
 	Notify(ctx context.Context, event NotificationEvent) (*NotificationEvent, error)
 }
 

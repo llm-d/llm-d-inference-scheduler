@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	extmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
 )
 
@@ -60,4 +62,53 @@ func TestRuntimeConfigureDuplicateGVKFails(t *testing.T) {
 	err := r.Configure(cfg, false, "", logger)
 	assert.Error(t, err, "Configure should fail with duplicate GVK")
 	assert.Contains(t, err.Error(), "duplicate", "Error should mention duplicate GVK")
+}
+
+// TestRuntimeConfigureVariantMismatch verifies that an extractor whose variant
+// interface doesn't match its source's variant is rejected at config-load.
+func TestRuntimeConfigureVariantMismatch(t *testing.T) {
+	logger := newTestLogger(t)
+	r := NewRuntime(1)
+
+	// PollingDataSource paired with an EndpointExtractor (wrong variant).
+	pollingSrc := &mocks.MetricsDataSource{}
+	endpointExt := extmocks.NewEndpointExtractor("ep-ext")
+
+	cfg := &Config{
+		Sources: []DataSourceConfig{
+			{
+				Plugin:     pollingSrc,
+				Extractors: []fwkplugin.Plugin{endpointExt},
+			},
+		},
+	}
+
+	err := r.Configure(cfg, false, "", logger)
+	assert.Error(t, err, "Configure should reject extractor that doesn't match source variant")
+	assert.Contains(t, err.Error(), "PollingExtractor", "Error should name the expected variant")
+}
+
+// TestRuntimeConfigureNotificationGVKMismatch verifies that a NotificationExtractor
+// whose GVK doesn't match its source's GVK is rejected.
+func TestRuntimeConfigureNotificationGVKMismatch(t *testing.T) {
+	logger := newTestLogger(t)
+	r := NewRuntime(1)
+
+	srcGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
+	extGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Service"}
+	src := mocks.NewNotificationSource("test", "source1", srcGVK)
+	ext := extmocks.NewNotificationExtractor("ext1").WithGVK(extGVK)
+
+	cfg := &Config{
+		Sources: []DataSourceConfig{
+			{
+				Plugin:     src,
+				Extractors: []fwkplugin.Plugin{ext},
+			},
+		},
+	}
+
+	err := r.Configure(cfg, false, "", logger)
+	assert.Error(t, err, "Configure should reject extractor with mismatched GVK")
+	assert.Contains(t, err.Error(), "GVK", "Error should mention GVK mismatch")
 }

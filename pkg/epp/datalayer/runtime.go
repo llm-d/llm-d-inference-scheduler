@@ -181,7 +181,7 @@ func (r *Runtime) appendPendingExtractor(srcName string, src fwkdl.DataSource, e
 func (r *Runtime) appendPendingPolling(srcName string, src fwkdl.PollingDataSource, ext fwkplugin.Plugin, disallowedType string) error {
 	typed, err := assertExtractors[fwkdl.PollingExtractor](src, []fwkplugin.Plugin{ext}, "PollingExtractor", disallowedType)
 	if err != nil {
-		return fmt.Errorf("code-registered extractor %s for source %s: %w", ext.TypedName(), srcName, err)
+		return fmt.Errorf("code-registered for source %s: %w", srcName, err)
 	}
 	r.polling.AppendExtractor(srcName, typed[0])
 	return nil
@@ -190,10 +190,10 @@ func (r *Runtime) appendPendingPolling(srcName string, src fwkdl.PollingDataSour
 func (r *Runtime) appendPendingNotification(srcName string, src fwkdl.NotificationSource, ext fwkplugin.Plugin, disallowedType string) error {
 	typed, err := assertExtractors[fwkdl.NotificationExtractor](src, []fwkplugin.Plugin{ext}, "NotificationExtractor", disallowedType)
 	if err != nil {
-		return fmt.Errorf("code-registered extractor %s for source %s: %w", ext.TypedName(), srcName, err)
+		return fmt.Errorf("code-registered for source %s: %w", srcName, err)
 	}
 	if err := validateNotificationGVK(src, typed); err != nil {
-		return fmt.Errorf("code-registered extractor %s for source %s: %w", ext.TypedName(), srcName, err)
+		return fmt.Errorf("code-registered for source %s: %w", srcName, err)
 	}
 	r.notification.AppendExtractor(srcName, typed[0])
 	return nil
@@ -202,7 +202,7 @@ func (r *Runtime) appendPendingNotification(srcName string, src fwkdl.Notificati
 func (r *Runtime) appendPendingEndpoint(srcName string, src fwkdl.EndpointSource, ext fwkplugin.Plugin, disallowedType string) error {
 	typed, err := assertExtractors[fwkdl.EndpointExtractor](src, []fwkplugin.Plugin{ext}, "EndpointExtractor", disallowedType)
 	if err != nil {
-		return fmt.Errorf("code-registered extractor %s for source %s: %w", ext.TypedName(), srcName, err)
+		return fmt.Errorf("code-registered for source %s: %w", srcName, err)
 	}
 	r.endpoint.AppendExtractor(srcName, typed[0])
 	return nil
@@ -269,7 +269,6 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 		if err := BindNotificationSource(ns, extractors[srcName], mgr); err != nil {
 			return fmt.Errorf("failed to bind notification source %s: %w", ns.TypedName(), err)
 		}
-		_ = srcName
 	}
 	return nil
 }
