@@ -239,6 +239,9 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 		go cleanCachePeriodically(ctx, speculativeCache, speculativeTTL)
 	}
 
+	hasKVEventsCfg := config.KVEventsConfig != nil &&
+		(config.KVEventsConfig.ZMQEndpoint != "" || config.KVEventsConfig.DiscoverPods)
+
 	return &Scorer{
 		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
 		kvCacheIndexer:     kvCacheIndexer,
@@ -251,6 +254,7 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 		blockSizeTokens:    config.TokenProcessorConfig.BlockSize,
 		speculativeEnabled: config.SpeculativeIndexing,
 		subscriberCtx:      ctx,
+		healthMonitor:      NewKVEventsHealthMonitor(hasKVEventsCfg),
 	}, nil
 }
 
@@ -310,6 +314,12 @@ type Scorer struct {
 	// matching the original behavior of `context.Background()` in the
 	// pre-refactor code.
 	subscriberCtx context.Context
+
+	// healthMonitor tracks per-endpoint KV events pipeline health.
+	// Used to detect confirmed entries in index lookups (indicating KV events
+	// are flowing) and record routing decisions. Data collection only for now;
+	// dynamic TTL adjustment will be added in a subsequent PR.
+	healthMonitor *KVEventsHealthMonitor
 }
 
 // TypedName returns the typed name of the plugin.
@@ -369,6 +379,15 @@ func (s *Scorer) PrepareRequestData(ctx context.Context,
 	keyToPods, err := s.kvCacheIndexer.KVBlockIndex().Lookup(ctx, blockKeys, podSet)
 	if err != nil {
 		return fmt.Errorf("failed to lookup block keys: %w", err)
+	}
+
+	// Record confirmed entries in health monitor.
+	for _, pods := range keyToPods {
+		for _, pod := range pods {
+			if !pod.Speculative {
+				s.healthMonitor.RecordConfirmedEntry(pod.PodIdentifier)
+			}
+		}
 	}
 
 	// 4. Compute per-pod scores using KVBlockScorer (supports device-backend weights)
@@ -556,10 +575,14 @@ func (s *Scorer) PreRequest(ctx context.Context,
 
 	// 3. Build speculative pod entry and add to index
 	targetMeta := targetEndpoint.GetMetadata()
+	podAddr := fmt.Sprintf("%s:%s", targetMeta.Address, targetMeta.Port)
 	speculativePod := kvblock.PodEntry{
-		PodIdentifier: fmt.Sprintf("%s:%s", targetMeta.Address, targetMeta.Port),
+		PodIdentifier: podAddr,
 		Speculative:   true,
 	}
+
+	// Record routing decision in health monitor.
+	s.healthMonitor.RecordRouting(podAddr)
 
 	allPodEntries := []kvblock.PodEntry{speculativePod}
 
