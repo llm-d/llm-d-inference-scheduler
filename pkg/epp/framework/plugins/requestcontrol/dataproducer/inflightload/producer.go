@@ -23,7 +23,9 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
@@ -46,26 +48,43 @@ type Config struct {
 	// IncludeOutputTokens controls whether estimated output tokens are added to
 	// the in-flight token counter. Defaults to true to preserve historical behavior.
 	IncludeOutputTokens bool `json:"includeOutputTokens"`
+	// RequestTTL bounds how long a per-request token entry is kept before it is
+	// considered abandoned. If ResponseBody never delivers EndOfStream (e.g.
+	// client disconnect, panic in a downstream plugin, EPP shutdown), the
+	// expiry-driven eviction subtracts the entry's tokens from the token
+	// tracker AND decrements the request tracker for that endpoint, preventing
+	// an unbounded leak of both counters and the per-request map entries.
+	// Defaults to 5 minutes. A non-positive value disables expiration entirely.
+	RequestTTL time.Duration `json:"requestTTL,omitempty"`
 }
 
 func defaultConfig() Config {
-	return Config{IncludeOutputTokens: true}
+	return Config{
+		IncludeOutputTokens: true,
+		RequestTTL:          5 * time.Minute,
+	}
 }
 
-func InFlightLoadProducerFactory(name string, rawParameters json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
+func InFlightLoadProducerFactory(name string, rawParameters json.RawMessage, handle fwkplugin.Handle) (fwkplugin.Plugin, error) {
 	cfg := defaultConfig()
 	if len(rawParameters) > 0 {
 		if err := json.Unmarshal(rawParameters, &cfg); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal inflight-load-producer parameters: %w", err)
 		}
 	}
-	return &InFlightLoadProducer{
+	p := &InFlightLoadProducer{
 		typedName:           fwkplugin.TypedName{Type: InFlightLoadProducerType, Name: name},
 		requestTracker:      newConcurrencyTracker(),
 		tokenTracker:        newConcurrencyTracker(),
 		tokenEstimator:      NewSimpleTokenEstimator(),
 		includeOutputTokens: cfg.IncludeOutputTokens,
-	}, nil
+		requestTTL:          cfg.RequestTTL,
+	}
+	p.initAddedTokensCache()
+	if handle != nil {
+		p.startCacheLifecycle(handle.Context())
+	}
+	return p, nil
 }
 
 var (
@@ -82,14 +101,81 @@ type InFlightLoadProducer struct {
 	tokenTracker        *concurrencyTracker
 	tokenEstimator      TokenEstimator
 	includeOutputTokens bool
+	requestTTL          time.Duration
+	initOnce            sync.Once
 	// addedTokens tracks the exact token amount added per (requestID, endpointID, profileName)
 	// so release subtracts the same value (accounting for prefix-cache discount).
-	// The profile name is part of the key so that multiple profiles targeting the
-	// same endpoint each track their own increment independently and a release
-	// for one profile cannot subtract another profile's value (which would leak
-	// or double-count tokens).
+	// Including the profile name keeps per-profile increments independent when multiple
+	// profiles target the same endpoint.
 	// Key format: "<requestID>|<endpointID>|<profileName>".
-	addedTokens sync.Map
+	//
+	// A TTL is applied so that abandoned requests (no EndOfStream delivered) are
+	// reaped instead of leaking both the entry and the per-endpoint counters
+	// they own; the eviction handler rolls back the request and token counters.
+	addedTokens *ttlcache.Cache[string, addedTokensEntry]
+}
+
+// addedTokensEntry is the value stored in addedTokens; it carries the endpoint
+// the increment was charged to so the TTL eviction handler can roll it back
+// without consulting the request's SchedulingResult (which the cache does not
+// hold a reference to).
+type addedTokensEntry struct {
+	endpointID  string
+	profileName string
+	tokens      int64
+}
+
+// initAddedTokensCache initializes the per-request token cache with TTL-based
+// eviction. Idempotent; safe to call from both the factory (eager) and from
+// PreRequest (lazy, for callers that build the struct directly without going
+// through the factory — e.g. unit tests). The eviction handler is the leak
+// safety net: when a request times out without ever seeing EndOfStream, it
+// subtracts the entry's tokens and decrements the request tracker so neither
+// counter drifts upward over time.
+func (p *InFlightLoadProducer) initAddedTokensCache() {
+	p.initOnce.Do(func() {
+		ttl := p.requestTTL
+		if ttl <= 0 {
+			ttl = ttlcache.NoTTL
+		}
+		p.addedTokens = ttlcache.New(ttlcache.WithTTL[string, addedTokensEntry](ttl))
+		p.addedTokens.OnEviction(func(ctx context.Context, reason ttlcache.EvictionReason, item *ttlcache.Item[string, addedTokensEntry]) {
+			if reason != ttlcache.EvictionReasonExpired {
+				return
+			}
+			entry := item.Value()
+			// The TTL fired before EndOfStream/StartOfStream cleaned this entry up.
+			// Roll back both counters that PreRequest incremented for this entry to
+			// avoid unbounded drift on long-running EPP processes.
+			if entry.tokens != 0 {
+				p.tokenTracker.add(entry.endpointID, -entry.tokens)
+			}
+			p.requestTracker.dec(entry.endpointID)
+			log.FromContext(ctx).V(logutil.DEFAULT).Info(
+				"in-flight load entry expired without release; rolled back counters",
+				"key", item.Key(),
+				"endpoint", entry.endpointID,
+				"profile", entry.profileName,
+				"tokens", entry.tokens,
+			)
+		})
+	})
+}
+
+// startCacheLifecycle runs the ttlcache janitor and stops it when ctx is
+// canceled. Mirrors the predicted-latency producer's pattern.
+func (p *InFlightLoadProducer) startCacheLifecycle(ctx context.Context) {
+	if p.addedTokens == nil {
+		return
+	}
+	go p.addedTokens.Start()
+	if ctx == nil {
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		p.addedTokens.Stop()
+	}()
 }
 
 func (p *InFlightLoadProducer) TypedName() fwkplugin.TypedName {
@@ -140,6 +226,7 @@ func (p *InFlightLoadProducer) PreRequest(_ context.Context, request *fwksched.I
 	if result == nil || len(result.ProfileResults) == 0 {
 		return
 	}
+	p.initAddedTokensCache()
 
 	inputTokens := p.tokenEstimator.EstimateInput(request)
 
@@ -167,8 +254,12 @@ func (p *InFlightLoadProducer) PreRequest(_ context.Context, request *fwksched.I
 		}
 
 		p.tokenTracker.add(eid, tokens)
-		if request != nil {
-			p.addedTokens.Store(addedTokensKey(request.RequestID, eid, profileName), tokens)
+		if request != nil && request.RequestID != "" && p.addedTokens != nil {
+			p.addedTokens.Set(
+				addedTokensKey(request.RequestID, eid, profileName),
+				addedTokensEntry{endpointID: eid, profileName: profileName, tokens: tokens},
+				ttlcache.DefaultTTL,
+			)
 		}
 	}
 }
@@ -220,9 +311,9 @@ func (p *InFlightLoadProducer) ResponseBody(
 
 			if !p.includeOutputTokens {
 				// Tokens are normally freed at StartOfStream; also call
-				// releaseTokens here as a safety net for non-streaming or
-				// error paths where StartOfStream may not be observed. It is
-				// a no-op via LoadAndDelete if tokens were already released.
+				// release() here as a safety net for non-streaming or error
+				// paths where StartOfStream may not be observed. releaseTokens
+				// is a no-op via LoadAndDelete if tokens were already released.
 				p.release(endpoint, request, name)
 				continue
 			}
@@ -257,19 +348,20 @@ func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request
 	eid := endpoint.GetMetadata().NamespacedName.String()
 
 	// Prefer the exact value stored in PreRequest to keep counters balanced.
-	// LoadAndDelete makes this idempotent per (requestID, endpointID, profileName):
+	// GetAndDelete makes this idempotent per (requestID, endpointID, profileName):
 	// a second call for the same key finds nothing and is a no-op below (we do
 	// NOT fall back to Estimate when the request carries a real RequestID, since
-	// the absence of the key means "already released").
-	if request != nil && request.RequestID != "" {
+	// the absence of the key means "already released" or "already TTL-evicted").
+	if request != nil && request.RequestID != "" && p.addedTokens != nil {
 		key := addedTokensKey(request.RequestID, eid, profileName)
-		if v, ok := p.addedTokens.LoadAndDelete(key); ok {
-			if tokens, ok := v.(int64); ok && tokens != 0 {
-				p.tokenTracker.add(eid, -tokens)
+		if item := p.addedTokens.Get(key, ttlcache.WithDisableTouchOnHit[string, addedTokensEntry]()); item != nil {
+			p.addedTokens.Delete(key)
+			if entry := item.Value(); entry.tokens != 0 {
+				p.tokenTracker.add(eid, -entry.tokens)
 			}
 		}
 		// Either we just released the stored value, or the key was already
-		// released by a previous call — both cases are no-ops here.
+		// released by a previous call (or TTL-evicted) — both cases are no-ops.
 		return
 	}
 
