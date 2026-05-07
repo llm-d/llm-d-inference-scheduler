@@ -29,7 +29,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	metricsutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/metrics"
-	schedulingframework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -788,7 +788,7 @@ func RecordSchedulerE2ELatency(duration time.Duration) {
 }
 
 // RecordSchedulerAttempt records a scheduling attempt with status and endpoint information.
-func RecordSchedulerAttempt(err error, targetModelName string, result *schedulingframework.SchedulingResult) {
+func RecordSchedulerAttempt(err error, targetModelName string, result *fwksched.SchedulingResult) {
 	if err != nil {
 		schedulerAttemptsTotal.WithLabelValues(SchedulerStatusFailure, targetModelName, "", "", "").Inc()
 		return

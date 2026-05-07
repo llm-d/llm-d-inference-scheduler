@@ -30,7 +30,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrlatency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/latency"
 )
 
@@ -38,7 +38,7 @@ const (
 	PluginType = "slo-headroom-tier-filter"
 )
 
-var _ framework.Filter = &Plugin{}
+var _ fwksched.Filter = &Plugin{}
 
 type Config struct {
 	// EpsilonExploreNeg is the probability of selecting the negative tier
@@ -81,14 +81,14 @@ func (p *Plugin) TypedName() fwkplugin.TypedName {
 // endpoints are kept. 1% of the time, only negative-tier endpoints are kept
 // (epsilon exploration for recovery). If only one tier has endpoints, that
 // tier is returned. If no endpoints have predictions, all are kept.
-func (p *Plugin) Filter(ctx context.Context, _ *framework.CycleState, _ *framework.InferenceRequest, endpoints []framework.Endpoint) []framework.Endpoint {
+func (p *Plugin) Filter(ctx context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
 	logger := log.FromContext(ctx)
 
 	if len(endpoints) <= 1 {
 		return endpoints
 	}
 
-	var positive, negative, noPrediction []framework.Endpoint
+	var positive, negative, noPrediction []fwksched.Endpoint
 	for _, ep := range endpoints {
 		raw, ok := ep.Get(attrlatency.LatencyPredictionInfoKey)
 		if !ok {

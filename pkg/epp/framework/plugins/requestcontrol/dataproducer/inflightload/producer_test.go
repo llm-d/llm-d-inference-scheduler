@@ -27,7 +27,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
 )
 
@@ -47,7 +47,7 @@ func TestInFlightLoadProducer_PrepareRequestData(t *testing.T) {
 	producer.tokenTracker.add(endpointID, 500)
 
 	ctx := context.Background()
-	endpoints := []schedulingtypes.Endpoint{newStubSchedulingEndpoint(endpointName)}
+	endpoints := []fwksched.Endpoint{newStubSchedulingEndpoint(endpointName)}
 
 	err := producer.PrepareRequestData(ctx, nil, endpoints)
 	require.NoError(t, err)
@@ -104,11 +104,11 @@ func TestInFlightLoadProducer_MultiPodLifecycle(t *testing.T) {
 
 	// 1. Dispatch to PodA (Prefill) and PodB (Decode)
 	req := makeTokenRequest("multi-req", "1234567890123456") // 10 tokens
-	res := &schedulingtypes.SchedulingResult{
+	res := &fwksched.SchedulingResult{
 		PrimaryProfileName: "prefill",
-		ProfileResults: map[string]*schedulingtypes.ProfileRunResult{
-			"prefill": {TargetEndpoints: []schedulingtypes.Endpoint{newStubSchedulingEndpoint(podA)}},
-			"decode":  {TargetEndpoints: []schedulingtypes.Endpoint{newStubSchedulingEndpoint(podB)}},
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
+			"prefill": {TargetEndpoints: []fwksched.Endpoint{newStubSchedulingEndpoint(podA)}},
+			"decode":  {TargetEndpoints: []fwksched.Endpoint{newStubSchedulingEndpoint(podB)}},
 		},
 	}
 
@@ -193,7 +193,7 @@ func TestInFlightLoadProducer_ConcurrencyStress(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			res := makeSchedulingResult(endpointName)
-			req := &schedulingtypes.InferenceRequest{SchedulingResult: res}
+			req := &fwksched.InferenceRequest{SchedulingResult: res}
 			for range opsPerRoutine {
 				producer.ResponseBody(ctx, req, &requestcontrol.Response{EndOfStream: true}, nil)
 			}
@@ -211,19 +211,19 @@ func fullEndpointName(name string) string {
 	return types.NamespacedName{Name: name, Namespace: "default"}.String()
 }
 
-func makeSchedulingResult(endpointName string) *schedulingtypes.SchedulingResult {
-	return &schedulingtypes.SchedulingResult{
+func makeSchedulingResult(endpointName string) *fwksched.SchedulingResult {
+	return &fwksched.SchedulingResult{
 		PrimaryProfileName: "default",
-		ProfileResults: map[string]*schedulingtypes.ProfileRunResult{
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
 			"default": {
-				TargetEndpoints: []schedulingtypes.Endpoint{newStubSchedulingEndpoint(endpointName)},
+				TargetEndpoints: []fwksched.Endpoint{newStubSchedulingEndpoint(endpointName)},
 			},
 		},
 	}
 }
 
 type stubSchedulingEndpoint struct {
-	schedulingtypes.Endpoint
+	fwksched.Endpoint
 	metadata *datalayer.EndpointMetadata
 	attr     datalayer.AttributeMap
 }
@@ -247,8 +247,8 @@ func (f *stubSchedulingEndpoint) Get(key string) (datalayer.Cloneable, bool) {
 }
 func (f *stubSchedulingEndpoint) Keys() []string { return f.attr.Keys() }
 
-func makeTokenRequest(requestID, prompt string) *schedulingtypes.InferenceRequest {
-	return &schedulingtypes.InferenceRequest{
+func makeTokenRequest(requestID, prompt string) *fwksched.InferenceRequest {
+	return &fwksched.InferenceRequest{
 		RequestID: requestID,
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: prompt}},

@@ -32,7 +32,7 @@ import (
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 const (
@@ -241,7 +241,7 @@ var _ = ginkgo.Describe("InferencePool", func() {
 			}, testConfig.ExistsTimeout, testConfig.Interval).Should(gomega.Succeed())
 
 			// Wait for one replica to become ready again.
-			testutils.DeploymentReadyReplicas(testConfig, deploy, 1)
+			igwtestutils.DeploymentReadyReplicas(testConfig, deploy, 1)
 
 			// Also wait for the total number of replicas to be back to 3.
 			gomega.Eventually(func(g gomega.Gomega) {
