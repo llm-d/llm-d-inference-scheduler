@@ -219,8 +219,11 @@ func (p *InFlightLoadProducer) ResponseBody(
 			endpoint := profileResult.TargetEndpoints[0]
 
 			if !p.includeOutputTokens {
-				// Tokens were freed at StartOfStream; only release the request counter.
-				p.releaseRequest(endpoint)
+				// Tokens are normally freed at StartOfStream; also call
+				// releaseTokens here as a safety net for non-streaming or
+				// error paths where StartOfStream may not be observed. It is
+				// a no-op via LoadAndDelete if tokens were already released.
+				p.release(endpoint, request, name)
 				continue
 			}
 
