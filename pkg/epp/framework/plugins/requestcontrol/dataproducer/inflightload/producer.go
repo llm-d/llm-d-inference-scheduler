@@ -151,12 +151,11 @@ func (p *InFlightLoadProducer) PreRequest(_ context.Context, request *fwksched.I
 		eid := endpoint.GetMetadata().NamespacedName.String()
 		p.requestTracker.inc(eid)
 
-		// Subtract approximate prefix-cache hit (in input tokens) for this endpoint.
-		cached := cachedInputTokens(endpoint)
-		adjustedInput := inputTokens - cached
-		if adjustedInput < 0 {
-			adjustedInput = 0
-		}
+		// Compute the uncached prompt portion this endpoint must actually compute.
+		// Prefer the prefix producer's view (real tokens) when available so the
+		// match-length and the input length are in the same units; fall back to
+		// the (estimated) input tokens otherwise.
+		adjustedInput := uncachedInputTokens(endpoint, inputTokens)
 		tokens := adjustedInput
 		if p.includeOutputTokens {
 			// Output tokens are based on the full input, not the cached portion.
@@ -272,25 +271,53 @@ func addedTokensKey(requestID, endpointID string) string {
 	return requestID + "|" + endpointID
 }
 
-// cachedInputTokens returns the number of input tokens this endpoint already has cached
-// from the approximate prefix cache producer, or 0 if not available.
-func cachedInputTokens(endpoint fwksched.Endpoint) int64 {
+// uncachedInputTokens returns the prompt tokens this endpoint must actually compute,
+// excluding any prefix already cached on it.
+//
+// When the approximate prefix producer has populated PrefixCacheMatchInfo on the
+// endpoint, the matched and total block counts are in real (tokenized) units, so
+// we use them directly: uncached = (TotalBlocks - MatchBlocks) * BlockSizeTokens.
+// For very long prompts where the prefix index is capped (MaxPrefixTokensToMatch),
+// any tail beyond the cap is added back from the (estimated) inputTokens so the
+// full prompt cost is still reflected.
+//
+// When the attribute is missing, we fall back to the estimated inputTokens.
+func uncachedInputTokens(endpoint fwksched.Endpoint, inputTokens int64) int64 {
 	if endpoint == nil {
-		return 0
+		return nonNeg(inputTokens)
 	}
 	raw, ok := endpoint.Get(attrprefix.PrefixCacheMatchInfoKey)
 	if !ok {
-		return 0
+		return nonNeg(inputTokens)
 	}
 	info, ok := raw.(*attrprefix.PrefixCacheMatchInfo)
-	if !ok || info == nil {
+	if !ok || info == nil || info.BlockSizeTokens() <= 0 {
+		return nonNeg(inputTokens)
+	}
+
+	blockSize := int64(info.BlockSizeTokens())
+	matched := int64(info.MatchBlocks()) * blockSize
+	indexed := int64(info.TotalBlocks()) * blockSize
+
+	uncachedIndexed := indexed - matched
+	if uncachedIndexed < 0 {
+		uncachedIndexed = 0
+	}
+
+	// Tail beyond the indexed portion (e.g., when MaxPrefixTokensToMatch caps total).
+	tail := inputTokens - indexed
+	if tail < 0 {
+		tail = 0
+	}
+
+	return uncachedIndexed + tail
+}
+
+func nonNeg(v int64) int64 {
+	if v < 0 {
 		return 0
 	}
-	cached := int64(info.MatchBlocks()) * int64(info.BlockSizeTokens())
-	if cached < 0 {
-		return 0
-	}
-	return cached
+	return v
 }
 
 func (p *InFlightLoadProducer) Produces() map[string]any {
