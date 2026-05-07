@@ -35,7 +35,6 @@ import (
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
-
 var _ = ginkgo.Describe("InferencePool", func() {
 	var infObjective *v1alpha2.InferenceObjective
 	ginkgo.BeforeEach(func() {
