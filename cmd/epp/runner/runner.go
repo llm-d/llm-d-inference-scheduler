@@ -21,13 +21,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	nhpprof "net/http/pprof"
 	"os"
 	"regexp"
+	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
@@ -40,9 +43,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-
-	nhpprof "net/http/pprof"
-	"runtime"
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/rungroup"
@@ -111,7 +111,6 @@ import (
 	runserver "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/server"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/env"
 	"github.com/llm-d/llm-d-inference-scheduler/version"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
