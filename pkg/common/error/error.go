@@ -19,15 +19,31 @@ package error
 import (
 	"fmt"
 
+	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	envoyTypePb "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"google.golang.org/grpc/status"
 )
 
+// EvictionReasonHeaderKey is the HTTP response header that communicates the specific
+// reason a request was rejected or evicted by flow control.
+const EvictionReasonHeaderKey = "x-eviction-reason"
+
+// EvictionReason is the reason a request was rejected or evicted by flow control.
+type EvictionReason string
+
+const (
+	EvictionReasonCapacity         EvictionReason = "capacity"
+	EvictionReasonTTLExpired       EvictionReason = "ttl-expired"
+	EvictionReasonContextCancelled EvictionReason = "context-cancelled"
+	EvictionReasonEvicted          EvictionReason = "evicted"
+)
+
 // Error is an error struct for errors returned by the epp/bbr server.
 type Error struct {
-	Code string
-	Msg  string
+	Code    string
+	Msg     string
+	Headers map[string]string
 }
 
 const (
@@ -81,19 +97,34 @@ func BuildErrResponse(err error) (*extProcPb.ProcessingResponse, error) {
 		return nil, status.Errorf(status.Code(err), "failed to handle request: %v", err)
 	}
 
-	resp := &extProcPb.ProcessingResponse{
-		Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-			ImmediateResponse: &extProcPb.ImmediateResponse{
-				Status: &envoyTypePb.HttpStatus{
-					Code: httpCode,
-				},
-			},
+	ir := &extProcPb.ImmediateResponse{
+		Status: &envoyTypePb.HttpStatus{
+			Code: httpCode,
 		},
 	}
 
 	if err.Error() != "" {
-		resp.Response.(*extProcPb.ProcessingResponse_ImmediateResponse).ImmediateResponse.Body = []byte(err.Error())
+		ir.Body = []byte(err.Error())
 	}
 
-	return resp, nil
+	if e, ok := err.(Error); ok && len(e.Headers) > 0 {
+		setHeaders := make([]*configPb.HeaderValueOption, 0, len(e.Headers))
+		for k, v := range e.Headers {
+			setHeaders = append(setHeaders, &configPb.HeaderValueOption{
+				Header: &configPb.HeaderValue{
+					Key:      k,
+					RawValue: []byte(v),
+				},
+			})
+		}
+		ir.Headers = &extProcPb.HeaderMutation{
+			SetHeaders: setHeaders,
+		}
+	}
+
+	return &extProcPb.ProcessingResponse{
+		Response: &extProcPb.ProcessingResponse_ImmediateResponse{
+			ImmediateResponse: ir,
+		},
+	}, nil
 }

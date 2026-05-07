@@ -209,6 +209,7 @@ func TestFlowControlAdmissionController_Admit(t *testing.T) {
 		expectErr       bool
 		expectErrCode   string
 		expectErrSubstr string
+		expectHeaders   map[string]string
 	}{
 		{
 			name:      "sheddable_dispatched",
@@ -223,29 +224,32 @@ func TestFlowControlAdmissionController_Admit(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name:            "fc_reject_capacity",
-			priority:        0,
-			fcOutcome:       fctypes.QueueOutcomeRejectedCapacity,
-			expectErr:       true,
-			expectErrCode:   errcommon.ResourceExhausted,
-			expectErrSubstr: "request rejected by flow control",
+			name:                 "fc_reject_capacity",
+			priority:             0,
+			fcOutcome:            fctypes.QueueOutcomeRejectedCapacity,
+			expectErr:            true,
+			expectErrCode:        errcommon.ResourceExhausted,
+			expectErrSubstr:      "request rejected by flow control",
+			expectHeaders:   map[string]string{errcommon.EvictionReasonHeaderKey: string(errcommon.EvictionReasonCapacity)},
 		},
 		{
-			name:            "fc_evict_ttl",
-			priority:        0,
-			fcOutcome:       fctypes.QueueOutcomeEvictedTTL,
-			fcErr:           errors.New("timeout"),
-			expectErr:       true,
-			expectErrCode:   errcommon.ServiceUnavailable,
-			expectErrSubstr: "request timed out in queue: timeout",
+			name:                 "fc_evict_ttl",
+			priority:             0,
+			fcOutcome:            fctypes.QueueOutcomeEvictedTTL,
+			fcErr:                errors.New("timeout"),
+			expectErr:            true,
+			expectErrCode:        errcommon.ServiceUnavailable,
+			expectErrSubstr:      "request timed out in queue: timeout",
+			expectHeaders:   map[string]string{errcommon.EvictionReasonHeaderKey: string(errcommon.EvictionReasonTTLExpired)},
 		},
 		{
-			name:            "fc_evict_context_cancelled",
-			priority:        0,
-			fcOutcome:       fctypes.QueueOutcomeEvictedContextCancelled,
-			expectErr:       true,
-			expectErrCode:   errcommon.ServiceUnavailable,
-			expectErrSubstr: "client disconnected",
+			name:                 "fc_evict_context_cancelled",
+			priority:             0,
+			fcOutcome:            fctypes.QueueOutcomeEvictedContextCancelled,
+			expectErr:            true,
+			expectErrCode:        errcommon.ServiceUnavailable,
+			expectErrSubstr:      "client disconnected",
+			expectHeaders:   map[string]string{errcommon.EvictionReasonHeaderKey: string(errcommon.EvictionReasonContextCancelled)},
 		},
 		{
 			name:            "fc_reject_other",
@@ -292,6 +296,7 @@ func TestFlowControlAdmissionController_Admit(t *testing.T) {
 				if assert.ErrorAs(t, err, &e, "error should be of type errcommon.Error") {
 					assert.Equal(t, tc.expectErrCode, e.Code, "incorrect error code for scenario: %s", tc.name)
 					assert.Contains(t, e.Msg, tc.expectErrSubstr, "incorrect error message substring for scenario: %s", tc.name)
+					assert.Equal(t, tc.expectHeaders, e.Headers, "incorrect headers for scenario: %s", tc.name)
 				}
 			}
 		})

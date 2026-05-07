@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 )
 
 func TestEvictionRegistry_RegisterAndGet(t *testing.T) {
@@ -49,6 +51,24 @@ func TestEvictionRegistry_Deregister(t *testing.T) {
 
 	// Deregister non-existent should not panic.
 	r.Deregister("non-existent")
+}
+
+func TestEvictionRegistry_SetAndGetReason(t *testing.T) {
+	t.Parallel()
+	r := NewEvictionRegistry()
+
+	ch := make(chan struct{})
+	r.Register("req-1", ch)
+
+	assert.Equal(t, errcommon.EvictionReason(""), r.GetReason("req-1"), "reason should be empty initially")
+
+	r.SetReason("req-1", errcommon.EvictionReasonEvicted)
+	assert.Equal(t, errcommon.EvictionReasonEvicted, r.GetReason("req-1"))
+
+	assert.Equal(t, errcommon.EvictionReason(""), r.GetReason("non-existent"), "GetReason for unregistered ID should return empty")
+
+	// SetReason on non-existent should not panic.
+	r.SetReason("non-existent", errcommon.EvictionReasonEvicted)
 }
 
 func TestEvictionRegistry_Concurrency(t *testing.T) {
