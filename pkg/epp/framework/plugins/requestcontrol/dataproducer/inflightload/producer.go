@@ -82,9 +82,13 @@ type InFlightLoadProducer struct {
 	tokenTracker        *concurrencyTracker
 	tokenEstimator      TokenEstimator
 	includeOutputTokens bool
-	// addedTokens tracks the exact token amount added per (requestID, endpointID)
+	// addedTokens tracks the exact token amount added per (requestID, endpointID, profileName)
 	// so release subtracts the same value (accounting for prefix-cache discount).
-	// Key format: "<requestID>|<endpointID>".
+	// The profile name is part of the key so that multiple profiles targeting the
+	// same endpoint each track their own increment independently and a release
+	// for one profile cannot subtract another profile's value (which would leak
+	// or double-count tokens).
+	// Key format: "<requestID>|<endpointID>|<profileName>".
 	addedTokens sync.Map
 }
 
@@ -139,7 +143,7 @@ func (p *InFlightLoadProducer) PreRequest(_ context.Context, request *fwksched.I
 
 	inputTokens := p.tokenEstimator.EstimateInput(request)
 
-	for _, profileResult := range result.ProfileResults {
+	for profileName, profileResult := range result.ProfileResults {
 		if profileResult == nil || len(profileResult.TargetEndpoints) == 0 {
 			continue
 		}
@@ -164,7 +168,7 @@ func (p *InFlightLoadProducer) PreRequest(_ context.Context, request *fwksched.I
 
 		p.tokenTracker.add(eid, tokens)
 		if request != nil {
-			p.addedTokens.Store(addedTokensKey(request.RequestID, eid), tokens)
+			p.addedTokens.Store(addedTokensKey(request.RequestID, eid, profileName), tokens)
 		}
 	}
 }
@@ -190,11 +194,11 @@ func (p *InFlightLoadProducer) ResponseBody(
 	// token counters for every targeted endpoint regardless of profile name.
 	// Request counters are still released on EndOfStream below.
 	if !p.includeOutputTokens && resp.StartOfStream {
-		for _, profileResult := range result.ProfileResults {
+		for profileName, profileResult := range result.ProfileResults {
 			if profileResult == nil || len(profileResult.TargetEndpoints) == 0 {
 				continue
 			}
-			p.releaseTokens(profileResult.TargetEndpoints[0], request)
+			p.releaseTokens(profileResult.TargetEndpoints[0], request, profileName)
 		}
 	}
 
@@ -202,7 +206,7 @@ func (p *InFlightLoadProducer) ResponseBody(
 	// Uses the new StartOfStream signal provided by the framework.
 	if p.includeOutputTokens && resp.StartOfStream {
 		if prefillResult, ok := result.ProfileResults[profilePrefill]; ok && len(prefillResult.TargetEndpoints) > 0 {
-			p.release(prefillResult.TargetEndpoints[0], request)
+			p.release(prefillResult.TargetEndpoints[0], request, profilePrefill)
 		}
 	}
 
@@ -225,14 +229,14 @@ func (p *InFlightLoadProducer) ResponseBody(
 			if name == profilePrefill {
 				continue
 			}
-			p.release(endpoint, request)
+			p.release(endpoint, request, name)
 		}
 	}
 }
 
-func (p *InFlightLoadProducer) release(endpoint fwksched.Endpoint, request *fwksched.InferenceRequest) {
+func (p *InFlightLoadProducer) release(endpoint fwksched.Endpoint, request *fwksched.InferenceRequest, profileName string) {
 	p.releaseRequest(endpoint)
-	p.releaseTokens(endpoint, request)
+	p.releaseTokens(endpoint, request, profileName)
 }
 
 func (p *InFlightLoadProducer) releaseRequest(endpoint fwksched.Endpoint) {
@@ -243,7 +247,7 @@ func (p *InFlightLoadProducer) releaseRequest(endpoint fwksched.Endpoint) {
 	p.requestTracker.dec(eid)
 }
 
-func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request *fwksched.InferenceRequest) {
+func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request *fwksched.InferenceRequest, profileName string) {
 	if endpoint == nil || endpoint.GetMetadata() == nil {
 		return
 	}
@@ -251,7 +255,7 @@ func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request
 
 	// Prefer the exact value stored in PreRequest to keep counters balanced.
 	if request != nil {
-		key := addedTokensKey(request.RequestID, eid)
+		key := addedTokensKey(request.RequestID, eid, profileName)
 		if v, ok := p.addedTokens.LoadAndDelete(key); ok {
 			if tokens, ok := v.(int64); ok && tokens != 0 {
 				p.tokenTracker.add(eid, -tokens)
@@ -267,8 +271,8 @@ func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request
 	}
 }
 
-func addedTokensKey(requestID, endpointID string) string {
-	return requestID + "|" + endpointID
+func addedTokensKey(requestID, endpointID, profileName string) string {
+	return requestID + "|" + endpointID + "|" + profileName
 }
 
 // uncachedInputTokens returns the prompt tokens this endpoint must actually compute,
