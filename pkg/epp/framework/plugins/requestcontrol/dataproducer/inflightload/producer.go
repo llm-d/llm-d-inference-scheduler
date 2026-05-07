@@ -275,7 +275,16 @@ func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request
 
 	// Fallback: re-estimate. Covers tests/legacy paths that bypass PreRequest
 	// (request is nil or has no RequestID, so nothing was stored to release).
-	tokens := p.tokenEstimator.Estimate(request)
+	// Mirror PreRequest's accounting so we subtract the same amount we would
+	// have added: uncached input tokens, plus output tokens only when
+	// includeOutputTokens is true. Using tokenEstimator.Estimate() here would
+	// ignore both the includeOutputTokens=false semantics and any prefix-cache
+	// discount applied at PreRequest time, leading to over/under-decrement.
+	inputTokens := p.tokenEstimator.EstimateInput(request)
+	tokens := uncachedInputTokens(endpoint, inputTokens)
+	if p.includeOutputTokens {
+		tokens += p.tokenEstimator.EstimateOutput(inputTokens)
+	}
 	if tokens != 0 {
 		p.tokenTracker.add(eid, -tokens)
 	}
