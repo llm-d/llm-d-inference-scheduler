@@ -25,7 +25,7 @@ import (
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
-// executePluginsAsDAG executes PrepareData plugins as a DAG based on their dependencies asynchronously.
+// executePluginsAsDAG executes DataProducer plugins as a DAG based on their dependencies asynchronously.
 // So, a plugin is executed only after all its dependencies have been executed.
 // If there is a cycle or any plugin fails with error, it returns an error.
 func executePluginsAsDAG(ctx context.Context, plugins []fwkrc.DataProducer, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {

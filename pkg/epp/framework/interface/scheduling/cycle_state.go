@@ -36,7 +36,7 @@ func NewCycleState() *CycleState {
 //
 // CycleState is possibly being deprecated in favor of plugin.PluginState
 // for per-request state management or Data Layer attributes for sharing data
-// between PrepareData and Scheduling phases.
+// between Produce and Scheduling phases.
 // See https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2657 for the ongoing discussion.
 // TODO(https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2657):
 // Remove CycleState once all plugins are migrated and the discussion is finalized.

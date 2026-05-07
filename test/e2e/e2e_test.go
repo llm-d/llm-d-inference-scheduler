@@ -644,7 +644,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
-	ginkgo.When("Running KV configuration with external tokenizer PrepareData plugin", func() {
+	ginkgo.When("Running KV configuration with external tokenizer DataProducer plugin", func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 

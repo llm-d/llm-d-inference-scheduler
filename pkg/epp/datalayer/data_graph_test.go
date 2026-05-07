@@ -272,7 +272,7 @@ func TestDAGAndTopologicalOrder(t *testing.T) {
 			maps.Copy(normalizedExpectedDAG, tc.expectedDAG)
 
 			if diff := cmp.Diff(normalizedExpectedDAG, normalizedDAG); diff != "" {
-				t.Errorf("prepareDataGraph() mismatch (-want +got):\n%s", diff)
+				t.Errorf("dataProducerGraph() mismatch (-want +got):\n%s", diff)
 			}
 
 			assertTopologicalOrder(t, dag, orderedPlugins)

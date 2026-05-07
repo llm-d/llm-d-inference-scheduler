@@ -38,12 +38,12 @@ const (
 )
 
 var (
-	_ requestcontrol.DataProducer = &prepareData{}
-	_ requestcontrol.PreRequest   = &prepareData{}
+	_ requestcontrol.DataProducer = &dataProducer{}
+	_ requestcontrol.PreRequest   = &dataProducer{}
 )
 
-// prepareData is a plugin that prepares data consumed by approx prefix cache aware scheduling.
-type prepareData struct {
+// dataProducer is a plugin that produces data consumed by approx prefix cache aware scheduling.
+type dataProducer struct {
 	typedName   plugin.TypedName
 	config      config
 	indexerInst indexerInterface
@@ -52,18 +52,18 @@ type prepareData struct {
 }
 
 // TypedName returns the type and name of the plugin.
-func (p *prepareData) TypedName() plugin.TypedName {
+func (p *dataProducer) TypedName() plugin.TypedName {
 	return p.typedName
 }
 
 // Produces returns the data produced by the plugin.
-func (p *prepareData) Produces() map[string]any {
+func (p *dataProducer) Produces() map[string]any {
 	return map[string]any{attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{}}
 }
 
-// newPrepareData returns a new PrepareData plugin.
-func newPrepareData(ctx context.Context, config config, handle plugin.Handle) (*prepareData, error) {
-	log.FromContext(ctx).V(logutil.DEFAULT).Info("Prefix PrepareData initialized", "config", config)
+// newDataProducer returns a new DataProducer plugin.
+func newDataProducer(ctx context.Context, config config, handle plugin.Handle) (*dataProducer, error) {
+	log.FromContext(ctx).V(logutil.DEFAULT).Info("Prefix DataProducer initialized", "config", config)
 
 	//nolint:staticcheck // BlockSize is deprecated, but we check it here to provide a migration path for users.
 	if config.BlockSize > 0 && config.BlockSizeTokens <= 0 {
@@ -78,7 +78,7 @@ func newPrepareData(ctx context.Context, config config, handle plugin.Handle) (*
 	}
 	indexer := newIndexer(ctx, config.LRUCapacityPerServer)
 
-	p := &prepareData{
+	p := &dataProducer{
 		typedName: plugin.TypedName{
 			Type: ApproxPrefixCachePluginType,
 			Name: ApproxPrefixCachePluginType,
@@ -96,7 +96,7 @@ func newPrepareData(ctx context.Context, config config, handle plugin.Handle) (*
 }
 
 // CleanUpInactivePods starts a goroutine that periodically removes inactive pods from the indexer.
-func (p *prepareData) CleanUpInactivePods(ctx context.Context, handle plugin.Handle) {
+func (p *dataProducer) CleanUpInactivePods(ctx context.Context, handle plugin.Handle) {
 	ticker := time.NewTicker(podActiveCheckInterval)
 	defer ticker.Stop()
 
@@ -122,17 +122,17 @@ func (p *prepareData) CleanUpInactivePods(ctx context.Context, handle plugin.Han
 }
 
 // indexer returns the shared indexer.
-func (p *prepareData) indexer() indexerInterface {
+func (p *dataProducer) indexer() indexerInterface {
 	return p.indexerInst
 }
 
 // PluginState returns the shared plugin state.
-func (p *prepareData) PluginState() *plugin.PluginState {
+func (p *dataProducer) PluginState() *plugin.PluginState {
 	return p.pluginState
 }
 
 // Produce is called by the director before scheduling requests.
-func (p *prepareData) Produce(ctx context.Context, request *fwksched.InferenceRequest, pods []fwksched.Endpoint) error {
+func (p *dataProducer) Produce(ctx context.Context, request *fwksched.InferenceRequest, pods []fwksched.Endpoint) error {
 	blockSize := p.GetBlockSize(pods)
 	maxBlocks := p.config.MaxPrefixBlocksToMatch
 	if p.config.MaxPrefixTokensToMatch > 0 && blockSize > 0 {
@@ -161,7 +161,7 @@ func (p *prepareData) Produce(ctx context.Context, request *fwksched.InferenceRe
 
 // PreRequest records in the shared indexer the result of the scheduling selection.
 // It updates the indexer with the prefix hashes for the selected endpoint(s).
-func (p *prepareData) PreRequest(ctx context.Context, request *fwksched.InferenceRequest, schedulingResult *fwksched.SchedulingResult) {
+func (p *dataProducer) PreRequest(ctx context.Context, request *fwksched.InferenceRequest, schedulingResult *fwksched.SchedulingResult) {
 	// Delete the state to avoid memory leak.
 	defer p.pluginState.Delete(request.RequestID)
 	primaryProfileResult := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
@@ -199,7 +199,7 @@ func (p *prepareData) PreRequest(ctx context.Context, request *fwksched.Inferenc
 	metrics.RecordPrefixCacheMatch(matchLen*blockSize*avgChars, total*blockSize*avgChars)
 }
 
-func (p *prepareData) makeserver(targetEndpoint fwksched.Endpoint) server {
+func (p *dataProducer) makeserver(targetEndpoint fwksched.Endpoint) server {
 	gpuBlocks := defaultLRUCapacityPerServer
 	if p.config.AutoTune && targetEndpoint.GetMetrics().CacheNumBlocks > 0 {
 		gpuBlocks = targetEndpoint.GetMetrics().CacheNumBlocks
@@ -211,7 +211,7 @@ func (p *prepareData) makeserver(targetEndpoint fwksched.Endpoint) server {
 }
 
 // matchLongestPrefix returns a map of servers and length of prefix that each server caches, prefix length is defined in blocks.
-func (p *prepareData) matchLongestPrefix(ctx context.Context, hashes []blockHash) map[ServerID]int {
+func (p *dataProducer) matchLongestPrefix(ctx context.Context, hashes []blockHash) map[ServerID]int {
 	loggerTrace := log.FromContext(ctx).V(logutil.TRACE)
 	res := make(map[ServerID]int)
 
@@ -230,7 +230,7 @@ func (p *prepareData) matchLongestPrefix(ctx context.Context, hashes []blockHash
 }
 
 // GetBlockSize returns the block size in tokens, potentially auto-tuned from endpoint metrics.
-func (p *prepareData) GetBlockSize(endpoints []fwksched.Endpoint) int {
+func (p *dataProducer) GetBlockSize(endpoints []fwksched.Endpoint) int {
 	if !p.config.AutoTune || len(endpoints) == 0 {
 		return p.config.BlockSizeTokens
 	}
@@ -244,7 +244,7 @@ func (p *prepareData) GetBlockSize(endpoints []fwksched.Endpoint) int {
 	return p.config.BlockSizeTokens
 }
 
-// ApproxPrefixCacheFactory is the factory function for the prefix cache prepare data plugin.
+// ApproxPrefixCacheFactory is the factory function for the prefix cache data producer plugin.
 func ApproxPrefixCacheFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := defaultConfig
 	if rawParameters != nil {
@@ -253,8 +253,8 @@ func ApproxPrefixCacheFactory(name string, rawParameters json.RawMessage, handle
 		}
 	}
 
-	// pluginState will be initialized by newPrepareData as we pass nil here.
-	p, err := newPrepareData(handle.Context(), parameters, handle)
+	// pluginState will be initialized by newDataProducer as we pass nil here.
+	p, err := newDataProducer(handle.Context(), parameters, handle)
 	if err != nil {
 		return nil, err
 	}

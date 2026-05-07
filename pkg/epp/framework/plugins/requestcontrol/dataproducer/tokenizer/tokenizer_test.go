@@ -184,7 +184,6 @@ func TestProduce_UnsupportedBodyType(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported request body type")
 	assert.Nil(t, req.Body.TokenizedPrompt)
 }
-}
 
 func TestConvertMMFeaturesRoundTrip(t *testing.T) {
 	src := &tokenization.MultiModalFeatures{

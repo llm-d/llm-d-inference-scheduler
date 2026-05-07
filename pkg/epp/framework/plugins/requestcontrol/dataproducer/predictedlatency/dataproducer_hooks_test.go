@@ -38,13 +38,13 @@ func TestProducesConsumes(t *testing.T) {
 }
 
 // TestProduce_CancelledContextDoesNotPublish verifies that when the
-// director's PrepareData window has already closed (ctx cancelled), the plugin
+// director's Produce window has already closed (ctx cancelled), the plugin
 // does not publish the SLO context into the ttlcache. If it did, ResponseBody
 // would later find the context and issue an orphan decrement against counters
 // PreRequest never incremented — draining prefillTokensInFlight negative.
 func TestProduce_CancelledContextDoesNotPublish(t *testing.T) {
 	cfg := DefaultConfig
-	cfg.PredictInPrepareData = false // skip the prediction sidecar path
+	cfg.PredictInProduce = false // skip the prediction sidecar path
 	pl := NewPredictedLatency(cfg, nil)
 
 	request := createTestInferenceRequest("cancel-test", 0, 0)
@@ -64,7 +64,7 @@ func TestProduce_CancelledContextDoesNotPublish(t *testing.T) {
 // cancellation test above: with a live context, the fast-path store still fires.
 func TestProduce_LiveContextPublishes(t *testing.T) {
 	cfg := DefaultConfig
-	cfg.PredictInPrepareData = false
+	cfg.PredictInProduce = false
 	pl := NewPredictedLatency(cfg, nil)
 
 	request := createTestInferenceRequest("live-test", 0, 0)
