@@ -17,7 +17,19 @@ limitations under the License.
 package epp
 
 import (
+	"context"
 	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 // TestGenerateTraffic pins generateTraffic's outcome for a set of exec responses.
@@ -45,6 +57,95 @@ func TestGenerateTraffic(t *testing.T) {
 			err := generateTraffic([]string{"curl"}, 1, semaphore, execFn, 0, tc.expectedStatus)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("generateTraffic: wantErr=%v, gotErr=%v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestDeploymentReadyCondition exercises deploymentReadyCondition with a fake k8s client.
+func TestDeploymentReadyCondition(t *testing.T) {
+	const (
+		ns         = "test-ns"
+		deployName = "test-deploy"
+	)
+	podLabels := map[string]string{"app": "test"}
+
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	makeDeploy := func(replicas, ready int32) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: deployName, Namespace: ns},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: podLabels},
+			},
+			Status: appsv1.DeploymentStatus{
+				Replicas: replicas, ReadyReplicas: ready,
+			},
+		}
+	}
+	makePod := func(name string, terminating bool) *corev1.Pod {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: podLabels},
+		}
+		if terminating {
+			now := metav1.Now()
+			pod.DeletionTimestamp = &now
+			pod.Finalizers = []string{"test/block-deletion"}
+		}
+		return pod
+	}
+
+	cases := []struct {
+		name    string
+		deploy  *appsv1.Deployment
+		pods    []*corev1.Pod
+		wantErr bool
+	}{
+		{
+			name:    "ready, no terminating pods",
+			deploy:  makeDeploy(1, 1),
+			pods:    []*corev1.Pod{makePod("pod-ready", false)},
+			wantErr: false,
+		},
+		{
+			// The regression case: after DeleteAllOf, a terminating pod still counts
+			// toward ReadyReplicas. deploymentReadyCondition must detect it.
+			name:    "terminating pod still present",
+			deploy:  makeDeploy(1, 1),
+			pods:    []*corev1.Pod{makePod("pod-terminating", true)},
+			wantErr: true,
+		},
+		{
+			name:    "no ready replicas",
+			deploy:  makeDeploy(1, 0),
+			pods:    []*corev1.Pod{makePod("pod-starting", false)},
+			wantErr: true,
+		},
+		{
+			name:    "replicas mismatch",
+			deploy:  makeDeploy(2, 1),
+			pods:    []*corev1.Pod{makePod("pod-1", false)},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := make([]client.Object, 0, 1+len(tc.pods))
+			objs = append(objs, tc.deploy)
+			for _, p := range tc.pods {
+				objs = append(objs, p)
+			}
+			cfg := &igwtestutils.TestConfig{
+				Context:   context.Background(),
+				K8sClient: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(),
+			}
+			err := deploymentReadyCondition(cfg, types.NamespacedName{Name: deployName, Namespace: ns})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr=%v, got=%v", tc.wantErr, err)
 			}
 		})
 	}
