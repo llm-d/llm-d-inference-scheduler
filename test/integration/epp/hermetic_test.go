@@ -60,7 +60,7 @@ const (
 
 // gaieModulePath is the on-disk path to the gateway-api-inference-extension
 // upstream module in the local mod cache. CRDs and shared testdata fixtures
-// live there because api/v1, apix/v1alpha2 are upstream types and the test
+// live there because api/v1 still comes from the upstream module and the test
 // manifests depend on those CRD shapes.
 var gaieModulePath string
 
