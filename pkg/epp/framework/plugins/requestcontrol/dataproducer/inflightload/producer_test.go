@@ -506,3 +506,47 @@ func TestInFlightLoadProducer_TTLEviction_RollsBackCounters(t *testing.T) {
 	}, time.Second, time.Millisecond,
 		"TTL eviction must roll back both token and request trackers for the endpoint")
 }
+
+// TestInFlightLoadProducer_ExcludeOutputTokens_EndOfStreamWithoutStart verifies the
+// safety net for non-streaming or error paths: when includeOutputTokens=false and
+// ResponseBody delivers EndOfStream without ever seeing StartOfStream, the token
+// counter and request counter must both drain (tokens are normally released at
+// StartOfStream, so a missing StartOfStream would otherwise leak them). Also
+// asserts the addedTokens cache entry is removed so the TTL safety net doesn't
+// later double-subtract via OnEviction.
+func TestInFlightLoadProducer_ExcludeOutputTokens_EndOfStreamWithoutStart(t *testing.T) {
+	t.Parallel()
+
+	producer := &InFlightLoadProducer{
+		requestTracker:      newConcurrencyTracker(),
+		tokenTracker:        newConcurrencyTracker(),
+		tokenEstimator:      NewSimpleTokenEstimator(),
+		includeOutputTokens: false,
+	}
+	ctx := context.Background()
+	endpointName := "no-start-endpoint"
+	endpointID := fullEndpointName(endpointName)
+
+	req := makeTokenRequest("req-no-start", "1234567890123456") // 4 input tokens
+	res := &fwksched.SchedulingResult{
+		PrimaryProfileName: "default",
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
+			"default": {TargetEndpoints: []fwksched.Endpoint{newStubSchedulingEndpoint(endpointName)}},
+		},
+	}
+
+	producer.PreRequest(ctx, req, res)
+	require.Equal(t, int64(1), producer.requestTracker.get(endpointID))
+	require.Equal(t, int64(4), producer.tokenTracker.get(endpointID))
+
+	// EndOfStream only (no StartOfStream): both counters must drain.
+	req.SchedulingResult = res
+	producer.ResponseBody(ctx, req, &requestcontrol.Response{EndOfStream: true}, nil)
+	require.Equal(t, int64(0), producer.requestTracker.get(endpointID))
+	require.Equal(t, int64(0), producer.tokenTracker.get(endpointID),
+		"tokens must be released on EndOfStream even if StartOfStream was never seen")
+
+	// addedTokens entry should be gone too (no leak, no future double-subtract).
+	require.False(t, producer.addedTokens.Has(addedTokensKey(req.RequestID, endpointID, "default")),
+		"addedTokens entry must be released")
+}
