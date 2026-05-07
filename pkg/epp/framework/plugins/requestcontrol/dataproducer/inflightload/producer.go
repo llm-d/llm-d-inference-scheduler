@@ -19,6 +19,7 @@ package inflightload
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
+	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	sourcenotifications "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/notifications"
 )
 
@@ -39,12 +41,30 @@ const (
 	profilePrefill           = "prefill"
 )
 
-func InFlightLoadProducerFactory(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
+// Config controls optional behaviors of InFlightLoadProducer.
+type Config struct {
+	// IncludeOutputTokens controls whether estimated output tokens are added to
+	// the in-flight token counter. Defaults to true to preserve historical behavior.
+	IncludeOutputTokens bool `json:"includeOutputTokens"`
+}
+
+func defaultConfig() Config {
+	return Config{IncludeOutputTokens: true}
+}
+
+func InFlightLoadProducerFactory(name string, rawParameters json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
+	cfg := defaultConfig()
+	if len(rawParameters) > 0 {
+		if err := json.Unmarshal(rawParameters, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal inflight-load-producer parameters: %w", err)
+		}
+	}
 	return &InFlightLoadProducer{
-		typedName:      fwkplugin.TypedName{Type: InFlightLoadProducerType, Name: name},
-		requestTracker: newConcurrencyTracker(),
-		tokenTracker:   newConcurrencyTracker(),
-		tokenEstimator: NewSimpleTokenEstimator(),
+		typedName:           fwkplugin.TypedName{Type: InFlightLoadProducerType, Name: name},
+		requestTracker:      newConcurrencyTracker(),
+		tokenTracker:        newConcurrencyTracker(),
+		tokenEstimator:      NewSimpleTokenEstimator(),
+		includeOutputTokens: cfg.IncludeOutputTokens,
 	}, nil
 }
 
@@ -57,10 +77,15 @@ var (
 )
 
 type InFlightLoadProducer struct {
-	typedName      fwkplugin.TypedName
-	requestTracker *concurrencyTracker
-	tokenTracker   *concurrencyTracker
-	tokenEstimator TokenEstimator
+	typedName           fwkplugin.TypedName
+	requestTracker      *concurrencyTracker
+	tokenTracker        *concurrencyTracker
+	tokenEstimator      TokenEstimator
+	includeOutputTokens bool
+	// addedTokens tracks the exact token amount added per (requestID, endpointID)
+	// so release subtracts the same value (accounting for prefix-cache discount).
+	// Key format: "<requestID>|<endpointID>".
+	addedTokens sync.Map
 }
 
 func (p *InFlightLoadProducer) TypedName() fwkplugin.TypedName {
@@ -112,6 +137,8 @@ func (p *InFlightLoadProducer) PreRequest(_ context.Context, request *fwksched.I
 		return
 	}
 
+	inputTokens := p.tokenEstimator.EstimateInput(request)
+
 	for _, profileResult := range result.ProfileResults {
 		if profileResult == nil || len(profileResult.TargetEndpoints) == 0 {
 			continue
@@ -123,8 +150,23 @@ func (p *InFlightLoadProducer) PreRequest(_ context.Context, request *fwksched.I
 		}
 		eid := endpoint.GetMetadata().NamespacedName.String()
 		p.requestTracker.inc(eid)
-		tokens := p.tokenEstimator.Estimate(request)
+
+		// Subtract approximate prefix-cache hit (in input tokens) for this endpoint.
+		cached := cachedInputTokens(endpoint)
+		adjustedInput := inputTokens - cached
+		if adjustedInput < 0 {
+			adjustedInput = 0
+		}
+		tokens := adjustedInput
+		if p.includeOutputTokens {
+			// Output tokens are based on the full input, not the cached portion.
+			tokens += p.tokenEstimator.EstimateOutput(inputTokens)
+		}
+
 		p.tokenTracker.add(eid, tokens)
+		if request != nil {
+			p.addedTokens.Store(addedTokensKey(request.RequestID, eid), tokens)
+		}
 	}
 }
 
@@ -143,9 +185,23 @@ func (p *InFlightLoadProducer) ResponseBody(
 		return
 	}
 
-	// 1. Early Prefill Release (on first chunk)
+	// When output tokens are excluded, the in-flight token estimate represents only
+	// the prompt cost, which is consumed by prefill. As soon as the first chunk
+	// arrives (StartOfStream), prefill is done across all profiles, so free the
+	// token counters for every targeted endpoint regardless of profile name.
+	// Request counters are still released on EndOfStream below.
+	if !p.includeOutputTokens && resp.StartOfStream {
+		for _, profileResult := range result.ProfileResults {
+			if profileResult == nil || len(profileResult.TargetEndpoints) == 0 {
+				continue
+			}
+			p.releaseTokens(profileResult.TargetEndpoints[0], request)
+		}
+	}
+
+	// 1. Early Prefill Release (on first chunk) — original behavior.
 	// Uses the new StartOfStream signal provided by the framework.
-	if resp.StartOfStream {
+	if p.includeOutputTokens && resp.StartOfStream {
 		if prefillResult, ok := result.ProfileResults[profilePrefill]; ok && len(prefillResult.TargetEndpoints) > 0 {
 			p.release(prefillResult.TargetEndpoints[0], request)
 		}
@@ -157,24 +213,84 @@ func (p *InFlightLoadProducer) ResponseBody(
 			if profileResult == nil || len(profileResult.TargetEndpoints) == 0 {
 				continue
 			}
+			endpoint := profileResult.TargetEndpoints[0]
+
+			if !p.includeOutputTokens {
+				// Tokens were freed at StartOfStream; only release the request counter.
+				p.releaseRequest(endpoint)
+				continue
+			}
+
 			// Skip "prefill" as it was already released in the StartOfStream block.
 			// This works perfectly even if StartOfStream and EndOfStream are both true (single chunk).
 			if name == profilePrefill {
 				continue
 			}
-			p.release(profileResult.TargetEndpoints[0], request)
+			p.release(endpoint, request)
 		}
 	}
 }
 
 func (p *InFlightLoadProducer) release(endpoint fwksched.Endpoint, request *fwksched.InferenceRequest) {
+	p.releaseRequest(endpoint)
+	p.releaseTokens(endpoint, request)
+}
+
+func (p *InFlightLoadProducer) releaseRequest(endpoint fwksched.Endpoint) {
 	if endpoint == nil || endpoint.GetMetadata() == nil {
 		return
 	}
 	eid := endpoint.GetMetadata().NamespacedName.String()
 	p.requestTracker.dec(eid)
+}
+
+func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request *fwksched.InferenceRequest) {
+	if endpoint == nil || endpoint.GetMetadata() == nil {
+		return
+	}
+	eid := endpoint.GetMetadata().NamespacedName.String()
+
+	// Prefer the exact value stored in PreRequest to keep counters balanced.
+	if request != nil {
+		key := addedTokensKey(request.RequestID, eid)
+		if v, ok := p.addedTokens.LoadAndDelete(key); ok {
+			if tokens, ok := v.(int64); ok && tokens != 0 {
+				p.tokenTracker.add(eid, -tokens)
+			}
+			return
+		}
+	}
+
+	// Fallback: re-estimate (covers tests/legacy paths that bypass PreRequest).
 	tokens := p.tokenEstimator.Estimate(request)
-	p.tokenTracker.add(eid, -tokens)
+	if tokens != 0 {
+		p.tokenTracker.add(eid, -tokens)
+	}
+}
+
+func addedTokensKey(requestID, endpointID string) string {
+	return requestID + "|" + endpointID
+}
+
+// cachedInputTokens returns the number of input tokens this endpoint already has cached
+// from the approximate prefix cache producer, or 0 if not available.
+func cachedInputTokens(endpoint fwksched.Endpoint) int64 {
+	if endpoint == nil {
+		return 0
+	}
+	raw, ok := endpoint.Get(attrprefix.PrefixCacheMatchInfoKey)
+	if !ok {
+		return 0
+	}
+	info, ok := raw.(*attrprefix.PrefixCacheMatchInfo)
+	if !ok || info == nil {
+		return 0
+	}
+	cached := int64(info.MatchBlocks()) * int64(info.BlockSizeTokens())
+	if cached < 0 {
+		return 0
+	}
+	return cached
 }
 
 func (p *InFlightLoadProducer) Produces() map[string]any {
@@ -184,7 +300,9 @@ func (p *InFlightLoadProducer) Produces() map[string]any {
 }
 
 func (p *InFlightLoadProducer) Consumes() map[string]any {
-	return nil
+	return map[string]any{
+		attrprefix.PrefixCacheMatchInfoKey: (*attrprefix.PrefixCacheMatchInfo)(nil),
+	}
 }
 
 // DeleteEndpoint removes an endpoint from the concurrency trackers to prevent memory leaks.
