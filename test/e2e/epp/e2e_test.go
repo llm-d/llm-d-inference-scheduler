@@ -35,6 +35,11 @@ import (
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
+const (
+	argPort             = "--port"
+	argDataParallelSize = "--data-parallel-size"
+)
+
 var _ = ginkgo.Describe("InferencePool", func() {
 	var infObjective *v1alpha2.InferenceObjective
 	ginkgo.BeforeEach(func() {
@@ -61,7 +66,7 @@ var _ = ginkgo.Describe("InferencePool", func() {
 					continue
 				}
 				// If this is one of the arguments we are updating, skip it AND its value
-				if arg == "--port" || arg == "--data-parallel-size" {
+				if arg == argPort || arg == argDataParallelSize {
 					skipNext = true
 					continue
 				}
@@ -69,8 +74,8 @@ var _ = ginkgo.Describe("InferencePool", func() {
 			} // contains only the args we want to keep
 
 			// add new arguments to open proper ports
-			newArgs = append(newArgs, "--port", strconv.Itoa(firstPort))
-			newArgs = append(newArgs, "--data-parallel-size", strconv.Itoa(numPorts))
+			newArgs = append(newArgs, argPort, strconv.Itoa(firstPort))
+			newArgs = append(newArgs, argDataParallelSize, strconv.Itoa(numPorts))
 			deploy.Spec.Template.Spec.Containers[0].Args = newArgs
 			deploy.Spec.Template.Spec.Containers[0].Ports = buildContainerPorts(firstPort, numPorts)
 
@@ -154,7 +159,7 @@ var _ = ginkgo.Describe("InferencePool", func() {
 					skipNext = false
 					continue
 				}
-				if arg == "--port" || arg == "--data-parallel-size" {
+				if arg == argPort || arg == argDataParallelSize {
 					skipNext = true
 					continue
 				}

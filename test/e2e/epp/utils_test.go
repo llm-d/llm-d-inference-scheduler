@@ -47,7 +47,13 @@ const (
 	maxRetries            = 5
 	backoff               = 5 * time.Second
 	batches               = 20
+	apiCompletions        = "/completions"
+	apiChatCompletions    = "/chat/completions"
 	apiEmbeddings         = "/embeddings"
+
+	curlPodName = "curl" // name of both the curl pod and its container
+
+	testPrompt = "Write as if you were a critic: San Francisco"
 
 	// statusTrailerFmt is the -w format that appends the HTTP status code to curl's
 	// stdout as "HTTP_STATUS=<code>". Prefer matching this over the header status line
@@ -73,24 +79,24 @@ func verifyTrafficRouting() {
 		promptOrMessages any
 	}{
 		{
-			api:              "/completions",
-			promptOrMessages: "Write as if you were a critic: San Francisco",
+			api:              apiCompletions,
+			promptOrMessages: testPrompt,
 		},
 		{
-			api: "/chat/completions",
+			api: apiChatCompletions,
 			promptOrMessages: []map[string]any{
 				{
 					"role":    "user",
-					"content": "Write as if you were a critic: San Francisco",
+					"content": testPrompt,
 				},
 			},
 		},
 		{
-			api: "/chat/completions",
+			api: apiChatCompletions,
 			promptOrMessages: []map[string]any{
 				{
 					"role":    "user",
-					"content": "Write as if you were a critic: San Francisco",
+					"content": testPrompt,
 				},
 				{"role": "assistant", "content": "Okay, let's see..."},
 				{"role": "user", "content": "Now summarize your thoughts."},
@@ -110,7 +116,7 @@ func verifyTrafficRouting() {
 		// Skip embeddings API if server returns 404 (not all models support embeddings).
 		if t.api == apiEmbeddings {
 			probeCmd := getCurlCommand(envoyName, testConfig.NsName, envoyPort, modelName, curlTimeout, t.api, t.promptOrMessages, false)
-			probeResp, probeErr := testutils.ExecCommandInPod(testConfig, "curl", "curl", probeCmd)
+			probeResp, probeErr := testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, probeCmd)
 			if probeErr == nil && strings.Contains(probeResp, statusNotFound) {
 				ginkgo.Skip("Skipping " + apiEmbeddings + ": server returned 404 (embeddings may not be supported by this model)")
 			}
@@ -157,7 +163,7 @@ func verifyTrafficRouting() {
 			var err error
 			// Repeatedly send a message until we get a successful response.
 			for attempt := 0; attempt <= maxRetries; attempt++ {
-				resp, err = testutils.ExecCommandInPod(testConfig, "curl", "curl", curlCmd)
+				resp, err = testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, curlCmd)
 				if err == nil && strings.Contains(resp, statusOK) {
 					break // Success!
 				}
@@ -205,13 +211,13 @@ func verifyMetrics() {
 
 	// Generate traffic by sending requests through the inference extension.
 	ginkgo.By("Generating traffic through the inference extension")
-	curlCmd := getCurlCommand(envoyName, testConfig.NsName, envoyPort, modelName, curlTimeout, "/completions", "Write as if you were a critic: San Francisco", true)
+	curlCmd := getCurlCommand(envoyName, testConfig.NsName, envoyPort, modelName, curlTimeout, apiCompletions, testPrompt, true)
 
 	// Run the curl command multiple times to generate some metrics data.
 
 	semaphore := make(chan struct{}, maxConcurrentRequests)
 	execFn := func(cmd []string) (string, error) {
-		return testutils.ExecCommandInPod(testConfig, "curl", "curl", cmd)
+		return testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, cmd)
 	}
 
 	errorGood := generateTraffic(curlCmd, batches, semaphore, execFn, backoff, statusOK)
@@ -281,7 +287,7 @@ func verifyMetrics() {
 
 	gomega.Eventually(func() error {
 		// Execute the metrics scrape command inside the curl pod.
-		resp, err := testutils.ExecCommandInPod(testConfig, "curl", "curl", metricScrapeCmd)
+		resp, err := testutils.ExecCommandInPod(testConfig, curlPodName, curlPodName, metricScrapeCmd)
 		if err != nil {
 			return err
 		}
@@ -355,9 +361,9 @@ func getCurlCommand(name, ns, port, model string, timeout time.Duration, api str
 		"temperature": 0,
 	}
 	switch api {
-	case "/completions":
+	case apiCompletions:
 		body["prompt"] = promptOrMessages
-	case "/chat/completions":
+	case apiChatCompletions:
 		body["messages"] = promptOrMessages
 	case apiEmbeddings:
 		body["input"] = promptOrMessages
