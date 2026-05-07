@@ -10,6 +10,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	prefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
@@ -55,11 +56,32 @@ func makeRequestWithTokens(tokens int) *scheduling.InferenceRequest {
 	return completionsRequest(strings.Repeat("x", tokens*AverageCharactersPerToken))
 }
 
+func completionsRequestWithPrompt(prompt fwkrh.Prompt) *scheduling.InferenceRequest {
+	return &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{
+			Completions: &fwkrh.CompletionsRequest{
+				Prompt: prompt,
+			},
+		},
+	}
+}
+
+func embeddingsRequestWithInput(input fwkrh.EmbeddingsInput) *scheduling.InferenceRequest {
+	return &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{
+			Embeddings: &fwkrh.EmbeddingsRequest{
+				Input: input,
+			},
+		},
+	}
+}
+
 func TestGetUserInputLenInTokens(t *testing.T) {
 	tests := []struct {
 		name     string
 		req      *scheduling.InferenceRequest
 		wantMin  int // at least this many tokens
+		want     int
 		wantZero bool
 	}{
 		{
@@ -77,14 +99,45 @@ func TestGetUserInputLenInTokens(t *testing.T) {
 			req:      completionsRequest(""),
 			wantZero: true,
 		},
+		{
+			name: "completions prompt array",
+			req: completionsRequestWithPrompt(fwkrh.Prompt{
+				Strings: []string{"hello", "world"},
+			}),
+			wantMin: 2,
+		},
+		{
+			name: "completions token ids uses exact hint",
+			req: completionsRequestWithPrompt(fwkrh.Prompt{
+				TokenIDs: []uint32{1, 2, 3, 4},
+			}),
+			want: 4,
+		},
+		{
+			name: "embeddings input array",
+			req: embeddingsRequestWithInput(fwkrh.EmbeddingsInput{
+				Strings: []string{"hello", "world"},
+			}),
+			wantMin: 2,
+		},
+		{
+			name: "embeddings token ids uses exact hint",
+			req: embeddingsRequestWithInput(fwkrh.EmbeddingsInput{
+				TokenIDs: []uint32{1, 2, 3},
+			}),
+			want: 3,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tokens, err := getUserInputLenInTokens(tt.req)
 			assert.NoError(t, err)
-			if tt.wantZero {
+			switch {
+			case tt.wantZero:
 				assert.Zero(t, tokens)
-			} else {
+			case tt.want > 0:
+				assert.Equal(t, tt.want, tokens)
+			default:
 				assert.GreaterOrEqual(t, tokens, tt.wantMin)
 			}
 		})
