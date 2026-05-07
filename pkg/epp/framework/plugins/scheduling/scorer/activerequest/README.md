@@ -2,7 +2,7 @@
 
 **Type:** `active-request-scorer`
 
-Scores pods based on the number of active requests being served per pod. It consumes request counts produced by the `inflight-load-producer` instead of tracking request lifecycle locally.
+Scores pods based on the number of active requests being served per pod. It consumes request counts produced by the `inflight-load-producer`.
 
 Pods at or below `idleThreshold` active requests receive the maximum score (`1.0`). Busier pods are scored proportionally in the range `[0, maxBusyScore]`, with the most-loaded pod scoring lowest.
 

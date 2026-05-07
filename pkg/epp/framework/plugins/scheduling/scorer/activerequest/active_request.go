@@ -72,7 +72,7 @@ func NewActiveRequest(ctx context.Context, params *Parameters) *ActiveRequest {
 	logger := log.FromContext(ctx)
 
 	if params != nil && params.RequestTimeout != "" {
-		logger.Info("requestTimeout is deprecated and ignored; inflight tracking is handled by inflight-load-producer",
+		logger.Info("DEPRECATED: requestTimeout is deprecated and ignored; inflight tracking is handled by inflight-load-producer",
 			"requestTimeout", params.RequestTimeout)
 	}
 
