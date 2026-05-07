@@ -54,7 +54,6 @@ func (g *groupRunner) Add(name string, fn func(ctx context.Context) error) {
 func (g *groupRunner) Run(ctx context.Context) error {
 	eg, ectx := errgroup.WithContext(ctx)
 	for _, nf := range g.fns {
-		nf := nf
 		eg.Go(func() error {
 			if err := nf.fn(ectx); err != nil {
 				return fmt.Errorf("%s: %w", nf.name, err)

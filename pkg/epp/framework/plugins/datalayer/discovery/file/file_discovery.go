@@ -21,6 +21,7 @@ package file
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -74,7 +75,7 @@ func Factory(name string, parameters json.RawMessage, _ fwkplugin.Handle) (fwkpl
 		}
 	}
 	if p.Path == "" {
-		return nil, fmt.Errorf("file-discovery: 'path' parameter is required")
+		return nil, errors.New("file-discovery: 'path' parameter is required")
 	}
 	if name == "" {
 		name = PluginType

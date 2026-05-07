@@ -35,10 +35,6 @@ import (
 
 // ---- baseK8sDiscovery tests -----------------------------------------------
 
-type fakeDatastore struct{}
-
-func (f *fakeDatastore) PoolSet(_ interface{}, _ interface{}, _ interface{}) error { return nil }
-
 func TestBaseK8sDiscovery_SetDatastore(t *testing.T) {
 	b := &baseK8sDiscovery{}
 	assert.Nil(t, b.ds)

@@ -37,7 +37,7 @@ type fakeNotifier struct {
 }
 
 func (f *fakeNotifier) Upsert(ep *fwkdl.EndpointMetadata) { f.upserted = append(f.upserted, ep) }
-func (f *fakeNotifier) Delete(id types.NamespacedName)     { f.deleted = append(f.deleted, id) }
+func (f *fakeNotifier) Delete(id types.NamespacedName)    { f.deleted = append(f.deleted, id) }
 
 func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
@@ -217,8 +217,6 @@ func TestLoad_InvalidYAML(t *testing.T) {
 
 func TestLoad_JSONFormat(t *testing.T) {
 	path := writeTempFile(t, `{"endpoints":[{"name":"ep-0","address":"10.0.0.1","port":"8080"}]}`)
-	path = path[:len(path)] // rename not needed, yaml.YAMLToJSON handles JSON
-	// rename to .json to make intent clear -- but the plugin doesn't care about extension
 	fd := &FileDiscovery{path: path, current: make(map[types.NamespacedName]struct{})}
 	n := &fakeNotifier{}
 	require.NoError(t, fd.load(n))
@@ -297,4 +295,4 @@ type trackingNotifier struct {
 }
 
 func (t *trackingNotifier) Upsert(ep *fwkdl.EndpointMetadata) { t.onUpsert(ep) }
-func (t *trackingNotifier) Delete(id types.NamespacedName)     { t.onDelete(id) }
+func (t *trackingNotifier) Delete(id types.NamespacedName)    { t.onDelete(id) }

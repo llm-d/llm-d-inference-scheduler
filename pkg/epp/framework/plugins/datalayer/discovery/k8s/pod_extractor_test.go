@@ -25,8 +25,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 )
 
 func makePod(name, namespace, ip string, labels map[string]string) *corev1.Pod {
@@ -97,12 +95,3 @@ func TestPodToEndpointMetadata_LabelsPreserved(t *testing.T) {
 	require.Len(t, metas, 1)
 	assert.Equal(t, labels, metas[0].Labels)
 }
-
-// fakeNotifier records Upsert/Delete calls for testing.
-type fakeNotifier struct {
-	upserted []*fwkdl.EndpointMetadata
-	deleted  []types.NamespacedName
-}
-
-func (f *fakeNotifier) Upsert(ep *fwkdl.EndpointMetadata) { f.upserted = append(f.upserted, ep) }
-func (f *fakeNotifier) Delete(id types.NamespacedName)     { f.deleted = append(f.deleted, id) }
