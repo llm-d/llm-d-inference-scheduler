@@ -254,17 +254,24 @@ func (p *InFlightLoadProducer) releaseTokens(endpoint fwksched.Endpoint, request
 	eid := endpoint.GetMetadata().NamespacedName.String()
 
 	// Prefer the exact value stored in PreRequest to keep counters balanced.
-	if request != nil {
+	// LoadAndDelete makes this idempotent per (requestID, endpointID, profileName):
+	// a second call for the same key finds nothing and is a no-op below (we do
+	// NOT fall back to Estimate when the request carries a real RequestID, since
+	// the absence of the key means "already released").
+	if request != nil && request.RequestID != "" {
 		key := addedTokensKey(request.RequestID, eid, profileName)
 		if v, ok := p.addedTokens.LoadAndDelete(key); ok {
 			if tokens, ok := v.(int64); ok && tokens != 0 {
 				p.tokenTracker.add(eid, -tokens)
 			}
-			return
 		}
+		// Either we just released the stored value, or the key was already
+		// released by a previous call — both cases are no-ops here.
+		return
 	}
 
-	// Fallback: re-estimate (covers tests/legacy paths that bypass PreRequest).
+	// Fallback: re-estimate. Covers tests/legacy paths that bypass PreRequest
+	// (request is nil or has no RequestID, so nothing was stored to release).
 	tokens := p.tokenEstimator.Estimate(request)
 	if tokens != 0 {
 		p.tokenTracker.add(eid, -tokens)
