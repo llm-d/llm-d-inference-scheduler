@@ -249,7 +249,7 @@ nodes:
 - role: control-plane
   # Pin to Kubernetes 1.31+ for Gateway API v1.5.1 compatibility
   # (requires isIP() CEL function and ValidatingAdmissionPolicy)
-  image: kindest/node:v1.31.2
+  image: kindest/node:v1.31.12
   extraPortMappings:
   - containerPort: 30080
     hostPort: ${GATEWAY_HOST_PORT}
@@ -304,20 +304,7 @@ fi
 
 pull_image() {
     local image="$1"
-    if [ "${CONTAINER_RUNTIME}" == "docker" ]; then
-        # Pull with --platform to ensure platform-specific layers are cached.
-        # If the pull fails, check for a local image (e.g. a locally-built :dev tag)
-        # before giving up — only treat the failure as non-fatal when the image
-        # already exists locally. Real failures (network, auth) are surfaced as errors.
-        if ! "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${image}" 2>/dev/null; then
-            if "${CONTAINER_RUNTIME}" image inspect "${image}" > /dev/null 2>&1; then
-                echo "Note: ${image} not found in registry, using local build."
-            else
-                echo "Error: failed to pull ${image} and no local image found." >&2
-                return 1
-            fi
-        fi
-    elif ! "${CONTAINER_RUNTIME}" image inspect "${image}" > /dev/null 2>&1; then
+    if ! "${CONTAINER_RUNTIME}" image inspect "${image}" > /dev/null 2>&1; then
         echo "Image ${image} not found locally, pulling..."
         "${CONTAINER_RUNTIME}" pull ${PLATFORM_ARGS[@]+"${PLATFORM_ARGS[@]}"} "${image}"
     fi
