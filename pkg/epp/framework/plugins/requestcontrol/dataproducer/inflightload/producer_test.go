@@ -495,7 +495,7 @@ func TestInFlightLoadProducer_ExcludeOutputTokens_EndOfStreamWithoutStart(t *tes
 	require.Equal(t, int64(0), producer.tokenTracker.get(endpointID),
 		"tokens must be released on EndOfStream even if StartOfStream was never seen")
 
-	// addedTokens entry should be gone too (no leak).
-	_, loaded := producer.addedTokens.Load(addedTokensKey(req.RequestID, endpointID, "default"))
-	require.False(t, loaded, "addedTokens entry must be released")
+	// addedTokens entry should be gone too (no leak, no future double-subtract).
+	require.False(t, producer.addedTokens.Has(addedTokensKey(req.RequestID, endpointID, "default")),
+		"addedTokens entry must be released")
 }
