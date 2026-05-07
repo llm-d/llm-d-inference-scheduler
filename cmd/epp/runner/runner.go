@@ -213,7 +213,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	poolName := opts.PoolName
 	if poolName == "" {
 		if v := os.Getenv("POD_NAME"); v != "" {
-			poolName = v
+			if name, err := extractDeploymentName(v); err == nil {
+				poolName = name
+			} else {
+				poolName = v
+			}
 		} else {
 			poolName = "epp"
 		}
