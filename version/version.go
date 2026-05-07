@@ -27,7 +27,7 @@ var (
 const (
 	// BundleVersionAnnotation is the annotation key used in llm-d CRDs to specify
 	// the installed bundle version.
-	BundleVersionAnnotation = "inference.networking.k8s.io/bundle-version"
+	BundleVersionAnnotation = "llm-d.ai/bundle-version"
 
 	// BundleVersion is the value used for labeling the CRD bundle version.
 	BundleVersion = "main-dev"
