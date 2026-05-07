@@ -200,16 +200,18 @@ func TestScorer_MultiPromptTokenizedIndependentScoring(t *testing.T) {
 
 	var scoreTokensCalls [][]uint32
 	scorer := &Scorer{
-		typedName:      plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
-		kvEventsConfig: &kvevents.Config{},
-		pluginState:    plugin.NewPluginState(ctx),
+		typedName:       plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
+		kvEventsConfig:  &kvevents.Config{},
+		pluginState:     plugin.NewPluginState(ctx),
+		blockSizeTokens: 3,
 		kvCacheIndexer: &mockKVCacheIndexer{
 			scoreTokensFunc: func(_ context.Context, tokens []uint32, _ string, _ []string, _ []*kvblock.BlockExtraFeatures) (map[string]float64, error) {
 				tokensCopy := make([]uint32, len(tokens))
 				copy(tokensCopy, tokens)
 				scoreTokensCalls = append(scoreTokensCalls, tokensCopy)
 
-				// Pod A has "hello" cached, Pod B has "world" cached
+				// Pod A has "hello" cached (1 block), Pod B has "world" cached (1 block).
+				// Each prompt is 3 tokens = 1 block with blockSizeTokens=3.
 				if tokens[0] == 10 {
 					return map[string]float64{
 						"10.0.0.1:8080": 1.0,
@@ -246,15 +248,16 @@ func TestScorer_MultiPromptTokenizedIndependentScoring(t *testing.T) {
 	assert.Equal(t, prompt1Tokens, scoreTokensCalls[0])
 	assert.Equal(t, prompt2Tokens, scoreTokensCalls[1])
 
-	// Both pods should have score 1.0 (sum of independent scores)
+	// Both pods should have score 0.5 (aggregated 1.0 / totalBlocks 2).
+	// Each prompt is 3 tokens = 1 block (blockSizeTokens=3), so totalBlocks = 2.
 	gotByAddress := make(map[string]float64)
 	for ep, score := range scores {
 		if m := ep.GetMetadata(); m != nil {
 			gotByAddress[m.Address+":"+m.Port] = score
 		}
 	}
-	assert.Equal(t, 1.0, gotByAddress["10.0.0.1:8080"], "pod-a: 1.0 from prompt1 + 0.0 from prompt2")
-	assert.Equal(t, 1.0, gotByAddress["10.0.0.2:8080"], "pod-b: 0.0 from prompt1 + 1.0 from prompt2")
+	assert.Equal(t, 0.5, gotByAddress["10.0.0.1:8080"], "pod-a: (1.0 + 0.0) / 2 blocks")
+	assert.Equal(t, 0.5, gotByAddress["10.0.0.2:8080"], "pod-b: (0.0 + 1.0) / 2 blocks")
 }
 
 func TestScorer_InvalidPerPromptTokensUsesFlatScoring(t *testing.T) {
