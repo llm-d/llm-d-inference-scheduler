@@ -366,10 +366,13 @@ func (s *Scorer) Produce(ctx context.Context,
 	podSet := extractPodSet(endpoints)
 
 	if request.Body.Completions != nil && len(request.Body.Completions.Prompt.Strings) > 0 {
-		aggregatedScores := make(map[string]float64)
+		var perPromptScores []map[string]float64
 		var perPromptKeys [][]kvblock.BlockHash
 		totalBlocks := 0
 
+		// Keep string-array completions as separate prefix chains. Flattening
+		// here would create cross-prompt block adjacency that never exists in
+		// the model server cache and would poison speculative indexing.
 		for _, promptStr := range request.Body.Completions.Prompt.Strings {
 			keys, err := s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, promptStr, request.TargetModel)
 			if err != nil {
@@ -390,11 +393,14 @@ func (s *Scorer) Produce(ctx context.Context,
 			if err != nil {
 				return fmt.Errorf("failed to score block keys: %w", err)
 			}
-			for pod, score := range scores {
-				aggregatedScores[pod] += score
-			}
+			perPromptScores = append(perPromptScores, scores)
 		}
 
+		if totalBlocks == 0 {
+			return nil
+		}
+
+		aggregatedScores := aggregatePromptScores(perPromptScores)
 		blockSize := s.getBlockSizeTokens()
 		for _, ep := range endpoints {
 			md := ep.GetMetadata()
@@ -826,6 +832,18 @@ func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
 	return podSet
 }
 
+// aggregatePromptScores uses total cached-work semantics for multi-prompt
+// completions: each prompt contributes its raw prefix-cache score to the pod.
+func aggregatePromptScores(perPromptScores []map[string]float64) map[string]float64 {
+	aggregated := make(map[string]float64)
+	for _, scores := range perPromptScores {
+		for pod, score := range scores {
+			aggregated[pod] += score
+		}
+	}
+	return aggregated
+}
+
 // getBlockSizeTokens returns the block size in tokens from the token processor config.
 func (s *Scorer) getBlockSizeTokens() int {
 	return s.blockSizeTokens
@@ -845,6 +863,27 @@ func (s *Scorer) scoreBlockKeys(ctx context.Context, blockKeys []kvblock.BlockHa
 	return s.kvBlockScorer.Score(ctx, blockKeys, keyToPods)
 }
 
+func perPromptTokenGroups(request *scheduling.InferenceRequest, tp *scheduling.TokenizedPrompt) ([][]uint32, bool, string) {
+	if tp == nil || len(tp.PerPromptTokens) == 0 {
+		return nil, false, ""
+	}
+	if request == nil || request.Body == nil || request.Body.Completions == nil {
+		return nil, false, "per-prompt tokens require a completions request body"
+	}
+	expectedPromptCount := len(request.Body.Completions.Prompt.Strings)
+	if expectedPromptCount <= 1 {
+		return nil, false, "per-prompt tokens require a completions string-array prompt with more than one prompt"
+	}
+	if len(tp.PerPromptTokens) != expectedPromptCount {
+		return nil, false, fmt.Sprintf("per-prompt token count %d does not match prompt count %d",
+			len(tp.PerPromptTokens), expectedPromptCount)
+	}
+	if !slices.Equal(slices.Concat(tp.PerPromptTokens...), tp.TokenIDs) {
+		return nil, false, "per-prompt tokens do not match flattened token IDs"
+	}
+	return tp.PerPromptTokens, true, ""
+}
+
 // getScores returns (scores, totalBlocks). Tokens path uses ScoreTokens;
 // prompt/chat fallback uses ComputeBlockKeys + scoreBlockKeys (single
 // tokenization).
@@ -859,29 +898,30 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 	// Prefer pre-tokenized input from the tokenizer DataProducer plugin.
 	if request.Body != nil {
 		if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
-			// Multi-prompt path: score each prompt independently and aggregate.
-			if len(tp.PerPromptTokens) > 1 {
-				traceLogger.Info("multi-prompt tokens found on request, scoring independently",
-					"promptCount", len(tp.PerPromptTokens))
+			if promptTokenGroups, ok, reason := perPromptTokenGroups(request, tp); len(tp.PerPromptTokens) > 0 {
+				if !ok {
+					traceLogger.Info("Ignoring invalid per-prompt tokens, using flat token scoring", "reason", reason)
+				} else {
+					traceLogger.Info("multi-prompt tokens found on request, scoring independently",
+						"promptCount", len(promptTokenGroups))
 
-				aggregated := make(map[string]float64)
-				totalBlocks := 0
-				for _, promptTokens := range tp.PerPromptTokens {
-					if len(promptTokens) == 0 {
-						continue
+					perPromptScores := make([]map[string]float64, 0, len(promptTokenGroups))
+					totalBlocks := 0
+					for _, promptTokens := range promptTokenGroups {
+						if len(promptTokens) == 0 {
+							continue
+						}
+						scores, scoreErr := s.kvCacheIndexer.ScoreTokens(ctx, promptTokens, request.TargetModel, nil, nil)
+						if scoreErr != nil {
+							return nil, 0, fmt.Errorf("failed to get endpoint scores for tokens: %w", scoreErr)
+						}
+						perPromptScores = append(perPromptScores, scores)
+						if s.blockSizeTokens > 0 {
+							totalBlocks += len(promptTokens) / s.blockSizeTokens
+						}
 					}
-					scores, scoreErr := s.kvCacheIndexer.ScoreTokens(ctx, promptTokens, request.TargetModel, nil, nil)
-					if scoreErr != nil {
-						return nil, 0, fmt.Errorf("failed to get endpoint scores for tokens: %w", scoreErr)
-					}
-					for pod, score := range scores {
-						aggregated[pod] += score
-					}
-					if s.blockSizeTokens > 0 {
-						totalBlocks += len(promptTokens) / s.blockSizeTokens
-					}
+					return aggregatePromptScores(perPromptScores), totalBlocks, nil
 				}
-				return aggregated, totalBlocks, nil
 			}
 
 			// Single-prompt path: use concatenated TokenIDs directly.
@@ -940,7 +980,7 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 	if request.Body != nil && request.Body.Completions != nil {
 		prompt := request.Body.Completions.Prompt
 		if len(prompt.Strings) > 0 {
-			aggregated := make(map[string]float64)
+			perPromptScores := make([]map[string]float64, 0, len(prompt.Strings))
 			totalBlocks := 0
 			for _, promptStr := range prompt.Strings {
 				traceLogger.Info("Scoring completion prompt independently", "promptLength", len(promptStr))
@@ -955,12 +995,10 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 				if err != nil {
 					return nil, 0, fmt.Errorf("failed to score block keys for completions: %w", err)
 				}
-				for pod, score := range scores {
-					aggregated[pod] += score
-				}
+				perPromptScores = append(perPromptScores, scores)
 				totalBlocks += len(blockKeys)
 			}
-			return aggregated, totalBlocks, nil
+			return aggregatePromptScores(perPromptScores), totalBlocks, nil
 		}
 
 		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
