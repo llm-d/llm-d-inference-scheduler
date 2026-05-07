@@ -308,7 +308,7 @@ func (r *Runtime) WaitForShutdown(ctx context.Context) error {
 func (r *Runtime) Stop() error {
 	r.collectors.Range(func(_, val any) bool {
 		if c, ok := val.(*Collector); ok {
-			_ = c.Stop()
+			c.Stop()
 		}
 		return true
 	})
