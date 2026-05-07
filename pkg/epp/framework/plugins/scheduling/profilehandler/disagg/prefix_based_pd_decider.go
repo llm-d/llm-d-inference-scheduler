@@ -11,7 +11,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
 
 const (
@@ -120,12 +120,12 @@ func (d *PrefixBasedPDDecider) disaggregate(ctx context.Context, request *schedu
 	}
 	// inspect the decode endpoint to disaggregate if prefill should run or not.
 	// if the non-cached part is short enough - no disaggregation.
-	prefixInfoRaw, ok := endpoint.Get(approxprefix.PrefixCacheMatchInfoKey)
+	prefixInfoRaw, ok := endpoint.Get(attrprefix.PrefixCacheMatchInfoKey)
 	if !ok || prefixInfoRaw == nil {
 		logger.Error(nil, "unable to read prefix cache state")
 		return false
 	}
-	prefixCacheMatchInfo, ok := prefixInfoRaw.(*approxprefix.PrefixCacheMatchInfo)
+	prefixCacheMatchInfo, ok := prefixInfoRaw.(*attrprefix.PrefixCacheMatchInfo)
 	if !ok {
 		logger.Error(nil, "wrong type of prefix cache match info")
 		return false

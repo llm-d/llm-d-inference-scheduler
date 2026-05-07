@@ -48,7 +48,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	fwk "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/openai"
@@ -1247,7 +1247,7 @@ func TestDirector_HandleResponseBody(t *testing.T) {
 	director.HandleResponseBody(ctx, reqCtx, true)
 
 	ps1.mu.Lock()
-	resps := make([]*fwk.Response, len(ps1.respsOnStreaming))
+	resps := make([]*fwkrc.Response, len(ps1.respsOnStreaming))
 	copy(resps, ps1.respsOnStreaming)
 	targetPods := make([]string, len(ps1.targetPodsOnStreaming))
 	copy(targetPods, ps1.targetPodsOnStreaming)
@@ -1339,7 +1339,7 @@ func (p *orderTrackingPlugin) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-func (p *orderTrackingPlugin) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwk.Response, _ *fwkdl.EndpointMetadata) {
+func (p *orderTrackingPlugin) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwkrc.Response, _ *fwkdl.EndpointMetadata) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.observedTokenCounts = append(p.observedTokenCounts, response.Usage.CompletionTokens)
@@ -1354,18 +1354,18 @@ const (
 type testResponseReceived struct {
 	mu                      sync.Mutex
 	typedName               fwkplugin.TypedName
-	lastRespOnResponse      *fwk.Response
+	lastRespOnResponse      *fwkrc.Response
 	lastTargetPodOnResponse string
 }
 
 type testResponseStreaming struct {
 	mu                    sync.Mutex
 	typedName             fwkplugin.TypedName
-	respsOnStreaming      []*fwk.Response
+	respsOnStreaming      []*fwkrc.Response
 	targetPodsOnStreaming []string
 
 	// Legacy fields for existing tests if any, but better to update them
-	lastRespOnStreaming      *fwk.Response
+	lastRespOnStreaming      *fwkrc.Response
 	lastTargetPodOnStreaming string
 }
 
@@ -1389,14 +1389,14 @@ func (p *testResponseStreaming) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-func (p *testResponseReceived) ResponseHeader(_ context.Context, _ *fwksched.InferenceRequest, response *fwk.Response, targetPod *fwkdl.EndpointMetadata) {
+func (p *testResponseReceived) ResponseHeader(_ context.Context, _ *fwksched.InferenceRequest, response *fwkrc.Response, targetPod *fwkdl.EndpointMetadata) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.lastRespOnResponse = response
 	p.lastTargetPodOnResponse = targetPod.NamespacedName.String()
 }
 
-func (p *testResponseStreaming) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwk.Response, targetPod *fwkdl.EndpointMetadata) {
+func (p *testResponseStreaming) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwkrc.Response, targetPod *fwkdl.EndpointMetadata) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.respsOnStreaming = append(p.respsOnStreaming, response)

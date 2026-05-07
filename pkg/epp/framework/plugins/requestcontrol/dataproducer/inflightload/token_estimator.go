@@ -19,12 +19,12 @@ package inflightload
 import (
 	"math"
 
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // TokenEstimator estimates the number of tokens for an LLM request.
 type TokenEstimator interface {
-	Estimate(request *framework.InferenceRequest) int64
+	Estimate(request *fwksched.InferenceRequest) int64
 }
 
 // SimpleTokenEstimator estimates tokens from character count. tokens = characters / CharactersPerToken.
@@ -45,7 +45,7 @@ func NewSimpleTokenEstimator() TokenEstimator {
 // When RequestSizeBytes is set, input tokens are derived from request size (~4 bytes per token)
 // to avoid allocations. Otherwise, input tokens are estimated from prompt/message character count
 // using CharactersPerToken; output tokens are estimated as inputTokens * OutputRatio.
-func (e *SimpleTokenEstimator) Estimate(request *framework.InferenceRequest) int64 {
+func (e *SimpleTokenEstimator) Estimate(request *fwksched.InferenceRequest) int64 {
 	if request == nil {
 		return 0
 	}

@@ -37,7 +37,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/backend/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
-	pooltuil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
+	poolutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
 	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 )
 
@@ -73,7 +73,7 @@ func PrepareForTestStreamingServer(objectives []*v1alpha2.InferenceObjective, po
 		Build()
 	pool := testutil.MakeInferencePool(poolName).Namespace(namespace).ObjRef()
 	pool.Spec.TargetPorts = []v1.Port{{Number: v1.PortNumber(poolPort)}}
-	_ = ds.PoolSet(context.Background(), fakeClient, pooltuil.InferencePoolToEndpointPool(pool))
+	_ = ds.PoolSet(context.Background(), fakeClient, poolutil.InferencePoolToEndpointPool(pool))
 
 	return ctx, cancel, ds, pmc
 }
