@@ -131,8 +131,8 @@ func (p *prepareData) PluginState() *plugin.PluginState {
 	return p.pluginState
 }
 
-// PrepareRequestData is called by the director before scheduling requests.
-func (p *prepareData) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, pods []fwksched.Endpoint) error {
+// Produce is called by the director before scheduling requests.
+func (p *prepareData) Produce(ctx context.Context, request *fwksched.InferenceRequest, pods []fwksched.Endpoint) error {
 	blockSize := p.GetBlockSize(pods)
 	maxBlocks := p.config.MaxPrefixBlocksToMatch
 	if p.config.MaxPrefixTokensToMatch > 0 && blockSize > 0 {
@@ -177,7 +177,7 @@ func (p *prepareData) PreRequest(ctx context.Context, request *fwksched.Inferenc
 		servers = append(servers, p.makeserver(pr.TargetEndpoints[0]))
 	}
 
-	// Read state saved during PrepareRequestData.
+	// Read state saved during Produce.
 	state, err := plugin.ReadPluginStateKey[*SchedulingContextState](p.pluginState, request.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to read prefix plugin state", "requestID", request.RequestID)

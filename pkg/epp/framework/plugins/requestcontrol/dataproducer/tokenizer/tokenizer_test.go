@@ -103,7 +103,7 @@ func TestPluginFactory_Validation(t *testing.T) {
 	}
 }
 
-func TestPrepareRequestData_PopulatesTokenizedPrompt(t *testing.T) {
+func TestProduce_PopulatesTokenizedPrompt(t *testing.T) {
 	mm := &tokenization.MultiModalFeatures{
 		MMHashes: map[string][]string{"image": {"hash-a", "hash-b"}},
 		MMPlaceholders: map[string][]kvblock.PlaceholderRange{
@@ -124,7 +124,7 @@ func TestPrepareRequestData_PopulatesTokenizedPrompt(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, p.PrepareRequestData(context.Background(), req, nil))
+	require.NoError(t, p.Produce(context.Background(), req, nil))
 	require.NotNil(t, req.Body.TokenizedPrompt)
 	assert.Equal(t, []uint32{1, 2, 3, 4}, req.Body.TokenizedPrompt.TokenIDs)
 	require.Len(t, req.Body.TokenizedPrompt.MultiModalFeatures, 2)
@@ -136,25 +136,25 @@ func TestPrepareRequestData_PopulatesTokenizedPrompt(t *testing.T) {
 	assert.Equal(t, fwkrh.ModalityImage, req.Body.TokenizedPrompt.MultiModalFeatures[0].Modality)
 }
 
-func TestPrepareRequestData_SkipsWhenAlreadyPopulated(t *testing.T) {
+func TestProduce_SkipsWhenAlreadyPopulated(t *testing.T) {
 	existing := &fwkrh.TokenizedPrompt{TokenIDs: []uint32{42}}
 	p := newTestPlugin(&mockTokenizer{})
 	req := &scheduling.InferenceRequest{
 		Body: &fwkrh.InferenceRequestBody{TokenizedPrompt: existing},
 	}
-	require.NoError(t, p.PrepareRequestData(context.Background(), req, nil))
+	require.NoError(t, p.Produce(context.Background(), req, nil))
 	assert.Same(t, existing, req.Body.TokenizedPrompt)
 }
 
-func TestPrepareRequestData_NilBody(t *testing.T) {
+func TestProduce_NilBody(t *testing.T) {
 	p := newTestPlugin(&mockTokenizer{})
 	req := &scheduling.InferenceRequest{}
-	err := p.PrepareRequestData(context.Background(), req, nil)
+	err := p.Produce(context.Background(), req, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "request body is nil")
 }
 
-func TestPrepareRequestData_TokenizerError(t *testing.T) {
+func TestProduce_TokenizerError(t *testing.T) {
 	tok := &mockTokenizer{
 		renderChatFunc: func(_ *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
 			return nil, nil, assert.AnError
@@ -168,21 +168,22 @@ func TestPrepareRequestData_TokenizerError(t *testing.T) {
 			},
 		},
 	}
-	err := p.PrepareRequestData(context.Background(), req, nil)
+	err := p.Produce(context.Background(), req, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "tokenization failed")
 	assert.Nil(t, req.Body.TokenizedPrompt)
 }
 
-func TestPrepareRequestData_UnsupportedBodyType(t *testing.T) {
+func TestProduce_UnsupportedBodyType(t *testing.T) {
 	p := newTestPlugin(&mockTokenizer{})
 	req := &scheduling.InferenceRequest{
 		Body: &fwkrh.InferenceRequestBody{}, // no Completions or ChatCompletions
 	}
-	err := p.PrepareRequestData(context.Background(), req, nil)
+	err := p.Produce(context.Background(), req, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported request body type")
 	assert.Nil(t, req.Body.TokenizedPrompt)
+}
 }
 
 func TestConvertMMFeaturesRoundTrip(t *testing.T) {

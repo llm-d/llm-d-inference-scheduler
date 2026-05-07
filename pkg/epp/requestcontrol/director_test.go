@@ -109,31 +109,31 @@ func (ds *mockDatastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.En
 	return res
 }
 
-type mockPrepareDataPlugin struct {
+type mockDataProducerPlugin struct {
 	name     string
 	produces map[string]any
 	consumes map[string]any
 }
 
-func (m *mockPrepareDataPlugin) TypedName() fwkplugin.TypedName {
+func (m *mockDataProducerPlugin) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Name: m.name, Type: "mock"}
 }
 
-func (m *mockPrepareDataPlugin) Produces() map[string]any {
+func (m *mockDataProducerPlugin) Produces() map[string]any {
 	return m.produces
 }
 
-func (m *mockPrepareDataPlugin) Consumes() map[string]any {
+func (m *mockDataProducerPlugin) Consumes() map[string]any {
 	return m.consumes
 }
 
-func (m *mockPrepareDataPlugin) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
+func (m *mockDataProducerPlugin) Produce(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	endpoints[0].Put(mockProducedDataKey, mockProducedDataType{value: 42})
 	return nil
 }
 
-func newMockPrepareDataPlugin(name string) *mockPrepareDataPlugin {
-	return &mockPrepareDataPlugin{
+func newMockDataProducerPlugin(name string) *mockDataProducerPlugin {
+	return &mockDataProducerPlugin{
 		name:     name,
 		produces: map[string]any{mockProducedDataKey: 0},
 		consumes: map[string]any{},
@@ -323,7 +323,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		wantReqCtx              *handlers.RequestContext // Fields to check in the returned RequestContext
 		targetModelName         string                   // Expected model name after target model resolution
 		admitRequestDenialError error                    // Expected denial error from admission plugin
-		prepareDataPlugin       *mockPrepareDataPlugin
+		dataProducerPlugin       *mockDataProducerPlugin
 		preRequestPlugin        *mockPreRequestPlugin
 		wantMutatedBody         map[string]any
 	}{
@@ -491,7 +491,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 				},
 			},
 			targetModelName:   model,
-			prepareDataPlugin: newMockPrepareDataPlugin("test-plugin"),
+			dataProducerPlugin: newMockDataProducerPlugin("test-plugin"),
 		},
 		{
 			name: "successful chat completions request with admit request plugins",
@@ -749,8 +749,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 					test.schedulerMockSetup(mockSched)
 				}
 				config := NewConfig()
-				if test.prepareDataPlugin != nil {
-					config = config.WithPrepareDataPlugins(test.prepareDataPlugin)
+				if test.dataProducerPlugin != nil {
+					config = config.WithDataProducerPlugins(test.dataProducerPlugin)
 				}
 				if test.preRequestPlugin != nil {
 					config = config.WithPreRequestPlugins(test.preRequestPlugin)

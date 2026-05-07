@@ -56,7 +56,7 @@ const (
 )
 
 // PredictedLatency is the latency data provider plugin. It handles:
-//   - PrepareRequestData: bulk predictions via the latency predictor sidecar
+//   - Produce: bulk predictions via the latency predictor sidecar
 //   - PreRequest: dispatch-time bookkeeping (token counters, request queues)
 //   - ResponseHeader/ResponseBody: training data collection (TTFT/TPOT)
 //   - Produces/Consumes: endpoint attribute declarations
@@ -119,7 +119,7 @@ type Config struct {
 	StreamingMode                      bool          `json:"streamingMode,omitempty"`
 	EndpointRoleLabel                  string        `json:"endpointRoleLabel,omitempty"`
 	// PredictInPrepareData controls whether bulk predictions are generated during
-	// PrepareRequestData. Set to false to disable predictions (training-only mode).
+	// Produce. Set to false to disable predictions (training-only mode).
 	// When false, the predictor still collects training data but does not call the
 	// sidecar for predictions. Default: true.
 	PredictInPrepareData bool `json:"predictInPrepareData,omitempty"`

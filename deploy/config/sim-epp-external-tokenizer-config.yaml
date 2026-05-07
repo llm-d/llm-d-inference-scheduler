@@ -5,12 +5,9 @@
 # prompts, attaching the resulting token IDs to the request so the
 # precise-prefix-cache-scorer can skip internal tokenization.
 #
-# Requires featureGates: [prepareDataPlugins] and the tokenizer sidecar
-# container running in the same pod.
+# Requires the tokenizer sidecar container running in the same pod.
 apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: tokenizer
   parameters:

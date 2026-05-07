@@ -30,20 +30,20 @@ import (
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
-var _ fwkrc.DataProducer = &mockPrepareRequestDataPlugin{}
+var _ fwkrc.DataProducer = &executorMockDataProducerPlugin{}
 
-type mockPrepareRequestDataPlugin struct {
+type executorMockDataProducerPlugin struct {
 	name      string
 	delay     time.Duration
 	returnErr error
 	executed  bool
 }
 
-func (m *mockPrepareRequestDataPlugin) TypedName() fwkplugin.TypedName {
+func (m *executorMockDataProducerPlugin) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Type: "mock", Name: m.name}
 }
 
-func (m *mockPrepareRequestDataPlugin) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
+func (m *executorMockDataProducerPlugin) Produce(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	m.executed = true
 	if m.delay > 0 {
 		select {
@@ -55,10 +55,9 @@ func (m *mockPrepareRequestDataPlugin) PrepareRequestData(ctx context.Context, r
 	return m.returnErr
 }
 
-func (m *mockPrepareRequestDataPlugin) Produces() map[string]any {
+func (m *executorMockDataProducerPlugin) Produces() map[string]any {
 	return nil
 }
-
 // ctxObservingPlugin records the context it received so tests can verify the
 // timeout wrapper cancels the plugin's context when the deadline fires.
 type ctxObservingPlugin struct {
@@ -72,7 +71,7 @@ func (p *ctxObservingPlugin) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Type: "mock", Name: p.name}
 }
 
-func (p *ctxObservingPlugin) PrepareRequestData(ctx context.Context, _ *fwksched.InferenceRequest, _ []fwksched.Endpoint) error {
+func (p *ctxObservingPlugin) Produce(ctx context.Context, _ *fwksched.InferenceRequest, _ []fwksched.Endpoint) error {
 	defer p.wg.Done()
 	select {
 	case <-time.After(p.block):
@@ -84,17 +83,17 @@ func (p *ctxObservingPlugin) PrepareRequestData(ctx context.Context, _ *fwksched
 
 func (p *ctxObservingPlugin) Produces() map[string]any { return nil }
 
-// TestPrepareDataPluginsWithTimeout_CancelsPluginContext verifies that the
+// TestDataProducerPluginsWithTimeout_CancelsPluginContext verifies that the
 // child context passed to plugins is cancelled with DeadlineExceeded when the
 // timeout fires. Without this cancellation, a slow plugin would continue
 // executing past the director's deadline and potentially commit state after
 // downstream hooks have already observed an "empty" state — the root cause of
 // the orphan-decrement drift we're fixing in the predicted-latency producer.
-func TestPrepareDataPluginsWithTimeout_CancelsPluginContext(t *testing.T) {
+func TestDataProducerPluginsWithTimeout_CancelsPluginContext(t *testing.T) {
 	plugin := &ctxObservingPlugin{name: "slow", block: time.Second}
 	plugin.wg.Add(1)
 
-	err := prepareDataPluginsWithTimeout(
+	err := dataProducerPluginsWithTimeout(
 		context.Background(),
 		20*time.Millisecond,
 		[]fwkrc.DataProducer{plugin},
@@ -111,7 +110,7 @@ func TestPrepareDataPluginsWithTimeout_CancelsPluginContext(t *testing.T) {
 		"plugin's context should be cancelled with DeadlineExceeded when timeout fires")
 }
 
-func TestPrepareDataPluginsWithTimeout(t *testing.T) {
+func TestDataProducerPluginsWithTimeout(t *testing.T) {
 	testCases := []struct {
 		name          string
 		timeout       time.Duration
@@ -125,21 +124,21 @@ func TestPrepareDataPluginsWithTimeout(t *testing.T) {
 			name:    "success with one plugin",
 			timeout: 100 * time.Millisecond,
 			plugins: []fwkrc.DataProducer{
-				&mockPrepareRequestDataPlugin{name: "p1"},
+				&executorMockDataProducerPlugin{name: "p1"},
 			},
 			ctxFn: func() (context.Context, context.CancelFunc) {
 				return context.Background(), func() {}
 			},
 			expectSuccess: true,
 			checkPlugins: func(t *testing.T, plugins []fwkrc.DataProducer) {
-				assert.True(t, plugins[0].(*mockPrepareRequestDataPlugin).executed)
+				assert.True(t, plugins[0].(*executorMockDataProducerPlugin).executed)
 			},
 		},
 		{
 			name:    "plugin returns error",
 			timeout: 100 * time.Millisecond,
 			plugins: []fwkrc.DataProducer{
-				&mockPrepareRequestDataPlugin{name: "p1", returnErr: errors.New("plugin failed")},
+				&executorMockDataProducerPlugin{name: "p1", returnErr: errors.New("plugin failed")},
 			},
 			ctxFn: func() (context.Context, context.CancelFunc) {
 				return context.Background(), func() {}
@@ -150,7 +149,7 @@ func TestPrepareDataPluginsWithTimeout(t *testing.T) {
 			name:    "plugins time out",
 			timeout: 50 * time.Millisecond,
 			plugins: []fwkrc.DataProducer{
-				&mockPrepareRequestDataPlugin{name: "p1", delay: 100 * time.Millisecond},
+				&executorMockDataProducerPlugin{name: "p1", delay: 100 * time.Millisecond},
 			},
 			ctxFn: func() (context.Context, context.CancelFunc) {
 				return context.Background(), func() {}
@@ -161,7 +160,7 @@ func TestPrepareDataPluginsWithTimeout(t *testing.T) {
 			name:    "context cancelled",
 			timeout: 200 * time.Millisecond,
 			plugins: []fwkrc.DataProducer{
-				&mockPrepareRequestDataPlugin{name: "p1", delay: 100 * time.Millisecond},
+				&executorMockDataProducerPlugin{name: "p1", delay: 100 * time.Millisecond},
 			},
 			ctxFn: func() (context.Context, context.CancelFunc) {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -174,16 +173,16 @@ func TestPrepareDataPluginsWithTimeout(t *testing.T) {
 			name:    "multiple plugins success",
 			timeout: 100 * time.Millisecond,
 			plugins: []fwkrc.DataProducer{
-				&mockPrepareRequestDataPlugin{name: "p1"},
-				&mockPrepareRequestDataPlugin{name: "p2"},
+				&executorMockDataProducerPlugin{name: "p1"},
+				&executorMockDataProducerPlugin{name: "p2"},
 			},
 			ctxFn: func() (context.Context, context.CancelFunc) {
 				return context.Background(), func() {}
 			},
 			expectSuccess: true,
 			checkPlugins: func(t *testing.T, plugins []fwkrc.DataProducer) {
-				assert.True(t, plugins[0].(*mockPrepareRequestDataPlugin).executed)
-				assert.True(t, plugins[1].(*mockPrepareRequestDataPlugin).executed)
+				assert.True(t, plugins[0].(*executorMockDataProducerPlugin).executed)
+				assert.True(t, plugins[1].(*executorMockDataProducerPlugin).executed)
 			},
 		},
 	}
@@ -193,7 +192,7 @@ func TestPrepareDataPluginsWithTimeout(t *testing.T) {
 			ctx, cancel := tc.ctxFn()
 			defer cancel()
 
-			err := prepareDataPluginsWithTimeout(ctx, tc.timeout, tc.plugins, &fwksched.InferenceRequest{}, nil)
+			err := dataProducerPluginsWithTimeout(ctx, tc.timeout, tc.plugins, &fwksched.InferenceRequest{}, nil)
 
 			if tc.expectSuccess {
 				assert.NoError(t, err)
@@ -210,18 +209,18 @@ func TestPrepareDataPluginsWithTimeout(t *testing.T) {
 }
 
 type dagTestPlugin struct {
-	mockPrepareRequestDataPlugin
+	executorMockDataProducerPlugin
 	produces map[string]any
 	consumes map[string]any
 	execTime time.Time
 	mu       sync.Mutex
 }
 
-func (p *dagTestPlugin) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
+func (p *dagTestPlugin) Produce(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.execTime = time.Now()
-	return p.mockPrepareRequestDataPlugin.PrepareRequestData(ctx, request, endpoints)
+	return p.executorMockDataProducerPlugin.Produce(ctx, request, endpoints)
 }
 
 func (p *dagTestPlugin) Produces() map[string]any {
@@ -234,31 +233,31 @@ func (p *dagTestPlugin) Consumes() map[string]any {
 
 func TestExecutePluginsAsDAG(t *testing.T) {
 	pluginA := &dagTestPlugin{
-		mockPrepareRequestDataPlugin: mockPrepareRequestDataPlugin{name: "A", delay: 20 * time.Millisecond},
+		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "A", delay: 20 * time.Millisecond},
 		produces:                     map[string]any{"keyA": nil},
 	}
 	pluginB := &dagTestPlugin{
-		mockPrepareRequestDataPlugin: mockPrepareRequestDataPlugin{name: "B"},
+		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "B"},
 		consumes:                     map[string]any{"keyA": nil},
 		produces:                     map[string]any{"keyB": nil},
 	}
 	pluginC := &dagTestPlugin{
-		mockPrepareRequestDataPlugin: mockPrepareRequestDataPlugin{name: "C"},
+		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "C"},
 		consumes:                     map[string]any{"keyB": nil},
 	}
 	pluginD := &dagTestPlugin{
-		mockPrepareRequestDataPlugin: mockPrepareRequestDataPlugin{name: "D"},
+		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "D"},
 		consumes:                     map[string]any{"keyA": nil},
 	}
 	pluginE := &dagTestPlugin{
-		mockPrepareRequestDataPlugin: mockPrepareRequestDataPlugin{name: "E"},
+		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "E"},
 	}
 	pluginFail := &dagTestPlugin{
-		mockPrepareRequestDataPlugin: mockPrepareRequestDataPlugin{name: "Fail", returnErr: errors.New("plugin failed")},
+		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "Fail", returnErr: errors.New("plugin failed")},
 		produces:                     map[string]any{"keyFail": nil},
 	}
 	pluginDependsOnFail := &dagTestPlugin{
-		mockPrepareRequestDataPlugin: mockPrepareRequestDataPlugin{name: "DependsOnFail"},
+		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "DependsOnFail"},
 		consumes:                     map[string]any{"keyFail": nil},
 	}
 

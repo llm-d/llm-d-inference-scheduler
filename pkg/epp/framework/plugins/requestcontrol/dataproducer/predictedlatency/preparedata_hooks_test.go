@@ -37,12 +37,12 @@ func TestProducesConsumes(t *testing.T) {
 	assert.Contains(t, consumes, attrprefix.PrefixCacheMatchInfoKey)
 }
 
-// TestPrepareRequestData_CancelledContextDoesNotPublish verifies that when the
+// TestProduce_CancelledContextDoesNotPublish verifies that when the
 // director's PrepareData window has already closed (ctx cancelled), the plugin
 // does not publish the SLO context into the ttlcache. If it did, ResponseBody
 // would later find the context and issue an orphan decrement against counters
 // PreRequest never incremented — draining prefillTokensInFlight negative.
-func TestPrepareRequestData_CancelledContextDoesNotPublish(t *testing.T) {
+func TestProduce_CancelledContextDoesNotPublish(t *testing.T) {
 	cfg := DefaultConfig
 	cfg.PredictInPrepareData = false // skip the prediction sidecar path
 	pl := NewPredictedLatency(cfg, nil)
@@ -53,16 +53,16 @@ func TestPrepareRequestData_CancelledContextDoesNotPublish(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before the plugin runs
 
-	err := pl.PrepareRequestData(ctx, request, []fwksched.Endpoint{endpoint})
+	err := pl.Produce(ctx, request, []fwksched.Endpoint{endpoint})
 	assert.ErrorIs(t, err, context.Canceled, "should propagate ctx.Err() on cancelled context")
 
 	_, getErr := pl.getPredictedLatencyContextForRequest(request)
 	assert.Error(t, getErr, "SLO context should NOT be stored when ctx is cancelled")
 }
 
-// TestPrepareRequestData_LivesContextPublishes is the positive control for the
+// TestProduce_LivesContextPublishes is the positive control for the
 // cancellation test above: with a live context, the fast-path store still fires.
-func TestPrepareRequestData_LiveContextPublishes(t *testing.T) {
+func TestProduce_LiveContextPublishes(t *testing.T) {
 	cfg := DefaultConfig
 	cfg.PredictInPrepareData = false
 	pl := NewPredictedLatency(cfg, nil)
@@ -70,7 +70,7 @@ func TestPrepareRequestData_LiveContextPublishes(t *testing.T) {
 	request := createTestInferenceRequest("live-test", 0, 0)
 	endpoint := createTestEndpoint("pod-a", 0.1, 0, 0)
 
-	err := pl.PrepareRequestData(context.Background(), request, []fwksched.Endpoint{endpoint})
+	err := pl.Produce(context.Background(), request, []fwksched.Endpoint{endpoint})
 	assert.NoError(t, err)
 
 	_, getErr := pl.getPredictedLatencyContextForRequest(request)

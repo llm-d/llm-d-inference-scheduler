@@ -36,7 +36,7 @@ import (
 
 const mockProducedDataKey = "mockProducedData"
 
-type mockPrepareRequestDataP struct {
+type mockDataProducerP struct {
 	name     string
 	produces map[string]any
 	consumes map[string]any
@@ -50,19 +50,19 @@ func (m *mockProducedDataType) Clone() fwkdl.Cloneable {
 	return &mockProducedDataType{value: m.value}
 }
 
-func (m *mockPrepareRequestDataP) TypedName() fwkplugin.TypedName {
+func (m *mockDataProducerP) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Name: m.name, Type: "mock"}
 }
 
-func (m *mockPrepareRequestDataP) Produces() map[string]any {
+func (m *mockDataProducerP) Produces() map[string]any {
 	return m.produces
 }
 
-func (m *mockPrepareRequestDataP) Consumes() map[string]any {
+func (m *mockDataProducerP) Consumes() map[string]any {
 	return m.consumes
 }
 
-func (m *mockPrepareRequestDataP) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
+func (m *mockDataProducerP) Produce(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	endpoints[0].Put(mockProducedDataKey, &mockProducedDataType{value: 42})
 	return nil
 }
@@ -79,7 +79,7 @@ func (m *typedMockPlugin) TypedName() fwkplugin.TypedName {
 }
 
 func (m *typedMockPlugin) Produces() map[string]any { return m.produces }
-func (m *typedMockPlugin) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
+func (m *typedMockPlugin) Produce(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	return nil
 }
 
@@ -107,7 +107,7 @@ func (m *MockSchedulingPlugin) Consumes() map[string]any {
 
 func TestValidatePluginExecutionOrder(t *testing.T) {
 	// Request control plugin that produces data.
-	pluginA := &mockPrepareRequestDataP{name: "A", produces: map[string]any{"keyA": nil}}
+	pluginA := &mockDataProducerP{name: "A", produces: map[string]any{"keyA": nil}}
 	// Flow control plugin.
 	consumerFairnessPolicyPlugin := MockConsumerFairnessPolicy{consumes: map[string]any{"keyA": nil}}
 	// Scheduling plugin.
@@ -152,23 +152,23 @@ func TestValidatePluginExecutionOrder(t *testing.T) {
 }
 
 func TestDAGAndTopologicalOrder(t *testing.T) {
-	pluginA := &mockPrepareRequestDataP{name: "A", produces: map[string]any{"keyA": nil}}
-	pluginB := &mockPrepareRequestDataP{name: "B", consumes: map[string]any{"keyA": nil}, produces: map[string]any{"keyB": nil}}
-	pluginC := &mockPrepareRequestDataP{name: "C", consumes: map[string]any{"keyB": nil}}
-	pluginD := &mockPrepareRequestDataP{name: "D", consumes: map[string]any{"keyA": nil}}
-	pluginE := &mockPrepareRequestDataP{name: "E"} // No dependencies
+	pluginA := &mockDataProducerP{name: "A", produces: map[string]any{"keyA": nil}}
+	pluginB := &mockDataProducerP{name: "B", consumes: map[string]any{"keyA": nil}, produces: map[string]any{"keyB": nil}}
+	pluginC := &mockDataProducerP{name: "C", consumes: map[string]any{"keyB": nil}}
+	pluginD := &mockDataProducerP{name: "D", consumes: map[string]any{"keyA": nil}}
+	pluginE := &mockDataProducerP{name: "E"} // No dependencies
 
 	// Cycle plugins
-	pluginX := &mockPrepareRequestDataP{name: "X", produces: map[string]any{"keyX": nil}, consumes: map[string]any{"keyY": nil}}
-	pluginY := &mockPrepareRequestDataP{name: "Y", produces: map[string]any{"keyY": nil}, consumes: map[string]any{"keyX": nil}}
+	pluginX := &mockDataProducerP{name: "X", produces: map[string]any{"keyX": nil}, consumes: map[string]any{"keyY": nil}}
+	pluginY := &mockDataProducerP{name: "Y", produces: map[string]any{"keyY": nil}, consumes: map[string]any{"keyX": nil}}
 
 	// Data type mismatch plugin.
-	pluginZ1 := &mockPrepareRequestDataP{name: "Z1", produces: map[string]any{"keyZ": int(0)}}
-	pluginZ2 := &mockPrepareRequestDataP{name: "Z2", consumes: map[string]any{"keyZ": string("")}}
+	pluginZ1 := &mockDataProducerP{name: "Z1", produces: map[string]any{"keyZ": int(0)}}
+	pluginZ2 := &mockDataProducerP{name: "Z2", consumes: map[string]any{"keyZ": string("")}}
 
 	// Same type different pointers.
-	pluginP1 := &mockPrepareRequestDataP{name: "P1", produces: map[string]any{"keyP": &mockProducedDataType{}}}
-	pluginP2 := &mockPrepareRequestDataP{name: "P2", consumes: map[string]any{"keyP": &mockProducedDataType{}}}
+	pluginP1 := &mockDataProducerP{name: "P1", produces: map[string]any{"keyP": &mockProducedDataType{}}}
+	pluginP2 := &mockDataProducerP{name: "P2", consumes: map[string]any{"keyP": &mockProducedDataType{}}}
 
 	testCases := []struct {
 		name        string
@@ -289,13 +289,13 @@ func TestCreateMissingDataProducers(t *testing.T) {
 	// A DataProducer that produces keyA.
 	producerTypeA := "producer-a"
 	producerAFactory := fwkplugin.FactoryFunc(func(name string, _ json.RawMessage, handle fwkplugin.Handle) (fwkplugin.Plugin, error) {
-		return &mockPrepareRequestDataP{name: name, produces: map[string]any{keyA: nil}}, nil
+		return &mockDataProducerP{name: name, produces: map[string]any{keyA: nil}}, nil
 	})
 
 	// A DataProducer that produces keyB.
 	producerTypeB := "producer-b"
 	producerBFactory := fwkplugin.FactoryFunc(func(name string, _ json.RawMessage, handle fwkplugin.Handle) (fwkplugin.Plugin, error) {
-		return &mockPrepareRequestDataP{name: name, produces: map[string]any{keyB: nil}}, nil
+		return &mockDataProducerP{name: name, produces: map[string]any{keyB: nil}}, nil
 	})
 
 	// A non-ProducerPlugin registry entry (e.g. a scheduling scorer).
@@ -332,7 +332,7 @@ func TestCreateMissingDataProducers(t *testing.T) {
 		{
 			name: "no missing keys - nothing created",
 			existingPlugins: []fwkplugin.Plugin{
-				&mockPrepareRequestDataP{name: "existing-a", produces: map[string]any{keyA: nil}},
+				&mockDataProducerP{name: "existing-a", produces: map[string]any{keyA: nil}},
 				&MockSchedulingPlugin{consumes: map[string]any{keyA: nil}},
 			},
 			defaultProducerRegistry: map[string]string{keyA: producerTypeA},
