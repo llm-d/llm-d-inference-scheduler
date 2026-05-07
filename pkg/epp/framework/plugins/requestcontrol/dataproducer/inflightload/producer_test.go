@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/types"
@@ -455,4 +456,53 @@ func TestInFlightLoadProducer_BalancedAddRelease_MultipleProfilesSameEndpoint(t 
 	require.Equal(t, int64(0), producer.requestTracker.get(endpointID))
 	require.Equal(t, int64(0), producer.tokenTracker.get(endpointID),
 		"counters must return to zero with no drift across profiles")
+}
+
+// TestInFlightLoadProducer_TTLEviction_RollsBackCounters verifies the leak
+// safety net: when ResponseBody never delivers EndOfStream for a request, the
+// addedTokens entry expires via TTL and the OnEviction handler rolls back both
+// the token tracker and the request tracker for that endpoint, so neither
+// counter (nor the cache itself) drifts upward over time.
+func TestInFlightLoadProducer_TTLEviction_RollsBackCounters(t *testing.T) {
+	t.Parallel()
+
+	producer := &InFlightLoadProducer{
+		requestTracker:      newConcurrencyTracker(),
+		tokenTracker:        newConcurrencyTracker(),
+		tokenEstimator:      NewSimpleTokenEstimator(),
+		includeOutputTokens: true,
+		requestTTL:          10 * time.Millisecond,
+	}
+	ctx := context.Background()
+	endpointName := "abandoned-endpoint"
+	endpointID := fullEndpointName(endpointName)
+
+	req := makeTokenRequest("req-abandoned", "1234567890123456") // 4 input + 6 output = 10
+	res := &fwksched.SchedulingResult{
+		PrimaryProfileName: "default",
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
+			"default": {TargetEndpoints: []fwksched.Endpoint{newStubSchedulingEndpoint(endpointName)}},
+		},
+	}
+
+	producer.PreRequest(ctx, req, res)
+	require.Equal(t, int64(1), producer.requestTracker.get(endpointID))
+	require.Equal(t, int64(10), producer.tokenTracker.get(endpointID))
+	require.True(t, producer.addedTokens.Has(addedTokensKey(req.RequestID, endpointID, "default")))
+
+	// Simulate an abandoned request: never call ResponseBody. Wait for the TTL
+	// to elapse, then deterministically trigger eviction (DeleteExpired runs
+	// the same OnEviction path as the background janitor would).
+	time.Sleep(15 * time.Millisecond)
+	producer.addedTokens.DeleteExpired()
+
+	require.False(t, producer.addedTokens.Has(addedTokensKey(req.RequestID, endpointID, "default")),
+		"expired addedTokens entry must be removed from the cache")
+	// OnEviction subscribers run on a goroutine in ttlcache v3, so wait briefly
+	// for the rollback to be observed on both counters.
+	require.Eventually(t, func() bool {
+		return producer.tokenTracker.get(endpointID) == 0 &&
+			producer.requestTracker.get(endpointID) == 0
+	}, time.Second, time.Millisecond,
+		"TTL eviction must roll back both token and request trackers for the endpoint")
 }
