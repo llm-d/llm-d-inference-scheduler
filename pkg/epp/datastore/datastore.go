@@ -342,23 +342,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 	existingEpSet := sets.Set[types.NamespacedName]{}
 	for _, endpointMetadata := range pods {
 		existingEpSet.Insert(endpointMetadata.NamespacedName)
-		var ep fwkdl.Endpoint
-		existing, ok := ds.pods.Load(endpointMetadata.NamespacedName)
-		if !ok {
-			ep = ds.epf.NewEndpoint(ds.parentCtx, endpointMetadata, ds)
-			if ep == nil {
-				// NewEndpoint returns nil when a collector is already running for this
-				// endpoint (duplicate reconcile race). The existing entry in ds.pods
-				// is still valid; skip re-registering it.
-				continue
-			}
-			ds.pods.Store(endpointMetadata.NamespacedName, ep)
+		if ds.upsertEndpoint(endpointMetadata) {
 			result = false
-		} else {
-			ep = existing.(fwkdl.Endpoint)
 		}
-		// Update endpoint properties if anything changed.
-		ep.UpdateMetadata(endpointMetadata)
 	}
 
 	// remove endpoints that are no longer active in the pool
@@ -398,16 +384,27 @@ func (ds *datastore) PoolTargetPorts() []int {
 }
 
 func (ds *datastore) BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) {
+	ds.upsertEndpoint(meta)
+}
+
+// upsertEndpoint stores or updates a single endpoint in the pods map.
+// It is the shared storage primitive used by both BackendUpsert and
+// podUpdateOrAddIfNotExist, keeping the two paths consistent.
+func (ds *datastore) upsertEndpoint(meta *fwkdl.EndpointMetadata) bool {
 	existing, ok := ds.pods.Load(meta.NamespacedName)
 	if !ok {
 		ep := ds.epf.NewEndpoint(ds.parentCtx, meta, ds)
 		if ep == nil {
-			return
+			// NewEndpoint returns nil when a collector is already running for this
+			// endpoint (duplicate reconcile race). The existing entry in ds.pods
+			// is still valid; skip re-registering it.
+			return false
 		}
 		ds.pods.Store(meta.NamespacedName, ep)
-		return
+		return true
 	}
 	existing.(fwkdl.Endpoint).UpdateMetadata(meta)
+	return false
 }
 
 func (ds *datastore) BackendDelete(id types.NamespacedName) {
