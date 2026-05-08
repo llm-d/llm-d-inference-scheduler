@@ -13,14 +13,14 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	giePlugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 func TestMain(m *testing.M) {
-	giePlugin.Register(DisaggHeadersHandlerType, HeadersHandlerFactory)
-	giePlugin.Register(PrefillHeaderHandlerType, HeadersHandlerFactory) //nolint:staticcheck
+	fwkplugin.Register(DisaggHeadersHandlerType, HeadersHandlerFactory)
+	fwkplugin.Register(PrefillHeaderHandlerType, HeadersHandlerFactory) //nolint:staticcheck
 	os.Exit(m.Run())
 }
 
@@ -157,7 +157,7 @@ func TestPreRequestNilSchedulingResult(t *testing.T) {
 
 func TestPrefillHeaderHandlerBackwardCompat(t *testing.T) {
 	// Simulate what the config loader does when it reads type: prefill-header-handler from YAML
-	factory, ok := giePlugin.Registry[PrefillHeaderHandlerType]
+	factory, ok := fwkplugin.Registry[PrefillHeaderHandlerType]
 	require.True(t, ok, "prefill-header-handler must be in the registry")
 
 	raw := json.RawMessage(`{"prefillProfile": "prefill"}`)

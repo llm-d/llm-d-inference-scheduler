@@ -77,6 +77,7 @@ func (s *Server) disaggregatedPrefillHandler(apiType APIType) http.HandlerFunc {
 		)
 
 		prefillHostPorts := r.Header.Values(routing.PrefillEndpointHeader)
+		r.Header.Del(routing.PrefillEndpointHeader)
 
 		if len(prefillHostPorts) == 1 {
 			prefillHostPorts = strings.Split(prefillHostPorts[0], ",")
@@ -125,6 +126,7 @@ func (s *Server) disaggregatedPrefillHandler(apiType APIType) http.HandlerFunc {
 		}
 
 		encoderHostPorts := r.Header.Values(routing.EncoderEndpointsHeader)
+		r.Header.Del(routing.EncoderEndpointsHeader)
 		if len(encoderHostPorts) == 1 {
 			encoderHostPorts = strings.Split(encoderHostPorts[0], ",")
 		}
