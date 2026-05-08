@@ -71,11 +71,15 @@ func (e *podDiscoveryExtractor) ExtractNotification(ctx context.Context, event f
 		return nil
 	}
 
+	// Snapshot once so all branches in this call see a consistent port list,
+	// even if InferencePoolReconciler fires PoolSet concurrently.
+	targetPorts := e.pool.PoolTargetPorts()
+
 	name := event.Object.GetName()
 	namespace := event.Object.GetNamespace()
 
 	if event.Type == fwkdl.EventDelete {
-		for _, id := range allPodEndpointIDs(name, namespace, e.pool.PoolTargetPorts()) {
+		for _, id := range allPodEndpointIDs(name, namespace, targetPorts) {
 			e.notifier.Delete(id)
 		}
 		return nil
@@ -87,13 +91,13 @@ func (e *podDiscoveryExtractor) ExtractNotification(ctx context.Context, event f
 	}
 
 	if !podutil.IsPodReady(pod) || !e.pool.PoolLabelsMatch(pod.Labels) {
-		for _, id := range allPodEndpointIDs(name, namespace, e.pool.PoolTargetPorts()) {
+		for _, id := range allPodEndpointIDs(name, namespace, targetPorts) {
 			e.notifier.Delete(id)
 		}
 		return nil
 	}
 
-	for _, meta := range podToEndpointMetadata(pod, e.pool.PoolTargetPorts()) {
+	for _, meta := range podToEndpointMetadata(pod, targetPorts) {
 		e.notifier.Upsert(meta)
 	}
 	return nil
