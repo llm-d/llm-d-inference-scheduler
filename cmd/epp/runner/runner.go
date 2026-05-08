@@ -211,15 +211,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	namespace := resolvePoolNamespace(opts.PoolNamespace)
 	poolName := opts.PoolName
 	if poolName == "" {
-		if v := os.Getenv("POD_NAME"); v != "" {
-			if name, err := extractDeploymentName(v); err == nil {
-				poolName = name
-			} else {
-				poolName = v
-			}
-		} else {
-			poolName = "epp"
-		}
+		poolName = "epp"
 	}
 
 	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
