@@ -1177,6 +1177,83 @@ func TestPodUpdateOrAddIfNotExist_ConcurrentPoolSet(t *testing.T) {
 	}
 }
 
+// ---- BackendUpsert / BackendDelete tests -----------------------------------
+
+// simpleEndpointFactory creates real fwkdl.ModelServer endpoints and tracks releases.
+type simpleEndpointFactory struct {
+	returnNil bool
+	released  []fwkdl.Endpoint
+}
+
+func (f *simpleEndpointFactory) NewEndpoint(_ context.Context, meta *fwkdl.EndpointMetadata, _ datalayer.PoolInfo) fwkdl.Endpoint {
+	if f.returnNil {
+		return nil
+	}
+	return fwkdl.NewEndpoint(meta, nil)
+}
+
+func (f *simpleEndpointFactory) ReleaseEndpoint(ep fwkdl.Endpoint) {
+	f.released = append(f.released, ep)
+}
+
+func TestBackendUpsert_NewEndpoint(t *testing.T) {
+	epf := &simpleEndpointFactory{}
+	ds := NewDatastore(context.Background(), epf, 0)
+	meta := &fwkdl.EndpointMetadata{NamespacedName: types.NamespacedName{Name: "ep-0", Namespace: "default"}, Address: "10.0.0.1"}
+
+	ds.BackendUpsert(context.Background(), meta)
+
+	eps := ds.PodList(func(fwkdl.Endpoint) bool { return true })
+	assert.Len(t, eps, 1)
+	assert.Equal(t, meta.NamespacedName, eps[0].GetMetadata().NamespacedName)
+}
+
+func TestBackendUpsert_UpdateExisting(t *testing.T) {
+	epf := &simpleEndpointFactory{}
+	ds := NewDatastore(context.Background(), epf, 0)
+	id := types.NamespacedName{Name: "ep-0", Namespace: "default"}
+
+	ds.BackendUpsert(context.Background(), &fwkdl.EndpointMetadata{NamespacedName: id, Address: "10.0.0.1"})
+	ds.BackendUpsert(context.Background(), &fwkdl.EndpointMetadata{NamespacedName: id, Address: "10.0.0.2"})
+
+	eps := ds.PodList(func(fwkdl.Endpoint) bool { return true })
+	assert.Len(t, eps, 1)
+	assert.Equal(t, "10.0.0.2", eps[0].GetMetadata().Address)
+}
+
+func TestBackendUpsert_NewEndpointReturnsNil(t *testing.T) {
+	epf := &simpleEndpointFactory{returnNil: true}
+	ds := NewDatastore(context.Background(), epf, 0)
+	meta := &fwkdl.EndpointMetadata{NamespacedName: types.NamespacedName{Name: "ep-0", Namespace: "default"}}
+
+	assert.NotPanics(t, func() { ds.BackendUpsert(context.Background(), meta) })
+	assert.Empty(t, ds.PodList(func(fwkdl.Endpoint) bool { return true }))
+}
+
+func TestBackendDelete_Existing(t *testing.T) {
+	epf := &simpleEndpointFactory{}
+	ds := NewDatastore(context.Background(), epf, 0)
+	id := types.NamespacedName{Name: "ep-0", Namespace: "default"}
+
+	ds.BackendUpsert(context.Background(), &fwkdl.EndpointMetadata{NamespacedName: id})
+	assert.Len(t, ds.PodList(func(fwkdl.Endpoint) bool { return true }), 1)
+
+	ds.BackendDelete(id)
+
+	assert.Empty(t, ds.PodList(func(fwkdl.Endpoint) bool { return true }))
+	assert.Len(t, epf.released, 1)
+}
+
+func TestBackendDelete_Missing(t *testing.T) {
+	epf := &simpleEndpointFactory{}
+	ds := NewDatastore(context.Background(), epf, 0)
+
+	assert.NotPanics(t, func() {
+		ds.BackendDelete(types.NamespacedName{Name: "nonexistent", Namespace: "default"})
+	})
+	assert.Empty(t, epf.released)
+}
+
 func TestExtractActivePorts(t *testing.T) {
 	tests := []struct {
 		name          string
