@@ -129,7 +129,7 @@ func TestProtectedTiersAlwaysAdmitted(t *testing.T) {
 
 	for _, priority := range []int{0, 100} {
 		req := &fwksched.InferenceRequest{
-			Objectives: schedulingtypes.RequestObjectives{Priority: priority},
+			Objectives: fwksched.RequestObjectives{Priority: priority},
 		}
 		if err := admitter.AdmitRequest(context.Background(), req, pods); err != nil {
 			t.Errorf("priority %d should always be admitted, got: %v", priority, err)
@@ -142,7 +142,7 @@ func TestDroppableRejectedAtHighSaturation(t *testing.T) {
 	pods := []fwksched.Endpoint{newEndpoint("pod-0", 100, 0)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &fwksched.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, pods); err == nil {
 		t.Error("expected rejection at high saturation")
@@ -153,7 +153,7 @@ func TestDroppableAdmittedAtZeroSaturation(t *testing.T) {
 	pods := []fwksched.Endpoint{newEndpoint("pod-0", 0, 0)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &fwksched.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, pods); err != nil {
 		t.Errorf("expected admission at zero saturation, got: %v", err)
@@ -168,9 +168,9 @@ func TestNilMetricsTreatedAsSaturated(t *testing.T) {
 	)
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &fwksched.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
-	if err := admitter.AdmitRequest(context.Background(), req, []schedulingtypes.Endpoint{pod}); err == nil {
+	if err := admitter.AdmitRequest(context.Background(), req, []fwksched.Endpoint{pod}); err == nil {
 		t.Error("expected rejection when pod has nil metrics")
 	}
 }
@@ -178,7 +178,7 @@ func TestNilMetricsTreatedAsSaturated(t *testing.T) {
 func TestNoPods(t *testing.T) {
 	admitter := newAdmitter(defaultParams())
 	req := &fwksched.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, nil); err != nil {
 		t.Errorf("no pods should admit, got: %v", err)
@@ -213,7 +213,7 @@ func TestQuinticProperty(t *testing.T) {
 	pods := []fwksched.Endpoint{newEndpoint("pod-0", 0, 0.272)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.999 })
 	req := &fwksched.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
 	sat := 0.272 / 0.8
 	if expected := math.Min(math.Pow(sat, 5)*300, 1.0); expected < 0.99 {
@@ -229,7 +229,7 @@ func TestErrorTypeIsStructured(t *testing.T) {
 	pods := []fwksched.Endpoint{newEndpoint("pod-0", 5, 0.8)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 	req := &fwksched.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
 	err := admitter.AdmitRequest(context.Background(), req, pods)
 	if err == nil {
@@ -248,7 +248,7 @@ func TestProbabilisticShedding(t *testing.T) {
 	// sat=0.16/0.8=0.2 → prob=0.2^5*300≈0.096
 	pods := []fwksched.Endpoint{newEndpoint("pod-0", 0, 0.16)}
 	req := &fwksched.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
 
 	// rand=0.9 > prob≈0.096 → admit
