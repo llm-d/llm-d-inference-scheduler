@@ -23,7 +23,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 
 	"github.com/fsnotify/fsnotify"
 	"k8s.io/apimachinery/pkg/types"
@@ -156,6 +158,13 @@ func (f *FileDiscovery) load(notifier fwkdl.DiscoveryNotifier) error {
 
 	incoming := make(map[types.NamespacedName]struct{}, len(ef.Endpoints))
 	for _, e := range ef.Endpoints {
+		if net.ParseIP(e.Address) == nil {
+			return fmt.Errorf("endpoint %q: invalid address %q", e.Name, e.Address)
+		}
+		portNum, err := strconv.Atoi(e.Port)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			return fmt.Errorf("endpoint %q: invalid port %q", e.Name, e.Port)
+		}
 		ns := e.Namespace
 		if ns == "" {
 			ns = "default"
