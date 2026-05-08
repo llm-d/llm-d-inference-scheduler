@@ -146,9 +146,6 @@ func (p *Plugin) Produces() map[string]any {
 // policy (currently: log and continue). If the request already carries a
 // TokenizedPrompt, tokenization is skipped.
 func (p *Plugin) Produce(ctx context.Context, request *scheduling.InferenceRequest, _ []scheduling.Endpoint) error {
-	if request != nil && request.Body != nil && request.Body.TokenizedPrompt != nil {
-		return nil
-	}
 	tp, err := p.tokenize(ctx, request)
 	if err != nil {
 		return err
