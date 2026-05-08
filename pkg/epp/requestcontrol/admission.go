@@ -223,11 +223,11 @@ func translateFlowControlOutcome(outcome types.QueueOutcome, err error) error {
 	case types.QueueOutcomeDispatched:
 		return nil
 	case types.QueueOutcomeRejectedCapacity:
-		return errcommon.Error{Code: errcommon.ResourceExhausted, Msg: msg, Headers: map[string]string{errcommon.EvictionReasonHeaderKey: string(errcommon.EvictionReasonCapacity)}}
+		return errcommon.Error{Code: errcommon.ResourceExhausted, Msg: msg, Headers: map[string]string{errcommon.RemovalReasonHeaderKey: string(errcommon.RemovalReasonAdmissionCapacity)}}
 	case types.QueueOutcomeEvictedTTL:
-		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "request timed out in queue: " + msg, Headers: map[string]string{errcommon.EvictionReasonHeaderKey: string(errcommon.EvictionReasonTTLExpired)}}
+		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "request timed out in queue: " + msg, Headers: map[string]string{errcommon.RemovalReasonHeaderKey: string(errcommon.RemovalReasonQueueTTLExpired)}}
 	case types.QueueOutcomeEvictedContextCancelled:
-		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "client disconnected: " + msg, Headers: map[string]string{errcommon.EvictionReasonHeaderKey: string(errcommon.EvictionReasonContextCancelled)}}
+		return errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "client disconnected: " + msg, Headers: map[string]string{errcommon.RemovalReasonHeaderKey: string(errcommon.RemovalReasonQueueContextCancelled)}}
 	case types.QueueOutcomeRejectedOther, types.QueueOutcomeEvictedOther:
 		return errcommon.Error{Code: errcommon.Internal, Msg: "internal flow control error: " + msg}
 	default:

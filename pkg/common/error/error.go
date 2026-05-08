@@ -25,18 +25,23 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// EvictionReasonHeaderKey is the HTTP response header that communicates the specific
+// RemovalReasonHeaderKey is the HTTP response header that communicates the specific
 // reason a request was rejected or evicted by flow control.
-const EvictionReasonHeaderKey = "x-eviction-reason"
+const RemovalReasonHeaderKey = "x-removal-reason"
 
-// EvictionReason is the reason a request was rejected or evicted by flow control.
-type EvictionReason string
+// RemovalReason is the reason a request was rejected, removed from queue, or evicted after dispatch.
+type RemovalReason string
 
 const (
-	EvictionReasonCapacity         EvictionReason = "capacity"
-	EvictionReasonTTLExpired       EvictionReason = "ttl-expired"
-	EvictionReasonContextCancelled EvictionReason = "context-cancelled"
-	EvictionReasonEvicted          EvictionReason = "evicted"
+	// Admission — rejected before entering a queue.
+	RemovalReasonAdmissionCapacity RemovalReason = "admission-capacity"
+
+	// Queue — entered the queue but removed before dispatch.
+	RemovalReasonQueueTTLExpired       RemovalReason = "queue-ttl-expired"
+	RemovalReasonQueueContextCancelled RemovalReason = "queue-context-cancelled"
+
+	// Evicted — dispatched to a model server and then killed.
+	RemovalReasonEvicted RemovalReason = "evicted"
 )
 
 // Error is an error struct for errors returned by the epp/bbr server.
