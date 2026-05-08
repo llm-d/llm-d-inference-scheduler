@@ -117,7 +117,7 @@ type RequestContext struct {
 	SchedulingRequest *fwksched.InferenceRequest
 
 	RequestState         StreamRequestState
-	RemovalReason       errcommon.RemovalReason
+	RemovalReason        errcommon.RemovalReason
 	modelServerStreaming bool
 
 	Response *Response

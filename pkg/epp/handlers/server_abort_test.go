@@ -56,19 +56,19 @@ func TestUpdateStateAndSendIfNeeded_Evicted(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
+		name          string
 		removalReason errcommon.RemovalReason
-		wantHeader     bool
+		wantHeader    bool
 	}{
 		{
-			name:           "with eviction reason",
+			name:          "with eviction reason",
 			removalReason: errcommon.RemovalReasonEvicted,
-			wantHeader:     true,
+			wantHeader:    true,
 		},
 		{
-			name:           "without eviction reason",
+			name:          "without eviction reason",
 			removalReason: "",
-			wantHeader:     false,
+			wantHeader:    false,
 		},
 	}
 
@@ -79,7 +79,7 @@ func TestUpdateStateAndSendIfNeeded_Evicted(t *testing.T) {
 			logger := logr.Discard()
 
 			reqCtx := &RequestContext{
-				RequestState:   RequestEvicted,
+				RequestState:  RequestEvicted,
 				RemovalReason: tt.removalReason,
 			}
 
