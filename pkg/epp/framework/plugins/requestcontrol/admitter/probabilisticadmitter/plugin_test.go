@@ -25,12 +25,12 @@ import (
 
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-func newEndpoint(name string, queueSize int, kvFraction float64) schedulingtypes.Endpoint {
-	return schedulingtypes.NewEndpoint(
+func newEndpoint(name string, queueSize int, kvFraction float64) fwksched.Endpoint {
+	return fwksched.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: name}},
 		&fwkdl.Metrics{
 			WaitingQueueSize:    queueSize,
@@ -124,11 +124,11 @@ func TestFactory_ZeroK(t *testing.T) {
 }
 
 func TestProtectedTiersAlwaysAdmitted(t *testing.T) {
-	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 100, 0)}
+	pods := []fwksched.Endpoint{newEndpoint("pod-0", 100, 0)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
 
 	for _, priority := range []int{0, 100} {
-		req := &schedulingtypes.InferenceRequest{
+		req := &fwksched.InferenceRequest{
 			Objectives: schedulingtypes.RequestObjectives{Priority: priority},
 		}
 		if err := admitter.AdmitRequest(context.Background(), req, pods); err != nil {
@@ -139,9 +139,9 @@ func TestProtectedTiersAlwaysAdmitted(t *testing.T) {
 
 func TestDroppableRejectedAtHighSaturation(t *testing.T) {
 	// QD=100, threshold=5 → saturation=20 → prob=1.0
-	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 100, 0)}
+	pods := []fwksched.Endpoint{newEndpoint("pod-0", 100, 0)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
-	req := &schedulingtypes.InferenceRequest{
+	req := &fwksched.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, pods); err == nil {
@@ -150,9 +150,9 @@ func TestDroppableRejectedAtHighSaturation(t *testing.T) {
 }
 
 func TestDroppableAdmittedAtZeroSaturation(t *testing.T) {
-	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 0, 0)}
+	pods := []fwksched.Endpoint{newEndpoint("pod-0", 0, 0)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
-	req := &schedulingtypes.InferenceRequest{
+	req := &fwksched.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, pods); err != nil {
@@ -161,13 +161,13 @@ func TestDroppableAdmittedAtZeroSaturation(t *testing.T) {
 }
 
 func TestNilMetricsTreatedAsSaturated(t *testing.T) {
-	pod := schedulingtypes.NewEndpoint(
+	pod := fwksched.NewEndpoint(
 		&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "stale"}},
 		nil,
 		nil,
 	)
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
-	req := &schedulingtypes.InferenceRequest{
+	req := &fwksched.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, []schedulingtypes.Endpoint{pod}); err == nil {
@@ -177,7 +177,7 @@ func TestNilMetricsTreatedAsSaturated(t *testing.T) {
 
 func TestNoPods(t *testing.T) {
 	admitter := newAdmitter(defaultParams())
-	req := &schedulingtypes.InferenceRequest{
+	req := &fwksched.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, nil); err != nil {
@@ -187,7 +187,7 @@ func TestNoPods(t *testing.T) {
 
 func TestNilRequest(t *testing.T) {
 	admitter := newAdmitter(defaultParams())
-	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 0, 0)}
+	pods := []fwksched.Endpoint{newEndpoint("pod-0", 0, 0)}
 	if err := admitter.AdmitRequest(context.Background(), nil, pods); err != nil {
 		t.Errorf("nil request should admit, got: %v", err)
 	}
@@ -195,13 +195,13 @@ func TestNilRequest(t *testing.T) {
 
 func TestMultiplePodsSaturationAveraging(t *testing.T) {
 	// pod-a: max(10/5, 0/0.8)=2.0; pod-b: max(0/5, 0/0.8)=0.0 → avg=1.0 → prob=1.0
-	pods := []schedulingtypes.Endpoint{
+	pods := []fwksched.Endpoint{
 		newEndpoint("pod-a", 10, 0),
 		newEndpoint("pod-b", 0, 0),
 	}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
-	req := &schedulingtypes.InferenceRequest{
-		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
+	req := &fwksched.InferenceRequest{
+		Objectives: fwksched.RequestObjectives{Priority: -1},
 	}
 	if err := admitter.AdmitRequest(context.Background(), req, pods); err == nil {
 		t.Error("expected rejection with avg saturation 1.0")
@@ -210,9 +210,9 @@ func TestMultiplePodsSaturationAveraging(t *testing.T) {
 
 func TestQuinticProperty(t *testing.T) {
 	// sat=0.272/0.8=0.34 → sat^5*300≈1.36 → prob=1.0 → reject even at rand=0.999
-	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 0, 0.272)}
+	pods := []fwksched.Endpoint{newEndpoint("pod-0", 0, 0.272)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.999 })
-	req := &schedulingtypes.InferenceRequest{
+	req := &fwksched.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
 	sat := 0.272 / 0.8
@@ -226,9 +226,9 @@ func TestQuinticProperty(t *testing.T) {
 
 func TestErrorTypeIsStructured(t *testing.T) {
 	// sat=1.0 → prob=1.0 → reject
-	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 5, 0.8)}
+	pods := []fwksched.Endpoint{newEndpoint("pod-0", 5, 0.8)}
 	admitter := newAdmitter(defaultParams()).WithRandFn(func() float64 { return 0.0 })
-	req := &schedulingtypes.InferenceRequest{
+	req := &fwksched.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
 	err := admitter.AdmitRequest(context.Background(), req, pods)
@@ -246,8 +246,8 @@ func TestErrorTypeIsStructured(t *testing.T) {
 
 func TestProbabilisticShedding(t *testing.T) {
 	// sat=0.16/0.8=0.2 → prob=0.2^5*300≈0.096
-	pods := []schedulingtypes.Endpoint{newEndpoint("pod-0", 0, 0.16)}
-	req := &schedulingtypes.InferenceRequest{
+	pods := []fwksched.Endpoint{newEndpoint("pod-0", 0, 0.16)}
+	req := &fwksched.InferenceRequest{
 		Objectives: schedulingtypes.RequestObjectives{Priority: -1},
 	}
 

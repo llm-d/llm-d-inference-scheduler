@@ -29,7 +29,7 @@ import (
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -122,7 +122,7 @@ func (p *ProbabilisticAdmitter) TypedName() fwkplugin.TypedName {
 
 // AdmitRequest implements requestcontrol.Admitter.
 // Returns nil to admit, or a ResourceExhausted error to reject.
-func (p *ProbabilisticAdmitter) AdmitRequest(_ context.Context, request *schedulingtypes.InferenceRequest, pods []schedulingtypes.Endpoint) error {
+func (p *ProbabilisticAdmitter) AdmitRequest(_ context.Context, request *fwksched.InferenceRequest, pods []fwksched.Endpoint) error {
 	if request == nil {
 		return nil
 	}
@@ -146,7 +146,7 @@ func (p *ProbabilisticAdmitter) AdmitRequest(_ context.Context, request *schedul
 }
 
 // computeSaturation calculates avg(max(QD/qdThreshold, KV/kvThreshold)) across all pods.
-func (p *ProbabilisticAdmitter) computeSaturation(pods []schedulingtypes.Endpoint) float64 {
+func (p *ProbabilisticAdmitter) computeSaturation(pods []fwksched.Endpoint) float64 {
 	var total float64
 	for _, pod := range pods {
 		m := pod.GetMetrics()
