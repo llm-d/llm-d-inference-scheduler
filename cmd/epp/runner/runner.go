@@ -45,7 +45,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
-	"github.com/llm-d/llm-d-inference-scheduler/internal/rungroup"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
@@ -308,7 +307,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		"namespace", namespace,
 		"discoveryPlugin", disc.TypedName())
 
-	g := rungroup.New()
+	g := newRunnableGroup()
 	g.Add("discovery", func(ctx context.Context) error {
 		return disc.Start(ctx, fwkdl.NewDiscoveryNotifier(ds))
 	})
@@ -381,7 +380,7 @@ func (r *Runner) buildServerRunner(opts *runserver.Options, ds datastore.Datasto
 	}
 }
 
-func (r *Runner) addCommonRunnables(g rungroup.RunnableGroup, opts *runserver.Options, ds datastore.Datastore, serverRunner *runserver.ExtProcServerRunner) {
+func (r *Runner) addCommonRunnables(g RunnableGroup, opts *runserver.Options, ds datastore.Datastore, serverRunner *runserver.ExtProcServerRunner) {
 	logger := ctrl.Log.WithName("ext-proc")
 	g.Add("ext-proc", func(ctx context.Context) error {
 		return serverRunner.AsRunnable(logger).Start(ctx)

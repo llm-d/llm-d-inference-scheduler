@@ -14,9 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package rungroup provides a RunnableGroup abstraction for starting a set of
-// named goroutines together and propagating the first failure to all of them.
-package rungroup
+package runner
 
 import (
 	"context"
@@ -33,8 +31,8 @@ type RunnableGroup interface {
 	Run(ctx context.Context) error
 }
 
-// New returns the default RunnableGroup implementation.
-func New() RunnableGroup {
+// newRunnableGroup returns the default RunnableGroup implementation.
+func newRunnableGroup() RunnableGroup {
 	return &groupRunner{}
 }
 
