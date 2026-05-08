@@ -226,6 +226,8 @@ func (k *InferencePoolDiscoveryPlugin) Start(ctx context.Context, notifier fwkdl
 		return fmt.Errorf("inference-pool-discovery: failed to create manager: %w", err)
 	}
 
+	// TODO: convert to NotificationExtractor via BindNotificationSource for
+	// consistency with pod-discovery.
 	if err := (&controller.InferencePoolReconciler{
 		Datastore: k.ds,
 		Reader:    mgr.GetClient(),
@@ -234,6 +236,8 @@ func (k *InferencePoolDiscoveryPlugin) Start(ctx context.Context, notifier fwkdl
 	}
 
 	if hasObjective {
+		// TODO: convert to NotificationExtractor via BindNotificationSource for
+		// consistency with pod-discovery.
 		if err := (&controller.InferenceObjectiveReconciler{
 			Datastore: k.ds, Reader: mgr.GetClient(), PoolGKNN: gknn,
 		}).SetupWithManager(mgr); err != nil {
@@ -241,6 +245,8 @@ func (k *InferencePoolDiscoveryPlugin) Start(ctx context.Context, notifier fwkdl
 		}
 	}
 	if hasModelRewrite {
+		// TODO: convert to NotificationExtractor via BindNotificationSource for
+		// consistency with pod-discovery.
 		if err := (&controller.InferenceModelRewriteReconciler{
 			Datastore: k.ds, Reader: mgr.GetClient(), PoolGKNN: gknn,
 		}).SetupWithManager(mgr); err != nil {
