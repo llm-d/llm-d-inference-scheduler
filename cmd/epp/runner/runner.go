@@ -62,6 +62,7 @@ import (
 	fcregistry "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/registry"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	discoveryinject "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/discovery/inject"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
 	attrlatency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/latency"
@@ -329,10 +330,10 @@ func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opt
 		if !ok {
 			return nil, fmt.Errorf("plugin %q does not implement EndpointDiscovery", rawConfig.Discovery.PluginRef)
 		}
-		if dp, ok := raw.(k8sdiscovery.DatastoreProvider); ok {
+		if dp, ok := raw.(discoveryinject.DatastoreProvider); ok {
 			dp.SetDatastore(ds)
 		}
-		if db, ok := raw.(k8sdiscovery.DatalayerBinder); ok {
+		if db, ok := raw.(discoveryinject.DatalayerBinder); ok {
 			db.BindDatalayer(r.dlRuntime)
 		}
 		return disc, nil

@@ -48,6 +48,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/discovery/inject"
 	dlnotifications "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/notifications"
 )
 
@@ -64,19 +65,13 @@ func init() {
 	utilruntime.Must(v1.Install(pluginScheme))
 }
 
-// DatastoreProvider is implemented by K8s discovery plugins that require the
-// shared Datastore before Start is called.
-type DatastoreProvider interface {
-	SetDatastore(ds datastore.Datastore)
-}
-
-// DatalayerBinder is an optional interface K8s discovery plugins implement to
-// receive the datalayer Runtime. When provided, the plugin calls
-// dlRuntime.Start(ctx, mgr) before mgr.Start to bind K8s notification sources
-// (push-based metrics) to the manager it owns.
-type DatalayerBinder interface {
-	BindDatalayer(rt *datalayer.Runtime)
-}
+// DatastoreProvider and DatalayerBinder are defined in the inject package so
+// that both K8s and non-K8s plugins can implement them without importing this
+// leaf package.
+type (
+	DatastoreProvider = inject.DatastoreProvider
+	DatalayerBinder   = inject.DatalayerBinder
+)
 
 // ---- baseK8sDiscovery -- shared state and behaviour -----------------------
 
