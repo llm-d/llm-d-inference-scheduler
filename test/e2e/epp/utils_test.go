@@ -491,9 +491,7 @@ func deploymentReadyCondition(tc *igwtestutils.TestConfig, key types.NamespacedN
 	}
 	for i := range podList.Items {
 		if podList.Items[i].DeletionTimestamp != nil {
-			err := fmt.Errorf("pod %s is still terminating", podList.Items[i].Name)
-			ginkgo.GinkgoWriter.Println(err.Error())
-			return err
+			return fmt.Errorf("pod %s is still terminating", podList.Items[i].Name)
 		}
 	}
 
