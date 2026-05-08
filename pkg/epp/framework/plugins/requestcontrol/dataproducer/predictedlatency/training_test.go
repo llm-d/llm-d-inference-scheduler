@@ -28,7 +28,7 @@ import (
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 func TestBulkPredictWithMetrics(t *testing.T) {
@@ -127,7 +127,7 @@ func TestBulkPredictWithMetrics_WithPredictedLatencyCtx(t *testing.T) {
 	prefixCacheScores := []float64{0.0}
 
 	plCtx := &predictedLatencyCtx{
-		schedulingRequest: schedulingtypes.InferenceRequest{
+		schedulingRequest: fwksched.InferenceRequest{
 			TargetModel: "test-model",
 		},
 		incomingModelName: "incoming-model",

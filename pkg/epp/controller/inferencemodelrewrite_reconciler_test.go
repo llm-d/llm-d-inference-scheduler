@@ -39,11 +39,11 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	poolutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
-	utiltest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
+	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 )
 
 var (
-	poolForRewrite = utiltest.MakeInferencePool("test-pool1").Namespace("ns1").ObjRef()
+	poolForRewrite = testutil.MakeInferencePool("test-pool1").Namespace("ns1").ObjRef()
 	rewrite1       = &v1alpha2.InferenceModelRewrite{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "rewrite1",

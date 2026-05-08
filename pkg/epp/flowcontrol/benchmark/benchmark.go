@@ -79,7 +79,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/usagelimits"
-	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 func init() {
@@ -241,7 +241,7 @@ func setupBenchmarkHarness(
 	customCfg *controller.Config,
 ) (*controller.FlowController, testDetector) {
 	b.Helper()
-	handle := testutils.NewTestHandle(ctx)
+	handle := igwtestutils.NewTestHandle(ctx)
 
 	fPolicy, err := globalstrict.GlobalStrictFairnessPolicyFactory(registry.DefaultFairnessPolicyRef, nil, handle)
 	if err != nil {

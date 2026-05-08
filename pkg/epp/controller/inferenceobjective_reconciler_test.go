@@ -38,42 +38,42 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	poolutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
-	utiltest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
+	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 )
 
 var (
-	inferencePool = utiltest.MakeInferencePool("test-pool1").Namespace("ns1").ObjRef()
-	infObjective1 = utiltest.MakeInferenceObjective("model1").
+	inferencePool = testutil.MakeInferencePool("test-pool1").Namespace("ns1").ObjRef()
+	infObjective1 = testutil.MakeInferenceObjective("model1").
 			Namespace(inferencePool.Namespace).
 			Priority(1).
 			CreationTimestamp(metav1.Unix(1000, 0)).
 			PoolName(inferencePool.Name).
 			PoolGroup("inference.networking.k8s.io").ObjRef()
-	infObjective1Pool2 = utiltest.MakeInferenceObjective(infObjective1.Name).
+	infObjective1Pool2 = testutil.MakeInferenceObjective(infObjective1.Name).
 				Namespace(infObjective1.Namespace).
 				Priority(*infObjective1.Spec.Priority).
 				CreationTimestamp(metav1.Unix(1001, 0)).
 				PoolName("test-pool2").
 				PoolGroup("inference.networking.k8s.io").ObjRef()
-	infObjective1Critical = utiltest.MakeInferenceObjective(infObjective1.Name).
+	infObjective1Critical = testutil.MakeInferenceObjective(infObjective1.Name).
 				Namespace(infObjective1.Namespace).
 				Priority(2).
 				CreationTimestamp(metav1.Unix(1003, 0)).
 				PoolName(inferencePool.Name).
 				PoolGroup("inference.networking.k8s.io").ObjRef()
-	infObjective1Deleted = utiltest.MakeInferenceObjective(infObjective1.Name).
+	infObjective1Deleted = testutil.MakeInferenceObjective(infObjective1.Name).
 				Namespace(infObjective1.Namespace).
 				CreationTimestamp(metav1.Unix(1004, 0)).
 				DeletionTimestamp().
 				PoolName(inferencePool.Name).
 				PoolGroup("inference.networking.k8s.io").ObjRef()
-	infObjective1DiffGroup = utiltest.MakeInferenceObjective(infObjective1.Name).
+	infObjective1DiffGroup = testutil.MakeInferenceObjective(infObjective1.Name).
 				Namespace(inferencePool.Namespace).
 				Priority(1).
 				CreationTimestamp(metav1.Unix(1005, 0)).
 				PoolName(inferencePool.Name).
 				PoolGroup("inference.networking.x-k8s.io").ObjRef()
-	infObjective2 = utiltest.MakeInferenceObjective("model2").
+	infObjective2 = testutil.MakeInferenceObjective("model2").
 			Namespace(inferencePool.Namespace).
 			CreationTimestamp(metav1.Unix(1000, 0)).
 			PoolName(inferencePool.Name).

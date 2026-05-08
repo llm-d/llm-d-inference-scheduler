@@ -55,7 +55,7 @@ import (
 	dlmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 	eppServer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/server"
-	epptestutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
+	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 	integration "github.com/llm-d/llm-d-inference-scheduler/test/integration"
 )
 
@@ -402,7 +402,7 @@ func (h *TestHarness) WithPods(pods []PodState) *TestHarness {
 	for _, p := range pods {
 		name := fmt.Sprintf("pod-%d", p.index)
 
-		pod := epptestutil.MakePod(name).
+		pod := testutil.MakePod(name).
 			Namespace(h.Namespace).
 			ReadyCondition(). // Sets Status.Conditions.
 			Labels(map[string]string{"app": testPoolName}).

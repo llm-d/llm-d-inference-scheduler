@@ -29,37 +29,37 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/contracts"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/framework/plugins/queue"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	frameworkmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/roundrobin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/ordering/edf"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/ordering/fcfs"
-	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 func newTestPluginsHandle(t *testing.T) plugin.Handle {
 	t.Helper()
-	handle := utils.NewTestHandle(t.Context())
-	handle.AddPlugin(globalstrict.GlobalStrictFairnessPolicyType, &frameworkmocks.MockFairnessPolicy{
+	handle := igwtestutils.NewTestHandle(t.Context())
+	handle.AddPlugin(globalstrict.GlobalStrictFairnessPolicyType, &fwkfcmocks.MockFairnessPolicy{
 		TypedNameV: plugin.TypedName{
 			Type: globalstrict.GlobalStrictFairnessPolicyType,
 			Name: globalstrict.GlobalStrictFairnessPolicyType,
 		},
 	})
-	handle.AddPlugin(roundrobin.RoundRobinFairnessPolicyType, &frameworkmocks.MockFairnessPolicy{
+	handle.AddPlugin(roundrobin.RoundRobinFairnessPolicyType, &fwkfcmocks.MockFairnessPolicy{
 		TypedNameV: plugin.TypedName{
 			Type: roundrobin.RoundRobinFairnessPolicyType,
 			Name: roundrobin.RoundRobinFairnessPolicyType,
 		},
 	})
-	handle.AddPlugin(fcfs.FCFSOrderingPolicyType, &frameworkmocks.MockOrderingPolicy{
+	handle.AddPlugin(fcfs.FCFSOrderingPolicyType, &fwkfcmocks.MockOrderingPolicy{
 		TypedNameV: plugin.TypedName{
 			Type: fcfs.FCFSOrderingPolicyType,
 			Name: fcfs.FCFSOrderingPolicyType,
 		},
 	})
-	handle.AddPlugin(edf.EDFOrderingPolicyType, &frameworkmocks.MockOrderingPolicy{
+	handle.AddPlugin(edf.EDFOrderingPolicyType, &fwkfcmocks.MockOrderingPolicy{
 		TypedNameV: plugin.TypedName{
 			Type: edf.EDFOrderingPolicyType,
 			Name: edf.EDFOrderingPolicyType,
@@ -262,7 +262,7 @@ func TestNewConfig(t *testing.T) {
 		{
 			name:      "ShouldError_WhenDefaultPolicyMissingFromHandle",
 			opts:      []ConfigOption{WithPriorityBand(&PriorityBandConfig{Priority: 1})},
-			handle:    utils.NewTestHandle(t.Context()), // Handle has no plugin.
+			handle:    igwtestutils.NewTestHandle(t.Context()), // Handle has no plugin.
 			expectErr: true,
 		},
 

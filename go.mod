@@ -2,9 +2,8 @@ module github.com/llm-d/llm-d-inference-scheduler
 
 go 1.25.7
 
-// Pinned to go1.25.9 to pick up stdlib fixes for GO-2026-4870, GO-2026-4865,
-// GO-2026-4946, and GO-2026-4947 (crypto/tls, html/template, crypto/x509).
-toolchain go1.25.9
+// Pinned to go1.25.10 to pick up stdlib fixes reported by govulncheck.
+toolchain go1.25.10
 
 require (
 	cloud.google.com/go/aiplatform v1.124.0

@@ -38,7 +38,7 @@ import (
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -230,7 +230,7 @@ func (pl *PredictedLatency) WithName(name string) *PredictedLatency {
 	return pl
 }
 
-func (pl *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *framework.InferenceRequest) *predictedLatencyCtx {
+func (pl *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *fwksched.InferenceRequest) *predictedLatencyCtx {
 	sloCtx, err := pl.getPredictedLatencyContextForRequest(request)
 	if err != nil {
 		sloCtx = newPredictedLatencyContext(request)
@@ -242,10 +242,10 @@ func (pl *PredictedLatency) getOrMakePredictedLatencyContextForRequest(request *
 
 // predictedLatencyCtx holds per-request state for latency prediction and training.
 type predictedLatencyCtx struct {
-	schedulingRequest         framework.InferenceRequest
+	schedulingRequest         fwksched.InferenceRequest
 	targetMetadata            *fwkdl.EndpointMetadata
 	prefillTargetMetadata     *fwkdl.EndpointMetadata
-	schedulingResult          *framework.SchedulingResult
+	schedulingResult          *fwksched.SchedulingResult
 	lastSeenMetrics           map[string]*fwkdl.Metrics
 	lastTokenTimestamp        time.Time
 	requestReceivedTimestamp  time.Time
@@ -274,7 +274,7 @@ type predictedLatencyCtx struct {
 	decodeTokensAtDispatch           int64
 }
 
-func newPredictedLatencyContext(request *framework.InferenceRequest) *predictedLatencyCtx {
+func newPredictedLatencyContext(request *fwksched.InferenceRequest) *predictedLatencyCtx {
 	var promptText string
 	if request.Body != nil {
 		promptText = request.Body.PromptText()
@@ -289,7 +289,7 @@ func newPredictedLatencyContext(request *framework.InferenceRequest) *predictedL
 	}
 }
 
-func (pl *PredictedLatency) getPredictedLatencyContextForRequest(request *framework.InferenceRequest) (*predictedLatencyCtx, error) {
+func (pl *PredictedLatency) getPredictedLatencyContextForRequest(request *fwksched.InferenceRequest) (*predictedLatencyCtx, error) {
 	id := request.Headers[reqcommon.RequestIDHeaderKey]
 	if item := pl.sloContextStore.Get(id); item != nil {
 		return item.Value(), nil
@@ -297,12 +297,12 @@ func (pl *PredictedLatency) getPredictedLatencyContextForRequest(request *framew
 	return nil, fmt.Errorf("SLO context not found for request ID: %s", id)
 }
 
-func (pl *PredictedLatency) setPredictedLatencyContextForRequest(request *framework.InferenceRequest, ctx *predictedLatencyCtx) {
+func (pl *PredictedLatency) setPredictedLatencyContextForRequest(request *fwksched.InferenceRequest, ctx *predictedLatencyCtx) {
 	id := request.Headers[reqcommon.RequestIDHeaderKey]
 	pl.sloContextStore.Set(id, ctx, ttlcache.DefaultTTL)
 }
 
-func (pl *PredictedLatency) deletePredictedLatencyContextForRequest(request *framework.InferenceRequest) {
+func (pl *PredictedLatency) deletePredictedLatencyContextForRequest(request *fwksched.InferenceRequest) {
 	id := request.Headers[reqcommon.RequestIDHeaderKey]
 	pl.sloContextStore.Delete(id)
 }
@@ -311,7 +311,7 @@ func (pl *PredictedLatency) deletePredictedLatencyContextForRequest(request *fra
 
 // parseFloatHeader retrieves a header by name, parses it as a float64,
 // and returns the value or an error if the header is missing or invalid.
-func parseFloatHeader(request framework.InferenceRequest, headerName string) (float64, error) {
+func parseFloatHeader(request fwksched.InferenceRequest, headerName string) (float64, error) {
 	headerValue, ok := request.Headers[headerName]
 	if !ok {
 		return 0, nil
@@ -326,7 +326,7 @@ func parseFloatHeader(request framework.InferenceRequest, headerName string) (fl
 	return parsedFloat, nil
 }
 
-func (pl *PredictedLatency) parseSLOHeaders(ctx context.Context, request *framework.InferenceRequest, predictedLatencyCtx *predictedLatencyCtx) {
+func (pl *PredictedLatency) parseSLOHeaders(ctx context.Context, request *fwksched.InferenceRequest, predictedLatencyCtx *predictedLatencyCtx) {
 	logger := log.FromContext(ctx)
 	var err error
 
@@ -343,7 +343,7 @@ func (pl *PredictedLatency) parseSLOHeaders(ctx context.Context, request *framew
 
 // --- Running request queue helpers ---
 
-func (pl *PredictedLatency) getEndpointMinTPOTSLO(endpoint framework.Endpoint) float64 {
+func (pl *PredictedLatency) getEndpointMinTPOTSLO(endpoint fwksched.Endpoint) float64 {
 	endpointName := endpoint.GetMetadata().NamespacedName
 	if runningReqs := pl.getRunningRequestList(endpointName); runningReqs != nil && runningReqs.GetSize() > 0 {
 		if min := runningReqs.Peek(); min != nil {
@@ -353,7 +353,7 @@ func (pl *PredictedLatency) getEndpointMinTPOTSLO(endpoint framework.Endpoint) f
 	return 0
 }
 
-func (pl *PredictedLatency) getEndpointRunningRequestCount(endpoint framework.Endpoint) int {
+func (pl *PredictedLatency) getEndpointRunningRequestCount(endpoint fwksched.Endpoint) int {
 	endpointName := endpoint.GetMetadata().NamespacedName
 	if runningReqs := pl.getRunningRequestList(endpointName); runningReqs != nil {
 		return runningReqs.GetSize()

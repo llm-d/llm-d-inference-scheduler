@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -196,17 +195,6 @@ func setupK8sCluster() {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 
-	// For Docker: pull with --platform to ensure platform-specific layers are cached
-	// before loading into KIND (avoids "content digest not found" with multi-arch images).
-	if containerRuntime == "docker" {
-		arch := runtime.GOARCH
-		for _, img := range []string{vllmSimImage, eppImage, sideCarImage, udsTokenizerImage} {
-			pull := exec.Command("docker", "pull", "--platform", "linux/"+arch, img)
-			pull.Stderr = ginkgo.GinkgoWriter
-			_ = pull.Run() // ignore failure — image may be local-only
-		}
-	}
-
 	kindLoadImage(vllmSimImage)
 	kindLoadImage(eppImage)
 	kindLoadImage(sideCarImage)
@@ -361,7 +349,7 @@ const kindClusterConfig = `
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
-- image: kindest/node:v1.31.2
+- image: kindest/node:v1.31.12
   extraPortMappings:
   - containerPort: 30080
     hostPort: ${PORT}

@@ -43,7 +43,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
-	pooltuil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
+	poolutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
 	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 )
 
@@ -129,12 +129,12 @@ func TestPool(t *testing.T) {
 					Build()
 
 				ds := NewDatastore(context.Background(), epf, 0)
-				_ = ds.PoolSet(context.Background(), fakeClient, pooltuil.InferencePoolToEndpointPool(tt.inferencePool))
+				_ = ds.PoolSet(context.Background(), fakeClient, poolutil.InferencePoolToEndpointPool(tt.inferencePool))
 				gotPool, gotErr := ds.PoolGet()
 				if diff := cmp.Diff(tt.wantErr, gotErr, cmpopts.EquateErrors()); diff != "" {
 					t.Errorf("Unexpected error diff (+got/-want): %s", diff)
 				}
-				if diff := cmp.Diff(pooltuil.InferencePoolToEndpointPool(tt.wantPool), gotPool); diff != "" {
+				if diff := cmp.Diff(poolutil.InferencePoolToEndpointPool(tt.wantPool), gotPool); diff != "" {
 					t.Errorf("Unexpected pool diff (+got/-want): %s", diff)
 				}
 				gotSynced := ds.PoolHasSynced()
@@ -386,7 +386,7 @@ func TestMetrics(t *testing.T) {
 					WithScheme(scheme).
 					Build()
 				ds := NewDatastore(ctx, epf, 0)
-				_ = ds.PoolSet(ctx, fakeClient, pooltuil.InferencePoolToEndpointPool(inferencePool))
+				_ = ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(inferencePool))
 				for _, pod := range test.storePods {
 					ds.PodUpdateOrAddIfNotExist(ctx, pod)
 				}
@@ -396,9 +396,9 @@ func TestMetrics(t *testing.T) {
 				}
 				assert.EventuallyWithT(t, func(t *assert.CollectT) {
 					got := ds.PodList(test.predict)
-					metrics := []*fwkdl.Metrics{}
-					for _, one := range got {
-						metrics = append(metrics, one.GetMetrics())
+					metrics := make([]*fwkdl.Metrics, len(got))
+					for idx, one := range got {
+						metrics[idx] = one.GetMetrics()
 					}
 					diff := cmp.Diff(test.want, metrics, cmpopts.IgnoreFields(fwkdl.Metrics{}, "UpdateTime"), cmpopts.SortSlices(func(a, b *fwkdl.Metrics) bool {
 						return a.String() < b.String()
@@ -461,7 +461,7 @@ func TestPods(t *testing.T) {
 				ctx := context.Background()
 				ds := NewDatastore(t.Context(), epf, 0)
 				fakeClient := fake.NewFakeClient()
-				if err := ds.PoolSet(ctx, fakeClient, pooltuil.InferencePoolToEndpointPool(inferencePool)); err != nil {
+				if err := ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(inferencePool)); err != nil {
 					t.Error(err)
 				}
 				for _, pod := range test.existingPods {
@@ -469,10 +469,13 @@ func TestPods(t *testing.T) {
 				}
 
 				test.op(ctx, ds)
-				var gotPods []*corev1.Pod
-				for _, pm := range ds.PodList(AllPodsPredicate) {
-					pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: pm.GetMetadata().PodName, Namespace: pm.GetMetadata().NamespacedName.Namespace}, Status: corev1.PodStatus{PodIP: pm.GetMetadata().GetIPAddress()}}
-					gotPods = append(gotPods, pod)
+				podList := ds.PodList(AllPodsPredicate)
+				gotPods := make([]*corev1.Pod, len(podList))
+				for idx, pm := range podList {
+					gotPods[idx] = &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: pm.GetMetadata().PodName, Namespace: pm.GetMetadata().NamespacedName.Namespace},
+						Status:     corev1.PodStatus{PodIP: pm.GetMetadata().GetIPAddress()},
+					}
 				}
 				if !cmp.Equal(gotPods, test.wantPods, cmpopts.SortSlices(func(a, b *corev1.Pod) bool { return a.Name < b.Name })) {
 					t.Errorf("got (%v) != want (%v);", gotPods, test.wantPods)
@@ -556,7 +559,7 @@ func TestTargetPortsChange(t *testing.T) {
 					Selector(map[string]string{"app": "vllm"}).ObjRef()
 				initialPool.Spec.TargetPorts = test.initialTargetPorts
 
-				if err := ds.PoolSet(ctx, fakeClient, pooltuil.InferencePoolToEndpointPool(initialPool)); err != nil {
+				if err := ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(initialPool)); err != nil {
 					t.Fatalf("Failed to set initial pool: %v", err)
 				}
 
@@ -572,7 +575,7 @@ func TestTargetPortsChange(t *testing.T) {
 					Selector(map[string]string{"app": "vllm"}).ObjRef()
 				updatedPool.Spec.TargetPorts = test.updatedTargetPorts
 
-				if err := ds.PoolSet(ctx, fakeClient, pooltuil.InferencePoolToEndpointPool(updatedPool)); err != nil {
+				if err := ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(updatedPool)); err != nil {
 					t.Fatalf("Failed to set updated pool: %v", err)
 				}
 
@@ -764,7 +767,7 @@ func TestEndpointMetadata(t *testing.T) {
 				ctx := context.Background()
 				ds := NewDatastore(t.Context(), epf, 0)
 				fakeClient := fake.NewFakeClient()
-				if err := ds.PoolSet(ctx, fakeClient, pooltuil.InferencePoolToEndpointPool(test.pool)); err != nil {
+				if err := ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(test.pool)); err != nil {
 					t.Error(err)
 				}
 				for _, pod := range test.existingPods {
@@ -772,9 +775,10 @@ func TestEndpointMetadata(t *testing.T) {
 				}
 
 				test.op(ctx, ds)
-				var gotMetadata []*fwkdl.EndpointMetadata
-				for _, pm := range ds.PodList(AllPodsPredicate) {
-					gotMetadata = append(gotMetadata, pm.GetMetadata())
+				podList := ds.PodList(AllPodsPredicate)
+				gotMetadata := make([]*fwkdl.EndpointMetadata, len(podList))
+				for idx, pm := range podList {
+					gotMetadata[idx] = pm.GetMetadata()
 				}
 				if diff := cmp.Diff(test.wantEndpointMetas, gotMetadata, cmpopts.SortSlices(func(a, b *fwkdl.EndpointMetadata) bool { return a.NamespacedName.Name < b.NamespacedName.Name })); diff != "" {
 					t.Errorf("ConvertTo() mismatch (-want +got):\n%s", diff)
@@ -920,7 +924,7 @@ func TestActivePortFiltering(t *testing.T) {
 				// Use the first pool in the test
 				if len(test.pools) > 0 {
 					pool := test.pools[0]
-					if err := ds.PoolSet(ctx, fakeClient, pooltuil.InferencePoolToEndpointPool(&pool)); err != nil {
+					if err := ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(&pool)); err != nil {
 						t.Fatalf("Failed to set pool: %v", err)
 					}
 				}
@@ -1071,7 +1075,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 				ds := NewDatastore(ctx, epf, 0)
 
 				// Set up the pool
-				if err := ds.PoolSet(ctx, fakeClient, pooltuil.InferencePoolToEndpointPool(test.pool)); err != nil {
+				if err := ds.PoolSet(ctx, fakeClient, poolutil.InferencePoolToEndpointPool(test.pool)); err != nil {
 					t.Fatalf("Failed to set pool: %v", err)
 				}
 
@@ -1125,7 +1129,7 @@ func TestPodUpdateOrAddIfNotExist_ConcurrentPoolSet(t *testing.T) {
 			ctx := context.Background()
 			ds := NewDatastore(ctx, epf, 0)
 
-			pool := pooltuil.InferencePoolToEndpointPool(
+			pool := poolutil.InferencePoolToEndpointPool(
 				testutil.MakeInferencePool("pool1").
 					Namespace("default").
 					Selector(map[string]string{"app": "vllm"}).
