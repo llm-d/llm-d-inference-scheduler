@@ -331,6 +331,11 @@ func (s *StaticSelectorDiscoveryPlugin) Start(ctx context.Context, notifier fwkd
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:  pluginScheme,
 		Metrics: metricsserver.Options{BindAddress: "0"},
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Pod{}: {Namespaces: map[string]cache.Config{s.namespace: {}}},
+			},
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("static-selector-discovery: failed to create manager: %w", err)
