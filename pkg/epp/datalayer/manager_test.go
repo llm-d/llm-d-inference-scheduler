@@ -57,7 +57,7 @@ func TestSourceManager_Register(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]("polling")
+			m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor](variantPolling)
 			err := tc.ops(m)
 			if tc.wantErr {
 				require.Error(t, err)
@@ -74,7 +74,7 @@ func TestSourceManager_Register(t *testing.T) {
 
 func TestSourceManager_AppendExtractorDedupesByType(t *testing.T) {
 	src := srcmocks.NewDataSource(fwkplugin.TypedName{Type: "polling", Name: "src1"})
-	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]("polling")
+	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor](variantPolling)
 	require.NoError(t, m.Register(src, nil))
 
 	// Two mock extractors share the same type ("mock-extractor"); one is a
@@ -96,7 +96,7 @@ func TestSourceManager_AppendExtractorDedupesByType(t *testing.T) {
 
 func TestSourceManager_AccessorsReturnCopies(t *testing.T) {
 	src := srcmocks.NewDataSource(fwkplugin.TypedName{Type: "polling", Name: "src1"})
-	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]("polling")
+	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor](variantPolling)
 	ext := newPollingExt(t, fwkplugin.TypedName{Type: "mock-extractor", Name: "ext1"})
 	require.NoError(t, m.Register(src, []fwkdl.PollingExtractor{ext}))
 
@@ -124,7 +124,7 @@ func TestSourceManager_AccessorsReturnCopies(t *testing.T) {
 }
 
 func TestSourceManager_FindByTypeStableSorted(t *testing.T) {
-	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]("polling")
+	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor](variantPolling)
 	// Insert in order designed to produce non-deterministic Go map iteration
 	// across runs; sorted-by-name first-match must always return "aaa".
 	for _, name := range []string{"zzz", "mmm", "aaa", "bbb"} {
@@ -141,7 +141,7 @@ func TestSourceManager_FindByTypeStableSorted(t *testing.T) {
 }
 
 func TestSourceManager_FindByTypeWithFilter(t *testing.T) {
-	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]("polling")
+	m := newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor](variantPolling)
 	a := srcmocks.NewDataSource(fwkplugin.TypedName{Type: "polling", Name: "a"})
 	b := srcmocks.NewDataSource(fwkplugin.TypedName{Type: "polling", Name: "b"})
 	require.NoError(t, m.Register(a, nil))

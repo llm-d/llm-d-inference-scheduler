@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"reflect"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
@@ -34,15 +33,14 @@ type HTTPDataSource struct {
 	scheme    string // scheme to use
 	path      string // path to use
 
-	client     Client // client (e.g. a wrapped http.Client) used to get data
-	parser     func(io.Reader) (any, error)
-	outputType reflect.Type
+	client Client // client (e.g. a wrapped http.Client) used to get data
+	parser func(io.Reader) (any, error)
 }
 
 // NewHTTPDataSource returns a new data source, configured with
 // the provided scheme, path and certificate verification parameters.
 func NewHTTPDataSource(scheme string, path string, skipCertVerification bool, pluginType string,
-	pluginName string, parser func(io.Reader) (any, error), outputType reflect.Type) (*HTTPDataSource, error) {
+	pluginName string, parser func(io.Reader) (any, error)) (*HTTPDataSource, error) {
 	if scheme != "http" && scheme != "https" {
 		return nil, fmt.Errorf("unsupported scheme: %s", scheme)
 	}
@@ -59,11 +57,10 @@ func NewHTTPDataSource(scheme string, path string, skipCertVerification bool, pl
 			Type: pluginType,
 			Name: pluginName,
 		},
-		scheme:     scheme,
-		path:       path,
-		client:     defaultClient,
-		parser:     parser,
-		outputType: outputType,
+		scheme: scheme,
+		path:   path,
+		client: defaultClient,
+		parser: parser,
 	}
 	return dataSrc, nil
 }

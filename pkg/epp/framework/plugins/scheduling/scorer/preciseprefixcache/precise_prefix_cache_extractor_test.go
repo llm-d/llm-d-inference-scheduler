@@ -2,7 +2,6 @@ package preciseprefixcache
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -59,7 +58,6 @@ func TestScorer_EndpointExtractor_InterfaceContract(t *testing.T) {
 	defer s.subscribersManager.Shutdown(ctx)
 
 	var _ fwkdl.EndpointExtractor = s
-	assert.True(t, reflect.TypeOf(s).Implements(reflect.TypeFor[fwkdl.EndpointExtractor]()))
 
 	// Extract on an event with nil endpoint is a no-op (guarded early).
 	require.NoError(t, s.Extract(ctx, fwkdl.EndpointEvent{}))

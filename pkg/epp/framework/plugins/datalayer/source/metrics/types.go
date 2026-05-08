@@ -17,13 +17,7 @@ limitations under the License.
 package metrics
 
 import (
-	"reflect"
-
 	dto "github.com/prometheus/client_model/go"
 )
 
 type PrometheusMetricMap = map[string]*dto.MetricFamily
-
-var (
-	PrometheusMetricType = reflect.TypeFor[PrometheusMetricMap]()
-)

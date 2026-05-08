@@ -1,3 +1,19 @@
+/*
+Copyright 2026 The llm-d Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package datalayer
 
 import (
@@ -9,20 +25,53 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
+// sourceVariant identifies one of the three DataSource integration kinds the
+// datalayer dispatches over. Each variant has its own driver lifecycle,
+// extractor signature, and manager instance:
+//
+//   - variantPolling: ticker-driven, per-endpoint scrapes (e.g. /metrics, /v1/models).
+//   - variantNotification: K8s informer-driven watches, with GVK uniqueness
+//     enforced across notification sources.
+//   - variantEndpoint: per-endpoint lifecycle events (add / update / delete)
+//     dispatched without polling.
+//
+// A new integration kind means a new constant here, a new manager field on
+// Runtime, and a new entry in Runtime.buildVariantLookups.
+type sourceVariant string
+
+const (
+	variantPolling      sourceVariant = "polling"
+	variantNotification sourceVariant = "notification"
+	variantEndpoint     sourceVariant = "endpoint"
+)
+
 // sourceManager owns a variant's typed source + extractor maps under one RWMutex.
 type sourceManager[S fwkdl.DataSource, E fwkplugin.Plugin] struct {
-	name       string
+	variant    sourceVariant
 	mu         sync.RWMutex
 	sources    map[string]S
 	extractors map[string][]E
 }
 
-func newSourceManager[S fwkdl.DataSource, E fwkplugin.Plugin](name string) *sourceManager[S, E] {
+func newSourceManager[S fwkdl.DataSource, E fwkplugin.Plugin](variant sourceVariant) *sourceManager[S, E] {
 	return &sourceManager[S, E]{
-		name:       name,
+		variant:    variant,
 		sources:    make(map[string]S),
 		extractors: make(map[string][]E),
 	}
+}
+
+type (
+	pollingManager  = sourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]
+	endpointManager = sourceManager[fwkdl.EndpointSource, fwkdl.EndpointExtractor]
+)
+
+func newPollingManager() *pollingManager {
+	return newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor](variantPolling)
+}
+
+func newEndpointManager() *endpointManager {
+	return newSourceManager[fwkdl.EndpointSource, fwkdl.EndpointExtractor](variantEndpoint)
 }
 
 // Register installs src and exts under src's name. Errors on duplicate name.
@@ -31,7 +80,7 @@ func (m *sourceManager[S, E]) Register(src S, exts []E) error {
 	defer m.mu.Unlock()
 	srcName := src.TypedName().Name
 	if _, exists := m.sources[srcName]; exists {
-		return fmt.Errorf("duplicate %s source name %q", m.name, srcName)
+		return fmt.Errorf("duplicate %s source name %q", m.variant, srcName)
 	}
 	m.sources[srcName] = src
 	if len(exts) > 0 {
@@ -138,7 +187,7 @@ type notificationManager struct {
 
 func newNotificationManager() *notificationManager {
 	return &notificationManager{
-		sourceManager: newSourceManager[fwkdl.NotificationSource, fwkdl.NotificationExtractor]("notification"),
+		sourceManager: newSourceManager[fwkdl.NotificationSource, fwkdl.NotificationExtractor](variantNotification),
 		gvkToName:     make(map[string]string),
 	}
 }

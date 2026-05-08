@@ -35,7 +35,7 @@ type modelsDatasourceParams struct {
 // Use this function directly in tests to bypass JSON parameter marshaling.
 func NewHTTPModelsDataSource(scheme, path, name string) (*http.HTTPDataSource, error) {
 	return http.NewHTTPDataSource(scheme, path, defaultModelsInsecureSkipVerify,
-		ModelsDataSourceType, name, parseModels, extmodels.ModelsResponseType)
+		ModelsDataSourceType, name, parseModels)
 }
 
 // ModelDataSourceFactory is a factory function used to instantiate data layer's
@@ -52,7 +52,7 @@ func ModelDataSourceFactory(name string, parameters json.RawMessage, _ plugin.Ha
 	}
 
 	ds, err := http.NewHTTPDataSource(cfg.Scheme, cfg.Path, cfg.InsecureSkipVerify, ModelsDataSourceType,
-		name, parseModels, extmodels.ModelsResponseType)
+		name, parseModels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP data source: %w", err)
 	}

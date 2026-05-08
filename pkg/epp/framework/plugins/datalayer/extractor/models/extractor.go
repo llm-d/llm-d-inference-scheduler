@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
@@ -57,11 +56,6 @@ type ModelResponse struct {
 	Object string      `json:"object"`
 	Data   []ModelData `json:"data"`
 }
-
-// ModelsResponseType is the type of models response
-var (
-	ModelsResponseType = reflect.TypeOf(ModelResponse{})
-)
 
 // ModelExtractor implements the models extraction.
 type ModelExtractor struct {

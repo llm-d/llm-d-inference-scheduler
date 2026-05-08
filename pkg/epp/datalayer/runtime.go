@@ -32,14 +32,25 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
+// variantLookup pairs a sourceVariant with its FindByType adapter; r.variants
+// (built in NewRuntime) is the single source of truth for variant iteration.
+type variantLookup struct {
+	variant sourceVariant
+	find    func(sourceType string, gvkFilter *schema.GroupVersionKind) (string, fwkdl.DataSource, bool)
+}
+
 // Runtime routes per-variant state to the matching manager and owns
 // per-endpoint Collectors and pending dependency resolution.
 type Runtime struct {
 	pollingInterval time.Duration
 
-	polling      *sourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]
+	polling      *pollingManager
 	notification *notificationManager
-	endpoint     *sourceManager[fwkdl.EndpointSource, fwkdl.EndpointExtractor]
+	endpoint     *endpointManager
+
+	// variants enumerates every (sourceVariant, FindByType-adapter) pair.
+	// Registered in NewRuntime; consumed by findSourceByType.
+	variants []variantLookup
 
 	pendingMu            sync.Mutex
 	pendingRegistrations []fwkdl.PendingRegistration
@@ -58,12 +69,38 @@ func NewRuntime(pollingInterval time.Duration) *Runtime {
 	if pollingInterval > 0 {
 		interval = pollingInterval
 	}
-	return &Runtime{
+	r := &Runtime{
 		pollingInterval: interval,
-		polling:         newSourceManager[fwkdl.PollingDataSource, fwkdl.PollingExtractor]("polling"),
+		polling:         newPollingManager(),
 		notification:    newNotificationManager(),
-		endpoint:        newSourceManager[fwkdl.EndpointSource, fwkdl.EndpointExtractor]("endpoint"),
+		endpoint:        newEndpointManager(),
 		logger:          logr.Discard(),
+	}
+	r.variants = r.buildVariantLookups()
+	return r
+}
+
+// buildVariantLookups registers every variant's FindByType adapter — adding a
+// new variant means adding one row here.
+func (r *Runtime) buildVariantLookups() []variantLookup {
+	return []variantLookup{
+		{variantPolling, func(t string, _ *schema.GroupVersionKind) (string, fwkdl.DataSource, bool) {
+			n, s, ok := r.polling.FindByType(t, nil)
+			return n, s, ok
+		}},
+		{variantNotification, func(t string, gvkFilter *schema.GroupVersionKind) (string, fwkdl.DataSource, bool) {
+			var nfilter func(fwkdl.NotificationSource) bool
+			if gvkFilter != nil {
+				want := gvkFilter.String()
+				nfilter = func(s fwkdl.NotificationSource) bool { return s.GVK().String() == want }
+			}
+			n, s, ok := r.notification.FindByType(t, nfilter)
+			return n, s, ok
+		}},
+		{variantEndpoint, func(t string, _ *schema.GroupVersionKind) (string, fwkdl.DataSource, bool) {
+			n, s, ok := r.endpoint.FindByType(t, nil)
+			return n, s, ok
+		}},
 	}
 }
 
@@ -212,7 +249,10 @@ func (r *Runtime) resolvePending(pending fwkdl.PendingRegistration, disallowedTy
 		gvk := ns.GVK()
 		gvkFilter = &gvk
 	}
-	srcName, matchedSrc := r.findSourceByType(pending.SourceType, gvkFilter)
+	srcName, matchedSrc, err := r.findSourceByType(pending.SourceType, gvkFilter)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", pending.Extractor.TypedName(), err)
+	}
 
 	if matchedSrc == nil {
 		if pending.DefaultSource == nil {
@@ -235,25 +275,26 @@ func (r *Runtime) resolvePending(pending fwkdl.PendingRegistration, disallowedTy
 	return r.appendPendingExtractor(srcName, matchedSrc, pending.Extractor, disallowedType)
 }
 
-// findSourceByType walks all managers; gvkFilter narrows notification matches.
-func (r *Runtime) findSourceByType(sourceType string, gvkFilter *schema.GroupVersionKind) (string, fwkdl.DataSource) {
-	if name, src, ok := r.polling.FindByType(sourceType, nil); ok {
-		return name, src
+// findSourceByType walks r.variants; gvkFilter narrows notification matches.
+// A type registered across more than one variant is a configuration error.
+func (r *Runtime) findSourceByType(sourceType string, gvkFilter *schema.GroupVersionKind) (string, fwkdl.DataSource, error) {
+	var (
+		matchedName    string
+		matchedSrc     fwkdl.DataSource
+		matchedVariant sourceVariant
+	)
+	for _, l := range r.variants {
+		name, src, ok := l.find(sourceType, gvkFilter)
+		if !ok {
+			continue
+		}
+		if matchedSrc != nil {
+			return "", nil, fmt.Errorf("source type %q is registered across variants: %s (%s) and %s (%s)",
+				sourceType, matchedVariant, matchedName, l.variant, name)
+		}
+		matchedVariant, matchedName, matchedSrc = l.variant, name, src
 	}
-
-	var nfilter func(fwkdl.NotificationSource) bool
-	if gvkFilter != nil {
-		want := gvkFilter.String()
-		nfilter = func(s fwkdl.NotificationSource) bool { return s.GVK().String() == want }
-	}
-	if name, src, ok := r.notification.FindByType(sourceType, nfilter); ok {
-		return name, src
-	}
-
-	if name, src, ok := r.endpoint.FindByType(sourceType, nil); ok {
-		return name, src
-	}
-	return "", nil
+	return matchedName, matchedSrc, nil
 }
 
 // Start wires Kubernetes notifications into the manager.
@@ -269,14 +310,13 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 }
 
 // Stop halts all per-endpoint collectors.
-func (r *Runtime) Stop() error {
+func (r *Runtime) Stop() {
 	r.collectors.Range(func(_, val any) bool {
 		if c, ok := val.(*Collector); ok {
 			c.Stop()
 		}
 		return true
 	})
-	return nil
 }
 
 // NewEndpoint sets up data polling on the provided endpoint.

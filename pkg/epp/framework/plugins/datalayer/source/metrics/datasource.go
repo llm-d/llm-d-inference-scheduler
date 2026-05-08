@@ -55,7 +55,7 @@ type metricsDatasourceParams struct {
 // Use this function directly in tests to bypass JSON parameter marshaling.
 func NewHTTPMetricsDataSource(scheme, path, name string) (*http.HTTPDataSource, error) {
 	return http.NewHTTPDataSource(scheme, path, defaultMetricsInsecureSkipVerify,
-		MetricsDataSourceType, name, parseMetrics, PrometheusMetricType)
+		MetricsDataSourceType, name, parseMetrics)
 }
 
 // MetricsDataSourceFactory is a factory function used to instantiate data layer's
@@ -73,7 +73,7 @@ func MetricsDataSourceFactory(name string, parameters json.RawMessage, handle fw
 	}
 
 	return http.NewHTTPDataSource(cfg.Scheme, cfg.Path, cfg.InsecureSkipVerify, MetricsDataSourceType,
-		name, parseMetrics, PrometheusMetricType)
+		name, parseMetrics)
 }
 
 // These flags are registered in options.go (server package) and marked as deprecated there.
