@@ -88,7 +88,7 @@ func TestEvictionRegistry_Concurrency(t *testing.T) {
 				reqID := fmt.Sprintf("req-%d-%d", id, i)
 				ch := make(chan struct{})
 
-				switch i % 3 {
+				switch i % 5 {
 				case 0:
 					r.Register(reqID, ch)
 				case 1:
@@ -97,6 +97,12 @@ func TestEvictionRegistry_Concurrency(t *testing.T) {
 					r.Deregister(reqID)
 				case 2:
 					r.Get(reqID)
+				case 3:
+					r.Register(reqID, ch)
+					r.SetReason(reqID, errcommon.RemovalReasonEvicted)
+					r.GetReason(reqID)
+				case 4:
+					r.GetReason(reqID)
 				}
 			}
 		}(g)
