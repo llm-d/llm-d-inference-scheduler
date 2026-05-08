@@ -72,7 +72,7 @@ func TestInferencePoolFactory_DefaultPoolGroup(t *testing.T) {
 	p, err := InferencePoolFactory("", json.RawMessage(`{"poolName":"p"}`), nil)
 	require.NoError(t, err)
 	ip := p.(*InferencePoolDiscoveryPlugin)
-	assert.Equal(t, "inference.networking.k8s.io", ip.PoolGroup)
+	assert.Equal(t, "inference.networking.k8s.io", ip.poolGroup)
 }
 
 func TestInferencePoolFactory_AllParams(t *testing.T) {
@@ -80,10 +80,10 @@ func TestInferencePoolFactory_AllParams(t *testing.T) {
 	p, err := InferencePoolFactory("", json.RawMessage(params), nil)
 	require.NoError(t, err)
 	ip := p.(*InferencePoolDiscoveryPlugin)
-	assert.Equal(t, "my-pool", ip.PoolName)
-	assert.Equal(t, "prod", ip.PoolNamespace)
-	assert.Equal(t, "custom.io", ip.PoolGroup)
-	assert.True(t, ip.LeaderElect)
+	assert.Equal(t, "my-pool", ip.GetPoolName())
+	assert.Equal(t, "prod", ip.poolNamespace)
+	assert.Equal(t, "custom.io", ip.poolGroup)
+	assert.True(t, ip.leaderElect)
 }
 
 func TestInferencePoolFactory_InvalidJSON(t *testing.T) {
@@ -104,10 +104,10 @@ func TestInferencePoolFactory_ImplementsInterfaces(t *testing.T) {
 
 func TestNewInferencePoolDiscoveryPlugin(t *testing.T) {
 	p := NewInferencePoolDiscoveryPlugin("pool", "ns", "group.io", true)
-	assert.Equal(t, "pool", p.PoolName)
-	assert.Equal(t, "ns", p.PoolNamespace)
-	assert.Equal(t, "group.io", p.PoolGroup)
-	assert.True(t, p.LeaderElect)
+	assert.Equal(t, "pool", p.GetPoolName())
+	assert.Equal(t, "ns", p.poolNamespace)
+	assert.Equal(t, "group.io", p.poolGroup)
+	assert.True(t, p.leaderElect)
 	assert.Equal(t, fwkplugin.TypedName{Type: InferencePoolPluginType, Name: InferencePoolPluginType}, p.TypedName())
 }
 

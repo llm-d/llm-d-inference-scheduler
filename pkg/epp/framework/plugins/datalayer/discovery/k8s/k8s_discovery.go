@@ -123,23 +123,30 @@ type inferencePoolParams struct {
 type InferencePoolDiscoveryPlugin struct {
 	baseK8sDiscovery
 	typedName     fwkplugin.TypedName
-	PoolName      string
-	PoolNamespace string
-	PoolGroup     string
-	LeaderElect   bool
+	poolName      string
+	poolNamespace string
+	poolGroup     string
+	leaderElect   bool
 }
 
 var _ fwkdl.EndpointDiscovery = (*InferencePoolDiscoveryPlugin)(nil)
 var _ DatastoreProvider = (*InferencePoolDiscoveryPlugin)(nil)
 var _ DatalayerBinder = (*InferencePoolDiscoveryPlugin)(nil)
 
+// GetPoolName returns the InferencePool name this plugin is configured to watch.
+func (k *InferencePoolDiscoveryPlugin) GetPoolName() string { return k.poolName }
+
+// SetPoolName sets the InferencePool name, used by the runner to inject --pool-name
+// when the factory parameter was omitted.
+func (k *InferencePoolDiscoveryPlugin) SetPoolName(name string) { k.poolName = name }
+
 func NewInferencePoolDiscoveryPlugin(poolName, poolNamespace, poolGroup string, leaderElect bool) *InferencePoolDiscoveryPlugin {
 	return &InferencePoolDiscoveryPlugin{
 		typedName:     fwkplugin.TypedName{Type: InferencePoolPluginType, Name: InferencePoolPluginType},
-		PoolName:      poolName,
-		PoolNamespace: poolNamespace,
-		PoolGroup:     poolGroup,
-		LeaderElect:   leaderElect,
+		poolName:      poolName,
+		poolNamespace: poolNamespace,
+		poolGroup:     poolGroup,
+		leaderElect:   leaderElect,
 	}
 }
 
@@ -155,10 +162,10 @@ func InferencePoolFactory(name string, parameters json.RawMessage, _ fwkplugin.H
 	}
 	return &InferencePoolDiscoveryPlugin{
 		typedName:     fwkplugin.TypedName{Type: InferencePoolPluginType, Name: name},
-		PoolName:      p.PoolName,
-		PoolNamespace: p.PoolNamespace,
-		PoolGroup:     p.PoolGroup,
-		LeaderElect:   p.LeaderElection,
+		poolName:      p.PoolName,
+		poolNamespace: p.PoolNamespace,
+		poolGroup:     p.PoolGroup,
+		leaderElect:   p.LeaderElection,
 	}, nil
 }
 
@@ -168,8 +175,8 @@ func (k *InferencePoolDiscoveryPlugin) Start(ctx context.Context, notifier fwkdl
 	if k.ds == nil {
 		return errors.New("inference-pool-discovery: datastore not set; call SetDatastore before Start")
 	}
-	if k.PoolName == "" {
-		return errors.New("inference-pool-discovery: poolName is required")
+	if k.poolName == "" {
+		return errors.New("inference-pool-discovery: poolName is required; set poolName in plugin parameters or provide --pool-name on the command line")
 	}
 
 	cfg, err := ctrl.GetConfig()
@@ -177,13 +184,13 @@ func (k *InferencePoolDiscoveryPlugin) Start(ctx context.Context, notifier fwkdl
 		return fmt.Errorf("inference-pool-discovery: failed to get K8s REST config: %w", err)
 	}
 
-	namespace := k.PoolNamespace
+	namespace := k.poolNamespace
 	if namespace == "" {
 		namespace = "default"
 	}
 	gknn := common.GKNN{
-		NamespacedName: types.NamespacedName{Name: k.PoolName, Namespace: namespace},
-		GroupKind:      schema.GroupKind{Group: k.PoolGroup, Kind: "InferencePool"},
+		NamespacedName: types.NamespacedName{Name: k.poolName, Namespace: namespace},
+		GroupKind:      schema.GroupKind{Group: k.poolGroup, Kind: "InferencePool"},
 	}
 
 	dc, err := k8sdiscovery.NewDiscoveryClientForConfig(cfg)
@@ -197,7 +204,7 @@ func (k *InferencePoolDiscoveryPlugin) Start(ctx context.Context, notifier fwkdl
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.Pod{}: {Namespaces: map[string]cache.Config{namespace: {}}},
 			&v1.InferencePool{}: {Namespaces: map[string]cache.Config{namespace: {
-				FieldSelector: fields.SelectorFromSet(fields.Set{"metadata.name": k.PoolName}),
+				FieldSelector: fields.SelectorFromSet(fields.Set{"metadata.name": k.poolName}),
 			}}},
 		},
 	}
@@ -213,10 +220,10 @@ func (k *InferencePoolDiscoveryPlugin) Start(ctx context.Context, notifier fwkdl
 		Cache:   cacheOpts,
 		Metrics: metricsserver.Options{BindAddress: "0"},
 	}
-	if k.LeaderElect {
+	if k.leaderElect {
 		mgrOpts.LeaderElection = true
 		mgrOpts.LeaderElectionResourceLock = "leases"
-		mgrOpts.LeaderElectionID = fmt.Sprintf("epp-%s-%s.inference-pool-discovery", namespace, k.PoolName)
+		mgrOpts.LeaderElectionID = fmt.Sprintf("epp-%s-%s.inference-pool-discovery", namespace, k.poolName)
 		mgrOpts.LeaderElectionNamespace = namespace
 		mgrOpts.LeaderElectionReleaseOnCancel = true
 	}
