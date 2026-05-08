@@ -43,6 +43,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
+	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pod"
 	poolutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
 	testutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing"
 )
@@ -796,7 +797,7 @@ func TestActivePortFiltering(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				activePortsAnnotation: "8000,8002",
+				podutil.ActivePortsAnnotation: "8000,8002",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -831,7 +832,7 @@ func TestActivePortFiltering(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				activePortsAnnotation: "",
+				podutil.ActivePortsAnnotation: "",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -963,7 +964,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				activePortsAnnotation: "8000,8001,8002",
+				podutil.ActivePortsAnnotation: "8000,8001,8002",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -982,7 +983,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				activePortsAnnotation: "8000",
+				podutil.ActivePortsAnnotation: "8000",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -1001,7 +1002,7 @@ func TestActivePortEndpointRemoval(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{"app": "vllm"},
 			Annotations: map[string]string{
-				activePortsAnnotation: "",
+				podutil.ActivePortsAnnotation: "",
 			},
 		},
 		Status: corev1.PodStatus{
@@ -1279,7 +1280,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: ""},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: ""},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1291,7 +1292,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: "8000"},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: "8000"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1303,7 +1304,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: "8000,8001,8002"},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: "8000,8001,8002"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1315,7 +1316,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: "8000, 8001 , 8002"},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: "8000, 8001 , 8002"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1327,7 +1328,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: "8000,invalid,8002"},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: "8000,invalid,8002"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1339,7 +1340,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: "8000,-1,8002"},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: "8000,-1,8002"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1351,7 +1352,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: "8000,8001,8000"},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: "8000,8001,8000"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1363,7 +1364,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{activePortsAnnotation: "8000,9000"},
+					Annotations: map[string]string{podutil.ActivePortsAnnotation: "8000,9000"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1375,7 +1376,7 @@ func TestExtractActivePorts(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "test-pod",
 					Namespace:   "default",
-					Annotations: map[string]string{legacyGAIEActivePortsAnnotation: "8000,8001"},
+					Annotations: map[string]string{podutil.LegacyGAIEActivePortsAnnotation: "8000,8001"},
 				},
 			},
 			validPorts:    []int{8000, 8001, 8002},
@@ -1388,8 +1389,8 @@ func TestExtractActivePorts(t *testing.T) {
 					Name:      "test-pod",
 					Namespace: "default",
 					Annotations: map[string]string{
-						activePortsAnnotation:           "8000",
-						legacyGAIEActivePortsAnnotation: "8001",
+						podutil.ActivePortsAnnotation:           "8000",
+						podutil.LegacyGAIEActivePortsAnnotation: "8001",
 					},
 				},
 			},
@@ -1400,7 +1401,7 @@ func TestExtractActivePorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			activePorts := extractActivePorts(tt.pod, tt.validPorts)
+			activePorts := podutil.ExtractActivePorts(tt.pod, tt.validPorts)
 			if !reflect.DeepEqual(activePorts, tt.expectedPorts) {
 				t.Errorf("ExtractActivePorts() ports = %v, want %v", activePorts, tt.expectedPorts)
 			}

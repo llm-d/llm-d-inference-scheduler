@@ -24,7 +24,6 @@ import (
 	"net"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -46,17 +45,6 @@ var (
 	AllPodsPredicate = func(_ fwkdl.Endpoint) bool { return true }
 )
 
-const (
-	// activePortsAnnotation is used to specify which ports on a pod should be considered
-	// as active for inference traffic. The value should be a comma-separated list of port numbers.
-	// Example: "8000,8001,8002"
-	activePortsAnnotation = "llm-d.ai/active-ports"
-
-	// legacyGAIEActivePortsAnnotation is the legacy GAIE active ports annotation key, kept for backward compatibility.
-	//
-	// Deprecated: use activePortsAnnotation instead; this may be removed in a future release.
-	legacyGAIEActivePortsAnnotation = "inference.networking.k8s.io/active-ports"
-)
 
 // The datastore is a local cache of relevant data for the given InferencePool (currently all pulled from k8s-api)
 type Datastore interface {
@@ -312,7 +300,7 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 		modelServerMetricsPort = int(ds.modelServerMetricsPort)
 	}
 	pods := []*fwkdl.EndpointMetadata{}
-	activePorts := extractActivePorts(pod, pool.TargetPorts)
+	activePorts := podutil.ExtractActivePorts(pod, pool.TargetPorts)
 	for idx, port := range pool.TargetPorts {
 		if !activePorts.Has(port) {
 			continue
@@ -455,30 +443,6 @@ func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) err
 	})
 
 	return nil
-}
-
-// extractActivePorts extracts the active ports from a pod's annotations.
-func extractActivePorts(pod *corev1.Pod, targetPorts []int) sets.Set[int] {
-	allPorts := sets.New(targetPorts...)
-	annotations := pod.GetAnnotations()
-	portsAnnotation, ok := annotations[activePortsAnnotation]
-	if !ok {
-		portsAnnotation, ok = annotations[legacyGAIEActivePortsAnnotation]
-		if !ok {
-			return allPorts
-		}
-	}
-
-	activePorts := sets.New[int]()
-	portStrs := strings.SplitSeq(portsAnnotation, ",")
-	for portStr := range portStrs {
-		var portNum int
-		_, err := fmt.Sscanf(strings.TrimSpace(portStr), "%d", &portNum)
-		if err == nil && portNum > 0 && allPorts.Has(portNum) {
-			activePorts.Insert(portNum)
-		}
-	}
-	return activePorts
 }
 
 // createEndpointNamespacedName creates a namespaced name for an endpoint based on pod and rank index.

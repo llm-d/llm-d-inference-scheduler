@@ -104,8 +104,12 @@ func (e *podDiscoveryExtractor) ExtractNotification(ctx context.Context, event f
 }
 
 func podToEndpointMetadata(pod *corev1.Pod, targetPorts []int) []*fwkdl.EndpointMetadata {
+	activePorts := podutil.ExtractActivePorts(pod, targetPorts)
 	metas := make([]*fwkdl.EndpointMetadata, 0, len(targetPorts))
 	for idx, port := range targetPorts {
+		if !activePorts.Has(port) {
+			continue
+		}
 		metas = append(metas, &fwkdl.EndpointMetadata{
 			NamespacedName: podEndpointID(pod.Name, pod.Namespace, idx),
 			PodName:        pod.Name,
