@@ -31,9 +31,6 @@ plugins:
 - name: precisePrefixCache
   type: precise-prefix-cache-scorer
   parameters:
-    indexerConfig:
-      tokenizersPoolConfig:
-        modelName: "test-model"
     kvEventsConfig:
       zmqEndpoint: "tcp://localhost:5557"
 - name: profileHandler
