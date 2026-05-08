@@ -25,22 +25,33 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// fakeBackendStore records BackendUpsert and BackendDelete calls.
-type fakeBackendStore struct {
-	upserted []*EndpointMetadata
-	deleted  []types.NamespacedName
+type opKind int
+
+const (
+	opUpsert opKind = iota
+	opDelete
+)
+
+type op struct {
+	kind opKind
+	id   types.NamespacedName
 }
 
-func (f *fakeBackendStore) BackendUpsert(_ context.Context, meta *EndpointMetadata) {
-	f.upserted = append(f.upserted, meta)
+// trackingStore records all BackendUpsert and BackendDelete calls in arrival order.
+type trackingStore struct {
+	ops []op
 }
 
-func (f *fakeBackendStore) BackendDelete(id types.NamespacedName) {
-	f.deleted = append(f.deleted, id)
+func (t *trackingStore) BackendUpsert(_ context.Context, meta *EndpointMetadata) {
+	t.ops = append(t.ops, op{opUpsert, meta.NamespacedName})
+}
+
+func (t *trackingStore) BackendDelete(id types.NamespacedName) {
+	t.ops = append(t.ops, op{opDelete, id})
 }
 
 func TestNewDiscoveryNotifier_Upsert(t *testing.T) {
-	store := &fakeBackendStore{}
+	store := &trackingStore{}
 	notifier := NewDiscoveryNotifier(store)
 
 	meta := &EndpointMetadata{
@@ -50,25 +61,25 @@ func TestNewDiscoveryNotifier_Upsert(t *testing.T) {
 	}
 	notifier.Upsert(meta)
 
-	assert.Len(t, store.upserted, 1)
-	assert.Equal(t, meta, store.upserted[0])
-	assert.Empty(t, store.deleted)
+	assert.Len(t, store.ops, 1)
+	assert.Equal(t, opUpsert, store.ops[0].kind)
+	assert.Equal(t, meta.NamespacedName, store.ops[0].id)
 }
 
 func TestNewDiscoveryNotifier_Delete(t *testing.T) {
-	store := &fakeBackendStore{}
+	store := &trackingStore{}
 	notifier := NewDiscoveryNotifier(store)
 
 	id := types.NamespacedName{Name: "ep-0", Namespace: "default"}
 	notifier.Delete(id)
 
-	assert.Len(t, store.deleted, 1)
-	assert.Equal(t, id, store.deleted[0])
-	assert.Empty(t, store.upserted)
+	assert.Len(t, store.ops, 1)
+	assert.Equal(t, opDelete, store.ops[0].kind)
+	assert.Equal(t, id, store.ops[0].id)
 }
 
 func TestNewDiscoveryNotifier_Order(t *testing.T) {
-	store := &fakeBackendStore{}
+	store := &trackingStore{}
 	notifier := NewDiscoveryNotifier(store)
 
 	meta := &EndpointMetadata{NamespacedName: types.NamespacedName{Name: "ep-0", Namespace: "default"}}
@@ -78,6 +89,9 @@ func TestNewDiscoveryNotifier_Order(t *testing.T) {
 	notifier.Delete(id)
 
 	// ordering contract: upsert must arrive before delete
-	assert.Len(t, store.upserted, 1)
-	assert.Len(t, store.deleted, 1)
+	assert.Len(t, store.ops, 2)
+	assert.Equal(t, opUpsert, store.ops[0].kind)
+	assert.Equal(t, opDelete, store.ops[1].kind)
+	assert.Equal(t, id, store.ops[0].id)
+	assert.Equal(t, id, store.ops[1].id)
 }
