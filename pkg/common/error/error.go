@@ -41,7 +41,9 @@ const (
 	RemovalReasonQueueContextCancelled RemovalReason = "queue-context-cancelled"
 
 	// Evicted — dispatched to a model server and then killed.
-	RemovalReasonEvicted RemovalReason = "evicted"
+	RemovalReasonEvicted              RemovalReason = "evicted"
+	RemovalReasonEvictedQueuePressure RemovalReason = "evicted-queue-pressure"
+	RemovalReasonEvictedPriority      RemovalReason = "evicted-priority"
 )
 
 // Error is an error struct for errors returned by the epp/bbr server.
