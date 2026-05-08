@@ -101,7 +101,7 @@ func TestDataProducerPluginsWithTimeout_CancelsPluginContext(t *testing.T) {
 		nil,
 	)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "prepare data plugin timed out")
+	assert.Contains(t, err.Error(), "DataProducer execution timed out")
 
 	// Wait for the plugin goroutine to observe cancellation before asserting
 	// on the recorded context error.
@@ -143,7 +143,7 @@ func TestDataProducerPluginsWithTimeout(t *testing.T) {
 			ctxFn: func() (context.Context, context.CancelFunc) {
 				return context.Background(), func() {}
 			},
-			expectErrStr: "prepare data plugin p1/mock failed: plugin failed",
+			expectErrStr: "DataProducer \"p1/mock\" failed: plugin failed",
 		},
 		{
 			name:    "plugins time out",
@@ -154,7 +154,7 @@ func TestDataProducerPluginsWithTimeout(t *testing.T) {
 			ctxFn: func() (context.Context, context.CancelFunc) {
 				return context.Background(), func() {}
 			},
-			expectErrStr: "prepare data plugin timed out",
+			expectErrStr: "DataProducer execution timed out",
 		},
 		{
 			name:    "context cancelled",

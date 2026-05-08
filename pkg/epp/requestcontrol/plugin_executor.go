@@ -19,6 +19,7 @@ package requestcontrol
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
@@ -31,7 +32,7 @@ import (
 func executePluginsAsDAG(ctx context.Context, plugins []fwkrc.DataProducer, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	for _, plugin := range plugins {
 		if err := plugin.Produce(ctx, request, endpoints); err != nil {
-			return errors.New("prepare data plugin " + plugin.TypedName().String() + " failed: " + err.Error())
+			return fmt.Errorf("DataProducer %q failed: %w", plugin.TypedName().String(), err)
 		}
 	}
 	return nil
@@ -55,7 +56,7 @@ func dataProducerPluginsWithTimeout(ctx context.Context, timeout time.Duration, 
 		return err
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return errors.New("prepare data plugin timed out")
+			return fmt.Errorf("DataProducer execution timed out: %w", ctx.Err())
 		}
 		return ctx.Err()
 	}

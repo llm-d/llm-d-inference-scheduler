@@ -100,7 +100,7 @@ func TestPreRequest(t *testing.T) {
 		},
 	}
 
-	// 1. Prepare data (this saves state)
+	// 1. Produce data (this saves state)
 	_ = p.Produce(context.Background(), req1, []fwksched.Endpoint{endpoint1})
 
 	// 2. Simulate scheduling result

@@ -6,7 +6,7 @@ Trains XGBoost models via a sidecar and generates per-endpoint TTFT/TPOT predict
 
 ## Interfaces
 
-DataProducerPlugin, PreRequest, ResponseHeader, ResponseBody, Producer, Consumer
+DataProducer, PreRequest, ResponseHeader, ResponseBody, ProducerPlugin, ConsumerPlugin
 
 ## Responsibilities
 

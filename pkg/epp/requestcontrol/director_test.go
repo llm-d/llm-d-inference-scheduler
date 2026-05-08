@@ -456,7 +456,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			targetModelName: model,
 		},
 		{
-			name: "successful chat completions request with prepare data plugins",
+			name: "successful chat completions request with DataProducer plugins",
 			reqBodyMap: map[string]any{
 				"model": model,
 				"messages": []any{
