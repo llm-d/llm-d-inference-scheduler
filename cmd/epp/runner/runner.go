@@ -341,7 +341,10 @@ func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opt
 	// Backward compat: pre-discovery-plugin deployments that pass --endpoint-selector
 	// on the CLI. These configs predate the EndpointDiscovery abstraction.
 	if opts.EndpointSelector != "" {
-		p := k8sdiscovery.NewStaticSelectorDiscoveryPlugin(opts.EndpointSelector, namespace, opts.EndpointTargetPorts)
+		p, err := k8sdiscovery.NewStaticSelectorDiscoveryPlugin(opts.EndpointSelector, namespace, opts.EndpointTargetPorts)
+		if err != nil {
+			return nil, err
+		}
 		p.SetDatastore(ds)
 		p.BindDatalayer(r.dlRuntime)
 		return p, nil

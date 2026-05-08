@@ -270,7 +270,7 @@ type staticSelectorParams struct {
 type StaticSelectorDiscoveryPlugin struct {
 	baseK8sDiscovery
 	typedName   fwkplugin.TypedName
-	selector    string
+	selectorMap labels.Set
 	targetPorts []int
 	namespace   string
 }
@@ -279,13 +279,17 @@ var _ fwkdl.EndpointDiscovery = (*StaticSelectorDiscoveryPlugin)(nil)
 var _ DatastoreProvider = (*StaticSelectorDiscoveryPlugin)(nil)
 var _ DatalayerBinder = (*StaticSelectorDiscoveryPlugin)(nil)
 
-func NewStaticSelectorDiscoveryPlugin(selector, namespace string, targetPorts []int) *StaticSelectorDiscoveryPlugin {
+func NewStaticSelectorDiscoveryPlugin(selector, namespace string, targetPorts []int) (*StaticSelectorDiscoveryPlugin, error) {
+	selectorMap, err := labels.ConvertSelectorToLabelsMap(selector)
+	if err != nil {
+		return nil, fmt.Errorf("static-selector-discovery: invalid endpointSelector: %w", err)
+	}
 	return &StaticSelectorDiscoveryPlugin{
 		typedName:   fwkplugin.TypedName{Type: StaticSelectorPluginType, Name: StaticSelectorPluginType},
-		selector:    selector,
+		selectorMap: selectorMap,
 		targetPorts: targetPorts,
 		namespace:   namespace,
-	}
+	}, nil
 }
 
 func StaticSelectorFactory(name string, parameters json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
@@ -301,12 +305,16 @@ func StaticSelectorFactory(name string, parameters json.RawMessage, _ fwkplugin.
 	if len(p.EndpointTargetPorts) == 0 {
 		return nil, fmt.Errorf("%s: 'endpointTargetPorts' parameter is required", StaticSelectorPluginType)
 	}
+	selectorMap, err := labels.ConvertSelectorToLabelsMap(p.EndpointSelector)
+	if err != nil {
+		return nil, fmt.Errorf("%s: invalid endpointSelector: %w", StaticSelectorPluginType, err)
+	}
 	if name == "" {
 		name = StaticSelectorPluginType
 	}
 	return &StaticSelectorDiscoveryPlugin{
 		typedName:   fwkplugin.TypedName{Type: StaticSelectorPluginType, Name: name},
-		selector:    p.EndpointSelector,
+		selectorMap: selectorMap,
 		targetPorts: p.EndpointTargetPorts,
 		namespace:   p.Namespace,
 	}, nil
@@ -324,13 +332,8 @@ func (s *StaticSelectorDiscoveryPlugin) Start(ctx context.Context, notifier fwkd
 		return fmt.Errorf("static-selector-discovery: failed to get K8s REST config: %w", err)
 	}
 
-	selectorMap, err := labels.ConvertSelectorToLabelsMap(s.selector)
-	if err != nil {
-		return fmt.Errorf("static-selector-discovery: invalid endpointSelector: %w", err)
-	}
-
 	pool := datalayer.NewEndpointPool(s.namespace, StaticSelectorPluginType)
-	pool.Selector = selectorMap
+	pool.Selector = s.selectorMap
 	pool.TargetPorts = s.targetPorts
 	s.ds.WithEndpointPool(pool)
 

@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	discoveryclient "k8s.io/client-go/discovery"
 	fakediscovery "k8s.io/client-go/discovery/fake"
@@ -129,7 +130,7 @@ func TestStaticSelectorFactory_ValidParams(t *testing.T) {
 	p, err := StaticSelectorFactory("", json.RawMessage(params), nil)
 	require.NoError(t, err)
 	ss := p.(*StaticSelectorDiscoveryPlugin)
-	assert.Equal(t, "app=vllm", ss.selector)
+	assert.Equal(t, labels.Set{"app": "vllm"}, ss.selectorMap)
 	assert.Equal(t, []int{8080, 8081}, ss.targetPorts)
 	assert.Equal(t, "prod", ss.namespace)
 }
@@ -160,11 +161,17 @@ func TestStaticSelectorFactory_ImplementsInterfaces(t *testing.T) {
 // ---- NewStaticSelectorDiscoveryPlugin tests -------------------------------
 
 func TestNewStaticSelectorDiscoveryPlugin(t *testing.T) {
-	p := NewStaticSelectorDiscoveryPlugin("app=vllm", "ns", []int{8080, 8081})
-	assert.Equal(t, "app=vllm", p.selector)
+	p, err := NewStaticSelectorDiscoveryPlugin("app=vllm", "ns", []int{8080, 8081})
+	require.NoError(t, err)
+	assert.Equal(t, labels.Set{"app": "vllm"}, p.selectorMap)
 	assert.Equal(t, "ns", p.namespace)
 	assert.Equal(t, []int{8080, 8081}, p.targetPorts)
 	assert.Equal(t, fwkplugin.TypedName{Type: StaticSelectorPluginType, Name: StaticSelectorPluginType}, p.TypedName())
+}
+
+func TestNewStaticSelectorDiscoveryPlugin_InvalidSelector(t *testing.T) {
+	_, err := NewStaticSelectorDiscoveryPlugin("!!!invalid", "ns", []int{8080})
+	assert.Error(t, err)
 }
 
 // ---- gvkInstalled tests ---------------------------------------------------
