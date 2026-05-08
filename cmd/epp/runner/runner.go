@@ -386,7 +386,9 @@ func (r *Runner) addCommonRunnables(g RunnableGroup, opts *runserver.Options, ds
 		return serverRunner.AsRunnable(logger).Start(ctx)
 	})
 	g.Add("health", buildHealthServer(ds, opts.GRPCHealthPort, r.parser))
-	g.Add("metrics", func(ctx context.Context) error { return serveMetrics(ctx, opts.MetricsPort, opts.EnablePprof) })
+	g.Add("metrics", func(ctx context.Context) error {
+		return serveMetrics(ctx, opts.MetricsPort, opts.EnablePprof, opts.MetricsEndpointAuth)
+	})
 }
 
 func buildHealthServer(ds datastore.Datastore, port int, supporter appProtocolSupporter) func(ctx context.Context) error {
@@ -406,7 +408,7 @@ func buildHealthServer(ds datastore.Datastore, port int, supporter appProtocolSu
 	}
 }
 
-func serveMetrics(ctx context.Context, port int, enablePprof bool) error {
+func serveMetrics(ctx context.Context, port int, enablePprof bool, metricsEndpointAuth bool) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	if enablePprof {
@@ -416,10 +418,30 @@ func serveMetrics(ctx context.Context, port int, enablePprof bool) error {
 			mux.Handle("/debug/pprof/"+p, nhpprof.Handler(p))
 		}
 	}
-	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux}
+
+	var handler http.Handler = mux
+	if metricsEndpointAuth {
+		cfg, err := ctrl.GetConfig()
+		if err != nil {
+			setupLog.Info("MetricsEndpointAuth requested but no K8s config available; serving metrics without auth", "error", err)
+		} else {
+			authFilter, err := filters.WithAuthenticationAndAuthorization(cfg, http.DefaultClient)
+			if err != nil {
+				return fmt.Errorf("metrics auth filter: %w", err)
+			}
+			handler, err = authFilter(ctrl.Log.WithName("metrics"), mux)
+			if err != nil {
+				return fmt.Errorf("metrics auth filter apply: %w", err)
+			}
+		}
+	}
+
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: handler}
 	go func() {
 		<-ctx.Done()
-		_ = srv.Shutdown(context.Background())
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
 	}()
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("metrics server error: %w", err)
