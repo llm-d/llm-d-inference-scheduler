@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -140,10 +141,20 @@ func (f *FileDiscovery) Start(ctx context.Context, notifier fwkdl.DiscoveryNotif
 	}
 }
 
+const maxEndpointsFileSize = 1 << 20 // 1 MiB
+
 func (f *FileDiscovery) load(notifier fwkdl.DiscoveryNotifier) error {
-	data, err := os.ReadFile(f.path)
+	fh, err := os.Open(f.path)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", f.path, err)
+	}
+	defer fh.Close()
+	data, err := io.ReadAll(io.LimitReader(fh, maxEndpointsFileSize+1))
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", f.path, err)
+	}
+	if len(data) > maxEndpointsFileSize {
+		return fmt.Errorf("endpoints file %s exceeds 1 MiB limit", f.path)
 	}
 
 	jsonData, err := yaml.YAMLToJSON(data)
