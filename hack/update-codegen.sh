@@ -18,8 +18,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-#echo "Generating CRDs"
-#go run ./pkg/generator
+echo "Generating CRDs"
+go run ./pkg/generator
 
 SCRIPT_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 CODEGEN_PKG=${1:-bin}
