@@ -17,14 +17,20 @@ limitations under the License.
 package k8s
 
 import (
+	"context"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	podutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pod"
 )
 
 func makePod(name, namespace, ip string, labels map[string]string) *corev1.Pod {
@@ -94,4 +100,135 @@ func TestPodToEndpointMetadata_LabelsPreserved(t *testing.T) {
 
 	require.Len(t, metas, 1)
 	assert.Equal(t, labels, metas[0].Labels)
+}
+
+func TestPodToEndpointMetadata_ActivePortsAnnotation(t *testing.T) {
+	pod := makePod("vllm-0", "default", "10.0.0.1", nil)
+	pod.Annotations = map[string]string{podutil.ActivePortsAnnotation: "8080"}
+	metas := podToEndpointMetadata(pod, []int{8080, 8081})
+
+	require.Len(t, metas, 1, "only active port should produce an endpoint")
+	assert.Equal(t, "8080", metas[0].Port)
+}
+
+// ---- ExtractNotification tests ---------------------------------------------
+
+type fakePool struct {
+	synced      bool
+	labelsMatch bool
+	targetPorts []int
+}
+
+func (f *fakePool) PoolHasSynced() bool                          { return f.synced }
+func (f *fakePool) PoolLabelsMatch(labels map[string]string) bool { return f.labelsMatch }
+func (f *fakePool) PoolTargetPorts() []int                        { return f.targetPorts }
+
+type trackingNotifier struct {
+	upserted []*fwkdl.EndpointMetadata
+	deleted  []types.NamespacedName
+}
+
+func (n *trackingNotifier) Upsert(m *fwkdl.EndpointMetadata)    { n.upserted = append(n.upserted, m) }
+func (n *trackingNotifier) Delete(id types.NamespacedName)       { n.deleted = append(n.deleted, id) }
+
+func podToUnstructured(pod *corev1.Pod) *unstructured.Unstructured {
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pod)
+	if err != nil {
+		panic(err)
+	}
+	u := &unstructured.Unstructured{Object: obj}
+	u.SetName(pod.Name)
+	u.SetNamespace(pod.Namespace)
+	return u
+}
+
+func TestExtractNotification_NotSynced(t *testing.T) {
+	pool := &fakePool{synced: false, targetPorts: []int{8080}}
+	n := &trackingNotifier{}
+	e := newPodDiscoveryExtractor(pool, n)
+
+	err := e.ExtractNotification(context.Background(), fwkdl.NotificationEvent{
+		Type:   fwkdl.EventAddOrUpdate,
+		Object: podToUnstructured(makePod("p", "ns", "1.2.3.4", nil)),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, n.upserted)
+	assert.Empty(t, n.deleted)
+}
+
+func TestExtractNotification_Delete(t *testing.T) {
+	pool := &fakePool{synced: true, targetPorts: []int{8080, 8081}}
+	n := &trackingNotifier{}
+	e := newPodDiscoveryExtractor(pool, n)
+
+	err := e.ExtractNotification(context.Background(), fwkdl.NotificationEvent{
+		Type:   fwkdl.EventDelete,
+		Object: podToUnstructured(makePod("pod-0", "ns", "", nil)),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, n.upserted)
+	assert.Len(t, n.deleted, 2)
+}
+
+func TestExtractNotification_PodNotReady(t *testing.T) {
+	pool := &fakePool{synced: true, labelsMatch: true, targetPorts: []int{8080}}
+	n := &trackingNotifier{}
+	e := newPodDiscoveryExtractor(pool, n)
+
+	pod := makePod("pod-0", "ns", "1.2.3.4", nil)
+	pod.Status.Conditions = nil // not ready
+
+	err := e.ExtractNotification(context.Background(), fwkdl.NotificationEvent{
+		Type:   fwkdl.EventAddOrUpdate,
+		Object: podToUnstructured(pod),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, n.upserted)
+	assert.Len(t, n.deleted, 1)
+}
+
+func TestExtractNotification_LabelsMismatch(t *testing.T) {
+	pool := &fakePool{synced: true, labelsMatch: false, targetPorts: []int{8080}}
+	n := &trackingNotifier{}
+	e := newPodDiscoveryExtractor(pool, n)
+
+	err := e.ExtractNotification(context.Background(), fwkdl.NotificationEvent{
+		Type:   fwkdl.EventAddOrUpdate,
+		Object: podToUnstructured(makePod("pod-0", "ns", "1.2.3.4", nil)),
+	})
+	require.NoError(t, err)
+	assert.Empty(t, n.upserted)
+	assert.Len(t, n.deleted, 1)
+}
+
+func TestExtractNotification_HappyPath(t *testing.T) {
+	pool := &fakePool{synced: true, labelsMatch: true, targetPorts: []int{8080, 8081}}
+	n := &trackingNotifier{}
+	e := newPodDiscoveryExtractor(pool, n)
+
+	err := e.ExtractNotification(context.Background(), fwkdl.NotificationEvent{
+		Type:   fwkdl.EventAddOrUpdate,
+		Object: podToUnstructured(makePod("pod-0", "ns", "1.2.3.4", map[string]string{"app": "vllm"})),
+	})
+	require.NoError(t, err)
+	assert.Len(t, n.upserted, 2)
+	assert.Empty(t, n.deleted)
+	assert.Equal(t, "1.2.3.4", n.upserted[0].Address)
+}
+
+func TestExtractNotification_ActivePortsAnnotation(t *testing.T) {
+	pool := &fakePool{synced: true, labelsMatch: true, targetPorts: []int{8080, 8081}}
+	n := &trackingNotifier{}
+	e := newPodDiscoveryExtractor(pool, n)
+
+	pod := makePod("pod-0", "ns", "1.2.3.4", nil)
+	pod.Annotations = map[string]string{podutil.ActivePortsAnnotation: "8080"}
+
+	err := e.ExtractNotification(context.Background(), fwkdl.NotificationEvent{
+		Type:   fwkdl.EventAddOrUpdate,
+		Object: podToUnstructured(pod),
+	})
+	require.NoError(t, err)
+	assert.Len(t, n.upserted, 1, "only active port should be upserted")
+	assert.Equal(t, "8080", n.upserted[0].Port)
 }
