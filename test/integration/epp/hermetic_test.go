@@ -41,8 +41,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metadata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
@@ -60,7 +60,7 @@ const (
 
 // gaieModulePath is the on-disk path to the gateway-api-inference-extension
 // upstream module in the local mod cache. CRDs and shared testdata fixtures
-// live there because api/v1, apix/v1alpha2 are upstream types and the test
+// live there because api/v1 still comes from the upstream module and the test
 // manifests depend on those CRD shapes.
 var gaieModulePath string
 
