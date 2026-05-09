@@ -45,7 +45,6 @@ var (
 	AllPodsPredicate = func(_ fwkdl.Endpoint) bool { return true }
 )
 
-
 // The datastore is a local cache of relevant data for the given InferencePool (currently all pulled from k8s-api)
 type Datastore interface {
 	// InferencePool operations

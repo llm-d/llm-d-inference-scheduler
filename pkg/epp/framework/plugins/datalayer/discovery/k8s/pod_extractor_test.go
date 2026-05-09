@@ -119,7 +119,7 @@ type fakePool struct {
 	targetPorts []int
 }
 
-func (f *fakePool) PoolHasSynced() bool                          { return f.synced }
+func (f *fakePool) PoolHasSynced() bool                           { return f.synced }
 func (f *fakePool) PoolLabelsMatch(labels map[string]string) bool { return f.labelsMatch }
 func (f *fakePool) PoolTargetPorts() []int                        { return f.targetPorts }
 
@@ -128,8 +128,8 @@ type trackingNotifier struct {
 	deleted  []types.NamespacedName
 }
 
-func (n *trackingNotifier) Upsert(m *fwkdl.EndpointMetadata)    { n.upserted = append(n.upserted, m) }
-func (n *trackingNotifier) Delete(id types.NamespacedName)       { n.deleted = append(n.deleted, id) }
+func (n *trackingNotifier) Upsert(m *fwkdl.EndpointMetadata) { n.upserted = append(n.upserted, m) }
+func (n *trackingNotifier) Delete(id types.NamespacedName)   { n.deleted = append(n.deleted, id) }
 
 func podToUnstructured(pod *corev1.Pod) *unstructured.Unstructured {
 	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pod)
