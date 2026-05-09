@@ -32,8 +32,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
