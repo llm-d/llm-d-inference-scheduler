@@ -183,10 +183,6 @@ func (p *InFlightLoadProducer) Produces() map[string]any {
 	}
 }
 
-func (p *InFlightLoadProducer) Consumes() map[string]any {
-	return nil
-}
-
 // DeleteEndpoint removes an endpoint from the concurrency trackers to prevent memory leaks.
 // This matches the design of the previous saturation detector and is called by the
 // ExtractNotification hook to ensure deterministic cleanup of stateful data.

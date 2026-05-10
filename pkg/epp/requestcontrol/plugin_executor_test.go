@@ -59,10 +59,6 @@ func (m *mockPrepareRequestDataPlugin) Produces() map[string]any {
 	return nil
 }
 
-func (m *mockPrepareRequestDataPlugin) Consumes() map[string]any {
-	return nil
-}
-
 // ctxObservingPlugin records the context it received so tests can verify the
 // timeout wrapper cancels the plugin's context when the deadline fires.
 type ctxObservingPlugin struct {
@@ -87,7 +83,6 @@ func (p *ctxObservingPlugin) PrepareRequestData(ctx context.Context, _ *fwksched
 }
 
 func (p *ctxObservingPlugin) Produces() map[string]any { return nil }
-func (p *ctxObservingPlugin) Consumes() map[string]any { return nil }
 
 // TestPrepareDataPluginsWithTimeout_CancelsPluginContext verifies that the
 // child context passed to plugins is cancelled with DeadlineExceeded when the
