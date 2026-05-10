@@ -67,7 +67,6 @@ type EndpointPickerConfig struct {
 	// Parser specifies the parsing logic used by the EPP to process protocol messages.
 	// If unspecified, default parsing behavior will be applied.
 	Parser *ParserConfig `json:"parser,omitempty"`
-
 }
 
 func (cfg EndpointPickerConfig) String() string {
