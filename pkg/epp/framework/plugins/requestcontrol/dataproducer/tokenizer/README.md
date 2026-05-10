@@ -20,16 +20,15 @@ upstream list shape, sorted by placeholder offset.
 ## Backends
 
 The plugin selects one of two backends based on which configuration block
-is present. `vllmHTTP` is the preferred backend for new deployments.
+is present.
 
 | Backend              | Transport     | Sidecar image                            | Notes                                                                                           |
-| -------------------- | ------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| -------------------- | ------------- | ---------------------------------------- |-------------------------------------------------------------------------------------------------|
 | `vllmHTTP`           | HTTP          | any vLLM image with `vllm launch render` | Uses vLLM's exact preprocessing (template + tokenizer) — no separate sidecar image to maintain. |
-| `udsTokenizerConfig` | gRPC over UDS | custom Python tokenizer service          | Lowest per-request overhead.                                                                    |
+| `udsTokenizerConfig` | gRPC over UDS | custom Python tokenizer service          | Lowest theoretical per-request overhead.                                                        |
 
 Set exactly one block. Setting both is rejected by the factory. An empty
-configuration falls back to `udsTokenizerConfig` with the default socket
-path for backward compatibility.
+configuration falls back to `vllmHTTP` with `http://localhost:8000`.
 
 ## Config
 

@@ -39,6 +39,11 @@ const (
 
 	completionsRenderPath = "/v1/completions/render"
 	chatRenderPath        = "/v1/chat/completions/render"
+
+	// maxErrorBodySnippetBytes truncates non-2xx response bodies before
+	// embedding them in the returned error, so a misconfigured upstream that
+	// returns a large HTML error page can't blow up log size.
+	maxErrorBodySnippetBytes = 1024
 )
 
 // vllmHTTPConfig configures the vLLM /render HTTP backend.
@@ -95,10 +100,10 @@ func parseHTTPDuration(s string, def time.Duration) (time.Duration, error) {
 
 // Render calls /v1/completions/render. Char offsets are not provided by vLLM's
 // render endpoint and the upstream call site discards them, so we return nil.
-func (r *vllmHTTPRenderer) Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
+func (r *vllmHTTPRenderer) Render(ctx context.Context, prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
 	body := completionsRenderRequest{Model: r.modelName, Prompt: prompt}
 	var resp []renderResponse
-	if err := r.postJSON(context.Background(), completionsRenderPath, body, r.timeout, &resp); err != nil {
+	if err := r.postJSON(ctx, completionsRenderPath, body, r.timeout, &resp); err != nil {
 		return nil, nil, err
 	}
 	if len(resp) == 0 {
@@ -110,10 +115,10 @@ func (r *vllmHTTPRenderer) Render(prompt string) ([]uint32, []tokenizerTypes.Off
 // RenderChat calls /v1/chat/completions/render with an OpenAI-shaped request
 // body, then converts the response's wire-format multimodal features into the
 // kvcache map shape expected by the upstream interface.
-func (r *vllmHTTPRenderer) RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+func (r *vllmHTTPRenderer) RenderChat(ctx context.Context, req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
 	body := buildChatRenderRequest(r.modelName, req)
 	var resp renderResponse
-	if err := r.postJSON(context.Background(), chatRenderPath, body, r.chatTimeout(req), &resp); err != nil {
+	if err := r.postJSON(ctx, chatRenderPath, body, r.chatTimeout(req), &resp); err != nil {
 		return nil, nil, err
 	}
 	return resp.TokenIDs, toKVCacheMM(resp.Features), nil
@@ -273,14 +278,11 @@ func (r *vllmHTTPRenderer) postJSON(ctx context.Context, path string, body any, 
 	}
 	defer httpResp.Body.Close()
 
-	respBody, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return fmt.Errorf("vLLM render returned status %d: %s", httpResp.StatusCode, string(respBody))
+		snippet, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxErrorBodySnippetBytes))
+		return fmt.Errorf("vLLM render returned status %d: %s", httpResp.StatusCode, string(snippet))
 	}
-	if err := json.Unmarshal(respBody, out); err != nil {
+	if err := json.NewDecoder(httpResp.Body).Decode(out); err != nil {
 		return fmt.Errorf("unmarshal response: %w", err)
 	}
 	return nil

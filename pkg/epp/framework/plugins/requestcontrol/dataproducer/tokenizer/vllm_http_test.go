@@ -17,6 +17,7 @@ limitations under the License.
 package tokenizer
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -65,7 +66,7 @@ func TestVLLMHTTPRenderer_Render(t *testing.T) {
 	defer srv.Close()
 
 	r := newHTTPRenderer(t, srv)
-	tokenIDs, offsets, err := r.Render("hello")
+	tokenIDs, offsets, err := r.Render(context.Background(), "hello")
 	require.NoError(t, err)
 	assert.Equal(t, []uint32{1, 2, 3}, tokenIDs)
 	assert.Nil(t, offsets)
@@ -102,7 +103,7 @@ func TestVLLMHTTPRenderer_RenderChat_Multimodal(t *testing.T) {
 		}},
 		AddGenerationPrompt: true,
 	}
-	tokenIDs, mm, err := r.RenderChat(req)
+	tokenIDs, mm, err := r.RenderChat(context.Background(), req)
 	require.NoError(t, err)
 	assert.Equal(t, []uint32{1, 2, 3, 4, 5}, tokenIDs)
 	require.NotNil(t, mm)
@@ -132,7 +133,7 @@ func TestVLLMHTTPRenderer_HTTPError(t *testing.T) {
 	defer srv.Close()
 
 	r := newHTTPRenderer(t, srv)
-	_, _, err := r.Render("x")
+	_, _, err := r.Render(context.Background(), "x")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "500")
 }

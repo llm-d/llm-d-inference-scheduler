@@ -39,8 +39,8 @@ import (
 )
 
 type tokenizer interface {
-	Render(prompt string) ([]uint32, []tokenizerTypes.Offset, error)
-	RenderChat(req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error)
+	Render(ctx context.Context, prompt string) ([]uint32, []tokenizerTypes.Offset, error)
+	RenderChat(ctx context.Context, req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error)
 }
 
 const (
@@ -60,10 +60,9 @@ const (
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
 //
-// Exactly one backend block should be set: udsTokenizerConfig (gRPC over Unix
-// domain socket) or vllmHTTP (vLLM HTTP /render). Each backend stands on its
-// own. For backward compatibility, an empty configuration falls back to
-// udsTokenizerConfig with its default socket path.
+// Exactly one backend block should be set: vllmHTTP (vLLM HTTP /render,
+// default) or udsTokenizerConfig (gRPC over Unix domain socket). An empty
+// configuration falls back to vllmHTTP with its default URL.
 type tokenizerPluginConfig struct {
 	// TokenizerConfig configures the gRPC-over-UDS backend.
 	TokenizerConfig tokenization.UdsTokenizerConfig `json:"udsTokenizerConfig,omitempty"`
@@ -112,24 +111,27 @@ func LegacyPluginFactory(name string, rawParameters json.RawMessage, handle plug
 }
 
 // NewPlugin creates a new tokenizer plugin instance and constructs the
-// configured backend (udsTokenizerConfig or vllmHTTP). When no backend block
-// is set, falls back to udsTokenizerConfig with its default socket path for
-// backward compatibility.
+// configured backend. vllmHTTP is the default; udsTokenizerConfig is
+// selected only when explicitly enabled (its socketFile is set).
 func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, error) {
-	var (
-		tk  tokenizer
-		err error
-	)
-	if config.VLLMHTTPConfig != nil {
-		tk, err = newVLLMHTTPRenderer(config.VLLMHTTPConfig, config.ModelName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize vLLM HTTP renderer for '%s' plugin - %w", PluginType, err)
-		}
-	} else {
-		tk, err = tokenization.NewUdsTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
+	var tk tokenizer
+	switch {
+	case config.TokenizerConfig.IsEnabled():
+		uds, err := newUDSTokenizer(ctx, &config.TokenizerConfig, config.ModelName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize UDS tokenizer for '%s' plugin - %w", PluginType, err)
 		}
+		tk = uds
+	default:
+		cfg := config.VLLMHTTPConfig
+		if cfg == nil {
+			cfg = &vllmHTTPConfig{}
+		}
+		renderer, err := newVLLMHTTPRenderer(cfg, config.ModelName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize vLLM HTTP renderer for '%s' plugin - %w", PluginType, err)
+		}
+		tk = renderer
 	}
 
 	return &Plugin{
@@ -207,11 +209,11 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequ
 	switch {
 	case request.Body.Completions != nil:
 		traceLogger.Info("Calling Render for completions", "prompt", request.Body.Completions.Prompt)
-		tokenIDs, _, err = p.tokenizer.Render(request.Body.Completions.Prompt.Raw)
+		tokenIDs, _, err = p.tokenizer.Render(ctx, request.Body.Completions.Prompt.Raw)
 	case request.Body.ChatCompletions != nil:
 		renderReq := ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))
-		tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(renderReq)
+		tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(ctx, renderReq)
 	default:
 		return nil, errors.New("unsupported request body type, skipping tokenization")
 	}

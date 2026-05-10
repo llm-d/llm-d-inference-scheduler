@@ -53,6 +53,7 @@ type kvCacheIndexer interface {
 	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
 	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
 	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
+	ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, modelName string, extraFeatures []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
 }
 
@@ -142,6 +143,7 @@ func PluginFactory(name string, rawParameters json.RawMessage,
 	if parameters.IndexerConfig == nil {
 		return nil, errors.New("indexerConfig is required")
 	}
+	//nolint:staticcheck // SA1019: validate the legacy field when callers explicitly opt into it.
 	if parameters.IndexerConfig.TokenizersPoolConfig != nil && parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
 		return nil, errors.New("modelName is required when indexerConfig.tokenizersPoolConfig is set")
 	}
@@ -689,13 +691,24 @@ func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []
 
 // --- Internal helper methods ---
 
-// computeBlockKeys extracts block keys from an LLM request by tokenizing
-// the prompt and computing KV-block hashes. Returns nil keys when no
-// tokenizers pool is configured.
+// computeBlockKeys extracts block keys from an LLM request. Prefers the
+// tokens written by the token-producer DataProducer plugin; falls back to
+// the deprecated prompt-string path on the indexer when no tokens are
+// attached. Returns nil keys (no error) when neither path can produce them.
 func (s *Scorer) computeBlockKeys(ctx context.Context,
 	request *scheduling.InferenceRequest) ([]kvblock.BlockHash, error) {
 	if request.Body == nil {
 		return nil, nil
+	}
+
+	if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
+		var extraFeatures []*kvblock.BlockExtraFeatures
+		if len(tp.MultiModalFeatures) > 0 {
+			mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
+			extraFeatures = kvblock.ComputeBlockExtraFeatures(
+				mmHashes, mmPlaceholders, s.blockSizeTokens, len(tp.TokenIDs))
+		}
+		return s.kvCacheIndexer.ComputeBlockKeysFromTokens(ctx, tp.TokenIDs, request.TargetModel, extraFeatures)
 	}
 
 	var (
@@ -787,7 +800,7 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
 		if err != nil {
 			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-				return nil, nil
+				return map[string]float64{}, nil
 			}
 			return nil, fmt.Errorf("failed to get endpoint scores for chat/completions: %w", err)
 		}
@@ -803,7 +816,7 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)
 		if err != nil {
 			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-				return nil, nil
+				return map[string]float64{}, nil
 			}
 			return nil, fmt.Errorf("failed to get endpoint scores for completions: %w", err)
 		}
