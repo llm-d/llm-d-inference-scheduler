@@ -147,7 +147,7 @@ func (m *InferenceObjectiveWrapper) PoolGroup(poolGroup string) *InferenceObject
 	return m
 }
 
-func (m *InferenceObjectiveWrapper) Priority(priority int) *InferenceObjectiveWrapper {
+func (m *InferenceObjectiveWrapper) Priority(priority int32) *InferenceObjectiveWrapper {
 	m.Spec.Priority = &priority
 	return m
 }

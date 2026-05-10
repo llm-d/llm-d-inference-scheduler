@@ -70,7 +70,7 @@ type InferenceObjectiveSpec struct {
 	// requests with Priority of 0 (the value used if Priority is unset or no InferenceObjective is specified).
 	// Similarly requests with a Priority of -10 will always be served after requests with Priority of 0.
 	// +optional
-	Priority *int `json:"priority,omitempty"`
+	Priority *int32 `json:"priority,omitempty"`
 
 	// PoolRef is a reference to the inference pool, the pool must exist in the same namespace.
 	//

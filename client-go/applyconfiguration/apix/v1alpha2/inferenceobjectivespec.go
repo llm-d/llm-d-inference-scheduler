@@ -27,7 +27,7 @@ type InferenceObjectiveSpecApplyConfiguration struct {
 	// Example: requests with Priority 10 will always be served before
 	// requests with Priority of 0 (the value used if Priority is unset or no InferenceObjective is specified).
 	// Similarly requests with a Priority of -10 will always be served after requests with Priority of 0.
-	Priority *int `json:"priority,omitempty"`
+	Priority *int32 `json:"priority,omitempty"`
 	// PoolRef is a reference to the inference pool, the pool must exist in the same namespace.
 	PoolRef *PoolObjectReferenceApplyConfiguration `json:"poolRef,omitempty"`
 }
@@ -41,7 +41,7 @@ func InferenceObjectiveSpec() *InferenceObjectiveSpecApplyConfiguration {
 // WithPriority sets the Priority field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Priority field is set to the value of the last call.
-func (b *InferenceObjectiveSpecApplyConfiguration) WithPriority(value int) *InferenceObjectiveSpecApplyConfiguration {
+func (b *InferenceObjectiveSpecApplyConfiguration) WithPriority(value int32) *InferenceObjectiveSpecApplyConfiguration {
 	b.Priority = &value
 	return b
 }
