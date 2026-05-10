@@ -13,6 +13,15 @@ inferenceExtension:
       targetPort: 8081
   env: []
   pluginsConfigFile: "default-plugins.yaml"
+  # Resource requests and limits for the EPP container.
+  # These defaults are sized for a standard EPP deployment with built-in scheduling plugins.
+  # CPU limits are intentionally unset to allow bursting to all available node CPUs during scheduling spikes.
+  resources:
+    requests:
+      cpu: "4"
+      memory: 8Gi
+    limits:
+      memory: 16Gi
 
   endpointsServer:
     # set it to false when you want to deploy EPP with inferencepool
@@ -24,6 +33,8 @@ inferenceExtension:
       - 8000
     # unused when createInferencePool is true
     modelServerType: vllm # vllm, sglang, triton-tensorrt-llm, trtllm-serve
+    # unused when createInferencePool is true
+    modelServerProtocol: http # http, grpc
 
 
   sidecar:
@@ -346,9 +357,17 @@ inferenceExtension:
       auth:
         # To allow unauthenticated /metrics access (e.g., for debugging with curl), set to false
         enabled: true
+        # Service account token secret for authentication
+        secretName: inference-gateway-sa-metrics-reader-secret
+      # additional labels for the ServiceMonitor
+      extraLabels: {}
 
   tracing:
     enabled: false
+    otelExporterEndpoint: "http://localhost:4317"
+    sampling:
+      sampler: "parentbased_traceidratio"
+      samplerArg: "0.1"
 
   latencyPredictor:
     # common latencyPredictor setting exists in config/charts/inference-extension/values.yaml
@@ -379,6 +398,7 @@ inferencePool:
   targetPorts:
     - number: 8000
   modelServerType: vllm # vllm, sglang, triton-tensorrt-llm, trtllm-serve
+  modelServerProtocol: http # http, grpc
   apiVersion: inference.networking.k8s.io/v1
   # modelServers: # REQUIRED
   #   matchLabels:
