@@ -2,8 +2,6 @@
 # the precise-prefix-cache-scorer.
 apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: token-producer
   parameters:

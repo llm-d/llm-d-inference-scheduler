@@ -26,8 +26,6 @@ Tokens are sourced from the `token-producer` DataProducer plugin
 
 **Example configuration with the above parameters set**
 ```yaml
-featureGates:
-- prepareDataPlugins
 plugins:
   - type: token-producer
     parameters:
@@ -68,8 +66,6 @@ vLLM engines configured to emit KV-events on port `5556`:
 
 **Configuration Example — all parameters:**
 ```yaml
-featureGates:
-- prepareDataPlugins
 plugins:
   - type: token-producer
     parameters:

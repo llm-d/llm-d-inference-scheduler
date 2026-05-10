@@ -4,8 +4,6 @@
 #   args:    ["${MODEL_NAME}", "--port=8000"]
 apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: token-producer
   parameters:

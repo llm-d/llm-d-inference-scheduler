@@ -178,8 +178,6 @@ schedulingProfiles:
 // EPP config for running with precise prefix scoring (i.e. KV events).
 const kvConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: token-producer
   parameters:
@@ -212,8 +210,6 @@ schedulingProfiles:
 // Alias of kvConfig retained for tests that reference the external-tokenizer name.
 const kvExternalTokenizerConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: token-producer
   parameters:

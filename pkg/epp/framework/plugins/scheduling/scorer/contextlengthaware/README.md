@@ -52,8 +52,6 @@ Reads tokenized prompt data from `request.Body.TokenizedPrompt` as written by th
 
 **Example — Scorer with token-producer:**
 ```yaml
-featureGates:
-- prepareDataPlugins
 plugins:
   - type: token-producer
     parameters:
