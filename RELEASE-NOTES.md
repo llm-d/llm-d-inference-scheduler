@@ -1,3 +1,4 @@
+2026-05-07 https://github.com/llm-d/llm-d-inference-scheduler/pull/931 active-request-scorer now uses inflight-load-producer for in-flight request tracking; requestTimeout is deprecated and ignored, and idleThreshold/maxBusyScore configure idle/busy endpoint scoring.
 2026-05-05 https://github.com/llm-d/llm-d-inference-scheduler/pull/899 Add `datalayer_poll_errors_total` and `datalayer_extract_errors_total` Prometheus counters; remove transition-only error logging.
 2026-05-05 https://github.com/llm-d/llm-d-inference-scheduler/pull/972 The use of inference.networking.x-k8s.io/v1alpha1/EndpointPickerConfig is deprecated. Please use llm-d.ai/v1alpha1/EndpointPickerConfig instead
 2026-05-05 https://github.com/llm-d/llm-d-inference-scheduler/pull/863 Deprecating plugin name `tokenizer` - added `token-producer`.
