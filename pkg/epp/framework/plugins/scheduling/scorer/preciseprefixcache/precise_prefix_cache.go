@@ -658,7 +658,8 @@ func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent)
 		logger.V(logging.DEBUG).Info("Adding subscriber", "endpoint", endpointKey)
 	case fwkdl.EventDelete:
 		s.subscribersManager.RemoveSubscriber(ctx, endpointKey)
-		logger.V(logging.DEBUG).Info("Removed KV-events subscriber", "endpoint", endpointKey)
+		s.healthMonitor.RemoveEndpoint(endpointKey)
+		logger.V(logging.DEBUG).Info("Removed KV-events subscriber and health state", "endpoint", endpointKey)
 	}
 	return nil
 }
