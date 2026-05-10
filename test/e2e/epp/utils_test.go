@@ -475,6 +475,11 @@ func deploymentReadyCondition(tc *igwtestutils.TestConfig, key types.NamespacedN
 		return errors.New("no replicas are ready yet")
 	}
 
+	if current.Spec.Replicas != nil && *current.Spec.Replicas != current.Status.Replicas {
+		return fmt.Errorf("status replicas (%d) has not converged to spec (%d)",
+			current.Status.Replicas, *current.Spec.Replicas)
+	}
+
 	if current.Status.Replicas != current.Status.ReadyReplicas {
 		return fmt.Errorf("replicas mismatch: expected %d, got %d ready",
 			current.Status.Replicas, current.Status.ReadyReplicas)
