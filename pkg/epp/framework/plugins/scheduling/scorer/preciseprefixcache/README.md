@@ -22,8 +22,7 @@ When enabled, the scorer will use the [`llm-d-kv-cache`](https://github.com/llm-
 See the full parameter reference at [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/main/docs/configuration.md).
 
 Tokens are sourced from the `token-producer` DataProducer plugin
-(`request.Body.TokenizedPrompt`). Set the token processor's `blockSize` and
-`hashSeed` to match the vLLM deployment.
+(`request.Body.TokenizedPrompt`).
 
 **Example configuration with the above parameters set**
 ```yaml
@@ -38,8 +37,7 @@ plugins:
   - type: precise-prefix-cache-scorer
     parameters:
       tokenProcessorConfig:
-        blockSize: 64                    # must match vLLM block size
-        hashSeed: "12345"                # must match vLLM PYTHONHASHSEED env var
+        blockSize: 64
       indexerConfig:
         kvBlockIndexConfig:
           enableMetrics: true
@@ -52,7 +50,6 @@ plugins:
     parameters:
       tokenProcessorConfig:
         blockSize: 64
-        hashSeed: "42"
       indexerConfig:
         kvBlockIndexConfig:
           enableMetrics: true
@@ -156,7 +153,4 @@ plugins:
     parameters:
       speculativeIndexing: true
       speculativeTTL: "2s"
-      tokenProcessorConfig:
-        blockSize: 64
-        hashSeed: "42"
 ```

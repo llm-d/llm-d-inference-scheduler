@@ -13,8 +13,7 @@ plugins:
 - type: precise-prefix-cache-scorer
   parameters:
     tokenProcessorConfig:
-      blockSize: 16                         # must match vLLM block size if not default (16)
-      hashSeed: "42"                        # must match PYTHONHASHSEED in vLLM pods
+      blockSize: 16
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:

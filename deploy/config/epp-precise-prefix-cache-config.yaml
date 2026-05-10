@@ -15,8 +15,7 @@ plugins:
   - type: precise-prefix-cache-scorer
     parameters:
       tokenProcessorConfig:
-        blockSize: 64                 # must match vLLM block size
-        hashSeed: "42"                # must match vLLM PYTHONHASHSEED env var
+        blockSize: 64
       indexerConfig:
         kvBlockIndexConfig:
           enableMetrics: true         # enable kv-block index metrics (prometheus)
