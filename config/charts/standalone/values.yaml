@@ -270,7 +270,7 @@ inferenceExtension:
           - "--service-node"
           - "envoy-sidecar"
           - "--log-level"
-          - "trace"
+          - "warn"
           - "--cpuset-threads"
           - "--drain-strategy"
           - "immediate"
