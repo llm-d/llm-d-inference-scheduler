@@ -1129,7 +1129,7 @@ func setupRegistryForConcurrency(t *testing.T, flowKey flowcontrol.FlowKey) *moc
 		AllOrderedPriorityLevelsFunc: func() []int { return []int{flowKey.Priority} },
 		PriorityBandAccessorFunc: func(priority int) (flowcontrol.PriorityBandAccessor, error) {
 			if priority == flowKey.Priority {
-				return &frameworkmocks.MockPriorityBandAccessor{
+				return &fwkfcmocks.MockPriorityBandAccessor{
 					PriorityV: priority,
 					IterateQueuesFunc: func(f func(flowcontrol.FlowQueueAccessor) bool) {
 						f(currentQueue.FlowQueueAccessor())
@@ -1139,7 +1139,7 @@ func setupRegistryForConcurrency(t *testing.T, flowKey flowcontrol.FlowKey) *moc
 			return nil, fmt.Errorf("unexpected priority %d", priority)
 		},
 		FairnessPolicyFunc: func(_ int) (flowcontrol.FairnessPolicy, error) {
-			return &frameworkmocks.MockFairnessPolicy{
+			return &fwkfcmocks.MockFairnessPolicy{
 				PickFunc: func(_ context.Context, _ flowcontrol.PriorityBandAccessor) (flowcontrol.FlowQueueAccessor, error) {
 					return currentQueue.FlowQueueAccessor(), nil
 				},
