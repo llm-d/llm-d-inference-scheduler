@@ -68,13 +68,6 @@ type EndpointPickerConfig struct {
 	// If unspecified, default parsing behavior will be applied.
 	Parser *ParserConfig `json:"parser,omitempty"`
 
-	// +optional
-	// Discovery specifies which EndpointDiscovery plugin to use for populating the
-	// endpoint datastore. When set, the EPP bypasses Kubernetes CRD reconcilers and
-	// relies entirely on the referenced plugin to enumerate and track inference
-	// endpoints. This enables running the EPP without a Kubernetes cluster.
-	// If omitted, the EPP uses the default Kubernetes-based discovery.
-	Discovery *DiscoveryConfig `json:"discovery,omitempty"`
 }
 
 func (cfg EndpointPickerConfig) String() string {
@@ -99,9 +92,6 @@ func (cfg EndpointPickerConfig) String() string {
 	}
 	if cfg.Parser != nil {
 		parts = append(parts, fmt.Sprintf("Parser: %v", cfg.Parser))
-	}
-	if cfg.Discovery != nil {
-		parts = append(parts, fmt.Sprintf("Discovery: %v", cfg.Discovery))
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
 }
@@ -231,13 +221,20 @@ type DataLayerConfig struct {
 	// +optional
 	// Sources is the list of sources to define to the DataLayer
 	Sources []DataLayerSource `json:"sources,omitempty"`
+	// +optional
+	// Discovery specifies which EndpointDiscovery plugin to use for populating the
+	// endpoint datastore. When set, the EPP bypasses Kubernetes CRD reconcilers and
+	// relies entirely on the referenced plugin to enumerate and track inference
+	// endpoints. This enables running the EPP without a Kubernetes cluster.
+	// If omitted, the EPP uses the default Kubernetes-based discovery.
+	Discovery *DiscoveryConfig `json:"discovery,omitempty"`
 }
 
 func (dlc *DataLayerConfig) String() string {
 	if dlc == nil {
 		return nilString
 	}
-	return fmt.Sprintf("{Sources: %v}", dlc.Sources)
+	return fmt.Sprintf("{Sources: %v, Discovery: %v}", dlc.Sources, dlc.Discovery)
 }
 
 // DataLayerSource contains the configuration of a DataSource of the DataLayer feature

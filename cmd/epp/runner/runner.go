@@ -320,14 +320,18 @@ func (r *Runner) Run(ctx context.Context) error {
 // is present in the config it uses the referenced plugin; otherwise it synthesizes
 // a K8s plugin from CLI flags for backward compatibility.
 func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opts *runserver.Options, namespace string, ds datastore.Datastore) (fwkdl.EndpointDiscovery, error) {
-	if rawConfig.Discovery != nil {
-		raw := r.handle.Plugin(rawConfig.Discovery.PluginRef)
+	var discoveryCfg *configapi.DiscoveryConfig
+	if rawConfig.DataLayer != nil {
+		discoveryCfg = rawConfig.DataLayer.Discovery
+	}
+	if discoveryCfg != nil {
+		raw := r.handle.Plugin(discoveryCfg.PluginRef)
 		if raw == nil {
-			return nil, fmt.Errorf("discovery pluginRef %q not found", rawConfig.Discovery.PluginRef)
+			return nil, fmt.Errorf("discovery pluginRef %q not found", discoveryCfg.PluginRef)
 		}
 		disc, ok := raw.(fwkdl.EndpointDiscovery)
 		if !ok {
-			return nil, fmt.Errorf("plugin %q does not implement EndpointDiscovery", rawConfig.Discovery.PluginRef)
+			return nil, fmt.Errorf("plugin %q does not implement EndpointDiscovery", discoveryCfg.PluginRef)
 		}
 		if dp, ok := raw.(discoveryinject.DatastoreProvider); ok {
 			dp.SetDatastore(ds)
