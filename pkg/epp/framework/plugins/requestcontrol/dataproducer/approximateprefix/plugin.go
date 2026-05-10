@@ -56,11 +56,6 @@ func (p *prepareData) TypedName() plugin.TypedName {
 	return p.typedName
 }
 
-// Consumes returns the data consumed by the plugin.
-func (p *prepareData) Consumes() map[string]any {
-	return map[string]any{}
-}
-
 // Produces returns the data produced by the plugin.
 func (p *prepareData) Produces() map[string]any {
 	return map[string]any{attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{}}
