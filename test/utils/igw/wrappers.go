@@ -45,7 +45,7 @@ func MakeModelWrapper(namespacedName types.NamespacedName) *InferenceObjectiveWr
 }
 
 // SetPriority sets the value of the InferenceObjective.spec.priority.
-func (m *InferenceObjectiveWrapper) SetPriority(level int) *InferenceObjectiveWrapper {
+func (m *InferenceObjectiveWrapper) SetPriority(level int32) *InferenceObjectiveWrapper {
 	m.Spec.Priority = &level
 	return m
 }

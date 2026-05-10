@@ -208,7 +208,7 @@ func (in *InferenceObjectiveSpec) DeepCopyInto(out *InferenceObjectiveSpec) {
 	*out = *in
 	if in.Priority != nil {
 		in, out := &in.Priority, &out.Priority
-		*out = new(int)
+		*out = new(int32)
 		**out = **in
 	}
 	out.PoolRef = in.PoolRef

@@ -118,10 +118,10 @@ type Director struct {
 	admissionController   AdmissionController
 	endpointCandidates    contracts.EndpointCandidates
 	requestControlPlugins Config
-	// we just need a pointer to an int variable since priority is a pointer in InferenceObjective
-	// no need to set this in the constructor, since the value we want is the default int val
+	// We just need a pointer to an int32 variable since Priority is a pointer in InferenceObjective.
+	// No need to set this in the constructor, since the value we want is the default (0) and
 	// and value types cannot be nil
-	defaultPriority int
+	defaultPriority int32
 
 	// responseBodyQueues maps request IDs to their async processing channels.
 	// Each request gets a dedicated channel and goroutine to ensure chunks are
@@ -161,12 +161,13 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	infObjective := d.getInferenceObjective(ctx, reqCtx)
-	reqCtx.Priority = *infObjective.Spec.Priority
-	requestObjectives := fwksched.RequestObjectives{Priority: *infObjective.Spec.Priority}
+	priority := int(*infObjective.Spec.Priority)
+	reqCtx.Priority = priority
+	requestObjectives := fwksched.RequestObjectives{Priority: priority}
 
 	span.SetAttributes(
 		attribute.String("target_model", reqCtx.TargetModelName),
-		attribute.Int("request_prio", *infObjective.Spec.Priority),
+		attribute.Int("request_prio", priority),
 	)
 
 	// Prepare InferenceRequest (needed for both saturation detection and Scheduler)
@@ -183,7 +184,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	ctx = log.IntoContext(ctx, logger)
 	logger.V(logutil.DEBUG).Info("LLM request assembled")
 
-	if err := d.admissionController.Admit(ctx, reqCtx, *infObjective.Spec.Priority); err != nil {
+	if err := d.admissionController.Admit(ctx, reqCtx, priority); err != nil {
 		return reqCtx, err
 	}
 
