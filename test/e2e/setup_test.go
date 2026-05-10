@@ -21,6 +21,7 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${POOL_NAME}":               poolName,
 		"${VLLM_IMAGE}":              vllmSimImage,
 		"${UDS_TOKENIZER_IMAGE}":     udsTokenizerImage,
+		"${VLLM_RENDER_IMAGE}":       vllmRenderImage,
 		"${SIDECAR_IMAGE}":           sideCarImage,
 		"${VLLM_DATA_PARALLEL_SIZE}": "1",
 		"${VLLM_SIM_MODE}":           "echo",
@@ -138,7 +139,8 @@ func createEndPointPicker(eppConfig string) []string {
 		map[string]string{
 			"${EPP_NAME}":              "e2e-epp",
 			"${EPP_IMAGE}":             eppImage,
-			"${UDS_TOKENIZER_IMAGE}":   udsTokenizerImage,
+			"${VLLM_RENDER_IMAGE}":     vllmRenderImage,
+			"${VLLM_RENDER_MODEL}":     kvModelName,
 			"${NAMESPACE}":             nsName,
 			"${POOL_NAME}":             simModelName + "-inference-pool",
 			"${METRICS_ENDPOINT_AUTH}": "false",
