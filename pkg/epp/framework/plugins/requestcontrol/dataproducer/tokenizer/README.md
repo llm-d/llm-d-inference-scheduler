@@ -20,13 +20,12 @@ upstream list shape, sorted by placeholder offset.
 ## Backends
 
 The plugin selects one of two backends based on which configuration block
-is present. Each backend is self-contained — they share the same plugin
-contract but are independent implementations.
+is present. `vllmHTTP` is the preferred backend for new deployments.
 
 | Backend              | Transport     | Sidecar image                            | Notes                                                                                           |
 | -------------------- | ------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `udsTokenizerConfig` | gRPC over UDS | custom Python tokenizer service          | Lowest per-request overhead.                                                                    |
 | `vllmHTTP`           | HTTP          | any vLLM image with `vllm launch render` | Uses vLLM's exact preprocessing (template + tokenizer) — no separate sidecar image to maintain. |
+| `udsTokenizerConfig` | gRPC over UDS | custom Python tokenizer service          | Lowest per-request overhead.                                                                    |
 
 Set exactly one block. Setting both is rejected by the factory. An empty
 configuration falls back to `udsTokenizerConfig` with the default socket
@@ -37,11 +36,11 @@ path for backward compatibility.
 | Parameter                              | Default                  | Description                                                       |
 | -------------------------------------- | ------------------------ | ----------------------------------------------------------------- |
 | `modelName`                            | – (required)             | Model whose tokenizer should be loaded / sent in render requests. |
-| `udsTokenizerConfig.socketFile`        | `/tmp/tokenizer/...sock` | UDS socket path.                                                  |
-| `udsTokenizerConfig.modelTokenizerMap` | –                        | Optional model → tokenizer-data path map.                         |
 | `vllmHTTP.url`                         | `http://localhost:8000`  | Base URL of the vLLM sidecar (no trailing slash).                 |
 | `vllmHTTP.timeout`                     | `5s`                     | Per-request timeout for text-only requests.                       |
 | `vllmHTTP.mmTimeout`                   | `30s`                    | Per-request timeout for multimodal requests.                      |
+| `udsTokenizerConfig.socketFile`        | `/tmp/tokenizer/...sock` | UDS socket path.                                                  |
+| `udsTokenizerConfig.modelTokenizerMap` | –                        | Optional model → tokenizer-data path map.                         |
 
 ## Failure mode
 

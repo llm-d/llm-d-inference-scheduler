@@ -1,7 +1,5 @@
-# EPP configuration using the token-producer plugin's vLLM HTTP /render backend.
-#
-# The token-producer plugin calls a co-located vLLM render sidecar over HTTP and
-# writes request.Body.TokenizedPrompt for downstream scorers. Sidecar:
+# Sample EPP configuration with the token-producer plugin (vLLM HTTP backend)
+# and the precise-prefix-cache-scorer. Sidecar:
 #   command: ["vllm", "launch", "render"]
 #   args:    ["${MODEL_NAME}", "--port=8000"]
 apiVersion: llm-d.ai/v1alpha1
@@ -24,11 +22,6 @@ plugins:
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
-      # Embedded HF tokenizer — used only if the HTTP backend fails.
-      tokenizersPoolConfig:
-        modelName: "${MODEL_NAME}"
-        hf:
-          tokenizersCacheDir: "/cache/tokenizers"
       kvBlockIndexConfig:
         enableMetrics: false
 - type: decode-filter

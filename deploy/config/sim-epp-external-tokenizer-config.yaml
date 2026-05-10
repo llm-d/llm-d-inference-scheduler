@@ -1,15 +1,11 @@
-# Sample EPP configuration for running with an external tokenizer sidecar.
-#
-# The tokenizer plugin (Produce phase) communicates with a Python gRPC
-# sidecar over a Unix domain socket. It renders chat templates and tokenizes
-# prompts, attaching the resulting token IDs to the request so the
-# precise-prefix-cache-scorer can skip internal tokenization.
-#
-# Requires the tokenizer sidecar container running in the same pod.
+# Sample EPP configuration with the token-producer plugin (UDS backend) and
+# the precise-prefix-cache-scorer.
 apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
+featureGates:
+- prepareDataPlugins
 plugins:
-- type: tokenizer
+- type: token-producer
   parameters:
     modelName: "${MODEL_NAME}"
 - type: precise-prefix-cache-scorer
@@ -20,11 +16,6 @@ plugins:
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
-      # Fallback tokenizer used if the external tokenizer plugin fails.
-      tokenizersPoolConfig:
-        modelName: "${MODEL_NAME}"
-        uds:
-          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
       kvBlockIndexConfig:
         enableMetrics: false
 - type: decode-filter
