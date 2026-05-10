@@ -29,6 +29,12 @@ inferenceExtension:
   sidecar:
     enabled: true
     proxyType: envoy
+    resources:
+      requests:
+        cpu: "4"
+        memory: 8Gi
+      limits:
+        memory: 16Gi
 
     # Agentgateway-specific settings used by the built-in preset when
     # proxyType=agentgateway. service.name is required.
@@ -275,10 +281,6 @@ inferenceExtension:
             name: http-8081
           - containerPort: 19001
             name: metrics-19001
-        resources:
-          requests:
-            cpu: 100m
-            memory: 512Mi
         readinessProbe:
           failureThreshold: 1
           httpGet:
@@ -315,10 +317,6 @@ inferenceExtension:
             name: metrics-15020
           - containerPort: 15021
             name: readiness-15021
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
         readinessProbe:
           failureThreshold: 1
           httpGet:
