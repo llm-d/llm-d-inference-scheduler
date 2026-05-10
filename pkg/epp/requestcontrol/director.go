@@ -119,8 +119,8 @@ type Director struct {
 	endpointCandidates    contracts.EndpointCandidates
 	requestControlPlugins Config
 	// We just need a pointer to an int32 variable since Priority is a pointer in InferenceObjective.
-	// No need to set this in the constructor, since the value we want is the default (0) and
-	// and value types cannot be nil
+	// No need to set this in the constructor, since the value we want is the default (0)
+	// and value types cannot be nil.
 	defaultPriority int32
 
 	// responseBodyQueues maps request IDs to their async processing channels.
