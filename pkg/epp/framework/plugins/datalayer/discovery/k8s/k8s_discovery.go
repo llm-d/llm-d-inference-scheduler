@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/controller"
@@ -134,6 +134,13 @@ func (k *InferencePoolDiscoveryPlugin) GetPoolName() string { return k.poolName 
 // SetPoolName sets the InferencePool name, used by the runner to inject --pool-name
 // when the factory parameter was omitted.
 func (k *InferencePoolDiscoveryPlugin) SetPoolName(name string) { k.poolName = name }
+
+// GetPoolNamespace returns the namespace this plugin is configured to watch.
+func (k *InferencePoolDiscoveryPlugin) GetPoolNamespace() string { return k.poolNamespace }
+
+// SetPoolNamespace sets the namespace, used by the runner to inject --pool-namespace / NAMESPACE
+// when the factory parameter was omitted.
+func (k *InferencePoolDiscoveryPlugin) SetPoolNamespace(ns string) { k.poolNamespace = ns }
 
 func NewInferencePoolDiscoveryPlugin(poolName, poolNamespace, poolGroup string, leaderElect bool) *InferencePoolDiscoveryPlugin {
 	return &InferencePoolDiscoveryPlugin{

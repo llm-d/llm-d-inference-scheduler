@@ -335,8 +335,13 @@ func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opt
 		if db, ok := raw.(discoveryinject.DatalayerBinder); ok {
 			db.BindDatalayer(r.dlRuntime)
 		}
-		if ip, ok := raw.(*k8sdiscovery.InferencePoolDiscoveryPlugin); ok && ip.GetPoolName() == "" {
-			ip.SetPoolName(opts.PoolName)
+		if ip, ok := raw.(*k8sdiscovery.InferencePoolDiscoveryPlugin); ok {
+			if ip.GetPoolName() == "" {
+				ip.SetPoolName(opts.PoolName)
+			}
+			if ip.GetPoolNamespace() == "" {
+				ip.SetPoolNamespace(namespace)
+			}
 		}
 		return disc, nil
 	}
