@@ -130,7 +130,7 @@ func TestImmediateResponseEvictor_SetsReasonOnRegistry(t *testing.T) {
 	err := evictor.Evict(context.Background(), item)
 	require.NoError(t, err)
 
-	assert.Equal(t, errcommon.RemovalReasonEvicted, registry.GetReason("req-1"),
+	assert.Equal(t, errcommon.RequestErrorReasonEvicted, registry.GetReason("req-1"),
 		"Evict should set the removal reason on the registry")
 
 	select {

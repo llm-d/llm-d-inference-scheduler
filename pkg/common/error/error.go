@@ -25,25 +25,25 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// RemovalReasonHeaderKey is the HTTP response header that communicates the specific
+// RequestErrorReasonHeaderKey is the HTTP response header that communicates the specific
 // reason a request was rejected or evicted by flow control.
-const RemovalReasonHeaderKey = "x-removal-reason"
+const RequestErrorReasonHeaderKey = "x-llm-d-request-error-reason"
 
-// RemovalReason is the reason a request was rejected, removed from queue, or evicted after dispatch.
-type RemovalReason string
+// RequestErrorReason is the reason a request was rejected before dispatch or evicted after dispatch.
+type RequestErrorReason string
 
 const (
-	// Admission — rejected before entering a queue.
-	RemovalReasonAdmissionCapacity RemovalReason = "admission-capacity"
+	// Rejected — request never reached an inference server.
+	RequestErrorReasonSaturated        RequestErrorReason = "rejected-saturated"
+	RequestErrorReasonTTLExpired       RequestErrorReason = "rejected-ttl-expired"
+	RequestErrorReasonContextCancelled RequestErrorReason = "rejected-context-cancelled"
 
-	// Queue — entered the queue but removed before dispatch.
-	RemovalReasonQueueTTLExpired       RemovalReason = "queue-ttl-expired"
-	RemovalReasonQueueContextCancelled RemovalReason = "queue-context-cancelled"
-
-	// Evicted — dispatched to a model server and then killed.
-	RemovalReasonEvicted              RemovalReason = "evicted"
-	RemovalReasonEvictedQueuePressure RemovalReason = "evicted-queue-pressure"
-	RemovalReasonEvictedPriority      RemovalReason = "evicted-priority"
+	// Evicted — request was dispatched to an inference server and then killed.
+	// The generic "evicted" reason is the current default used by ImmediateResponseEvictor.Evict().
+	// The specific sub-reasons are forward-looking for when EvictN() callers specify why they're evicting.
+	RequestErrorReasonEvicted              RequestErrorReason = "evicted"
+	RequestErrorReasonEvictedQueuePressure RequestErrorReason = "evicted-queue-pressure"
+	RequestErrorReasonEvictedPriority      RequestErrorReason = "evicted-priority"
 )
 
 // Error is an error struct for errors returned by the epp/bbr server.

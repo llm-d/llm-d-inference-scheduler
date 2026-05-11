@@ -278,10 +278,10 @@ func TestBuildErrResponse(t *testing.T) {
 		},
 		{
 			name:             "headers are included in response",
-			err:              Error{Code: ResourceExhausted, Msg: "no capacity", Headers: map[string]string{RemovalReasonHeaderKey: string(RemovalReasonAdmissionCapacity)}},
+			err:              Error{Code: ResourceExhausted, Msg: "no capacity", Headers: map[string]string{RequestErrorReasonHeaderKey: string(RequestErrorReasonSaturated)}},
 			wantHTTPStatus:   envoyTypePb.StatusCode_TooManyRequests,
 			wantBodyContains: "no capacity",
-			wantHeaders:      map[string]string{RemovalReasonHeaderKey: string(RemovalReasonAdmissionCapacity)},
+			wantHeaders:      map[string]string{RequestErrorReasonHeaderKey: string(RequestErrorReasonSaturated)},
 		},
 		{
 			name:             "nil headers omits header mutation",

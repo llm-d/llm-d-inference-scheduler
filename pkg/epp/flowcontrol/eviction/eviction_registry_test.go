@@ -60,15 +60,15 @@ func TestEvictionRegistry_SetAndGetReason(t *testing.T) {
 	ch := make(chan struct{})
 	r.Register("req-1", ch)
 
-	assert.Equal(t, errcommon.RemovalReason(""), r.GetReason("req-1"), "reason should be empty initially")
+	assert.Equal(t, errcommon.RequestErrorReason(""), r.GetReason("req-1"), "reason should be empty initially")
 
-	r.SetReason("req-1", errcommon.RemovalReasonEvicted)
-	assert.Equal(t, errcommon.RemovalReasonEvicted, r.GetReason("req-1"))
+	r.SetReason("req-1", errcommon.RequestErrorReasonEvicted)
+	assert.Equal(t, errcommon.RequestErrorReasonEvicted, r.GetReason("req-1"))
 
-	assert.Equal(t, errcommon.RemovalReason(""), r.GetReason("non-existent"), "GetReason for unregistered ID should return empty")
+	assert.Equal(t, errcommon.RequestErrorReason(""), r.GetReason("non-existent"), "GetReason for unregistered ID should return empty")
 
 	// SetReason on non-existent should not panic.
-	r.SetReason("non-existent", errcommon.RemovalReasonEvicted)
+	r.SetReason("non-existent", errcommon.RequestErrorReasonEvicted)
 }
 
 func TestEvictionRegistry_Concurrency(t *testing.T) {
@@ -99,7 +99,7 @@ func TestEvictionRegistry_Concurrency(t *testing.T) {
 					r.Get(reqID)
 				case 3:
 					r.Register(reqID, ch)
-					r.SetReason(reqID, errcommon.RemovalReasonEvicted)
+					r.SetReason(reqID, errcommon.RequestErrorReasonEvicted)
 					r.GetReason(reqID)
 				case 4:
 					r.GetReason(reqID)

@@ -53,7 +53,7 @@ import (
 // to support eviction of in-flight requests via ext_proc ImmediateResponse.
 type EvictChannelLookup interface {
 	Get(requestID string) chan struct{}
-	GetReason(requestID string) errcommon.RemovalReason
+	GetReason(requestID string) errcommon.RequestErrorReason
 	Deregister(requestID string)
 }
 
@@ -117,7 +117,7 @@ type RequestContext struct {
 	SchedulingRequest *fwksched.InferenceRequest
 
 	RequestState         StreamRequestState
-	RemovalReason        errcommon.RemovalReason
+	RequestErrorReason   errcommon.RequestErrorReason
 	modelServerStreaming bool
 
 	Response *Response
@@ -276,7 +276,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			logger.Info("Request evicted by flow control", "requestID", evictionRequestID)
 			reqCtx.RequestState = RequestEvicted
 			if s.evictionLookup != nil {
-				reqCtx.RemovalReason = s.evictionLookup.GetReason(evictionRequestID)
+				reqCtx.RequestErrorReason = s.evictionLookup.GetReason(evictionRequestID)
 			}
 			if sendErr := reqCtx.updateStateAndSendIfNeeded(srv, logger); sendErr != nil {
 				return sendErr
@@ -498,13 +498,13 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 			},
 			Body: []byte("request evicted by flow control"),
 		}
-		if r.RemovalReason != "" {
+		if r.RequestErrorReason != "" {
 			ir.Headers = &extProcPb.HeaderMutation{
 				SetHeaders: []*configPb.HeaderValueOption{
 					{
 						Header: &configPb.HeaderValue{
-							Key:      errcommon.RemovalReasonHeaderKey,
-							RawValue: []byte(r.RemovalReason),
+							Key:      errcommon.RequestErrorReasonHeaderKey,
+							RawValue: []byte(r.RequestErrorReason),
 						},
 					},
 				},
