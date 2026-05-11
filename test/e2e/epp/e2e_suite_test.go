@@ -33,9 +33,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	infextv1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	infextv1a2 "sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/env"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
@@ -179,7 +179,7 @@ func setupSuite() {
 	err = apiextv1.AddToScheme(testConfig.Scheme)
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 
-	err = infextv1a2.Install(testConfig.Scheme)
+	err = v1alpha2.Install(testConfig.Scheme)
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 
 	err = infextv1.Install(testConfig.Scheme)

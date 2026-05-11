@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	backendmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/backend/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
@@ -45,7 +45,7 @@ var (
 	inferencePool = testutil.MakeInferencePool("test-pool1").Namespace("ns1").ObjRef()
 	infObjective1 = testutil.MakeInferenceObjective("model1").
 			Namespace(inferencePool.Namespace).
-			Priority(1).
+			Priority(int32(1)).
 			CreationTimestamp(metav1.Unix(1000, 0)).
 			PoolName(inferencePool.Name).
 			PoolGroup("inference.networking.k8s.io").ObjRef()
@@ -57,7 +57,7 @@ var (
 				PoolGroup("inference.networking.k8s.io").ObjRef()
 	infObjective1Critical = testutil.MakeInferenceObjective(infObjective1.Name).
 				Namespace(infObjective1.Namespace).
-				Priority(2).
+				Priority(int32(2)).
 				CreationTimestamp(metav1.Unix(1003, 0)).
 				PoolName(inferencePool.Name).
 				PoolGroup("inference.networking.k8s.io").ObjRef()
@@ -69,7 +69,7 @@ var (
 				PoolGroup("inference.networking.k8s.io").ObjRef()
 	infObjective1DiffGroup = testutil.MakeInferenceObjective(infObjective1.Name).
 				Namespace(inferencePool.Namespace).
-				Priority(1).
+				Priority(int32(1)).
 				CreationTimestamp(metav1.Unix(1005, 0)).
 				PoolName(inferencePool.Name).
 				PoolGroup("inference.networking.x-k8s.io").ObjRef()

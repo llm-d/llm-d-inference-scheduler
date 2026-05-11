@@ -68,7 +68,6 @@ type ResponseBodyProcessor interface {
 // PrepareRequestData is called by the director before scheduling requests.
 type DataProducer interface {
 	plugin.ProducerPlugin
-	plugin.ConsumerPlugin
 	PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, pods []fwksched.Endpoint) error
 }
 

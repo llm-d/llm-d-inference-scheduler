@@ -30,8 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
