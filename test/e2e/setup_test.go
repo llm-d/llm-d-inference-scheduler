@@ -137,10 +137,12 @@ func createEndPointPicker(eppConfig string) []string {
 	eppYamls := testutils.ReadYaml(eppManifest)
 	eppYamls = substituteMany(eppYamls,
 		map[string]string{
-			"${EPP_NAME}":              "e2e-epp",
-			"${EPP_IMAGE}":             eppImage,
-			"${VLLM_RENDER_IMAGE}":     vllmRenderImage,
-			"${VLLM_RENDER_MODEL}":     kvModelName,
+			"${EPP_NAME}":          "e2e-epp",
+			"${EPP_IMAGE}":         eppImage,
+			"${VLLM_RENDER_IMAGE}": vllmRenderImage,
+			// The render sidecar needs a real, fetchable model. Sim tests
+			// don't query it; the cost is paying weights-load on every EPP.
+			"${MODEL_NAME}":            kvModelName,
 			"${NAMESPACE}":             nsName,
 			"${POOL_NAME}":             simModelName + "-inference-pool",
 			"${METRICS_ENDPOINT_AUTH}": "false",

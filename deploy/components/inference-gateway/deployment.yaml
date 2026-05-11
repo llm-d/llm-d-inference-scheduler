@@ -65,7 +65,7 @@ spec:
         image: ${VLLM_RENDER_IMAGE}
         imagePullPolicy: IfNotPresent
         command: ["vllm", "launch", "render"]
-        args: ["${VLLM_RENDER_MODEL}", "--port=8000"]
+        args: ["${MODEL_NAME}", "--port=8000"]
         ports:
         - name: render-http
           containerPort: 8000
