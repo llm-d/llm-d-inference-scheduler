@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
@@ -29,6 +31,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 // NewSchedulerProfile creates a new SchedulerProfile object and returns its pointer.
@@ -132,11 +135,23 @@ func (p *SchedulerProfile) runFilterPlugins(ctx context.Context, request *fwksch
 	filteredEndpoints := endpoints
 	logger.V(logutil.DEBUG).Info("Before running filter plugins", "endpoints", filteredEndpoints)
 
+	tracer := telemetry.Tracer()
 	for _, filter := range p.filters {
 		logger.V(logutil.VERBOSE).Info("Running filter plugin", "plugin", filter.TypedName())
+		endpointsIn := len(filteredEndpoints)
+		spanCtx, span := tracer.Start(ctx, "gateway.scheduling.filter",
+			trace.WithAttributes(
+				attribute.String("plugin.extension_point", filterExtensionPoint),
+				attribute.String("plugin.type", filter.TypedName().Type),
+				attribute.String("plugin.name", filter.TypedName().Name),
+				attribute.Int("endpoints.in", endpointsIn),
+			),
+		)
 		before := time.Now()
-		filteredEndpoints = filter.Filter(ctx, cycleState, request, filteredEndpoints)
+		filteredEndpoints = filter.Filter(spanCtx, cycleState, request, filteredEndpoints)
 		metrics.RecordPluginProcessingLatency(filterExtensionPoint, filter.TypedName().Type, filter.TypedName().Name, time.Since(before))
+		span.SetAttributes(attribute.Int("endpoints.out", len(filteredEndpoints)))
+		span.End()
 		logger.V(logutil.DEBUG).Info("Completed running filter plugin successfully", "plugin", filter.TypedName(), "endpoints", filteredEndpoints)
 		if len(filteredEndpoints) == 0 {
 			logger.V(logutil.VERBOSE).Info("Filter eliminated all endpoints", "plugin", filter.TypedName(), "endpointsBefore", len(endpoints))
@@ -156,12 +171,23 @@ func (p *SchedulerProfile) runScorerPlugins(ctx context.Context, request *fwksch
 	for _, endpoint := range endpoints {
 		weightedScorePerEndpoint[endpoint] = float64(0) // initialize weighted score per endpoint with 0 value
 	}
+	tracer := telemetry.Tracer()
 	// Iterate through each scorer in the chain and accumulate the weighted scores.
 	for _, scorer := range p.scorers {
 		logger.V(logutil.VERBOSE).Info("Running scorer plugin", "plugin", scorer.TypedName())
+		spanCtx, span := tracer.Start(ctx, "gateway.scheduling.scorer",
+			trace.WithAttributes(
+				attribute.String("plugin.extension_point", scorerExtensionPoint),
+				attribute.String("plugin.type", scorer.TypedName().Type),
+				attribute.String("plugin.name", scorer.TypedName().Name),
+				attribute.Float64("plugin.weight", scorer.Weight()),
+				attribute.Int("endpoints.scored", len(endpoints)),
+			),
+		)
 		before := time.Now()
-		scores := scorer.Score(ctx, cycleState, request, endpoints)
+		scores := scorer.Score(spanCtx, cycleState, request, endpoints)
 		metrics.RecordPluginProcessingLatency(scorerExtensionPoint, scorer.TypedName().Type, scorer.TypedName().Name, time.Since(before))
+		span.End()
 		for endpoint, score := range scores { // weight is relative to the sum of weights
 			logger.V(logutil.DEBUG).Info("Calculated score", "plugin", scorer.TypedName(), "endpoint", endpoint.GetMetadata().NamespacedName, "score", score)
 			weightedScorePerEndpoint[endpoint] += enforceScoreRange(score) * scorer.Weight()
@@ -183,9 +209,32 @@ func (p *SchedulerProfile) runPickerPlugin(ctx context.Context, cycleState *fwks
 	}
 	logger.V(logutil.VERBOSE).Info("Running picker plugin", "plugin", p.picker.TypedName())
 	logger.V(logutil.DEBUG).Info("Candidate pods for picking", "endpoints-weighted-score", scoredEndpoints)
+	tracer := telemetry.Tracer()
+	spanCtx, span := tracer.Start(ctx, "gateway.scheduling.picker",
+		trace.WithAttributes(
+			attribute.String("plugin.extension_point", pickerExtensionPoint),
+			attribute.String("plugin.type", p.picker.TypedName().Type),
+			attribute.String("plugin.name", p.picker.TypedName().Name),
+			attribute.Int("endpoints.scored", len(weightedScorePerEndpoint)),
+		),
+	)
+	defer span.End()
 	before := time.Now()
-	result := p.picker.Pick(ctx, cycleState, scoredEndpoints)
+	result := p.picker.Pick(spanCtx, cycleState, scoredEndpoints)
 	metrics.RecordPluginProcessingLatency(pickerExtensionPoint, p.picker.TypedName().Type, p.picker.TypedName().Name, time.Since(before))
+	if span.IsRecording() && result != nil {
+		switch n := len(result.TargetEndpoints); {
+		case n == 1:
+			span.SetAttributes(attribute.String("picker.selected.address",
+				result.TargetEndpoints[0].GetMetadata().Address))
+		case n > 1:
+			addrs := make([]string, n)
+			for i, ep := range result.TargetEndpoints {
+				addrs[i] = ep.GetMetadata().Address
+			}
+			span.SetAttributes(attribute.StringSlice("picker.selected.addresses", addrs))
+		}
+	}
 	logger.V(logutil.DEBUG).Info("Completed running picker plugin successfully", "plugin", p.picker.TypedName(), "result", result)
 
 	return result

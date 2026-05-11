@@ -21,9 +21,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
@@ -613,4 +617,56 @@ func findEndpoints(endpoints []fwksched.Endpoint, names ...k8stypes.NamespacedNa
 		}
 	}
 	return res
+}
+
+// BenchmarkSchedulerProfile_Run measures per-plugin span overhead.
+// NeverSample = no-exporter baseline; AlwaysSample = full-cost ceiling.
+func BenchmarkSchedulerProfile_Run(b *testing.B) {
+	crlog.SetLogger(logr.Discard()) // silence controller-runtime's log.SetLogger warning
+
+	pluginPool := []*testPlugin{
+		{TypeRes: "filter-1", FilterRes: []k8stypes.NamespacedName{{Name: "pod1"}, {Name: "pod2"}, {Name: "pod3"}}},
+		{TypeRes: "scorer-a", ScoreRes: 0.3},
+		{TypeRes: "scorer-b", ScoreRes: 0.5},
+		{TypeRes: "scorer-c", ScoreRes: 0.7},
+		{TypeRes: "picker-1", PickRes: k8stypes.NamespacedName{Name: "pod1"}},
+	}
+	profile := NewSchedulerProfile().
+		WithFilters(pluginPool[0]).
+		WithScorers(
+			NewWeightedScorer(pluginPool[1], 1),
+			NewWeightedScorer(pluginPool[2], 1),
+			NewWeightedScorer(pluginPool[3], 1),
+		).
+		WithPicker(pluginPool[4])
+
+	endpoints := []fwksched.Endpoint{
+		fwksched.NewEndpoint(&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, nil, nil),
+		fwksched.NewEndpoint(&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod2"}}, nil, nil),
+		fwksched.NewEndpoint(&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod3"}}, nil, nil),
+	}
+	request := &fwksched.InferenceRequest{
+		TargetModel: "bench-model",
+		RequestID:   "bench-request",
+	}
+
+	benchProfileRun := func(b *testing.B, sampler sdktrace.Sampler) {
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sampler))
+		prev := otel.GetTracerProvider()
+		otel.SetTracerProvider(tp)
+		defer otel.SetTracerProvider(prev)
+		defer func() { _ = tp.Shutdown(context.Background()) }()
+
+		ctx := context.Background()
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := profile.Run(ctx, request, fwksched.NewCycleState(), endpoints); err != nil {
+				b.Fatalf("Run failed: %v", err)
+			}
+		}
+	}
+
+	b.Run("AlwaysSample", func(b *testing.B) { benchProfileRun(b, sdktrace.AlwaysSample()) })
+	b.Run("NeverSample", func(b *testing.B) { benchProfileRun(b, sdktrace.NeverSample()) })
 }
