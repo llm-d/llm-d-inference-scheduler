@@ -79,7 +79,6 @@ func (m *typedMockPlugin) TypedName() fwkplugin.TypedName {
 }
 
 func (m *typedMockPlugin) Produces() map[string]any { return m.produces }
-func (m *typedMockPlugin) Consumes() map[string]any { return nil }
 func (m *typedMockPlugin) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	return nil
 }

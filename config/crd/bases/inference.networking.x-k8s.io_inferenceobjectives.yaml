@@ -97,6 +97,7 @@ spec:
                   Example: requests with Priority 10 will always be served before
                   requests with Priority of 0 (the value used if Priority is unset or no InferenceObjective is specified).
                   Similarly requests with a Priority of -10 will always be served after requests with Priority of 0.
+                format: int32
                 type: integer
             required:
             - poolRef

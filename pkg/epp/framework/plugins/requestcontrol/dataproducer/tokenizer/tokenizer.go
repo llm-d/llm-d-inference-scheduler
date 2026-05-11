@@ -140,11 +140,6 @@ func (p *Plugin) Produces() map[string]any {
 	return map[string]any{TokenizedPromptKey: fwkrh.TokenizedPrompt{}}
 }
 
-// Consumes returns the data keys this plugin requires.
-func (p *Plugin) Consumes() map[string]any {
-	return nil
-}
-
 // PrepareRequestData tokenizes the request prompt and stores the result on
 // InferenceRequestBody.TokenizedPrompt (TokenIDs + MultiModalFeatures in flat shape).
 // Returns an error when tokenization fails; the caller (Director) decides the

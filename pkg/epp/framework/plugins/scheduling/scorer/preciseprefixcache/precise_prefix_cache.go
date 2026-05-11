@@ -337,11 +337,6 @@ func (s *Scorer) Produces() map[string]any {
 	}
 }
 
-// Consumes declares the data keys this plugin requires from other plugins.
-func (s *Scorer) Consumes() map[string]any {
-	return map[string]any{}
-}
-
 // PrepareRequestData computes block keys, looks up the index, and stores
 // per-endpoint prefix match information. The computed block keys and scores
 // are saved to PluginState for reuse by Score() and PreRequest().
