@@ -24,7 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
