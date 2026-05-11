@@ -82,5 +82,7 @@ jobs:
       - name: Run make lint
         run: make lint
 
-      - name: Run make vulncheck
-        run: make vulncheck
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+          govulncheck ./...
