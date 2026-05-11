@@ -57,11 +57,7 @@ ensuring TPOT doesn't affect scoring, admission, or tier classification for pref
 |------|---------|
 | `plugin.go` | Struct, factory, config, per-request context, queue helpers |
 | `requestcontrol_hooks.go` | PreRequest, ResponseHeader, ResponseBody hooks |
-<<<<<<< HEAD
-| `preparedata_hooks.go` | Produce, Produces, Consumes |
-=======
 | `dataproducer_hooks.go` | Produce, Produces, Consumes |
->>>>>>> 5670f5c1 (refactor: complete internal naming and doc alignment with Produce/DataProducer terminology)
 | `training.go` | buildTrainingEntry, buildPredictionRequest, bulkPredict |
 | `prediction.go` | generatePredictions, validatePrediction, TPOT neutralization |
 | `decode_token_sampler.go` | Poisson-distributed token sampling for TPOT |

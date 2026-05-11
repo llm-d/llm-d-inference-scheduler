@@ -36,11 +36,7 @@ schedulingProfiles:
         weight: 10
 ```
 
-<<<<<<< HEAD
-The framework auto-registers any plugin implementing `requestcontrol.DataProducer` into the `Produce` phase; no separate `prepareData:` block is required.
-=======
 The framework auto-registers any plugin implementing `requestcontrol.DataProducer` into the `Produce` phase; no separate `dataProducer:` block is required.
->>>>>>> 5670f5c1 (refactor: complete internal naming and doc alignment with Produce/DataProducer terminology)
 
 ---
 
