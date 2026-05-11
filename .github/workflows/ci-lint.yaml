@@ -76,6 +76,9 @@ jobs:
           restore-keys: |
             go-cache-
 
+      - name: Run make build
+        run: make build
+
       - name: Run make lint
         run: make lint
 
