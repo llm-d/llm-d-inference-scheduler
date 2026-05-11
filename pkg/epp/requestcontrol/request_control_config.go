@@ -25,7 +25,7 @@ import (
 func NewConfig() *Config {
 	return &Config{
 		admissionPlugins:         []fwkrc.Admitter{},
-		dataProducerPlugins:       []fwkrc.DataProducer{},
+		dataProducerPlugins:      []fwkrc.DataProducer{},
 		preRequestPlugins:        []fwkrc.PreRequest{},
 		responseReceivedPlugins:  []fwkrc.ResponseHeaderProcessor{},
 		responseStreamingPlugins: []fwkrc.ResponseBodyProcessor{},
@@ -35,7 +35,7 @@ func NewConfig() *Config {
 // Config provides a configuration for the requestcontrol plugins.
 type Config struct {
 	admissionPlugins         []fwkrc.Admitter
-	dataProducerPlugins       []fwkrc.DataProducer
+	dataProducerPlugins      []fwkrc.DataProducer
 	preRequestPlugins        []fwkrc.PreRequest
 	responseReceivedPlugins  []fwkrc.ResponseHeaderProcessor
 	responseStreamingPlugins []fwkrc.ResponseBodyProcessor

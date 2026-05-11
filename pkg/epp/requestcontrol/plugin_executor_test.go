@@ -58,6 +58,7 @@ func (m *executorMockDataProducerPlugin) Produce(ctx context.Context, request *f
 func (m *executorMockDataProducerPlugin) Produces() map[string]any {
 	return nil
 }
+
 // ctxObservingPlugin records the context it received so tests can verify the
 // timeout wrapper cancels the plugin's context when the deadline fires.
 type ctxObservingPlugin struct {
@@ -234,31 +235,31 @@ func (p *dagTestPlugin) Consumes() map[string]any {
 func TestExecutePluginsAsDAG(t *testing.T) {
 	pluginA := &dagTestPlugin{
 		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "A", delay: 20 * time.Millisecond},
-		produces:                     map[string]any{"keyA": nil},
+		produces:                       map[string]any{"keyA": nil},
 	}
 	pluginB := &dagTestPlugin{
 		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "B"},
-		consumes:                     map[string]any{"keyA": nil},
-		produces:                     map[string]any{"keyB": nil},
+		consumes:                       map[string]any{"keyA": nil},
+		produces:                       map[string]any{"keyB": nil},
 	}
 	pluginC := &dagTestPlugin{
 		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "C"},
-		consumes:                     map[string]any{"keyB": nil},
+		consumes:                       map[string]any{"keyB": nil},
 	}
 	pluginD := &dagTestPlugin{
 		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "D"},
-		consumes:                     map[string]any{"keyA": nil},
+		consumes:                       map[string]any{"keyA": nil},
 	}
 	pluginE := &dagTestPlugin{
 		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "E"},
 	}
 	pluginFail := &dagTestPlugin{
 		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "Fail", returnErr: errors.New("plugin failed")},
-		produces:                     map[string]any{"keyFail": nil},
+		produces:                       map[string]any{"keyFail": nil},
 	}
 	pluginDependsOnFail := &dagTestPlugin{
 		executorMockDataProducerPlugin: executorMockDataProducerPlugin{name: "DependsOnFail"},
-		consumes:                     map[string]any{"keyFail": nil},
+		consumes:                       map[string]any{"keyFail": nil},
 	}
 
 	testCases := []struct {

@@ -323,7 +323,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		wantReqCtx              *handlers.RequestContext // Fields to check in the returned RequestContext
 		targetModelName         string                   // Expected model name after target model resolution
 		admitRequestDenialError error                    // Expected denial error from admission plugin
-		dataProducerPlugin       *mockDataProducerPlugin
+		dataProducerPlugin      *mockDataProducerPlugin
 		preRequestPlugin        *mockPreRequestPlugin
 		wantMutatedBody         map[string]any
 	}{
@@ -490,7 +490,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 					},
 				},
 			},
-			targetModelName:   model,
+			targetModelName:    model,
 			dataProducerPlugin: newMockDataProducerPlugin("test-plugin"),
 		},
 		{
