@@ -79,7 +79,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body:        nil,
 			},
@@ -123,7 +123,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -207,7 +207,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					ChatCompletions: &fwkrh.ChatCompletionsRequest{
@@ -318,7 +318,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -390,7 +390,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -460,7 +460,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -508,7 +508,7 @@ func TestPrefixCacheTracking_Score(t *testing.T) {
 				),
 			},
 			request: &scheduling.InferenceRequest{
-				RequestId:   "test-request",
+				RequestID:   "test-request",
 				TargetModel: "test-model",
 				Body: &fwkrh.InferenceRequestBody{
 					Completions: &fwkrh.CompletionsRequest{
@@ -633,9 +633,9 @@ func newTestScorer(t *testing.T) *Scorer {
 	return scorer
 }
 
-// TestPrepareRequestData_PopulatesPluginState verifies that PrepareRequestData
+// TestProduce_PopulatesPluginState verifies that Produce
 // stores block keys and scores in PluginState for later reuse by Score().
-func TestPrepareRequestData_PopulatesPluginState(t *testing.T) {
+func TestProduce_PopulatesPluginState(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := newTestScorer(t)
 
@@ -645,7 +645,7 @@ func TestPrepareRequestData_PopulatesPluginState(t *testing.T) {
 		"slightly domed and divided by arches into stiff sections."
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-prepare-request",
+		RequestID:   "test-prepare-request",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -663,18 +663,18 @@ func TestPrepareRequestData_PopulatesPluginState(t *testing.T) {
 			}, nil, nil),
 	}
 
-	err := scorer.PrepareRequestData(ctx, request, endpoints)
+	err := scorer.Produce(ctx, request, endpoints)
 	require.NoError(t, err)
 
 	// Verify that PluginState was populated
-	state, err := readPrecisePluginState(scorer.pluginState, request.RequestId)
+	state, err := readPrecisePluginState(scorer.pluginState, request.RequestID)
 	require.NoError(t, err)
 	require.NotNil(t, state)
-	assert.NotEmpty(t, state.blockKeys, "block keys should be populated after PrepareRequestData")
+	assert.NotEmpty(t, state.blockKeys, "block keys should be populated after Produce")
 }
 
 // TestScoreReusesPluginState verifies that Score() picks up the pre-computed
-// scores from PrepareRequestData via PluginState.
+// scores from Produce via PluginState.
 func TestScoreReusesPluginState(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	scorer := newTestScorer(t)
@@ -728,7 +728,7 @@ func TestScoreReusesPluginState(t *testing.T) {
 	}
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-reuse",
+		RequestID:   "test-reuse",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -737,8 +737,8 @@ func TestScoreReusesPluginState(t *testing.T) {
 		},
 	}
 
-	// Call PrepareRequestData first (as would happen in a real flow)
-	err = scorer.PrepareRequestData(ctx, request, endpoints)
+	// Call Produce first (as would happen in a real flow)
+	err = scorer.Produce(ctx, request, endpoints)
 	require.NoError(t, err)
 
 	// Now call Score - it should reuse the state
@@ -781,7 +781,7 @@ func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 	}
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-speculative",
+		RequestID:   "test-speculative",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -790,8 +790,8 @@ func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 		},
 	}
 
-	// 1. Call PrepareRequestData to populate PluginState
-	err := scorer.PrepareRequestData(ctx, request, endpoints)
+	// 1. Call Produce to populate PluginState
+	err := scorer.Produce(ctx, request, endpoints)
 	require.NoError(t, err)
 
 	// 2. Simulate scheduling result: selected pod-a as primary target
@@ -831,7 +831,7 @@ func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 	assert.True(t, found, "Expected to find speculative entry for 10.0.0.1:8080")
 
 	// 5. Verify speculative entries appear in the TTL cache
-	item := scorer.speculativeCache.Get(request.RequestId)
+	item := scorer.speculativeCache.Get(request.RequestID)
 	require.NotNil(t, item, "Speculative entry should be in TTL cache")
 	assert.Equal(t, len(blockKeys), len(item.Value().blockKeys))
 }
@@ -881,7 +881,7 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 	}
 
 	request := &scheduling.InferenceRequest{
-		RequestId:   "test-ttl-evict",
+		RequestID:   "test-ttl-evict",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			Completions: &fwkrh.CompletionsRequest{
@@ -890,8 +890,8 @@ func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 		},
 	}
 
-	// 1. PrepareRequestData + PreRequest
-	err = scorer.PrepareRequestData(ctx, request, endpoints)
+	// 1. Produce + PreRequest
+	err = scorer.Produce(ctx, request, endpoints)
 	require.NoError(t, err)
 
 	schedulingResult := &scheduling.SchedulingResult{
