@@ -433,7 +433,7 @@ image-push-%: check-container-tool ## Push container image to registry using $(C
 .PHONY: image-pull
 image-pull: check-container-tool ## Pull all related images using $(CONTAINER_RUNTIME)
 	@printf "\033[33;1m==== Pulling Container images ====\033[0m\n"
-	./scripts/pull_images.sh
+	TARGETARCH=$(TARGETARCH) ./scripts/pull_images.sh
 
 ##@ Container Run
 
