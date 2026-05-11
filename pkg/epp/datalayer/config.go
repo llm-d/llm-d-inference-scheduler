@@ -54,6 +54,9 @@ func ResolveSource(handle fwkplugin.Handle, ref string) (fwkdl.DataSource, error
 func assertAll[T fwkplugin.Plugin](plugins []fwkplugin.Plugin, variant string) ([]T, error) {
 	out := make([]T, 0, len(plugins))
 	for _, p := range plugins {
+		if p == nil {
+			return nil, fmt.Errorf("nil plugin in %s", variant)
+		}
 		e, ok := p.(T)
 		if !ok {
 			return nil, fmt.Errorf("plugin %s is not a %s", p.TypedName(), variant)

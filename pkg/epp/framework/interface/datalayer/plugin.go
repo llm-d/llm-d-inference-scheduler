@@ -37,6 +37,7 @@ type PollingDataSource interface {
 	DataSource
 	// Poll fetches data for an endpoint and returns it.
 	// The Runtime handles calling extractors with the returned data.
+	// TODO: make PollingDataSource generic on T to drop this `any`.
 	Poll(ctx context.Context, ep Endpoint) (any, error)
 }
 
@@ -48,7 +49,6 @@ type Extractor[T any] interface {
 }
 
 // PollingInput pairs a poll result with the endpoint it belongs to.
-// TODO: parametrize PollingDataSource.Poll over T to drop this `any`.
 type PollingInput struct {
 	Data     any
 	Endpoint Endpoint

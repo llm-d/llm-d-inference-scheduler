@@ -22,9 +22,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	extractormocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/mocks"
+	sourcemocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/notifications"
 )
 
@@ -172,4 +175,50 @@ func TestConfigure_DedupByExtractorType(t *testing.T) {
 	exts := r.endpoint.ExtractorsFor("ep-src")
 	require.Len(t, exts, 1, "code registration should be deduped; only config extractor present")
 	assert.Equal(t, "config-ext", exts[0].TypedName().Name)
+}
+
+func TestConfigure_CrossVariantSourceTypeCollisionRejected(t *testing.T) {
+	const collidingType = "colliding-source-type"
+	gvk := schema.GroupVersionKind{Group: "test.io", Version: "v1", Kind: "Probe"}
+
+	polling := func() fwkdl.DataSource {
+		return sourcemocks.NewDataSource(fwkplugin.TypedName{Type: collidingType, Name: "polling-src"})
+	}
+	notification := func() fwkdl.DataSource {
+		return sourcemocks.NewNotificationSource(collidingType, "notif-src", gvk)
+	}
+	endpoint := func() fwkdl.DataSource {
+		return notifications.NewEndpointDataSource(collidingType, "endpoint-src")
+	}
+
+	cases := []struct {
+		name    string
+		sources []fwkdl.DataSource
+	}{
+		{"polling+endpoint", []fwkdl.DataSource{polling(), endpoint()}},
+		{"polling+notification", []fwkdl.DataSource{polling(), notification()}},
+		{"notification+endpoint", []fwkdl.DataSource{notification(), endpoint()}},
+		{"all three variants", []fwkdl.DataSource{polling(), notification(), endpoint()}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRuntime(0)
+			logger := newTestLogger(t)
+
+			require.NoError(t, r.Register(fwkdl.PendingRegistration{
+				Owner:      fwkplugin.TypedName{Type: "test-plugin", Name: "test"},
+				SourceType: collidingType,
+				Extractor:  extractormocks.NewEndpointExtractor("ext"),
+			}))
+
+			srcCfgs := make([]DataSourceConfig, len(tc.sources))
+			for i, s := range tc.sources {
+				srcCfgs[i] = DataSourceConfig{Plugin: s}
+			}
+
+			err := r.Configure(&Config{Sources: srcCfgs}, false, "", logger)
+			require.ErrorIs(t, err, ErrSourceTypeCollision)
+		})
+	}
 }

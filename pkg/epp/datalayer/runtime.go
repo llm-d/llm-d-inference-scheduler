@@ -32,6 +32,8 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
+var ErrSourceTypeCollision = errors.New("source type registered across variants")
+
 // variantLookup pairs a sourceVariant with its FindByType adapter; r.variants
 // (built in NewRuntime) is the single source of truth for variant iteration.
 type variantLookup struct {
@@ -132,6 +134,9 @@ func (r *Runtime) Configure(cfg *Config, enableNewMetrics bool, disallowedExtrac
 		}
 	}
 
+	// TODO: exhaustively validate cross-variant SourceType uniqueness here;
+	// today the check only fires when a pending extractor references the
+	// colliding type (via resolvePending -> findSourceByType).
 	for _, pending := range r.pendingRegistrations {
 		if err := r.resolvePending(pending, disallowedExtractorType, logger); err != nil {
 			return err
@@ -289,8 +294,8 @@ func (r *Runtime) findSourceByType(sourceType string, gvkFilter *schema.GroupVer
 			continue
 		}
 		if matchedSrc != nil {
-			return "", nil, fmt.Errorf("source type %q is registered across variants: %s (%s) and %s (%s)",
-				sourceType, matchedVariant, matchedName, l.variant, name)
+			return "", nil, fmt.Errorf("%w: %q in %s (%s) and %s (%s)",
+				ErrSourceTypeCollision, sourceType, matchedVariant, matchedName, l.variant, name)
 		}
 		matchedVariant, matchedName, matchedSrc = l.variant, name, src
 	}
