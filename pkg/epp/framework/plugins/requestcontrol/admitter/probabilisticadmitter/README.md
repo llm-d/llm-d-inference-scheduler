@@ -67,11 +67,8 @@ apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: probabilistic-admitter
-  name: probabilistic-admitter
-- type: random-picker
-  name: random-picker
+- type: random-picker  # feel free to plug in other scorers/pickers here
 - type: utilization-detector
-  name: utilization-detector
   parameters:
     queueDepthThreshold: 999999999
     kvCacheUtilThreshold: 1.0
