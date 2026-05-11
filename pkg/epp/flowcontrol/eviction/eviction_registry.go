@@ -40,56 +40,47 @@ type evictionEntry struct {
 //
 // All methods are goroutine-safe.
 type EvictionRegistry struct {
-	mu      sync.RWMutex
-	entries map[string]*evictionEntry // requestID → eviction entry
+	entries sync.Map // requestID (string) → *evictionEntry
 }
 
 // NewEvictionRegistry creates a new EvictionRegistry.
 func NewEvictionRegistry() *EvictionRegistry {
-	return &EvictionRegistry{
-		entries: make(map[string]*evictionEntry),
-	}
+	return &EvictionRegistry{}
 }
 
 // Register stores an eviction channel for the given request ID.
 func (r *EvictionRegistry) Register(requestID string, ch chan struct{}) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.entries[requestID] = &evictionEntry{ch: ch}
+	r.entries.Store(requestID, &evictionEntry{ch: ch})
 }
 
 // Get returns the eviction channel for the given request ID, or nil if not found.
 func (r *EvictionRegistry) Get(requestID string) chan struct{} {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if e := r.entries[requestID]; e != nil {
-		return e.ch
+	v, ok := r.entries.Load(requestID)
+	if !ok {
+		return nil
 	}
-	return nil
+	return v.(*evictionEntry).ch
 }
 
 // SetReason records the eviction reason for a request before the channel is closed.
 func (r *EvictionRegistry) SetReason(requestID string, reason errcommon.RemovalReason) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if e := r.entries[requestID]; e != nil {
-		e.reason = reason
+	v, ok := r.entries.Load(requestID)
+	if !ok {
+		return
 	}
+	v.(*evictionEntry).reason = reason
 }
 
 // GetReason returns the eviction reason for a request, or empty string if not found.
 func (r *EvictionRegistry) GetReason(requestID string) errcommon.RemovalReason {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if e := r.entries[requestID]; e != nil {
-		return e.reason
+	v, ok := r.entries.Load(requestID)
+	if !ok {
+		return ""
 	}
-	return ""
+	return v.(*evictionEntry).reason
 }
 
 // Deregister removes the eviction entry for the given request ID.
 func (r *EvictionRegistry) Deregister(requestID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.entries, requestID)
+	r.entries.Delete(requestID)
 }
