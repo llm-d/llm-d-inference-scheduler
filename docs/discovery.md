@@ -83,11 +83,12 @@ at compile time by the interface embedding). Register via:
 fwkplugin.Register(MyPluginType, MyFactory)
 ```
 
-Reference the plugin in the config:
+Reference the plugin in the config under the `dataLayer` section:
 
 ```yaml
-discovery:
-  pluginRef: my-plugin-name
+dataLayer:
+  discovery:
+    pluginRef: my-plugin-name
 ```
 
 ---
@@ -141,14 +142,17 @@ when those are installed. Owns its own `ctrl.Manager` internally.
 
 #### Parameters
 
-| Parameter        | Type   | Required | Default                          | Description |
-|------------------|--------|----------|----------------------------------|-------------|
-| `poolName`       | string | yes*     | from `--pool-name` flag          | InferencePool name |
-| `poolNamespace`  | string | no       | `"default"`                      | InferencePool namespace |
-| `poolGroup`      | string | no       | `"inference.networking.k8s.io"`  | API group |
-| `leaderElection` | bool   | no       | `false`                          | Enable leader election |
+| Parameter        | Type   | Required | Default                                                        | Description |
+|------------------|--------|----------|----------------------------------------------------------------|-------------|
+| `poolName`       | string | yes*     | from `--pool-name` flag                                        | InferencePool name |
+| `poolNamespace`  | string | no       | `--pool-namespace` flag, then `NAMESPACE` env var, then `"default"` | InferencePool namespace |
+| `poolGroup`      | string | no       | `"inference.networking.k8s.io"`                                | API group |
+| `leaderElection` | bool   | no       | `false`                                                        | Enable leader election |
 
-*When no `discovery` section is in the config, pool name comes from `--pool-name`.
+*When no `dataLayer.discovery` section is in the config, pool name comes from `--pool-name`.
+When `poolNamespace` is omitted from the plugin parameters, the runner injects the resolved
+namespace (from `--pool-namespace`, then `NAMESPACE` env var, then `"default"`) so that the
+plugin always watches the correct namespace.
 
 ### `static-selector-discovery`
 
@@ -169,7 +173,7 @@ parameters. No InferencePool CRD required. Owns its own `ctrl.Manager` internall
 
 ## Backward Compatibility
 
-When no `discovery` section is present in the EPP config, the EPP falls back to
+When no `dataLayer.discovery` section is present in the EPP config, the EPP falls back to
 Kubernetes-based discovery based on which CLI flags are provided:
 
 | CLI flags | Behavior |
@@ -179,8 +183,8 @@ Kubernetes-based discovery based on which CLI flags are provided:
 | Neither set | EPP fails to start: `--pool-name is required when no discovery plugin is configured` |
 
 Existing deployments that rely on the `--pool-name` flag continue to work without
-any config change. The `discovery` section is only needed when using a non-K8s
-plugin such as `file-discovery`.
+any config change. The `dataLayer.discovery` section is only needed when using a
+non-K8s plugin such as `file-discovery`.
 
 ---
 
@@ -188,7 +192,7 @@ plugin such as `file-discovery`.
 
 ### Using file-discovery
 
-Add the following plugin entry and `discovery` section to your `EndpointPickerConfig`.
+Add the following plugin entry and `dataLayer.discovery` section to your `EndpointPickerConfig`.
 This is the same for both the non-P/D and P/D cases:
 
 ```yaml
@@ -199,8 +203,9 @@ plugins:
       path: /etc/epp/endpoints.yaml
       watchFile: true
 
-discovery:
-  pluginRef: file-discovery
+dataLayer:
+  discovery:
+    pluginRef: file-discovery
 ```
 
 See the [Appendix](#appendix----envoy-config) for the Envoy config, which is
