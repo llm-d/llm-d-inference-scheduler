@@ -18,6 +18,7 @@ package eviction
 
 import (
 	"sync"
+	"sync/atomic"
 
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 )
@@ -25,7 +26,7 @@ import (
 // evictionEntry holds the eviction channel and an optional reason for the eviction.
 type evictionEntry struct {
 	ch     chan struct{}
-	reason errcommon.RequestDroppedReason
+	reason atomic.Value // stores errcommon.RequestDroppedReason
 }
 
 // EvictionRegistry is a shared registry that maps request IDs to eviction channels.
@@ -68,7 +69,7 @@ func (r *EvictionRegistry) SetReason(requestID string, reason errcommon.RequestD
 	if !ok {
 		return
 	}
-	v.(*evictionEntry).reason = reason
+	v.(*evictionEntry).reason.Store(reason)
 }
 
 // GetReason returns the eviction reason for a request, or empty string if not found.
@@ -77,7 +78,8 @@ func (r *EvictionRegistry) GetReason(requestID string) errcommon.RequestDroppedR
 	if !ok {
 		return ""
 	}
-	return v.(*evictionEntry).reason
+	reason, _ := v.(*evictionEntry).reason.Load().(errcommon.RequestDroppedReason)
+	return reason
 }
 
 // Deregister removes the eviction entry for the given request ID.
