@@ -53,37 +53,46 @@ llm-d.ai/igw-mode: inferencepool
 {{/*
 Return the monitoring provider name.
 
-Historically, provider.name gated both gateway resources and monitoring resources.
-monitoringProvider.name allows selecting a different provider for monitoring
-without affecting the gateway provider.
-
-If monitoringProvider.name is unset/empty, it falls back to provider.name for
-backwards compatibility.
+If inferenceExtension.monitoring.provider.name is unset/empty, default to
+prometheusoperator. For backwards compatibility, provider.name=gke still maps
+to gmp when no monitoring provider is explicitly set.
 */}}
-{{- define "llm-d-inference-scheduler.monitoringProviderName" -}}
-{{- $mp := .Values.monitoringProvider | default dict -}}
-{{- $mpName := (index $mp "name") | default "" -}}
+{{- define "llm-d-inference-scheduler.inferenceExtension.monitoring.provider.name" -}}
+{{- $monitoring := .Values.inferenceExtension.monitoring | default dict -}}
+{{- $mp := index $monitoring "provider" | default dict -}}
+{{- $mpName := index $mp "name" | default "" -}}
 {{- if and (kindIs "string" $mpName) (ne (trim $mpName) "") -}}
 {{- $mpName -}}
+{{- else if eq (lower (.Values.provider.name | default "")) "gke" -}}
+gmp
 {{- else -}}
-{{- .Values.provider.name | default "none" -}}
+prometheusoperator
 {{- end -}}
 {{- end -}}
 
 {{/*
 Return the monitoring provider config object.
 
-When monitoringProvider.name is unset/empty, fall back to provider for
-backwards compatibility (so provider.gke.autopilot still works).
+When inferenceExtension.monitoring.provider.name is unset/empty, use defaults.
+For backwards compatibility, provider.gke.autopilot is still honored when
+provider.name=gke and no monitoring provider is explicitly set.
 */}}
-{{- define "llm-d-inference-scheduler.monitoringProvider" -}}
-{{- $mp := .Values.monitoringProvider | default dict -}}
-{{- $mpName := (index $mp "name") | default "" -}}
-{{- if and (kindIs "string" $mpName) (ne (trim $mpName) "") -}}
-{{- toYaml $mp -}}
+{{- define "llm-d-inference-scheduler.inferenceExtension.monitoring.provider" -}}
+{{- $monitoring := .Values.inferenceExtension.monitoring | default dict -}}
+{{- $mp := index $monitoring "provider" | default dict -}}
+{{- $mpName := include "llm-d-inference-scheduler.inferenceExtension.monitoring.provider.name" . -}}
+{{- $resolved := dict "name" $mpName -}}
+{{- if eq (lower $mpName) "gmp" -}}
+  {{- $gmp := index $mp "gmp" | default dict -}}
+  {{- $legacyGke := dict -}}
+  {{- if and (eq (lower (.Values.provider.name | default "")) "gke") .Values.provider.gke -}}
+    {{- $legacyGke = .Values.provider.gke -}}
+  {{- end -}}
+  {{- $_ := set $resolved "gmp" (mergeOverwrite (deepCopy $legacyGke) (deepCopy $gmp)) -}}
 {{- else -}}
-{{- toYaml (.Values.provider | default dict) -}}
+  {{- $_ := set $resolved "prometheusoperator" (index $mp "prometheusoperator" | default dict) -}}
 {{- end -}}
+{{- toYaml $resolved -}}
 {{- end -}}
 
 {{/*

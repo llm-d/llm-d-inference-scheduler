@@ -77,6 +77,14 @@ inferenceExtension:
   # Monitoring configuration for EPP
   monitoring:
     interval: "10s"
+    # Monitoring provider selection.
+    # Options: ["gmp", "prometheusoperator"].
+    # If not set, defaults to "prometheusoperator". For backwards compatibility,
+    # provider.name=gke still maps to "gmp" when this field is unset.
+    provider:
+      name: ""
+      gmp:
+        autopilot: false
     # Prometheus ServiceMonitor will be created when enabled for EPP metrics collection
     prometheus:
       enabled: false
@@ -119,15 +127,10 @@ inferencePool:
   #   matchLabels:
   #     app: vllm-qwen3-32b
 
+# Gateway provider selection.
 # Options: ["gke", "istio", "none"]
 provider:
   name: none
-
-  # GKE-specific configuration.
-  # This block is only used if name is "gke".
-  gke:
-    # Set to true if the cluster is an Autopilot cluster.
-    autopilot: false
 
   # Istio-specific configuration.
   # This block is only used if name is "istio".
@@ -140,23 +143,6 @@ provider:
         # connectionPool:
         #   http:
         #     maxRequestsPerConnection: 256000
-
-# Monitoring provider selection.
-#
-# Historically, `provider.name` was also used to customize monitoring resources.
-# This is not always desired because gateway and monitoring can be offered by
-# different providers (e.g., GKE gateway + OSS Prometheus, or Istio + GKE Managed
-# Prometheus).
-#
-# If `monitoringProvider.name` is empty, charts fall back to `provider.name` for
-# backwards compatibility.
-#
-# Options: ["gke", "none"] (currently only gates the choice between GMP
-# PodMonitoring on GKE vs. Prometheus Operator ServiceMonitor elsewhere).
-monitoringProvider:
-  name: ""
-  gke:
-    autopilot: false
 
 # experimentalHttpRoute section is used to deploy httproute as part of the epp helm chart.
 # this section is temporary and should be extracted to a separate chart.
