@@ -1,20 +1,14 @@
-//go:build embedded_tokenizers
-
 package preciseprefixcache
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
+	"context"
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
-	preprocessing "github.com/llm-d/llm-d-kv-cache/pkg/preprocessing/chat_completions"
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization"
 	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,910 +22,234 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
-func TestPrefixCacheTracking_Score(t *testing.T) {
-	d, err := os.Getwd()
-	require.NoError(t, err)
-	modelDir := filepath.Join(d, "testdata")
-	localTokenizerConfig := tokenization.LocalTokenizerConfig{
-		ModelTokenizerMap: map[string]string{
-			"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-		},
-	}
-
-	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
-		"he found himself transformed in his bed into a horrible vermin. " +
-		"He lay on his armour-like back, and if he lifted his head a little he could see his brown belly, " +
-		"slightly domed and divided by arches into stiff sections."
-
-	testcases := []struct {
-		name                string
-		endpoints           []scheduling.Endpoint
-		request             *scheduling.InferenceRequest
-		kvBlockData         func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry
-		wantScoresByAddress map[string]float64
-	}{
-		{
-			name: "nil request",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-			},
-			wantScoresByAddress: map[string]float64{}, // empty map
-		},
-		{
-			name: "empty request body",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-			},
-			request: &scheduling.InferenceRequest{
-				RequestID:   "test-request",
-				TargetModel: "test-model",
-				Body:        nil,
-			},
-			wantScoresByAddress: map[string]float64{}, // empty map
-		},
-		{
-			name: "longest prefix scorer (default scorer)",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 0,
-					},
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 1,
-					},
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 2,
-					},
-					nil,
-				),
-			},
-			request: &scheduling.InferenceRequest{
-				RequestID:   "test-request",
-				TargetModel: "test-model",
-				Body: &fwkrh.InferenceRequestBody{
-					Completions: &fwkrh.CompletionsRequest{
-						Prompt: fwkrh.Prompt{Raw: prompt},
-					},
-				},
-			},
-			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
-				require.NotNil(t, req.Completions, "req expected to use Completions API")
-				prompt := req.Completions.Prompt.Raw
-
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
-
-				// use the actual tokenizer on the test prompt
-				tokens, _, err := testTokenizer.Render(prompt)
-				require.NoError(t, err)
-
-				// compute chunk hashes using the default block size
-				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
-
-				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
-
-				// populate kvblock.Index to test longest prefix matching:
-				// - chunk0 (first chunk): all endpoints have it (common prefix start)
-				// - chunk1: pod-a and pod-b have it (pod-c drops off after chunk0)
-				// - chunk2: only pod-a has it (pod-b drops off after chunk1)
-				// LongestPrefixScorer uses intersection, so:
-				//   pod-a: 3 chunks (0,1,2) -> score 3
-				//   pod-b: 2 chunks (0,1) -> score 2
-				//   pod-c: 1 chunk (0) -> score 1
-				// Normalized: (3-1)/(3-1) = 1.0, (2-1)/(3-1) = 0.5, (1-1)/(3-1) = 0.0
-
-				return map[kvblock.BlockHash][]kvblock.PodEntry{
-					chunkKeys[0]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"},
-						{PodIdentifier: "10.0.0.3:8080"},
-					},
-					chunkKeys[1]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"},
-					},
-					chunkKeys[2]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-					},
-				}
-			},
-			wantScoresByAddress: map[string]float64{
-				"10.0.0.1:8080": 1.0, // 3 chunks -> (3-1)/(3-1) = 1.0
-				"10.0.0.2:8080": 0.5, // 2 chunks -> (2-1)/(3-1) = 0.5
-				"10.0.0.3:8080": 0.0, // 1 chunk -> (1-1)/(3-1) = 0.0
-			},
-		},
-		{
-			name: "chat completions request",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 0,
-					},
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 1,
-					},
-					nil,
-				),
-			},
-			request: &scheduling.InferenceRequest{
-				RequestID:   "test-request",
-				TargetModel: "test-model",
-				Body: &fwkrh.InferenceRequestBody{
-					ChatCompletions: &fwkrh.ChatCompletionsRequest{
-						ChatTemplate: `{% for message in messages %}{{ message.role }}: {{ message.content }}
-		{% endfor %}`,
-						Messages: []fwkrh.Message{
-							{
-								Role:    "user",
-								Content: fwkrh.Content{Raw: "Hello, how are you?"},
-							},
-							{
-								Role:    "assistant",
-								Content: fwkrh.Content{Raw: "I'm doing well, thank you for asking!"},
-							},
-							{
-								Role:    "user",
-								Content: fwkrh.Content{Raw: "Can you help me with a question about prefix caching in LLM inference?"},
-							},
-						},
-					},
-				},
-			},
-			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
-				require.NotNil(t, req.ChatCompletions, "req expected to use ChatCompletions API")
-
-				// convert to preprocessing format
-				conversations := make([]preprocessing.Conversation, len(req.ChatCompletions.Messages))
-				for idx, msg := range req.ChatCompletions.Messages {
-					conversations[idx] = preprocessing.Conversation{
-						Role:    msg.Role,
-						Content: types.Content{Raw: msg.Content.Raw},
-					}
-				}
-
-				processor := preprocessing.NewChatTemplatingProcessor()
-				tokenizerCacheKey, err := processor.GetOrCreateTokenizerKey(t.Context(), &preprocessing.GetOrCreateTokenizerKeyRequest{
-					IsLocal: true,
-					Model:   "testdata/" + model,
-				})
-				require.NoError(t, err)
-
-				// render the chat template and tokenize
-				renderReq := &preprocessing.RenderChatRequest{
-					Key:          tokenizerCacheKey,
-					Conversation: conversations,
-					ChatTemplate: req.ChatCompletions.ChatTemplate,
-				}
-				tokens, _, err := processor.RenderChat(t.Context(), renderReq)
-				require.NoError(t, err)
-
-				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
-
-				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
-
-				// pod-a has both chunks, pod-b has only the first
-				return map[kvblock.BlockHash][]kvblock.PodEntry{
-					chunkKeys[0]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"},
-					},
-					chunkKeys[1]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-					},
-				}
-			},
-			wantScoresByAddress: map[string]float64{
-				"10.0.0.1:8080": 1.0, // 2 chunks -> (2-1)/(2-1) = 1.0
-				"10.0.0.2:8080": 0.0, // 1 chunk -> (1-1)/(2-1) = 0.0
-			},
-		},
-		{
-			name: "partial prefix",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 0,
-					},
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 1,
-					},
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 2,
-					},
-					nil,
-				),
-			},
-			request: &scheduling.InferenceRequest{
-				RequestID:   "test-request",
-				TargetModel: "test-model",
-				Body: &fwkrh.InferenceRequestBody{
-					Completions: &fwkrh.CompletionsRequest{
-						Prompt: fwkrh.Prompt{Raw: prompt},
-					},
-				},
-			},
-			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
-				require.NotNil(t, req.Completions, "req expected to use Completions API")
-
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
-
-				tokens, _, err := testTokenizer.Render(req.Completions.Prompt.Raw)
-				require.NoError(t, err)
-
-				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
-
-				require.GreaterOrEqual(t, len(chunkKeys), 3, "Need at least 3 chunks for test")
-
-				// Test partial prefix cache scenario:
-				// - chunk0: all endpoints (common prefix start)
-				// - chunk1: only pod-a (creates a gap for pod-b and pod-c)
-				// - chunk2: pod-a and pod-b (pod-b has this but missing chunk1)
-				//
-				// Expected behavior (prefix matching stops at gaps):
-				//   pod-a: has chunks 0,1,2 contiguously -> score 3
-				//   pod-b: has chunks 0,2 (missing 1) -> prefix stops at chunk0 -> score 1
-				//   pod-c: has only chunk 0 -> score 1
-				return map[kvblock.BlockHash][]kvblock.PodEntry{
-					chunkKeys[0]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"},
-						{PodIdentifier: "10.0.0.3:8080"},
-					},
-					chunkKeys[1]: {
-						{PodIdentifier: "10.0.0.1:8080"}, // only pod-a has chunk1
-					},
-					chunkKeys[2]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"}, // pod-b has chunk2 but missing chunk1
-					},
-				}
-			},
-			wantScoresByAddress: map[string]float64{
-				// pod-a: 3 chunks contiguously -> (3-1)/(3-1) = 1.0
-				// pod-b: prefix breaks at chunk1 (has 0,2 but not 1) -> only 1 chunk counted -> (1-1)/(3-1) = 0.0
-				// pod-c: only chunk 0 -> (1-1)/(3-1) = 0.0
-				"10.0.0.1:8080": 1.0,
-				"10.0.0.2:8080": 0.0,
-				"10.0.0.3:8080": 0.0,
-			},
-		},
-		{
-			name: "single endpoint",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					&fwkdl.Metrics{
-						WaitingQueueSize: 0,
-					},
-					nil,
-				),
-			},
-			request: &scheduling.InferenceRequest{
-				RequestID:   "test-request",
-				TargetModel: "test-model",
-				Body: &fwkrh.InferenceRequestBody{
-					Completions: &fwkrh.CompletionsRequest{
-						Prompt: fwkrh.Prompt{Raw: prompt},
-					},
-				},
-			},
-			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
-				require.NotNil(t, req.Completions, "req expected to use Completions API")
-
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
-
-				tokens, _, err := testTokenizer.Render(req.Completions.Prompt.Raw)
-				require.NoError(t, err)
-
-				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
-
-				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
-
-				// Single endpoint has 2 chunks cached
-				return map[kvblock.BlockHash][]kvblock.PodEntry{
-					chunkKeys[0]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-					},
-					chunkKeys[1]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-					},
-				}
-			},
-			wantScoresByAddress: map[string]float64{
-				// with only one endpoint, minScore == maxScore, so normalization returns 1.0
-				"10.0.0.1:8080": 1.0,
-			},
-		},
-		{
-			name: "no cache hits (empty index)",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-			},
-			request: &scheduling.InferenceRequest{
-				RequestID:   "test-request",
-				TargetModel: "test-model",
-				Body: &fwkrh.InferenceRequestBody{
-					Completions: &fwkrh.CompletionsRequest{
-						Prompt: fwkrh.Prompt{Raw: "This prompt has never been cached before on any endpoint."},
-					},
-				},
-			},
-			kvBlockData: nil, // no cached data
-			wantScoresByAddress: map[string]float64{
-				// when no endpoints have any cache hits, all should get equal scores (0.0)
-				"10.0.0.1:8080": 0.0,
-				"10.0.0.2:8080": 0.0,
-				"10.0.0.3:8080": 0.0,
-			},
-		},
-		{
-			name: "all endpoints have equal prefix length",
-			endpoints: []scheduling.Endpoint{
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-						Address:        "10.0.0.1",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-						Address:        "10.0.0.2",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-				scheduling.NewEndpoint(
-					&fwkdl.EndpointMetadata{
-						NamespacedName: k8stypes.NamespacedName{Name: "pod-c"},
-						Address:        "10.0.0.3",
-						Port:           "8080",
-					},
-					nil,
-					nil,
-				),
-			},
-			request: &scheduling.InferenceRequest{
-				RequestID:   "test-request",
-				TargetModel: "test-model",
-				Body: &fwkrh.InferenceRequestBody{
-					Completions: &fwkrh.CompletionsRequest{
-						Prompt: fwkrh.Prompt{Raw: prompt},
-					},
-				},
-			},
-			kvBlockData: func(req *fwkrh.InferenceRequestBody, model string) map[kvblock.BlockHash][]kvblock.PodEntry {
-				require.NotNil(t, req.Completions, "req expected to use Completions API")
-
-				testTokenizer, err := tokenization.NewCachedLocalTokenizer(t.Context(), model, localTokenizerConfig)
-				require.NoError(t, err)
-
-				tokens, _, err := testTokenizer.Render(req.Completions.Prompt.Raw)
-				require.NoError(t, err)
-
-				tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-				require.NoError(t, err)
-				chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, model)
-
-				require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks for test")
-
-				// all endpoints have the same 2 chunks cached
-				return map[kvblock.BlockHash][]kvblock.PodEntry{
-					chunkKeys[0]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"},
-						{PodIdentifier: "10.0.0.3:8080"},
-					},
-					chunkKeys[1]: {
-						{PodIdentifier: "10.0.0.1:8080"},
-						{PodIdentifier: "10.0.0.2:8080"},
-						{PodIdentifier: "10.0.0.3:8080"},
-					},
-				}
-			},
-			wantScoresByAddress: map[string]float64{
-				// when all endpoints have equal cache (minScore == maxScore), the implementation
-				// returns 1.0 for all endpoints to avoid division by zero
-				"10.0.0.1:8080": 1.0,
-				"10.0.0.2:8080": 1.0,
-				"10.0.0.3:8080": 1.0,
-			},
-		},
-	}
-
-	for _, tt := range testcases {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := utils.NewTestContext(t)
-
-			kvcacheConfig, err := kvcache.NewDefaultConfig()
-			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
-				ModelName:            "test-model",
-				WorkersCount:         1,
-				LocalTokenizerConfig: &localTokenizerConfig,
-			}
-			require.NoError(t, err)
-
-			prefixCacheScorer, err := New(ctx, PluginConfig{
-				IndexerConfig:  kvcacheConfig,
-				KVEventsConfig: kvevents.DefaultConfig(),
-			})
-			require.NoError(t, err)
-			require.NotNil(t, prefixCacheScorer)
-
-			// populate the kvblock.Index with test data
-			if tt.kvBlockData != nil && tt.request != nil && tt.request.Body != nil {
-				kvBlockIndex := prefixCacheScorer.kvCacheIndexer.KVBlockIndex()
-				blockData := tt.kvBlockData(tt.request.Body, tt.request.TargetModel)
-				for key, entries := range blockData {
-					err := kvBlockIndex.Add(ctx, []kvblock.BlockHash{kvblock.EmptyBlockHash}, []kvblock.BlockHash{key}, entries)
-					require.NoError(t, err)
-				}
-			}
-
-			got := prefixCacheScorer.Score(ctx, scheduling.NewCycleState(), tt.request, tt.endpoints)
-
-			gotByAddress := make(map[string]float64)
-			for endpoint, score := range got {
-				if m := endpoint.GetMetadata(); m != nil {
-					gotByAddress[fmt.Sprintf("%s:%s", m.Address, m.Port)] = score
-				}
-			}
-
-			if diff := cmp.Diff(tt.wantScoresByAddress, gotByAddress); diff != "" {
-				t.Errorf("Unexpected output (-want +got): %v", diff)
-			}
-		})
-	}
-}
-
-// newTestScorer creates a Scorer for testing.
-func newTestScorer(t *testing.T) *Scorer {
+// newSpeculativeFakeScorer builds a Scorer with an in-test fake kvCacheIndexer
+// (real in-memory kvblock.Index + fixed ComputeBlockKeys), avoiding the
+// embedded tokenizer path removed in llm-d/llm-d-kv-cache#473.
+func newSpeculativeFakeScorer(t *testing.T, speculativeTTL time.Duration) (*Scorer, []kvblock.BlockHash) {
 	t.Helper()
 	ctx := utils.NewTestContext(t)
 
-	d, err := os.Getwd()
+	blockKeys := []kvblock.BlockHash{
+		kvblock.BlockHash(111),
+		kvblock.BlockHash(222),
+		kvblock.BlockHash(333),
+	}
+
+	index, err := kvblock.NewInMemoryIndex(kvblock.DefaultInMemoryIndexConfig())
 	require.NoError(t, err)
-	modelDir := filepath.Join(d, "testdata")
-	localTokenizerConfig := tokenization.LocalTokenizerConfig{
-		ModelTokenizerMap: map[string]string{
-			"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
+
+	mockIndexer := &mockKVCacheIndexer{
+		kvBlockIndex: index,
+		computeBlockKeysFunc: func(_ context.Context, _ *types.RenderChatRequest, _, _ string) ([]kvblock.BlockHash, error) {
+			return blockKeys, nil
 		},
 	}
 
-	kvcacheConfig, err := kvcache.NewDefaultConfig()
+	kvBlockScorer, err := kvcache.NewKVBlockScorer(kvcache.DefaultKVBlockScorerConfig())
 	require.NoError(t, err)
-	kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
-		ModelName:            "test-model",
-		WorkersCount:         1,
-		LocalTokenizerConfig: &localTokenizerConfig,
-	}
 
-	scorer, err := New(ctx, PluginConfig{
-		IndexerConfig:       kvcacheConfig,
-		KVEventsConfig:      kvevents.DefaultConfig(),
-		SpeculativeIndexing: true,
-		SpeculativeTTL:      "5s",
+	// Mirror production OnEviction so TTL expiry actually evicts from the index.
+	speculativeCache := ttlcache.New[string, *speculativeEntries](
+		ttlcache.WithTTL[string, *speculativeEntries](speculativeTTL),
+	)
+	speculativeCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
+		item *ttlcache.Item[string, *speculativeEntries],
+	) {
+		if reason != ttlcache.EvictionReasonExpired {
+			return
+		}
+		entries := item.Value()
+		for _, reqKey := range entries.blockKeys {
+			//nolint:errcheck // best-effort cleanup, mirrors production
+			index.Evict(context.Background(), reqKey, kvblock.RequestKey, entries.podEntries)
+		}
 	})
-	require.NoError(t, err)
-	require.NotNil(t, scorer)
-	return scorer
+
+	// DiscoverPods=false skips subscriber wiring so we don't need ZMQ here.
+	kvEventsConfig := kvevents.DefaultConfig()
+	kvEventsConfig.DiscoverPods = false
+
+	return &Scorer{
+		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType, Name: "test"},
+		kvCacheIndexer:     mockIndexer,
+		kvBlockScorer:      kvBlockScorer,
+		kvEventsConfig:     kvEventsConfig,
+		pluginState:        plugin.NewPluginState(ctx),
+		speculativeCache:   speculativeCache,
+		speculativeTTL:     speculativeTTL,
+		blockSizeTokens:    16,
+		speculativeEnabled: true,
+		subscriberCtx:      ctx,
+	}, blockKeys
 }
 
-// TestProduce_PopulatesPluginState verifies that Produce
-// stores block keys and scores in PluginState for later reuse by Score().
-func TestProduce_PopulatesPluginState(t *testing.T) {
-	ctx := utils.NewTestContext(t)
-	scorer := newTestScorer(t)
-
-	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
-		"he found himself transformed in his bed into a horrible vermin. " +
-		"He lay on his armour-like back, and if he lifted his head a little he could see his brown belly, " +
-		"slightly domed and divided by arches into stiff sections."
-
-	request := &scheduling.InferenceRequest{
-		RequestID:   "test-prepare-request",
+func speculativeRequest(id string) *scheduling.InferenceRequest {
+	return &scheduling.InferenceRequest{
+		RequestID:   id,
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
+			// Body must be non-nil; prompt content is ignored by the fake indexer.
 			Completions: &fwkrh.CompletionsRequest{
-				Prompt: fwkrh.Prompt{Raw: prompt},
+				Prompt: fwkrh.Prompt{Raw: "ignored-by-fake-indexer"},
 			},
 		},
 	}
+}
 
-	endpoints := []scheduling.Endpoint{
-		scheduling.NewEndpoint(
-			&fwkdl.EndpointMetadata{
-				NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-				Address:        "10.0.0.1",
-				Port:           "8080",
-			}, nil, nil),
+func testEndpoint(name, address string) scheduling.Endpoint {
+	return scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
+		NamespacedName: k8stypes.NamespacedName{Name: name},
+		Address:        address,
+		Port:           "8080",
+	}, nil, nil)
+}
+
+func defaultProfileResult(endpoints []scheduling.Endpoint) *scheduling.SchedulingResult {
+	return &scheduling.SchedulingResult{
+		PrimaryProfileName: "default",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"default": {TargetEndpoints: endpoints},
+		},
 	}
+}
+
+// TestProduce_PopulatesPluginState verifies Produce stores block keys in PluginState.
+func TestProduce_PopulatesPluginState(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	scorer, blockKeys := newSpeculativeFakeScorer(t, 5*time.Second)
+
+	request := speculativeRequest("test-produce")
+	endpoints := []scheduling.Endpoint{testEndpoint("pod-a", "10.0.0.1")}
 
 	err := scorer.Produce(ctx, request, endpoints)
 	require.NoError(t, err)
 
-	// Verify that PluginState was populated
-	state, err := readPrecisePluginState(scorer.pluginState, request.RequestID)
+	state, err := plugin.ReadPluginStateKey[*precisePluginState](
+		scorer.pluginState, request.RequestID, stateKey)
 	require.NoError(t, err)
 	require.NotNil(t, state)
-	assert.NotEmpty(t, state.blockKeys, "block keys should be populated after Produce")
+	assert.Equal(t, blockKeys, state.blockKeys)
 }
 
-// TestScoreReusesPluginState verifies that Score() picks up the pre-computed
-// scores from Produce via PluginState.
+// TestScoreReusesPluginState verifies Score reuses block keys persisted by Produce.
 func TestScoreReusesPluginState(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := newTestScorer(t)
+	scorer, blockKeys := newSpeculativeFakeScorer(t, 5*time.Second)
 
-	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
-		"he found himself transformed in his bed into a horrible vermin. " +
-		"He lay on his armour-like back, and if he lifted his head a little he could see his brown belly, " +
-		"slightly domed and divided by arches into stiff sections."
-
-	d, err := os.Getwd()
+	// Populate index: pod-a has all blocks, pod-b only the first.
+	index := scorer.kvCacheIndexer.KVBlockIndex()
+	err := index.Add(ctx, []kvblock.BlockHash{kvblock.EmptyBlockHash},
+		[]kvblock.BlockHash{blockKeys[0]}, []kvblock.PodEntry{
+			{PodIdentifier: "10.0.0.1:8080"},
+			{PodIdentifier: "10.0.0.2:8080"},
+		})
 	require.NoError(t, err)
-	modelDir := filepath.Join(d, "testdata")
-	localTokenizerConfig := tokenization.LocalTokenizerConfig{
-		ModelTokenizerMap: map[string]string{
-			"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-		},
+	for _, k := range blockKeys[1:] {
+		err := index.Add(ctx, []kvblock.BlockHash{kvblock.EmptyBlockHash},
+			[]kvblock.BlockHash{k}, []kvblock.PodEntry{{PodIdentifier: "10.0.0.1:8080"}})
+		require.NoError(t, err)
 	}
-	testTokenizer, err := tokenization.NewCachedLocalTokenizer(ctx, "test-model", localTokenizerConfig)
-	require.NoError(t, err)
-
-	tokens, _, err := testTokenizer.Render(prompt)
-	require.NoError(t, err)
-	tokenProcessor, err := kvblock.NewChunkedTokenDatabase(kvblock.DefaultTokenProcessorConfig())
-	require.NoError(t, err)
-	chunkKeys := tokenProcessor.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, "test-model")
-	require.GreaterOrEqual(t, len(chunkKeys), 2, "Need at least 2 chunks")
-
-	// Populate index: pod-a has 2 chunks, pod-b has 1
-	kvBlockIndex := scorer.kvCacheIndexer.KVBlockIndex()
-	err = kvBlockIndex.Add(ctx, []kvblock.BlockHash{kvblock.EmptyBlockHash}, []kvblock.BlockHash{chunkKeys[0]}, []kvblock.PodEntry{
-		{PodIdentifier: "10.0.0.1:8080"},
-		{PodIdentifier: "10.0.0.2:8080"},
-	})
-	require.NoError(t, err)
-	err = kvBlockIndex.Add(ctx, []kvblock.BlockHash{kvblock.EmptyBlockHash}, []kvblock.BlockHash{chunkKeys[1]}, []kvblock.PodEntry{
-		{PodIdentifier: "10.0.0.1:8080"},
-	})
-	require.NoError(t, err)
 
 	endpoints := []scheduling.Endpoint{
-		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-			Address:        "10.0.0.1",
-			Port:           "8080",
-		}, nil, nil),
-		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-			Address:        "10.0.0.2",
-			Port:           "8080",
-		}, nil, nil),
+		testEndpoint("pod-a", "10.0.0.1"),
+		testEndpoint("pod-b", "10.0.0.2"),
 	}
 
-	request := &scheduling.InferenceRequest{
-		RequestID:   "test-reuse",
-		TargetModel: "test-model",
-		Body: &fwkrh.InferenceRequestBody{
-			Completions: &fwkrh.CompletionsRequest{
-				Prompt: fwkrh.Prompt{Raw: prompt},
-			},
-		},
-	}
+	request := speculativeRequest("test-reuse")
 
-	// Call Produce first (as would happen in a real flow)
 	err = scorer.Produce(ctx, request, endpoints)
 	require.NoError(t, err)
 
-	// Now call Score - it should reuse the state
+	// pod-a covers all 3 blocks (score 1.0); pod-b covers only the first (score 0.0).
 	scores := scorer.Score(ctx, scheduling.NewCycleState(), request, endpoints)
-	require.NotEmpty(t, scores)
+	require.Len(t, scores, 2)
 
-	gotByAddress := make(map[string]float64)
+	gotByAddress := map[string]float64{}
 	for ep, score := range scores {
 		m := ep.GetMetadata()
-		gotByAddress[fmt.Sprintf("%s:%s", m.Address, m.Port)] = score
+		gotByAddress[m.Address+":"+m.Port] = score
 	}
-
-	// pod-a has 2 chunks, pod-b has 1
 	assert.Equal(t, 1.0, gotByAddress["10.0.0.1:8080"])
 	assert.Equal(t, 0.0, gotByAddress["10.0.0.2:8080"])
 }
 
-// TestPreRequest_AddsSpeculativeEntries verifies that PreRequest adds speculative
-// entries to the index and that they are visible to subsequent lookups.
+// TestPreRequest_AddsSpeculativeEntries verifies PreRequest writes speculative
+// entries to both the index and the TTL cache.
 func TestPreRequest_AddsSpeculativeEntries(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-	scorer := newTestScorer(t)
+	scorer, blockKeys := newSpeculativeFakeScorer(t, 5*time.Second)
 
-	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
-		"he found himself transformed in his bed into a horrible vermin. " +
-		"He lay on his armour-like back, and if he lifted his head a little he could see his brown belly, " +
-		"slightly domed and divided by arches into stiff sections."
+	endpoints := []scheduling.Endpoint{testEndpoint("pod-a", "10.0.0.1")}
 
-	endpoints := []scheduling.Endpoint{
-		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-			Address:        "10.0.0.1",
-			Port:           "8080",
-		}, nil, nil),
-		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{Name: "pod-b"},
-			Address:        "10.0.0.2",
-			Port:           "8080",
-		}, nil, nil),
-	}
+	request := speculativeRequest("test-speculative")
 
-	request := &scheduling.InferenceRequest{
-		RequestID:   "test-speculative",
-		TargetModel: "test-model",
-		Body: &fwkrh.InferenceRequestBody{
-			Completions: &fwkrh.CompletionsRequest{
-				Prompt: fwkrh.Prompt{Raw: prompt},
-			},
-		},
-	}
+	// 1. Produce populates PluginState.
+	require.NoError(t, scorer.Produce(ctx, request, endpoints))
 
-	// 1. Call Produce to populate PluginState
-	err := scorer.Produce(ctx, request, endpoints)
-	require.NoError(t, err)
+	// 2. Simulate scheduling selecting pod-a.
+	scorer.PreRequest(ctx, request, defaultProfileResult(endpoints))
 
-	// 2. Simulate scheduling result: selected pod-a as primary target
-	schedulingResult := &scheduling.SchedulingResult{
-		PrimaryProfileName: "default",
-		ProfileResults: map[string]*scheduling.ProfileRunResult{
-			"default": {
-				TargetEndpoints: []scheduling.Endpoint{endpoints[0]},
-			},
-		},
-	}
-
-	// 3. Call PreRequest - should add speculative entries for pod-a
-	scorer.PreRequest(ctx, request, schedulingResult)
-
-	// 4. Verify speculative entries are in the index
-	// Compute block keys to look them up
-	blockKeys, err := scorer.computeBlockKeys(ctx, request)
-	require.NoError(t, err)
-	require.NotEmpty(t, blockKeys)
-
-	// Look up speculative entries
+	// 3. Speculative entry must exist in the index.
 	index := scorer.kvCacheIndexer.KVBlockIndex()
 	keyToPods, err := index.Lookup(ctx, blockKeys, sets.New[string]())
 	require.NoError(t, err)
 
-	// The first block key should have a speculative entry for pod-a
-	firstKeyPods, exists := keyToPods[blockKeys[0]]
-	require.True(t, exists, "First block key should have entries")
 	found := false
-	for _, pod := range firstKeyPods {
+	for _, pod := range keyToPods[blockKeys[0]] {
 		if pod.PodIdentifier == "10.0.0.1:8080" && pod.Speculative {
 			found = true
 			break
 		}
 	}
-	assert.True(t, found, "Expected to find speculative entry for 10.0.0.1:8080")
+	assert.True(t, found, "speculative entry for pod-a should be present")
 
-	// 5. Verify speculative entries appear in the TTL cache
+	// 4. TTL cache must track the entry for later eviction.
 	item := scorer.speculativeCache.Get(request.RequestID)
-	require.NotNil(t, item, "Speculative entry should be in TTL cache")
+	require.NotNil(t, item)
 	assert.Equal(t, len(blockKeys), len(item.Value().blockKeys))
 }
 
-// TestSpeculativeEntriesEvictOnTTL verifies that speculative entries are
-// evicted from the index when their TTL expires.
+// TestSpeculativeEntriesEvictOnTTL verifies speculative entries are evicted
+// from the index when their TTL expires.
 func TestSpeculativeEntriesEvictOnTTL(t *testing.T) {
 	ctx := utils.NewTestContext(t)
+	scorer, blockKeys := newSpeculativeFakeScorer(t, 200*time.Millisecond)
 
-	d, err := os.Getwd()
-	require.NoError(t, err)
-	modelDir := filepath.Join(d, "testdata")
-	localTokenizerConfig := tokenization.LocalTokenizerConfig{
-		ModelTokenizerMap: map[string]string{
-			"test-model": filepath.Join(modelDir, "test-model/tokenizer.json"),
-		},
-	}
+	endpoints := []scheduling.Endpoint{testEndpoint("pod-a", "10.0.0.1")}
 
-	kvcacheConfig, err := kvcache.NewDefaultConfig()
-	require.NoError(t, err)
-	kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
-		ModelName:            "test-model",
-		WorkersCount:         1,
-		LocalTokenizerConfig: &localTokenizerConfig,
-	}
+	request := speculativeRequest("test-ttl-evict")
+	require.NoError(t, scorer.Produce(ctx, request, endpoints))
 
-	// Create scorer with very short TTL for testing eviction
-	scorer, err := New(ctx, PluginConfig{
-		IndexerConfig:       kvcacheConfig,
-		KVEventsConfig:      kvevents.DefaultConfig(),
-		SpeculativeIndexing: true,
-		SpeculativeTTL:      "200ms",
-	})
-	require.NoError(t, err)
-
-	prompt := "One morning, when Gregor Samsa woke from troubled dreams, " +
-		"he found himself transformed in his bed into a horrible vermin. " +
-		"He lay on his armour-like back, and if he lifted his head a little he could see his brown belly, " +
-		"slightly domed and divided by arches into stiff sections."
-
-	endpoints := []scheduling.Endpoint{
-		scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
-			NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
-			Address:        "10.0.0.1",
-			Port:           "8080",
-		}, nil, nil),
-	}
-
-	request := &scheduling.InferenceRequest{
-		RequestID:   "test-ttl-evict",
-		TargetModel: "test-model",
-		Body: &fwkrh.InferenceRequestBody{
-			Completions: &fwkrh.CompletionsRequest{
-				Prompt: fwkrh.Prompt{Raw: prompt},
-			},
-		},
-	}
-
-	// 1. Produce + PreRequest
-	err = scorer.Produce(ctx, request, endpoints)
-	require.NoError(t, err)
-
-	schedulingResult := &scheduling.SchedulingResult{
-		PrimaryProfileName: "default",
-		ProfileResults: map[string]*scheduling.ProfileRunResult{
-			"default": {
-				TargetEndpoints: endpoints,
-			},
-		},
-	}
-	scorer.PreRequest(ctx, request, schedulingResult)
-
-	// 2. Verify speculative entries exist initially
-	blockKeys, err := scorer.computeBlockKeys(ctx, request)
-	require.NoError(t, err)
-	require.NotEmpty(t, blockKeys)
+	scorer.PreRequest(ctx, request, defaultProfileResult(endpoints))
 
 	index := scorer.kvCacheIndexer.KVBlockIndex()
 	keyToPods, err := index.Lookup(ctx, blockKeys[:1], sets.New[string]())
 	require.NoError(t, err)
-	initialCount := len(keyToPods[blockKeys[0]])
-	assert.Greater(t, initialCount, 0, "Should have speculative entries initially")
+	require.Greater(t, len(keyToPods[blockKeys[0]]), 0,
+		"index should hold the speculative entry before TTL expires")
 
-	// 3. Wait for TTL to expire and trigger eviction
+	// ttlcache v3 runs OnEviction in a separate goroutine, so the index
+	// Evict call lands asynchronously; poll with Eventually.
 	time.Sleep(500 * time.Millisecond)
 	scorer.speculativeCache.DeleteExpired()
 
-	// 4. Verify speculative entries were evicted
-	keyToPods, err = index.Lookup(ctx, blockKeys[:1], sets.New[string]())
-	require.NoError(t, err)
-
-	// After eviction, no speculative entries should remain for this pod
-	for _, pod := range keyToPods[blockKeys[0]] {
-		assert.False(t, pod.Speculative,
-			"Speculative entries should have been evicted after TTL")
-	}
+	require.Eventually(t, func() bool {
+		keyToPods, err := index.Lookup(ctx, blockKeys[:1], sets.New[string]())
+		if err != nil {
+			return false
+		}
+		for _, pod := range keyToPods[blockKeys[0]] {
+			if pod.Speculative {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 20*time.Millisecond,
+		"speculative entries should be evicted after TTL")
 }
 
-// TestKVBlockScorerIntegration verifies that KVBlockScorer.Score() computes
-// longest prefix match scores correctly (replacing the old computeScoresFromKeyToPods helper).
+// TestKVBlockScorerIntegration guards the kv-cache wiring used by Produce.
+// The scoring semantics themselves are owned upstream.
 func TestKVBlockScorerIntegration(t *testing.T) {
 	scorer, err := kvcache.NewKVBlockScorer(kvcache.DefaultKVBlockScorerConfig())
 	require.NoError(t, err)
@@ -973,17 +291,4 @@ func TestKVBlockScorerIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, scores)
 	})
-}
-
-// readPrecisePluginState is a test helper to read precisePluginState from PluginState.
-func readPrecisePluginState(ps *plugin.PluginState, requestID string) (*precisePluginState, error) {
-	raw, err := ps.Read(requestID, stateKey)
-	if err != nil {
-		return nil, err
-	}
-	state, ok := raw.(*precisePluginState)
-	if !ok {
-		return nil, fmt.Errorf("unexpected type: %T", raw)
-	}
-	return state, nil
 }
