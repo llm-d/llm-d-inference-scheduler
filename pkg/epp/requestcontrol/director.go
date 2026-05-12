@@ -52,7 +52,7 @@ const (
 	// TODO(https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2081):
 	// Make this timeout configurable per-plugin or globally via the Director configuration to support plugins with
 	// varying latency profiles.
-	prepareDataTimeout = 400 * time.Millisecond
+	dataProducerTimeout = 400 * time.Millisecond
 )
 
 // Datastore defines the interface required by the Director.
@@ -197,10 +197,10 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	snapshotOfCandidatePods := d.toSchedulerEndpoints(endpointCandidates)
-	// Prepare per request data by running PrepareData plugins.
-	err = d.runPrepareDataPlugins(ctx, reqCtx.SchedulingRequest, snapshotOfCandidatePods)
+	// Prepare per request data by running DataProducer plugins.
+	err = d.runDataProducerPlugins(ctx, reqCtx.SchedulingRequest, snapshotOfCandidatePods)
 	if err != nil {
-		// Don't fail the request if PrepareData plugins fail.
+		// Don't fail the request if DataProducer plugins fail.
 		logger.Error(err, "failed to prepare per request data")
 	}
 
@@ -449,12 +449,12 @@ func (d *Director) runPreRequestPlugins(ctx context.Context, request *fwksched.I
 	}
 }
 
-func (d *Director) runPrepareDataPlugins(ctx context.Context,
+func (d *Director) runDataProducerPlugins(ctx context.Context,
 	request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
-	if len(d.requestControlPlugins.prepareDataPlugins) == 0 {
+	if len(d.requestControlPlugins.dataProducerPlugins) == 0 {
 		return nil
 	}
-	return prepareDataPluginsWithTimeout(ctx, prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, request, endpoints)
+	return dataProducerPluginsWithTimeout(ctx, dataProducerTimeout, d.requestControlPlugins.dataProducerPlugins, request, endpoints)
 }
 
 func (d *Director) runAdmissionPlugins(ctx context.Context,
