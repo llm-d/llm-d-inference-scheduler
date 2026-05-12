@@ -40,6 +40,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/types"
 	fwkrequest "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/common/request"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metadata"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 )
 
@@ -223,7 +224,10 @@ func (fc *FlowController) EnqueueAndWait(
 	flowKey := req.FlowKey()
 	priority := strconv.Itoa(flowKey.Priority)
 	reqBytes := req.ByteSize()
-	sloClass := metrics.ClassifySLO(extractHeader(req, fwkrequest.TTFTSLOMsHeaderKey))
+	sloClass := extractHeader(req, metadata.ObjectiveKey)
+	if sloClass == "" {
+		sloClass = metrics.SLOClassNone
+	}
 	metrics.RecordFlowControlSLOIncomingRequest(sloClass, req.InferencePoolName())
 	metrics.IncFlowControlQueueSize(
 		flowKey.ID, priority,
