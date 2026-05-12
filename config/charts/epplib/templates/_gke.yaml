@@ -1,5 +1,6 @@
 {{- define "inference-extension.gke" -}}
-{{- if and .Values.provider (eq (lower .Values.provider.name) "gke") }}
+{{- $monitoringProvider := include "llm-d-inference-scheduler.monitoringProvider" . | fromYaml | default dict -}}
+{{- if and $monitoringProvider (eq (lower (index $monitoringProvider "name" | default "")) "gke") }}
 {{- if and .Values.inferenceExtension.monitoring.prometheus.enabled .Values.inferenceExtension.monitoring.prometheus.auth.enabled }}
 {{- $metricsReadSA := printf "%s-metrics-reader-sa" .Release.Name -}}
 {{- $metricsReadSecretName := printf "%s-metrics-reader-secret" .Release.Name -}}
@@ -8,7 +9,7 @@
 {{- $secretReadRoleName := printf "%s-metrics-reader-secret-read" .Release.Name -}}
 {{- $gmpNamespace := "gmp-system" -}}
 {{- $isAutopilot := false -}}
-{{- with .Values.provider.gke }}
+{{- with (index $monitoringProvider "gke") }}
   {{- $isAutopilot = .autopilot | default false -}}
 {{- end }}
 {{- if $isAutopilot -}}

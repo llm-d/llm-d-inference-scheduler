@@ -51,6 +51,42 @@ llm-d.ai/igw-mode: inferencepool
 {{- end -}}
 
 {{/*
+Return the monitoring provider name.
+
+Historically, provider.name gated both gateway resources and monitoring resources.
+monitoringProvider.name allows selecting a different provider for monitoring
+without affecting the gateway provider.
+
+If monitoringProvider.name is unset/empty, it falls back to provider.name for
+backwards compatibility.
+*/}}
+{{- define "llm-d-inference-scheduler.monitoringProviderName" -}}
+{{- $mp := .Values.monitoringProvider | default dict -}}
+{{- $mpName := (index $mp "name") | default "" -}}
+{{- if and (kindIs "string" $mpName) (ne (trim $mpName) "") -}}
+{{- $mpName -}}
+{{- else -}}
+{{- .Values.provider.name | default "none" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return the monitoring provider config object.
+
+When monitoringProvider.name is unset/empty, fall back to provider for
+backwards compatibility (so provider.gke.autopilot still works).
+*/}}
+{{- define "llm-d-inference-scheduler.monitoringProvider" -}}
+{{- $mp := .Values.monitoringProvider | default dict -}}
+{{- $mpName := (index $mp "name") | default "" -}}
+{{- if and (kindIs "string" $mpName) (ne (trim $mpName) "") -}}
+{{- toYaml $mp -}}
+{{- else -}}
+{{- toYaml (.Values.provider | default dict) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Return the standalone sidecar proxy type.
 */}}
 {{- define "llm-d-inference-scheduler.sidecarProxyType" -}}

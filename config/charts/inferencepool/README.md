@@ -185,9 +185,9 @@ inferenceExtension:
 
 **Note:** Prometheus monitoring requires the Prometheus Operator and ServiceMonitor CRD to be installed in the cluster.
 
-For GKE environments, you need to set `provider.name` to `gke` firstly. This will create the necessary `PodMonitoring` and RBAC resources for metrics collection.
+For GKE environments, if you are using **GKE Managed Prometheus** for metrics collection, set `monitoringProvider.name` to `gke`. This will create the necessary `PodMonitoring` and RBAC resources for metrics collection.
 
-If you are using a GKE Autopilot cluster, you also need to set `provider.gke.autopilot` to `true`.
+If you are using a GKE Autopilot cluster, you also need to set `monitoringProvider.gke.autopilot` to `true`.
 
 Then apply it with:
 
@@ -255,6 +255,8 @@ The following table list the configurable parameters of the chart.
 | `inferenceObjectives`                                      | A list of names and priorities to create optional InferenceObjectives from that will be assigned to the inference pool. This can be used when `InferenceObjectives` are known in advance and are mostly static. In these cases managing lifecycle through the helm chart ensures creation and cleanup, leaving users free to update, or add and delete more `InferenceObjectives` as desired. |
 | `provider.name`                                            | Name of the Inference Gateway implementation being used. Possible values: [`none`, `gke`, or `istio`]. Defaults to `none`.                                                                                                                                                                                                                                                                    |
 | `provider.gke.autopilot`                                   | Set to `true` if the cluster is a GKE Autopilot cluster. This is only used if `provider.name` is `gke`. Defaults to `false`.                                                                                                                                                                                                                                                                  |
+| `monitoringProvider.name`                                  | Monitoring provider used for EPP metrics resources. If empty, falls back to `provider.name` for backwards compatibility. Set to `gke` to use GKE Managed Prometheus (`PodMonitoring`); otherwise Prometheus Operator `ServiceMonitor` is used when enabled. Defaults to empty.                                                                                                            |
+| `monitoringProvider.gke.autopilot`                          | Set to `true` if the cluster is a GKE Autopilot cluster for monitoring. Only used when `monitoringProvider.name` is `gke` (or when it falls back to `provider.name=gke`). Defaults to `false`.                                                                                                                                                                                                |
 
 ### Provider Specific Configuration
 

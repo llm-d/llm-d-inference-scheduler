@@ -393,6 +393,15 @@ provider:
     # Set to true if the cluster is an Autopilot cluster.
     autopilot: false
 
+# Monitoring provider selection.
+#
+# If `monitoringProvider.name` is empty, charts fall back to `provider.name` for
+# backwards compatibility.
+monitoringProvider:
+  name: ""
+  gke:
+    autopilot: false
+
 # This is not used when you deploy standalone with inferenceExtension.endpointsServer.createInferencePool=false
 inferencePool:
   targetPorts:
