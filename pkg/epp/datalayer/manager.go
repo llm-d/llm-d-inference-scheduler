@@ -17,11 +17,13 @@ limitations under the License.
 package datalayer
 
 import (
+	"fmt"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
 // sourceHit identifies a matched source by its variant, registered name, and value.
@@ -123,14 +125,55 @@ func (m *variantSourceMap[T]) findFirst(matches func(fwkdl.DataSource) bool) sou
 	return found
 }
 
-// pollingManager owns the registered PollingDataSources.
-type pollingManager struct {
-	*variantSourceMap[fwkdl.PollingDataSource]
+// pollingDispatchers stores PollingDispatchers keyed by source name. Each
+// dispatcher owns its own extractors internally; the framework treats them
+// as opaque dispatch units.
+type pollingDispatchers struct {
+	mu sync.RWMutex
+	m  map[string]fwkdl.PollingDispatcher
 }
 
-func newPollingManager() *pollingManager {
-	return &pollingManager{variantSourceMap: newVariantSourceMap[fwkdl.PollingDataSource](variantPolling)}
+func newPollingDispatchers() *pollingDispatchers {
+	return &pollingDispatchers{m: make(map[string]fwkdl.PollingDispatcher)}
 }
+
+// Register installs disp under its TypedName.Name. Errors on duplicate name:
+// two plugins auto-creating same-named DefaultSources used to be last-write-
+// wins under variantSourceMap.Set; now the second one fails loudly so the
+// config error surfaces at startup instead of producing silently-shadowed
+// telemetry.
+func (p *pollingDispatchers) Register(disp fwkdl.PollingDispatcher) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	name := disp.TypedName().Name
+	if _, exists := p.m[name]; exists {
+		return fmt.Errorf("duplicate %s source name %q", variantPolling, name)
+	}
+	p.m[name] = disp
+	return nil
+}
+
+// Get returns the dispatcher registered under name, if any.
+func (p *pollingDispatchers) Get(name string) (fwkdl.PollingDispatcher, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	d, ok := p.m[name]
+	return d, ok
+}
+
+// Dispatchers returns a snapshot of all dispatchers.
+func (p *pollingDispatchers) Dispatchers() map[string]fwkdl.PollingDispatcher {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make(map[string]fwkdl.PollingDispatcher, len(p.m))
+	for k, v := range p.m {
+		out[k] = v
+	}
+	return out
+}
+
+func (p *pollingDispatchers) Count() int    { p.mu.RLock(); defer p.mu.RUnlock(); return len(p.m) }
+func (p *pollingDispatchers) IsEmpty() bool { return p.Count() == 0 }
 
 // notificationManager owns the registered NotificationSources.
 // GVK uniqueness is enforced per-Configure-call by a caller-owned gvk tracker
@@ -203,17 +246,17 @@ func newExtractorMap() *extractorMap {
 }
 
 // Set stores exts under srcName, overwriting any prior entry.
-func (e *extractorMap) Set(srcName string, exts []fwkdl.ExtractorBase) {
+func (e *extractorMap) Set(srcName string, exts []fwkplugin.Plugin) {
 	e.m.Store(srcName, exts)
 }
 
 // Get returns the extractors stored under srcName, if any.
-func (e *extractorMap) Get(srcName string) ([]fwkdl.ExtractorBase, bool) {
+func (e *extractorMap) Get(srcName string) ([]fwkplugin.Plugin, bool) {
 	raw, ok := e.m.Load(srcName)
 	if !ok {
 		return nil, false
 	}
-	return raw.([]fwkdl.ExtractorBase), true
+	return raw.([]fwkplugin.Plugin), true
 }
 
 // Count returns the number of stored entries.
@@ -227,16 +270,16 @@ func (e *extractorMap) Count() int {
 }
 
 // Range invokes f for every entry. f returning false stops iteration.
-func (e *extractorMap) Range(f func(name string, exts []fwkdl.ExtractorBase) bool) {
+func (e *extractorMap) Range(f func(name string, exts []fwkplugin.Plugin) bool) {
 	e.m.Range(func(k, raw any) bool {
-		return f(k.(string), raw.([]fwkdl.ExtractorBase))
+		return f(k.(string), raw.([]fwkplugin.Plugin))
 	})
 }
 
 // Append adds ext to srcName's extractor slice, deduping by extractor type so
 // code-registered extractors are a no-op when an equivalent type is already
 // wired via config.
-func (e *extractorMap) Append(srcName string, ext fwkdl.ExtractorBase) {
+func (e *extractorMap) Append(srcName string, ext fwkplugin.Plugin) {
 	existing, _ := e.Get(srcName)
 	extType := ext.TypedName().Type
 	for _, p := range existing {

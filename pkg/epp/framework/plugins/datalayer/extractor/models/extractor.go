@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
@@ -51,16 +50,14 @@ func (m ModelDataCollection) String() string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-// ModelResponse is the response from /v1/models API
+// ModelResponse is the response from /v1/models API.
+// Data is typed as ModelDataCollection (not []ModelData) so the Cloneable
+// methods are attached directly, removing the per-call ModelDataCollection
+// conversion the extractor would otherwise need.
 type ModelResponse struct {
-	Object string      `json:"object"`
-	Data   []ModelData `json:"data"`
+	Object string              `json:"object"`
+	Data   ModelDataCollection `json:"data"`
 }
-
-// ModelsResponseType is the type of models response
-var (
-	ModelsResponseType = reflect.TypeOf(ModelResponse{})
-)
 
 // ModelExtractor implements the models extraction.
 type ModelExtractor struct {
@@ -82,11 +79,6 @@ func (me *ModelExtractor) TypedName() fwkplugin.TypedName {
 	return me.typedName
 }
 
-// ExpectedInputType defines the type expected by ModelExtractor.
-func (me *ModelExtractor) ExpectedInputType() reflect.Type {
-	return ModelsResponseType
-}
-
 // ModelServerExtractorFactory is a factory function used to instantiate data layer's
 // models extractor plugins specified in a configuration.
 func ModelServerExtractorFactory(name string, _ json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
@@ -95,14 +87,10 @@ func ModelServerExtractorFactory(name string, _ json.RawMessage, _ fwkplugin.Han
 	return extractor, nil
 }
 
-// Extract transforms the data source output into a concrete attribute that
-// is stored on the given endpoint.
-func (me *ModelExtractor) Extract(_ context.Context, data any, ep fwkdl.Endpoint) error {
-	models, ok := data.(*ModelResponse)
-	if !ok {
-		return fmt.Errorf("unexpected input in Extract: %T", data)
-	}
-
-	ep.GetAttributes().Put(ModelsAttributeKey, ModelDataCollection(models.Data))
+// Extract transforms the typed models payload into endpoint attributes.
+// Payload is non-nil per the PollingDispatcher contract: a conforming
+// dispatcher short-circuits on nil poll results before invoking extractors.
+func (me *ModelExtractor) Extract(_ context.Context, in fwkdl.PollInput[*ModelResponse]) error {
+	in.Endpoint.GetAttributes().Put(ModelsAttributeKey, in.Payload.Data)
 	return nil
 }
