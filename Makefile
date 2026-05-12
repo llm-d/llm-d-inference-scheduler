@@ -257,17 +257,22 @@ test-unit-%: image-build-builder
 
 # Smoke test against llm-d-kv-cache main (or any ref via KVCACHE_UPSTREAM_REF).
 # Pins the dep in a temp worktree so the developer's go.mod is not mutated.
-# See issue #1056.
+# Auto-discovers every package that imports llm-d-kv-cache so new consumers
+# are covered without touching this target. See issue #1056.
 .PHONY: test-kvcache-upstream-smoke
-test-kvcache-upstream-smoke: ## Run preciseprefixcache tests against llm-d-kv-cache main
-	@ref="$${KVCACHE_UPSTREAM_REF:-main}"; \
-	wt=$$(mktemp -d) && trap "rm -rf $$wt" EXIT && \
-	tar --exclude=.git -C . -cf - . | tar -C $$wt -xf - && \
-	cd $$wt && \
-	go mod edit -replace github.com/llm-d/llm-d-kv-cache=github.com/llm-d/llm-d-kv-cache@$$ref && \
-	go mod tidy && \
-	go list -m github.com/llm-d/llm-d-kv-cache && \
-	go test -count=1 -timeout 10m ./pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache/...
+test-kvcache-upstream-smoke: ## Run all kv-cache-consuming tests against llm-d-kv-cache main
+	@set -e; \
+	ref="$${KVCACHE_UPSTREAM_REF:-main}"; \
+	wt=$$(mktemp -d -t kvcache-smoke.XXXXXX); trap "rm -rf $$wt" EXIT; \
+	tar --exclude=.git -C . -cf - . | tar -C $$wt -xf -; \
+	cd $$wt; \
+	go mod edit -replace github.com/llm-d/llm-d-kv-cache=github.com/llm-d/llm-d-kv-cache@$$ref; \
+	go mod tidy; \
+	go list -m github.com/llm-d/llm-d-kv-cache; \
+	pkgs=$$(go list -f '{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' ./... \
+	  | awk '/github.com\/llm-d\/llm-d-kv-cache/ {print $$1}'); \
+	echo "Testing packages:"; printf '  %s\n' $$pkgs; \
+	go test -count=1 -timeout 10m $$pkgs
 
 .PHONY: test-filter
 test-filter: image-build-builder ## Run filtered unit tests (usage: make test-filter PATTERN=TestName TYPE=epp)
