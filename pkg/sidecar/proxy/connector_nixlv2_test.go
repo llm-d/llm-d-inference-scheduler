@@ -195,14 +195,14 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(cachedTokensFromResponse(response)).To(BeNumerically("==", 7))
 	})
 
-	It("should keep decoder cached tokens when prefiller does not report cached tokens", func() {
+	It("should return zero cached tokens when prefiller does not report cached tokens", func() {
 		testInfo.prefillHandler.RawResponse = `{"kv_transfer_params":{"remote_block_ids":[1,2,3],"remote_engine_id":"5b5fb28f-3f30-4bdd-9a36-958d52459200","remote_host":"ahost","remote_port":4032},"usage":{"prompt_tokens":64,"completion_tokens":1,"total_tokens":65,"prompt_tokens_details":{}}}`
 		testInfo.decodeHandler.RawResponse = `{"id":"chatcmpl-test","object":"chat.completion","choices":[],"usage":{"prompt_tokens":64,"completion_tokens":1,"total_tokens":65,"prompt_tokens_details":{"cached_tokens":49}}}`
 		proxyBaseAddr := startProxy()
 
 		response := sendChatCompletionsRequest(proxyBaseAddr)
 
-		Expect(cachedTokensFromResponse(response)).To(BeNumerically("==", 49))
+		Expect(cachedTokensFromResponse(response)).To(BeNumerically("==", 0))
 	})
 
 	It("should overwrite decoder cached tokens when prefiller reports zero cached tokens", func() {
@@ -239,7 +239,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(responseBody).To(ContainSubstring("data: [DONE]"))
 	})
 
-	It("should keep decoder cached tokens in streamed usage when prefiller does not report cached tokens", func() {
+	It("should return zero cached tokens in streamed usage when prefiller does not report cached tokens", func() {
 		testInfo.prefillHandler.RawResponse = `{"kv_transfer_params":{"remote_block_ids":[1,2,3],"remote_engine_id":"5b5fb28f-3f30-4bdd-9a36-958d52459200","remote_host":"ahost","remote_port":4032},"usage":{"prompt_tokens":64,"completion_tokens":1,"total_tokens":65,"prompt_tokens_details":{}}}`
 		testInfo.decodeHandler.RawResponseType = eventStreamContentType
 		testInfo.decodeHandler.RawResponse = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"completion_tokens\":1,\"total_tokens\":65,\"prompt_tokens_details\":{\"cached_tokens\":49}}}\n\ndata: [DONE]\n"
@@ -247,7 +247,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 
 		responseBody := sendStreamingChatCompletionsRequest(proxyBaseAddr)
 
-		Expect(responseBody).To(ContainSubstring(`"cached_tokens":49`))
+		Expect(responseBody).To(ContainSubstring(`"cached_tokens":0`))
+		Expect(responseBody).ToNot(ContainSubstring(`"cached_tokens":49`))
 		Expect(responseBody).To(ContainSubstring("data: [DONE]"))
 	})
 

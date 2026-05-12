@@ -39,18 +39,19 @@ type cachedTokensUsageRewriter struct {
 // See: https://platform.openai.com/docs/guides/prompt-caching
 const promptTokensDetailsField = "prompt_tokens_details"
 
-func newCachedTokensResponseWriter(w http.ResponseWriter, cachedTokens int, enabled bool) http.ResponseWriter {
-	if !enabled {
-		// Prefill did not report cached_tokens, so keep the decoder response intact.
-		return w
-	}
+func newCachedTokensResponseWriter(w http.ResponseWriter, cachedTokens int) http.ResponseWriter {
+	writer, _ := newCachedTokensResponseWriterWithFinalize(w, cachedTokens)
+	return writer
+}
+
+func newCachedTokensResponseWriterWithFinalize(w http.ResponseWriter, cachedTokens int) (http.ResponseWriter, func() error) {
 	rewriter := &cachedTokensUsageRewriter{
 		header:       w.Header(),
 		cachedTokens: cachedTokens,
 	}
 	// httpsnoop preserves optional ResponseWriter interfaces such as
 	// http.Flusher, http.Hijacker, http.Pusher, and io.ReaderFrom.
-	return httpsnoop.Wrap(w, httpsnoop.Hooks{
+	writer := httpsnoop.Wrap(w, httpsnoop.Hooks{
 		WriteHeader: func(next httpsnoop.WriteHeaderFunc) httpsnoop.WriteHeaderFunc {
 			return func(statusCode int) {
 				rewriter.writeHeader(next, statusCode)
@@ -68,6 +69,9 @@ func newCachedTokensResponseWriter(w http.ResponseWriter, cachedTokens int, enab
 			}
 		},
 	})
+	return writer, func() error {
+		return rewriter.flushSSEBuffer(w.Write)
+	}
 }
 
 func (r *cachedTokensUsageRewriter) writeHeader(next httpsnoop.WriteHeaderFunc, statusCode int) {
