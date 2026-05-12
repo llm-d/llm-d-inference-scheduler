@@ -146,7 +146,7 @@ The same scorer instance serves both roles (Scorer and EndpointExtractor),
 no second factory is needed.
 
 > [!NOTE]
-> The `tokenizer` PrepareData plugin is the preferred source of tokenized
+> The `tokenizer` DataProducer plugin is the preferred source of tokenized
 > prompts; the scorer's internal tokenization (via
 > `indexerConfig.tokenizersPoolConfig`) is a fallback and is being phased
 > out. New configs should declare a `tokenizer` plugin and reference it in

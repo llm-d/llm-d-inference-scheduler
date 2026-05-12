@@ -140,12 +140,12 @@ func (p *Plugin) Produces() map[string]any {
 	return map[string]any{TokenizedPromptKey: fwkrh.TokenizedPrompt{}}
 }
 
-// PrepareRequestData tokenizes the request prompt and stores the result on
+// Produce tokenizes the request prompt and stores the result on
 // InferenceRequestBody.TokenizedPrompt (TokenIDs + MultiModalFeatures in flat shape).
 // Returns an error when tokenization fails; the caller (Director) decides the
 // policy (currently: log and continue). If the request already carries a
 // TokenizedPrompt, tokenization is skipped.
-func (p *Plugin) PrepareRequestData(ctx context.Context, request *scheduling.InferenceRequest, _ []scheduling.Endpoint) error {
+func (p *Plugin) Produce(ctx context.Context, request *scheduling.InferenceRequest, _ []scheduling.Endpoint) error {
 	tp, err := p.tokenize(ctx, request)
 	if err != nil {
 		return err

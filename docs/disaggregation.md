@@ -258,8 +258,6 @@ Below is a minimal `EndpointPickerConfig` for P/D disaggregation using custom la
 ```yaml
 apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
   # Prefill selection: match Pods with label role=prefill
   - type: label-selector-filter
@@ -314,8 +312,6 @@ Below is an `EndpointPickerConfig` for full E/P/D disaggregation using custom la
 ```yaml
 apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
   # Encoding selection: match Pods with label role=encode
   - type: label-selector-filter
@@ -416,15 +412,6 @@ The `prefix-based-pd-decider` plugin makes the disaggregation decision according
 
 - `nonCachedTokens`: Number of non-cached tokens that trigger disaggregation
   - If set to 0, disaggregation always occurs for all requests
-
-**Feature Gate Requirement**
-To activate this decider, ensure the following feature gate is enabled in your EndpointPickerConfig
-
-```yaml
-featureGates:
-- prepareDataPlugins
-```
-
 
 #### Always-Disagg PD Decider
 The `always-disagg-pd-decider` is a simpler alternative used mainly for testing or benchmarking.
