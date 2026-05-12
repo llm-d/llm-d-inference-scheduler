@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	srcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
 )
 
@@ -17,9 +17,9 @@ import (
 // without data races. Run under -race to catch regressions if the storage
 // switches to a primitive that requires explicit locking on reads.
 func TestVariantSourceMap_ConcurrentReadsRaceFree(t *testing.T) {
-	m := newVariantSourceMap[fwkdl.PollingDataSource](variantPolling)
+	m := newVariantSourceMap[fwkdl.NotificationSource](variantPolling)
 	for i := 0; i < 5; i++ {
-		m.Set(srcmocks.NewDataSource(fwkplugin.TypedName{Type: "polling", Name: fmt.Sprintf("src%d", i)}))
+		m.Set(srcmocks.NewNotificationSource("polling", fmt.Sprintf("src%d", i), schema.GroupVersionKind{Group: "g", Version: "v", Kind: "k"}))
 	}
 
 	const goroutines = 32
@@ -32,8 +32,8 @@ func TestVariantSourceMap_ConcurrentReadsRaceFree(t *testing.T) {
 			_ = m.Sources()
 			_ = m.Count()
 			_ = m.IsEmpty()
-			m.Range(func(string, fwkdl.PollingDataSource) bool { return true })
-			require.NoError(t, m.ForEach(func(string, fwkdl.PollingDataSource) error { return nil }))
+			m.Range(func(string, fwkdl.NotificationSource) bool { return true })
+			require.NoError(t, m.ForEach(func(string, fwkdl.NotificationSource) error { return nil }))
 			_ = m.findFirst(func(fwkdl.DataSource) bool { return false })
 		}(i)
 	}

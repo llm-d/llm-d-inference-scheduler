@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -746,36 +745,16 @@ func (m *mockSaturationDetector) Saturation(ctx context.Context, endpoints []fwk
 	return 0.5
 }
 
-func (m *mockSource) AddExtractor(_ fwkdl.Extractor) error {
-	return nil
-}
+// mockSource implements PollingDispatcher for loader integration tests. The
+// loader only inspects the source's TypedName and routes its extractors via
+// AppendExtractor; the dispatch path is never exercised in this package.
+func (m *mockSource) Dispatch(_ context.Context, _ fwkdl.Endpoint) error { return nil }
 
-func (m *mockSource) Collect(ctx context.Context, ep fwkdl.Endpoint) error {
-	return nil
-}
+func (m *mockSource) AppendExtractor(_ fwkplugin.Plugin) error { return nil }
 
-func (m *mockSource) Extractors() []string {
-	return []string{}
-}
-
-func (m *mockSource) OutputType() reflect.Type {
-	return fwkdl.NotificationEventType
-}
-
-func (m *mockSource) ExtractorType() reflect.Type {
-	return fwkdl.ExtractorType
-}
-
-// Mock Extractor
+// Mock Extractor. The loader treats it as a generic Plugin; no Extract method
+// is required because mockSource.AppendExtractor doesn't type-check.
 type mockExtractor struct{ mockPlugin }
-
-func (m *mockExtractor) ExpectedInputType() reflect.Type {
-	return reflect.TypeFor[string]()
-}
-
-func (m *mockExtractor) Extract(ctx context.Context, data any, ep fwkdl.Endpoint) error {
-	return nil
-}
 
 func registerTestPlugins(t *testing.T) {
 	t.Helper()

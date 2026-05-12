@@ -160,7 +160,7 @@ func TestConfigure_DedupByExtractorType(t *testing.T) {
 	cfg := &Config{
 		Sources: []DataSourceConfig{{
 			Plugin:     src,
-			Extractors: []fwkdl.ExtractorBase{extFromConfig},
+			Extractors: []fwkplugin.Plugin{extFromConfig},
 		}},
 	}
 
