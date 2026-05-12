@@ -112,7 +112,7 @@ func TestRequestEvictor_EvictN_ClosesEvictChannel(t *testing.T) {
 		t.Fatal("eviction channel should be closed after EvictN")
 	}
 
-	assert.Equal(t, errcommon.RequestErrorReasonEvicted, re.EvictionRegistry().GetReason("req-1"),
+	assert.Equal(t, errcommon.RequestDroppedReasonEvicted, re.EvictionRegistry().GetReason("req-1"),
 		"EvictN should store the removal reason in the registry")
 }
 

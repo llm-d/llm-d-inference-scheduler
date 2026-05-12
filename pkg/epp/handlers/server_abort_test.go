@@ -56,19 +56,19 @@ func TestUpdateStateAndSendIfNeeded_Evicted(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name               string
-		requestErrorReason errcommon.RequestErrorReason
-		wantHeader         bool
+		name                 string
+		requestDroppedReason errcommon.RequestDroppedReason
+		wantHeader           bool
 	}{
 		{
-			name:               "with eviction reason",
-			requestErrorReason: errcommon.RequestErrorReasonEvicted,
-			wantHeader:         true,
+			name:                 "with eviction reason",
+			requestDroppedReason: errcommon.RequestDroppedReasonEvicted,
+			wantHeader:           true,
 		},
 		{
-			name:               "without eviction reason",
-			requestErrorReason: "",
-			wantHeader:         false,
+			name:                 "without eviction reason",
+			requestDroppedReason: "",
+			wantHeader:           false,
 		},
 	}
 
@@ -79,8 +79,8 @@ func TestUpdateStateAndSendIfNeeded_Evicted(t *testing.T) {
 			logger := logr.Discard()
 
 			reqCtx := &RequestContext{
-				RequestState:       RequestEvicted,
-				RequestErrorReason: tt.requestErrorReason,
+				RequestState:         RequestEvicted,
+				RequestDroppedReason: tt.requestDroppedReason,
 			}
 
 			err := reqCtx.updateStateAndSendIfNeeded(srv, logger)
@@ -95,8 +95,8 @@ func TestUpdateStateAndSendIfNeeded_Evicted(t *testing.T) {
 			if tt.wantHeader {
 				require.NotNil(t, ir.Headers, "Should have HeaderMutation when eviction reason is set")
 				require.Len(t, ir.Headers.SetHeaders, 1)
-				assert.Equal(t, "x-llm-d-request-error-reason", ir.Headers.SetHeaders[0].Header.Key)
-				assert.Equal(t, []byte(tt.requestErrorReason), ir.Headers.SetHeaders[0].Header.RawValue)
+				assert.Equal(t, "x-llm-d-request-dropped-reason", ir.Headers.SetHeaders[0].Header.Key)
+				assert.Equal(t, []byte(tt.requestDroppedReason), ir.Headers.SetHeaders[0].Header.RawValue)
 			} else {
 				assert.Nil(t, ir.Headers, "Should not have HeaderMutation when eviction reason is empty")
 			}

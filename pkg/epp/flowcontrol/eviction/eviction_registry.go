@@ -25,7 +25,7 @@ import (
 // evictionEntry holds the eviction channel and an optional reason for the eviction.
 type evictionEntry struct {
 	ch     chan struct{}
-	reason errcommon.RequestErrorReason
+	reason errcommon.RequestDroppedReason
 }
 
 // EvictionRegistry is a shared registry that maps request IDs to eviction channels.
@@ -63,7 +63,7 @@ func (r *EvictionRegistry) Get(requestID string) chan struct{} {
 }
 
 // SetReason records the eviction reason for a request before the channel is closed.
-func (r *EvictionRegistry) SetReason(requestID string, reason errcommon.RequestErrorReason) {
+func (r *EvictionRegistry) SetReason(requestID string, reason errcommon.RequestDroppedReason) {
 	v, ok := r.entries.Load(requestID)
 	if !ok {
 		return
@@ -72,7 +72,7 @@ func (r *EvictionRegistry) SetReason(requestID string, reason errcommon.RequestE
 }
 
 // GetReason returns the eviction reason for a request, or empty string if not found.
-func (r *EvictionRegistry) GetReason(requestID string) errcommon.RequestErrorReason {
+func (r *EvictionRegistry) GetReason(requestID string) errcommon.RequestDroppedReason {
 	v, ok := r.entries.Load(requestID)
 	if !ok {
 		return ""

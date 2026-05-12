@@ -79,7 +79,7 @@ func (e *ImmediateResponseEvictor) Evict(ctx context.Context, item *flowcontrol.
 	once, _ := e.closeOnce.LoadOrStore(item.RequestID, &sync.Once{})
 	once.(*sync.Once).Do(func() {
 		if e.registry != nil {
-			e.registry.SetReason(item.RequestID, errcommon.RequestErrorReasonEvicted)
+			e.registry.SetReason(item.RequestID, errcommon.RequestDroppedReasonEvicted)
 		}
 		close(item.EvictCh)
 	})
