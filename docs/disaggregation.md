@@ -411,7 +411,7 @@ The `prefix-based-pd-decider` plugin makes the disaggregation decision according
 **Parameter:**
 
 - `nonCachedTokens`: Number of non-cached tokens that trigger disaggregation
-  - If set to 0, disaggregation always occurs for all requests
+  - If set to 0, disaggregation never occurs for any request
 
 #### Always-Disagg PD Decider
 The `always-disagg-pd-decider` is a simpler alternative used mainly for testing or benchmarking.
