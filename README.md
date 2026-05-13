@@ -83,6 +83,6 @@ Contributions are welcome!
 [create an issue]:https://github.com/llm-d/llm-d-inference-scheduler/issues/new
 [discussion]:https://github.com/llm-d/llm-d-inference-scheduler/discussions/new?category=q-a
 [Slack]:https://llm-d.slack.com/
-[Google Meet]:https://meet.google.com/uin-yncz-rvg
+[Google Meet]:https://meet.google.com/zij-zekm-jvt
 [Meeting Notes]:https://docs.google.com/document/d/1Pf3x7ZM8nNpU56nt6CzePAOmFZ24NXDeXyaYb565Wq4
 [#sig-inference-scheduler]:https://llm-d.slack.com/?redir=%2Fmessages%2Fsig-inference-scheduler
