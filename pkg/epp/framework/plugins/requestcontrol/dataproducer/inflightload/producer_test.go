@@ -31,7 +31,7 @@ import (
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
 )
 
-func TestInFlightLoadProducer_PrepareRequestData(t *testing.T) {
+func TestInFlightLoadProducer_Produce(t *testing.T) {
 	t.Parallel()
 
 	producer := &InFlightLoadProducer{
@@ -49,7 +49,7 @@ func TestInFlightLoadProducer_PrepareRequestData(t *testing.T) {
 	ctx := context.Background()
 	endpoints := []fwksched.Endpoint{newStubSchedulingEndpoint(endpointName)}
 
-	err := producer.PrepareRequestData(ctx, nil, endpoints)
+	err := producer.Produce(ctx, nil, endpoints)
 	require.NoError(t, err)
 
 	// Verify AttributeMap population

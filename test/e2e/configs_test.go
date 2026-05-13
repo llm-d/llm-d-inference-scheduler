@@ -209,8 +209,8 @@ schedulingProfiles:
     weight: 10
 `
 
-// EPP config for running with precise prefix scoring and external tokenizer PrepareData plugin.
-// The tokenizer plugin runs in the PrepareData phase (before scoring) and attaches
+// EPP config for running with precise prefix scoring and external tokenizer DataProducer plugin.
+// The tokenizer plugin runs in the Produce phase (before scoring) and attaches
 // pre-computed token IDs to the request, so the scorer skips internal tokenization.
 const kvExternalTokenizerConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
