@@ -557,9 +557,51 @@ type AnthropicMessage struct {
 	Content AnthropicContent `json:"content"`
 }
 
+// AnthropicContent handles the Anthropic content format which can be either
+// a plain string or an array of content blocks.
 type AnthropicContent struct {
-	Raw        string     `json:"raw,omitempty"`
-	Structured []AnthropicContentBlock `json:"structured,omitempty"`
+	Raw        string
+	Structured []AnthropicContentBlock
+}
+
+func (ac *AnthropicContent) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		ac.Raw = str
+		return nil
+	}
+
+	var blocks []AnthropicContentBlock
+	if err := json.Unmarshal(data, &blocks); err == nil {
+		ac.Structured = blocks
+		return nil
+	}
+
+	return errors.New("anthropic content: must be a string or an array of content blocks")
+}
+
+func (ac AnthropicContent) MarshalJSON() ([]byte, error) {
+	if ac.Raw != "" {
+		return json.Marshal(ac.Raw)
+	}
+	if ac.Structured != nil {
+		return json.Marshal(ac.Structured)
+	}
+	return json.Marshal("")
+}
+
+func (ac AnthropicContent) PlainText() string {
+	if ac.Raw != "" {
+		return ac.Raw
+	}
+	var sb strings.Builder
+	for _, block := range ac.Structured {
+		if block.Type == "text" {
+			sb.WriteString(block.Text)
+			sb.WriteString(" ")
+		}
+	}
+	return sb.String()
 }
 
 type AnthropicContentBlock struct {
