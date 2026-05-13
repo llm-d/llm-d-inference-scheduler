@@ -354,7 +354,7 @@ inferenceExtension:
     # Monitoring provider selection.
     # Options: ["gmp", "prometheusoperator"].
     # If not set, defaults to "prometheusoperator". For backwards compatibility,
-    # provider.name=gke still maps to "gmp" when this field is unset.
+    # legacy provider.name=gke still maps to "gmp" when this field is unset.
     provider:
       name: ""
       gmp:
@@ -390,11 +390,6 @@ inferenceExtension:
     path: "/metrics"
     # insecureSkipVerify disables TLS certificate verification when scheme is https.
     insecureSkipVerify: true
-
-# Gateway provider selection.
-# Options: ["gke"]
-provider:
-  name: none
 
 # This is not used when you deploy standalone with inferenceExtension.endpointsServer.createInferencePool=false
 inferencePool:

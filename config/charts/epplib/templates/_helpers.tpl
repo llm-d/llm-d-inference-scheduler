@@ -61,9 +61,11 @@ to gmp when no monitoring provider is explicitly set.
 {{- $monitoring := .Values.inferenceExtension.monitoring | default dict -}}
 {{- $mp := index $monitoring "provider" | default dict -}}
 {{- $mpName := index $mp "name" | default "" -}}
+{{- $gatewayProvider := .Values.provider | default dict -}}
+{{- $gatewayProviderName := index $gatewayProvider "name" | default "" -}}
 {{- if and (kindIs "string" $mpName) (ne (trim $mpName) "") -}}
 {{- $mpName -}}
-{{- else if eq (lower (.Values.provider.name | default "")) "gke" -}}
+{{- else if eq (lower $gatewayProviderName) "gke" -}}
 gmp
 {{- else -}}
 prometheusoperator
@@ -81,12 +83,14 @@ provider.name=gke and no monitoring provider is explicitly set.
 {{- $monitoring := .Values.inferenceExtension.monitoring | default dict -}}
 {{- $mp := index $monitoring "provider" | default dict -}}
 {{- $mpName := include "llm-d-inference-scheduler.inferenceExtension.monitoring.provider.name" . -}}
+{{- $gatewayProvider := .Values.provider | default dict -}}
+{{- $gatewayProviderName := index $gatewayProvider "name" | default "" -}}
 {{- $resolved := dict "name" $mpName -}}
 {{- if eq (lower $mpName) "gmp" -}}
   {{- $gmp := index $mp "gmp" | default dict -}}
   {{- $legacyGke := dict -}}
-  {{- if and (eq (lower (.Values.provider.name | default "")) "gke") .Values.provider.gke -}}
-    {{- $legacyGke = .Values.provider.gke -}}
+  {{- if and (eq (lower $gatewayProviderName) "gke") (index $gatewayProvider "gke") -}}
+    {{- $legacyGke = index $gatewayProvider "gke" -}}
   {{- end -}}
   {{- $_ := set $resolved "gmp" (mergeOverwrite (deepCopy $legacyGke) (deepCopy $gmp)) -}}
 {{- else -}}
