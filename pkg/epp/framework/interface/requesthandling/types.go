@@ -525,12 +525,31 @@ type PromptTokenDetails struct {
 	CachedTokens int `json:"cached_tokens"`
 }
 
+// MessagesRequest is a structured representation of the fields we parse out of the /v1/messages
+// request body. For detailed body fields, please refer to https://docs.anthropic.com/en/api/messages.
+// This struct includes fields usable for plugins and scheduling decisions - and not the entire
+// API spec.
 type MessagesRequest struct {
-	Messages []Message `json:"messages,omitempty"`
-	
+	// Messages is the array of conversation messages with alternating user/assistant roles.
+	Messages []AnthropicMessage `json:"messages,omitempty"`
+	// System is the system prompt. In the Anthropic API this is a top-level field,
+	// not a message with role "system".
+	System AnthropicContent `json:"system,omitempty"`
+	// Tools field for tool use capabilities.
 	Tools []any `json:"tools,omitempty"`
+	// CacheSalt isolates prefix caches for security.
 	CacheSalt string `json:"cache_salt,omitempty"`
-	// SystemInstructions any `json:"system_instructions,omitempty"`
+}
+
+func (r *MessagesRequest) String() string {
+	if r == nil {
+		return nilStr
+	}
+	messagesLen := 0
+	for _, msg := range r.Messages {
+		messagesLen += len(msg.Content.PlainText())
+	}
+	return fmt.Sprintf("{MessagesLength: %d}", messagesLen)
 }
 
 type AnthropicMessage struct {
