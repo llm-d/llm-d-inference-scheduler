@@ -24,9 +24,8 @@ jobs:
       - name: Set image names
         id: version
         run: |
-          repo="${GITHUB_REPOSITORY##*/}"
-          echo "epp_name=$repo" >> "$GITHUB_OUTPUT"
-          echo "sidecar_name=llm-d-routing-sidecar" >> "$GITHUB_OUTPUT"
+          echo "project_name=router-endpoint-picker" >> "$GITHUB_OUTPUT"
+          echo "sidecar_name=router-disagg-sidecar" >> "$GITHUB_OUTPUT"
 
       - name: Determine tag name
         id: tag
