@@ -53,6 +53,7 @@ type kvCacheIndexer interface {
 	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
 	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
 	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
+	ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, modelName string, extraFeatures []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
 }
 
@@ -139,9 +140,12 @@ func PluginFactory(name string, rawParameters json.RawMessage,
 		}
 	}
 
-	// Validate model name is set
-	if parameters.IndexerConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
-		return nil, errors.New("modelName is required in indexerConfig.tokenizersPoolConfig")
+	if parameters.IndexerConfig == nil {
+		return nil, errors.New("indexerConfig is required")
+	}
+	//nolint:staticcheck // SA1019: validate the legacy field when callers explicitly opt into it.
+	if parameters.IndexerConfig.TokenizersPoolConfig != nil && parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
+		return nil, errors.New("modelName is required when indexerConfig.tokenizersPoolConfig is set")
 	}
 
 	scorer, err := New(handle.Context(), parameters)
@@ -687,27 +691,45 @@ func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []
 
 // --- Internal helper methods ---
 
-// computeBlockKeys extracts block keys from an LLM request by tokenizing
-// the prompt and computing KV-block hashes.
+// computeBlockKeys extracts block keys from an LLM request. Prefers the
+// tokens written by the token-producer DataProducer plugin; falls back to
+// the deprecated prompt-string path on the indexer when no tokens are
+// attached. Returns nil keys (no error) when neither path can produce them.
 func (s *Scorer) computeBlockKeys(ctx context.Context,
 	request *scheduling.InferenceRequest) ([]kvblock.BlockHash, error) {
 	if request.Body == nil {
 		return nil, nil
 	}
 
-	// Chat completions path
-	if request.Body.ChatCompletions != nil {
+	if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
+		var extraFeatures []*kvblock.BlockExtraFeatures
+		if len(tp.MultiModalFeatures) > 0 {
+			mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
+			extraFeatures = kvblock.ComputeBlockExtraFeatures(
+				mmHashes, mmPlaceholders, s.blockSizeTokens, len(tp.TokenIDs))
+		}
+		return s.kvCacheIndexer.ComputeBlockKeysFromTokens(ctx, tp.TokenIDs, request.TargetModel, extraFeatures)
+	}
+
+	var (
+		keys []kvblock.BlockHash
+		err  error
+	)
+	switch {
+	case request.Body.ChatCompletions != nil:
 		renderReq := tokenizer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
-
-		return s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
+		keys, err = s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
+	case request.Body.Completions != nil:
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
+		keys, err = s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
+	default:
+		return nil, nil
 	}
-
-	// Regular completions path
-	if request.Body.Completions != nil {
-		return s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
+	if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
+		return nil, nil
 	}
-
-	return nil, nil
+	return keys, err
 }
 
 // extractPodSet builds a set of pod identifiers from endpoints for filtered index lookups.
@@ -774,8 +796,12 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 			"toolsCount", len(renderReq.Tools),
 			"documentsCount", len(renderReq.Documents))
 
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
 		if err != nil {
+			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
+				return map[string]float64{}, nil
+			}
 			return nil, fmt.Errorf("failed to get endpoint scores for chat/completions: %w", err)
 		}
 		return scores, nil
@@ -786,8 +812,12 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 		prompt := request.Body.Completions.Prompt.Raw
 		traceLogger.Info("Using completion prompt directly", "promptLength", len(prompt))
 
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)
 		if err != nil {
+			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
+				return map[string]float64{}, nil
+			}
 			return nil, fmt.Errorf("failed to get endpoint scores for completions: %w", err)
 		}
 		return scores, nil

@@ -69,6 +69,10 @@ export UDS_TOKENIZER_TAG="${UDS_TOKENIZER_TAG:-dev}"
 UDS_TOKENIZER_IMAGE="${UDS_TOKENIZER_IMAGE:-${IMAGE_REGISTRY}/llm-d-uds-tokenizer:${UDS_TOKENIZER_TAG}}"
 export UDS_TOKENIZER_IMAGE
 
+# Set a default VLLM_RENDER_IMAGE if not provided (CPU-only vLLM image that
+# runs `vllm launch render` for the token-producer plugin's HTTP backend).
+export VLLM_RENDER_IMAGE="${VLLM_RENDER_IMAGE:-vllm/vllm-openai-cpu:v0.19.1}"
+
 # Set the inference pool name for the deployment
 export POOL_NAME="${POOL_NAME:-${MODEL_NAME_SAFE}-inference-pool}"
 
@@ -387,7 +391,7 @@ kubectl --context ${KUBE_CONTEXT} create configmap epp-config --from-file=epp-co
 # Deploy Istio base (shared infrastructure)
 kubectl kustomize --enable-helm deploy/environments/dev/base-kind-istio \
   | envsubst '${POOL_NAME} ${MODEL_NAME} ${MODEL_NAME_SAFE} ${EPP_NAME} ${EPP_IMAGE} ${VLLM_IMAGE} \
-  ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${TARGET_PORTS} ${NAMESPACE} ${METRICS_ENDPOINT_AUTH} \
+  ${SIDECAR_IMAGE} ${UDS_TOKENIZER_IMAGE} ${VLLM_RENDER_IMAGE} ${TARGET_PORTS} ${NAMESPACE} ${METRICS_ENDPOINT_AUTH} \
 ${VLLM_REPLICA_COUNT_E} ${VLLM_REPLICA_COUNT_P} ${VLLM_REPLICA_COUNT_D} ${VLLM_DATA_PARALLEL_SIZE}' \
   | kubectl --context ${KUBE_CONTEXT} apply -f -
 
