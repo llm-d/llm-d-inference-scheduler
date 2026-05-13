@@ -67,6 +67,8 @@ type InferenceRequestBody struct {
 	Completions *CompletionsRequest `json:"completions,omitempty"`
 	// ChatCompletionsRequest is the representation of the OpenAI /v1/chat/completions request body.
 	ChatCompletions *ChatCompletionsRequest `json:"chat_completions,omitempty"`
+	// MessagesRequest is the representation of the Claude /v1/messages request body.
+	Messages *MessagesRequest `json:"messages,omitempty"`
 	// ResponsesRequest is the representation of the OpenAI /v1/responses request body.
 	Responses *ResponsesRequest `json:"responses,omitempty"`
 	// ConversationsRequest is the representation of the OpenAI /v1/conversations request body.
@@ -521,4 +523,36 @@ type Usage struct {
 
 type PromptTokenDetails struct {
 	CachedTokens int `json:"cached_tokens"`
+}
+
+type MessagesRequest struct {
+	Messages []Message `json:"messages,omitempty"`
+	
+	Tools []any `json:"tools,omitempty"`
+	CacheSalt string `json:"cache_salt,omitempty"`
+	// SystemInstructions any `json:"system_instructions,omitempty"`
+}
+
+type AnthropicMessage struct {
+	Role    string `json:"role"`
+	Content AnthropicContent `json:"content"`
+}
+
+type AnthropicContent struct {
+	Raw        string     `json:"raw,omitempty"`
+	Structured []AnthropicContentBlock `json:"structured,omitempty"`
+}
+
+type AnthropicContentBlock struct {
+	Type       string     `json:"type"`
+	Text       string     `json:"text,omitempty"`
+	// image source fields (base64 or URL)
+	Source *AnthropicImageSource `json:"source,omitempty"`
+}
+
+type AnthropicImageSource struct {
+	Type  string `json:"type"` // "base64" or "url"
+	MediaType string `json:"media_type,omitempty"` // "image/jpeg", "image/png", "image/gif", "image/webp"
+	Data  string `json:"data,omitempty"` // base64-encoded image data
+	URL   string `json:"url,omitempty"`  // imae URL
 }
