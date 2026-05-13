@@ -47,7 +47,7 @@ webhooks:
         - key: istio.io/rev
           operator: In
           values:
-          - "default"
+          - "llm-d-gateway"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
