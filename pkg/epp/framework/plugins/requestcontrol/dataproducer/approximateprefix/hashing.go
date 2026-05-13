@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
+	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
@@ -121,20 +122,27 @@ func getUserInputBytes(request *scheduling.InferenceRequest) ([]byte, error) {
 		return json.Marshal(combined)
 
 	case request.Body.ChatCompletions != nil:
+		// When the tokenizer DataProducer plugin has run, prefer its tokens
+		// (and any multimodal feature data) so identical effective prefixes
+		// hash the same even if the message JSON differs (e.g. a different
+		// image URL resolving to the same image bytes).
+		if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
+			return tokenizedPromptBytes(tp), nil
+		}
 		return json.Marshal(request.Body.ChatCompletions.Messages)
 
 	case request.Body.Completions != nil:
 		if ids := request.Body.Completions.Prompt.TokenIDs; len(ids) > 0 {
 			return tokenIDsToBytes(ids), nil
 		}
-		return []byte(request.Body.Completions.Prompt.PlainText()), nil
+		return request.Body.Completions.Prompt.Bytes(), nil
 
 	case request.Body.Embeddings != nil:
 		input := request.Body.Embeddings.Input
 		if ids := input.TokenIDs; len(ids) > 0 {
 			return tokenIDsToBytes(ids), nil
 		}
-		return []byte(input.PlainText()), nil
+		return input.Bytes(), nil
 
 	default:
 		return nil, errors.New("invalid request body: no recognized API format found")
@@ -148,6 +156,29 @@ func tokenIDsToBytes(ids []uint32) []byte {
 	out := make([]byte, 4*len(ids))
 	for i, id := range ids {
 		binary.LittleEndian.PutUint32(out[i*4:(i+1)*4], id)
+	}
+	return out
+}
+
+// tokenizedPromptBytes serializes tokens and any per-item multimodal features
+// into a stable byte sequence: token IDs as LE u32, followed by each feature
+// as (offset LE u64, length LE u64, modality, hash). Two prompts with the same
+// tokens and the same multimodal content hashes produce the same bytes.
+func tokenizedPromptBytes(tp *fwkrh.TokenizedPrompt) []byte {
+	n := 4 * len(tp.TokenIDs)
+	for _, f := range tp.MultiModalFeatures {
+		n += 16 + len(f.Modality) + len(f.Hash)
+	}
+	out := make([]byte, 0, n)
+	out = append(out, tokenIDsToBytes(tp.TokenIDs)...)
+	var u64 [8]byte
+	for _, f := range tp.MultiModalFeatures {
+		binary.LittleEndian.PutUint64(u64[:], uint64(f.Offset))
+		out = append(out, u64[:]...)
+		binary.LittleEndian.PutUint64(u64[:], uint64(f.Length))
+		out = append(out, u64[:]...)
+		out = append(out, f.Modality...)
+		out = append(out, f.Hash...)
 	}
 	return out
 }
