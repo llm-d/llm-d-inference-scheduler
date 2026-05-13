@@ -226,13 +226,13 @@ func toChatContent(c tokenizerTypes.Content) chatContent {
 	if len(c.Structured) == 0 {
 		return chatContent{Raw: c.Raw}
 	}
-	parts := make([]chatPart, 0, len(c.Structured))
-	for _, b := range c.Structured {
+	parts := make([]chatPart, len(c.Structured))
+	for idx, b := range c.Structured {
 		switch b.Type {
 		case "text":
-			parts = append(parts, chatPart{Type: "text", Text: b.Text})
+			parts[idx] = chatPart{Type: "text", Text: b.Text}
 		case "image_url":
-			parts = append(parts, chatPart{Type: "image_url", ImageURL: &chatImageURL{URL: b.ImageURL.URL}})
+			parts[idx] = chatPart{Type: "image_url", ImageURL: &chatImageURL{URL: b.ImageURL.URL}}
 		default:
 			// Unsupported by the kvcache ContentBlock schema; skip.
 		}
