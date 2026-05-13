@@ -25,11 +25,11 @@ import (
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 type endpointPredictionResult struct {
-	Endpoint         schedulingtypes.Endpoint
+	Endpoint         fwksched.Endpoint
 	TTFT             float64
 	TPOT             float64
 	TTFTValid        bool
@@ -42,7 +42,7 @@ type endpointPredictionResult struct {
 }
 
 // generatePredictions creates prediction results for all candidate pods
-func (pl *PredictedLatency) generatePredictions(ctx context.Context, predictedLatencyCtx *predictedLatencyCtx, candidateEndpoints []schedulingtypes.Endpoint) ([]endpointPredictionResult, error) {
+func (pl *PredictedLatency) generatePredictions(ctx context.Context, predictedLatencyCtx *predictedLatencyCtx, candidateEndpoints []fwksched.Endpoint) ([]endpointPredictionResult, error) {
 	logger := log.FromContext(ctx)
 	predictions := make([]endpointPredictionResult, 0, len(candidateEndpoints))
 
@@ -166,7 +166,7 @@ func (pl *PredictedLatency) validatePrediction(
 }
 
 // hasPrefillRole returns true if the endpoint has the prefill role label set.
-func hasPrefillRole(roleLabel string, endpoint schedulingtypes.Endpoint) bool {
+func hasPrefillRole(roleLabel string, endpoint fwksched.Endpoint) bool {
 	if roleLabel == "" {
 		return false
 	}

@@ -26,7 +26,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/registry"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	extractormetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/metrics"
 	sourcemetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization"
@@ -153,7 +153,7 @@ func ensureSchedulingLayer(
 		// Auto-populate the default profile with all Filter, Scorer, and Picker plugins found.
 		for name, p := range allPlugins {
 			switch p.(type) {
-			case framework.Filter, framework.Scorer, framework.Picker:
+			case fwksched.Filter, fwksched.Scorer, fwksched.Picker:
 				defaultProfile.Plugins = append(defaultProfile.Plugins, configapi.SchedulingPlugin{PluginRef: name})
 			}
 		}
@@ -164,7 +164,7 @@ func ensureSchedulingLayer(
 	if len(cfg.SchedulingProfiles) == 1 {
 		hasHandler := false
 		for _, p := range allPlugins {
-			if _, ok := p.(framework.ProfileHandler); ok {
+			if _, ok := p.(fwksched.ProfileHandler); ok {
 				hasHandler = true
 				break
 			}
@@ -179,7 +179,7 @@ func ensureSchedulingLayer(
 	// Find or Create a default MaxScorePicker to reuse across profiles.
 	var maxScorePickerName string
 	for name, p := range allPlugins {
-		if _, ok := p.(framework.Picker); ok {
+		if _, ok := p.(fwksched.Picker); ok {
 			maxScorePickerName = name
 			break
 		}
@@ -197,11 +197,11 @@ func ensureSchedulingLayer(
 		for j, pluginRef := range prof.Plugins {
 			p := handle.Plugin(pluginRef.PluginRef)
 
-			if _, ok := p.(framework.Scorer); ok && pluginRef.Weight == nil {
+			if _, ok := p.(fwksched.Scorer); ok && pluginRef.Weight == nil {
 				cfg.SchedulingProfiles[i].Plugins[j].Weight = &defaultScorerWeight
 			}
 
-			if _, ok := p.(framework.Picker); ok {
+			if _, ok := p.(fwksched.Picker); ok {
 				hasPicker = true
 			}
 		}

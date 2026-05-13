@@ -32,8 +32,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
@@ -41,7 +41,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/flowcontrol/contracts"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	fwk "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
@@ -52,7 +52,7 @@ const (
 	// TODO(https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2081):
 	// Make this timeout configurable per-plugin or globally via the Director configuration to support plugins with
 	// varying latency profiles.
-	prepareDataTimeout = 400 * time.Millisecond
+	dataProducerTimeout = 400 * time.Millisecond
 )
 
 // Datastore defines the interface required by the Director.
@@ -91,7 +91,7 @@ func NewDirectorWithConfig(
 type responseBodyWork struct {
 	ctx            context.Context
 	request        *fwksched.InferenceRequest
-	response       *fwk.Response
+	response       *fwkrc.Response
 	targetEndpoint *fwkdl.EndpointMetadata
 }
 
@@ -118,10 +118,10 @@ type Director struct {
 	admissionController   AdmissionController
 	endpointCandidates    contracts.EndpointCandidates
 	requestControlPlugins Config
-	// we just need a pointer to an int variable since priority is a pointer in InferenceObjective
-	// no need to set this in the constructor, since the value we want is the default int val
-	// and value types cannot be nil
-	defaultPriority int
+	// We just need a pointer to an int32 variable since Priority is a pointer in InferenceObjective.
+	// No need to set this in the constructor, since the value we want is the default (0)
+	// and value types cannot be nil.
+	defaultPriority int32
 
 	// responseBodyQueues maps request IDs to their async processing channels.
 	// Each request gets a dedicated channel and goroutine to ensure chunks are
@@ -161,12 +161,13 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	infObjective := d.getInferenceObjective(ctx, reqCtx)
-	reqCtx.Priority = *infObjective.Spec.Priority
-	requestObjectives := fwksched.RequestObjectives{Priority: *infObjective.Spec.Priority}
+	priority := int(*infObjective.Spec.Priority)
+	reqCtx.Priority = priority
+	requestObjectives := fwksched.RequestObjectives{Priority: priority}
 
 	span.SetAttributes(
 		attribute.String("target_model", reqCtx.TargetModelName),
-		attribute.Int("request_prio", *infObjective.Spec.Priority),
+		attribute.Int("request_prio", priority),
 	)
 
 	// Prepare InferenceRequest (needed for both saturation detection and Scheduler)
@@ -183,7 +184,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	ctx = log.IntoContext(ctx, logger)
 	logger.V(logutil.DEBUG).Info("LLM request assembled")
 
-	if err := d.admissionController.Admit(ctx, reqCtx, *infObjective.Spec.Priority); err != nil {
+	if err := d.admissionController.Admit(ctx, reqCtx, priority); err != nil {
 		return reqCtx, err
 	}
 
@@ -196,10 +197,10 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	}
 
 	snapshotOfCandidatePods := d.toSchedulerEndpoints(endpointCandidates)
-	// Prepare per request data by running PrepareData plugins.
-	err = d.runPrepareDataPlugins(ctx, reqCtx.SchedulingRequest, snapshotOfCandidatePods)
+	// Prepare per request data by running DataProducer plugins.
+	err = d.runDataProducerPlugins(ctx, reqCtx.SchedulingRequest, snapshotOfCandidatePods)
 	if err != nil {
-		// Don't fail the request if PrepareData plugins fail.
+		// Don't fail the request if DataProducer plugins fail.
 		logger.Error(err, "failed to prepare per request data")
 	}
 
@@ -353,7 +354,7 @@ func (d *Director) HandleResponseHeader(ctx context.Context, reqCtx *handlers.Re
 	if len(d.requestControlPlugins.responseReceivedPlugins) == 0 {
 		return reqCtx
 	}
-	response := &fwk.Response{
+	response := &fwkrc.Response{
 		RequestID:   reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
 		Headers:     reqCtx.Response.Headers,
 		ReqMetadata: reqCtx.Request.Metadata,
@@ -382,7 +383,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 
 	startOfStream := !reqCtx.ResponseBodyStarted
 	reqCtx.ResponseBodyStarted = true
-	response := &fwk.Response{
+	response := &fwkrc.Response{
 		RequestID:     reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
 		Headers:       reqCtx.Response.Headers,
 		StartOfStream: startOfStream,
@@ -443,17 +444,17 @@ func (d *Director) runPreRequestPlugins(ctx context.Context, request *fwksched.I
 		loggerDebug.Info("Running PreRequest plugin", "plugin", plugin.TypedName())
 		before := time.Now()
 		plugin.PreRequest(ctx, request, schedulingResult)
-		metrics.RecordPluginProcessingLatency(fwk.PreRequestExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
+		metrics.RecordPluginProcessingLatency(fwkrc.PreRequestExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
 		loggerDebug.Info("Completed running PreRequest plugin successfully", "plugin", plugin.TypedName())
 	}
 }
 
-func (d *Director) runPrepareDataPlugins(ctx context.Context,
+func (d *Director) runDataProducerPlugins(ctx context.Context,
 	request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
-	if len(d.requestControlPlugins.prepareDataPlugins) == 0 {
+	if len(d.requestControlPlugins.dataProducerPlugins) == 0 {
 		return nil
 	}
-	return prepareDataPluginsWithTimeout(ctx, prepareDataTimeout, d.requestControlPlugins.prepareDataPlugins, request, endpoints)
+	return dataProducerPluginsWithTimeout(ctx, dataProducerTimeout, d.requestControlPlugins.dataProducerPlugins, request, endpoints)
 }
 
 func (d *Director) runAdmissionPlugins(ctx context.Context,
@@ -470,24 +471,24 @@ func (d *Director) runAdmissionPlugins(ctx context.Context,
 	return true
 }
 
-func (d *Director) runResponseHeaderPlugins(ctx context.Context, request *fwksched.InferenceRequest, response *fwk.Response, targetEndpoint *fwkdl.EndpointMetadata) {
+func (d *Director) runResponseHeaderPlugins(ctx context.Context, request *fwksched.InferenceRequest, response *fwkrc.Response, targetEndpoint *fwkdl.EndpointMetadata) {
 	loggerDebug := log.FromContext(ctx).V(logutil.DEBUG)
 	for _, plugin := range d.requestControlPlugins.responseReceivedPlugins {
 		loggerDebug.Info("Running ResponseReceived plugin", "plugin", plugin.TypedName())
 		before := time.Now()
 		plugin.ResponseHeader(ctx, request, response, targetEndpoint)
-		metrics.RecordPluginProcessingLatency(fwk.ResponseReceivedExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
+		metrics.RecordPluginProcessingLatency(fwkrc.ResponseReceivedExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
 		loggerDebug.Info("Completed running ResponseReceived plugin successfully", "plugin", plugin.TypedName())
 	}
 }
 
-func (d *Director) runResponseBodyPlugins(ctx context.Context, request *fwksched.InferenceRequest, response *fwk.Response, targetEndpoint *fwkdl.EndpointMetadata) {
+func (d *Director) runResponseBodyPlugins(ctx context.Context, request *fwksched.InferenceRequest, response *fwkrc.Response, targetEndpoint *fwkdl.EndpointMetadata) {
 	loggerTrace := log.FromContext(ctx).V(logutil.TRACE)
 	for _, plugin := range d.requestControlPlugins.responseStreamingPlugins {
 		loggerTrace.Info("Running ResponseStreaming plugin", "plugin", plugin.TypedName())
 		before := time.Now()
 		plugin.ResponseBody(ctx, request, response, targetEndpoint)
-		metrics.RecordPluginProcessingLatency(fwk.ResponseStreamingExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
+		metrics.RecordPluginProcessingLatency(fwkrc.ResponseStreamingExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
 		loggerTrace.Info("Completed running ResponseStreaming plugin successfully", "plugin", plugin.TypedName())
 	}
 }

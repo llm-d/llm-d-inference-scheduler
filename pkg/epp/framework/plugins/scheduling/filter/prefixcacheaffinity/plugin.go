@@ -31,7 +31,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrlatency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/latency"
 	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
@@ -40,7 +40,7 @@ const (
 	PluginType = "prefix-cache-affinity-filter"
 )
 
-var _ framework.Filter = &Plugin{}
+var _ fwksched.Filter = &Plugin{}
 
 type Config struct {
 	// AffinityThreshold is the prefix cache score threshold. Endpoints with
@@ -102,7 +102,7 @@ func (p *Plugin) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-func (p *Plugin) Filter(ctx context.Context, _ *framework.CycleState, _ *framework.InferenceRequest, endpoints []framework.Endpoint) []framework.Endpoint {
+func (p *Plugin) Filter(ctx context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
 	logger := log.FromContext(ctx)
 
 	if len(endpoints) <= 1 || p.config.AffinityThreshold <= 0 {
@@ -117,7 +117,7 @@ func (p *Plugin) Filter(ctx context.Context, _ *framework.CycleState, _ *framewo
 	}
 
 	// Find sticky and non-sticky endpoints.
-	var sticky, nonSticky []framework.Endpoint
+	var sticky, nonSticky []fwksched.Endpoint
 	for _, ep := range endpoints {
 		if prefixCacheScore(ep) >= p.config.AffinityThreshold {
 			sticky = append(sticky, ep)
@@ -157,7 +157,7 @@ func (p *Plugin) Consumes() map[string]any {
 	}
 }
 
-func prefixCacheScore(ep framework.Endpoint) float64 {
+func prefixCacheScore(ep fwksched.Endpoint) float64 {
 	if raw, ok := ep.Get(attrprefix.PrefixCacheMatchInfoKey); ok {
 		info := raw.(*attrprefix.PrefixCacheMatchInfo)
 		if info.TotalBlocks() > 0 {
@@ -170,7 +170,7 @@ func prefixCacheScore(ep framework.Endpoint) float64 {
 	return 0
 }
 
-func bestTTFT(endpoints []framework.Endpoint) float64 {
+func bestTTFT(endpoints []fwksched.Endpoint) float64 {
 	best := math.MaxFloat64
 	for _, ep := range endpoints {
 		if raw, ok := ep.Get(attrlatency.LatencyPredictionInfoKey); ok {

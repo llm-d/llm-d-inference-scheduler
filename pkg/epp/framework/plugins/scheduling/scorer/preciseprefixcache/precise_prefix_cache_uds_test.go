@@ -566,6 +566,7 @@ func TestPrefixCacheTracking_Score_UDS(t *testing.T) {
 			require.NoError(t, err)
 
 			// Configure UDS tokenizer
+			//nolint:staticcheck // SA1019: exercising the legacy in-indexer tokenization path.
 			kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
 				ModelName:    "test-model",
 				WorkersCount: 1,
@@ -780,6 +781,7 @@ func TestMMPipeline_ScoreTokensWithExtraFeatures_UDS(t *testing.T) {
 	// 3. Set up indexer.
 	kvcacheConfig, err := kvcache.NewDefaultConfig()
 	require.NoError(t, err)
+	//nolint:staticcheck // SA1019: exercising the legacy in-indexer tokenization path.
 	kvcacheConfig.TokenizersPoolConfig = &tokenization.Config{
 		ModelName:    mmModelName,
 		WorkersCount: 1,

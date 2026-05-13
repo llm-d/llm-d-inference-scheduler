@@ -24,7 +24,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	errcommmon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
+	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
@@ -117,7 +117,7 @@ func (p *SchedulerProfile) String() string {
 func (p *SchedulerProfile) Run(ctx context.Context, request *fwksched.InferenceRequest, cycleState *fwksched.CycleState, candidateEndpoints []fwksched.Endpoint) (*fwksched.ProfileRunResult, error) {
 	endpoints := p.runFilterPlugins(ctx, request, cycleState, candidateEndpoints)
 	if len(endpoints) == 0 {
-		return nil, errcommmon.Error{Code: errcommmon.Internal, Msg: "no endpoints available for the given request"}
+		return nil, errcommon.Error{Code: errcommon.Internal, Msg: "no endpoints available for the given request"}
 	}
 	// if we got here, there is at least one endpoint to score
 	weightedScorePerEndpoint := p.runScorerPlugins(ctx, request, cycleState, endpoints)

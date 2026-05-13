@@ -11,7 +11,7 @@ import (
 
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	prefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
@@ -44,8 +44,8 @@ func makeTestEndpointBase() scheduling.Endpoint {
 
 func makeTestEndpoint(cachedTokens int) scheduling.Endpoint {
 	ep := makeTestEndpointBase()
-	ep.Put(prefix.PrefixCacheMatchInfoKey,
-		prefix.NewPrefixCacheMatchInfo(cachedTokens, testTotalTokens, testBlockSize))
+	ep.Put(attrprefix.PrefixCacheMatchInfoKey,
+		attrprefix.NewPrefixCacheMatchInfo(cachedTokens, testTotalTokens, testBlockSize))
 	return ep
 }
 
@@ -291,7 +291,7 @@ func TestDisaggregateWrongPrefixInfoType(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	ep := makeTestEndpointBase()
-	ep.Put(prefix.PrefixCacheMatchInfoKey, &notPrefixCacheMatchInfo{})
+	ep.Put(attrprefix.PrefixCacheMatchInfoKey, &notPrefixCacheMatchInfo{})
 
 	decider, err := NewPrefixBasedPDDecider(PrefixBasedPDDeciderConfig{NonCachedTokens: 5})
 	require.NoError(t, err)
@@ -307,7 +307,7 @@ func TestConsumes(t *testing.T) {
 	require.NoError(t, err)
 
 	consumed := handler.Consumes()
-	assert.Contains(t, consumed, prefix.PrefixCacheMatchInfoKey)
+	assert.Contains(t, consumed, attrprefix.PrefixCacheMatchInfoKey)
 }
 
 func TestWithName(t *testing.T) {

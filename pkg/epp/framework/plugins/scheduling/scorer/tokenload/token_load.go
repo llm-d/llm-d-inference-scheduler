@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
 )
 
@@ -41,7 +41,7 @@ type Config struct {
 }
 
 // compile-time type assertion
-var _ framework.Scorer = &TokenLoadScorer{}
+var _ fwksched.Scorer = &TokenLoadScorer{}
 
 type TokenLoadScorer struct {
 	typedName            fwkplugin.TypedName
@@ -71,8 +71,8 @@ func (s *TokenLoadScorer) TypedName() fwkplugin.TypedName {
 	return s.typedName
 }
 
-func (s *TokenLoadScorer) Category() framework.ScorerCategory {
-	return framework.Distribution
+func (s *TokenLoadScorer) Category() fwksched.ScorerCategory {
+	return fwksched.Distribution
 }
 
 func (s *TokenLoadScorer) Consumes() map[string]any {
@@ -81,8 +81,8 @@ func (s *TokenLoadScorer) Consumes() map[string]any {
 	}
 }
 
-func (s *TokenLoadScorer) Score(ctx context.Context, _ *framework.CycleState, _ *framework.InferenceRequest, endpoints []framework.Endpoint) map[framework.Endpoint]float64 {
-	scores := make(map[framework.Endpoint]float64, len(endpoints))
+func (s *TokenLoadScorer) Score(ctx context.Context, _ *fwksched.CycleState, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
+	scores := make(map[fwksched.Endpoint]float64, len(endpoints))
 	logger := log.FromContext(ctx)
 
 	for _, endpoint := range endpoints {

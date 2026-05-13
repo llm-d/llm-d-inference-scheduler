@@ -24,8 +24,8 @@ import (
 
 	fwkfc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	fwkrq "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	fwksch "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 // ValidateAndOrderDataDependencies validates that the data dependencies among the given plugins are acyclic
@@ -155,30 +155,30 @@ func pluginToLayerExecutionOrder(plugin plugin.Plugin) int {
 	}
 
 	// Request control plugins
-	if _, ok := plugin.(fwkrq.DataProducer); ok {
+	if _, ok := plugin.(fwkrc.DataProducer); ok {
 		return RequestControlLayer
 	}
-	if _, ok := plugin.(fwkrq.Admitter); ok {
+	if _, ok := plugin.(fwkrc.Admitter); ok {
 		return RequestControlLayer
 	}
-	if _, ok := plugin.(fwkrq.PreRequest); ok {
+	if _, ok := plugin.(fwkrc.PreRequest); ok {
 		return RequestControlLayer
 	}
-	if _, ok := plugin.(fwkrq.ResponseHeaderProcessor); ok {
+	if _, ok := plugin.(fwkrc.ResponseHeaderProcessor); ok {
 		return RequestControlLayer
 	}
 
 	// Scheduling plugins
-	if _, ok := plugin.(fwksch.ProfileHandler); ok {
+	if _, ok := plugin.(fwksched.ProfileHandler); ok {
 		return SchedulingLayer
 	}
-	if _, ok := plugin.(fwksch.Filter); ok {
+	if _, ok := plugin.(fwksched.Filter); ok {
 		return SchedulingLayer
 	}
-	if _, ok := plugin.(fwksch.Scorer); ok {
+	if _, ok := plugin.(fwksched.Scorer); ok {
 		return SchedulingLayer
 	}
-	if _, ok := plugin.(fwksch.Picker); ok {
+	if _, ok := plugin.(fwksched.Picker); ok {
 		return SchedulingLayer
 	}
 

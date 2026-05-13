@@ -28,7 +28,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
-	pooltuil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
+	poolutil "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool"
 )
 
 // InferencePoolReconciler utilizes the controller runtime to reconcile Instance Gateway resources
@@ -63,7 +63,7 @@ func (c *InferencePoolReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	endpointPool := pooltuil.InferencePoolToEndpointPool(pool)
+	endpointPool := poolutil.InferencePoolToEndpointPool(pool)
 	if err := c.Datastore.PoolSet(ctx, c.Reader, endpointPool); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update datastore - %w", err)
 	}

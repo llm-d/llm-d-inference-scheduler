@@ -28,7 +28,7 @@ import (
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
-	schedulingtypes "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrlatency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/latency"
 )
 
@@ -96,7 +96,7 @@ func (p *LatencyAdmission) Consumes() map[string]any {
 //   - No endpoint has a valid prediction (all violate SLO)
 //   - No endpoint is idle (all have running requests)
 //   - No cold pod exists (predictions are reliable)
-func (p *LatencyAdmission) AdmitRequest(ctx context.Context, request *schedulingtypes.InferenceRequest, endpoints []schedulingtypes.Endpoint) error {
+func (p *LatencyAdmission) AdmitRequest(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	logger := log.FromContext(ctx)
 	if request == nil {
 		return nil

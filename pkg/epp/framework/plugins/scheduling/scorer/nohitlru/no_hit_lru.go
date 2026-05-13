@@ -12,7 +12,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	approxprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/prefix"
 )
 
@@ -141,11 +141,11 @@ func (s *NoHitLRU) isColdRequest(ctx context.Context, endpoints []scheduling.End
 	logger := log.FromContext(ctx).V(logging.DEBUG)
 
 	for _, ep := range endpoints {
-		attr, ok := ep.Get(approxprefix.PrefixCacheMatchInfoKey)
+		attr, ok := ep.Get(attrprefix.PrefixCacheMatchInfoKey)
 		if !ok {
 			continue
 		}
-		info, ok := attr.(*approxprefix.PrefixCacheMatchInfo)
+		info, ok := attr.(*attrprefix.PrefixCacheMatchInfo)
 		if ok && info.MatchBlocks() > 0 {
 			logger.Info("Cache hit detected on endpoint", "endpoint", ep.GetMetadata().NamespacedName)
 			return false

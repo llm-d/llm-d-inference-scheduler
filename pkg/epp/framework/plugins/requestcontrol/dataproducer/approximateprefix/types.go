@@ -113,6 +113,60 @@ const (
 	averageCharactersPerToken = 4
 )
 
+const (
+	ModeFixed   mode = "fixed"
+	ModeDynamic mode = "dynamic"
+)
+
+// mode defines the mode for image processing.
+type mode string
+
+// resolution defines the width and height of an image.
+type resolution struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+type fixedConfig struct {
+	FixedToken int `json:"fixedToken"`
+}
+
+type dynamicConfig struct {
+	Factor int `json:"factor"`
+}
+
+// imageConfig defines the configuration for image modality.
+type imageConfig struct {
+	Mode              mode           `json:"mode"`
+	DefaultResolution resolution     `json:"defaultResolution"`
+	DynamicCfg        *dynamicConfig `json:"dynamic,omitempty"`
+	FixedCfg          *fixedConfig   `json:"fixed,omitempty"`
+}
+
+// videoConfig defines the configuration for video modality.
+type videoConfig struct {
+}
+
+// multiModalConfig defines the configuration for multimodal inputs.
+type multiModalConfig struct {
+	Image *imageConfig `json:"image,omitempty"`
+	Video *videoConfig `json:"video,omitempty"`
+}
+
+// defaultMultimodalConfig provides default configuration for multimodal inputs.
+var defaultMultimodalConfig = multiModalConfig{
+	Image: &imageConfig{
+		Mode: ModeFixed,
+		DefaultResolution: resolution{
+			Width:  640,
+			Height: 320,
+		},
+		FixedCfg: &fixedConfig{
+			FixedToken: 512,
+		},
+	},
+}
+
 // config defines the configuration for the prefix cache plugins.
 type config struct {
 	// If set to true, the plugin will automatically adjust the configuration based on various
@@ -130,6 +184,8 @@ type config struct {
 	MaxPrefixTokensToMatch int `json:"maxPrefixTokensToMatch"`
 	// Max capacity size of the LRU indexer in number of entries per server (pod).
 	LRUCapacityPerServer int `json:"lruCapacityPerServer"`
+	// Multimodal configuration for the plugin.
+	Multimodal *multiModalConfig `json:"multimodal,omitempty"`
 }
 
 // defaultConfig provides sensible defaults for the prefix cache plugins.
@@ -139,4 +195,5 @@ var defaultConfig = config{
 	BlockSizeTokens:        defaultBlockSizeTokens,
 	MaxPrefixBlocksToMatch: defaultMaxPrefixBlocks,
 	LRUCapacityPerServer:   defaultLRUCapacityPerServer,
+	Multimodal:             &defaultMultimodalConfig,
 }

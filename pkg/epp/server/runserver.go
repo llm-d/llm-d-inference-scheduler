@@ -40,7 +40,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/controller"
 	datalayerlogger "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer/logger"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
-	fwkflowcontrol "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
+	fwkfc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/handlers"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/requestcontrol"
@@ -60,7 +60,7 @@ type ExtProcServerRunner struct {
 	MetricsStalenessThreshold        time.Duration
 	Director                         *requestcontrol.Director
 	Parser                           fwkrh.Parser
-	SaturationDetector               fwkflowcontrol.SaturationDetector
+	SaturationDetector               fwkfc.SaturationDetector
 	UseExperimentalDatalayerV2       bool // Pluggable data layer feature flag
 }
 

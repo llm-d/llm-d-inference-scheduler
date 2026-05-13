@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
-	frameworkmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
+	fwkfcmocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/globalstrict"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/flowcontrol/fairness/roundrobin"
@@ -75,7 +75,7 @@ func runPickConformanceTests(t *testing.T, policy flowcontrol.FairnessPolicy) {
 	state := policy.NewState(ctx)
 
 	flowIDEmpty := "flow-empty"
-	mockQueueEmpty := &frameworkmocks.MockFlowQueueAccessor{
+	mockQueueEmpty := &fwkfcmocks.MockFlowQueueAccessor{
 		LenV:      0,
 		PeekHeadV: nil,
 		FlowKeyV:  flowcontrol.FlowKey{ID: flowIDEmpty},
@@ -96,7 +96,7 @@ func runPickConformanceTests(t *testing.T, policy flowcontrol.FairnessPolicy) {
 		},
 		{
 			name: "With an empty priority band accessor",
-			band: &frameworkmocks.MockPriorityBandAccessor{
+			band: &fwkfcmocks.MockPriorityBandAccessor{
 				PolicyStateV:      state,
 				FlowKeysFunc:      func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{} },
 				IterateQueuesFunc: func(callback func(flow flowcontrol.FlowQueueAccessor) bool) { /* no-op */ },
@@ -106,7 +106,7 @@ func runPickConformanceTests(t *testing.T, policy flowcontrol.FairnessPolicy) {
 		},
 		{
 			name: "With a band that has one empty queue",
-			band: &frameworkmocks.MockPriorityBandAccessor{
+			band: &fwkfcmocks.MockPriorityBandAccessor{
 				PolicyStateV: state,
 				FlowKeysFunc: func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{{ID: flowIDEmpty}} },
 				QueueFunc: func(fID string) flowcontrol.FlowQueueAccessor {
@@ -122,7 +122,7 @@ func runPickConformanceTests(t *testing.T, policy flowcontrol.FairnessPolicy) {
 		},
 		{
 			name: "With a band that has multiple empty queues",
-			band: &frameworkmocks.MockPriorityBandAccessor{
+			band: &fwkfcmocks.MockPriorityBandAccessor{
 				PolicyStateV: state,
 				FlowKeysFunc: func() []flowcontrol.FlowKey { return []flowcontrol.FlowKey{{ID: flowIDEmpty}, {ID: "flow-empty-2"}} },
 				QueueFunc:    func(fID string) flowcontrol.FlowQueueAccessor { return mockQueueEmpty },

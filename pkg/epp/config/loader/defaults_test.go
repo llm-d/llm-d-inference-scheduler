@@ -28,7 +28,7 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	extractormetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/metrics"
 	sourcemetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/metrics"
-	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 // metricsPlugins returns an allPlugins map with mock stubs for both default metrics plugins.
@@ -46,7 +46,7 @@ func TestEnsureDataLayer(t *testing.T) {
 
 	t.Run("nil DataLayer injects metrics defaults", func(t *testing.T) {
 		cfg := &configapi.EndpointPickerConfig{}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 
 		err := ensureDataLayer(cfg, handle, metricsPlugins())
 
@@ -62,7 +62,7 @@ func TestEnsureDataLayer(t *testing.T) {
 		cfg := &configapi.EndpointPickerConfig{
 			DataLayer: &configapi.DataLayerConfig{},
 		}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 
 		err := ensureDataLayer(cfg, handle, metricsPlugins())
 
@@ -79,7 +79,7 @@ func TestEnsureDataLayer(t *testing.T) {
 				},
 			},
 		}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 
 		err := ensureDataLayer(cfg, handle, metricsPlugins())
 
@@ -98,7 +98,7 @@ func TestEnsureDataLayer(t *testing.T) {
 				},
 			},
 		}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 
 		err := ensureDataLayer(cfg, handle, metricsPlugins())
 
@@ -112,7 +112,7 @@ func TestEnsureDataLayer(t *testing.T) {
 				InjectDefaults: ptr.To(false),
 			},
 		}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 
 		err := ensureDataLayer(cfg, handle, metricsPlugins())
 
@@ -124,7 +124,7 @@ func TestEnsureDataLayer(t *testing.T) {
 		cfg := &configapi.EndpointPickerConfig{
 			FeatureGates: configapi.FeatureGates{datalayer.EnableLegacyMetricsFeatureGate},
 		}
-		handle := utils.NewTestHandle(context.Background())
+		handle := igwtestutils.NewTestHandle(context.Background())
 
 		err := ensureDataLayer(cfg, handle, metricsPlugins())
 

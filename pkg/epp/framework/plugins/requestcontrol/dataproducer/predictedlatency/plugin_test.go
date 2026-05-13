@@ -31,7 +31,7 @@ import (
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	utils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
 // mockPredictor implements PredictorInterface for testing
@@ -329,7 +329,7 @@ func TestPredictedLatencyFactory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handle := utils.NewTestHandle(context.Background())
+			handle := igwtestutils.NewTestHandle(context.Background())
 			rawParams := json.RawMessage(tt.jsonParams)
 			plugin, err := PredictedLatencyFactory(tt.pluginName, rawParams, handle)
 
@@ -365,7 +365,7 @@ func TestPredictedLatencyFactoryInvalidJSON(t *testing.T) {
 
 	for _, tt := range invalidTests {
 		t.Run(tt.name, func(t *testing.T) {
-			handle := utils.NewTestHandle(context.Background())
+			handle := igwtestutils.NewTestHandle(context.Background())
 			rawParams := json.RawMessage(tt.jsonParams)
 			plugin, err := PredictedLatencyFactory("test", rawParams, handle)
 

@@ -32,7 +32,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	framework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrconcurrency "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
 )
 
@@ -60,7 +60,7 @@ func ConcurrencyDetectorFactory(
 }
 
 var (
-	_ framework.Filter               = &detector{}
+	_ fwksched.Filter                = &detector{}
 	_ flowcontrol.SaturationDetector = &detector{}
 )
 
@@ -151,12 +151,12 @@ func (d *detector) Saturation(_ context.Context, endpoints []datalayer.Endpoint)
 // It applies a relaxed limit (MaxConcurrency * (1 + Headroom)) to allow for scheduling flexibility and burst tolerance.
 func (d *detector) Filter(
 	_ context.Context,
-	_ *framework.CycleState,
-	_ *framework.InferenceRequest,
-	endpoints []framework.Endpoint,
-) []framework.Endpoint {
+	_ *fwksched.CycleState,
+	_ *fwksched.InferenceRequest,
+	endpoints []fwksched.Endpoint,
+) []fwksched.Endpoint {
 	// Pre-allocate assuming most endpoints will pass the filter to minimize allocations.
-	filtered := make([]framework.Endpoint, 0, len(endpoints))
+	filtered := make([]fwksched.Endpoint, 0, len(endpoints))
 
 	var limit int64
 	if d.config.mode == modeTokens {

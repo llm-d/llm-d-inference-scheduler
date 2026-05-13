@@ -38,8 +38,8 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
-	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 
+	"github.com/llm-d/llm-d-inference-scheduler/apix/v1alpha2"
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
@@ -48,7 +48,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	fwk "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
+	fwkrc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requesthandling/parsers/openai"
@@ -109,31 +109,31 @@ func (ds *mockDatastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.En
 	return res
 }
 
-type mockPrepareDataPlugin struct {
+type mockDataProducerPlugin struct {
 	name     string
 	produces map[string]any
 	consumes map[string]any
 }
 
-func (m *mockPrepareDataPlugin) TypedName() fwkplugin.TypedName {
+func (m *mockDataProducerPlugin) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Name: m.name, Type: "mock"}
 }
 
-func (m *mockPrepareDataPlugin) Produces() map[string]any {
+func (m *mockDataProducerPlugin) Produces() map[string]any {
 	return m.produces
 }
 
-func (m *mockPrepareDataPlugin) Consumes() map[string]any {
+func (m *mockDataProducerPlugin) Consumes() map[string]any {
 	return m.consumes
 }
 
-func (m *mockPrepareDataPlugin) PrepareRequestData(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
+func (m *mockDataProducerPlugin) Produce(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	endpoints[0].Put(mockProducedDataKey, mockProducedDataType{value: 42})
 	return nil
 }
 
-func newMockPrepareDataPlugin(name string) *mockPrepareDataPlugin {
-	return &mockPrepareDataPlugin{
+func newMockDataProducerPlugin(name string) *mockDataProducerPlugin {
+	return &mockDataProducerPlugin{
 		name:     name,
 		produces: map[string]any{mockProducedDataKey: 0},
 		consumes: map[string]any{},
@@ -323,7 +323,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 		wantReqCtx              *handlers.RequestContext // Fields to check in the returned RequestContext
 		targetModelName         string                   // Expected model name after target model resolution
 		admitRequestDenialError error                    // Expected denial error from admission plugin
-		prepareDataPlugin       *mockPrepareDataPlugin
+		dataProducerPlugin      *mockDataProducerPlugin
 		preRequestPlugin        *mockPreRequestPlugin
 		wantMutatedBody         map[string]any
 	}{
@@ -456,7 +456,7 @@ func TestDirector_HandleRequest(t *testing.T) {
 			targetModelName: model,
 		},
 		{
-			name: "successful chat completions request with prepare data plugins",
+			name: "successful chat completions request with DataProducer plugins",
 			reqBodyMap: map[string]any{
 				"model": model,
 				"messages": []any{
@@ -490,8 +490,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 					},
 				},
 			},
-			targetModelName:   model,
-			prepareDataPlugin: newMockPrepareDataPlugin("test-plugin"),
+			targetModelName:    model,
+			dataProducerPlugin: newMockDataProducerPlugin("test-plugin"),
 		},
 		{
 			name: "successful chat completions request with admit request plugins",
@@ -749,8 +749,8 @@ func TestDirector_HandleRequest(t *testing.T) {
 					test.schedulerMockSetup(mockSched)
 				}
 				config := NewConfig()
-				if test.prepareDataPlugin != nil {
-					config = config.WithPrepareDataPlugins(test.prepareDataPlugin)
+				if test.dataProducerPlugin != nil {
+					config = config.WithDataProducerPlugins(test.dataProducerPlugin)
 				}
 				if test.preRequestPlugin != nil {
 					config = config.WithPreRequestPlugins(test.preRequestPlugin)
@@ -1247,7 +1247,7 @@ func TestDirector_HandleResponseBody(t *testing.T) {
 	director.HandleResponseBody(ctx, reqCtx, true)
 
 	ps1.mu.Lock()
-	resps := make([]*fwk.Response, len(ps1.respsOnStreaming))
+	resps := make([]*fwkrc.Response, len(ps1.respsOnStreaming))
 	copy(resps, ps1.respsOnStreaming)
 	targetPods := make([]string, len(ps1.targetPodsOnStreaming))
 	copy(targetPods, ps1.targetPodsOnStreaming)
@@ -1339,7 +1339,7 @@ func (p *orderTrackingPlugin) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-func (p *orderTrackingPlugin) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwk.Response, _ *fwkdl.EndpointMetadata) {
+func (p *orderTrackingPlugin) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwkrc.Response, _ *fwkdl.EndpointMetadata) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.observedTokenCounts = append(p.observedTokenCounts, response.Usage.CompletionTokens)
@@ -1354,18 +1354,18 @@ const (
 type testResponseReceived struct {
 	mu                      sync.Mutex
 	typedName               fwkplugin.TypedName
-	lastRespOnResponse      *fwk.Response
+	lastRespOnResponse      *fwkrc.Response
 	lastTargetPodOnResponse string
 }
 
 type testResponseStreaming struct {
 	mu                    sync.Mutex
 	typedName             fwkplugin.TypedName
-	respsOnStreaming      []*fwk.Response
+	respsOnStreaming      []*fwkrc.Response
 	targetPodsOnStreaming []string
 
 	// Legacy fields for existing tests if any, but better to update them
-	lastRespOnStreaming      *fwk.Response
+	lastRespOnStreaming      *fwkrc.Response
 	lastTargetPodOnStreaming string
 }
 
@@ -1389,14 +1389,14 @@ func (p *testResponseStreaming) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
-func (p *testResponseReceived) ResponseHeader(_ context.Context, _ *fwksched.InferenceRequest, response *fwk.Response, targetPod *fwkdl.EndpointMetadata) {
+func (p *testResponseReceived) ResponseHeader(_ context.Context, _ *fwksched.InferenceRequest, response *fwkrc.Response, targetPod *fwkdl.EndpointMetadata) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.lastRespOnResponse = response
 	p.lastTargetPodOnResponse = targetPod.NamespacedName.String()
 }
 
-func (p *testResponseStreaming) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwk.Response, targetPod *fwkdl.EndpointMetadata) {
+func (p *testResponseStreaming) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, response *fwkrc.Response, targetPod *fwkdl.EndpointMetadata) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.respsOnStreaming = append(p.respsOnStreaming, response)

@@ -33,7 +33,7 @@ import (
 	errcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	schedulingframework "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
 
 const (
@@ -839,12 +839,12 @@ func TestSchedulerAttemptsTotal(t *testing.T) {
 
 	t.Run("success with endpoint metadata", func(t *testing.T) {
 		Reset()
-		result := &schedulingframework.SchedulingResult{
+		result := &fwksched.SchedulingResult{
 			PrimaryProfileName: "primary",
-			ProfileResults: map[string]*schedulingframework.ProfileRunResult{
+			ProfileResults: map[string]*fwksched.ProfileRunResult{
 				"primary": {
-					TargetEndpoints: []schedulingframework.Endpoint{
-						schedulingframework.NewEndpoint(
+					TargetEndpoints: []fwksched.Endpoint{
+						fwksched.NewEndpoint(
 							&fwkdl.EndpointMetadata{
 								NamespacedName: k8stypes.NamespacedName{Name: "pod-1", Namespace: "ns-1"},
 								PodName:        "pod-1",
@@ -863,12 +863,12 @@ func TestSchedulerAttemptsTotal(t *testing.T) {
 
 	t.Run("success with multiple endpoints uses first", func(t *testing.T) {
 		Reset()
-		result := &schedulingframework.SchedulingResult{
+		result := &fwksched.SchedulingResult{
 			PrimaryProfileName: "primary",
-			ProfileResults: map[string]*schedulingframework.ProfileRunResult{
+			ProfileResults: map[string]*fwksched.ProfileRunResult{
 				"primary": {
-					TargetEndpoints: []schedulingframework.Endpoint{
-						schedulingframework.NewEndpoint(
+					TargetEndpoints: []fwksched.Endpoint{
+						fwksched.NewEndpoint(
 							&fwkdl.EndpointMetadata{
 								NamespacedName: k8stypes.NamespacedName{Name: "pod-1", Namespace: "ns-1"},
 								PodName:        "pod-1",
@@ -876,7 +876,7 @@ func TestSchedulerAttemptsTotal(t *testing.T) {
 							},
 							nil, nil,
 						),
-						schedulingframework.NewEndpoint(
+						fwksched.NewEndpoint(
 							&fwkdl.EndpointMetadata{
 								NamespacedName: k8stypes.NamespacedName{Name: "pod-2", Namespace: "ns-2"},
 								PodName:        "pod-2",
@@ -895,12 +895,12 @@ func TestSchedulerAttemptsTotal(t *testing.T) {
 
 	t.Run("success with different models and endpoints", func(t *testing.T) {
 		Reset()
-		resultA := &schedulingframework.SchedulingResult{
+		resultA := &fwksched.SchedulingResult{
 			PrimaryProfileName: "primary",
-			ProfileResults: map[string]*schedulingframework.ProfileRunResult{
+			ProfileResults: map[string]*fwksched.ProfileRunResult{
 				"primary": {
-					TargetEndpoints: []schedulingframework.Endpoint{
-						schedulingframework.NewEndpoint(
+					TargetEndpoints: []fwksched.Endpoint{
+						fwksched.NewEndpoint(
 							&fwkdl.EndpointMetadata{
 								NamespacedName: k8stypes.NamespacedName{Name: "pod-1", Namespace: "ns-1"},
 								PodName:        "pod-1",
@@ -912,12 +912,12 @@ func TestSchedulerAttemptsTotal(t *testing.T) {
 				},
 			},
 		}
-		resultB := &schedulingframework.SchedulingResult{
+		resultB := &fwksched.SchedulingResult{
 			PrimaryProfileName: "primary",
-			ProfileResults: map[string]*schedulingframework.ProfileRunResult{
+			ProfileResults: map[string]*fwksched.ProfileRunResult{
 				"primary": {
-					TargetEndpoints: []schedulingframework.Endpoint{
-						schedulingframework.NewEndpoint(
+					TargetEndpoints: []fwksched.Endpoint{
+						fwksched.NewEndpoint(
 							&fwkdl.EndpointMetadata{
 								NamespacedName: k8stypes.NamespacedName{Name: "pod-2", Namespace: "ns-2"},
 								PodName:        "pod-2",

@@ -141,9 +141,9 @@ func TestDatastoreEndpointCandidates_Locate(t *testing.T) {
 			endpointCandidates := NewDatastoreEndpointCandidates(mockDS, tc.opts...)
 			result := endpointCandidates.Locate(context.Background(), tc.metadata)
 
-			var gotIPs []string
-			for _, ep := range result {
-				gotIPs = append(gotIPs, ep.GetMetadata().GetIPAddress())
+			gotIPs := make([]string, len(result))
+			for idx, ep := range result {
+				gotIPs[idx] = ep.GetMetadata().GetIPAddress()
 			}
 			assert.ElementsMatch(t, tc.expectedEndpointIPs, gotIPs, "Locate returned unexpected set of endpoint candidates")
 		})

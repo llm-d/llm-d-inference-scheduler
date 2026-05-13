@@ -32,7 +32,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer/mocks"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
-	plugininterface "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	datasourcemocks "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 )
@@ -59,8 +59,8 @@ type errSource struct {
 	err  error
 }
 
-func (e *errSource) TypedName() plugininterface.TypedName {
-	return plugininterface.TypedName{Type: e.kind, Name: e.kind}
+func (e *errSource) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: e.kind, Name: e.kind}
 }
 
 func (e *errSource) Poll(_ context.Context, _ fwkdl.Endpoint) (any, error) {
@@ -73,8 +73,8 @@ type dataSource struct {
 	kind string
 }
 
-func (d *dataSource) TypedName() plugininterface.TypedName {
-	return plugininterface.TypedName{Type: d.kind, Name: d.kind}
+func (d *dataSource) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: d.kind, Name: d.kind}
 }
 
 func (d *dataSource) Poll(_ context.Context, _ fwkdl.Endpoint) (any, error) {
@@ -87,8 +87,8 @@ type stubExtractor struct {
 	err  error
 }
 
-func (s *stubExtractor) TypedName() plugininterface.TypedName {
-	return plugininterface.TypedName{Type: s.kind, Name: s.kind}
+func (s *stubExtractor) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: s.kind, Name: s.kind}
 }
 func (s *stubExtractor) ExpectedInputType() reflect.Type                          { return reflect.TypeFor[any]() }
 func (s *stubExtractor) Extract(_ context.Context, _ any, _ fwkdl.Endpoint) error { return s.err }
