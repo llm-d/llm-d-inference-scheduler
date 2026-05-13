@@ -19,6 +19,7 @@ package tokenizer
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,7 +49,8 @@ const (
 
 // vllmHTTPConfig configures the vLLM /render HTTP backend.
 type vllmHTTPConfig struct {
-	// URL is the base URL of the vLLM sidecar (no trailing slash).
+	// URL is the base URL of the vLLM render endpoint (no trailing slash).
+	// Can be a loopback sidecar or a dedicated Service.
 	// Defaults to http://localhost:8000.
 	URL string `json:"url,omitempty"`
 	// Timeout is the per-request timeout for text-only requests
@@ -83,12 +85,28 @@ func newVLLMHTTPRenderer(cfg *vllmHTTPConfig, modelName string) (*vllmHTTPRender
 		return nil, fmt.Errorf("invalid 'mmTimeout': %w", err)
 	}
 	return &vllmHTTPRenderer{
-		client:    &http.Client{},
+		client:    &http.Client{Transport: newRenderTransport()},
 		baseURL:   url,
 		modelName: modelName,
 		timeout:   timeout,
 		mmTimeout: mmTimeout,
 	}, nil
+}
+
+// newRenderTransport returns an http.Transport tuned for the render endpoint:
+// HTTP/2 is disabled (vLLM doesn't support it) and the idle-connection pool
+// is sized for the in-pod sidecar case while still being reasonable for a
+// dedicated render Service.
+func newRenderTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 0
+	t.MaxIdleConnsPerHost = 16
+	t.IdleConnTimeout = 90 * time.Second
+	// Disable HTTP/2: vLLM doesn't support it. ForceAttemptHTTP2 alone is
+	// not enough — clearing TLSNextProto prevents ALPN-negotiated h2 too.
+	t.ForceAttemptHTTP2 = false
+	t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	return t
 }
 
 func parseHTTPDuration(s string, def time.Duration) (time.Duration, error) {
@@ -187,9 +205,9 @@ type chatImageURL struct {
 // OpenAI-shaped wire body expected by vLLM's /v1/chat/completions/render.
 // Unknown content-block types are skipped (mirrors the UDS path's behavior).
 func buildChatRenderRequest(model string, req *tokenizerTypes.RenderChatRequest) chatRenderRequest {
-	msgs := make([]chatMessage, 0, len(req.Conversation))
-	for _, c := range req.Conversation {
-		msgs = append(msgs, chatMessage{Role: c.Role, Content: toChatContent(c.Content)})
+	msgs := make([]chatMessage, len(req.Conversation))
+	for idx, c := range req.Conversation {
+		msgs[idx] = chatMessage{Role: c.Role, Content: toChatContent(c.Content)}
 	}
 	return chatRenderRequest{
 		Model:                model,
