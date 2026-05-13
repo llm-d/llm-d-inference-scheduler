@@ -8,8 +8,8 @@ plugins:
 - type: token-producer
   parameters:
     modelName: "${MODEL_NAME}"
-    vllmHTTP:
-      url: "http://localhost:8000"
+    vllm:
+      http: "http://localhost:8000"
       # timeout: "5s"
       # mmTimeout: "30s"
 - type: precise-prefix-cache-scorer

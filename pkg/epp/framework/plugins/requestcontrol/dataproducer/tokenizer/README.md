@@ -17,43 +17,35 @@ upstream list shape, sorted by placeholder offset.
 > Legacy alias `tokenizer` is still accepted but logs a deprecation warning at
 > instantiation. Prefer `token-producer` in new configs.
 
-## Backends
+## Backend
 
-The plugin selects one of two backends based on which configuration block
-is present.
-
-| Backend              | Transport     | Sidecar image                            | Notes                                                                                           |
-| -------------------- | ------------- | ---------------------------------------- |-------------------------------------------------------------------------------------------------|
-| `vllmHTTP`           | HTTP          | any vLLM image with `vllm launch render` | Uses vLLM's exact preprocessing (template + tokenizer) — no separate sidecar image to maintain. |
-| `udsTokenizerConfig` | gRPC over UDS | custom Python tokenizer service          | Lowest theoretical per-request overhead.                                                        |
-
-Set exactly one block. Setting both is rejected by the factory. An empty
-configuration falls back to `vllmHTTP` with `http://localhost:8000`.
+The plugin calls vLLM's `/v1/completions/render` and
+`/v1/chat/completions/render` over HTTP. An empty configuration falls back
+to `vllm` with `http://localhost:8000`. Future protocol fields (e.g. `grpc`)
+can be added alongside `http` under the same `vllm` block.
 
 ## Config
 
-| Parameter                              | Default                  | Description                                                       |
-| -------------------------------------- | ------------------------ | ----------------------------------------------------------------- |
-| `modelName`                            | – (required)             | Model whose tokenizer should be loaded / sent in render requests. |
-| `vllmHTTP.url`                         | `http://localhost:8000`  | Base URL of the vLLM sidecar (no trailing slash).                 |
-| `vllmHTTP.timeout`                     | `5s`                     | Per-request timeout for text-only requests.                       |
-| `vllmHTTP.mmTimeout`                   | `30s`                    | Per-request timeout for multimodal requests.                      |
-| `udsTokenizerConfig.socketFile`        | `/tmp/tokenizer/...sock` | UDS socket path.                                                  |
-| `udsTokenizerConfig.modelTokenizerMap` | –                        | Optional model → tokenizer-data path map.                         |
+| Parameter        | Default                 | Description                                                       |
+| ---------------- | ----------------------- | ----------------------------------------------------------------- |
+| `modelName`      | – (required)            | Model whose tokenizer should be loaded / sent in render requests. |
+| `vllm.http`      | `http://localhost:8000` | Base URL of the vLLM render endpoint (no trailing slash).         |
+| `vllm.timeout`   | `5s`                    | Per-request timeout for text-only requests.                       |
+| `vllm.mmTimeout` | `30s`                   | Per-request timeout for multimodal requests.                      |
 
 ## Failure mode
 
 Per-request errors are returned to the Director, which currently logs and
 continues; downstream scorers fall back to their own paths.
 
-## Deployment — vLLM HTTP backend
+## Deployment
 
-The HTTP backend calls `POST {url}/v1/completions/render` and
-`POST {url}/v1/chat/completions/render`, both of which are exposed by
+The plugin calls `POST {http}/v1/completions/render` and
+`POST {http}/v1/chat/completions/render`, both of which are exposed by
 `vllm serve <model>` and by the GPU-less `vllm launch render <model>`.
-
-Recommended layout: co-locate a CPU-only render server as a sidecar in the
-EPP pod and connect over loopback.
+Any reachable HTTP endpoint serving the same model the scheduler tokenizes
+for will work — sidecar in the EPP pod (loopback) or a dedicated Service
+shared by multiple EPP replicas.
 
 ```yaml
 # EPP pod spec
@@ -66,13 +58,24 @@ containers:
   readinessProbe: {httpGet: {path: /health, port: 8000}, periodSeconds: 5}
 ```
 
+Plugin config — sidecar (loopback):
+
 ```yaml
-# EPP plugin config
 - type: token-producer
   parameters:
     modelName: "${MODEL_NAME}"
-    vllmHTTP:
-      url: "http://localhost:8000"        # optional; this is the default
+    vllm:
+      http: "http://localhost:8000"       # optional; this is the default
+```
+
+Plugin config — dedicated render Service:
+
+```yaml
+- type: token-producer
+  parameters:
+    modelName: "${MODEL_NAME}"
+    vllm:
+      http: "http://vllm-render.default.svc.cluster.local:8000"
 ```
 
 A complete sample config that pairs this with `precise-prefix-cache-scorer`

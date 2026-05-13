@@ -60,14 +60,14 @@ const (
 
 // tokenizerPluginConfig holds the configuration for the tokenizer plugin.
 //
-// Exactly one backend block should be set: vllmHTTP (vLLM HTTP /render,
-// default) or udsTokenizerConfig (gRPC over Unix domain socket). An empty
-// configuration falls back to vllmHTTP with its default URL.
+// The default backend is `vllm` (HTTP /render). `udsTokenizerConfig` is the
+// legacy gRPC-over-UDS backend, selected only when explicitly enabled. An
+// empty configuration falls back to `vllm` with its default endpoint.
 type tokenizerPluginConfig struct {
-	// TokenizerConfig configures the gRPC-over-UDS backend.
+	// TokenizerConfig configures the legacy gRPC-over-UDS backend.
 	TokenizerConfig tokenization.UdsTokenizerConfig `json:"udsTokenizerConfig,omitempty"`
-	// VLLMHTTPConfig configures the vLLM HTTP /render backend.
-	VLLMHTTPConfig *vllmHTTPConfig `json:"vllmHTTP,omitempty"`
+	// VLLM configures the vLLM /render backend.
+	VLLM *vllmConfig `json:"vllm,omitempty"`
 	// ModelName is the name of the model whose tokenizer should be loaded.
 	ModelName string `json:"modelName"`
 }
@@ -85,8 +85,8 @@ func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Han
 	if config.ModelName == "" {
 		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'modelName' must be specified", PluginType)
 	}
-	if config.VLLMHTTPConfig != nil && config.TokenizerConfig.IsEnabled() {
-		return nil, fmt.Errorf("invalid configuration for '%s' plugin: only one of 'udsTokenizerConfig' or 'vllmHTTP' may be set", PluginType)
+	if config.VLLM != nil && config.TokenizerConfig.IsEnabled() {
+		return nil, fmt.Errorf("invalid configuration for '%s' plugin: only one of 'udsTokenizerConfig' or 'vllm' may be set", PluginType)
 	}
 
 	p, err := NewPlugin(handle.Context(), &config)
@@ -111,8 +111,8 @@ func LegacyPluginFactory(name string, rawParameters json.RawMessage, handle plug
 }
 
 // NewPlugin creates a new tokenizer plugin instance and constructs the
-// configured backend. vllmHTTP is the default; udsTokenizerConfig is
-// selected only when explicitly enabled (its socketFile is set).
+// configured backend. vllm is the default; udsTokenizerConfig is selected
+// only when explicitly enabled (its socketFile is set).
 func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, error) {
 	var tk tokenizer
 	switch {
@@ -123,9 +123,9 @@ func NewPlugin(ctx context.Context, config *tokenizerPluginConfig) (*Plugin, err
 		}
 		tk = uds
 	default:
-		cfg := config.VLLMHTTPConfig
+		cfg := config.VLLM
 		if cfg == nil {
-			cfg = &vllmHTTPConfig{}
+			cfg = &vllmConfig{}
 		}
 		renderer, err := newVLLMHTTPRenderer(cfg, config.ModelName)
 		if err != nil {

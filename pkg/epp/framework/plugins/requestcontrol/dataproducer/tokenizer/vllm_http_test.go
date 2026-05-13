@@ -37,7 +37,7 @@ const testHTTPModel = "test-model"
 
 func newHTTPRenderer(t *testing.T, srv *httptest.Server) *vllmHTTPRenderer {
 	t.Helper()
-	r, err := newVLLMHTTPRenderer(&vllmHTTPConfig{URL: srv.URL}, testHTTPModel)
+	r, err := newVLLMHTTPRenderer(&vllmConfig{HTTP: srv.URL}, testHTTPModel)
 	require.NoError(t, err)
 	return r
 }
@@ -142,7 +142,7 @@ func TestPluginFactory_RejectsBothBackends(t *testing.T) {
 	params := `{
 		"modelName": "m",
 		"udsTokenizerConfig": {"socketFile": "/tmp/foo.sock"},
-		"vllmHTTP": {"url": "http://localhost:8000"}
+		"vllm": {"http": "http://localhost:8000"}
 	}`
 	handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
 	p, err := PluginFactory("test", json.RawMessage(params), handle)
@@ -154,7 +154,7 @@ func TestPluginFactory_RejectsBothBackends(t *testing.T) {
 func TestPluginFactory_HTTPBackend_BadTimeout(t *testing.T) {
 	params := `{
 		"modelName": "m",
-		"vllmHTTP": {"timeout": "nope"}
+		"vllm": {"timeout": "nope"}
 	}`
 	handle := plugin.NewEppHandle(utils.NewTestContext(t), nil)
 	p, err := PluginFactory("test", json.RawMessage(params), handle)

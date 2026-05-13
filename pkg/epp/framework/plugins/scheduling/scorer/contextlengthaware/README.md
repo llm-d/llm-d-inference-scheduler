@@ -56,8 +56,8 @@ plugins:
   - type: token-producer
     parameters:
       modelName: meta-llama/Llama-3.1-8B-Instruct
-      vllmHTTP:
-        url: http://localhost:8000
+      vllm:
+        http: http://localhost:8000
   - type: context-length-aware
     parameters:
       label: llm-d.ai/context-length-range

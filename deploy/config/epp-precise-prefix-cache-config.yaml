@@ -5,8 +5,8 @@ plugins:
   - type: token-producer
     parameters:
       modelName: hf-repo/model-name           # set to the model used in the vLLM deployment
-      vllmHTTP:
-        url: http://localhost:8000
+      vllm:
+        http: http://localhost:8000
   - type: endpoint-notification-source
   - type: metrics-data-source
   - type: core-metrics-extractor
