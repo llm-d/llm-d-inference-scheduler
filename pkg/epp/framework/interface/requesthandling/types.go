@@ -61,7 +61,7 @@ func (RawPayload) IsParsed() bool    { return false }
 
 // InferenceRequestBody contains the request-body fields that we parse out as user input,
 // to be used in forming scheduling decisions.
-// An InferenceRequestBody must contain exactly one of CompletionsRequest, ChatCompletionsRequest, ResponsesRequest, ConversationsRequest, or EmbeddingsRequest.
+// An InferenceRequestBody must contain exactly one of CompletionsRequest, ChatCompletionsRequest, MessagesRequest, ResponsesRequest, ConversationsRequest, or EmbeddingsRequest.
 type InferenceRequestBody struct {
 	// CompletionsRequest is the representation of the OpenAI /v1/completions request body.
 	Completions *CompletionsRequest `json:"completions,omitempty"`
@@ -129,6 +129,21 @@ func (r *InferenceRequestBody) PromptText() string {
 			}
 		}
 		return sb.String()
+	case r.Messages != nil:
+		var sb strings.Builder
+		sysText := r.Messages.System.PlainText()
+		if sysText != "" {
+			sb.WriteString(sysText)
+			sb.WriteString(" ")
+		}
+		for _, msg := range r.Messages.Messages {
+			text := msg.Content.PlainText()
+			if text != "" {
+				sb.WriteString(text)
+				sb.WriteString(" ")
+			}
+		}
+		return sb.String()
 	case r.Responses != nil:
 		if s, ok := r.Responses.Input.(string); ok {
 			return s
@@ -167,6 +182,9 @@ func (r *InferenceRequestBody) CacheSalt() string {
 	}
 	if r.ChatCompletions != nil {
 		return r.ChatCompletions.CacheSalt
+	}
+	if r.Messages != nil {
+		return r.Messages.CacheSalt
 	}
 	if r.Completions != nil {
 		return r.Completions.CacheSalt
