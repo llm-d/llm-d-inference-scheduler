@@ -202,7 +202,7 @@ upgrade-deps: ## Upgrade all Go dependencies to latest minor/patch versions and 
 .PHONY: vulncheck
 vulncheck: image-build-builder ## Run govulncheck for known vulnerabilities
 	@printf "\033[33;1m==== Running govulncheck ====\033[0m\n"
-	$(BUILDER_RUN) 'go install golang.org/x/vuln/cmd/govulncheck@v1.3.0 && govulncheck ./...'
+	$(BUILDER_RUN) 'govulncheck ./...'
 
 .PHONY: presubmit
 presubmit: LINT_NEW_ONLY=true
