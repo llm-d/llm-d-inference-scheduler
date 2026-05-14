@@ -1334,4 +1334,3 @@ func TestExtractActivePorts(t *testing.T) {
 		})
 	}
 }
-
