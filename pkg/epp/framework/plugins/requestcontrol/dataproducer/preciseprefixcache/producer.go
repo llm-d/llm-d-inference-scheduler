@@ -113,10 +113,6 @@ func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Han
 	if parameters.IndexerConfig == nil {
 		return nil, errors.New("indexerConfig is required")
 	}
-	//nolint:staticcheck // SA1019: validate the legacy field when callers explicitly opt into it.
-	if parameters.IndexerConfig.TokenizersPoolConfig != nil && parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
-		return nil, errors.New("modelName is required when indexerConfig.tokenizersPoolConfig is set")
-	}
 
 	p, err := New(handle.Context(), parameters)
 	if err != nil {
@@ -211,9 +207,6 @@ func (p *Producer) Produce(ctx context.Context,
 
 	blockKeys, err := computeBlockKeys(ctx, p.kvCacheIndexer, request, p.blockSizeTokens)
 	if err != nil {
-		if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-			return nil
-		}
 		return fmt.Errorf("failed to compute block keys: %w", err)
 	}
 	if len(blockKeys) == 0 {

@@ -23,7 +23,6 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -39,15 +38,7 @@ import (
 
 type fakeKVCacheIndexer struct {
 	computeFromTokens func(ctx context.Context, tokens []uint32, model string, extra []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
-	computePrompt     func(ctx context.Context, renderReq *types.RenderChatRequest, prompt, model string) ([]kvblock.BlockHash, error)
 	index             *fakeKVBlockIndex
-}
-
-func (f *fakeKVCacheIndexer) ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, model string) ([]kvblock.BlockHash, error) {
-	if f.computePrompt != nil {
-		return f.computePrompt(ctx, renderReq, prompt, model)
-	}
-	return []kvblock.BlockHash{}, nil
 }
 
 func (f *fakeKVCacheIndexer) ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, model string, extra []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
@@ -129,25 +120,20 @@ func newProducerWithIndexer(ctx context.Context, idx kvCacheIndexer, scorer kvca
 	}
 }
 
-// When TokenizedPrompt is populated, Produce hashes the tokens directly and
-// must not invoke the prompt-based ComputeBlockKeys.
-func TestProduce_UsesTokenizedPromptOverFallback(t *testing.T) {
+// TokenizedPrompt populated → Produce hashes the tokens and writes the
+// real (matchLen, totalBlocks, blockSize) per endpoint.
+func TestProduce_UsesTokenizedPrompt(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 
 	tokens := []uint32{10, 20, 30, 40, 50}
 	wantKey := kvblock.BlockHash(0xCAFE)
 
 	var capturedTokens []uint32
-	promptCalled := false
 
 	idx := &fakeKVCacheIndexer{
 		computeFromTokens: func(_ context.Context, ts []uint32, _ string, _ []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
 			capturedTokens = ts
 			return []kvblock.BlockHash{wantKey}, nil
-		},
-		computePrompt: func(_ context.Context, _ *types.RenderChatRequest, _, _ string) ([]kvblock.BlockHash, error) {
-			promptCalled = true
-			return nil, nil
 		},
 		index: &fakeKVBlockIndex{
 			lookup: func(_ context.Context, _ []kvblock.BlockHash, _ sets.Set[string]) (map[kvblock.BlockHash][]kvblock.PodEntry, error) {
@@ -170,13 +156,11 @@ func TestProduce_UsesTokenizedPromptOverFallback(t *testing.T) {
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
 			TokenizedPrompt: &fwkrh.TokenizedPrompt{TokenIDs: tokens},
-			Completions:     &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "ignored"}},
 		},
 	}
 
 	require.NoError(t, p.Produce(ctx, req, testEndpoints))
 	require.Equal(t, tokens, capturedTokens)
-	require.False(t, promptCalled)
 
 	raw, ok := testEndpoints[0].Get(attrprefix.PrefixCacheMatchInfoKey)
 	require.True(t, ok)
@@ -193,80 +177,39 @@ func TestProduce_UsesTokenizedPromptOverFallback(t *testing.T) {
 	assert.Equal(t, 1, info2.TotalBlocks())
 }
 
-// No TokenizedPrompt → fall back to the indexer's prompt-based path
-// (legacy all-in-one mode).
-func TestProduce_NoTokens_FallsBackToPrompt(t *testing.T) {
+// No TokenizedPrompt → no-op. The producer never tokenizes from a prompt.
+func TestProduce_NoTokens_NoOp(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-
-	wantKey := kvblock.BlockHash(0xDEAD)
-	var capturedPrompt string
-	fromTokensCalled := false
-
 	idx := &fakeKVCacheIndexer{
 		computeFromTokens: func(_ context.Context, _ []uint32, _ string, _ []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
-			fromTokensCalled = true
+			t.Fatalf("ComputeBlockKeysFromTokens must not be called when no tokens")
 			return nil, nil
 		},
-		computePrompt: func(_ context.Context, _ *types.RenderChatRequest, prompt, _ string) ([]kvblock.BlockHash, error) {
-			capturedPrompt = prompt
-			return []kvblock.BlockHash{wantKey}, nil
-		},
-		index: &fakeKVBlockIndex{
-			lookup: func(_ context.Context, _ []kvblock.BlockHash, _ sets.Set[string]) (map[kvblock.BlockHash][]kvblock.PodEntry, error) {
-				return map[kvblock.BlockHash][]kvblock.PodEntry{
-					wantKey: {{PodIdentifier: "10.0.0.1:8080"}},
-				}, nil
-			},
-		},
+		index: &fakeKVBlockIndex{},
 	}
-	scorer := &fakeKVBlockScorer{
-		score: func(_ context.Context, _ []kvblock.BlockHash, _ map[kvblock.BlockHash][]kvblock.PodEntry) (map[string]float64, error) {
-			return map[string]float64{"10.0.0.1:8080": 1.0}, nil
-		},
-	}
-
-	p := newProducerWithIndexer(ctx, idx, scorer)
+	p := newProducerWithIndexer(ctx, idx, &fakeKVBlockScorer{})
 
 	req := &scheduling.InferenceRequest{
 		RequestID:   "req-2",
 		TargetModel: "test-model",
 		Body: &fwkrh.InferenceRequestBody{
-			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "fallback prompt"}},
+			Completions: &fwkrh.CompletionsRequest{Prompt: fwkrh.Prompt{Raw: "no tokens here"}},
 		},
 	}
-
 	require.NoError(t, p.Produce(ctx, req, testEndpoints))
-	require.False(t, fromTokensCalled)
-	require.Equal(t, "fallback prompt", capturedPrompt)
 }
 
-// An empty TokenIDs slice must NOT take the tokens path — the fallback
-// applies when a prompt is present.
-func TestProduce_EmptyTokenizedPromptDoesNotTrigger(t *testing.T) {
+// Empty TokenIDs → no-op (no fallback exists).
+func TestProduce_EmptyTokenizedPrompt_NoOp(t *testing.T) {
 	ctx := utils.NewTestContext(t)
-
-	wantKey := kvblock.BlockHash(0xBEEF)
-	fromTokensCalled := false
-	promptCalled := false
-
 	idx := &fakeKVCacheIndexer{
 		computeFromTokens: func(_ context.Context, _ []uint32, _ string, _ []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
-			fromTokensCalled = true
+			t.Fatalf("ComputeBlockKeysFromTokens must not be called for empty TokenIDs")
 			return nil, nil
 		},
-		computePrompt: func(_ context.Context, _ *types.RenderChatRequest, _, _ string) ([]kvblock.BlockHash, error) {
-			promptCalled = true
-			return []kvblock.BlockHash{wantKey}, nil
-		},
-		index: &fakeKVBlockIndex{
-			lookup: func(_ context.Context, _ []kvblock.BlockHash, _ sets.Set[string]) (map[kvblock.BlockHash][]kvblock.PodEntry, error) {
-				return map[kvblock.BlockHash][]kvblock.PodEntry{}, nil
-			},
-		},
+		index: &fakeKVBlockIndex{},
 	}
-	scorer := &fakeKVBlockScorer{}
-
-	p := newProducerWithIndexer(ctx, idx, scorer)
+	p := newProducerWithIndexer(ctx, idx, &fakeKVBlockScorer{})
 
 	req := &scheduling.InferenceRequest{
 		RequestID:   "req-3",
@@ -276,10 +219,7 @@ func TestProduce_EmptyTokenizedPromptDoesNotTrigger(t *testing.T) {
 			TokenizedPrompt: &fwkrh.TokenizedPrompt{TokenIDs: []uint32{}},
 		},
 	}
-
 	require.NoError(t, p.Produce(ctx, req, testEndpoints))
-	assert.False(t, fromTokensCalled)
-	assert.True(t, promptCalled)
 }
 
 // Multimodal taint flows from TokenizedPrompt into
@@ -331,10 +271,6 @@ func TestProduce_NoOpPaths(t *testing.T) {
 	idx := &fakeKVCacheIndexer{
 		computeFromTokens: func(_ context.Context, _ []uint32, _ string, _ []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
 			t.Fatalf("ComputeBlockKeysFromTokens must not be called")
-			return nil, nil
-		},
-		computePrompt: func(_ context.Context, _ *types.RenderChatRequest, _, _ string) ([]kvblock.BlockHash, error) {
-			t.Fatalf("ComputeBlockKeys must not be called")
 			return nil, nil
 		},
 		index: &fakeKVBlockIndex{},

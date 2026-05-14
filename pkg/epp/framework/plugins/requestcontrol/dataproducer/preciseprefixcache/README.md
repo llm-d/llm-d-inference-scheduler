@@ -14,8 +14,8 @@ Pipeline per request:
 - (`PreRequest`) Speculative-index the selected endpoint(s) with TTL eviction.
 - (`EndpointExtractor`) Per-pod ZMQ subscriber lifecycle on add/delete.
 
-When `TokenizedPrompt` is absent (legacy all-in-one mode), falls back to the
-kvcache indexer's `ComputeBlockKeys` for internal tokenization.
+Requires `TokenizedPrompt` on the request — set by a `token-producer`
+upstream. No-op otherwise.
 
 ## Parameters
 

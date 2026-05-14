@@ -18,62 +18,38 @@ package preciseprefixcache
 
 import (
 	"context"
-	"errors"
 
-	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
 
 // kvCacheIndexer is the subset of kvcache.Indexer the producer needs.
-// Narrowed for testability.
+// Tokens-only — no prompt-based entry points.
 type kvCacheIndexer interface {
-	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
 	ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, modelName string, extraFeatures []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
 }
 
-// computeBlockKeys converts the request to KV-block keys. Prefers
-// TokenizedPrompt (no tokenization); falls back to the indexer's
-// prompt-based path (legacy tokenizersPoolConfig configs) when tokens are
-// absent. Returns (nil, nil) when no input is resolvable.
+// computeBlockKeys hashes the request's TokenizedPrompt into KV-block keys.
+// Returns (nil, nil) if tokens are absent — callers wanting prompt-based
+// tokenization should run a token-producer plugin upstream.
 func computeBlockKeys(ctx context.Context, idx kvCacheIndexer,
 	request *scheduling.InferenceRequest, blockSizeTokens int,
 ) ([]kvblock.BlockHash, error) {
 	if request == nil || request.Body == nil {
 		return nil, nil
 	}
-
-	if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
-		var extraFeatures []*kvblock.BlockExtraFeatures
-		if len(tp.MultiModalFeatures) > 0 {
-			mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
-			extraFeatures = kvblock.ComputeBlockExtraFeatures(
-				mmHashes, mmPlaceholders, blockSizeTokens, len(tp.TokenIDs))
-		}
-		return idx.ComputeBlockKeysFromTokens(ctx, tp.TokenIDs, request.TargetModel, extraFeatures)
-	}
-
-	var (
-		keys []kvblock.BlockHash
-		err  error
-	)
-	switch {
-	case request.Body.ChatCompletions != nil:
-		renderReq := tokenizer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		keys, err = idx.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
-	case request.Body.Completions != nil:
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		keys, err = idx.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
-	default:
+	tp := request.Body.TokenizedPrompt
+	if tp == nil || len(tp.TokenIDs) == 0 {
 		return nil, nil
 	}
-	if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-		return nil, nil
+	var extraFeatures []*kvblock.BlockExtraFeatures
+	if len(tp.MultiModalFeatures) > 0 {
+		mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
+		extraFeatures = kvblock.ComputeBlockExtraFeatures(
+			mmHashes, mmPlaceholders, blockSizeTokens, len(tp.TokenIDs))
 	}
-	return keys, err
+	return idx.ComputeBlockKeysFromTokens(ctx, tp.TokenIDs, request.TargetModel, extraFeatures)
 }
