@@ -611,7 +611,7 @@ kubectl --context kind-e2e-tests get pods
 | `NAMESPACE` | `default` | Namespace to deploy test resources into |
 | `CONTAINER_RUNTIME` | `docker` | Container runtime used to load images into Kind (`docker` or `podman`) |
 | `READY_TIMEOUT` | `3m` | How long to wait for resources to become ready |
-| `EPP_IMAGE` | `ghcr.io/llm-d/router-endpoint-picker:dev` | EPP image loaded into the Kind cluster |
+| `EPP_IMAGE` | `ghcr.io/llm-d/llm-d-router-endpoint-picker:dev` | EPP image loaded into the Kind cluster |
 | `DISAGG_E` | `false` | Deploy a separate Encoder pod. See [Inference Disaggregation Modes](#inference-disaggregation-modes) |
 | `DISAGG_P` | `false` | Deploy a separate Prefill pod. See [Inference Disaggregation Modes](#inference-disaggregation-modes) |
 | `VLLM_DATA_PARALLEL_SIZE` | `1` | Number of data-parallel ranks per vLLM pod. Applies to all pod types. Set to `2`+ to enable multi-rank inference. See [Combining Scenarios with Data Parallel and KV Cache](#combining-scenarios-with-data-parallel-and-kv-cache) |
@@ -620,7 +620,7 @@ kubectl --context kind-e2e-tests get pods
 | `VLLM_EXTRA_ARGS_D` | _(empty)_ | Additional flags for the Decode vLLM container (e.g. `--tensor-parallel-size=2`) |
 | `VLLM_IMAGE` | `ghcr.io/llm-d/llm-d-inference-sim:v0.8.2` | vLLM container image to deploy. Can be a simulator or a real vLLM image (e.g., `vllm/vllm-openai:v0.16.0`) |
 | `VLLM_SIM_MODE` | `echo` | Simulator response mode. Supported values: `echo` (returns the input prompt as the response), `random` (returns a random sentence from a pre-defined bank) |
-| `SIDECAR_IMAGE` | `ghcr.io/llm-d/router-disagg-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
+| `SIDECAR_IMAGE` | `ghcr.io/llm-d/llm-d-router-disagg-sidecar:dev` | Routing sidecar image loaded into the Kind cluster |
 | `UDS_TOKENIZER_IMAGE` | `ghcr.io/llm-d/llm-d-uds-tokenizer:dev` | UDS tokenizer image loaded into the Kind cluster |
 
 ### Coverage
@@ -813,9 +813,9 @@ export EPP_TAG="<YOUR_TAG>"
 ```
 
 > [!NOTE]
-> The full image reference is `${IMAGE_REGISTRY}/router-endpoint-picker:${EPP_TAG}`.
+> The full image reference is `${IMAGE_REGISTRY}/llm-d-router-endpoint-picker:${EPP_TAG}`.
 > For example, with `IMAGE_REGISTRY=quay.io/<my-id>` and `EPP_TAG=v1.0.0`, the image
-> will be `quay.io/<my-id>/router-endpoint-picker:v1.0.0`.
+> will be `quay.io/<my-id>/llm-d-router-endpoint-picker:v1.0.0`.
 
 **2. vLLM replica count:**
 

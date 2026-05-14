@@ -24,8 +24,8 @@ jobs:
       - name: Set image names
         id: version
         run: |
-          echo "project_name=router-endpoint-picker" >> "$GITHUB_OUTPUT"
-          echo "sidecar_name=router-disagg-sidecar" >> "$GITHUB_OUTPUT"
+          echo "project_name=llm-d-router-endpoint-picker" >> "$GITHUB_OUTPUT"
+          echo "sidecar_name=llm-d-router-disagg-sidecar" >> "$GITHUB_OUTPUT"
 
       - name: Determine tag name
         id: tag

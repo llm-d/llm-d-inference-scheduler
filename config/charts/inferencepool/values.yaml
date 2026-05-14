@@ -2,7 +2,7 @@ inferenceExtension:
   replicas: 1
   image:
     registry: ghcr.io/llm-d
-    repository: router-endpoint-picker-dev
+    repository: llm-d-router-endpoint-picker-dev
     tag: main
     pullPolicy: Always
   extProcPort: 9002
