@@ -229,12 +229,10 @@ jobs:
       fail-fast: false
       matrix:
         suite:
-          - name: pd
-            focus: "simple non-PD configuration (should|with disagg)|PD configuration"
-          - name: epd-kv-scale
-            focus: "E/PD|E/P/D|EPD|KV|Scaling|Data Parallel"
+          - name: routing
+            label-filter: "!Disruptive"
           - name: disruption
-            focus: "Disruption"
+            label-filter: "Disruptive"
     name: e2e-scheduler (${{ matrix.suite.name }})
     steps:
       - name: Checkout source
@@ -280,4 +278,4 @@ jobs:
         shell: bash
         run: make test-e2e-scheduler
         env:
-          E2E_FOCUS: ${{ matrix.suite.focus }}
+          E2E_LABEL_FILTER: ${{ matrix.suite.label-filter }}
