@@ -749,8 +749,23 @@ func (s *Scorer) getBlockSizeTokens() int {
 	return s.blockSizeTokens
 }
 
+// scoreBlockKeys computes per-pod scores from precomputed block keys, avoiding
+// re-tokenization in the legacy prompt/chat fallback paths. Empty input
+// returns an empty score map.
+func (s *Scorer) scoreBlockKeys(ctx context.Context, blockKeys []kvblock.BlockHash) (map[string]float64, error) {
+	if len(blockKeys) == 0 {
+		return map[string]float64{}, nil
+	}
+	keyToPods, err := s.kvCacheIndexer.KVBlockIndex().Lookup(ctx, blockKeys, nil)
+	if err != nil {
+		return nil, fmt.Errorf("lookup: %w", err)
+	}
+	return s.kvBlockScorer.Score(ctx, blockKeys, keyToPods)
+}
+
 // getScores returns (scores, totalBlocks). Tokens path uses ScoreTokens;
-// prompt/chat fallback adds a ComputeBlockKeys to get totalBlocks.
+// prompt/chat fallback uses ComputeBlockKeys + scoreBlockKeys (single
+// tokenization).
 func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, request *scheduling.InferenceRequest) (map[string]float64, int, error) {
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	traceLogger := logger.V(logging.TRACE)
@@ -798,7 +813,6 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 			"toolsCount", len(renderReq.Tools),
 			"documentsCount", len(renderReq.Documents))
 
-		// Re-tokenizes alongside GetPodScores; acceptable in this legacy path.
 		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
 		blockKeys, err := s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
 		if err != nil {
@@ -807,14 +821,9 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 			}
 			return nil, 0, fmt.Errorf("failed to compute block keys for chat/completions: %w", err)
 		}
-
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
+		scores, err := s.scoreBlockKeys(ctx, blockKeys)
 		if err != nil {
-			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-				return map[string]float64{}, 0, nil
-			}
-			return nil, 0, fmt.Errorf("failed to get endpoint scores for chat/completions: %w", err)
+			return nil, 0, fmt.Errorf("failed to score block keys for chat/completions: %w", err)
 		}
 		return scores, len(blockKeys), nil
 	}
@@ -832,13 +841,9 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 			}
 			return nil, 0, fmt.Errorf("failed to compute block keys for completions: %w", err)
 		}
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)
+		scores, err := s.scoreBlockKeys(ctx, blockKeys)
 		if err != nil {
-			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-				return map[string]float64{}, 0, nil
-			}
-			return nil, 0, fmt.Errorf("failed to get endpoint scores for completions: %w", err)
+			return nil, 0, fmt.Errorf("failed to score block keys for completions: %w", err)
 		}
 		return scores, len(blockKeys), nil
 	}
