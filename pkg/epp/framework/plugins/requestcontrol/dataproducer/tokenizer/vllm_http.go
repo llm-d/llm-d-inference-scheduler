@@ -120,30 +120,25 @@ func parseHTTPDuration(s string, def time.Duration) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
-// Render calls /v1/completions/render. Char offsets are not provided by vLLM's
-// render endpoint and the upstream call site discards them, so we return nil.
+// Render calls /v1/completions/render for prompt-only callers. The Produce path
+// uses renderCompletionsPayload so the original request payload is preserved.
+// Char offsets are not provided by vLLM's render endpoint and the upstream call
+// site discards them, so we return nil.
 func (r *vllmHTTPRenderer) Render(ctx context.Context, prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
-	body := struct {
-		Model  string `json:"model"`
-		Prompt string `json:"prompt"`
-	}{
-		Model:  r.modelName,
-		Prompt: prompt,
-	}
-	var resp []renderResponse
-	if err := r.postJSON(ctx, completionsRenderPath, body, r.timeout, &resp); err != nil {
-		return nil, nil, err
-	}
-	if len(resp) == 0 {
-		return nil, nil, errors.New("vLLM render returned empty response")
-	}
-	return resp[0].TokenIDs, nil, nil
+	return r.postCompletionsRender(ctx, map[string]any{
+		"model":  r.modelName,
+		"prompt": prompt,
+	})
 }
 
 func (r *vllmHTTPRenderer) renderCompletionsPayload(ctx context.Context, payload fwkrh.PayloadMap) ([]uint32, []tokenizerTypes.Offset, error) {
 	body := maps.Clone(payload)
 	body["model"] = r.modelName
 
+	return r.postCompletionsRender(ctx, body)
+}
+
+func (r *vllmHTTPRenderer) postCompletionsRender(ctx context.Context, body any) ([]uint32, []tokenizerTypes.Offset, error) {
 	var resp []renderResponse
 	if err := r.postJSON(ctx, completionsRenderPath, body, r.timeout, &resp); err != nil {
 		return nil, nil, err
