@@ -655,6 +655,7 @@ func TestEndpointMetadata(t *testing.T) {
 					Port:        inferencePoolMultiTargetPort1,
 					MetricsHost: net.JoinHostPort(pod1.Status.PodIP, inferencePoolMultiTargetPort1),
 					Labels:      map[string]string{},
+					RankIndex:   1,
 				},
 			},
 			op: func(ctx context.Context, ds Datastore) {
@@ -689,6 +690,7 @@ func TestEndpointMetadata(t *testing.T) {
 					Port:        inferencePoolMultiTargetPort1,
 					MetricsHost: net.JoinHostPort(pod1.Status.PodIP, inferencePoolMultiTargetPort1),
 					Labels:      map[string]string{},
+					RankIndex:   1,
 				},
 				{
 					NamespacedName: types.NamespacedName{
@@ -713,6 +715,7 @@ func TestEndpointMetadata(t *testing.T) {
 					Port:        inferencePoolMultiTargetPort1,
 					MetricsHost: net.JoinHostPort(pod1.Status.PodIP, inferencePoolMultiTargetPort1),
 					Labels:      map[string]string{},
+					RankIndex:   1,
 				},
 			},
 			op: func(ctx context.Context, ds Datastore) {
@@ -747,6 +750,7 @@ func TestEndpointMetadata(t *testing.T) {
 					Port:        inferencePoolMultiTargetPort1,
 					MetricsHost: net.JoinHostPort(pod1.Status.PodIP, inferencePoolMultiTargetPort1),
 					Labels:      map[string]string{},
+					RankIndex:   1,
 				},
 			},
 			op: func(ctx context.Context, ds Datastore) {
@@ -1330,3 +1334,4 @@ func TestExtractActivePorts(t *testing.T) {
 		})
 	}
 }
+
