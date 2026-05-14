@@ -71,8 +71,11 @@ func (s *Scorer) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
+// Consumes the precise-only attribute key. Pinning to a key only the
+// precise producer writes prevents the data-layer DAG from auto-instantiating
+// a different default producer of the shared PrefixCacheMatchInfoKey.
 func (s *Scorer) Consumes() map[string]any {
-	return map[string]any{attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{}}
+	return map[string]any{preciseproducer.MatchInfoAttributeKey: attrprefix.PrefixCacheMatchInfo{}}
 }
 
 // Score returns matchBlocks/totalBlocks per endpoint. Missing or malformed
@@ -104,7 +107,7 @@ func (s *Scorer) Score(ctx context.Context, _ *scheduling.CycleState,
 	for _, endpoint := range endpoints {
 		scores[endpoint] = 0.0
 
-		raw, ok := endpoint.Get(attrprefix.PrefixCacheMatchInfoKey)
+		raw, ok := endpoint.Get(preciseproducer.MatchInfoAttributeKey)
 		if !ok {
 			debugLogger.Info("PrefixCacheMatchInfo missing, assigning 0",
 				"endpoint", endpointKey(endpoint))

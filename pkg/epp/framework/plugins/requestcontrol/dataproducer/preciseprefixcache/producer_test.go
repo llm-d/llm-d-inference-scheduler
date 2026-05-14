@@ -184,6 +184,9 @@ func TestProduce_UsesTokenizedPrompt(t *testing.T) {
 	info2 := raw2.(*attrprefix.PrefixCacheMatchInfo)
 	assert.Equal(t, 0, info2.MatchBlocks())
 	assert.Equal(t, 1, info2.TotalBlocks())
+
+	_, ok = testEndpoints[0].Get(MatchInfoAttributeKey)
+	assert.True(t, ok)
 }
 
 // No TokenizedPrompt → no-op. The producer never tokenizes from a prompt.
@@ -290,10 +293,13 @@ func TestProduce_NoOpPaths(t *testing.T) {
 	require.NoError(t, p.Produce(ctx, &scheduling.InferenceRequest{RequestID: "x", Body: &fwkrh.InferenceRequestBody{}}, testEndpoints))
 }
 
-func TestProduces_DeclaresPrefixCacheMatchInfo(t *testing.T) {
+func TestProduces_DeclaresBothKeys(t *testing.T) {
 	p := &Producer{typedName: plugin.TypedName{Type: PluginType, Name: "x"}}
-	_, ok := p.Produces()[attrprefix.PrefixCacheMatchInfoKey]
-	require.True(t, ok)
+	produces := p.Produces()
+	_, hasGeneric := produces[attrprefix.PrefixCacheMatchInfoKey]
+	_, hasPrecise := produces[MatchInfoAttributeKey]
+	require.True(t, hasGeneric)
+	require.True(t, hasPrecise)
 }
 
 func TestConsumes_DeclaresTokenizedPrompt(t *testing.T) {

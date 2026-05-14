@@ -26,6 +26,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	preciseproducer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/preciseprefixcache"
+	tokenproducer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
 
 // legacyScorer wraps a tokens-only Producer + slim Scorer and routes
@@ -47,13 +48,17 @@ func (l *legacyScorer) TypedName() plugin.TypedName {
 }
 
 func (l *legacyScorer) Produces() map[string]any {
-	return map[string]any{attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{}}
+	return map[string]any{
+		attrprefix.PrefixCacheMatchInfoKey:    attrprefix.PrefixCacheMatchInfo{},
+		preciseproducer.MatchInfoAttributeKey: attrprefix.PrefixCacheMatchInfo{},
+	}
 }
 
-// Consumes returns nil so legacy configs without a token-producer don't fail
-// the DAG.
+// Consumes declares the TokenizedPrompt dependency: when token-producer is
+// present, the DAG orders it before this wrapper; otherwise the wrapper
+// falls through to its internal-tokenization path.
 func (l *legacyScorer) Consumes() map[string]any {
-	return nil
+	return map[string]any{tokenproducer.TokenizedPromptKey: scheduling.TokenizedPrompt{}}
 }
 
 func (l *legacyScorer) Produce(ctx context.Context,

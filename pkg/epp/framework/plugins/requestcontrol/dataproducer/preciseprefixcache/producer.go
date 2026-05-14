@@ -42,6 +42,13 @@ import (
 // PluginType is the type-name of the precise-prefix-cache producer plugin.
 const PluginType = "precise-prefix-cache-producer"
 
+// MatchInfoAttributeKey carries the same PrefixCacheMatchInfo as
+// attrprefix.PrefixCacheMatchInfoKey but only this producer writes it.
+// Consumers that need the precise variant specifically (vs. the
+// approximate producer that also writes the generic key) depend on this
+// key to bind the precise producer in the data-layer DAG.
+const MatchInfoAttributeKey = "PrecisePrefixCacheMatchInfo"
+
 // PluginConfig mirrors the historical `precise-prefix-cache-scorer` config so
 // legacy YAML still parses.
 type PluginConfig struct {
@@ -190,7 +197,10 @@ func (p *Producer) WithName(name string) *Producer {
 }
 
 func (p *Producer) Produces() map[string]any {
-	return map[string]any{attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{}}
+	return map[string]any{
+		attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{},
+		MatchInfoAttributeKey:              attrprefix.PrefixCacheMatchInfo{},
+	}
 }
 
 // Consumes declares the TokenizedPrompt dependency so the data-layer DAG
@@ -239,8 +249,12 @@ func (p *Producer) ProduceFromBlockKeys(ctx context.Context,
 		}
 		addr := fmt.Sprintf("%s:%s", md.Address, md.Port)
 		matchLen := int(scores[addr])
-		ep.Put(attrprefix.PrefixCacheMatchInfoKey,
-			attrprefix.NewPrefixCacheMatchInfo(matchLen, totalBlocks, p.blockSizeTokens))
+		info := attrprefix.NewPrefixCacheMatchInfo(matchLen, totalBlocks, p.blockSizeTokens)
+		// Generic key: shared with the approximate producer and read by
+		// all prefix-cache-aware plugins. Precise-only key: pins the
+		// precise producer as the source for consumers that need it.
+		ep.Put(attrprefix.PrefixCacheMatchInfoKey, info)
+		ep.Put(MatchInfoAttributeKey, info)
 	}
 
 	if p.speculativeEnabled {

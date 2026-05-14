@@ -29,6 +29,7 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	preciseproducer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/preciseprefixcache"
 	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
@@ -44,13 +45,13 @@ func TestScorer_ReadsMatchRatio(t *testing.T) {
 	ctx := context.Background()
 
 	epA := newEndpoint("pod-a", "10.0.0.1")
-	epA.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(3, 4, 16))
+	epA.Put(preciseproducer.MatchInfoAttributeKey, attrprefix.NewPrefixCacheMatchInfo(3, 4, 16))
 
 	epB := newEndpoint("pod-b", "10.0.0.2")
-	epB.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(1, 4, 16))
+	epB.Put(preciseproducer.MatchInfoAttributeKey, attrprefix.NewPrefixCacheMatchInfo(1, 4, 16))
 
 	epC := newEndpoint("pod-c", "10.0.0.3")
-	epC.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(0, 4, 16))
+	epC.Put(preciseproducer.MatchInfoAttributeKey, attrprefix.NewPrefixCacheMatchInfo(0, 4, 16))
 
 	got := New().Score(ctx, scheduling.NewCycleState(),
 		&scheduling.InferenceRequest{RequestID: "r"},
@@ -72,7 +73,7 @@ func TestScorer_MissingAttributeIsZero(t *testing.T) {
 // Divide-by-zero guard: totalBlocks=0 must produce 0, not NaN.
 func TestScorer_ZeroTotalIsZero(t *testing.T) {
 	ep := newEndpoint("pod-a", "10.0.0.1")
-	ep.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(0, 0, 16))
+	ep.Put(preciseproducer.MatchInfoAttributeKey, attrprefix.NewPrefixCacheMatchInfo(0, 0, 16))
 
 	got := New().Score(context.Background(), scheduling.NewCycleState(),
 		&scheduling.InferenceRequest{RequestID: "r"},
@@ -80,8 +81,8 @@ func TestScorer_ZeroTotalIsZero(t *testing.T) {
 	assert.Equal(t, 0.0, got[ep])
 }
 
-func TestScorer_DeclaresConsumes(t *testing.T) {
-	_, ok := New().Consumes()[attrprefix.PrefixCacheMatchInfoKey]
+func TestScorer_ConsumesPreciseKey(t *testing.T) {
+	_, ok := New().Consumes()[preciseproducer.MatchInfoAttributeKey]
 	require.True(t, ok)
 }
 
@@ -118,6 +119,7 @@ func TestPluginFactory_LegacyMode_WithParams(t *testing.T) {
 
 	_, ok = wrapper.Produces()[attrprefix.PrefixCacheMatchInfoKey]
 	assert.True(t, ok)
-	assert.Nil(t, wrapper.Consumes())
+	_, ok = wrapper.Consumes()["TokenizedPrompt"]
+	assert.True(t, ok)
 	require.NotNil(t, wrapper.producer)
 }
