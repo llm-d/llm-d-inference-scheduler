@@ -52,7 +52,7 @@ A real Kubernetes cluster setup is covered later for shared or production-like t
 ## Requirements
 
 - [Make] `v4`+
-- [Golang] `v1.24`+
+- [Golang] `v1.25`+
 - [Docker] (or [Podman])
 - [Kubernetes in Docker (KIND)]
 - [Kubectl] `v1.25`+
@@ -72,7 +72,7 @@ Deploys the EPP, vLLM simulator, and Gateway API implementation into a local KIN
 make env-dev-kind
 ```
 
-Creates a new `kind` cluster (or reuses an existing one) in the `default` namespace.
+Creates a new `kind` cluster (or reuses an existing one) in the `default` namespace. The cluster name defaults to `KIND_CLUSTER_NAME` in `Makefile.kind.mk` (currently `$(PROJECT_NAME)-dev`), and the kubectl context is `kind-<cluster-name>`.
 
 > [!NOTE]
 > You can pre-pull external images to avoid slow downloads:
@@ -86,7 +86,7 @@ Creates a new `kind` cluster (or reuses an existing one) in the `default` namesp
 Use port-forward for local development:
 
 ```bash
-kubectl --context kind-llm-d-inference-scheduler-dev \
+kubectl --context kind-llm-d-router-dev \
   port-forward service/inference-gateway-istio 8080:80
 ```
 
@@ -141,7 +141,7 @@ The service is then accessible at `http://localhost:30080`.
 ```bash
 # Install and run cloud-provider-kind:
 go install sigs.k8s.io/cloud-provider-kind@latest && cloud-provider-kind &
-kubectl --context kind-llm-d-inference-scheduler-dev get service inference-gateway-istio
+kubectl --context kind-llm-d-router-dev get service inference-gateway-istio
 # Wait for the LoadBalancer External-IP to become available.
 # The service is accessible over port 80.
 ```
@@ -260,7 +260,7 @@ then attach `dlv` via the ephemeral container:
 ```bash
 # 1. Build and load the debug image
 LDFLAGS="" make image-build-epp
-kind load docker-image $(EPP_IMAGE) --name llm-d-inference-scheduler-dev
+kind load docker-image $(EPP_IMAGE) --name llm-d-router-dev
 
 # 2. Restart the deployment to pick up the new image
 kubectl rollout restart deployment tinyllama-1-1b-chat-v1-0-endpoint-picker
@@ -392,7 +392,7 @@ curl -s http://localhost:30080/v1/chat/completions \
 After deploying any disaggregation mode, verify with a basic request:
 
 ```bash
-kubectl --context kind-llm-d-inference-scheduler-dev port-forward service/inference-gateway-istio 8080:80
+kubectl --context kind-llm-d-router-dev port-forward service/inference-gateway-istio 8080:80
 ```
 
 For multimodal disaggregation (E/PD, E/P/D), test with an image request to verify the encoder stage is working:
