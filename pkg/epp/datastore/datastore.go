@@ -24,7 +24,6 @@ import (
 	"net"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -44,18 +43,6 @@ import (
 var (
 	errPoolNotSynced = errors.New("InferencePool is not initialized in data store")
 	AllPodsPredicate = func(_ fwkdl.Endpoint) bool { return true }
-)
-
-const (
-	// activePortsAnnotation is used to specify which ports on a pod should be considered
-	// as active for inference traffic. The value should be a comma-separated list of port numbers.
-	// Example: "8000,8001,8002"
-	activePortsAnnotation = "llm-d.ai/active-ports"
-
-	// legacyGAIEActivePortsAnnotation is the legacy GAIE active ports annotation key, kept for backward compatibility.
-	//
-	// Deprecated: use activePortsAnnotation instead; this may be removed in a future release.
-	legacyGAIEActivePortsAnnotation = "inference.networking.k8s.io/active-ports"
 )
 
 // The datastore is a local cache of relevant data for the given InferencePool (currently all pulled from k8s-api)
@@ -86,6 +73,14 @@ type Datastore interface {
 	PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoint
 	PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) bool
 	PodDelete(podName string)
+
+	// PoolTargetPorts returns the target ports of the current pool, or nil if not synced.
+	PoolTargetPorts() []int
+
+	// BackendUpsert adds or updates an endpoint from a non-Kubernetes discovery source.
+	BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata)
+	// BackendDelete removes the endpoint with the given namespaced name.
+	BackendDelete(id types.NamespacedName)
 
 	// Clears the store state, happens when the pool gets deleted.
 	Clear()
@@ -304,7 +299,7 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 		modelServerMetricsPort = int(ds.modelServerMetricsPort)
 	}
 	pods := []*fwkdl.EndpointMetadata{}
-	activePorts := extractActivePorts(pod, pool.TargetPorts)
+	activePorts := podutil.ExtractActivePorts(pod, pool.TargetPorts)
 	for idx, port := range pool.TargetPorts {
 		if !activePorts.Has(port) {
 			continue
@@ -334,23 +329,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 	existingEpSet := sets.Set[types.NamespacedName]{}
 	for _, endpointMetadata := range pods {
 		existingEpSet.Insert(endpointMetadata.NamespacedName)
-		var ep fwkdl.Endpoint
-		existing, ok := ds.pods.Load(endpointMetadata.NamespacedName)
-		if !ok {
-			ep = ds.epf.NewEndpoint(ds.parentCtx, endpointMetadata, ds)
-			if ep == nil {
-				// NewEndpoint returns nil when a collector is already running for this
-				// endpoint (duplicate reconcile race). The existing entry in ds.pods
-				// is still valid; skip re-registering it.
-				continue
-			}
-			ds.pods.Store(endpointMetadata.NamespacedName, ep)
+		if ds.upsertEndpoint(endpointMetadata) {
 			result = false
-		} else {
-			ep = existing.(fwkdl.Endpoint)
 		}
-		// Update endpoint properties if anything changed.
-		ep.UpdateMetadata(endpointMetadata)
 	}
 
 	// remove endpoints that are no longer active in the pool
@@ -378,6 +359,45 @@ func (ds *datastore) PodDelete(podName string) {
 		}
 		return true
 	})
+}
+
+func (ds *datastore) PoolTargetPorts() []int {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+	if ds.pool == nil {
+		return nil
+	}
+	return ds.pool.TargetPorts
+}
+
+func (ds *datastore) BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) {
+	ds.upsertEndpoint(meta)
+}
+
+// upsertEndpoint stores or updates a single endpoint in the pods map.
+// It is the shared storage primitive used by both BackendUpsert and
+// podUpdateOrAddIfNotExist, keeping the two paths consistent.
+func (ds *datastore) upsertEndpoint(meta *fwkdl.EndpointMetadata) bool {
+	existing, ok := ds.pods.Load(meta.NamespacedName)
+	if !ok {
+		ep := ds.epf.NewEndpoint(ds.parentCtx, meta, ds)
+		if ep == nil {
+			// NewEndpoint returns nil when a collector is already running for this
+			// endpoint (duplicate reconcile race). The existing entry in ds.pods
+			// is still valid; skip re-registering it.
+			return false
+		}
+		ds.pods.Store(meta.NamespacedName, ep)
+		return true
+	}
+	existing.(fwkdl.Endpoint).UpdateMetadata(meta)
+	return false
+}
+
+func (ds *datastore) BackendDelete(id types.NamespacedName) {
+	if v, ok := ds.pods.LoadAndDelete(id); ok {
+		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
+	}
 }
 
 func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) error {
@@ -422,30 +442,6 @@ func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) err
 	})
 
 	return nil
-}
-
-// extractActivePorts extracts the active ports from a pod's annotations.
-func extractActivePorts(pod *corev1.Pod, targetPorts []int) sets.Set[int] {
-	allPorts := sets.New(targetPorts...)
-	annotations := pod.GetAnnotations()
-	portsAnnotation, ok := annotations[activePortsAnnotation]
-	if !ok {
-		portsAnnotation, ok = annotations[legacyGAIEActivePortsAnnotation]
-		if !ok {
-			return allPorts
-		}
-	}
-
-	activePorts := sets.New[int]()
-	portStrs := strings.SplitSeq(portsAnnotation, ",")
-	for portStr := range portStrs {
-		var portNum int
-		_, err := fmt.Sscanf(strings.TrimSpace(portStr), "%d", &portNum)
-		if err == nil && portNum > 0 && allPorts.Has(portNum) {
-			activePorts.Insert(portNum)
-		}
-	}
-	return activePorts
 }
 
 // createEndpointNamespacedName creates a namespaced name for an endpoint based on pod and rank index.

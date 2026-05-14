@@ -219,8 +219,10 @@ func (opts *Options) Complete() error {
 }
 
 func (opts *Options) Validate() error {
-	if (opts.PoolName != "" && opts.EndpointSelector != "") || (opts.PoolName == "" && opts.EndpointSelector == "") {
-		return errors.New("either pool-name or endpoint-selector must be set")
+	// Both flags may be absent when an EndpointDiscovery plugin is configured in
+	// the config file. Reject only the ambiguous case where both are set.
+	if opts.PoolName != "" && opts.EndpointSelector != "" {
+		return errors.New("pool-name and endpoint-selector are mutually exclusive; set only one")
 	}
 	if opts.EndpointSelector != "" {
 		if len(opts.EndpointTargetPorts) == 0 || len(opts.EndpointTargetPorts) > 8 {
