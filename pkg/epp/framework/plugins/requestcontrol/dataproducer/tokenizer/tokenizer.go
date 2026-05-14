@@ -174,7 +174,9 @@ func (p *Plugin) Produces() map[string]any {
 func (p *Plugin) Produce(ctx context.Context, request *scheduling.InferenceRequest, _ []scheduling.Endpoint) error {
 	tp, err := p.tokenize(ctx, request)
 	if err != nil {
-		return err
+		log.FromContext(ctx).WithName(p.typedName.String()).Error(err, "tokenization failed")
+		// skip error otherwise other PrepareRequestData plugins will not run
+		return nil
 	}
 
 	request.Body.TokenizedPrompt = tp
