@@ -194,8 +194,7 @@ func (p *Producer) Produces() map[string]any {
 }
 
 // Consumes declares the TokenizedPrompt dependency so the data-layer DAG
-// orders `token-producer` first. Configs without a token-producer fall back
-// to the indexer's internal tokenization in computeBlockKeys.
+// orders `token-producer` first. No-op when TokenizedPrompt is absent.
 func (p *Producer) Consumes() map[string]any {
 	return map[string]any{tokenproducer.TokenizedPromptKey: scheduling.TokenizedPrompt{}}
 }

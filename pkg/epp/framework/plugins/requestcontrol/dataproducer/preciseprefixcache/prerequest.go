@@ -132,6 +132,9 @@ func (p *Producer) PreRequest(ctx context.Context,
 	}
 	targetEndpoint := primary.TargetEndpoints[0]
 	targetMeta := targetEndpoint.GetMetadata()
+	if targetMeta == nil {
+		return
+	}
 	speculativePod := kvblock.PodEntry{
 		PodIdentifier: fmt.Sprintf("%s:%s", targetMeta.Address, targetMeta.Port),
 		Speculative:   true,
