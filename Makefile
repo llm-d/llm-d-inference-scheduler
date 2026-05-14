@@ -296,11 +296,15 @@ test-e2e-gaie: image-build-builder image-build image-pull ## Run GAIE end-to-end
 		-e USE_KIND=true \
 		$(BUILDER_IMAGE) ./hack/test-e2e.sh
 
-.PHONY: test-e2e-scheduler
-test-e2e-scheduler: image-build-builder image-build image-pull ## Run scheduler end-to-end tests against a new kind cluster
+.PHONY: test-e2e-scheduler-run
+test-e2e-scheduler-run: image-pull ## Run scheduler e2e tests (images must already exist)
 	@printf "\033[33;1m==== Running End to End Tests ====\033[0m\n"
 	$(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_E2E_FLAGS) \
 		$(BUILDER_IMAGE) ./test/scripts/run_e2e.sh
+
+.PHONY: test-e2e-scheduler
+test-e2e-scheduler: image-build-builder image-build ## Build images and run scheduler e2e tests
+	$(MAKE) test-e2e-scheduler-run
 
 .PHONY: test-e2e
 test-e2e: test-e2e-gaie test-e2e-scheduler ## Run all end-to-end tests sequentially
