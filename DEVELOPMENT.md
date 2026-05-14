@@ -20,8 +20,11 @@ Documentation for developing the inference scheduler.
       - [3. Encode/Prefill-Decode (E/PD) Disaggregation](#3-encodeprefill-decode-epd-disaggregation)
       - [4. Encode/Prefill/Decode (E/P/D) Disaggregation](#4-encodeprefilldecode-epd-disaggregation)
       - [5. Disaggregated Setup Verification](#5-disaggregated-setup-verification)
-      - [Combining Scenarios with Data Parallel and KV Cache](#combining-scenarios-with-data-parallel-and-kv-cache)
+    - [Combining Scenarios with Data Parallel and KV Cache](#combining-scenarios-with-data-parallel-and-kv-cache)
     - [Simulator vs Real vLLM](#simulator-vs-real-vllm)
+      - [Deploying with Simulator (default)](#deploying-with-simulator-default)
+      - [Deploying with Real vLLM](#deploying-with-real-vllm)
+      - [Deployment Component Summary](#deployment-component-summary)
     - [Cleanup](#cleanup)
   - [Running Tests](#running-tests)
     - [Unit Tests](#unit-tests)
@@ -38,6 +41,8 @@ Documentation for developing the inference scheduler.
     - [Deploying Changes](#deploying-changes)
     - [Cleanup Environment](#cleanup-environment)
   - [Submitting Changes](#submitting-changes)
+    - [Scope](#scope)
+    - [Presubmit](#presubmit)
 
 ## Overview
 
@@ -903,6 +908,29 @@ For more details, see the Gateway API Inference Extension
 [getting started guide](https://gateway-api-inference-extension.sigs.k8s.io/guides/).
 
 ## Submitting Changes
+
+### Scope
+
+Scoped changes and localized bug fixes can be submitted directly as a PR. 
+For larger changes please [create an issue](https://github.com/llm-d/llm-d-router/issues/new)
+first describing the change so the maintainers can do an assessment, and work on the details
+with you. Getting alignment on the requirements and approach is critical for getting your
+changes merged.
+
+Please call out any user facing changes your change will introduce, including changes to
+documentation, deployment guides, etc. If your changes replace and deprecate an existing feature,
+please be sure to consider that in your design and implementation.
+We follow an "N+2 deprecation" policy: features deprecated in release N must continue to work
+without user impact (e.g., configuration changes) for 2 releases and can be fully removed
+in release N+2. Use of a deprecated feature must produce a clear warning message in releases
+N and N+1, providing users with a two release grace period to adjust before the feature is removed.
+
+Please use the [template](.github/PULL_REQUEST_TEMPLATE.md) provided when creating a PR.
+If using coding agents, please ensure that the agent uses the PR template format as well.
+The template contains a `release-notes` section which must be filled for any change that has
+user facing impact.
+
+### Presubmit
 
 Before opening a PR, run:
 
