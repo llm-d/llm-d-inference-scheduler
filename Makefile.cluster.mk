@@ -58,7 +58,7 @@ install-openshift: check-kubectl check-envsubst ## Deploy resources to OpenShift
 	kubectl create namespace $(NAMESPACE) 2>/dev/null || true
 	@echo "Deploying common resources from deploy/ ..."
 	# Build and substitute the base manifests from deploy, then apply them
-	kubectl kustomize deploy/environments/kubernetes-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$VERSION' | kubectl apply -n $(NAMESPACE) -f -
+	kubectl kustomize deploy/environments/kubernetes-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE $$VERSION' | kubectl apply -n $(NAMESPACE) -f -
 	@echo "Waiting for pod to become ready..."
 	sleep 5
 	@POD=$$(kubectl get pod -l app=$(PROJECT_NAME)-statefulset -n $(NAMESPACE) -o jsonpath='{.items[0].metadata.name}'); \
@@ -69,7 +69,7 @@ install-openshift: check-kubectl check-envsubst ## Deploy resources to OpenShift
 .PHONY: uninstall-openshift
 uninstall-openshift: check-kubectl check-envsubst ## Remove resources from OpenShift
 	@echo "Removing resources from OpenShift..."
-	kubectl kustomize deploy/environments/kubernetes-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$VERSION' | kubectl delete --force -f - || true
+	kubectl kustomize deploy/environments/kubernetes-base | envsubst '$$PROJECT_NAME $$NAMESPACE $$EPP_IMAGE $$VERSION' | kubectl delete --force -f - || true
 	# @if kubectl api-resources --api-group=route.openshift.io | grep -q Route; then \
 	#   envsubst '$$PROJECT_NAME $$NAMESPACE $$VERSION' < deploy/openshift/route.yaml | kubectl delete --force -f - || true; \
 	# fi
