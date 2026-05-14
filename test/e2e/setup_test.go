@@ -158,11 +158,16 @@ func createEndPointPicker(eppConfig string) []string {
 	gomega.Eventually(func() bool {
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%s/v1/models", port))
 		if err != nil {
+			ginkgo.By(fmt.Sprintf("Gateway not ready: %v", err))
 			return false
 		}
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return resp.StatusCode == http.StatusOK || len(body) > 0
+		ready := resp.StatusCode == http.StatusOK || len(body) > 0
+		if !ready {
+			ginkgo.By(fmt.Sprintf("Gateway not ready: status=%d bodyLen=%d", resp.StatusCode, len(body)))
+		}
+		return ready
 	}, readyTimeout, 2*time.Second).Should(gomega.BeTrue(), "gateway should be ready within the ready timeout")
 
 	return objects
