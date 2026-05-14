@@ -42,6 +42,7 @@ func newExtractorScorer(discoverPods bool) *Scorer {
 		subscribersManager: kvevents.NewSubscriberManager(kvevents.NewPool(cfg, nil, nil, nil)),
 		kvEventsConfig:     cfg,
 		subscriberCtx:      context.Background(),
+		healthMonitor:      NewKVEventsHealthMonitor(discoverPods),
 	}
 }
 
