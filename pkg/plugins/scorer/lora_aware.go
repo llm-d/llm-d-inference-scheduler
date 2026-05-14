@@ -101,10 +101,11 @@ type LoRAAware struct {
 	typedName           plugin.TypedName
 	configuredShardSize int                 // 0 means auto-calculate based on endpoint count
 	baseModel           string              // Base model name
-	mu                  sync.RWMutex        // Protects shardCache, cachedShardSize, and cachedEndpointCount
+	mu                  sync.RWMutex        // Protects shardCache, cachedShardSize, cachedEndpointCount, and rngMu
 	shardCache          map[string][]string // Cache of adapter -> endpoint names
 	cachedShardSize     int                 // Cached calculated shard size
 	cachedEndpointCount int                 // Number of endpoints for cached shard size
+	rngMu               sync.Mutex          // Protects random number generation to avoid race conditions
 }
 
 // TypedName returns the typed name of the plugin.
@@ -198,17 +199,31 @@ func (s *LoRAAware) Score(ctx context.Context, _ *scheduling.CycleState, request
 
 // calculateShardSize determines the effective shard size to use.
 // If a shard size was explicitly configured, it uses that value.
-// Otherwise, it calculates a conservative default: max(2, ceil(N / 2)),
-// where N is the number of endpoints. This provides good balance between
-// isolation and redundancy without knowing the number of adapters in advance.
+// Otherwise, it calculates a default based on the number of endpoints:
+// - For 2-3 endpoints: use all endpoints (100% utilization)
+// - For 4-7 endpoints: use ceil(N * 0.75) (75% utilization)
+// - For 8+ endpoints: use ceil(N * 0.67) (67% utilization)
+// This provides good balance between isolation, redundancy, and resource utilization.
 func (s *LoRAAware) calculateShardSize(numEndpoints int) int {
 	if s.configuredShardSize > 0 {
 		return s.configuredShardSize
 	}
 
-	// Conservative default: ceil(N / 2)
-	// This works well for unknown number of adapters
-	calculatedSize := (numEndpoints + 1) / 2 // Integer ceiling division
+	var calculatedSize int
+
+	if numEndpoints <= 3 {
+		// For small clusters, use all endpoints to maximize utilization
+		calculatedSize = numEndpoints
+	} else if numEndpoints <= 7 {
+		// For medium clusters, use 75% of endpoints
+		// This gives good utilization while still providing some isolation
+		calculatedSize = (numEndpoints*3 + 3) / 4 // ceil(N * 0.75)
+	} else {
+		// For larger clusters, use 67% of endpoints
+		// This provides better isolation for multiple adapters
+		// Using (N*2 + 2) / 3 for proper ceiling division
+		calculatedSize = (numEndpoints*2 + 2) / 3 // ceil(N * 2/3)
+	}
 
 	// Ensure minimum of 2 for redundancy
 	if calculatedSize < minShardSize {
@@ -329,10 +344,13 @@ func (s *LoRAAware) getShardForAdapter(adapterName string, endpoints []schedulin
 	seed := int64(hashString(adapterName))
 
 	// Shuffle in-place and return the first shardSize endpoints
+	// Lock to prevent race conditions with math/rand
+	s.rngMu.Lock()
 	rng := rand.New(rand.NewSource(seed))
 	rng.Shuffle(len(sorted), func(i, j int) {
 		sorted[i], sorted[j] = sorted[j], sorted[i]
 	})
+	s.rngMu.Unlock()
 
 	return sorted[:shardSize]
 }

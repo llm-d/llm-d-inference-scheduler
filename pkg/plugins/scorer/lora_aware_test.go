@@ -278,19 +278,19 @@ func TestLoRAAwareDynamicShardSize(t *testing.T) {
 			name:              "8 endpoints, auto-calculate",
 			numEndpoints:      8,
 			configuredSize:    0,
-			expectedShardSize: 4, // ceil(8/2) = 4
+			expectedShardSize: 6, // ceil(8 * 0.67) = 6
 		},
 		{
 			name:              "12 endpoints, auto-calculate",
 			numEndpoints:      12,
 			configuredSize:    0,
-			expectedShardSize: 6, // ceil(12/2) = 6
+			expectedShardSize: 8, // ceil(12 * 0.67) = 8
 		},
 		{
 			name:              "3 endpoints, auto-calculate",
 			numEndpoints:      3,
 			configuredSize:    0,
-			expectedShardSize: 2, // ceil(3/2) = 2 (minimum)
+			expectedShardSize: 3, // <= 3 endpoints: use all
 		},
 		{
 			name:              "1 endpoint, auto-calculate",
@@ -386,8 +386,18 @@ func TestLoRAAwareConservativeFormula(t *testing.T) {
 
 			selectedCount := countEndpointsWithScore(scores, 1.0)
 
-			// Calculate expected using ceil(N/2) with minimum of 2
-			expected := int(math.Ceil(float64(tc.numEndpoints) / 2.0))
+			// Calculate expected using the new formula:
+			// - For 2-3 endpoints: use all endpoints (100% utilization)
+			// - For 4-7 endpoints: use ceil(N * 0.75) (75% utilization)
+			// - For 8+ endpoints: use ceil(N * 2/3) (~67% utilization)
+			var expected int
+			if tc.numEndpoints <= 3 {
+				expected = tc.numEndpoints
+			} else if tc.numEndpoints <= 7 {
+				expected = int(math.Ceil(float64(tc.numEndpoints) * 0.75))
+			} else {
+				expected = (tc.numEndpoints*2 + 2) / 3 // ceil(N * 2/3)
+			}
 			if expected < 2 {
 				expected = 2
 			}
@@ -436,17 +446,17 @@ func TestLoRAAware_InvalidShardSize(t *testing.T) {
 		{
 			name:              "nil parameters - use dynamic calculation",
 			params:            nil,
-			expectedShardSize: 5, // ceil(10/2) = 5
+			expectedShardSize: 7, // ceil(10 * 0.67) = 7
 		},
 		{
 			name:              "zero shard size - use dynamic calculation",
 			params:            &scorer.LoRAAwareParameters{ShardSize: 0},
-			expectedShardSize: 5, // ceil(10/2) = 5
+			expectedShardSize: 7, // ceil(10 * 0.67) = 7
 		},
 		{
 			name:              "negative shard size - use dynamic calculation",
 			params:            &scorer.LoRAAwareParameters{ShardSize: -5},
-			expectedShardSize: 5, // ceil(10/2) = 5
+			expectedShardSize: 7, // ceil(10 * 0.67) = 7
 		},
 		{
 			name:              "valid custom shard size",
@@ -605,25 +615,25 @@ func TestLoRAAware_ShardSizeCaching(t *testing.T) {
 		TargetModel: "test-adapter",
 	}
 
-	// Score with 8 endpoints (should calculate and cache shardSize=4)
+	// Score with 8 endpoints (should calculate and cache shardSize=6, ceil(8*0.67)=6)
 	scores8a := loraScorer.Score(ctx, nil, request, endpoints8)
 	count8a := countEndpointsWithScore(scores8a, 1.0)
-	assert.Equal(t, 4, count8a, "Expected 4 endpoints selected for 8 endpoints")
+	assert.Equal(t, 6, count8a, "Expected 6 endpoints selected for 8 endpoints")
 
-	// Score again with 8 endpoints (should use cached shardSize=4)
+	// Score again with 8 endpoints (should use cached shardSize=6)
 	scores8b := loraScorer.Score(ctx, nil, request, endpoints8)
 	count8b := countEndpointsWithScore(scores8b, 1.0)
-	assert.Equal(t, 4, count8b, "Expected 4 endpoints selected for 8 endpoints (cached)")
+	assert.Equal(t, 6, count8b, "Expected 6 endpoints selected for 8 endpoints (cached)")
 
 	// Score with 10 endpoints
-	// Note: The shard cache persists the 4 endpoint names from the 8-endpoint scoring.
-	// Only those 4 endpoints that exist in both sets will be selected.
+	// Note: The shard cache persists the 6 endpoint names from the 8-endpoint scoring.
+	// Only those 6 endpoints that exist in both sets will be selected.
 	scores10 := loraScorer.Score(ctx, nil, request, endpoints10)
 	count10 := countEndpointsWithScore(scores10, 1.0)
-	assert.Equal(t, 4, count10, "Expected 4 endpoints selected (cached shard from 8 endpoints)")
+	assert.Equal(t, 6, count10, "Expected 6 endpoints selected (cached shard from 8 endpoints)")
 
-	// Score again with 8 endpoints (should use cached shardSize=4 again)
+	// Score again with 8 endpoints (should use cached shardSize=6 again)
 	scores8c := loraScorer.Score(ctx, nil, request, endpoints8)
 	count8c := countEndpointsWithScore(scores8c, 1.0)
-	assert.Equal(t, 4, count8c, "Expected 4 endpoints selected for 8 endpoints (re-cached)")
+	assert.Equal(t, 6, count8c, "Expected 6 endpoints selected for 8 endpoints (re-cached)")
 }
