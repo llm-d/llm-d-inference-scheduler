@@ -20,14 +20,17 @@ import (
 	"context"
 
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
 
 // kvCacheIndexer is the subset of kvcache.Indexer the producer needs.
-// Tokens-only — no prompt-based entry points.
+// ComputeBlockKeys is used only by ComputeBlockKeysFromRequest (legacy
+// wrapper); the normal Produce path uses ComputeBlockKeysFromTokens.
 type kvCacheIndexer interface {
+	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
 	ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, modelName string, extraFeatures []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
 }

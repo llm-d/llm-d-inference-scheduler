@@ -23,6 +23,7 @@ import (
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
+	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -38,12 +39,20 @@ import (
 
 type fakeKVCacheIndexer struct {
 	computeFromTokens func(ctx context.Context, tokens []uint32, model string, extra []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
+	computePrompt     func(ctx context.Context, renderReq *types.RenderChatRequest, prompt, model string) ([]kvblock.BlockHash, error)
 	index             *fakeKVBlockIndex
 }
 
 func (f *fakeKVCacheIndexer) ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, model string, extra []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
 	if f.computeFromTokens != nil {
 		return f.computeFromTokens(ctx, tokens, model, extra)
+	}
+	return []kvblock.BlockHash{}, nil
+}
+
+func (f *fakeKVCacheIndexer) ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, model string) ([]kvblock.BlockHash, error) {
+	if f.computePrompt != nil {
+		return f.computePrompt(ctx, renderReq, prompt, model)
 	}
 	return []kvblock.BlockHash{}, nil
 }

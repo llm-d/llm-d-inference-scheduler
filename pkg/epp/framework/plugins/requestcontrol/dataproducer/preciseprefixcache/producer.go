@@ -194,8 +194,7 @@ func (p *Producer) Produces() map[string]any {
 }
 
 // Consumes declares the TokenizedPrompt dependency so the data-layer DAG
-// orders `token-producer` first. Configs without a token-producer fall back
-// to the indexer's internal tokenization in computeBlockKeys.
+// orders `token-producer` first.
 func (p *Producer) Consumes() map[string]any {
 	return map[string]any{tokenproducer.TokenizedPromptKey: scheduling.TokenizedPrompt{}}
 }
@@ -203,19 +202,26 @@ func (p *Producer) Consumes() map[string]any {
 func (p *Producer) Produce(ctx context.Context,
 	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint,
 ) error {
-	logger := log.FromContext(ctx).WithName(p.typedName.String())
-
 	blockKeys, err := computeBlockKeys(ctx, p.kvCacheIndexer, request, p.blockSizeTokens)
 	if err != nil {
 		return fmt.Errorf("failed to compute block keys: %w", err)
 	}
+	return p.ProduceFromBlockKeys(ctx, request, endpoints, blockKeys)
+}
+
+// ProduceFromBlockKeys runs the post-tokenization pipeline. Exposed for the
+// legacy wrapper, which sources block keys via ComputeBlockKeysFromRequest.
+func (p *Producer) ProduceFromBlockKeys(ctx context.Context,
+	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint,
+	blockKeys []kvblock.BlockHash,
+) error {
 	if len(blockKeys) == 0 {
 		return nil
 	}
 
-	podSet := extractPodSet(endpoints)
+	logger := log.FromContext(ctx).WithName(p.typedName.String())
 
-	keyToPods, err := p.kvCacheIndexer.KVBlockIndex().Lookup(ctx, blockKeys, podSet)
+	keyToPods, err := p.kvCacheIndexer.KVBlockIndex().Lookup(ctx, blockKeys, extractPodSet(endpoints))
 	if err != nil {
 		return fmt.Errorf("failed to lookup block keys: %w", err)
 	}
@@ -245,4 +251,34 @@ func (p *Producer) Produce(ctx context.Context,
 	logger.V(logging.TRACE).Info("Produce completed",
 		"blockKeys", totalBlocks, "scores", scores)
 	return nil
+}
+
+// ComputeBlockKeysFromRequest hashes chat/completions or completions via the
+// indexer's internal tokenizers pool. (nil, nil) on no resolvable input or
+// ErrInternalTokenizationDisabled. Legacy-wrapper-only.
+func (p *Producer) ComputeBlockKeysFromRequest(ctx context.Context,
+	request *scheduling.InferenceRequest,
+) ([]kvblock.BlockHash, error) {
+	if request == nil || request.Body == nil {
+		return nil, nil
+	}
+	var (
+		keys []kvblock.BlockHash
+		err  error
+	)
+	switch {
+	case request.Body.ChatCompletions != nil:
+		renderReq := tokenproducer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
+		keys, err = p.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
+	case request.Body.Completions != nil:
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
+		keys, err = p.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
+	default:
+		return nil, nil
+	}
+	if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
+		return nil, nil
+	}
+	return keys, err
 }
