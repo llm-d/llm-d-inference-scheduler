@@ -142,7 +142,7 @@ func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *fwksched.
 			processFirstTokenForLatencyPrediction(ctx, pl.latencypredictor, pl.config.StreamingMode, pl.config.EndpointRoleLabel, predictedLatencyCtx, now, pl.config.SamplingMean, pl.config.MaxDecodeTokenSamplesForPrediction)
 
 			// Only decrement if PreRequest actually incremented the prefill pod counter.
-			// If PrepareData timed out, PreRequest may have skipped incrementing, and
+			// If Produce timed out, PreRequest may have skipped incrementing, and
 			// decrementing here would drift the counter negative.
 			if predictedLatencyCtx.prefillTargetMetadata != nil && predictedLatencyCtx.prefillTokensAtDispatchOnPrefill > 0 {
 				prefillPodKey := predictedLatencyCtx.prefillTargetMetadata.NamespacedName.String()
@@ -204,7 +204,7 @@ func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *fwksched.
 
 		decodePodKey := targetMetadata.NamespacedName.String()
 		// Only decrement counters that PreRequest actually incremented. See the TTFT
-		// branch above for the rationale: PrepareData timeouts can leave PreRequest
+		// branch above for the rationale: Produce timeouts can leave PreRequest
 		// without an SLO context, so the counter was never bumped up, and decrementing
 		// here would orphan the pod's counter into negative territory.
 		if ttftNotYetRecorded && predictedLatencyCtx.prefillTargetMetadata != nil && predictedLatencyCtx.prefillTokensAtDispatchOnPrefill > 0 {

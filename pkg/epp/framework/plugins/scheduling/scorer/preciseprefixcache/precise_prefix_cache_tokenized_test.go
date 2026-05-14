@@ -57,6 +57,10 @@ func (m *mockKVCacheIndexer) ComputeBlockKeys(ctx context.Context, renderReq *ty
 	return nil, nil
 }
 
+func (m *mockKVCacheIndexer) ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, modelName string, extraFeatures []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
+	return nil, nil
+}
+
 func (m *mockKVCacheIndexer) KVBlockIndex() kvblock.Index {
 	return nil
 }

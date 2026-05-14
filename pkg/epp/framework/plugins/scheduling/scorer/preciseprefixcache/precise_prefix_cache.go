@@ -42,7 +42,7 @@ const (
 	defaultSpeculativeTTL = 2 * time.Second
 
 	// stateKey is the PluginState key used to share data between
-	// PrepareRequestData, Score, and PreRequest.
+	// Produce, Score, and PreRequest.
 	stateKey = plugin.StateKey("prefix-cache-state")
 
 	// experimentalPrefillProfile is the profile name for P/D disaggregation mode.
@@ -53,6 +53,7 @@ type kvCacheIndexer interface {
 	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
 	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
 	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
+	ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, modelName string, extraFeatures []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
 	KVBlockIndex() kvblock.Index
 }
 
@@ -71,7 +72,7 @@ type PluginConfig struct {
 	KVEventsConfig *kvevents.Config `json:"kvEventsConfig"`
 	// SpeculativeIndexing enables speculative indexing. When true, the plugin
 	// proactively adds predicted cache entries to the index immediately after
-	// a routing decision (via PrepareRequestData and PreRequest), closing the
+	// a routing decision (via Produce and PreRequest), closing the
 	// blind spot between routing and KV event arrival.
 	// When false, only confirmed KV events populate the index.
 	SpeculativeIndexing bool `json:"speculativeIndexing"`
@@ -97,7 +98,7 @@ type speculativeEntries struct {
 	podEntries []kvblock.PodEntry
 }
 
-// precisePluginState holds data shared between PrepareRequestData, Score,
+// precisePluginState holds data shared between Produce, Score,
 // and PreRequest via PluginState.
 type precisePluginState struct {
 	blockKeys []kvblock.BlockHash
@@ -139,9 +140,12 @@ func PluginFactory(name string, rawParameters json.RawMessage,
 		}
 	}
 
-	// Validate model name is set
-	if parameters.IndexerConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig == nil || parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
-		return nil, errors.New("modelName is required in indexerConfig.tokenizersPoolConfig")
+	if parameters.IndexerConfig == nil {
+		return nil, errors.New("indexerConfig is required")
+	}
+	//nolint:staticcheck // SA1019: validate the legacy field when callers explicitly opt into it.
+	if parameters.IndexerConfig.TokenizersPoolConfig != nil && parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
+		return nil, errors.New("modelName is required when indexerConfig.tokenizersPoolConfig is set")
 	}
 
 	scorer, err := New(handle.Context(), parameters)
@@ -260,7 +264,7 @@ func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
 // state, and the `kvevents.Pool` to subscribe to KV-cache events
 // to keep the internal KV-cache index state up-to-date.
 //
-// With speculative indexing, the scorer also implements PrepareDataPlugin and
+// With speculative indexing, the scorer also implements DataProducerPlugin and
 // PreRequest to proactively populate the index with expected cache entries
 // immediately after a routing decision, closing the blind spot between the
 // routing decision and the arrival of actual KV events from the engine.
@@ -276,7 +280,7 @@ type Scorer struct {
 	kvEventsConfig     *kvevents.Config
 
 	// pluginState stores per-request data (block keys, scores) shared
-	// between PrepareRequestData, Score, and PreRequest extension points.
+	// between Produce, Score, and PreRequest extension points.
 	pluginState *plugin.PluginState
 
 	// speculativeCache tracks speculative entries added to the index so that
@@ -288,7 +292,7 @@ type Scorer struct {
 	kvBlockScorer kvcache.KVBlockScorer
 
 	// blockSizeTokens is the number of tokens per KV-block, used for
-	// constructing PrefixCacheMatchInfo in PrepareRequestData.
+	// constructing PrefixCacheMatchInfo in Produce.
 	blockSizeTokens int
 
 	// speculativeEnabled controls whether speculative indexing is active.
@@ -328,7 +332,7 @@ func (s *Scorer) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
-// --- PrepareDataPlugin implementation ---
+// --- DataProducerPlugin implementation ---
 
 // Produces declares the data keys this plugin writes to endpoints.
 func (s *Scorer) Produces() map[string]any {
@@ -337,11 +341,11 @@ func (s *Scorer) Produces() map[string]any {
 	}
 }
 
-// PrepareRequestData computes block keys, looks up the index, and stores
+// Produce computes block keys, looks up the index, and stores
 // per-endpoint prefix match information. The computed block keys and scores
 // are saved to PluginState for reuse by Score() and PreRequest().
 // This is a no-op when speculative indexing is disabled.
-func (s *Scorer) PrepareRequestData(ctx context.Context,
+func (s *Scorer) Produce(ctx context.Context,
 	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) error {
 	if !s.speculativeEnabled {
 		return nil
@@ -395,7 +399,7 @@ func (s *Scorer) PrepareRequestData(ctx context.Context,
 		scores:    scores,
 	})
 
-	logger.V(logging.TRACE).Info("PrepareRequestData completed",
+	logger.V(logging.TRACE).Info("Produce completed",
 		"blockKeys", len(blockKeys), "scores", scores)
 
 	return nil
@@ -405,7 +409,7 @@ func (s *Scorer) PrepareRequestData(ctx context.Context,
 
 // Score scores the provided endpoint based on the KVCache index state.
 // The returned scores are normalized to a range of 0-1.
-// If PrepareRequestData was called beforehand, Score reuses the pre-computed
+// If Produce was called beforehand, Score reuses the pre-computed
 // results from PluginState. Otherwise, it falls back to computing scores
 // directly via getScores (backward compatible).
 func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
@@ -448,12 +452,12 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 	}
 
-	// Try to reuse pre-computed scores from PrepareRequestData
+	// Try to reuse pre-computed scores from Produce
 	var scores map[string]float64
 	if pluginStateData, err := plugin.ReadPluginStateKey[*precisePluginState](
 		s.pluginState, request.RequestID, stateKey); err == nil {
 		scores = pluginStateData.scores
-		debugLogger.Info("Reusing pre-computed scores from PrepareRequestData")
+		debugLogger.Info("Reusing pre-computed scores from Produce")
 	} else {
 		// Fallback: compute scores directly (backward compatible path).
 		var scoreErr error
@@ -687,27 +691,45 @@ func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []
 
 // --- Internal helper methods ---
 
-// computeBlockKeys extracts block keys from an LLM request by tokenizing
-// the prompt and computing KV-block hashes.
+// computeBlockKeys extracts block keys from an LLM request. Prefers the
+// tokens written by the token-producer DataProducer plugin; falls back to
+// the deprecated prompt-string path on the indexer when no tokens are
+// attached. Returns nil keys (no error) when neither path can produce them.
 func (s *Scorer) computeBlockKeys(ctx context.Context,
 	request *scheduling.InferenceRequest) ([]kvblock.BlockHash, error) {
 	if request.Body == nil {
 		return nil, nil
 	}
 
-	// Chat completions path
-	if request.Body.ChatCompletions != nil {
+	if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
+		var extraFeatures []*kvblock.BlockExtraFeatures
+		if len(tp.MultiModalFeatures) > 0 {
+			mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
+			extraFeatures = kvblock.ComputeBlockExtraFeatures(
+				mmHashes, mmPlaceholders, s.blockSizeTokens, len(tp.TokenIDs))
+		}
+		return s.kvCacheIndexer.ComputeBlockKeysFromTokens(ctx, tp.TokenIDs, request.TargetModel, extraFeatures)
+	}
+
+	var (
+		keys []kvblock.BlockHash
+		err  error
+	)
+	switch {
+	case request.Body.ChatCompletions != nil:
 		renderReq := tokenizer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
-
-		return s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
+		keys, err = s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
+	case request.Body.Completions != nil:
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
+		keys, err = s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
+	default:
+		return nil, nil
 	}
-
-	// Regular completions path
-	if request.Body.Completions != nil {
-		return s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
+	if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
+		return nil, nil
 	}
-
-	return nil, nil
+	return keys, err
 }
 
 // extractPodSet builds a set of pod identifiers from endpoints for filtered index lookups.
@@ -774,8 +796,12 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 			"toolsCount", len(renderReq.Tools),
 			"documentsCount", len(renderReq.Documents))
 
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
 		if err != nil {
+			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
+				return map[string]float64{}, nil
+			}
 			return nil, fmt.Errorf("failed to get endpoint scores for chat/completions: %w", err)
 		}
 		return scores, nil
@@ -786,8 +812,12 @@ func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, reques
 		prompt := request.Body.Completions.Prompt.Raw
 		traceLogger.Info("Using completion prompt directly", "promptLength", len(prompt))
 
+		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
 		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)
 		if err != nil {
+			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
+				return map[string]float64{}, nil
+			}
 			return nil, fmt.Errorf("failed to get endpoint scores for completions: %w", err)
 		}
 		return scores, nil

@@ -56,7 +56,7 @@ const (
 )
 
 // PredictedLatency is the latency data provider plugin. It handles:
-//   - PrepareRequestData: bulk predictions via the latency predictor sidecar
+//   - Produce: bulk predictions via the latency predictor sidecar
 //   - PreRequest: dispatch-time bookkeeping (token counters, request queues)
 //   - ResponseHeader/ResponseBody: training data collection (TTFT/TPOT)
 //   - Produces/Consumes: endpoint attribute declarations
@@ -82,8 +82,8 @@ func (pl *PredictedLatency) endpointCounter(m *sync.Map, key string) *atomic.Int
 // floor at zero, and removes the entry from the map once the counter reaches
 // zero. This is the only sanctioned way to decrement prefillTokensInFlight
 // (or any counter with the same shape): a naive Add(-delta) can drift the
-// counter negative if callers race (e.g. PrepareData publishing an SLO
-// context after PreRequest already skipped the increment), which used to
+// counter negative if callers race (e.g. Produce publishing an SLO
+// context after PreRequest already skipped the increment)
 // break prediction requests with `greater_than_equal: 0` validation errors.
 // Decrementing a missing key is a no-op and does not create a zero entry.
 func (pl *PredictedLatency) decrementEndpointCounter(m *sync.Map, key string, delta int64) {
@@ -118,11 +118,11 @@ type Config struct {
 	ContextTTL                         time.Duration `json:"contextTTL,omitempty"`
 	StreamingMode                      bool          `json:"streamingMode,omitempty"`
 	EndpointRoleLabel                  string        `json:"endpointRoleLabel,omitempty"`
-	// PredictInPrepareData controls whether bulk predictions are generated during
-	// PrepareRequestData. Set to false to disable predictions (training-only mode).
+	// PredictInProduce controls whether bulk predictions are generated during
+	// Produce. Set to false to disable predictions (training-only mode).
 	// When false, the predictor still collects training data but does not call the
 	// sidecar for predictions. Default: true.
-	PredictInPrepareData bool `json:"predictInPrepareData,omitempty"`
+	PredictInProduce bool `json:"predictInProduce,omitempty"`
 }
 
 var DefaultConfig = Config{
@@ -131,7 +131,7 @@ var DefaultConfig = Config{
 	SLOBufferFactor:                    1,
 	ContextTTL:                         5 * time.Minute,
 	StreamingMode:                      false,
-	PredictInPrepareData:               true,
+	PredictInProduce:                   true,
 }
 
 func PredictedLatencyFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
