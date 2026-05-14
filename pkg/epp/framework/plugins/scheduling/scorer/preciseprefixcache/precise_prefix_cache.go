@@ -1,419 +1,88 @@
+/*
+Copyright 2026 The llm-d Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+// Package preciseprefixcache implements the slim precise-prefix-cache-scorer:
+// it reads the per-endpoint PrefixCacheMatchInfo attribute written by the
+// precise-prefix-cache-producer and returns matchBlocks/totalBlocks.
+//
+// For backward compatibility the factory accepts the old all-in-one
+// parameters; it then instantiates an internal Producer and returns a
+// legacy wrapper that fulfills Scorer + DataProducer + PreRequest +
+// EndpointExtractor from one plugin instance.
 package preciseprefixcache
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"reflect"
-	"sync/atomic"
-	"time"
 
-	"github.com/jellydator/ttlcache/v3"
-	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
-	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
-	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
-	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents/engineadapter"
-	"github.com/llm-d/llm-d-kv-cache/pkg/tokenization/types"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
+	preciseproducer "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/requestcontrol/dataproducer/preciseprefixcache"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
-const (
-	// PrecisePrefixCachePluginType is the type-name of the Scorer plugin.
-	PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
+// PrecisePrefixCachePluginType keeps the public type name stable for YAML
+// compatibility.
+const PrecisePrefixCachePluginType = "precise-prefix-cache-scorer"
 
-	// defaultSpeculativeTTL is the default TTL for speculative entries.
-	// This should be just long enough to cover the blind spot between
-	// routing decision and KV event arrival, maintaining high confidence
-	// in speculations while avoiding stale routing affinity.
-	defaultSpeculativeTTL = 2 * time.Second
+var _ scheduling.Scorer = &Scorer{}
 
-	// stateKey is the PluginState key used to share data between
-	// Produce, Score, and PreRequest.
-	stateKey = plugin.StateKey("prefix-cache-state")
-
-	// experimentalPrefillProfile is the profile name for P/D disaggregation mode.
-	experimentalPrefillProfile = "prefill"
-)
-
-type kvCacheIndexer interface {
-	GetPodScores(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string, podIdentifiers []string) (map[string]float64, error)
-	ScoreTokens(ctx context.Context, tokens []uint32, modelName string, podIdentifiers []string, extraFeatures []*kvblock.BlockExtraFeatures) (map[string]float64, error)
-	ComputeBlockKeys(ctx context.Context, renderReq *types.RenderChatRequest, prompt, modelName string) ([]kvblock.BlockHash, error)
-	ComputeBlockKeysFromTokens(ctx context.Context, tokens []uint32, modelName string, extraFeatures []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error)
-	KVBlockIndex() kvblock.Index
+func New() *Scorer {
+	return &Scorer{typedName: plugin.TypedName{Type: PrecisePrefixCachePluginType}}
 }
 
-// PluginConfig holds the configuration for the
-// Scorer plugin.
-type PluginConfig struct {
-	// TokenProcessorConfig holds the configuration for the `kvblock.TokenProcessor` which is
-	// used to process tokens into KV-block keys.
-	TokenProcessorConfig *kvblock.TokenProcessorConfig `json:"tokenProcessorConfig"`
-	// IndexerConfig holds the configuration for the `kvcache.Indexer` which is
-	// used to score endpoints based on the KV-cache index state.
-	IndexerConfig *kvcache.Config `json:"indexerConfig"`
-	// KVEventsConfig holds the configuration for the `kvevents.Pool` which is
-	// used to subscribe to KV-cache events and update the internal KV-cache
-	// index state.
-	KVEventsConfig *kvevents.Config `json:"kvEventsConfig"`
-	// SpeculativeIndexing enables speculative indexing. When true, the plugin
-	// proactively adds predicted cache entries to the index immediately after
-	// a routing decision (via Produce and PreRequest), closing the
-	// blind spot between routing and KV event arrival.
-	// When false, only confirmed KV events populate the index.
-	SpeculativeIndexing bool `json:"speculativeIndexing"`
-	// SpeculativeTTL is the time-to-live for speculative index entries.
-	// After this duration, speculative entries are evicted from the index.
-	// If empty, defaultSpeculativeTTL is used. Only used when SpeculativeIndexing is true.
-	// Accepts Go duration strings (e.g. "2s", "500ms").
-	SpeculativeTTL string `json:"speculativeTTL"`
-}
-
-// compile-time type assertions
-var (
-	_ scheduling.Scorer           = &Scorer{}
-	_ requestcontrol.DataProducer = &Scorer{}
-	_ requestcontrol.PreRequest   = &Scorer{}
-	_ fwkdl.EndpointExtractor     = &Scorer{}
-)
-
-// speculativeEntries holds the data needed to evict speculative entries
-// from the index when the TTL expires.
-type speculativeEntries struct {
-	blockKeys  []kvblock.BlockHash
-	podEntries []kvblock.PodEntry
-}
-
-// precisePluginState holds data shared between Produce, Score,
-// and PreRequest via PluginState.
-type precisePluginState struct {
-	blockKeys []kvblock.BlockHash
-	scores    map[string]float64 // pod addr → score
-}
-
-// Clone implements plugin.StateData.
-func (s *precisePluginState) Clone() plugin.StateData {
-	blockKeys := make([]kvblock.BlockHash, len(s.blockKeys))
-	copy(blockKeys, s.blockKeys)
-	scores := make(map[string]float64, len(s.scores))
-	for k, v := range s.scores {
-		scores[k] = v
-	}
-	return &precisePluginState{
-		blockKeys: blockKeys,
-		scores:    scores,
-	}
-}
-
-// PluginFactory defines the factory function for creating
-// a new instance of the PrefixCacheTrackingPlugin.
-func PluginFactory(name string, rawParameters json.RawMessage,
-	handle plugin.Handle,
-) (plugin.Plugin, error) {
-	indexerConfig, err := kvcache.NewDefaultConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize indexer config: %w", err)
-	}
-
-	parameters := PluginConfig{
-		IndexerConfig:  indexerConfig,
-		KVEventsConfig: kvevents.DefaultConfig(),
-	}
-
-	if rawParameters != nil {
-		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
-			return nil, fmt.Errorf("failed to parse %s plugin config: %w", PrecisePrefixCachePluginType, err)
-		}
-	}
-
-	if parameters.IndexerConfig == nil {
-		return nil, errors.New("indexerConfig is required")
-	}
-	//nolint:staticcheck // SA1019: validate the legacy field when callers explicitly opt into it.
-	if parameters.IndexerConfig.TokenizersPoolConfig != nil && parameters.IndexerConfig.TokenizersPoolConfig.ModelName == "" {
-		return nil, errors.New("modelName is required when indexerConfig.tokenizersPoolConfig is set")
-	}
-
-	scorer, err := New(handle.Context(), parameters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create %s plugin: %w", PrecisePrefixCachePluginType, err)
-	}
-
-	return scorer.WithName(name), nil
-}
-
-// New initializes a new prefix Plugin and returns its pointer.
-// It sets up the `kvcache.Indexer` and `kvevents.Pool`
-// based on the provided configuration. The `kvevents.Pool` is started
-// in a goroutine to listen for KV-cache events and update the internal
-// KV-cache index state. The `kvcache.Indexer` is also started in a goroutine
-// to score endpoints based on the KV-cache index state.
-//
-// If the configuration is invalid or if the indexer fails to initialize,
-// an error is returned.
-func New(ctx context.Context, config PluginConfig) (*Scorer, error) {
-	if config.TokenProcessorConfig == nil {
-		config.TokenProcessorConfig = kvblock.DefaultTokenProcessorConfig()
-	}
-
-	tokenProcessor, err := kvblock.NewChunkedTokenDatabase(config.TokenProcessorConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create token processor: %w", err)
-	}
-
-	// initialize the indexer
-	kvCacheIndexer, err := kvcache.NewKVCacheIndexer(ctx, config.IndexerConfig, tokenProcessor)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create `kvcache.Indexer`: %w", err)
-	}
-
-	go kvCacheIndexer.Run(ctx)
-
-	// initialize the KV block scorer with the same config the indexer uses
-	scorerConfig := kvcache.DefaultKVBlockScorerConfig()
-	if config.IndexerConfig != nil && config.IndexerConfig.BackendConfigs != nil {
-		scorerConfig.BackendConfigs = config.IndexerConfig.BackendConfigs
-	}
-	kvBlockScorer, err := kvcache.NewKVBlockScorer(scorerConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create KVBlockScorer: %w", err)
-	}
-
-	// initialize the KV-events pool
-	pool := kvevents.NewPool(config.KVEventsConfig, kvCacheIndexer.KVBlockIndex(), tokenProcessor, engineadapter.NewVLLMAdapter())
-	pool.Start(ctx)
-
-	subscribersManager := kvevents.NewSubscriberManager(pool)
-
-	if config.KVEventsConfig.ZMQEndpoint != "" {
-		// setup local subscriber to support global socket mode
-		if err := subscribersManager.EnsureSubscriber(ctx, "local-subscriber",
-			config.KVEventsConfig.ZMQEndpoint, config.KVEventsConfig.TopicFilter, false); err != nil {
-			return nil, fmt.Errorf("failed to create local subscriber for global socket mode: %w", err)
-		}
-	}
-
-	// Initialize speculative indexing components only when enabled
-	var speculativeCache *ttlcache.Cache[string, *speculativeEntries]
-	var speculativeTTL time.Duration
-	if config.SpeculativeIndexing {
-		if config.SpeculativeTTL != "" {
-			var err error
-			speculativeTTL, err = time.ParseDuration(config.SpeculativeTTL)
-			if err != nil {
-				return nil, fmt.Errorf("invalid speculativeTTL %q: %w", config.SpeculativeTTL, err)
-			}
-		}
-		if speculativeTTL <= 0 {
-			speculativeTTL = defaultSpeculativeTTL
-		}
-
-		speculativeCache = ttlcache.New[string, *speculativeEntries](
-			ttlcache.WithTTL[string, *speculativeEntries](speculativeTTL),
-		)
-		speculativeCache.OnEviction(func(_ context.Context, reason ttlcache.EvictionReason,
-			item *ttlcache.Item[string, *speculativeEntries],
-		) {
-			if reason != ttlcache.EvictionReasonExpired {
-				return
-			}
-			entries := item.Value()
-			for _, reqKey := range entries.blockKeys {
-				// Evict speculative entries from the index.
-				// Speculative entries were added without engineKey mapping (nil engineKeys),
-				// so we use RequestKey type to evict by requestKey directly.
-				//nolint:errcheck // best-effort cleanup on TTL expiry
-				kvCacheIndexer.KVBlockIndex().Evict(context.Background(), reqKey, kvblock.RequestKey, entries.podEntries)
-			}
-		})
-		go cleanCachePeriodically(ctx, speculativeCache, speculativeTTL)
-	}
-
-	return &Scorer{
-		typedName:          plugin.TypedName{Type: PrecisePrefixCachePluginType},
-		kvCacheIndexer:     kvCacheIndexer,
-		kvBlockScorer:      kvBlockScorer,
-		subscribersManager: subscribersManager,
-		kvEventsConfig:     config.KVEventsConfig,
-		pluginState:        plugin.NewPluginState(ctx),
-		speculativeCache:   speculativeCache,
-		speculativeTTL:     speculativeTTL,
-		blockSizeTokens:    config.TokenProcessorConfig.BlockSize,
-		speculativeEnabled: config.SpeculativeIndexing,
-		subscriberCtx:      ctx,
-	}, nil
-}
-
-// Scorer implements the framework.Scorer interface.
-// The scorer implements precise prefix-cache KV-block locality scoring.
-// It uses the `kvcache.Indexer` to score endpoints based on the KV-cache index
-// state, and the `kvevents.Pool` to subscribe to KV-cache events
-// to keep the internal KV-cache index state up-to-date.
-//
-// With speculative indexing, the scorer also implements DataProducerPlugin and
-// PreRequest to proactively populate the index with expected cache entries
-// immediately after a routing decision, closing the blind spot between the
-// routing decision and the arrival of actual KV events from the engine.
-//
-// The scorer also implements EndpointExtractor to react to endpoint lifecycle
-// events from the data layer's endpoint-notification-source: an add/update
-// installs a per-pod ZMQ subscriber, a delete removes it.
+// Scorer is a pure reader of PrefixCacheMatchInfo. No tokenization, no
+// index access — that lives on the precise-prefix-cache-producer.
 type Scorer struct {
-	typedName      plugin.TypedName
-	kvCacheIndexer kvCacheIndexer
-
-	subscribersManager *kvevents.SubscriberManager
-	kvEventsConfig     *kvevents.Config
-
-	// pluginState stores per-request data (block keys, scores) shared
-	// between Produce, Score, and PreRequest extension points.
-	pluginState *plugin.PluginState
-
-	// speculativeCache tracks speculative entries added to the index so that
-	// they can be evicted when their TTL expires.
-	speculativeCache *ttlcache.Cache[string, *speculativeEntries]
-	speculativeTTL   time.Duration
-
-	// kvBlockScorer scores pods based on block hits with device-backend weights.
-	kvBlockScorer kvcache.KVBlockScorer
-
-	// blockSizeTokens is the number of tokens per KV-block, used for
-	// constructing PrefixCacheMatchInfo in Produce.
-	blockSizeTokens int
-
-	// speculativeEnabled controls whether speculative indexing is active.
-	speculativeEnabled bool
-
-	// extractorActive is set the first time ExtractEndpoint is invoked,
-	// signalling that the data layer's endpoint-notification-source is wired
-	// for this scorer. Once set, the legacy in-Score subscriber discovery
-	// path becomes a no-op so the data layer is the sole authority over
-	// per-pod subscriber lifecycle.
-	extractorActive atomic.Bool
-
-	// subscriberCtx is the long-lived context used to start ZMQ subscribers.
-	// SubscriberManager binds each subscriber's goroutine lifetime to the
-	// context passed in to EnsureSubscriber, so any caller-scoped context
-	// (e.g. the request ctx in the legacy in-Score path) would tear the
-	// subscriber down as soon as the caller returned. Using the plugin's
-	// construction-time ctx keeps subscribers alive for the EPP's lifetime,
-	// matching the original behavior of `context.Background()` in the
-	// pre-refactor code.
-	subscriberCtx context.Context
+	typedName plugin.TypedName
 }
 
-// TypedName returns the typed name of the plugin.
 func (s *Scorer) TypedName() plugin.TypedName {
 	return s.typedName
 }
 
-// WithName sets the name of the plugin.
 func (s *Scorer) WithName(name string) *Scorer {
 	s.typedName.Name = name
 	return s
 }
 
-// Category returns the preference the scorer applies when scoring candidate endpoints.
 func (s *Scorer) Category() scheduling.ScorerCategory {
 	return scheduling.Affinity
 }
 
-// --- DataProducerPlugin implementation ---
-
-// Produces declares the data keys this plugin writes to endpoints.
-func (s *Scorer) Produces() map[string]any {
-	return map[string]any{
-		attrprefix.PrefixCacheMatchInfoKey: attrprefix.PrefixCacheMatchInfo{},
-	}
+// Consumes the precise-only attribute key. Pinning to a key only the
+// precise producer writes prevents the data-layer DAG from auto-instantiating
+// a different default producer of the shared PrefixCacheMatchInfoKey.
+func (s *Scorer) Consumes() map[string]any {
+	return map[string]any{preciseproducer.MatchInfoAttributeKey: attrprefix.PrefixCacheMatchInfo{}}
 }
 
-// Produce computes block keys, looks up the index, and stores
-// per-endpoint prefix match information. The computed block keys and scores
-// are saved to PluginState for reuse by Score() and PreRequest().
-// This is a no-op when speculative indexing is disabled.
-func (s *Scorer) Produce(ctx context.Context,
-	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) error {
-	if !s.speculativeEnabled {
-		return nil
-	}
-
-	logger := log.FromContext(ctx).WithName(s.typedName.String())
-
-	if request == nil || request.Body == nil {
-		return nil
-	}
-
-	// 1. Compute block keys from the request
-	blockKeys, err := s.computeBlockKeys(ctx, request)
-	if err != nil {
-		return fmt.Errorf("failed to compute block keys: %w", err)
-	}
-	if len(blockKeys) == 0 {
-		return nil
-	}
-
-	// 2. Build pod set from endpoints for filtered lookup
-	podSet := extractPodSet(endpoints)
-
-	// 3. Lookup index for matching pods
-	keyToPods, err := s.kvCacheIndexer.KVBlockIndex().Lookup(ctx, blockKeys, podSet)
-	if err != nil {
-		return fmt.Errorf("failed to lookup block keys: %w", err)
-	}
-
-	// 4. Compute per-pod scores using KVBlockScorer (supports device-backend weights)
-	scores, err := s.kvBlockScorer.Score(ctx, blockKeys, keyToPods)
-	if err != nil {
-		return fmt.Errorf("failed to score block keys: %w", err)
-	}
-
-	// 5. Store PrefixCacheMatchInfo on each endpoint
-	blockSize := s.getBlockSizeTokens()
-	for _, ep := range endpoints {
-		md := ep.GetMetadata()
-		if md == nil {
-			continue
-		}
-		addr := fmt.Sprintf("%s:%s", md.Address, md.Port)
-		matchLen := int(scores[addr])
-		ep.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(matchLen, len(blockKeys), blockSize))
-	}
-
-	// 6. Save to PluginState for Score() and PreRequest()
-	s.pluginState.Write(request.RequestID, stateKey, &precisePluginState{
-		blockKeys: blockKeys,
-		scores:    scores,
-	})
-
-	logger.V(logging.TRACE).Info("Produce completed",
-		"blockKeys", len(blockKeys), "scores", scores)
-
-	return nil
-}
-
-// --- Scorer implementation ---
-
-// Score scores the provided endpoint based on the KVCache index state.
-// The returned scores are normalized to a range of 0-1.
-// If Produce was called beforehand, Score reuses the pre-computed
-// results from PluginState. Otherwise, it falls back to computing scores
-// directly via getScores (backward compatible).
-func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) map[scheduling.Endpoint]float64 {
-	// Start tracing span for scoring operation
+// Score returns matchBlocks/totalBlocks per endpoint. Missing or malformed
+// attributes score 0.
+func (s *Scorer) Score(ctx context.Context, _ *scheduling.CycleState,
+	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint,
+) map[scheduling.Endpoint]float64 {
 	tracer := telemetry.Tracer()
 	ctx, span := tracer.Start(ctx, "llm_d.epp.scorer.prefix_cache",
 		trace.WithSpanKind(trace.SpanKindInternal),
@@ -423,405 +92,112 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 	logger := log.FromContext(ctx).WithName(s.typedName.String())
 	debugLogger := logger.V(logging.DEBUG)
 
-	// Set initial attributes
-	span.SetAttributes(
-		attribute.Int("llm_d.scorer.candidate_endpoints", len(endpoints)),
-	)
-
-	// Backwards-compat: opportunistically subscribe to per-pod KV events for
-	// each endpoint we see in scoring. Preferred path is the data-layer
-	// EndpointExtractor (see ExtractEndpoint), which also handles teardown
-	// when pods disappear. This in-Score path keeps existing configs that
-	// don't wire the endpoint-notification-source working without changes;
-	// EnsureSubscriber is idempotent so the two paths are safe to run
-	// together.
-	s.ensureSubscribersForEndpoints(ctx, endpoints)
-
-	// Early return if request is nil
-	if request == nil {
-		debugLogger.Info("Request is nil, skipping scoring")
-		span.SetAttributes(attribute.String("llm_d.scorer.result", "skipped_nil_request"))
-		return nil
-	}
-
-	// Set optional request attributes
-	if request.TargetModel != "" {
-		span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
-	}
-	if request.RequestID != "" {
-		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
-	}
-
-	// Try to reuse pre-computed scores from Produce
-	var scores map[string]float64
-	if pluginStateData, err := plugin.ReadPluginStateKey[*precisePluginState](
-		s.pluginState, request.RequestID, stateKey); err == nil {
-		scores = pluginStateData.scores
-		debugLogger.Info("Reusing pre-computed scores from Produce")
-	} else {
-		// Fallback: compute scores directly (backward compatible path).
-		var scoreErr error
-		scores, scoreErr = s.getScores(ctx, cycleState, request)
-		if scoreErr != nil {
-			logger.Error(scoreErr, "Failed to get endpoint scores")
-			span.SetStatus(codes.Error, scoreErr.Error())
-			return nil
+	span.SetAttributes(attribute.Int("llm_d.scorer.candidate_endpoints", len(endpoints)))
+	if request != nil {
+		if request.TargetModel != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.model", request.TargetModel))
+		}
+		if request.RequestID != "" {
+			span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 		}
 	}
-	debugLogger.Info("Got endpoint scores", "scores", scores)
 
-	// Track scoring statistics
-	span.SetAttributes(
-		attribute.Int("llm_d.scorer.scores_computed", len(scores)),
-	)
-
-	endpointToKey := func(endpoint scheduling.Endpoint) (string, bool) {
-		metadata := endpoint.GetMetadata()
-		if metadata == nil {
-			return "", false
-		}
-
-		return fmt.Sprintf("%s:%s", metadata.Address, metadata.Port), true
-	}
-
-	// Write per-endpoint prefix-cache match info as endpoint attributes so downstream
-	// scorers (e.g. nohitlru) can determine whether any cache hits were found.
+	scores := make(map[scheduling.Endpoint]float64, len(endpoints))
+	var maxScore, totalScore float64
 	for _, endpoint := range endpoints {
-		key, ok := endpointToKey(endpoint)
-		matchBlocks := 0
-		if ok {
-			if rawScore, exists := scores[key]; exists && rawScore > 0 {
-				matchBlocks = 1
-			}
+		scores[endpoint] = 0.0
+
+		raw, ok := endpoint.Get(preciseproducer.MatchInfoAttributeKey)
+		if !ok {
+			debugLogger.Info("PrefixCacheMatchInfo missing, assigning 0",
+				"endpoint", endpointKey(endpoint))
+			continue
 		}
-		endpoint.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(matchBlocks, 1, 1))
+		info, ok := raw.(*attrprefix.PrefixCacheMatchInfo)
+		if !ok {
+			logger.Error(nil, "PrefixCacheMatchInfo has unexpected type, assigning 0",
+				"endpoint", endpointKey(endpoint))
+			continue
+		}
+		if info.TotalBlocks() == 0 {
+			continue
+		}
+		score := float64(info.MatchBlocks()) / float64(info.TotalBlocks())
+		scores[endpoint] = score
+		if score > maxScore {
+			maxScore = score
+		}
+		totalScore += score
 	}
 
-	normalizedScores := indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
-
-	// Calculate score distribution for observability
-	if len(normalizedScores) > 0 {
-		maxScore := 0.0
-		totalScore := 0.0
-		for _, score := range normalizedScores {
-			if score > maxScore {
-				maxScore = score
-			}
-			totalScore += score
-		}
-		avgScore := totalScore / float64(len(normalizedScores))
-
+	if len(endpoints) > 0 {
 		span.SetAttributes(
 			attribute.Float64("llm_d.scorer.score.max", maxScore),
-			attribute.Float64("llm_d.scorer.score.avg", avgScore),
-			attribute.Int("llm_d.scorer.endpoints_scored", len(normalizedScores)),
+			attribute.Float64("llm_d.scorer.score.avg", totalScore/float64(len(endpoints))),
+			attribute.Int("llm_d.scorer.endpoints_scored", len(endpoints)),
 		)
 	}
 
-	return normalizedScores
-}
-
-// --- PreRequest implementation ---
-
-// PreRequest records speculative entries in the index for the selected endpoint
-// immediately after the scheduling decision. This closes the blind spot between
-// the routing decision and the arrival of actual KV events from the engine.
-// The speculative entries are associated with a TTL and will be automatically
-// evicted when the TTL expires.
-// This is a no-op when speculative indexing is disabled.
-func (s *Scorer) PreRequest(ctx context.Context,
-	request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
-	if !s.speculativeEnabled {
-		return
-	}
-
-	logger := log.FromContext(ctx).WithName(s.typedName.String())
-
-	// 1. Read block keys from PluginState
-	state, err := plugin.ReadPluginStateKey[*precisePluginState](
-		s.pluginState, request.RequestID, stateKey)
-	if err != nil {
-		logger.V(logging.TRACE).Info("No plugin state found for PreRequest, skipping speculative indexing",
-			"requestID", request.RequestID)
-		return
-	}
-	s.pluginState.Delete(request.RequestID)
-
-	if len(state.blockKeys) == 0 {
-		return
-	}
-
-	// 2. Get target endpoint from scheduling result
-	primaryResult := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
-	if primaryResult == nil || len(primaryResult.TargetEndpoints) == 0 {
-		return
-	}
-	targetEndpoint := primaryResult.TargetEndpoints[0]
-
-	// 3. Build speculative pod entry and add to index
-	targetMeta := targetEndpoint.GetMetadata()
-	speculativePod := kvblock.PodEntry{
-		PodIdentifier: fmt.Sprintf("%s:%s", targetMeta.Address, targetMeta.Port),
-		Speculative:   true,
-	}
-
-	allPodEntries := []kvblock.PodEntry{speculativePod}
-
-	index := s.kvCacheIndexer.KVBlockIndex()
-	// Pass nil engineKeys: speculative entries only need requestKey -> PodEntry mapping.
-	// Engine keys will be linked later when confirmed KV events arrive.
-	if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{speculativePod}); err != nil {
-		logger.Error(err, "Failed to add speculative entries to index",
-			"pod", speculativePod.PodIdentifier)
-	}
-
-	// 4. Handle P/D disaggregation: also add speculative entry for prefill endpoint
-	if pr, exists := schedulingResult.ProfileResults[experimentalPrefillProfile]; exists && len(pr.TargetEndpoints) > 0 {
-		prefillMeta := pr.TargetEndpoints[0].GetMetadata()
-		prefillPod := kvblock.PodEntry{
-			PodIdentifier: fmt.Sprintf("%s:%s", prefillMeta.Address, prefillMeta.Port),
-			Speculative:   true,
+	if debugLogger.Enabled() {
+		// Build a string-keyed snapshot — log encoders JSON-marshal values and
+		// choke on the live Endpoint interface as a map key.
+		loggable := make(map[string]float64, len(scores))
+		for ep, score := range scores {
+			loggable[endpointKey(ep)] = score
 		}
-		if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{prefillPod}); err != nil {
-			logger.Error(err, "Failed to add speculative entries for prefill endpoint",
-				"pod", prefillPod.PodIdentifier)
-		}
-		allPodEntries = append(allPodEntries, prefillPod)
+		debugLogger.Info("Computed prefix-cache scores", "scores", loggable)
 	}
 
-	// 5. Register in TTL cache for automatic eviction
-	s.speculativeCache.Set(request.RequestID, &speculativeEntries{
-		blockKeys:  state.blockKeys,
-		podEntries: allPodEntries,
-	}, s.speculativeTTL)
-
-	logger.V(logging.TRACE).Info("Added speculative entries",
-		"requestID", request.RequestID,
-		"pod", speculativePod.PodIdentifier,
-		"blockKeys", len(state.blockKeys),
-		"ttl", s.speculativeTTL)
+	return scores
 }
 
-// --- EndpointExtractor implementation ---
-
-// ExpectedInputType declares the data type this extractor consumes.
-// Required by the data layer's source/extractor type-compatibility check.
-func (s *Scorer) ExpectedInputType() reflect.Type {
-	return fwkdl.EndpointEventReflectType
+func endpointKey(ep scheduling.Endpoint) string {
+	md := ep.GetMetadata()
+	if md == nil {
+		return "<unknown>"
+	}
+	return fmt.Sprintf("%s:%s", md.Address, md.Port)
 }
 
-// ExtractEndpoint reacts to endpoint lifecycle events from the data layer's
-// endpoint-notification-source: an add/update installs a per-pod ZMQ
-// subscriber so KV-cache events flow into the index; a delete tears it down.
-// No-op when DiscoverPods is disabled or the namespaced name is unavailable.
-//
-// Being called at all is also the signal that the data layer is wired for
-// this scorer; the legacy in-Score discovery path turns itself off from
-// here on.
-func (s *Scorer) ExtractEndpoint(ctx context.Context, event fwkdl.EndpointEvent) error {
-	s.extractorActive.Store(true)
-	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
-		return nil
-	}
-	meta := event.Endpoint.GetMetadata()
-	if meta == nil || meta.NamespacedName.Name == "" {
-		return nil
+// PluginFactory routes to either the slim Scorer (no params, split mode) or
+// the legacy wrapper (any non-empty params, all-in-one mode). Legacy mode
+// will be removed in a future release.
+func PluginFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
+	if !hasConfig(rawParameters) {
+		return New().WithName(name), nil
 	}
 
-	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	endpointKey := meta.NamespacedName.String()
-
-	switch event.Type {
-	case fwkdl.EventAddOrUpdate:
-		if err := s.ensureSubscriber(ctx, meta); err != nil {
-			return err
-		}
-		logger.V(logging.DEBUG).Info("Adding subscriber", "endpoint", endpointKey)
-	case fwkdl.EventDelete:
-		s.subscribersManager.RemoveSubscriber(ctx, endpointKey)
-		logger.V(logging.DEBUG).Info("Removed KV-events subscriber", "endpoint", endpointKey)
-	}
-	return nil
-}
-
-// ensureSubscriber installs (or refreshes) a per-pod ZMQ subscriber for the
-// given endpoint metadata. Used by both the data-layer-driven extractor path
-// and the legacy in-Score backwards-compat path. Returns nil for endpoints
-// without an address — those can't be dialed.
-//
-// The subscriber goroutine is started against subscriberCtx (plugin-lifetime),
-// not the caller ctx, so request-scoped contexts don't tear it down.
-func (s *Scorer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMetadata) error {
-	if meta == nil || meta.Address == "" {
-		return nil
-	}
-	endpointKey := meta.NamespacedName.String()
-	zmqEndpoint := fmt.Sprintf("tcp://%s:%d", meta.Address, s.kvEventsConfig.PodDiscoveryConfig.SocketPort)
-
-	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	if err := s.subscribersManager.EnsureSubscriber(s.subscriberCtx, endpointKey,
-		zmqEndpoint, s.kvEventsConfig.TopicFilter, true); err != nil {
-		logger.Error(err, "Failed to ensure KV-events subscriber for endpoint",
-			"endpoint", endpointKey, "address", meta.Address)
-		return fmt.Errorf("ensure subscriber for %s: %w", endpointKey, err)
-	}
-	logger.V(logging.DEBUG).Info("Ensured KV-events subscriber", "endpoint", endpointKey, "zmq", zmqEndpoint)
-	return nil
-}
-
-// ensureSubscribersForEndpoints is the backwards-compat path for configs
-// that don't wire the endpoint-notification-source: it iterates the candidate
-// endpoints presented to Score and ensures a per-pod subscriber for each.
-// Errors are logged and not returned — discovery is best-effort here, the
-// data layer remains the authoritative source when wired.
-//
-// Becomes a no-op once ExtractEndpoint has been called at least once,
-// indicating the data layer is wired and will drive subscriber lifecycle.
-func (s *Scorer) ensureSubscribersForEndpoints(ctx context.Context, endpoints []scheduling.Endpoint) {
-	if s.extractorActive.Load() {
-		return
-	}
-	if !s.kvEventsConfig.DiscoverPods || s.kvEventsConfig.PodDiscoveryConfig == nil {
-		return
-	}
-	for _, ep := range endpoints {
-		_ = s.ensureSubscriber(ctx, ep.GetMetadata())
-	}
-}
-
-// --- Internal helper methods ---
-
-// computeBlockKeys extracts block keys from an LLM request. Prefers the
-// tokens written by the token-producer DataProducer plugin; falls back to
-// the deprecated prompt-string path on the indexer when no tokens are
-// attached. Returns nil keys (no error) when neither path can produce them.
-func (s *Scorer) computeBlockKeys(ctx context.Context,
-	request *scheduling.InferenceRequest) ([]kvblock.BlockHash, error) {
-	if request.Body == nil {
-		return nil, nil
-	}
-
-	if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
-		var extraFeatures []*kvblock.BlockExtraFeatures
-		if len(tp.MultiModalFeatures) > 0 {
-			mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
-			extraFeatures = kvblock.ComputeBlockExtraFeatures(
-				mmHashes, mmPlaceholders, s.blockSizeTokens, len(tp.TokenIDs))
-		}
-		return s.kvCacheIndexer.ComputeBlockKeysFromTokens(ctx, tp.TokenIDs, request.TargetModel, extraFeatures)
-	}
-
-	var (
-		keys []kvblock.BlockHash
-		err  error
+	ctx := handle.Context()
+	log.FromContext(ctx).Info(
+		"precise-prefix-cache-scorer is configured with parameters; running in legacy all-in-one mode. "+
+			"Prefer splitting into a `token-producer` plugin, a `precise-prefix-cache-producer` plugin, and a "+
+			"parameter-free `precise-prefix-cache-scorer`. Legacy mode will be removed in a future release.",
+		"plugin", name,
 	)
-	switch {
-	case request.Body.ChatCompletions != nil:
-		renderReq := tokenizer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		keys, err = s.kvCacheIndexer.ComputeBlockKeys(ctx, renderReq, "", request.TargetModel)
-	case request.Body.Completions != nil:
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		keys, err = s.kvCacheIndexer.ComputeBlockKeys(ctx, nil, request.Body.Completions.Prompt.Raw, request.TargetModel)
-	default:
-		return nil, nil
+
+	producer, err := preciseproducer.PluginFactory(name+"-legacy-producer", rawParameters, handle)
+	if err != nil {
+		return nil, fmt.Errorf("legacy %s: %w", PrecisePrefixCachePluginType, err)
 	}
-	if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-		return nil, nil
+	prod, ok := producer.(*preciseproducer.Producer)
+	if !ok {
+		return nil, fmt.Errorf("legacy %s: unexpected producer type %T", PrecisePrefixCachePluginType, producer)
 	}
-	return keys, err
+
+	slim := New().WithName(name)
+	return &legacyScorer{Scorer: slim, producer: prod}, nil
 }
 
-// extractPodSet builds a set of pod identifiers from endpoints for filtered index lookups.
-func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
-	podSet := sets.New[string]()
-	for _, ep := range endpoints {
-		if m := ep.GetMetadata(); m != nil {
-			podSet.Insert(fmt.Sprintf("%s:%s", m.Address, m.Port))
-		}
+// hasConfig reports whether rawParameters carry any non-empty content
+// (treat absent, `null`, and `{}` as empty).
+func hasConfig(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return false
 	}
-	return podSet
-}
-
-// getBlockSizeTokens returns the block size in tokens from the token processor config.
-func (s *Scorer) getBlockSizeTokens() int {
-	return s.blockSizeTokens
-}
-
-// getScores retrieves the endpoint scores from the KV-cache indexer
-// based on the provided LLM request.
-// If tokenized prompt data is found on the request (written by the tokenizer
-// DataProducer plugin), it calls ScoreTokens directly, bypassing
-// prompt/chat tokenization. Otherwise, chat completions and regular
-// completions are tokenized internally by the kvcache indexer.
-func (s *Scorer) getScores(ctx context.Context, _ *scheduling.CycleState, request *scheduling.InferenceRequest) (map[string]float64, error) {
-	logger := log.FromContext(ctx).WithName(s.typedName.String())
-	traceLogger := logger.V(logging.TRACE)
-
-	traceLogger.Info("Getting scores",
-		"isChatCompletions", request.Body != nil && request.Body.ChatCompletions != nil,
-		"isCompletions", request.Body != nil && request.Body.Completions != nil)
-
-	// Prefer pre-tokenized input from the tokenizer DataProducer plugin.
-	if request.Body != nil {
-		if tp := request.Body.TokenizedPrompt; tp != nil && len(tp.TokenIDs) > 0 {
-			traceLogger.Info("tokens found on request, skipping tokenization")
-
-			var extraFeatures []*kvblock.BlockExtraFeatures
-			if len(tp.MultiModalFeatures) > 0 {
-				mmHashes, mmPlaceholders := tokenizer.ConvertMMFeaturesFromUpstream(tp.MultiModalFeatures)
-				extraFeatures = kvblock.ComputeBlockExtraFeatures(
-					mmHashes, mmPlaceholders, s.blockSizeTokens, len(tp.TokenIDs))
-			}
-
-			scores, err := s.kvCacheIndexer.ScoreTokens(ctx, tp.TokenIDs, request.TargetModel, nil, extraFeatures)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get endpoint scores for tokens: %w", err)
-			}
-			return scores, nil
-		}
+	switch string(trimmed) {
+	case "null", "{}":
+		return false
 	}
-
-	// The upstream parser guarantees exactly one body is populated, but we defensively prioritize chat completions.
-	// If an unexpected dual payload slips through (parser regression/new client), log it and use chat semantics.
-	if request.Body != nil && request.Body.ChatCompletions != nil {
-		if request.Body.Completions != nil {
-			traceLogger.Info("Both chat/completions and completions present; defaulting to chat/completions")
-		}
-
-		renderReq := tokenizer.ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
-
-		traceLogger.Info("Processing chat completion request",
-			"messagesCount", len(renderReq.Conversation),
-			"toolsCount", len(renderReq.Tools),
-			"documentsCount", len(renderReq.Documents))
-
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		scores, err := s.kvCacheIndexer.GetPodScores(ctx, renderReq, "", request.TargetModel, nil)
-		if err != nil {
-			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-				return map[string]float64{}, nil
-			}
-			return nil, fmt.Errorf("failed to get endpoint scores for chat/completions: %w", err)
-		}
-		return scores, nil
-	}
-
-	// For regular completions, use the prompt directly
-	if request.Body != nil && request.Body.Completions != nil {
-		prompt := request.Body.Completions.Prompt.Raw
-		traceLogger.Info("Using completion prompt directly", "promptLength", len(prompt))
-
-		//nolint:staticcheck // SA1019: legacy path retained for tokenizersPoolConfig configs.
-		scores, err := s.kvCacheIndexer.GetPodScores(ctx, nil, prompt, request.TargetModel, nil)
-		if err != nil {
-			if errors.Is(err, kvcache.ErrInternalTokenizationDisabled) {
-				return map[string]float64{}, nil
-			}
-			return nil, fmt.Errorf("failed to get endpoint scores for completions: %w", err)
-		}
-		return scores, nil
-	}
-
-	return nil, errors.New("no valid input found in request")
+	return true
 }
