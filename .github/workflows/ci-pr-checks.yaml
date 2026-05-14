@@ -8,17 +8,22 @@ on:
   pull_request:
     branches:
       - main
+  pull_request_target:
+    branches:
+      - main
+    types: [ opened, synchronize, reopened ]
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   check-changes:
+    if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     outputs:
       src: ${{ steps.filter.outputs.src }}
