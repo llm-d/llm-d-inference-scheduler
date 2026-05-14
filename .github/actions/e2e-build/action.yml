@@ -1,0 +1,66 @@
+name: Build e2e images
+description: Free disk space and build images with buildx GHA cache
+inputs:
+  commit-sha:
+    required: true
+    description: Git commit SHA for image labels
+runs:
+  using: "composite"
+  steps:
+    - name: Free disk space
+      uses: justinthelaw/maximize-github-runner-space@v0.9.0
+      with:
+        cleanup-profile: custom
+        remove-android: 'true'
+        remove-dotnet: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+        remove-cached-tools: 'true'
+        remove-swift: 'true'
+        remove-julia: 'true'
+        remove-rust: 'true'
+        remove-miniconda: 'true'
+        swapfile-size: 0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build builder image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Dockerfile.builder
+        tags: ghcr.io/llm-d/llm-d-builder:dev
+        load: true
+        cache-from: type=gha,scope=builder
+        cache-to: type=gha,scope=builder,mode=max
+
+    - name: Build EPP image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Dockerfile.epp
+        tags: ghcr.io/llm-d/llm-d-inference-scheduler:dev
+        load: true
+        build-args: |
+          TARGETOS=linux
+          TARGETARCH=amd64
+          COMMIT_SHA=${{ inputs.commit-sha }}
+          LDFLAGS=-s -w
+        cache-from: type=gha,scope=epp
+        cache-to: type=gha,scope=epp,mode=max
+
+    - name: Build sidecar image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Dockerfile.sidecar
+        tags: ghcr.io/llm-d/llm-d-routing-sidecar:dev
+        load: true
+        build-args: |
+          TARGETOS=linux
+          TARGETARCH=amd64
+          COMMIT_SHA=${{ inputs.commit-sha }}
+          LDFLAGS=-s -w
+        cache-from: type=gha,scope=sidecar
+        cache-to: type=gha,scope=sidecar,mode=max

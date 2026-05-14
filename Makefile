@@ -290,13 +290,17 @@ test-integration-hermetic: image-build-builder ## Run hermetic integration tests
 	$(BUILDER_RUN) 'CGO_ENABLED=1 KUBEBUILDER_ASSETS="$$(setup-envtest use $$ENVTEST_K8S_VERSION --bin-dir $$ENVTEST_ASSETS_DIR -p path)" go test -v -race -coverprofile=$(COVERAGE_DIR)/integration-hermetic.out -covermode=atomic ./test/integration/...'
 	$(BUILDER_RUN) 'go tool cover -func=$(COVERAGE_DIR)/integration-hermetic.out | tail -1'
 
-.PHONY: test-e2e-gaie
-test-e2e-gaie: image-build-builder image-build image-pull ## Run GAIE end-to-end tests against a new kind cluster
+.PHONY: test-e2e-gaie-run
+test-e2e-gaie-run: image-pull ## Run GAIE e2e tests (images must already exist)
 	@printf "\033[33;1m==== Running GAIE End to End Tests ====\033[0m\n"
 	$(CONTAINER_RUNTIME) run $(BUILDER_RUN_FLAGS) $(BUILDER_E2E_FLAGS) \
 		-e EPP_IMAGE=$(GAIE_E2E_IMAGE) \
 		-e USE_KIND=true \
 		$(BUILDER_IMAGE) ./hack/test-e2e.sh
+
+.PHONY: test-e2e-gaie
+test-e2e-gaie: image-build-builder image-build ## Build images and run GAIE e2e tests
+	$(MAKE) test-e2e-gaie-run
 
 .PHONY: test-e2e-scheduler-run
 test-e2e-scheduler-run: image-pull ## Run scheduler e2e tests (images must already exist)
