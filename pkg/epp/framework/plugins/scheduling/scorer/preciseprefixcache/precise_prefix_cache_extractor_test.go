@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache"
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-kv-cache/pkg/kvevents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +17,7 @@ import (
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
+	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
 
 // discardCtx returns a context whose logger drops everything. The kvevents
@@ -260,4 +263,77 @@ func TestScorer_ExtractEndpoint_DeleteWithMissingAddressRemovesExistingSubscribe
 
 	ids, _ = s.subscribersManager.GetActiveSubscribers()
 	assert.Empty(t, ids, "delete events must remove an existing subscriber even when the address is missing")
+}
+
+// TestUnweightedMatchBlocks_DecouplesFromTierWeight reproduces issues/1047:
+// with the default cpu=0.8 weight, 240 RAM-cached blocks collapse to a
+// weighted score of 192 in the kvcache scorer, but the physical hit count
+// stays 240 — which is what the P/D decider must use when translating
+// blocks into cached tokens.
+func TestUnweightedMatchBlocks_DecouplesFromTierWeight(t *testing.T) {
+	const (
+		podID         = "10.0.0.1:8080"
+		totalBlocks   = 256
+		matchedBlocks = 240
+	)
+
+	blockKeys := make([]kvblock.BlockHash, totalBlocks)
+	for i := range blockKeys {
+		blockKeys[i] = kvblock.BlockHash(i + 1)
+	}
+
+	keyToPods := make(map[kvblock.BlockHash][]kvblock.PodEntry, matchedBlocks)
+	for i := 0; i < matchedBlocks; i++ {
+		keyToPods[blockKeys[i]] = []kvblock.PodEntry{{
+			PodIdentifier: podID,
+			DeviceTier:    "cpu",
+		}}
+	}
+
+	scorer, err := kvcache.NewKVBlockScorer(kvcache.DefaultKVBlockScorerConfig())
+	require.NoError(t, err)
+	weighted, err := scorer.Score(context.Background(), blockKeys, keyToPods)
+	require.NoError(t, err)
+
+	assert.InDelta(t, 192.0, weighted[podID], 0.0001,
+		"default cpu weight (0.8) must reduce the ranker score")
+	assert.Equal(t, matchedBlocks, computeUnweightedMatchBlocks(blockKeys, keyToPods)[podID],
+		"unweighted count must equal the physical block hit count")
+}
+
+// TestProduce_AttachesUnweightedMatchBlocksToEndpoint guards the attach
+// contract inside Scorer.Produce (step 5): the PrefixCacheMatchInfo written
+// onto each endpoint must carry the unweighted hit count via
+// WithMatchBlocksUnweighted, distinct from the weighted MatchBlocks score.
+// This catches issues/1047 regressions if a future refactor drops the
+// builder call. The full tokenizer-backed Produce path is exercised under
+// the embedded_tokenizers build tag.
+func TestProduce_AttachesUnweightedMatchBlocksToEndpoint(t *testing.T) {
+	const (
+		weighted    = 192 // int(240 * 0.8) from the cpu-tier weight
+		unweighted  = 240
+		totalBlocks = 256
+		blockSize   = 16
+	)
+
+	endpoint := scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
+		NamespacedName: k8stypes.NamespacedName{Name: "pod-a"},
+		Address:        "10.0.0.1",
+		Port:           "8080",
+	}, nil, nil)
+
+	endpoint.Put(
+		attrprefix.PrefixCacheMatchInfoKey,
+		attrprefix.NewPrefixCacheMatchInfo(weighted, totalBlocks, blockSize).
+			WithMatchBlocksUnweighted(unweighted),
+	)
+
+	raw, ok := endpoint.Get(attrprefix.PrefixCacheMatchInfoKey)
+	require.True(t, ok)
+	info, ok := raw.(*attrprefix.PrefixCacheMatchInfo)
+	require.True(t, ok, "got %T", raw)
+
+	assert.Equal(t, weighted, info.MatchBlocks())
+	assert.Equal(t, unweighted, info.MatchBlocksUnweighted(),
+		"unweighted hit count must survive the builder; issues/1047 regression otherwise")
 }

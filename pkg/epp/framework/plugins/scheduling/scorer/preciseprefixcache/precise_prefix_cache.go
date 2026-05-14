@@ -381,7 +381,10 @@ func (s *Scorer) Produce(ctx context.Context,
 		return fmt.Errorf("failed to score block keys: %w", err)
 	}
 
-	// 5. Store PrefixCacheMatchInfo on each endpoint
+	// 5. Store PrefixCacheMatchInfo on each endpoint.
+	// matchLen is the device-weighted score for rankers; unweighted is the
+	// physical hit count needed by the P/D decider (issues/1047).
+	unweighted := computeUnweightedMatchBlocks(blockKeys, keyToPods)
 	blockSize := s.getBlockSizeTokens()
 	for _, ep := range endpoints {
 		md := ep.GetMetadata()
@@ -390,7 +393,11 @@ func (s *Scorer) Produce(ctx context.Context,
 		}
 		addr := fmt.Sprintf("%s:%s", md.Address, md.Port)
 		matchLen := int(scores[addr])
-		ep.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(matchLen, len(blockKeys), blockSize))
+		ep.Put(
+			attrprefix.PrefixCacheMatchInfoKey,
+			attrprefix.NewPrefixCacheMatchInfo(matchLen, len(blockKeys), blockSize).
+				WithMatchBlocksUnweighted(unweighted[addr]),
+		)
 	}
 
 	// 6. Save to PluginState for Score() and PreRequest()
@@ -452,11 +459,19 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 		span.SetAttributes(attribute.String("gen_ai.request.id", request.RequestID))
 	}
 
-	// Try to reuse pre-computed scores from Produce
-	var scores map[string]float64
+	// Try to reuse pre-computed scores from Produce. When Produce ran, it
+	// has already attached an authoritative PrefixCacheMatchInfo (carrying
+	// both the weighted ranking score and the unweighted physical block
+	// count) to each endpoint; we must not overwrite it here with the
+	// fallback (1,1,1) placeholder used by the legacy path.
+	var (
+		scores           map[string]float64
+		producePopulated bool
+	)
 	if pluginStateData, err := plugin.ReadPluginStateKey[*precisePluginState](
 		s.pluginState, request.RequestID, stateKey); err == nil {
 		scores = pluginStateData.scores
+		producePopulated = true
 		debugLogger.Info("Reusing pre-computed scores from Produce")
 	} else {
 		// Fallback: compute scores directly (backward compatible path).
@@ -486,15 +501,22 @@ func (s *Scorer) Score(ctx context.Context, cycleState *scheduling.CycleState, r
 
 	// Write per-endpoint prefix-cache match info as endpoint attributes so downstream
 	// scorers (e.g. nohitlru) can determine whether any cache hits were found.
-	for _, endpoint := range endpoints {
-		key, ok := endpointToKey(endpoint)
-		matchBlocks := 0
-		if ok {
-			if rawScore, exists := scores[key]; exists && rawScore > 0 {
-				matchBlocks = 1
+	//
+	// When Produce already populated authoritative match info (with real block
+	// counts and block size, including the unweighted count consumed by the
+	// P/D decider), do not overwrite it with the legacy (1,1,1) placeholder
+	// that the fallback path uses. See issues/1047.
+	if !producePopulated {
+		for _, endpoint := range endpoints {
+			key, ok := endpointToKey(endpoint)
+			matchBlocks := 0
+			if ok {
+				if rawScore, exists := scores[key]; exists && rawScore > 0 {
+					matchBlocks = 1
+				}
 			}
+			endpoint.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(matchBlocks, 1, 1))
 		}
-		endpoint.Put(attrprefix.PrefixCacheMatchInfoKey, attrprefix.NewPrefixCacheMatchInfo(matchBlocks, 1, 1))
 	}
 
 	normalizedScores := indexedScoresToNormalizedScoredPods(endpoints, endpointToKey, scores)
@@ -741,6 +763,48 @@ func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
 		}
 	}
 	return podSet
+}
+
+// computeUnweightedMatchBlocks returns the longest consecutive prefix match
+// count per pod, ignoring device-tier weights. Mirrors the intersection
+// loop in kvcache.LongestPrefixScorer but adds 1 per block instead of a
+// weight. Pods absent from the returned map have 0 hits.
+func computeUnweightedMatchBlocks(
+	blockKeys []kvblock.BlockHash,
+	keyToPods map[kvblock.BlockHash][]kvblock.PodEntry,
+) map[string]int {
+	counts := make(map[string]int)
+	if len(blockKeys) == 0 {
+		return counts
+	}
+
+	// Seed active set from block[0].
+	active := make(map[string]struct{})
+	for _, entry := range keyToPods[blockKeys[0]] {
+		if _, seen := active[entry.PodIdentifier]; !seen {
+			active[entry.PodIdentifier] = struct{}{}
+			counts[entry.PodIdentifier] = 1
+		}
+	}
+
+	present := make(map[string]struct{})
+	for i := 1; i < len(blockKeys); i++ {
+		if len(active) == 0 {
+			break
+		}
+		clear(present)
+		for _, entry := range keyToPods[blockKeys[i]] {
+			present[entry.PodIdentifier] = struct{}{}
+		}
+		for pod := range active {
+			if _, ok := present[pod]; ok {
+				counts[pod]++
+			} else {
+				delete(active, pod)
+			}
+		}
+	}
+	return counts
 }
 
 // getBlockSizeTokens returns the block size in tokens from the token processor config.
