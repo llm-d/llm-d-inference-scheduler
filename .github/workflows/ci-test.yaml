@@ -171,14 +171,46 @@ jobs:
           retention-days: 400
           overwrite: true
 
-  e2e-gaie:
+  e2e-build:
     needs: check-changes
+    if: ${{ needs.check-changes.outputs.src == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Build e2e images
+        uses: ./.github/actions/e2e-build
+        with:
+          commit-sha: ${{ github.sha }}
+
+  e2e-gaie:
+    needs: [check-changes, e2e-build]
     if: ${{ needs.check-changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+
+      # Custom profile with directory-only removals (run in parallel, no apt).
+      # The cleanup-profile: max is much more aggressive, it cleanups around 41GB,
+      # but runs 3.5 mins
+      - name: Free disk space
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-cached-tools: 'true'
+          remove-swift: 'true'
+          remove-julia: 'true'
+          remove-rust: 'true'
+          remove-miniconda: 'true'
+          swapfile-size: 0
 
       - name: Create and resolve Go cache volumes
         id: go-cache
@@ -208,7 +240,7 @@ jobs:
         run: make test-e2e-gaie-run
 
   e2e-scheduler:
-    needs: check-changes
+    needs: [check-changes, e2e-build]
     if: ${{ needs.check-changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -226,6 +258,24 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+
+      # Custom profile with directory-only removals (run in parallel, no apt).
+      # The cleanup-profile: max is much more aggressive, it cleanups around 41GB,
+      # but runs 3.5 mins
+      - name: Free disk space
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-cached-tools: 'true'
+          remove-swift: 'true'
+          remove-julia: 'true'
+          remove-rust: 'true'
+          remove-miniconda: 'true'
+          swapfile-size: 0
 
       - name: Create and resolve Go cache volumes
         id: go-cache
