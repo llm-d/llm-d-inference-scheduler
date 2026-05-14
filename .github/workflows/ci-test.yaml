@@ -229,8 +229,10 @@ jobs:
       fail-fast: false
       matrix:
         suite:
-          - name: routing
-            label-filter: "!Disruptive"
+          - name: pd
+            label-filter: "!Disruptive && !Extended"
+          - name: extended
+            label-filter: "Extended"
           - name: disruption
             label-filter: "Disruptive"
     name: e2e-scheduler (${{ matrix.suite.name }})
