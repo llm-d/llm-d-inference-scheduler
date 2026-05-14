@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,6 +165,10 @@ type recvResult struct {
 	req *extProcPb.ProcessingRequest
 	err error
 }
+
+// maxRequestBodyPreallocBytes bounds Content-Length-driven body buffer
+// preallocation; sized for long-context (multi-MiB) JSON bodies.
+const maxRequestBodyPreallocBytes = 16 << 20 // 16 MiB
 
 func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer) error {
 	ctx := srv.Context()
@@ -311,6 +316,11 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			ctx = log.IntoContext(ctx, logger)
 
 			err = s.HandleRequestHeaders(ctx, reqCtx, v)
+			if err == nil && !v.RequestHeaders.EndOfStream {
+				if capacity := requestBodyCapacity(v); capacity > 0 {
+					body = make([]byte, 0, capacity)
+				}
+			}
 		case *extProcPb.ProcessingRequest_RequestBody:
 			loggerTrace.Info("Incoming body chunk", "EoS", v.RequestBody.EndOfStream)
 			// In the stream case, we can receive multiple request bodies.
@@ -442,6 +452,24 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			return nil
 		}
 	}
+}
+
+// requestBodyCapacity returns the body buffer preallocation size from
+// Content-Length, clamped to maxRequestBodyPreallocBytes. Returns 0 for
+// missing, malformed, or non-positive values.
+func requestBodyCapacity(req *extProcPb.ProcessingRequest_RequestHeaders) int {
+	contentLength := envoy.ExtractHeaderValue(req, "content-length")
+	if contentLength == "" {
+		return 0
+	}
+	bodyLength, err := strconv.Atoi(contentLength)
+	if err != nil || bodyLength <= 0 {
+		return 0
+	}
+	if bodyLength > maxRequestBodyPreallocBytes {
+		return maxRequestBodyPreallocBytes
+	}
+	return bodyLength
 }
 
 // finishResponse ensures all post-response logic, such as metric recording

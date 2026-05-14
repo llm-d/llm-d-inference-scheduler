@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -209,5 +210,37 @@ func (m *mockDirectorRequest) GetRandomEndpoint() *datalayer.EndpointMetadata {
 	return &datalayer.EndpointMetadata{
 		Address: "1.2.3.4",
 		Port:    "80",
+	}
+}
+
+func TestRequestBodyCapacity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{name: "valid", value: "1024", want: 1024},
+		{name: "at cap", value: strconv.Itoa(maxRequestBodyPreallocBytes), want: maxRequestBodyPreallocBytes},
+		{name: "above cap clamped", value: strconv.Itoa(maxRequestBodyPreallocBytes + 1), want: maxRequestBodyPreallocBytes},
+		{name: "missing", value: "", want: 0},
+		{name: "malformed", value: "not-a-number", want: 0},
+		{name: "non-positive", value: "0", want: 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var headers []*configPb.HeaderValue
+			if tc.value != "" {
+				headers = []*configPb.HeaderValue{{Key: "content-length", Value: tc.value}}
+			}
+			req := &extProcPb.ProcessingRequest_RequestHeaders{
+				RequestHeaders: &extProcPb.HttpHeaders{
+					Headers: &configPb.HeaderMap{Headers: headers},
+				},
+			}
+			assert.Equal(t, tc.want, requestBodyCapacity(req))
+		})
 	}
 }
