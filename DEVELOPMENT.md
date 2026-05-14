@@ -909,6 +909,11 @@ For more details, see the Gateway API Inference Extension
 
 ## Submitting Changes
 
+Read the [llm-d organization contributing guide](https://github.com/llm-d/llm-d/blob/main/CONTRIBUTING.md)
+first — it covers project-wide guidelines, code of conduct, and community resources that apply across
+all llm-d repositories. The sections below describe router-repo-specific expectations on top of that
+baseline.
+
 ### Scope
 
 Scoped changes and localized bug fixes can be submitted directly as a PR. 
