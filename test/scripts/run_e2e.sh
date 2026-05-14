@@ -20,4 +20,9 @@ trap cleanup INT TERM
 echo "Running end to end tests"
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-go test -v -timeout 45m ${DIR}/../e2e/ -ginkgo.v -ginkgo.fail-fast
+if [ -n "${E2E_FOCUS:-}" ]; then
+  echo "Filtering tests: ${E2E_FOCUS}"
+  go test -v -timeout 45m ${DIR}/../e2e/ -ginkgo.v -ginkgo.fail-fast "-ginkgo.focus=${E2E_FOCUS}"
+else
+  go test -v -timeout 45m ${DIR}/../e2e/ -ginkgo.v -ginkgo.fail-fast
+fi

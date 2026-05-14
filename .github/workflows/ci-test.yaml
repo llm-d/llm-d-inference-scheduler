@@ -224,7 +224,18 @@ jobs:
     needs: check-changes
     if: ${{ needs.check-changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: pd
+            focus: "simple non-PD configuration (should|with disagg)|PD configuration"
+          - name: epd-kv-scale
+            focus: "E/PD|E/P/D|EPD|KV|Scaling|Data Parallel"
+          - name: disruption
+            focus: "Disruption"
+    name: e2e-scheduler (${{ matrix.suite.name }})
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
@@ -265,6 +276,8 @@ jobs:
           restore-keys: |
             go-cache-
 
-      - name: Run make test-e2e-scheduler
+      - name: Run e2e-scheduler (${{ matrix.suite.name }})
         shell: bash
         run: make test-e2e-scheduler
+        env:
+          E2E_FOCUS: ${{ matrix.suite.focus }}
