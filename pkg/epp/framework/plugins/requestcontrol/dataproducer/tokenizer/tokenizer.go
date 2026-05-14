@@ -205,30 +205,30 @@ func (p *Plugin) tokenize(ctx context.Context, request *scheduling.InferenceRequ
 	var tokenIDs []uint32
 	var mmFeatures *tokenization.MultiModalFeatures
 	var err error
-	renderer, isVLLMHTTP := p.tokenizer.(*vllmHTTPRenderer)
-	var payload fwkrh.PayloadMap
-	if isVLLMHTTP && (request.Body.Completions != nil || request.Body.ChatCompletions != nil) {
-		var ok bool
-		payload, ok = request.Body.Payload.(fwkrh.PayloadMap)
-		if !ok {
-			return nil, errors.New("vLLM HTTP tokenizer requires request PayloadMap")
-		}
-	}
 
 	switch {
 	case request.Body.Completions != nil:
 		traceLogger.Info("Calling Render for completions", "prompt", request.Body.Completions.Prompt)
-		if isVLLMHTTP {
+		if renderer, ok := p.tokenizer.(*vllmHTTPRenderer); ok {
+			payload, ok := request.Body.Payload.(fwkrh.PayloadMap)
+			if !ok {
+				return nil, errors.New("vLLM HTTP tokenizer requires request PayloadMap")
+			}
 			tokenIDs, _, err = renderer.renderCompletionsPayload(ctx, payload)
 		} else {
 			tokenIDs, _, err = p.tokenizer.Render(ctx, request.Body.Completions.Prompt.Raw)
 		}
 	case request.Body.ChatCompletions != nil:
 		traceLogger.Info("Calling RenderChat for chat completions", "messageCount", len(request.Body.ChatCompletions.Messages))
-		if isVLLMHTTP {
-			tokenIDs, mmFeatures, err = renderer.renderChatPayload(ctx, payload, request.Body.ChatCompletions)
+		renderReq := ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions)
+		if renderer, ok := p.tokenizer.(*vllmHTTPRenderer); ok {
+			payload, ok := request.Body.Payload.(fwkrh.PayloadMap)
+			if !ok {
+				return nil, errors.New("vLLM HTTP tokenizer requires request PayloadMap")
+			}
+			tokenIDs, mmFeatures, err = renderer.renderChatPayload(ctx, payload, renderReq)
 		} else {
-			tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(ctx, ChatCompletionsToRenderChatRequest(request.Body.ChatCompletions))
+			tokenIDs, mmFeatures, err = p.tokenizer.RenderChat(ctx, renderReq)
 		}
 	default:
 		return nil, errors.New("unsupported request body type, skipping tokenization")

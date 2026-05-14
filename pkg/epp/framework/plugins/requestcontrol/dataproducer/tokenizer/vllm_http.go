@@ -123,7 +123,21 @@ func parseHTTPDuration(s string, def time.Duration) (time.Duration, error) {
 // Render calls /v1/completions/render. Char offsets are not provided by vLLM's
 // render endpoint and the upstream call site discards them, so we return nil.
 func (r *vllmHTTPRenderer) Render(ctx context.Context, prompt string) ([]uint32, []tokenizerTypes.Offset, error) {
-	return r.renderCompletionsPayload(ctx, fwkrh.PayloadMap{"prompt": prompt})
+	body := struct {
+		Model  string `json:"model"`
+		Prompt string `json:"prompt"`
+	}{
+		Model:  r.modelName,
+		Prompt: prompt,
+	}
+	var resp []renderResponse
+	if err := r.postJSON(ctx, completionsRenderPath, body, r.timeout, &resp); err != nil {
+		return nil, nil, err
+	}
+	if len(resp) == 0 {
+		return nil, nil, errors.New("vLLM render returned empty response")
+	}
+	return resp[0].TokenIDs, nil, nil
 }
 
 func (r *vllmHTTPRenderer) renderCompletionsPayload(ctx context.Context, payload fwkrh.PayloadMap) ([]uint32, []tokenizerTypes.Offset, error) {
@@ -149,11 +163,11 @@ func (r *vllmHTTPRenderer) RenderChat(ctx context.Context, req *tokenizerTypes.R
 	return r.postChatRender(ctx, body, r.chatTimeout(req))
 }
 
-func (r *vllmHTTPRenderer) renderChatPayload(ctx context.Context, payload fwkrh.PayloadMap, chat *fwkrh.ChatCompletionsRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
+func (r *vllmHTTPRenderer) renderChatPayload(ctx context.Context, payload fwkrh.PayloadMap, req *tokenizerTypes.RenderChatRequest) ([]uint32, *tokenization.MultiModalFeatures, error) {
 	body := maps.Clone(payload)
 	body["model"] = r.modelName
 
-	return r.postChatRender(ctx, body, r.chatCompletionsTimeout(chat))
+	return r.postChatRender(ctx, body, r.chatTimeout(req))
 }
 
 func (r *vllmHTTPRenderer) postChatRender(ctx context.Context, body any, timeout time.Duration) ([]uint32, *tokenization.MultiModalFeatures, error) {
@@ -168,20 +182,6 @@ func (r *vllmHTTPRenderer) chatTimeout(req *tokenizerTypes.RenderChatRequest) ti
 	for _, msg := range req.Conversation {
 		if len(msg.Content.Structured) > 0 {
 			return r.mmTimeout
-		}
-	}
-	return r.timeout
-}
-
-func (r *vllmHTTPRenderer) chatCompletionsTimeout(chat *fwkrh.ChatCompletionsRequest) time.Duration {
-	if chat == nil {
-		return r.timeout
-	}
-	for _, msg := range chat.Messages {
-		for _, block := range msg.Content.Structured {
-			if block.Type == "image_url" || block.Type == "video_url" || block.Type == "input_audio" {
-				return r.mmTimeout
-			}
 		}
 	}
 	return r.timeout

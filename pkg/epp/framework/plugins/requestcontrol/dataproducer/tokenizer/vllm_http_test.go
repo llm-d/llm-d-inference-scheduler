@@ -88,8 +88,8 @@ func TestProduce_CompletionsVLLMHTTPUsesRawPayload(t *testing.T) {
 				Prompt: fwkrh.Prompt{Raw: "hello"},
 			},
 			Payload: fwkrh.PayloadMap{
-				"prompt":   "hello",
-				"priority": "high",
+				"prompt":      "hello",
+				"dummy_field": "kept",
 			},
 		},
 	}
@@ -101,7 +101,7 @@ func TestProduce_CompletionsVLLMHTTPUsesRawPayload(t *testing.T) {
 
 	var sent map[string]any
 	require.NoError(t, json.Unmarshal(cap.completions, &sent))
-	assert.Equal(t, "high", sent["priority"])
+	assert.Equal(t, "kept", sent["dummy_field"])
 	assert.Equal(t, testHTTPModel, sent["model"])
 }
 
@@ -143,7 +143,7 @@ func TestVLLMHTTPRenderer_RenderChat_Multimodal(t *testing.T) {
 		}},
 		AddGenerationPrompt: true,
 	}
-	tokenIDs, mm, err := r.renderChatPayload(context.Background(), payload, chat)
+	tokenIDs, mm, err := r.renderChatPayload(context.Background(), payload, ChatCompletionsToRenderChatRequest(chat))
 	require.NoError(t, err)
 	assert.Equal(t, []uint32{1, 2, 3, 4, 5}, tokenIDs)
 	require.NotNil(t, mm)
