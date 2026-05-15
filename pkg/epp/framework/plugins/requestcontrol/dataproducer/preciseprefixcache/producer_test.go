@@ -281,9 +281,12 @@ func TestProduce_NoOpPaths(t *testing.T) {
 	require.NoError(t, p.Produce(ctx, &scheduling.InferenceRequest{RequestID: "x", Body: &fwkrh.InferenceRequestBody{}}, testEndpoints))
 }
 
+// Use string literals here rather than imported constants: a rename of the
+// upstream key value should fail this test, not silently track.
+
 func TestProduces_DeclaresPrefixCacheMatchInfo(t *testing.T) {
 	p := &Producer{typedName: plugin.TypedName{Type: PluginType, Name: "x"}}
-	_, ok := p.Produces()[attrprefix.PrefixCacheMatchInfoKey]
+	_, ok := p.Produces()["PrefixCacheMatchInfoKey"]
 	require.True(t, ok)
 }
 
