@@ -4,7 +4,8 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	compbasemetrics "k8s.io/component-base/metrics"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/metrics"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/metrics"
 )
 
 const (
@@ -70,11 +71,38 @@ var (
 		},
 		[]string{"model_name", "decider", "reason"},
 	)
+
+	// Data-layer counters: label values must be plugin TypedName.Type only —
+	// never per-instance or runtime-variable strings (cardinality).
+
+	DataLayerPollErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: SchedulerSubsystem,
+			Name:      "datalayer_poll_errors_total",
+			Help:      metrics.HelpMsgWithStability("Data-source poll errors per source type.", compbasemetrics.ALPHA),
+		},
+		[]string{"source_type"},
+	)
+
+	DataLayerExtractErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: SchedulerSubsystem,
+			Name:      "datalayer_extract_errors_total",
+			Help:      metrics.HelpMsgWithStability("Extract errors per source/extractor type.", compbasemetrics.ALPHA),
+		},
+		[]string{"source_type", "extractor_type"},
+	)
 )
 
 // GetCollectors returns all custom collectors for the llm-d-inference-scheduler.
 func GetCollectors() []prometheus.Collector {
-	return []prometheus.Collector{SchedulerPDDecisionCount, SchedulerDisaggDecisionCount, SchedulerDeciderEvaluationCount}
+	return []prometheus.Collector{
+		SchedulerPDDecisionCount,
+		SchedulerDisaggDecisionCount,
+		SchedulerDeciderEvaluationCount,
+		DataLayerPollErrorsTotal,
+		DataLayerExtractErrorsTotal,
+	}
 }
 
 // RecordPDDecision increments the counter for a specific P/D routing decision.

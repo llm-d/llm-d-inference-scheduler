@@ -24,10 +24,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry"
 )
 
 func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType APIType) {
@@ -186,6 +187,12 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	if !ok {
 		s.logger.Info("warning: missing 'kv_transfer_params' field in prefiller response")
 	}
+	pCachedTokens, hasPCachedTokens := extractCachedTokens(prefillerResponse)
+	if !hasPCachedTokens {
+		// vLLM returns prompt_tokens_details as null when cached_tokens is 0,
+		// so treat a missing prefiller cached_tokens value as zero.
+		pCachedTokens = 0
+	}
 
 	s.logger.V(5).Info("received prefiller response", requestFieldKVTransferParams, pKVTransferParams)
 
@@ -243,13 +250,19 @@ func (s *Server) runNIXLProtocolV2(w http.ResponseWriter, r *http.Request, prefi
 	// 2. Forward to local decoder.
 
 	s.logger.V(5).Info("sending request to decoder", "body", string(dbody))
-	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(w, dreq)
+	decodeWriter, finalizeDecodeWriter := newCachedTokensResponseWriterWithFinalize(w, pCachedTokens)
+	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeWriter, dreq)
 	decodeSpan.SetAttributes(attribute.Bool("llm_d.pd_proxy.decode.data_parallel", dataParallelUsed))
 
 	if !dataParallelUsed {
 		s.logger.V(4).Info("sending request to decoder", "to", s.config.DecoderURL.Host)
 		decodeSpan.SetAttributes(attribute.String("llm_d.pd_proxy.decode.target", s.config.DecoderURL.Host))
-		s.decoderProxy.ServeHTTP(w, dreq)
+		s.decoderProxy.ServeHTTP(decodeWriter, dreq)
+	}
+	if err := finalizeDecodeWriter(); err != nil {
+		s.logger.Error(err, "failed to flush cached token response writer")
+		decodeSpan.SetStatus(codes.Error, "failed to flush cached token response writer")
+		return
 	}
 
 	decodeDuration := time.Since(decodeStart)

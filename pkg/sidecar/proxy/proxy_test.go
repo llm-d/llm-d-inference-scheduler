@@ -26,13 +26,13 @@ import (
 	"net/url"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2" // nolint:revive
+	. "github.com/onsi/gomega"    // nolint:revive
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 	"github.com/llm-d/llm-d-inference-scheduler/test/sidecar/mock"
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
 )
 
 func newTestContext() context.Context {
@@ -196,7 +196,7 @@ var _ = Describe("Reverse Proxy", func() {
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
-				req.Header.Add(common.PrefillEndpointHeader, prefillBackend.URL)
+				req.Header.Add(routing.PrefillEndpointHeader, prefillBackend.URL)
 
 				_, err = http.DefaultClient.Do(req)
 				Expect(err).ToNot(HaveOccurred())
@@ -269,7 +269,7 @@ var _ = Describe("Reverse Proxy", func() {
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+ChatCompletionsPath, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
-				req.Header.Add(common.PrefillEndpointHeader, prefillBackend.URL[len("http://"):])
+				req.Header.Add(routing.PrefillEndpointHeader, prefillBackend.URL[len("http://"):])
 
 				_, err = http.DefaultClient.Do(req)
 				Expect(err).ToNot(HaveOccurred())

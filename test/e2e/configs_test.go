@@ -1,7 +1,7 @@
 package e2e
 
 // Simple EPP configuration for running without P/D
-const simpleConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const simpleConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer
@@ -22,10 +22,8 @@ schedulingProfiles:
 
 // EPP configuration for running with P/D
 // Uses deprecated pd-profile-handler
-const deprecatedPdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const deprecatedPdConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
 - type: prefill-header-handler
 - type: prefix-cache-scorer
@@ -59,10 +57,9 @@ schedulingProfiles:
 
 // epdEncodeDecodeConfig configures E/PD (encode + P/D) using disagg-profile-handler.
 // The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
-const epdEncodeDecodeConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const epdEncodeDecodeConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
-- type: disagg-headers-handler
 - type: encode-filter
 - type: decode-filter
 - type: max-score-picker
@@ -82,12 +79,9 @@ schedulingProfiles:
 
 // epdConfig configures E/P/D (encode + prefill + decode) using disagg-profile-handler.
 // The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
-const epdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const epdConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
-- type: prefill-header-handler
 - type: encode-filter
 - type: prefill-filter
 - type: decode-filter
@@ -125,12 +119,9 @@ schedulingProfiles:
 `
 
 // EPP configuration for running with P/D using the unified disagg-profile-handler
-const pdConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const pdConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
-- type: disagg-headers-handler
 - type: prefix-cache-scorer
   parameters:
     blockSizeTokens: 16
@@ -162,7 +153,7 @@ schedulingProfiles:
 `
 
 // EPP configuration for running decode-only using disagg-profile-handler (no prefill, no encode)
-const decodeOnlyConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const decodeOnlyConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: prefix-cache-scorer
@@ -184,11 +175,15 @@ schedulingProfiles:
     weight: 2
 `
 
-// EPP config for running with precise prefix scoring (i.e. KV events)
-// Uses UDS tokenizer sidecar for tokenization
-const kvConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+// EPP config for running with precise prefix scoring (i.e. KV events).
+const kvConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
+- type: token-producer
+  parameters:
+    modelName: Qwen/Qwen2.5-1.5B-Instruct
+    vllm:
+      http: http://localhost:8000
 - type: precise-prefix-cache-scorer
   parameters:
     tokenProcessorConfig:
@@ -197,12 +192,6 @@ plugins:
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
-      prefixStoreConfig:
-        blockSize: 16
-      tokenizersPoolConfig:
-        modelName: Qwen/Qwen2.5-1.5B-Instruct
-        uds:
-          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
       kvBlockIndexConfig:
         enableMetrics: false                  # enable kv-block index metrics (prometheus)
         metricsLoggingInterval: 6000000000    # log kv-block metrics as well (1m in nanoseconds)
@@ -218,17 +207,15 @@ schedulingProfiles:
     weight: 10
 `
 
-// EPP config for running with precise prefix scoring and external tokenizer PrepareData plugin.
-// The tokenizer plugin runs in the PrepareData phase (before scoring) and attaches
-// pre-computed token IDs to the request, so the scorer skips internal tokenization.
-const kvExternalTokenizerConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+// Alias of kvConfig retained for tests that reference the external-tokenizer name.
+const kvExternalTokenizerConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
-featureGates:
-- prepareDataPlugins
 plugins:
-- type: tokenizer
+- type: token-producer
   parameters:
     modelName: Qwen/Qwen2.5-1.5B-Instruct
+    vllm:
+      http: http://localhost:8000
 - type: precise-prefix-cache-scorer
   parameters:
     tokenProcessorConfig:
@@ -237,12 +224,6 @@ plugins:
     kvEventsConfig:
       zmqEndpoint: tcp://0.0.0.0:5557
     indexerConfig:
-      prefixStoreConfig:
-        blockSize: 16
-      tokenizersPoolConfig:
-        modelName: Qwen/Qwen2.5-1.5B-Instruct
-        uds:
-          socketFile: "/tmp/tokenizer/tokenizer-uds.socket"
       kvBlockIndexConfig:
         enableMetrics: false
 - type: decode-filter
@@ -258,7 +239,7 @@ schedulingProfiles:
 `
 
 // EPP configuration for running scale model server test
-const scaleConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const scaleConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: max-score-picker
@@ -270,7 +251,7 @@ schedulingProfiles:
 `
 
 // EPP configuration for running with vLLM Data Parallel support
-const dataParallelConfig = `apiVersion: inference.networking.x-k8s.io/v1alpha1
+const dataParallelConfig = `apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - type: decode-filter

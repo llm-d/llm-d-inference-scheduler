@@ -27,7 +27,7 @@ SOURCE_REPO_NAME="gateway-api-inference-extension"
 SOURCE_UPSTREAM_URL="git@github.com:${SOURCE_ORG}/${SOURCE_REPO_NAME}.git"
 
 DEST_ORG="llm-d"
-DEST_REPO_NAME="llm-d-inference-scheduler"
+DEST_REPO_NAME="llm-d-router"
 DEST_UPSTREAM_URL="git@github.com:${DEST_ORG}/${DEST_REPO_NAME}.git"
 
 UPSTREAM_REMOTE="upstream"
@@ -124,7 +124,18 @@ echo
 # Validate all pairs before touching anything
 for i in "${!SRC_PATHS[@]}"; do
   [[ -e "${SOURCE_DIR}/${SRC_PATHS[$i]}" ]] || { echo "error: '${SRC_PATHS[$i]}' not found in source repo"; exit 1; }
-  [[ -z "${SINCE_REF}" && -e "${DEST_DIR}/${DEST_PATHS[$i]}" ]] && { echo "error: '${DEST_PATHS[$i]}' already exists in destination repo"; exit 1; }
+  if [[ -z "${SINCE_REF}" ]]; then
+    while IFS= read -r -d '' src_dir; do
+      rel="${src_dir#"${SOURCE_DIR}/${SRC_PATHS[$i]}"}"
+      dest_dir="${DEST_DIR}/${DEST_PATHS[$i]}${rel}"
+      if [[ -d "${dest_dir}" ]] && \
+           find "${src_dir}" -maxdepth 1 -name "*.go" -print -quit 2>/dev/null | grep -q . && \
+           find "${dest_dir}" -maxdepth 1 -name "*.go" -print -quit 2>/dev/null | grep -q .; then
+        echo "error: Go package conflict at '${DEST_PATHS[$i]}${rel}': both source and destination contain Go files"
+        exit 1
+      fi
+    done < <(find "${SOURCE_DIR}/${SRC_PATHS[$i]}" -type d -print0)
+  fi
 done
 
 if git -C "${DEST_DIR}" rev-parse --verify "${BRANCH_NAME}" &>/dev/null; then

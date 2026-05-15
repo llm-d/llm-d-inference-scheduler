@@ -1,5 +1,39 @@
 ##@ Tool Checks
 
+HELM_VERSION ?= v3.17.1
+KUBECTL_VALIDATE_VERSION ?= v0.0.4
+YQ_VERSION ?= v4.45.1
+
+$(LOCALBIN):
+	[ -d $@ ] || mkdir -p $@
+
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(notdir $(1))-$(3) $(1)
+endef
+
+.PHONY: helm-install
+helm-install: $(HELM) ## Download helm locally if necessary.
+$(HELM): | $(LOCALBIN)
+	$(call go-install-tool,$(HELM),helm.sh/helm/v3/cmd/helm,$(HELM_VERSION))
+
+.PHONY: kubectl-validate
+kubectl-validate: $(KUBECTL_VALIDATE) ## Download kubectl-validate locally if necessary.
+$(KUBECTL_VALIDATE): | $(LOCALBIN)
+	$(call go-install-tool,$(KUBECTL_VALIDATE),sigs.k8s.io/kubectl-validate,$(KUBECTL_VALIDATE_VERSION))
+
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): | $(LOCALBIN)
+	$(call go-install-tool,$(YQ),github.com/mikefarah/yq/v4,$(YQ_VERSION))
+
 .PHONY: check-container-tool
 check-container-tool:
 	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \

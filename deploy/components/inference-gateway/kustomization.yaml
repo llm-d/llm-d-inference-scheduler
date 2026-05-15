@@ -15,6 +15,6 @@ resources:
 - rbac.yaml
 - inference-pools.yaml
 - services.yaml
-- deployments.yaml
+- deployment.yaml
 - gateways.yaml
 - httproutes.yaml

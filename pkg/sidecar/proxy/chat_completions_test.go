@@ -23,8 +23,9 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"k8s.io/utils/set"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/routing"
 )
 
 // testPrefillHeaderRouting is a shared table-driven helper that exercises
@@ -50,27 +51,27 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 		},
 		{
 			name: "passthrough with no header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{}}},
 
 			expectedPassthrough: true,
 		},
 		{
 			name: "default prefill to one header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a"}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{"a"}}},
 
 			expectedCode:             200,
 			expectedPrefillHostPorts: []string{"a"},
 		},
 		{
 			name: "default prefill to first header value",
-			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,b"}}},
+			r:    &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{"a,b"}}},
 
 			expectedCode:             200,
 			expectedPrefillHostPorts: []string{"a"},
 		},
 		{
 			name:     "sample from comma delimited header",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{"a,b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -78,7 +79,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 		},
 		{
 			name:     "sample from comma delimited header with whitespace",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{" a, b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{" a, b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -86,7 +87,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 		},
 		{
 			name:     "sample from duplicate values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a,a"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{"a,a"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -94,7 +95,7 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 		},
 		{
 			name:     "sample from multiple header values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"a", "b"}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{"a", "b"}}},
 			sampling: true,
 
 			expectedCode:             200,
@@ -102,14 +103,14 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 		},
 		{
 			name:     "sample from empty header value",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{""}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{""}}},
 			sampling: true,
 
 			expectedPassthrough: true,
 		},
 		{
 			name:     "sample from multiple empty header values",
-			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(common.PrefillEndpointHeader): []string{"", ""}}},
+			r:        &http.Request{Header: http.Header{http.CanonicalHeaderKey(routing.PrefillEndpointHeader): []string{"", ""}}},
 			sampling: true,
 
 			expectedPassthrough: true,
@@ -124,17 +125,21 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 				s.allowlistValidator = &AllowlistValidator{}
 				s.prefillSamplerFn = func(n int) int { return i % n }
 				var hostPort string
-				s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, selectedHostPort string, _ APIType) {
+				var capturedReq *http.Request
+				s.runPDConnectorProtocol = func(_ http.ResponseWriter, r *http.Request, selectedHostPort string, _ APIType) {
 					hostPort = selectedHostPort
+					capturedReq = r
 				}
 				var passthrough bool
-				s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 					passthrough = true
+					capturedReq = r
 				})
 				s.dataParallelProxies = make(map[string]http.Handler)
 				recorder := httptest.NewRecorder()
 				recorder.Code = 0
-				s.disaggregatedPrefillHandler(apiType)(recorder, tt.r)
+				req := tt.r.Clone(tt.r.Context())
+				s.disaggregatedPrefillHandler(apiType)(recorder, req)
 
 				resp := recorder.Result()
 				if passthrough {
@@ -159,6 +164,11 @@ func testPrefillHeaderRouting(t *testing.T, apiType APIType) {
 						t.Errorf("expected=%s actual=%s", expected, actual)
 					}
 				}
+				if capturedReq != nil {
+					if v := capturedReq.Header.Get(routing.PrefillEndpointHeader); v != "" {
+						t.Errorf("PrefillEndpointHeader should be stripped before forwarding, got %q", v)
+					}
+				}
 			})
 		}
 	}
@@ -173,8 +183,8 @@ func TestServer_responsesHandler(t *testing.T) {
 }
 
 func TestServer_encoderEndpointRouting(t *testing.T) {
-	encoderHeader := http.CanonicalHeaderKey(common.EncoderEndpointsHeader)
-	prefillHeader := http.CanonicalHeaderKey(common.PrefillEndpointHeader)
+	encoderHeader := http.CanonicalHeaderKey(routing.EncoderEndpointsHeader)
+	prefillHeader := http.CanonicalHeaderKey(routing.PrefillEndpointHeader)
 
 	tests := []struct {
 		name string
@@ -300,24 +310,28 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 			var epdCalled bool
 			var epdPrefill string
 			var epdEncoders []string
+			var capturedReq *http.Request
 			if tt.epdConfigured {
-				s.runEPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, prefillHost string, encoders []string) {
+				s.runEPDConnectorProtocol = func(_ http.ResponseWriter, r *http.Request, prefillHost string, encoders []string) {
 					epdCalled = true
 					epdPrefill = prefillHost
 					epdEncoders = encoders
+					capturedReq = r
 				}
 			}
 
 			var pdCalled bool
 			var pdHost string
-			s.runPDConnectorProtocol = func(_ http.ResponseWriter, _ *http.Request, host string, _ APIType) {
+			s.runPDConnectorProtocol = func(_ http.ResponseWriter, r *http.Request, host string, _ APIType) {
 				pdCalled = true
 				pdHost = host
+				capturedReq = r
 			}
 
 			var passthrough bool
-			s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			s.decoderProxy = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 				passthrough = true
+				capturedReq = r
 			})
 			s.dataParallelProxies = make(map[string]http.Handler)
 
@@ -371,6 +385,14 @@ func TestServer_encoderEndpointRouting(t *testing.T) {
 					t.Error("P/D protocol should not be called during passthrough")
 				}
 
+			}
+			if capturedReq != nil {
+				if v := capturedReq.Header.Get(routing.PrefillEndpointHeader); v != "" {
+					t.Errorf("PrefillEndpointHeader should be stripped before forwarding, got %q", v)
+				}
+				if v := capturedReq.Header.Get(routing.EncoderEndpointsHeader); v != "" {
+					t.Errorf("EncoderEndpointsHeader should be stripped before forwarding, got %q", v)
+				}
 			}
 		})
 	}

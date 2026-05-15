@@ -1,0 +1,14 @@
+# ------------------------------------------------------------------------------
+# VLLM Encode Component
+#
+# Encoder deployment for multimodal disaggregation scenarios (E/PD, E/P/D).
+# Includes a PVC for shared encoder embeddings cache.
+# ------------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- deployment.yaml
+# A PVC (pvc.yaml) for shared encoder embeddings cache is NOT included here by default 
+# - it is added by scenario overlays that need it. The e2e test utils don't support PVC 
+# creation, and the simulator tolerates missing PVCs. Real vLLM overlays must add the PVC.

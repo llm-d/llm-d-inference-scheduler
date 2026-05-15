@@ -11,6 +11,7 @@ formatters:
 
 linters:
   enable:
+    - importas
     - bodyclose
     - copyloopvar
     - dupword
@@ -34,7 +35,44 @@ linters:
     - unparam
     - unused
     - unconvert
+  exclusions:
+    presets:
+      - comments        # suppress missing comment violations on packages and exported symbols
+      - std-error-handling  # suppress unchecked errors on well-known stdlib patterns (e.g. Close())
+    rules:
+      # Package names inherited from GAIE upstream (common, types, utils, http) are intentional
+      - linters: [revive]
+        text: "avoid meaningless package names"
+      - linters: [revive]
+        text: "avoid package names that conflict with Go standard library package names"
   settings:
+    importas:
+      no-unaliased: false # unaliased imports are allowed; only enforce when an alias is used
+      alias:
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling
+          alias: fwksched
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol
+          alias: fwkrc
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol
+          alias: fwkfc
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/flowcontrol/mocks
+          alias: fwkfcmocks
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin
+          alias: fwkplugin
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix
+          alias: attrprefix
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/metrics
+          alias: extractormetrics
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/metrics
+          alias: sourcemetrics
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/pool
+          alias: poolutil
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/testing
+          alias: testutil
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/pkg/common/error
+          alias: errcommon
+        - pkg: github.com/llm-d/llm-d-inference-scheduler/test/utils/igw
+          alias: igwtestutils
     revive: # see https://github.com/mgechev/revive#available-rules for all options
       rules:
         - name: blank-imports
@@ -44,18 +82,17 @@ linters:
         - name: error-return
         - name: error-strings
         - name: error-naming
-        - name: exported
+        - name: errorf
         - name: if-return
         - name: increment-decrement
-        - name: var-naming
-        - name: var-declaration
+        - name: indent-error-flow
         - name: package-comments
         - name: range
         - name: receiver-naming
         - name: time-naming
         - name: unexported-return
-        - name: indent-error-flow
-        - name: errorf
+        - name: var-declaration
+        - name: var-naming
 
 issues:
   # do not limit the number of issues, ensure even identical are reported

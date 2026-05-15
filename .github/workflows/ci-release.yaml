@@ -7,6 +7,11 @@ on:
   release:
     types: [published]  # Also runs when a GitHub release is published
 
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
 jobs:
   set-params:
     runs-on: ubuntu-latest

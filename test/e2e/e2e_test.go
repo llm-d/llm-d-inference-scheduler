@@ -4,31 +4,26 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	testutils "sigs.k8s.io/gateway-api-inference-extension/test/utils"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/metrics"
+	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
 )
 
 const (
-	// simDeployment references the YAML file for the deployment
-	// running the vLLM simulator without PD
-	simDeployment = "./yaml/vllm-sim.yaml"
-	// simPDDisaggDeployment references the YAML file for the deployment
-	// running the vLLM simulator with PD (connector type is configurable via ${CONNECTOR_TYPE})
-	simPDDisaggDeployment = "./yaml/vllm-sim-p-d-disagg.yaml"
-	// simDPDeployment references  the YAML file for the deployment
-	// running the vLLM simulator with Data Parallel
-	simDPDeployment = "./yaml/vllm-sim-dp.yaml"
-	// simEpDDisaggDeployment references the YAML file for the deployment
-	// running the vLLM simulator with E/PD (Encode/Prefill-Decode)
-	simEpDDisaggDeployment = "./yaml/vllm-sim-e-pd-disagg.yaml"
-	// simEPDDisaggDeployment references the YAML file for the deployment
-	// running the vLLM simulator with E/P/D (Encode/Prefill/Decode)
-	simEPDDisaggDeployment = "./yaml/vllm-sim-e-p-d-disagg.yaml"
-	// simEPDUnifiedDeployment references the YAML file for the deployment
-	// running the vLLM simulator with EPD (no disaggregation)
-	simEPDUnifiedDeployment = "./yaml/vllm-sim-epd-unified.yaml"
+	// epdDeploymentDir references the Kustomize directory for the non-disaggregated
+	// EPD scenario — single deployment, no routing sidecar, vLLM on port 8000
+	epdDeploymentDir = "../../deploy/environments/dev/epd"
+	// pdDisaggDir references the Kustomize directory for the deployment
+	// running vLLM with P/D (connector type is configurable via ${CONNECTOR_TYPE})
+	pdDisaggDir = "../../deploy/environments/dev/p-d"
+	// ePdDisaggDir references the Kustomize directory for the deployment
+	// running vLLM with E/PD (Encode/Prefill-Decode)
+	ePdDisaggDir = "../../deploy/environments/dev/e-pd"
+	// ePDDisaggDir references the Kustomize directory for the deployment
+	// running vLLM with E/P/D (Encode/Prefill/Decode)
+	ePDDisaggDir = "../../deploy/environments/dev/e-p-d"
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
@@ -649,7 +644,7 @@ var _ = ginkgo.Describe("Run end to end tests", ginkgo.Ordered, func() {
 		})
 	})
 
-	ginkgo.When("Running KV configuration with external tokenizer PrepareData plugin", func() {
+	ginkgo.When("Running KV configuration with external tokenizer DataProducer plugin", func() {
 		ginkgo.It("should run successfully", func() {
 			infPoolObjects = createInferencePool(1, true)
 

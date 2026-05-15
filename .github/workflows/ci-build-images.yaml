@@ -19,6 +19,11 @@ on:
       GHCR_TOKEN:
         required: true
 
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
 jobs:
   build-epp:
     runs-on: ubuntu-latest

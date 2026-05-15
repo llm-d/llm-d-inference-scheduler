@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/common"
+
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 )
 
 // startHTTP starts the HTTP reverse proxy.

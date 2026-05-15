@@ -136,11 +136,55 @@ func podsInDeploymentsReady(objects []string) {
 }
 
 func runKustomize(kustomizeDir string) []string {
-	command := exec.Command("kustomize", "build", kustomizeDir)
+	// Use "kubectl kustomize" rather than the standalone "kustomize" binary.
+	// CI/dev environments guarantee kubectl but may not have kustomize installed
+	// (see Makefile.tools.mk check-kustomize target).
+	command := exec.Command("kubectl", "kustomize", kustomizeDir)
 	session, err := gexec.Start(command, nil, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 	gomega.Eventually(session).WithTimeout(600 * time.Second).Should(gexec.Exit(0))
 	return strings.Split(string(session.Out.Contents()), "\n---")
+}
+
+// removeEmptyArgs strips YAML list items that are empty strings after variable
+// substitution (e.g. '- ""' produced when VLLM_EXTRA_ARGS_* is unset).
+func removeEmptyArgs(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		lines := strings.Split(input, "\n")
+		filtered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			if strings.TrimSpace(line) == `- ""` {
+				continue
+			}
+			filtered = append(filtered, line)
+		}
+		outputs[idx] = strings.Join(filtered, "\n")
+	}
+	return outputs
+}
+
+// removeEmptyLabels strips YAML lines like "llm-d.ai/role: " where the value
+// is empty after variable substitution. Kubernetes accepts empty-value labels,
+// but the test pod-selector logic treats the key's presence as meaningful.
+func removeEmptyLabels(inputs []string) []string {
+	outputs := make([]string, len(inputs))
+	for idx, input := range inputs {
+		lines := strings.Split(input, "\n")
+		filtered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			// Skip lines like "llm-d.ai/role:" (key with empty value after TrimSpace)
+			if strings.HasSuffix(trimmed, ":") {
+				if strings.Contains(trimmed, "llm-d.ai/role") {
+					continue
+				}
+			}
+			filtered = append(filtered, line)
+		}
+		outputs[idx] = strings.Join(filtered, "\n")
+	}
+	return outputs
 }
 
 func substituteMany(inputs []string, substitutions map[string]string) []string {
@@ -156,19 +200,23 @@ func substituteMany(inputs []string, substitutions map[string]string) []string {
 }
 
 // getCounterMetric fetches the current value of a Prometheus counter metric from the given metrics URL.
+// Retries on transient connection errors (e.g. the previous EPP pod is still terminating).
 //
 //nolint:unparam // metricName may vary in future test cases
 func getCounterMetric(metricsURL, metricName, labelMatch string) int {
-	resp, err := http.Get(metricsURL)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	defer func() {
-		err = resp.Body.Close()
-		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-	}()
-	gomega.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusOK))
-
-	body, err := io.ReadAll(resp.Body)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	var body []byte
+	gomega.Eventually(func() error {
+		resp, err := http.Get(metricsURL)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status %d", resp.StatusCode)
+		}
+		body, err = io.ReadAll(resp.Body)
+		return err
+	}, 10*time.Second, 1*time.Second).Should(gomega.Succeed())
 
 	metricsText := string(body)
 	for _, line := range strings.Split(metricsText, "\n") {
@@ -280,6 +328,36 @@ func dumpPodsAndLogs() {
 	}
 
 	ginkgo.GinkgoWriter.Printf("Total pods found: %d\n\n", len(pods.Items))
+
+	// Print summary table (like kubectl get pods)
+	ginkgo.GinkgoWriter.Printf("%-55s %-8s %-22s %-8s %-6s\n", "NAME", "READY", "STATUS", "RESTARTS", "AGE")
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		ready, total := 0, len(pod.Spec.Containers)
+		restarts := int32(0)
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Ready {
+				ready++
+			}
+			restarts += cs.RestartCount
+		}
+		status := string(pod.Status.Phase)
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Waiting != nil {
+				status = cs.State.Waiting.Reason
+				break
+			}
+		}
+		age := ""
+		if !pod.CreationTimestamp.IsZero() {
+			d := time.Since(pod.CreationTimestamp.Time).Round(time.Second)
+			age = d.String()
+		}
+		ginkgo.GinkgoWriter.Printf("%-55s %-8s %-22s %-8d %-6s\n",
+			pod.Name, fmt.Sprintf("%d/%d", ready, total), status, restarts, age)
+	}
+	ginkgo.GinkgoWriter.Println()
+
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		ginkgo.GinkgoWriter.Printf("--- Pod: %s | Phase: %s | Node: %s ---\n",

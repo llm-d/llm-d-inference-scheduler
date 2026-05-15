@@ -1,0 +1,20 @@
+# EPP configuration for E/PD (encode + prefill-decode) using disagg-profile-handler.
+# The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
+apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: encode-filter
+- type: decode-filter
+- type: max-score-picker
+- type: always-disagg-multimodal-decider
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      encode: always-disagg-multimodal-decider
+schedulingProfiles:
+- name: encode
+  plugins:
+  - pluginRef: encode-filter
+- name: decode
+  plugins:
+  - pluginRef: decode-filter

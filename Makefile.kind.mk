@@ -1,7 +1,11 @@
 ##@ Kind Development Environments
 
-KIND_CLUSTER_NAME ?= llm-d-inference-scheduler-dev
+KIND_CLUSTER_NAME ?= $(PROJECT_NAME)-dev
 KIND_GATEWAY_HOST_PORT ?= 30080
+
+.PHONY: image-kind
+image-kind: ## Reload the EPP and SideCar images into the kind cluster $(KIND_CLUSTER_NAME)
+	KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) ./scripts/load_image.sh $(EPP_IMAGE) $(SIDECAR_IMAGE)
 
 .PHONY: env-dev-kind
 env-dev-kind: image-build image-pull ## Run under kind ($(KIND_CLUSTER_NAME))
@@ -12,10 +16,6 @@ env-dev-kind: image-build image-pull ## Run under kind ($(KIND_CLUSTER_NAME))
 		CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 		GATEWAY_HOST_PORT=$(KIND_GATEWAY_HOST_PORT) \
 		IMAGE_REGISTRY=$(IMAGE_REGISTRY) \
-		EPP_IMAGE=$(EPP_IMAGE) \
-		VLLM_SIMULATOR_IMAGE=${VLLM_SIMULATOR_IMAGE} \
-		SIDECAR_IMAGE=$(SIDECAR_IMAGE) \
-		UDS_TOKENIZER_IMAGE=$(UDS_TOKENIZER_IMAGE) \
 		./scripts/kind-dev-env.sh; \
 	fi
 

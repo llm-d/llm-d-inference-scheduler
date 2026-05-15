@@ -10,12 +10,12 @@ BASE_BRANCH=${1:-upstream/main}
 BASE=$(git merge-base HEAD "$BASE_BRANCH")
 RANGE="$BASE..HEAD"
 
-echo "Checking $(git rev-list --count "$RANGE") commits ($BASE..HEAD)..."
+echo "Checking $(git rev-list --first-parent --count "$RANGE") commits ($BASE..HEAD)..."
 
 ERR_SIG=""
 ERR_DCO=""
 
-for commit in $(git rev-list "$RANGE"); do
+for commit in $(git rev-list --first-parent "$RANGE"); do
     HASH=$(git rev-parse --short "$commit")
     
     # 1. Check for cryptographic signature header (gpgsig)

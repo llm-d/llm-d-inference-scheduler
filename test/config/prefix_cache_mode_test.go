@@ -6,16 +6,16 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/config/loader"
-	giePlugins "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
-	"sigs.k8s.io/gateway-api-inference-extension/test/utils"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/plugins/scorer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/config/loader"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins"
+	preciseprefixcache "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/scheduling/scorer/preciseprefixcache"
 	testutils "github.com/llm-d/llm-d-inference-scheduler/test/utils"
+	igwtestutils "github.com/llm-d/llm-d-inference-scheduler/test/utils/igw"
 )
 
-func TestPrecisePrefixCacheScorer(t *testing.T) {
+func TestScorer(t *testing.T) {
 	tests := []struct {
 		name       string
 		pluginName string
@@ -25,7 +25,7 @@ func TestPrecisePrefixCacheScorer(t *testing.T) {
 			name:       "precise prefix cache scorer",
 			pluginName: "precisePrefixCache",
 			configText: `
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1alpha1
 kind: EndpointPickerConfig
 plugins:
 - name: precisePrefixCache
@@ -53,16 +53,16 @@ schedulingProfiles:
 			if err != nil {
 				t.Fatalf("unexpected error from LoadConfigPhaseOne: %v", err)
 			}
-			handle := utils.NewTestHandle(ctx)
+			handle := igwtestutils.NewTestHandle(ctx)
 			_, err = loader.InstantiateAndConfigure(rawConfig, handle, logr.Discard())
 			if err != nil {
 				t.Fatalf("unexpected error from LoadConfigPhaseTwo: %v", err)
 			}
 			fmt.Println("all plugins", handle.GetAllPluginsWithNames())
 
-			_, err = giePlugins.PluginByType[*scorer.PrecisePrefixCacheScorer](handle, test.pluginName)
+			_, err = fwkplugin.PluginByType[*preciseprefixcache.Scorer](handle, test.pluginName)
 			if err != nil {
-				t.Fatalf("expected PrecisePrefixCacheScorer, but got error: %v", err)
+				t.Fatalf("expected Scorer, but got error: %v", err)
 			}
 		})
 	}

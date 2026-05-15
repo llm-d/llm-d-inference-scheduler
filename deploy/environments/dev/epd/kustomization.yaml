@@ -1,0 +1,17 @@
+# ------------------------------------------------------------------------------
+# EPD (No Disaggregation) Development Environment
+#
+# Single deployment handling all stages. No routing sidecar — vLLM listens
+# directly on port 8000.
+# ------------------------------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../../components/vllm-decode/
+
+patches:
+- path: patch-decode.yaml
+
+components:
+- ../../../components/overlays/simulator/
