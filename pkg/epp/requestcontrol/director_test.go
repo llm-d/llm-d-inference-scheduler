@@ -1328,6 +1328,68 @@ func TestDirector_HandleResponseBody_ChunkOrdering(t *testing.T) {
 	}
 }
 
+func TestDirector_HandleResponseBody_ConcurrentSendAndClose(t *testing.T) {
+	// Regression test for the "send on closed channel" panic.
+	// Multiple goroutines send intermediate chunks while a final-chunk goroutine
+	// concurrently closes the queue. Without mutex protection, this TOCTOU race
+	// would panic. Run with -race and -count to increase detection probability.
+	plugin := &panicDetectPlugin{
+		typedName: fwkplugin.TypedName{Type: "panic-detect", Name: "panic-detect"},
+	}
+
+	ctx := logutil.NewTestLoggerIntoContext(context.Background())
+	ds := datastore.NewDatastore(t.Context(), nil, 0)
+	director := NewDirectorWithConfig(ds, &mockScheduler{}, nil, nil, NewConfig().WithResponseStreamingPlugins(plugin))
+
+	const numSenders = 30
+	const numRounds = 200
+
+	for round := range numRounds {
+		requestID := fmt.Sprintf("concurrent-test-%d", round)
+		var wg sync.WaitGroup
+
+		// Fire intermediate chunks concurrently.
+		for range numSenders {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				reqCtx := &handlers.RequestContext{
+					Request: &handlers.Request{
+						Headers: map[string]string{reqcommon.RequestIDHeaderKey: requestID},
+					},
+					Response:  &handlers.Response{Headers: map[string]string{}},
+					TargetPod: &fwkdl.EndpointMetadata{},
+				}
+				director.HandleResponseBody(ctx, reqCtx, false)
+			}()
+		}
+
+		// Let goroutines queue up so the race window is wide open.
+		time.Sleep(time.Microsecond)
+
+		// Final chunk — this is the close side of the race.
+		finalReqCtx := &handlers.RequestContext{
+			Request: &handlers.Request{
+				Headers: map[string]string{reqcommon.RequestIDHeaderKey: requestID},
+			},
+			Response:  &handlers.Response{Headers: map[string]string{}},
+			TargetPod: &fwkdl.EndpointMetadata{},
+		}
+		director.HandleResponseBody(ctx, finalReqCtx, true)
+
+		wg.Wait()
+	}
+}
+
+// panicDetectPlugin is a minimal ResponseStreaming plugin used in the concurrent race test.
+type panicDetectPlugin struct {
+	typedName fwkplugin.TypedName
+}
+
+func (p *panicDetectPlugin) TypedName() fwkplugin.TypedName { return p.typedName }
+func (p *panicDetectPlugin) ResponseBody(_ context.Context, _ *fwksched.InferenceRequest, _ *fwkrc.Response, _ *fwkdl.EndpointMetadata) {
+}
+
 // orderTrackingPlugin records the CompletionTokens from each ResponseBody call to verify ordering.
 type orderTrackingPlugin struct {
 	mu                  sync.Mutex
