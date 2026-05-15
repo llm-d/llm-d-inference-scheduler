@@ -451,6 +451,9 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 }
 
 func (d *Director) loadOrCreateResponseBodyQueue(reqCtx *handlers.RequestContext) *responseBodyQueue {
+	if val, ok := d.responseBodyQueues.Load(reqCtx); ok {
+		return val.(*responseBodyQueue)
+	}
 	q := newResponseBodyQueue()
 	val, loaded := d.responseBodyQueues.LoadOrStore(reqCtx, q)
 	if loaded {
