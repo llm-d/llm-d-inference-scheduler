@@ -79,6 +79,15 @@ func (p *InFlightLoadProducer) TypedName() fwkplugin.TypedName {
 	return p.typedName
 }
 
+// DumpState implements [fwkplugin.StateDumper] and exposes per-endpoint
+// in-flight request and token counts for the /debug/plugins/state endpoint.
+//
+// The request and token tracker maps are snapshotted under separate read
+// locks, so the returned per-endpoint Requests and Tokens values are not
+// guaranteed to correspond to the same instant in time and the endpoint set
+// itself may change between the two snapshots. This is acceptable for a
+// debug endpoint, where best-effort visibility is preferred over coordinating
+// a single global lock that would contend with the hot path.
 func (p *InFlightLoadProducer) DumpState() any {
 	requestCounts := map[string]int64{}
 	if p.requestTracker != nil {
