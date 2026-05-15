@@ -87,10 +87,10 @@ type Datastore interface {
 	PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) bool
 	PodDelete(podName string)
 
-	// BackendUpsert adds or updates an endpoint from a non-Kubernetes discovery source.
-	BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata)
-	// BackendDelete removes the endpoint with the given namespaced name.
-	BackendDelete(id types.NamespacedName)
+	// EndpointUpsert adds or updates an endpoint from a non-Kubernetes discovery source.
+	EndpointUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata)
+	// EndpointDelete removes the endpoint with the given namespaced name.
+	EndpointDelete(id types.NamespacedName)
 
 	// Clears the store state, happens when the pool gets deleted.
 	Clear()
@@ -371,11 +371,11 @@ func (ds *datastore) PodDelete(podName string) {
 	})
 }
 
-func (ds *datastore) BackendUpsert(_ context.Context, meta *fwkdl.EndpointMetadata) {
+func (ds *datastore) EndpointUpsert(_ context.Context, meta *fwkdl.EndpointMetadata) {
 	ds.upsertEndpoint(meta)
 }
 
-func (ds *datastore) BackendDelete(id types.NamespacedName) {
+func (ds *datastore) EndpointDelete(id types.NamespacedName) {
 	if v, ok := ds.pods.LoadAndDelete(id); ok {
 		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
 	}
@@ -384,7 +384,7 @@ func (ds *datastore) BackendDelete(id types.NamespacedName) {
 // upsertEndpoint stores or updates a single endpoint in the pods map.
 // Returns true if the endpoint was newly created, false if it already existed
 // or if NewEndpoint returned nil (duplicate-start race).
-// Shared by BackendUpsert and podUpdateOrAddIfNotExist.
+// Shared by EndpointUpsert and podUpdateOrAddIfNotExist.
 func (ds *datastore) upsertEndpoint(meta *fwkdl.EndpointMetadata) bool {
 	existing, ok := ds.pods.Load(meta.NamespacedName)
 	if !ok {
