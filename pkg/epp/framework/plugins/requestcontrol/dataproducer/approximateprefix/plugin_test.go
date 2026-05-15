@@ -34,6 +34,11 @@ import (
 	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 )
 
+func TestApproxPrefixCacheFactoryRejectsUnknownFields(t *testing.T) {
+	_, err := ApproxPrefixCacheFactory("test", []byte(`{"blockSizeCharacters": 16}`), plugin.NewEppHandle(t.Context(), nil))
+	assert.ErrorContains(t, err, "unknown field \"blockSizeCharacters\"")
+}
+
 func TestProduce(t *testing.T) {
 	config := config{
 		BlockSizeTokens:        1,

@@ -17,6 +17,7 @@ limitations under the License.
 package approximateprefix
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -248,7 +249,9 @@ func (p *dataProducer) GetBlockSize(endpoints []fwksched.Endpoint) int {
 func ApproxPrefixCacheFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := defaultConfig
 	if rawParameters != nil {
-		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(rawParameters))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&parameters); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal prefix cache parameters: %w", err)
 		}
 	}
