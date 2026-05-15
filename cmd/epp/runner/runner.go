@@ -137,6 +137,7 @@ type Runner struct {
 	customCollectors     []prometheus.Collector
 	parser               fwkrh.Parser
 	dlRuntime            *datalayer.Runtime
+	pluginHandle         fwkplugin.HandlePlugins
 }
 
 // WithExecutableName sets the name of the executable containing the runner.
@@ -321,6 +322,11 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 			setupLog.Error(err, "Failed to setup pprof handlers")
 			return nil, nil, err
 		}
+	}
+
+	if err = runserver.SetupPluginStateDebugHandler(mgr, r.pluginHandle); err != nil {
+		setupLog.Error(err, "Failed to setup plugin state debug handler")
+		return nil, nil, err
 	}
 
 	// --- Initialize Core EPP Components ---
@@ -616,6 +622,7 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	// The plugins will be executed in topologically sorted order to ensure that data is produced before it is consumed.
 	r.requestControlConfig.OrderDataProducerPlugins(dag)
 
+	r.pluginHandle = handle
 	r.parser = handlers.NewParser(cfg.ParserConfig)
 	logger.Info("loaded configuration from file/text successfully")
 

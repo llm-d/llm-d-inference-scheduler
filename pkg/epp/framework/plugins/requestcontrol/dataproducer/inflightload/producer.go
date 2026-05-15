@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -54,6 +55,7 @@ var (
 	_ requestcontrol.DataProducer          = &InFlightLoadProducer{}
 	_ datalayer.EndpointExtractor          = &InFlightLoadProducer{}
 	_ datalayer.Registrant                 = &InFlightLoadProducer{}
+	_ fwkplugin.StateDumper                = &InFlightLoadProducer{}
 )
 
 type InFlightLoadProducer struct {
@@ -63,8 +65,57 @@ type InFlightLoadProducer struct {
 	tokenEstimator TokenEstimator
 }
 
+type InFlightLoadState struct {
+	Endpoints []EndpointInFlightLoadState `json:"endpoints"`
+}
+
+type EndpointInFlightLoadState struct {
+	Endpoint string `json:"endpoint"`
+	Requests int64  `json:"requests"`
+	Tokens   int64  `json:"tokens"`
+}
+
 func (p *InFlightLoadProducer) TypedName() fwkplugin.TypedName {
 	return p.typedName
+}
+
+func (p *InFlightLoadProducer) DumpState() any {
+	requestCounts := map[string]int64{}
+	if p.requestTracker != nil {
+		requestCounts = p.requestTracker.snapshot()
+	}
+
+	tokenCounts := map[string]int64{}
+	if p.tokenTracker != nil {
+		tokenCounts = p.tokenTracker.snapshot()
+	}
+
+	endpointSet := make(map[string]struct{}, len(requestCounts)+len(tokenCounts))
+	for endpointID := range requestCounts {
+		endpointSet[endpointID] = struct{}{}
+	}
+	for endpointID := range tokenCounts {
+		endpointSet[endpointID] = struct{}{}
+	}
+
+	endpointIDs := make([]string, 0, len(endpointSet))
+	for endpointID := range endpointSet {
+		endpointIDs = append(endpointIDs, endpointID)
+	}
+	sort.Strings(endpointIDs)
+
+	state := InFlightLoadState{
+		Endpoints: make([]EndpointInFlightLoadState, 0, len(endpointIDs)),
+	}
+	for _, endpointID := range endpointIDs {
+		state.Endpoints = append(state.Endpoints, EndpointInFlightLoadState{
+			Endpoint: endpointID,
+			Requests: requestCounts[endpointID],
+			Tokens:   tokenCounts[endpointID],
+		})
+	}
+
+	return state
 }
 
 // RegisterDependencies declares that this plugin needs an endpoint-notification-source to track
@@ -212,6 +263,17 @@ func (ct *concurrencyTracker) get(endpointID string) int64 {
 		return 0
 	}
 	return counter.Load()
+}
+
+func (ct *concurrencyTracker) snapshot() map[string]int64 {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+
+	result := make(map[string]int64, len(ct.counts))
+	for endpointID, counter := range ct.counts {
+		result[endpointID] = counter.Load()
+	}
+	return result
 }
 
 func (ct *concurrencyTracker) inc(endpointID string) {
