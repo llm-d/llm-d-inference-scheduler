@@ -94,7 +94,7 @@ func buildSpeculativeCache(ctx context.Context, config PluginConfig,
 			// Speculative entries were added without engineKey mapping, so
 			// evict by RequestKey directly.
 			//nolint:errcheck // best-effort cleanup on TTL expiry
-			index.Evict(context.Background(), reqKey, kvblock.RequestKey, entries.podEntries)
+			index.Evict(ctx, reqKey, kvblock.RequestKey, entries.podEntries)
 		}
 	})
 	go cache.Start()
