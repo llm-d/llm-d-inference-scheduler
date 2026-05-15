@@ -62,7 +62,7 @@ func (p *dataProducer) Produces() map[string]any {
 }
 
 // newDataProducer returns a new DataProducer plugin.
-func newDataProducer(ctx context.Context, config config, handle plugin.Handle) (*dataProducer, error) {
+func newDataProducer(ctx context.Context, config config, handle plugin.Handle, name string) (*dataProducer, error) {
 	log.FromContext(ctx).V(logutil.DEFAULT).Info("Prefix DataProducer initialized", "config", config)
 
 	//nolint:staticcheck // BlockSize is deprecated, but we check it here to provide a migration path for users.
@@ -77,11 +77,11 @@ func newDataProducer(ctx context.Context, config config, handle plugin.Handle) (
 		return nil, fmt.Errorf("invalid configuration: MaxPrefixTokensToMatch must be >= 0 (current value: %d)", config.MaxPrefixTokensToMatch)
 	}
 	indexer := newIndexer(ctx, config.LRUCapacityPerServer)
-
+	
 	p := &dataProducer{
 		typedName: plugin.TypedName{
 			Type: ApproxPrefixCachePluginType,
-			Name: ApproxPrefixCachePluginType,
+			Name: name,
 		},
 		config:      config,
 		indexerInst: indexer,
@@ -254,7 +254,7 @@ func ApproxPrefixCacheFactory(name string, rawParameters json.RawMessage, handle
 	}
 
 	// pluginState will be initialized by newDataProducer as we pass nil here.
-	p, err := newDataProducer(handle.Context(), parameters, handle)
+	p, err := newDataProducer(handle.Context(), parameters, handle, name)
 	if err != nil {
 		return nil, err
 	}
