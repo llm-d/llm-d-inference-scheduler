@@ -17,11 +17,8 @@ limitations under the License.
 package preciseprefixcache
 
 import (
-	"context"
 	"fmt"
-	"time"
 
-	"github.com/jellydator/ttlcache/v3"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
@@ -35,18 +32,4 @@ func extractPodSet(endpoints []scheduling.Endpoint) sets.Set[string] {
 		}
 	}
 	return podSet
-}
-
-func cleanCachePeriodically[K comparable, V any](ctx context.Context, cache *ttlcache.Cache[K, V], interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			cache.DeleteExpired()
-		}
-	}
 }

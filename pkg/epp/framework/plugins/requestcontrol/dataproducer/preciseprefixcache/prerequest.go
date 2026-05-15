@@ -97,7 +97,11 @@ func buildSpeculativeCache(ctx context.Context, config PluginConfig,
 			index.Evict(context.Background(), reqKey, kvblock.RequestKey, entries.podEntries)
 		}
 	})
-	go cleanCachePeriodically(ctx, cache, ttl)
+	go cache.Start()
+	go func() {
+		<-ctx.Done()
+		cache.Stop()
+	}()
 
 	return cache, ttl, nil
 }
@@ -152,16 +156,17 @@ func (p *Producer) PreRequest(ctx context.Context,
 
 	// P/D disaggregation: also seed the prefill endpoint.
 	if pr, exists := schedulingResult.ProfileResults[experimentalPrefillProfile]; exists && len(pr.TargetEndpoints) > 0 {
-		prefillMeta := pr.TargetEndpoints[0].GetMetadata()
-		prefillPod := kvblock.PodEntry{
-			PodIdentifier: fmt.Sprintf("%s:%s", prefillMeta.Address, prefillMeta.Port),
-			Speculative:   true,
+		if prefillMeta := pr.TargetEndpoints[0].GetMetadata(); prefillMeta != nil {
+			prefillPod := kvblock.PodEntry{
+				PodIdentifier: fmt.Sprintf("%s:%s", prefillMeta.Address, prefillMeta.Port),
+				Speculative:   true,
+			}
+			if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{prefillPod}); err != nil {
+				logger.Error(err, "Failed to add speculative entries for prefill endpoint",
+					"pod", prefillPod.PodIdentifier)
+			}
+			allPodEntries = append(allPodEntries, prefillPod)
 		}
-		if err := index.Add(ctx, nil, state.blockKeys, []kvblock.PodEntry{prefillPod}); err != nil {
-			logger.Error(err, "Failed to add speculative entries for prefill endpoint",
-				"pod", prefillPod.PodIdentifier)
-		}
-		allPodEntries = append(allPodEntries, prefillPod)
 	}
 
 	p.speculativeCache.Set(request.RequestID, &speculativeEntries{
