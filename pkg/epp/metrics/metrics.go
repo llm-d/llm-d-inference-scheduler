@@ -401,6 +401,27 @@ var (
 		append([]string{"fairness_id", "priority", "outcome", "inference_pool"}, modelLabels...),
 	)
 
+	flowControlSLORequestQueueDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Subsystem: inferenceExtension,
+			Name:      "flow_control_slo_request_queue_duration_seconds",
+			Help:      metricsutil.HelpMsgWithStability("Distribution of the total time requests spend in the EPP flow control layer, partitioned by SLO class.", compbasemetrics.ALPHA),
+			Buckets: []float64{
+				0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
+			},
+		},
+		[]string{"slo_class", "outcome", "inference_pool"},
+	)
+
+	flowControlSLOIncomingRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: inferenceExtension,
+			Name:      "flow_control_slo_incoming_requests_total",
+			Help:      metricsutil.HelpMsgWithStability("Total number of requests that entered the EPP flow control layer via EnqueueAndWait.", compbasemetrics.ALPHA),
+		},
+		[]string{"slo_class", "inference_pool"},
+	)
+
 	flowControlDispatchCycleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Subsystem: inferenceExtension,
@@ -431,7 +452,7 @@ var (
 			Name:      "flow_control_queue_size",
 			Help:      metricsutil.HelpMsgWithStability("Current number of requests actively held in the Flow Control queue.", compbasemetrics.ALPHA),
 		},
-		append([]string{"fairness_id", "priority", "inference_pool"}, modelLabels...),
+		append([]string{"fairness_id", "priority", "inference_pool", "slo_class"}, modelLabels...),
 	)
 
 	flowControlQueueBytes = prometheus.NewGaugeVec(
@@ -440,7 +461,7 @@ var (
 			Name:      "flow_control_queue_bytes",
 			Help:      metricsutil.HelpMsgWithStability("Current total size in bytes of requests actively held in the Flow Control queue.", compbasemetrics.ALPHA),
 		},
-		append([]string{"fairness_id", "priority", "inference_pool"}, modelLabels...),
+		append([]string{"fairness_id", "priority", "inference_pool", "slo_class"}, modelLabels...),
 	)
 
 	flowControlPoolSaturation = prometheus.NewGaugeVec(
@@ -505,6 +526,8 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(prefixCacheHitRatio)
 		metrics.Registry.MustRegister(prefixCacheHitLength)
 		metrics.Registry.MustRegister(flowControlRequestQueueDuration)
+		metrics.Registry.MustRegister(flowControlSLORequestQueueDuration)
+		metrics.Registry.MustRegister(flowControlSLOIncomingRequestsTotal)
 		metrics.Registry.MustRegister(flowControlDispatchCycleDuration)
 		metrics.Registry.MustRegister(flowControlQueueSize)
 		metrics.Registry.MustRegister(flowControlQueueBytes)
@@ -556,6 +579,8 @@ func Reset() {
 	prefixCacheHitRatio.Reset()
 	prefixCacheHitLength.Reset()
 	flowControlRequestQueueDuration.Reset()
+	flowControlSLORequestQueueDuration.Reset()
+	flowControlSLOIncomingRequestsTotal.Reset()
 	flowControlQueueSize.Reset()
 	flowControlQueueBytes.Reset()
 	flowControlPoolSaturation.Reset()
@@ -858,6 +883,25 @@ func RecordFlowControlRequestQueueDuration(
 	).Observe(duration.Seconds())
 }
 
+// SLOClassNone is the metric label used when a request has no associated InferenceObjective.
+const SLOClassNone = "none"
+
+// RecordFlowControlSLORequestQueueDuration records the queue duration for a request partitioned by its
+// SLO class (derived from the TTFT SLO header "x-slo-ttft-ms").
+func RecordFlowControlSLORequestQueueDuration(
+	sloClass, outcome, inferencePool string,
+	duration time.Duration,
+) {
+	flowControlSLORequestQueueDuration.WithLabelValues(
+		sloClass, outcome, inferencePool,
+	).Observe(duration.Seconds())
+}
+
+// RecordFlowControlSLOIncomingRequest increments the count of requests that entered flow control at EnqueueAndWait.
+func RecordFlowControlSLOIncomingRequest(sloClass, inferencePool string) {
+	flowControlSLOIncomingRequestsTotal.WithLabelValues(sloClass, inferencePool).Inc()
+}
+
 // RecordFlowControlDispatchCycleDuration records the duration of a dispatch cycle in the Flow Control layer.
 func RecordFlowControlDispatchCycleDuration(duration time.Duration) {
 	flowControlDispatchCycleDuration.WithLabelValues().Observe(duration.Seconds())
@@ -874,23 +918,23 @@ func RecordFlowControlRequestEnqueueDuration(
 }
 
 // IncFlowControlQueueSize increments the Flow Control queue size gauge.
-func IncFlowControlQueueSize(fairnessID, priority, inferencePool, modelName, targetModelName string) {
-	flowControlQueueSize.WithLabelValues(fairnessID, priority, inferencePool, modelName, targetModelName).Inc()
+func IncFlowControlQueueSize(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName string) {
+	flowControlQueueSize.WithLabelValues(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName).Inc()
 }
 
 // DecFlowControlQueueSize decrements the Flow Control queue size gauge.
-func DecFlowControlQueueSize(fairnessID, priority, inferencePool, modelName, targetModelName string) {
-	flowControlQueueSize.WithLabelValues(fairnessID, priority, inferencePool, modelName, targetModelName).Dec()
+func DecFlowControlQueueSize(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName string) {
+	flowControlQueueSize.WithLabelValues(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName).Dec()
 }
 
 // AddFlowControlQueueBytes increments the Flow Control queue bytes gauge.
-func AddFlowControlQueueBytes(fairnessID, priority, inferencePool, modelName, targetModelName string, bytes uint64) {
-	flowControlQueueBytes.WithLabelValues(fairnessID, priority, inferencePool, modelName, targetModelName).Add(float64(bytes))
+func AddFlowControlQueueBytes(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName string, bytes uint64) {
+	flowControlQueueBytes.WithLabelValues(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName).Add(float64(bytes))
 }
 
 // SubFlowControlQueueBytes decrements the Flow Control queue bytes gauge.
-func SubFlowControlQueueBytes(fairnessID, priority, inferencePool, modelName, targetModelName string, bytes uint64) {
-	flowControlQueueBytes.WithLabelValues(fairnessID, priority, inferencePool, modelName, targetModelName).Sub(float64(bytes))
+func SubFlowControlQueueBytes(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName string, bytes uint64) {
+	flowControlQueueBytes.WithLabelValues(fairnessID, priority, inferencePool, sloClass, modelName, targetModelName).Sub(float64(bytes))
 }
 
 // RecordFlowControlPoolSaturation records the current saturation level for an inference pool.
