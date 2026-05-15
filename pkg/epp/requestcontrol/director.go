@@ -99,8 +99,10 @@ type responseBodyWork struct {
 // It ensures chunks are processed in order via a channel while keeping plugin execution
 // off the critical streaming path.
 type responseBodyQueue struct {
-	ch   chan responseBodyWork
-	done chan struct{} // closed when the processing goroutine exits
+	mu     sync.Mutex
+	closed bool
+	ch     chan responseBodyWork
+	done   chan struct{} // closed when the processing goroutine exits
 }
 
 // Director orchestrates the request handling flow after initial parsing by the handler.
@@ -397,7 +399,10 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 		// processing all previously queued chunks before running the final chunk synchronously.
 		if val, ok := d.responseBodyQueues.LoadAndDelete(requestID); ok {
 			q := val.(*responseBodyQueue)
+			q.mu.Lock()
+			q.closed = true
 			close(q.ch)
+			q.mu.Unlock()
 			<-q.done // wait for all queued chunks to be processed
 		}
 		// Run the final chunk synchronously so DynamicMetadata is available for the response.
@@ -411,17 +416,21 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 			response:       response,
 			targetEndpoint: reqCtx.TargetPod,
 		}
-		if val, ok := d.responseBodyQueues.Load(requestID); ok {
-			val.(*responseBodyQueue).ch <- work
+		q := &responseBodyQueue{
+			ch:   make(chan responseBodyWork, 100),
+			done: make(chan struct{}),
+		}
+		val, loaded := d.responseBodyQueues.LoadOrStore(requestID, q)
+		if loaded {
+			q = val.(*responseBodyQueue)
 		} else {
-			q := &responseBodyQueue{
-				ch:   make(chan responseBodyWork, 100),
-				done: make(chan struct{}),
-			}
-			d.responseBodyQueues.Store(requestID, q)
 			go d.processResponseBodyQueue(q)
+		}
+		q.mu.Lock()
+		if !q.closed {
 			q.ch <- work
 		}
+		q.mu.Unlock()
 	}
 	logger.V(logutil.TRACE).Info("Exiting HandleResponseBodyChunk")
 	return reqCtx
