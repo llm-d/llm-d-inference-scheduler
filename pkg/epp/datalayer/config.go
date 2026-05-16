@@ -18,6 +18,7 @@ package datalayer
 
 import (
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
 
 // Config defines the configuration of EPP data layer, as the set of DataSources
@@ -28,8 +29,10 @@ type Config struct {
 	Sources []DataSourceConfig // the data sources configured in the data layer
 }
 
-// DataSourceConfig defines the configuration of a specific DataSource
+// DataSourceConfig defines the configuration of a specific DataSource.
+// Extractors are type-asserted to the source's variant at Configure time;
+// PollingDispatchers consume them via AppendExtractor.
 type DataSourceConfig struct {
-	Plugin     fwkdl.DataSource      // the data source plugin instance
-	Extractors []fwkdl.ExtractorBase // extractors defined for the data source
+	Plugin     fwkdl.DataSource // the data source plugin instance
+	Extractors []plugin.Plugin  // extractors defined for the data source
 }

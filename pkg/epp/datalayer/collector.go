@@ -37,10 +37,6 @@ import (
 // to only update on endpoint addition/change and deletion. This can also be used
 // to centrally track statistics such errors, active routines, etc.
 
-const (
-	defaultCollectionTimeout = time.Second
-)
-
 // Ticker implements a time source for periodic invocation.
 // The Ticker is passed in as parameter a Collector to allow control over time
 // progress in tests, ensuring tests are deterministic and fast.
@@ -84,27 +80,17 @@ func NewCollector() *Collector {
 }
 
 // Start launches the collection goroutine.
-func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.ExtractorBase) error {
-	if len(pollers) == 0 {
+func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, dispatchers []fwkdl.PollingDispatcher) error {
+	if len(dispatchers) == 0 {
 		return errors.New("cannot start collector with empty sources")
 	}
-	for _, src := range pollers {
-		if src == nil {
+	for _, d := range dispatchers {
+		if d == nil {
 			return errors.New("cannot add nil data source")
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-
-	// Filter to poll-capable extractors up front so the hot loop avoids per-tick type assertions.
-	pollingExtractors := make(map[string][]fwkdl.Extractor, len(extractors))
-	for name, exts := range extractors {
-		for _, ext := range exts {
-			if e, ok := ext.(fwkdl.Extractor); ok {
-				pollingExtractors[name] = append(pollingExtractors[name], e)
-			}
-		}
 	}
 
 	c.mu.Lock()
@@ -114,7 +100,7 @@ func (c *Collector) Start(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint,
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
-	go c.run(ctx, ticker, ep, pollers, pollingExtractors)
+	go c.run(ctx, ticker, ep, dispatchers)
 	return nil
 }
 
@@ -129,7 +115,7 @@ func (c *Collector) Stop() {
 	}
 }
 
-func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, pollers []fwkdl.PollingDataSource, extractors map[string][]fwkdl.Extractor) {
+func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, dispatchers []fwkdl.PollingDispatcher) {
 	defer func() {
 		close(c.done)
 		ticker.Stop()
@@ -141,42 +127,25 @@ func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, p
 		case <-ctx.Done():
 			return
 		case <-ticker.Channel():
-			for _, src := range pollers {
+			for _, d := range dispatchers {
 				if ctx.Err() != nil {
 					return
 				}
-				c.pollOne(ctx, src, ep, extractors, logger)
+				c.dispatchOne(ctx, d, ep, logger)
 			}
 		}
 	}
 }
 
-func (c *Collector) pollOne(ctx context.Context, src fwkdl.PollingDataSource, ep fwkdl.Endpoint, extractors map[string][]fwkdl.Extractor, logger logr.Logger) {
-	tn := src.TypedName()
-
-	pollCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
-	defer cancel()
-	data, err := src.Poll(pollCtx, ep)
-	if err != nil {
+// dispatchOne ticks one dispatcher. The dispatcher owns its own per-step
+// timeouts; the collector does not wrap ctx. A non-nil return indicates a
+// poll-level failure (fetch failed); per-extractor failures are recorded in
+// DataLayerExtractErrorsTotal by the dispatcher itself and do not surface
+// here. This keeps the poll/extract error counters cleanly separated.
+func (c *Collector) dispatchOne(ctx context.Context, d fwkdl.PollingDispatcher, ep fwkdl.Endpoint, logger logr.Logger) {
+	tn := d.TypedName()
+	if err := d.Dispatch(ctx, ep); err != nil {
 		metrics.DataLayerPollErrorsTotal.WithLabelValues(tn.Type).Inc()
 		logger.V(logging.DEBUG).Info("poll failed", "source", tn, "err", err)
-		return
-	}
-	if data == nil {
-		return
-	}
-
-	for _, ext := range extractors[tn.Name] {
-		if ctx.Err() != nil {
-			return
-		}
-		extCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
-		err := ext.Extract(extCtx, data, ep)
-		cancel()
-		if err != nil {
-			extName := ext.TypedName()
-			metrics.DataLayerExtractErrorsTotal.WithLabelValues(tn.Type, extName.Type).Inc()
-			logger.V(logging.DEBUG).Info("extract failed", "source", tn, "extractor", extName, "err", err)
-		}
 	}
 }

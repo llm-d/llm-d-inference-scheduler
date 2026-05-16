@@ -28,6 +28,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/mocks"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/notifications"
 )
@@ -45,7 +46,7 @@ func setupRuntimeWithExtractor(r *datalayer.Runtime, extractorName string) (*moc
 	ext := mocks.NewNotificationExtractor(extractorName)
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
-			{Plugin: src, Extractors: []fwkdl.ExtractorBase{ext}},
+			{Plugin: src, Extractors: []fwkplugin.Plugin{ext}},
 		},
 	}
 	return ext, r.Configure(cfg, false, "", logger)
@@ -141,7 +142,7 @@ func TestRuntimeNotificationDispatch(t *testing.T) {
 				ext2 := mocks.NewNotificationExtractor("extractor-2")
 				cfg := &datalayer.Config{
 					Sources: []datalayer.DataSourceConfig{
-						{Plugin: src, Extractors: []fwkdl.ExtractorBase{ext1, ext2}},
+						{Plugin: src, Extractors: []fwkplugin.Plugin{ext1, ext2}},
 					},
 				}
 				return ext1, r.Configure(cfg, false, "", logger)
@@ -164,7 +165,7 @@ func TestRuntimeNotificationDispatch(t *testing.T) {
 				workingExtractor := mocks.NewNotificationExtractor("working-extractor")
 				cfg := &datalayer.Config{
 					Sources: []datalayer.DataSourceConfig{
-						{Plugin: src, Extractors: []fwkdl.ExtractorBase{errExtractor, workingExtractor}},
+						{Plugin: src, Extractors: []fwkplugin.Plugin{errExtractor, workingExtractor}},
 					},
 				}
 				return workingExtractor, r.Configure(cfg, false, "", logger)
@@ -216,7 +217,7 @@ func TestRuntimeNotificationWithRuntime(t *testing.T) {
 
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
-			{Plugin: src, Extractors: []fwkdl.ExtractorBase{extractor}},
+			{Plugin: src, Extractors: []fwkplugin.Plugin{extractor}},
 		},
 	}
 	require.NoError(t, r.Configure(cfg, false, "", logger))
@@ -243,8 +244,8 @@ func TestRuntimeNotificationDifferentGVKs(t *testing.T) {
 
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
-			{Plugin: podSrc, Extractors: []fwkdl.ExtractorBase{podExtractor}},
-			{Plugin: svcSrc, Extractors: []fwkdl.ExtractorBase{svcExtractor}},
+			{Plugin: podSrc, Extractors: []fwkplugin.Plugin{podExtractor}},
+			{Plugin: svcSrc, Extractors: []fwkplugin.Plugin{svcExtractor}},
 		},
 	}
 

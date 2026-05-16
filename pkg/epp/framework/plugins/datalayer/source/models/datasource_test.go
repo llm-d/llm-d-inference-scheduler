@@ -13,6 +13,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	extmodels "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/extractor/models"
 )
 
@@ -20,17 +21,16 @@ func TestDatasource(t *testing.T) {
 	srcPlugin, err := ModelDataSourceFactory("models-data-source",
 		json.RawMessage(`{"scheme":"https","path":"/models","insecureSkipVerify":true}`), nil)
 	assert.Nil(t, err, "failed to create http datasource")
-	source := srcPlugin.(fwkdl.PollingDataSource)
+	source := srcPlugin.(fwkdl.PollingDispatcher)
 
 	extPlugin, err := extmodels.ModelServerExtractorFactory("models-data-extractor", nil, nil)
 	assert.Nil(t, err, "failed to create extractor")
-	extractor := extPlugin.(fwkdl.Extractor)
 
 	cfg := &datalayer.Config{
 		Sources: []datalayer.DataSourceConfig{
 			{
 				Plugin:     source,
-				Extractors: []fwkdl.ExtractorBase{extractor},
+				Extractors: []fwkplugin.Plugin{extPlugin},
 			},
 		},
 	}
@@ -53,7 +53,6 @@ func TestDatasource(t *testing.T) {
 	endpoint := runtime.NewEndpoint(ctx, pod, nil)
 	assert.NotNil(t, endpoint, "failed to create endpoint")
 
-	data, err := source.Poll(ctx, endpoint)
-	assert.NotNil(t, err, "expected to fail to collect metrics")
-	assert.Nil(t, data)
+	err = source.Dispatch(ctx, endpoint)
+	assert.NotNil(t, err, "expected dispatch to fail (no real HTTP target)")
 }

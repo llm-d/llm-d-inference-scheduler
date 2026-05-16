@@ -18,7 +18,6 @@ package mocks
 
 import (
 	"context"
-	"reflect"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -61,16 +60,12 @@ func (m *NotificationExtractor) TypedName() fwkplugin.TypedName {
 	return fwkplugin.TypedName{Type: "mock-extractor", Name: m.name}
 }
 
-func (m *NotificationExtractor) ExpectedInputType() reflect.Type {
-	return reflect.TypeFor[fwkdl.NotificationEvent]()
-}
-
 func (m *NotificationExtractor) GVK() schema.GroupVersionKind {
 	return m.gvk
 }
 
-// ExtractNotification is the NotificationExtractor method — records the event.
-func (m *NotificationExtractor) ExtractNotification(_ context.Context, event fwkdl.NotificationEvent) error {
+// Extract records the event and returns any configured error.
+func (m *NotificationExtractor) Extract(_ context.Context, event fwkdl.NotificationEvent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.events = append(m.events, event)
@@ -93,11 +88,11 @@ func (m *NotificationExtractor) Reset() {
 	m.events = nil
 }
 
-// Extractor is a generic mock for Extractor interface.
-// It records call counts and optionally updates endpoint metrics.
+// Extractor is a generic mock for the typed Extractor[PollInput[Metrics]]
+// interface used by polling tests. It records call counts and optionally
+// updates endpoint metrics on each Extract.
 type Extractor struct {
 	name            string
-	inputType       reflect.Type
 	callCount       int
 	mu              sync.Mutex
 	extractErr      error
@@ -105,17 +100,11 @@ type Extractor struct {
 	metricsToUpdate *fwkdl.Metrics
 }
 
-// NewExtractor creates a new mock extractor with the given name and input type.
-func NewExtractor(name string, inputType reflect.Type) *Extractor {
-	return &Extractor{
-		name:      name,
-		inputType: inputType,
-	}
-}
-
-// NewPollingExtractor creates a mock extractor for polling data sources (Metrics type).
+// NewPollingExtractor creates a mock extractor for polling data sources.
+// The metrics-typed input matches the HTTPDataSource[Metrics] dispatcher
+// used by polling integration tests.
 func NewPollingExtractor(name string) *Extractor {
-	return NewExtractor(name, reflect.TypeFor[fwkdl.Metrics]())
+	return &Extractor{name: name}
 }
 
 // WithExtractError configures the extractor to return an error.
@@ -131,21 +120,18 @@ func (m *Extractor) WithMetricsUpdate(metrics *fwkdl.Metrics) *Extractor {
 	return m
 }
 
+// Type uses m.name so instances look like distinct plugin types; HTTP source dedupes appends by Type.
 func (m *Extractor) TypedName() fwkplugin.TypedName {
-	return fwkplugin.TypedName{Type: "mock-extractor", Name: m.name}
+	return fwkplugin.TypedName{Type: m.name, Name: m.name}
 }
 
-func (m *Extractor) ExpectedInputType() reflect.Type {
-	return m.inputType
-}
-
-func (m *Extractor) Extract(_ context.Context, data any, ep fwkdl.Endpoint) error {
+func (m *Extractor) Extract(_ context.Context, in fwkdl.PollInput[fwkdl.Metrics]) error {
 	m.mu.Lock()
 	m.callCount++
 	m.mu.Unlock()
 
-	if m.updateMetrics && m.metricsToUpdate != nil {
-		ep.UpdateMetrics(m.metricsToUpdate)
+	if m.updateMetrics && m.metricsToUpdate != nil && in.Endpoint != nil {
+		in.Endpoint.UpdateMetrics(m.metricsToUpdate)
 	}
 
 	return m.extractErr
