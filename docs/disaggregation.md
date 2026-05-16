@@ -516,8 +516,7 @@ Custom profile names (if your scheduling profiles are not named `decode`/`prefil
 ---
 
 ## References
-- vLLM: [Disaggregated Prefill V1](https://docs.vllm.ai/en/stable/examples/offline_inference/disaggregated-prefill-v1/)
-- vLLM: [Disaggregated Prefill](https://docs.vllm.ai/en/stable/examples/offline_inference/disaggregated_prefill/)
+- vLLM: [Disaggregated Prefill](https://docs.vllm.ai/en/latest/features/disagg_prefill/)
 - vLLM: [Encode Prefill Decode Disaggregation Design](https://docs.google.com/document/d/1aed8KtC6XkXtdoV87pWT0a8OJlZ-CpnuLLzmR8l9BAE/edit?tab=t.0#heading=h.9xkkijtnbbje)
 - vLLM: [Disaggregated Encoder](https://docs.vllm.ai/en/latest/features/disagg_encoder/)
 - vLLM: [[RFC]: Prototype Separating Vision Encoder to Its Own Worker](https://github.com/vllm-project/vllm/issues/20799)}
