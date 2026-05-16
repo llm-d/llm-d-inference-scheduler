@@ -18,7 +18,6 @@ include Makefile.gen.mk
 TARGETOS ?= $(shell command -v go >/dev/null 2>&1 && go env GOOS || uname -s | tr '[:upper:]' '[:lower:]')
 TARGETARCH ?= $(shell command -v go >/dev/null 2>&1 && go env GOARCH || uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/; s/armv7l/arm/')
 PROJECT_NAME ?= llm-d-router
-# TODO: decide whether EPP_IMAGE_NAME shoudl be router-endpoint-picker or llm-d-router-endpoint-picker
 EPP_IMAGE_NAME ?= llm-d-router-endpoint-picker
 SIDECAR_IMAGE_NAME ?= llm-d-router-disagg-sidecar
 VLLM_SIMULATOR_IMAGE_NAME ?= llm-d-inference-sim
