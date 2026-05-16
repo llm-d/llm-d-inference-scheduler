@@ -48,6 +48,7 @@ type dataProducer struct {
 	config      config
 	indexerInst indexerInterface
 	pluginState *plugin.PluginState
+	tokenEstimator TokenEstimator
 	wg          sync.WaitGroup // Used for waiting on async cache updates in tests.
 }
 
@@ -83,9 +84,10 @@ func newDataProducer(ctx context.Context, config config, handle plugin.Handle) (
 			Type: ApproxPrefixCachePluginType,
 			Name: ApproxPrefixCachePluginType,
 		},
-		config:      config,
-		indexerInst: indexer,
-		pluginState: plugin.NewPluginState(ctx),
+		config:         config,
+		indexerInst:    indexer,
+		pluginState:    plugin.NewPluginState(ctx),
+		tokenEstimator: NewApproximatePrefixCacheTokenEstimator(ctx, config.Multimodal),
 	}
 
 	if handle != nil {
@@ -138,7 +140,7 @@ func (p *dataProducer) Produce(ctx context.Context, request *fwksched.InferenceR
 	if p.config.MaxPrefixTokensToMatch > 0 && blockSize > 0 {
 		maxBlocks = p.config.MaxPrefixTokensToMatch / blockSize
 	}
-	hashes := hashPrompt(ctx, request, blockSize, maxBlocks)
+	hashes := getBlockHashes(ctx, request, blockSize, maxBlocks, p.tokenEstimator)
 	total := len(hashes)
 	prefixCacheServers := p.matchLongestPrefix(ctx, hashes)
 
@@ -247,11 +249,15 @@ func (p *dataProducer) GetBlockSize(endpoints []fwksched.Endpoint) int {
 // ApproxPrefixCacheFactory is the factory function for the prefix cache data producer plugin.
 func ApproxPrefixCacheFactory(name string, rawParameters json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
 	parameters := defaultConfig
+	logger := log.FromContext(handle.Context()).V(logutil.DEFAULT)
+	logger.Info(fmt.Sprintf("Using raw parameters: %s", rawParameters))
 	if rawParameters != nil {
 		if err := json.Unmarshal(rawParameters, &parameters); err != nil {
+			logger.Error(err, "failed to unmarshal raw parameters")
 			return nil, fmt.Errorf("failed to unmarshal prefix cache parameters: %w", err)
 		}
 	}
+	logger.Info(fmt.Sprintf("Using parameters: %v", parameters))
 
 	// pluginState will be initialized by newDataProducer as we pass nil here.
 	p, err := newDataProducer(handle.Context(), parameters, handle)

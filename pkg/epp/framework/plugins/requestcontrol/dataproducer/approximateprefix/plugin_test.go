@@ -120,7 +120,7 @@ func TestPreRequest(t *testing.T) {
 	p.wg.Wait()
 
 	// 4. Verify indexer was updated
-	hashes := hashPrompt(context.Background(), req1, 4, defaultMaxPrefixBlocks)
+	hashes := getBlockHashes(context.Background(), req1, config.BlockSizeTokens, defaultMaxPrefixBlocks, NewApproximatePrefixCacheTokenEstimator(context.Background(), &defaultMultimodalConfig))
 	for _, hash := range hashes {
 		pods := p.indexer().Get(hash)
 		assert.Contains(t, pods, ServerID(endpoint1.GetMetadata().NamespacedName))
@@ -298,6 +298,7 @@ func TestPrefixPluginChatCompletionsMultimodalSameUrlMatches(t *testing.T) {
 		AutoTune:               false,
 		MaxPrefixBlocksToMatch: defaultMaxPrefixBlocks,
 		LRUCapacityPerServer:   defaultLRUCapacityPerServer,
+		Multimodal:             &defaultMultimodalConfig,
 	}
 	p, _ := newDataProducer(context.Background(), config, nil)
 
@@ -370,6 +371,7 @@ func TestPrefixPluginChatCompletionsMultimodalDifferentUrlPartialMatch(t *testin
 		AutoTune:               false,
 		MaxPrefixBlocksToMatch: defaultMaxPrefixBlocks,
 		LRUCapacityPerServer:   defaultLRUCapacityPerServer,
+		Multimodal:             &defaultMultimodalConfig,
 	}
 	p, _ := newDataProducer(context.Background(), config, nil)
 
@@ -435,6 +437,155 @@ func TestPrefixPluginChatCompletionsMultimodalDifferentUrlPartialMatch(t *testin
 	prefixInfo := info.(*attrprefix.PrefixCacheMatchInfo)
 	// Not a full cache hit as the image url has changed
 	assert.Less(t, prefixInfo.MatchBlocks(), prefixInfo.TotalBlocks(), "should not have full prefix cache hit")
+}
+
+func TestPrefixPluginChatCompletionsMultimodalSameImageContentMatches(t *testing.T) {
+	config := config{
+		BlockSizeTokens:        32,
+		AutoTune:               false,
+		MaxPrefixBlocksToMatch: defaultMaxPrefixBlocks,
+		LRUCapacityPerServer:   defaultLRUCapacityPerServer,
+		Multimodal:             &defaultMultimodalConfig,
+	}
+	p, _ := newDataProducer(context.Background(), config, nil)
+
+	endpoint1 := fwksched.NewEndpoint(&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, &fwkdl.Metrics{}, fwkdl.NewAttributes())
+	endpoints := []fwksched.Endpoint{endpoint1}
+
+	req1 := &fwksched.InferenceRequest{
+		RequestID:   uuid.NewString(),
+		TargetModel: "test-model1",
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{
+					{
+						Role: "user",
+						Content: fwkrh.Content{
+							Structured: []fwkrh.ContentBlock{
+								{Type: "text", Text: "Describe"},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: base64Image180p1}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_ = p.Produce(context.Background(), req1, endpoints)
+	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
+	initialHashCount := len(state1.PrefixHashes)
+	assert.Greater(t, initialHashCount, 0)
+
+	schedulingResult := &fwksched.SchedulingResult{
+		PrimaryProfileName: "default",
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
+			"default": {TargetEndpoints: []fwksched.Endpoint{endpoint1}},
+		},
+	}
+	p.PreRequest(context.Background(), req1, schedulingResult)
+	p.wg.Wait()
+
+	req2 := &fwksched.InferenceRequest{
+		RequestID:   uuid.NewString(),
+		TargetModel: "test-model1",
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{
+					{
+						Role: "user",
+						Content: fwkrh.Content{
+							Structured: []fwkrh.ContentBlock{
+								{Type: "text", Text: "Describe"},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: base64Image180p1}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_ = p.Produce(context.Background(), req2, endpoints)
+	info, _ := endpoint1.Get(attrprefix.PrefixCacheMatchInfoKey)
+	prefixInfo := info.(*attrprefix.PrefixCacheMatchInfo)
+
+	// Since same prefix hashes are expected to be generated
+	assert.Equal(t, prefixInfo.MatchBlocks(), prefixInfo.TotalBlocks())
+}
+
+func TestPrefixPluginChatCompletionsMultimodalPrefixImageContentMatches(t *testing.T) {
+	config := config{
+		BlockSizeTokens:        32,
+		AutoTune:               false,
+		MaxPrefixBlocksToMatch: defaultMaxPrefixBlocks,
+		LRUCapacityPerServer:   defaultLRUCapacityPerServer,
+		Multimodal:             &defaultMultimodalConfig,
+	}
+	p, _ := newDataProducer(context.Background(), config, nil)
+
+	endpoint1 := fwksched.NewEndpoint(&fwkdl.EndpointMetadata{NamespacedName: k8stypes.NamespacedName{Name: "pod1"}}, &fwkdl.Metrics{}, fwkdl.NewAttributes())
+	endpoints := []fwksched.Endpoint{endpoint1}
+
+	req1 := &fwksched.InferenceRequest{
+		RequestID:   uuid.NewString(),
+		TargetModel: "test-model1",
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{
+					{
+						Role: "user",
+						Content: fwkrh.Content{
+							Structured: []fwkrh.ContentBlock{
+								{Type: "text", Text: "Describe"},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: base64Image180p1}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_ = p.Produce(context.Background(), req1, endpoints)
+	state1, _ := plugin.ReadPluginStateKey[*SchedulingContextState](p.PluginState(), req1.RequestID, plugin.StateKey(ApproxPrefixCachePluginType))
+	initialHashCount := len(state1.PrefixHashes)
+	assert.Greater(t, initialHashCount, 0)
+
+	schedulingResult := &fwksched.SchedulingResult{
+		PrimaryProfileName: "default",
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
+			"default": {TargetEndpoints: []fwksched.Endpoint{endpoint1}},
+		},
+	}
+	p.PreRequest(context.Background(), req1, schedulingResult)
+	p.wg.Wait()
+
+	req2 := &fwksched.InferenceRequest{
+		RequestID:   uuid.NewString(),
+		TargetModel: "test-model1",
+		Body: &fwkrh.InferenceRequestBody{
+			ChatCompletions: &fwkrh.ChatCompletionsRequest{
+				Messages: []fwkrh.Message{
+					{
+						Role: "user",
+						Content: fwkrh.Content{
+							Structured: []fwkrh.ContentBlock{
+								{Type: "text", Text: "Describe"},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: base64Image180p1}},
+								{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: base64Image180p2}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_ = p.Produce(context.Background(), req2, endpoints)
+	info, _ := endpoint1.Get(attrprefix.PrefixCacheMatchInfoKey)
+	prefixInfo := info.(*attrprefix.PrefixCacheMatchInfo)
+
+	// Since same prefix hashes are expected to be generated
+	assert.Equal(t, 16, prefixInfo.MatchBlocks())
+	assert.Equal(t, 33, prefixInfo.TotalBlocks())
+
 }
 
 func TestPrefixPluginAutoTune(t *testing.T) {
