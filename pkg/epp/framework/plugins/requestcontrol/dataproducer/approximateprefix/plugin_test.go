@@ -601,6 +601,22 @@ func TestGetBlockSize_ManualConfigHonoredBelowMinimum(t *testing.T) {
 	assert.Equal(t, 32, got, "manual BlockSizeTokens below minimum should be honored, not clamped")
 }
 
+// TestGetBlockSize_AutotuneFallbackClampsLowConfig verifies that the floor applies
+// to the autotune fallback path too — when AutoTune is on but no endpoint metric is
+// available, the configured BlockSizeTokens still gets clamped. This is the path the
+// default config (AutoTune=true, BlockSizeTokens=16) would land on if endpoint
+// metrics are missing.
+func TestGetBlockSize_AutotuneFallbackClampsLowConfig(t *testing.T) {
+	cfg := config{AutoTune: true, BlockSizeTokens: 16} // default config shape
+	p, err := newDataProducer(context.Background(), cfg, nil)
+	assert.NoError(t, err)
+
+	// No endpoints passed — exercise the autotune fallback path.
+	got := p.GetBlockSize(nil)
+	assert.Equal(t, minBlockSizeTokens, got,
+		"autotune fallback should clamp BlockSizeTokens to the floor when below minimum")
+}
+
 // TestNewDataProducer_AcceptsLowManualBlockSize verifies that a low BlockSizeTokens
 // with AutoTune off does not cause initialization to fail — the operator gets a
 // warning logged but the producer comes up. (We intentionally don't assert on log
