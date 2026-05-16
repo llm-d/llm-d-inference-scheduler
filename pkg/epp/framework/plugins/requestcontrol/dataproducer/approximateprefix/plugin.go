@@ -76,6 +76,21 @@ func newDataProducer(ctx context.Context, config config, handle plugin.Handle) (
 	if config.MaxPrefixTokensToMatch < 0 {
 		return nil, fmt.Errorf("invalid configuration: MaxPrefixTokensToMatch must be >= 0 (current value: %d)", config.MaxPrefixTokensToMatch)
 	}
+
+	// Warn (but don't reject) on a manually set BlockSizeTokens below the
+	// recommended minimum: the routing-side indexer keeps one LRU entry per
+	// (pod, block), so small values can cause gigabyte-scale memory growth at
+	// scale. The autotune path clamps automatically (see GetBlockSize); manual
+	// configuration is honored verbatim so operators retain an escape hatch.
+	if config.BlockSizeTokens > 0 && config.BlockSizeTokens < minBlockSizeTokens {
+		log.FromContext(ctx).Info(
+			"WARNING: blockSizeTokens is below the recommended minimum; this can cause high EPP memory usage at scale",
+			"blockSizeTokens", config.BlockSizeTokens,
+			"recommendedMinimum", minBlockSizeTokens,
+			"issue", "https://github.com/llm-d/llm-d-router/issues/1158",
+		)
+	}
+
 	indexer := newIndexer(ctx, config.LRUCapacityPerServer)
 
 	p := &dataProducer{
@@ -230,6 +245,15 @@ func (p *dataProducer) matchLongestPrefix(ctx context.Context, hashes []blockHas
 }
 
 // GetBlockSize returns the block size in tokens, potentially auto-tuned from endpoint metrics.
+//
+// When AutoTune is on, the value is clamped at minBlockSizeTokens to bound EPP indexer
+// memory: the routing-side indexer holds one LRU entry per (pod, block), so a small
+// model-server block size (e.g., vLLM's default of 16) would otherwise inflate memory
+// by ~64x. Routing intentionally measures matches at coarser granularity than the
+// model server's true block size. See #1158.
+//
+// Manual configuration (AutoTune off) is honored verbatim; a startup warning is
+// logged in newDataProducer when the configured value is below the recommended floor.
 func (p *dataProducer) GetBlockSize(endpoints []fwksched.Endpoint) int {
 	if !p.config.AutoTune || len(endpoints) == 0 {
 		return p.config.BlockSizeTokens
@@ -238,6 +262,9 @@ func (p *dataProducer) GetBlockSize(endpoints []fwksched.Endpoint) int {
 	if endpoint := endpoints[0]; endpoint.GetMetrics() != nil {
 		cacheBlockSize := endpoint.GetMetrics().CacheBlockSize
 		if cacheBlockSize > 0 {
+			if cacheBlockSize < minBlockSizeTokens {
+				return minBlockSizeTokens
+			}
 			return cacheBlockSize
 		}
 	}
