@@ -50,7 +50,7 @@ spec:
                 description: PoolRef is a reference to the inference pool.
                 properties:
                   group:
-                    default: llm-d.ai
+                    default: inference.networking.k8s.io
                     description: Group is the group of the referent.
                     maxLength: 253
                     pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
