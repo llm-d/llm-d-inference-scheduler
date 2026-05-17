@@ -29,9 +29,9 @@ import (
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 )
 
 var _ requestcontrol.PreRequest = &PredictedLatency{}
@@ -150,7 +150,7 @@ func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *fwksched.
 			}
 		}
 	} else {
-		processTokenForLatencyPrediction(ctx, pl.latencypredictor, pl.config.EndpointRoleLabel, predictedLatencyCtx, targetMetadata, now, pl.config.SamplingMean, pl.config.MaxDecodeTokenSamplesForPrediction)
+		processTokenForLatencyPrediction(ctx, pl.latencypredictor, pl.config.EndpointRoleLabel, predictedLatencyCtx, targetMetadata, now, pl.config.SamplingMean, pl.config.MaxDecodeTokenSamplesForPrediction, pl.metricsRecorder)
 	}
 
 	if response.EndOfStream {
@@ -162,10 +162,10 @@ func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *fwksched.
 		if predictedLatencyCtx.ttft > 0 {
 			// In non-streaming mode, TTFT represents full e2e latency.
 			logger.V(logutil.TRACE).Info("Averages calculated", "avgActualTTFT", predictedLatencyCtx.ttft, "avgPredictedTTFT", predictedLatencyCtx.predictedTTFT)
-			metrics.RecordRequestTTFT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.ttft/1000)
-			metrics.RecordRequestPredictedTTFT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.predictedTTFT/1000)
+			pl.metricsRecorder.RecordRequestTTFT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.ttft/1000)
+			pl.metricsRecorder.RecordRequestPredictedTTFT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.predictedTTFT/1000)
 			if predictedLatencyCtx.ttftSLO > 0 {
-				metrics.RecordRequestTTFTWithSLO(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.ttft, predictedLatencyCtx.ttftSLO)
+				pl.metricsRecorder.RecordRequestTTFTWithSLO(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.ttft, predictedLatencyCtx.ttftSLO)
 			}
 		}
 
@@ -176,10 +176,10 @@ func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *fwksched.
 
 		if predictedLatencyCtx.avgTPOT > 0 {
 			logger.V(logutil.TRACE).Info("Averages calculated", "avgActualTPOT", predictedLatencyCtx.avgTPOT, "avgPredictedTPOT", predictedLatencyCtx.avgPredictedTPOT)
-			metrics.RecordRequestTPOT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.avgTPOT/1000)
-			metrics.RecordRequestPredictedTPOT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.avgPredictedTPOT/1000)
+			pl.metricsRecorder.RecordRequestTPOT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.avgTPOT/1000)
+			pl.metricsRecorder.RecordRequestPredictedTPOT(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.avgPredictedTPOT/1000)
 			if predictedLatencyCtx.avgTPOTSLO > 0 {
-				metrics.RecordRequestTPOTWithSLO(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.avgTPOT, predictedLatencyCtx.avgTPOTSLO)
+				pl.metricsRecorder.RecordRequestTPOTWithSLO(ctx, predictedLatencyCtx.incomingModelName, request.TargetModel, predictedLatencyCtx.avgTPOT, predictedLatencyCtx.avgTPOTSLO)
 			}
 
 			if m, err := getLatestMetricsForProfile(predictedLatencyCtx, ""); err == nil {
@@ -330,6 +330,7 @@ func processTokenForLatencyPrediction(
 	now time.Time,
 	samplingMean float64,
 	maxDecodeTokenSamplesForPrediction int,
+	metricsRecorder plugin.MetricsRecorder,
 ) {
 	logger := log.FromContext(ctx)
 
@@ -378,7 +379,7 @@ func processTokenForLatencyPrediction(
 			predictedLatencyCtx.predictedTPOTObservations = append(predictedLatencyCtx.predictedTPOTObservations, p.TPOT)
 			predictedLatencyCtx.avgPredictedTPOT = calculateRunningAverage(predictedLatencyCtx.avgPredictedTPOT, p.TPOT, len(predictedLatencyCtx.predictedTPOTObservations))
 		}
-		metrics.RecordRequestTPOTPredictionDuration(ctx, predictedLatencyCtx.schedulingRequest.TargetModel, predictedLatencyCtx.incomingModelName, dur.Seconds())
+		metricsRecorder.RecordRequestTPOTPredictionDuration(ctx, predictedLatencyCtx.schedulingRequest.TargetModel, predictedLatencyCtx.incomingModelName, dur.Seconds())
 		predictedLatencyCtx.decodeTokenSampler.recordPrediction(predictedLatencyCtx.generatedTokenCount)
 	}
 

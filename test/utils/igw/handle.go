@@ -39,6 +39,10 @@ func (h *testHandle) PodList() []types.NamespacedName {
 	return []types.NamespacedName{}
 }
 
+func (h *testHandle) Metrics() plugin.MetricsRecorder {
+	return plugin.NewNoopMetricsRecorder()
+}
+
 type testHandlePlugins struct {
 	plugins map[string]plugin.Plugin
 }
