@@ -31,6 +31,7 @@ import (
 
 	reqcommon "github.com/llm-d/llm-d-inference-scheduler/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 )
@@ -67,6 +68,7 @@ func createTestRouter() *PredictedLatency {
 		),
 		// runningRequestLists is a sync.Map and needs no initialization
 		latencypredictor: nil,
+		metricsRecorder:  plugin.NewNoopMetricsRecorder(),
 		config:           cfg,
 	}
 }

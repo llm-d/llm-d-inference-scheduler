@@ -30,7 +30,6 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/attribute/prefix"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/metrics"
 )
 
 const (
@@ -44,11 +43,12 @@ var (
 
 // dataProducer is a plugin that produces data consumed by approx prefix cache aware scheduling.
 type dataProducer struct {
-	typedName   plugin.TypedName
-	config      config
-	indexerInst indexerInterface
-	pluginState *plugin.PluginState
-	wg          sync.WaitGroup // Used for waiting on async cache updates in tests.
+	typedName       plugin.TypedName
+	config          config
+	indexerInst     indexerInterface
+	metricsRecorder plugin.MetricsRecorder
+	pluginState     *plugin.PluginState
+	wg              sync.WaitGroup // Used for waiting on async cache updates in tests.
 }
 
 // TypedName returns the type and name of the plugin.
@@ -76,16 +76,18 @@ func newDataProducer(ctx context.Context, config config, handle plugin.Handle) (
 	if config.MaxPrefixTokensToMatch < 0 {
 		return nil, fmt.Errorf("invalid configuration: MaxPrefixTokensToMatch must be >= 0 (current value: %d)", config.MaxPrefixTokensToMatch)
 	}
-	indexer := newIndexer(ctx, config.LRUCapacityPerServer)
+	metricsRecorder := plugin.MetricsRecorderFromHandle(handle)
+	indexer := newIndexer(ctx, config.LRUCapacityPerServer, metricsRecorder)
 
 	p := &dataProducer{
 		typedName: plugin.TypedName{
 			Type: ApproxPrefixCachePluginType,
 			Name: ApproxPrefixCachePluginType,
 		},
-		config:      config,
-		indexerInst: indexer,
-		pluginState: plugin.NewPluginState(ctx),
+		config:          config,
+		indexerInst:     indexer,
+		metricsRecorder: metricsRecorder,
+		pluginState:     plugin.NewPluginState(ctx),
 	}
 
 	if handle != nil {
@@ -196,7 +198,7 @@ func (p *dataProducer) PreRequest(ctx context.Context, request *fwksched.Inferen
 	matchLen := state.PrefixCacheServers[ServerID(targetEndpoint.GetMetadata().NamespacedName)]
 	blockSize := p.GetBlockSize(primaryProfileResult.TargetEndpoints)
 	avgChars := averageCharactersPerToken
-	metrics.RecordPrefixCacheMatch(matchLen*blockSize*avgChars, total*blockSize*avgChars)
+	p.metricsRecorder.RecordPrefixCacheMatch(matchLen*blockSize*avgChars, total*blockSize*avgChars)
 }
 
 func (p *dataProducer) makeserver(targetEndpoint fwksched.Endpoint) server {

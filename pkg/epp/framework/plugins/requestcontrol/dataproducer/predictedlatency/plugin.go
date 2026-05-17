@@ -66,6 +66,7 @@ const (
 type PredictedLatency struct {
 	typedName             plugin.TypedName
 	latencypredictor      latencypredictor.PredictorInterface
+	metricsRecorder       plugin.MetricsRecorder
 	runningRequestLists   sync.Map                                      // Key: types.NamespacedName, Value: *requestPriorityQueue
 	sloContextStore       *ttlcache.Cache[string, *predictedLatencyCtx] // TTL cache for request contexts
 	config                Config
@@ -151,7 +152,9 @@ func PredictedLatencyFactory(name string, rawParameters json.RawMessage, handle 
 		return nil, fmt.Errorf("failed to start latency predictor: %w", err)
 	}
 
-	return NewPredictedLatency(parameters, predictor).WithName(name), nil
+	metricsRecorder := plugin.MetricsRecorderFromHandle(handle)
+
+	return NewPredictedLatency(parameters, predictor).WithMetricsRecorder(metricsRecorder).WithName(name), nil
 }
 
 func (c *Config) validate() error {
@@ -175,10 +178,13 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// NewPredictedLatency constructs the plugin with a NoopMetricsRecorder by default.
+// Use WithMetricsRecorder to attach a real recorder.
 func NewPredictedLatency(config Config, predictor latencypredictor.PredictorInterface) *PredictedLatency {
 	predictedLatency := &PredictedLatency{
 		typedName:        plugin.TypedName{Type: LatencyDataProviderPluginType, Name: LatencyDataProviderPluginType},
 		latencypredictor: predictor,
+		metricsRecorder:  plugin.NewNoopMetricsRecorder(),
 		config:           config,
 	}
 
@@ -227,6 +233,15 @@ func (pl *PredictedLatency) TypedName() plugin.TypedName {
 
 func (pl *PredictedLatency) WithName(name string) *PredictedLatency {
 	pl.typedName.Name = name
+	return pl
+}
+
+// WithMetricsRecorder sets the metrics recorder used by the plugin. A nil recorder
+// is ignored and the default NoopMetricsRecorder is retained.
+func (pl *PredictedLatency) WithMetricsRecorder(recorder plugin.MetricsRecorder) *PredictedLatency {
+	if recorder != nil {
+		pl.metricsRecorder = recorder
+	}
 	return pl
 }
 
