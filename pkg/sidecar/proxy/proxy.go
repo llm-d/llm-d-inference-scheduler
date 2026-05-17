@@ -83,7 +83,7 @@ const (
 
 	// LegacyPoolGroup is the deprecated API group for llm-d inference APIs.
 	LegacyPoolGroup = "inference.networking.x-k8s.io"
-	)
+)
 
 // APIType represents the type of OpenAI API being used.
 type APIType int
