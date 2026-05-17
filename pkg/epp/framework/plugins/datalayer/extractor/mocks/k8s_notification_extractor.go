@@ -31,6 +31,7 @@ import (
 // It records all events it receives and provides helper methods for test assertions.
 type NotificationExtractor struct {
 	name       string
+	typeName   string
 	gvk        schema.GroupVersionKind
 	events     []fwkdl.NotificationEvent
 	mu         sync.Mutex
@@ -38,10 +39,12 @@ type NotificationExtractor struct {
 }
 
 // NewNotificationExtractor creates a new mock extractor with the given name.
+// Type defaults to name so distinct instances have distinct types.
 func NewNotificationExtractor(name string) *NotificationExtractor {
 	return &NotificationExtractor{
-		name: name,
-		gvk:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"},
+		name:     name,
+		typeName: name,
+		gvk:      schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"},
 	}
 }
 
@@ -57,8 +60,15 @@ func (m *NotificationExtractor) WithExtractError(err error) *NotificationExtract
 	return m
 }
 
+// WithType overrides the Type field returned by TypedName. Use this when
+// multiple mock instances must share the same type (e.g., dedup tests).
+func (m *NotificationExtractor) WithType(t string) *NotificationExtractor {
+	m.typeName = t
+	return m
+}
+
 func (m *NotificationExtractor) TypedName() fwkplugin.TypedName {
-	return fwkplugin.TypedName{Type: "mock-extractor", Name: m.name}
+	return fwkplugin.TypedName{Type: m.typeName, Name: m.name}
 }
 
 func (m *NotificationExtractor) ExpectedInputType() reflect.Type {
@@ -97,6 +107,7 @@ func (m *NotificationExtractor) Reset() {
 // It records call counts and optionally updates endpoint metrics.
 type Extractor struct {
 	name            string
+	typeName        string
 	inputType       reflect.Type
 	callCount       int
 	mu              sync.Mutex
@@ -106,9 +117,11 @@ type Extractor struct {
 }
 
 // NewExtractor creates a new mock extractor with the given name and input type.
+// Type defaults to name so distinct instances have distinct types.
 func NewExtractor(name string, inputType reflect.Type) *Extractor {
 	return &Extractor{
 		name:      name,
+		typeName:  name,
 		inputType: inputType,
 	}
 }
@@ -131,8 +144,15 @@ func (m *Extractor) WithMetricsUpdate(metrics *fwkdl.Metrics) *Extractor {
 	return m
 }
 
+// WithType overrides the Type field returned by TypedName. Use this when
+// multiple mock instances must share the same type (e.g., dedup tests).
+func (m *Extractor) WithType(t string) *Extractor {
+	m.typeName = t
+	return m
+}
+
 func (m *Extractor) TypedName() fwkplugin.TypedName {
-	return fwkplugin.TypedName{Type: "mock-extractor", Name: m.name}
+	return fwkplugin.TypedName{Type: m.typeName, Name: m.name}
 }
 
 func (m *Extractor) ExpectedInputType() reflect.Type {

@@ -152,8 +152,8 @@ func TestConfigure_DedupByExtractorType(t *testing.T) {
 	logger := newTestLogger(t)
 
 	src := notifications.NewEndpointDataSource(notifications.EndpointNotificationSourceType, "ep-src")
-	extFromConfig := extractormocks.NewEndpointExtractor("config-ext")
-	extFromCode := extractormocks.NewEndpointExtractor("code-ext")
+	extFromConfig := extractormocks.NewEndpointExtractor("config-ext").WithType("shared-type")
+	extFromCode := extractormocks.NewEndpointExtractor("code-ext").WithType("shared-type")
 
 	// User config wires extFromConfig to src.
 	cfg := &Config{
@@ -163,7 +163,7 @@ func TestConfigure_DedupByExtractorType(t *testing.T) {
 		}},
 	}
 
-	// Code registers extFromCode — same type as extFromConfig ("mock-endpoint-extractor").
+	// Code registers extFromCode — same type as extFromConfig ("shared-type").
 	require.NoError(t, r.Register(fwkdl.PendingRegistration{
 		Owner:      fwkplugin.TypedName{Type: "test-plugin", Name: "test"},
 		SourceType: notifications.EndpointNotificationSourceType,
