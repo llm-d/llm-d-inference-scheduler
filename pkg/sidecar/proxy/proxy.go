@@ -81,7 +81,7 @@ const (
 	// DefaultPoolGroup is the default pool group name
 	DefaultPoolGroup = "inference.networking.k8s.io"
 
-	// LegacyPoolGroup is the deprecated API group for llm-d inference APIs.
+	// LegacyPoolGroup is the legacy pool group name
 	LegacyPoolGroup = "inference.networking.x-k8s.io"
 )
 
