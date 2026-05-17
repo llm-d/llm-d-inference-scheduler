@@ -108,7 +108,11 @@ func (d *detector) Consumes() map[string]any {
 }
 
 func (d *detector) getLoad(m datalayer.AttributeMap) *attrconcurrency.InFlightLoad {
-	val, _ := datalayer.ReadAttribute[*attrconcurrency.InFlightLoad](m, attrconcurrency.InFlightLoadKey)
+	val, ok := datalayer.ReadAttribute[*attrconcurrency.InFlightLoad](m, attrconcurrency.InFlightLoadKey)
+	if !ok {
+		return &attrconcurrency.InFlightLoad{}
+	}
+
 	return val
 }
 
