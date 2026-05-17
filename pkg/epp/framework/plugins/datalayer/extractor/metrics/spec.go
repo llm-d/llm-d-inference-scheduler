@@ -23,19 +23,22 @@ import (
 	"strings"
 
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/model"
 
 	sourcemetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/datalayer/source/metrics"
 )
 
-// metricSpecRe matches: optional-space metric-name optional-space optional-{labels} optional-space end.
-// Prometheus metric names may contain letters, digits, underscores, and colons.
-var metricSpecRe = regexp.MustCompile(`^\s*([a-zA-Z_:][a-zA-Z0-9_:]*)\s*(?:\{([^}]*)\})?\s*$`)
+// metricSpecRE handles structural parsing: extracts the metric name token and optional label block.
+// Field validation (metric name syntax) is delegated to model.LegacyValidation.IsValidMetricName.
+var metricSpecRE = regexp.MustCompile(`^\s*(\S+?)\s*(?:\{([^}]*)\})?\s*$`)
 
-// labelPairRe matches a single key="value" label pair (after addQuotesToLabelValues normalisation).
-var labelPairRe = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*"([^"]*)"\s*$`)
+// labelPairRE handles structural parsing: extracts the key and value from a key="value" label pair
+// (after addQuotesToLabelValues normalisation). Field validation (label name syntax) is delegated
+// to model.LegacyValidation.IsValidLabelName.
+var labelPairRE = regexp.MustCompile(`^\s*(\S+?)\s*=\s*"([^"]*)"\s*$`)
 
-// addQuotesRe is the compiled form of the pattern used by addQuotesToLabelValues.
-var addQuotesRe = regexp.MustCompile(`(\w+)\s*=\s*([^",}\s]+)`)
+// addQuotesRE is the compiled form of the pattern used by addQuotesToLabelValues.
+var addQuotesRE = regexp.MustCompile(`(\w+)\s*=\s*([^",}\s]+)`)
 
 // Spec represents a single metric's specification.
 type Spec struct {
@@ -54,16 +57,16 @@ func parseStringToSpec(spec string) (*Spec, error) {
 
 	// Normalise unquoted label values so {label=value} and {label="value"} both work.
 	quoted := addQuotesToLabelValues(spec)
-	m := metricSpecRe.FindStringSubmatch(quoted)
-	if m == nil {
+	m := metricSpecRE.FindStringSubmatch(quoted)
+	if m == nil || !model.LegacyValidation.IsValidMetricName(m[1]) {
 		return nil, fmt.Errorf("not a valid metric specification: %q", spec)
 	}
 
 	metricLabels := make(map[string]string)
 	if labelBlock := strings.TrimSpace(m[2]); labelBlock != "" {
 		for _, pair := range strings.Split(labelBlock, ",") {
-			lm := labelPairRe.FindStringSubmatch(pair)
-			if lm == nil {
+			lm := labelPairRE.FindStringSubmatch(pair)
+			if lm == nil || !model.LegacyValidation.IsValidLabelName(lm[1]) {
 				return nil, fmt.Errorf("invalid label pair %q in specification: %q", pair, spec)
 			}
 			metricLabels[lm[1]] = lm[2]
@@ -76,7 +79,7 @@ func parseStringToSpec(spec string) (*Spec, error) {
 // addQuotesToLabelValues wraps label values with quotes, if missing,
 // allowing both {label=value} and {label="value"} inputs.
 func addQuotesToLabelValues(input string) string {
-	return addQuotesRe.ReplaceAllString(input, `$1="$2"`)
+	return addQuotesRE.ReplaceAllString(input, `$1="$2"`)
 }
 
 // extract the metric family is common to standard and LoRA spec's.
