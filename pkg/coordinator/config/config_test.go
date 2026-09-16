@@ -19,6 +19,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -49,6 +50,9 @@ func TestLoadDefaults(t *testing.T) {
 		{"server.listen_addr", cfg.Server.ListenAddr, ":8080"},
 		{"server.metrics_port", cfg.Server.MetricsPort, 9090},
 		{"server.metrics_cert_dir", cfg.Server.MetricsCertDir, ""},
+		{"server.secure_coordinator", cfg.Server.SecureCoordinator, true},
+		{"server.cert_path", cfg.Server.CertPath, ""},
+		{"server.tls_min_version", cfg.Server.TLSMinVersion, ""},
 		{"server.read_timeout", cfg.Server.ReadTimeout, 30 * time.Second},
 		{"server.write_timeout", cfg.Server.WriteTimeout, 120 * time.Second},
 		{"server.shutdown_timeout", cfg.Server.ShutdownTimeout, 25 * time.Second},
@@ -63,8 +67,13 @@ func TestLoadDefaults(t *testing.T) {
 			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
 		}
 	}
+
 	if got := cfg.Pipeline.ForwardResponseHeaders; len(got) != 1 || got[0] != "x-llm-d-disagg-revision" {
 		t.Errorf("pipeline.forward_response_headers = %v, want default revision header", got)
+	}
+
+	if len(cfg.Server.TLSCipherSuites) != 0 {
+		t.Errorf("server.tls_cipher_suites = %v, want empty", cfg.Server.TLSCipherSuites)
 	}
 }
 
@@ -97,6 +106,18 @@ func TestLoadEnvOverride(t *testing.T) {
 			envVal: "/etc/coordinator-metrics",
 			check:  func(c *Config) (any, any) { return c.Server.MetricsCertDir, "/etc/coordinator-metrics" },
 		},
+		{
+			name:   "secure coordinator",
+			envKey: "COORDINATOR_SERVER_SECURE_COORDINATOR",
+			envVal: "false",
+			check:  func(c *Config) (any, any) { return c.Server.SecureCoordinator, false },
+		},
+		{
+			name:   "inference listener certificate path",
+			envKey: "COORDINATOR_SERVER_CERT_PATH",
+			envVal: "/etc/coordinator-tls",
+			check:  func(c *Config) (any, any) { return c.Server.CertPath, "/etc/coordinator-tls" },
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -119,6 +140,32 @@ func TestLoadMetricsCertDir(t *testing.T) {
 	}
 	if got, want := cfg.Server.MetricsCertDir, "/etc/coordinator-metrics"; got != want {
 		t.Errorf("server.metrics_cert_dir = %q, want %q", got, want)
+	}
+}
+
+func TestLoadInferenceListenerTLS(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "server:\n  secure_coordinator: false\n  cert_path: /etc/coordinator-tls\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Server.SecureCoordinator {
+		t.Error("server.secure_coordinator = true, want false")
+	}
+	if got, want := cfg.Server.CertPath, "/etc/coordinator-tls"; got != want {
+		t.Errorf("server.cert_path = %q, want %q", got, want)
+	}
+}
+
+func TestLoadEnvOverrideCipherSuites(t *testing.T) {
+	t.Setenv("COORDINATOR_SERVER_TLS_CIPHER_SUITES", "TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384")
+
+	cfg, err := Load(writeConfig(t, "log_level: 2\n"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := []string{"TLS_AES_128_GCM_SHA256", "TLS_AES_256_GCM_SHA384"}
+	if !slices.Equal(cfg.Server.TLSCipherSuites, want) {
+		t.Errorf("server.tls_cipher_suites = %v, want %v", cfg.Server.TLSCipherSuites, want)
 	}
 }
 
