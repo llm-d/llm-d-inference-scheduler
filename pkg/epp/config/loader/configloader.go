@@ -220,6 +220,7 @@ func InstantiateAndConfigure(
 		DataConfig:         dataConfig,
 		FlowControlConfig:  flowControlConfig,
 		ParserRegistry:     parserRegistry,
+		PropagatePriority:  rawConfig.RequestHandler.PropagatePriority,
 	}, nil
 }
 
