@@ -188,9 +188,9 @@ func TestCapSingleToken(t *testing.T) {
 		},
 		{
 			// The sidecar caps the request straight off the client body, with no
-			// equivalent of the coordinator's validateSamplingParams ahead of
-			// it, so a malformed sampling_params arrives here. The request still
-			// has to carry a cap, so the field is replaced.
+			// type guard for sampling_params ahead of it, so a malformed value
+			// arrives here. The request still has to carry a cap, so the field
+			// is replaced.
 			name:    "generate replaces a non-object sampling_params",
 			apiType: APITypeVLLMGenerate,
 			body:    map[string]any{"model": "m", "sampling_params": "not-an-object"},
