@@ -20,7 +20,7 @@ import (
 	"context"
 	"log"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"slices"
 	"strconv"
@@ -158,7 +158,6 @@ func main() {
 	// ---------------------------------------------------------------
 	generatorWg.Go(func() {
 
-		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 		trainingTicker := time.NewTicker(time.Duration(trainingIntervalMs) * time.Millisecond)
 		defer trainingTicker.Stop()
 
@@ -175,7 +174,7 @@ func main() {
 					return
 				}
 
-				entries := generateTrainingBatch(rng, trainingBatchSize)
+				entries := generateTrainingBatch(trainingBatchSize)
 				atomic.AddInt64(&trainMetrics.TotalBatches, 1)
 				atomic.AddInt64(&trainMetrics.TotalEntries, int64(len(entries)))
 
@@ -428,31 +427,33 @@ func main() {
 }
 
 // generateTrainingBatch creates a batch of realistic training entries.
-func generateTrainingBatch(rng *rand.Rand, batchSize int) []latencypredictorclient.TrainingEntry {
+//
+//nolint:gosec // G404: math/rand/v2 is non-cryptographic PRNG used only for test fixture values
+func generateTrainingBatch(batchSize int) []latencypredictorclient.TrainingEntry {
 	entries := make([]latencypredictorclient.TrainingEntry, batchSize)
 
 	for i := range batchSize {
-		inputTokens := 128 + rng.Intn(2048)
+		inputTokens := 128 + rand.IntN(2048)
 		// Pick queue bucket uniformly across all 5 buckets: [0], [1-2], [3-5], [6-10], [11+]
 		var numWaiting int
-		switch rng.Intn(5) {
+		switch rand.IntN(5) {
 		case 0:
 			numWaiting = 0
 		case 1:
-			numWaiting = rng.Intn(2) + 1 // 1-2
+			numWaiting = rand.IntN(2) + 1 // 1-2
 		case 2:
-			numWaiting = rng.Intn(3) + 3 // 3-5
+			numWaiting = rand.IntN(3) + 3 // 3-5
 		case 3:
-			numWaiting = rng.Intn(5) + 6 // 6-10
+			numWaiting = rand.IntN(5) + 6 // 6-10
 		default:
-			numWaiting = rng.Intn(5) + 11 // 11-15
+			numWaiting = rand.IntN(5) + 11 // 11-15
 		}
-		numRunning := rng.Intn(8) + 1
-		kvCache := rng.Float64()
-		prefixCache := rng.Float64()
-		numTokensGenerated := 64 + rng.Intn(512)
-		prefillTIF := int64(rng.Intn(15000))
-		decodeTIF := int64(rng.Intn(5000))
+		numRunning := rand.IntN(8) + 1
+		kvCache := rand.Float64()
+		prefixCache := rand.Float64()
+		numTokensGenerated := 64 + rand.IntN(512)
+		prefillTIF := int64(rand.IntN(15000))
+		decodeTIF := int64(rand.IntN(5000))
 
 		// Simulate realistic TTFT
 		baseTTFT := float64(inputTokens)*0.05 +
@@ -470,13 +471,13 @@ func generateTrainingBatch(rng *rand.Rand, batchSize int) []latencypredictorclie
 			baseTTFT *= 0.8
 		}
 
-		ttftMs := math.Max(1.0, baseTTFT+(rng.Float64()-0.5)*baseTTFT*0.2)
+		ttftMs := math.Max(1.0, baseTTFT+(rand.Float64()-0.5)*baseTTFT*0.2)
 
 		// Simulate realistic TPOT
 		baseTPOT := 8.0 +
 			float64(decodeTIF)*0.02 +
 			float64(numRunning-1)*2.0 +
-			(rng.Float64()-0.5)*2.0
+			(rand.Float64()-0.5)*2.0
 
 		tpotMs := math.Max(1.0, baseTPOT*float64(numTokensGenerated))
 
@@ -520,7 +521,7 @@ func parseEnvInt(key string, defaultVal int) int {
 	}
 	val, err := strconv.Atoi(raw)
 	if err != nil {
-		log.Printf("Warning: invalid value %q for %s, using default %d", raw, key, defaultVal)
+		log.Printf("Warning: invalid value %q for %s, using default %d", raw, key, defaultVal) //nolint:gosec // %q escapes control chars in env-var value; operator-supplied
 		return defaultVal
 	}
 	if val == 0 {
