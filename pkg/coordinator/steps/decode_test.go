@@ -190,6 +190,48 @@ func TestDecodeStep_CompletionsFormat_NoRenderedTokens(t *testing.T) {
 	}
 }
 
+// TestDecodeStep_CompletionsFormat_RewritesPromptAndTopLevelKV verifies that for
+// the /v1/completions format the decode step rewrites prompt to the rendered
+// token IDs and places kv_transfer_params at the top level.
+func TestDecodeStep_CompletionsFormat_RewritesPromptAndTopLevelKV(t *testing.T) {
+	var parsed map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &parsed)
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"text": "ok"}}})
+	}))
+	defer server.Close()
+
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+	step, err := NewDecodeStep(gwClient, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-compl-rendered",
+		OriginalPath:     reqcommon.PathCompletions,
+		Model:            "test-model",
+		TokenIDs:         []int{1, 2345},
+		KVTransferParams: map[string]any{"block_id": "block-1"},
+		Body:             map[string]any{"model": "test-model", "prompt": "Hello"},
+		ResponseWriter:   recorder,
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if tokenIDs, _ := parsed["prompt"].([]any); len(tokenIDs) != 2 {
+		t.Fatalf("expected prompt rewritten to rendered token_ids, got %v", parsed["prompt"])
+	}
+	if _, ok := parsed[reqcommon.FieldKVTransferParams]; !ok {
+		t.Fatal("expected top-level kv_transfer_params for /v1/completions")
+	}
+}
+
 // TestDecodeStep_GenerateFormat_ToplevelKV verifies that for the
 // /inference/v1/generate format the decode step places kv_transfer_params at the
 // top level of the request body, and preserves the client's sampling_params so
@@ -204,7 +246,7 @@ func TestDecodeStep_GenerateFormat_ToplevelKV(t *testing.T) {
 	defer server.Close()
 
 	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
-	step, err := NewDecodeStep(gwClient, map[string]any{"use_openai_format": false, ParamKVConnector: kv.NIXL})
+	step, err := NewDecodeStep(gwClient, map[string]any{ParamKVConnector: kv.NIXL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,6 +292,31 @@ func TestDecodeStep_GenerateFormat_ToplevelKV(t *testing.T) {
 	}
 	if kvParams["do_remote_prefill"] != true {
 		t.Errorf("kv_transfer_params.do_remote_prefill = %v, want true", kvParams["do_remote_prefill"])
+	}
+}
+
+// TestDecodeStep_UnreachableFormat_ReturnsError verifies that request paths
+// for formats prepareDecodeBody's switch does not handle explicitly
+// (APITypeMessages, APITypeResponses, APITypeSGLangGenerate) fail through
+// its default case, reporting an error instead of sending an unprepared
+// body upstream.
+func TestDecodeStep_UnreachableFormat_ReturnsError(t *testing.T) {
+	for _, path := range []string{reqcommon.PathMessages, reqcommon.PathResponses, reqcommon.PathSGLangGenerate} {
+		t.Run(path, func(t *testing.T) {
+			step, err := NewDecodeStep(gateway.New(config.GatewayConfig{}), map[string]any{ParamKVConnector: kv.NIXL})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			reqCtx := &pipeline.RequestContext{
+				OriginalPath:     path,
+				Body:             map[string]any{"model": testModelName},
+				KVTransferParams: map[string]any{"block_id": "block-1"},
+			}
+			if err := step.(*DecodeStep).prepareDecodeBody(context.Background(), reqCtx); err == nil {
+				t.Fatal("expected an error for an unreachable request format")
+			}
+		})
 	}
 }
 

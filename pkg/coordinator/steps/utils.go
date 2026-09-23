@@ -59,6 +59,24 @@ func parseUseOpenAIFormat(params map[string]any) (bool, error) {
 	return v, nil
 }
 
+// rejectUseOpenAIFormatOverride returns an error if params sets use_openai_format.
+// decode and conditional-decode derive their body format directly from the
+// request's original path, so a step-level override has no effect; rejecting
+// the key surfaces stale config instead of silently ignoring it.
+func rejectUseOpenAIFormatOverride(step string, params map[string]any) error {
+	if _, ok := params["use_openai_format"]; ok {
+		return fmt.Errorf("%s: use_openai_format is not a valid parameter for this step", step)
+	}
+	return nil
+}
+
+// unreachableFormatError builds an error for a request format with no
+// registered coordinator route (see server.go), signaling a routing bug
+// rather than a client error.
+func unreachableFormatError(format reqcommon.APIType) error {
+	return fmt.Errorf("unsupported request format %v: no coordinator route serves it", format)
+}
+
 // resolveFormat maps a request path to the wire format a step emits. The steps
 // build only Completions, Chat Completions, and generate bodies, so any other
 // API collapses to APITypeVLLMGenerate; Chat Completions additionally requires

@@ -40,18 +40,16 @@ func init() {
 }
 
 type DecodeStep struct {
-	useOpenAIFormat bool
-	gwClient        *gateway.Client
-	kv              kv.Connector
+	gwClient *gateway.Client
+	kv       kv.Connector
 }
 
 func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.Step, error) {
 	if gwClient == nil {
 		return nil, errors.New("decode: gateway client is required")
 	}
-	useOpenAI, err := parseUseOpenAIFormat(params)
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
+	if err := rejectUseOpenAIFormatOverride(DecodeStepName, params); err != nil {
+		return nil, err
 	}
 	kvName, err := paramString(params, ParamKVConnector)
 	if err != nil {
@@ -61,7 +59,7 @@ func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.St
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	return &DecodeStep{useOpenAIFormat: useOpenAI, gwClient: gwClient, kv: kvConn}, nil
+	return &DecodeStep{gwClient: gwClient, kv: kvConn}, nil
 }
 
 func (s *DecodeStep) Name() string { return DecodeStepName }
@@ -69,7 +67,9 @@ func (s *DecodeStep) Name() string { return DecodeStepName }
 func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) error {
 	logger := log.FromContext(ctx).WithName(DecodeStepName)
 
-	s.prepareDecodeBody(ctx, reqCtx)
+	if err := s.prepareDecodeBody(ctx, reqCtx); err != nil {
+		return err
+	}
 
 	logger.V(logutil.DEFAULT).Info("sending request", "path", reqCtx.OriginalPath, "stream", reqCtx.Stream)
 
@@ -96,11 +96,12 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 // would also be insufficient, since injectUUIDs mutates nested values that a shallow
 // maps.Clone would still share. This is sound only while the pipeline runs steps
 // sequentially; if it ever goes concurrent, decode must copy like the others.
-func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.RequestContext) {
+func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.RequestContext) error {
+	format := reqcommon.DetectAPIType(reqCtx.OriginalPath)
+
 	kvParams := s.kv.PrepareDecodeKVParams(ctx, reqCtx)
 	s.injectUUIDs(reqCtx)
 
-	format := resolveFormat(s.useOpenAIFormat, reqCtx.OriginalPath)
 	switch format {
 	case reqcommon.APITypeChatCompletions, reqcommon.APITypeVLLMGenerate:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
@@ -109,7 +110,12 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 		if len(reqCtx.TokenIDs) > 0 {
 			reqCtx.Body["prompt"] = reqCtx.TokenIDs
 		}
+	default:
+		// kvParams and injectUUIDs above already ran; both are harmless here
+		// since the request fails on this return and reqCtx.Body is never sent.
+		return unreachableFormatError(format)
 	}
+	return nil
 }
 
 func (s *DecodeStep) injectUUIDs(reqCtx *pipeline.RequestContext) {

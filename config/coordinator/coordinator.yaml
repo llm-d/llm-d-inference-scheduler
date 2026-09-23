@@ -272,11 +272,6 @@ pipeline:
     # decode as normal. Uncomment to enable.
     # -------------------------------------------------------------------
     # - type: conditional-decode
-    #   params:
-    #     # use_openai_format mirrors gateway.use_openai_format but lets the
-    #     # step override per-pipeline if you want a different wire format
-    #     # for the text-only fast path.
-    #     use_openai_format: true
 
     # -------------------------------------------------------------------
     # encode: fans out one POST per multimodal entry to the encoder pods,
@@ -308,7 +303,10 @@ pipeline:
     # -------------------------------------------------------------------
     - type: prefill
       # params:
-      #   use_openai_format: true   # see notes above
+      #   use_openai_format mirrors gateway.use_openai_format but lets the
+      #   step override per-pipeline if you want a different wire format
+      #   for the text-only fast path.
+      #   use_openai_format: true
       #   ec_connector: ec-nixl     # overrides pipeline.ec_connector
       #   kv_connector: kv-nixl     # overrides pipeline.kv_connector
 
@@ -317,5 +315,4 @@ pipeline:
     # -------------------------------------------------------------------
     - type: decode
       # params:
-      #   use_openai_format: true   # see notes above
       #   kv_connector: kv-nixl     # overrides pipeline.kv_connector
