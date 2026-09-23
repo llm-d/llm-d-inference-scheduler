@@ -1227,7 +1227,7 @@ func serveMetrics(ctx context.Context, port uint16, enablePprof bool) error {
 			mux.Handle(path, h)
 		}
 	}
-	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux}
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), metricsShutdownTimeout)
