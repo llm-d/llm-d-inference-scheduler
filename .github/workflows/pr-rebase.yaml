@@ -75,6 +75,7 @@ jobs:
           ref: ${{ steps.pr.outputs.base-ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Fetch PR head and rebase
         if: steps.check-access.outputs.skip != 'true'
