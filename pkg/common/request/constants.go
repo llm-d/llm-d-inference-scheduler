@@ -46,4 +46,10 @@ const (
 	FieldCacheHitThreshold    = "cache_hit_threshold"
 	FieldContinueFinalMessage = "continue_final_message"
 	FieldAddGenerationPrompt  = "add_generation_prompt"
+	FieldPreviousResponseID   = "previous_response_id"
+	FieldConversation         = "conversation"
+	FieldBackground           = "background"
+	FieldInput                = "input"
+	FieldContent              = "content"
+	FieldFileID               = "file_id"
 )
