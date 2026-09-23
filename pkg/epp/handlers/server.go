@@ -43,6 +43,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
@@ -53,7 +54,6 @@ import (
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
-	"github.com/llm-d/llm-d-router/pkg/epp/toolcalling"
 
 	"go.opentelemetry.io/otel/attribute"
 )

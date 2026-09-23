@@ -30,8 +30,8 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
-	"github.com/llm-d/llm-d-router/pkg/epp/toolcalling"
 )
 
 var (
