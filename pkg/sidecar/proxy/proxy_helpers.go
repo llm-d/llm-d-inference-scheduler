@@ -188,7 +188,7 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 }
 
 func bodyAsJSON(r *http.Request) ([]byte, map[string]any, error) {
-	defer func() { _ = r.Body.Close() }()
+	defer r.Body.Close()
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read request body: %w", err)
@@ -322,4 +322,10 @@ func isRetryableStatus(statusCode int) bool {
 	return statusCode == http.StatusBadGateway ||
 		statusCode == http.StatusServiceUnavailable ||
 		statusCode == http.StatusGatewayTimeout
+}
+
+// WriteAll writes b to w, discarding the error. The caller has already sent
+// headers and status, so there is no recovery action for a write failure.
+func WriteAll(w io.Writer, b []byte) {
+	_, _ = w.Write(b)
 }

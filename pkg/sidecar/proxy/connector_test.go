@@ -85,7 +85,7 @@ func expectGenerateRequestTokenLimits(testInfo *sidecarTestInfo) {
 
 	resp, err := http.DefaultClient.Do(req)
 	Expect(err).ToNot(HaveOccurred())
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
@@ -379,7 +379,7 @@ var _ = Describe("Non-object request body", func() {
 
 			resp, err := http.DefaultClient.Do(req)
 			Expect(err).ToNot(HaveOccurred())
-			defer resp.Body.Close() //nolint:errcheck
+			defer resp.Body.Close()
 
 			Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
 			respBody, err := io.ReadAll(resp.Body)
