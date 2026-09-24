@@ -46,7 +46,7 @@ var _ = Describe("Mooncake Connector", func() {
 		// start a mock bootstrap server that returns map
 		bootstrapServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(bootstrapResponse)) //nolint:all
+			w.Write([]byte(bootstrapResponse)) //nolint:errcheck
 		}))
 		DeferCleanup(bootstrapServer.Close)
 
