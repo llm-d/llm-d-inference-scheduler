@@ -21,7 +21,10 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancelling a push run to main drops its gosec SARIF upload for that
+  # commit, leaving the code scanning dashboard pinned to whichever earlier
+  # commit's run last completed. Superseded PR pushes still cancel.
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   check-changes:
