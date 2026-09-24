@@ -45,6 +45,10 @@ type HashBlock struct {
 // Hash computes a stable unique identifier for the HashBlock content.
 func (b HashBlock) Hash() uint64 {
 	if len(b.Tokens) > 0 {
+		// Reinterprets the uint32 slice as bytes to hash without copying. Safe
+		// because the length check above guarantees a valid backing array, and
+		// the byte length (len(Tokens) * 4) matches uint32's size exactly, so
+		// the resulting slice stays within the array's bounds.
 		byteSlice := unsafe.Slice((*byte)(unsafe.Pointer(&b.Tokens[0])), len(b.Tokens)*4)
 		return xxhash.Sum64(byteSlice)
 	}
