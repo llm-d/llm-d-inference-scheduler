@@ -530,10 +530,10 @@ func TestCompleteMetricsCertFiles(t *testing.T) {
 
 func TestTLSMinVersionFlag(t *testing.T) {
 	tests := []struct {
-		name        string
-		args        []string
-		wantVersion uint16
-		wantErr     bool
+		name            string
+		args            []string
+		wantVersion     uint16
+		wantErrContains string
 	}{
 		{
 			name:        "VersionTLS12",
@@ -551,9 +551,19 @@ func TestTLSMinVersionFlag(t *testing.T) {
 			wantVersion: 0,
 		},
 		{
-			name:    "invalid version",
-			args:    []string{"--tls-min-version", "TLS1.2"},
-			wantErr: true,
+			name:            "TLS1.2",
+			args:            []string{"--tls-min-version", "TLS1.2"},
+			wantErrContains: "unknown TLS version",
+		},
+		{
+			name:            "VersionTLS10",
+			args:            []string{"--tls-min-version", "VersionTLS10"},
+			wantErrContains: "below the TLS 1.2 minimum",
+		},
+		{
+			name:            "VersionTLS11",
+			args:            []string{"--tls-min-version", "VersionTLS11"},
+			wantErrContains: "below the TLS 1.2 minimum",
 		},
 	}
 	for _, tt := range tests {
@@ -566,8 +576,8 @@ func TestTLSMinVersionFlag(t *testing.T) {
 			require.NoError(t, fs.Parse(argv))
 
 			err := opts.Complete()
-			if tt.wantErr {
-				require.Error(t, err)
+			if tt.wantErrContains != "" {
+				require.ErrorContains(t, err, tt.wantErrContains)
 				return
 			}
 			require.NoError(t, err)

@@ -333,6 +333,9 @@ func (opts *Options) Complete() error {
 		if err != nil {
 			return fmt.Errorf("invalid tls-min-version %q: %w", opts.TLSMinVersion, err)
 		}
+		if v < tls.VersionTLS12 {
+			return fmt.Errorf("tls-min-version %q is below the TLS 1.2 minimum; supported values: VersionTLS12, VersionTLS13", opts.TLSMinVersion)
+		}
 		opts.tlsMinVersionValue = v
 	}
 	if len(opts.TLSCipherSuites) > 0 {
@@ -492,7 +495,7 @@ func parseTLSVersion(s string) (uint16, error) {
 	if v, ok := tlsVersions[s]; ok {
 		return v, nil
 	}
-	return 0, fmt.Errorf("unknown TLS version %q; supported values: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13", s)
+	return 0, fmt.Errorf("unknown TLS version %q; supported values: VersionTLS12, VersionTLS13", s)
 }
 
 func parseCipherSuites(names []string) ([]uint16, error) {
