@@ -229,7 +229,9 @@ endpoints:
 
 	require.NoError(t, newFD(path, false).Start(ctx, notifier))
 	require.Len(t, notifier.upserted, 2)
+	assert.Equal(t, "10.0.0.1", notifier.upserted[0].Address)
 	assert.Equal(t, 0, notifier.upserted[0].RankIndex)
+	assert.Equal(t, "10.0.0.1", notifier.upserted[1].Address)
 	assert.Equal(t, 1, notifier.upserted[1].RankIndex)
 }
 
