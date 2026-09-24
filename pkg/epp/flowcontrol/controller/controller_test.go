@@ -1075,11 +1075,11 @@ func setupRegistryForConcurrency(t *testing.T, flowKey flowcontrol.FlowKey) *moc
 		CapacitySnapshotFunc: func(int) (contracts.CapacitySnapshot, error) {
 			return contracts.CapacitySnapshot{
 				Global: contracts.CapacityDimension{
-					Len:      uint64(currentQueue.Len()),
+					Len:      uint64(currentQueue.Len()), // #nosec G115 -- test data, queue length is small
 					ByteSize: currentQueue.ByteSize(),
 				},
 				Band: contracts.CapacityDimension{
-					Len:           uint64(currentQueue.Len()),
+					Len:           uint64(currentQueue.Len()), // #nosec G115 -- test data, queue length is small
 					ByteSize:      currentQueue.ByteSize(),
 					CapacityBytes: 1e9, // Effectively unlimited capacity to ensure dispatch success.
 				},

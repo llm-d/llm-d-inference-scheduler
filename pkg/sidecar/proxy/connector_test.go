@@ -43,7 +43,7 @@ const chatCompletionsRequestBody = `{
 				"max_tokens": 50
 			}`
 
-const chatCompletionsRequestBodyWithMaxCompletionTokens = `{
+const chatCompletionsRequestBodyWithMaxCompletionCap = `{
 				"model": "Qwen/Qwen2-0.5B",
 				"messages": [
 				  {"role": "user", "content": "Hello"}
@@ -52,7 +52,7 @@ const chatCompletionsRequestBodyWithMaxCompletionTokens = `{
 				"max_completion_tokens": 100
 			}`
 
-const chatCompletionsRequestBodyWithMinTokens = `{
+const chatCompletionsRequestBodyWithMinCap = `{
 				"model": "Qwen/Qwen2-0.5B",
 				"messages": [
 				  {"role": "user", "content": "Hello"}
@@ -182,7 +182,7 @@ var _ = Describe("Common Connector tests", func() {
 				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 				By("sending a /v1/chat/completions request with max_completion_tokens set")
-				body := chatCompletionsRequestBodyWithMaxCompletionTokens
+				body := chatCompletionsRequestBodyWithMaxCompletionCap
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+reqcommon.PathChatCompletions, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
@@ -296,7 +296,7 @@ var _ = Describe("Common Connector tests", func() {
 				proxyBaseAddr := "http://" + testInfo.proxy.addr.String()
 
 				By("sending a /v1/chat/completions request with min_tokens set")
-				body := chatCompletionsRequestBodyWithMinTokens
+				body := chatCompletionsRequestBodyWithMinCap
 
 				req, err := http.NewRequest(http.MethodPost, proxyBaseAddr+reqcommon.PathChatCompletions, bytes.NewReader([]byte(body)))
 				Expect(err).ToNot(HaveOccurred())
