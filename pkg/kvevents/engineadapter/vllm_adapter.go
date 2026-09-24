@@ -21,6 +21,7 @@ import (
 
 	"github.com/vmihailenco/msgpack/v5"
 
+	"github.com/llm-d/llm-d-router/pkg/common/clamp"
 	"github.com/llm-d/llm-d-router/pkg/kvevents"
 )
 
@@ -389,7 +390,7 @@ func toUint32Slice(raw any) ([]uint32, error) {
 		if err != nil {
 			return nil, fmt.Errorf("token_ids[%d]: %w", i, err)
 		}
-		result[i] = uint32(n)
+		result[i] = clamp.Uint32(n)
 	}
 	return result, nil
 }
