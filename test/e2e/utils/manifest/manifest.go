@@ -37,6 +37,7 @@ func RunKustomize(kustomizeDir string) []string {
 	// Use "kubectl kustomize" rather than the standalone "kustomize" binary.
 	// CI/dev environments guarantee kubectl but may not have kustomize installed
 	// (see Makefile.tools.mk check-kustomize target).
+	// #nosec G204 -- Fixed kubectl executable; the kustomize directory is a test-controlled constant passed as a separate argv, without a shell.
 	command := exec.Command("kubectl", "kustomize", kustomizeDir)
 	session, err := gexec.Start(command, nil, ginkgo.GinkgoWriter)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
