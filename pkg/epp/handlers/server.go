@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -54,8 +53,6 @@ import (
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
-
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // EvictChannelLookup is an optional interface for looking up eviction channels by request ID.
@@ -251,6 +248,33 @@ func (r *RequestContext) apiType() reqcommon.APIType {
 		headers = r.Request.Headers
 	}
 	return reqcommon.DetectAPIType(fwkrequest.GetRequestPath(headers))
+}
+
+func toolCallingSurfaceForPath(path string) (toolcalling.APISurface, bool) {
+	switch {
+	case strings.Contains(path, reqcommon.PathChatCompletions):
+		return toolcalling.APISurfaceChatCompletions, true
+	case strings.Contains(path, reqcommon.PathMessages):
+		return toolcalling.APISurfaceMessages, true
+	default:
+		return "", false
+	}
+}
+
+func compareEPPToolCallingBodies(surface toolcalling.APISurface, inboundBody, outboundBody []byte) (toolcalling.RequestSnapshot, []toolcalling.FieldStatus, error) {
+	inbound, err := toolcalling.CaptureRequestJSON(surface, inboundBody)
+	if err != nil {
+		return toolcalling.RequestSnapshot{}, nil, err
+	}
+	outbound, err := toolcalling.CaptureRequestJSON(surface, outboundBody)
+	if err != nil {
+		return inbound, toolcalling.RejectedFieldStatuses(inbound), err
+	}
+	statuses, err := toolcalling.CompareRequests(inbound, outbound)
+	if err != nil {
+		return inbound, nil, err
+	}
+	return inbound, statuses, nil
 }
 
 // extractTraceContext returns ctx augmented with the upstream trace context
@@ -531,48 +555,58 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: resolveErr.Error()}
 					break
 				}
+				inboundBody := bytes.Clone(reqCtx.Request.RawBody)
+				apiSurface, hasToolCallingSurface := toolCallingSurfaceForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
+				var inboundToolSnapshot toolcalling.RequestSnapshot
+				hasInboundToolSnapshot := false
+				if hasToolCallingSurface {
+					inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiSurface, inboundBody)
+					if err != nil {
+						// A malformed body has no trustworthy field snapshot. Leave
+						// rejection reporting to the normal request parser below.
+						hasToolCallingSurface = false
+					} else {
+						hasInboundToolSnapshot = true
+					}
+				}
 				before := time.Now()
 				parseResult, parseErr := parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				metrics.RecordPluginProcessingLatency(fwkrh.RequestParsingExtensionPoint, parser.TypedName().Type, parser.TypedName().Name, time.Since(before))
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
+					if hasInboundToolSnapshot {
+						statuses := toolcalling.RejectedFieldStatuses(inboundToolSnapshot)
+						metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
+						if span != nil {
+							span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
+						}
+					}
 					break
-				}
-
-				var inboundToolSnapshot *toolcalling.ToolCallingSnapshot
-				if payloadMap, ok := parseResult.Body.Payload.(fwkrh.PayloadMap); ok {
-					inboundToolSnapshot = toolcalling.ExtractFromPayloadMap(payloadMap)
 				}
 
 				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
 				// The Director may resolve agent identity after this request span opened.
 				tracing.AttributeRequest(ctx, span)
 				if err != nil {
+					if hasInboundToolSnapshot {
+						statuses := toolcalling.RejectedFieldStatuses(inboundToolSnapshot)
+						metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
+						if span != nil {
+							span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
+						}
+					}
 					break
 				}
 
-				var outboundToolSnapshot *toolcalling.ToolCallingSnapshot
-				if payloadMap, ok := parseResult.Body.Payload.(fwkrh.PayloadMap); ok {
-					outboundToolSnapshot = toolcalling.ExtractFromPayloadMap(payloadMap)
-				}
-
-				parserType := parser.TypedName().Type
-				metrics.RecordToolCallingRequest(parserType, inboundToolSnapshot)
-				preserved := toolcalling.PreservationStatus(inboundToolSnapshot, outboundToolSnapshot)
-				metrics.RecordToolCallingPreservation(parserType, preserved)
-
-				if inboundToolSnapshot != nil && span != nil {
-					span.AddEvent("tool_calling.parameters.observed",
-						trace.WithAttributes(toolcalling.SpanAttributes(inboundToolSnapshot, "epp_inbound")...))
-				}
-				if outboundToolSnapshot != nil && span != nil {
-					attrs := toolcalling.SpanAttributes(outboundToolSnapshot, "epp_outbound")
-					attrs = append(attrs, attribute.String("preserved_from_inbound", preserved))
-					span.AddEvent("tool_calling.parameters.forwarded", trace.WithAttributes(attrs...))
-				}
-
-				if outboundToolSnapshot != nil {
-					maps.Copy(reqCtx.Request.Headers, toolcalling.ToHeaders(outboundToolSnapshot))
+				if hasToolCallingSurface && hasInboundToolSnapshot {
+					inboundSnapshot, statuses, compareErr := compareEPPToolCallingBodies(apiSurface, inboundBody, reqCtx.Request.RawBody)
+					if compareErr != nil {
+						logger.Error(compareErr, "Error comparing tool-calling request fields")
+					}
+					metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
+					if span != nil {
+						span.SetAttributes(inboundSnapshot.SpanAttributes(statuses)...)
+					}
 				}
 
 				// After scheduling, look up the eviction channel for eviction support.

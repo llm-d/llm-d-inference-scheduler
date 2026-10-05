@@ -37,6 +37,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
@@ -656,4 +657,53 @@ func TestRequestAttributionAtIngress(t *testing.T) {
 			assert.Equal(t, tc.wantSource, source.AsString())
 		})
 	}
+}
+
+func TestCompareEPPToolCallingBodies(t *testing.T) {
+	inbound := []byte(`{"tools":[{"function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"required","parallel_tool_calls":true}`)
+	outbound := []byte(`{"parallel_tool_calls":true,"tool_choice":"auto","tools":[{"function":{"parameters":{"type":"object"},"name":"private"}}]}`)
+
+	_, statuses, err := compareEPPToolCallingBodies(toolcalling.APISurfaceChatCompletions, inbound, outbound)
+	require.NoError(t, err)
+	require.Equal(t, toolcalling.FieldStatusPreserved, statusForField(t, statuses, toolcalling.FieldTools).Status)
+	require.Equal(t, toolcalling.FieldStatusChanged, statusForField(t, statuses, toolcalling.FieldToolChoice).Status)
+	require.True(t, statusForField(t, statuses, toolcalling.FieldToolChoice).Observed)
+
+	_, statuses, err = compareEPPToolCallingBodies(toolcalling.APISurfaceChatCompletions, inbound, []byte(`{"tools":[`))
+	require.Error(t, err)
+	require.Equal(t, toolcalling.FieldStatusRejected, statusForField(t, statuses, toolcalling.FieldTools).Status)
+
+	_, statuses, err = compareEPPToolCallingBodies(toolcalling.APISurfaceChatCompletions, []byte(`{"tools":[`), outbound)
+	require.Error(t, err)
+	require.Empty(t, statuses, "malformed inbound JSON must not produce guessed field outcomes")
+}
+
+func TestToolCallingSurfaceForPath(t *testing.T) {
+	tests := []struct {
+		path   string
+		want   toolcalling.APISurface
+		wantOK bool
+	}{
+		{path: "/v1/chat/completions", want: toolcalling.APISurfaceChatCompletions, wantOK: true},
+		{path: "/prefix/v1/messages", want: toolcalling.APISurfaceMessages, wantOK: true},
+		{path: "/v1/embeddings", wantOK: false},
+	}
+	for _, tt := range tests {
+		got, ok := toolCallingSurfaceForPath(tt.path)
+		require.Equal(t, tt.wantOK, ok)
+		if ok {
+			require.Equal(t, tt.want, got)
+		}
+	}
+}
+
+func statusForField(t *testing.T, statuses []toolcalling.FieldStatus, field toolcalling.Field) toolcalling.FieldStatus {
+	t.Helper()
+	for _, status := range statuses {
+		if status.Field == field {
+			return status
+		}
+	}
+	t.Fatalf("field %q missing from status list", field)
+	return toolcalling.FieldStatus{}
 }

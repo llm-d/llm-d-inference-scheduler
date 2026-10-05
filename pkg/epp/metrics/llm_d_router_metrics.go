@@ -21,6 +21,7 @@ import (
 	compbasemetrics "k8s.io/component-base/metrics"
 
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 )
 
 const (
@@ -572,53 +573,19 @@ var (
 	)
 )
 
-// --- llm-d Tool Calling Metrics ---
-var (
-	llmdToolCallingRequestsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Subsystem: LLMDRouterEndpointPickerSubsystem,
-			Name:      "tool_calling_requests_total",
-			Help:      metricsutil.HelpMsgWithStability("Total requests by tool-calling presence.", compbasemetrics.ALPHA),
-		},
-		[]string{"parser", "present"},
-	)
-
-	llmdToolChoiceTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Subsystem: LLMDRouterEndpointPickerSubsystem,
-			Name:      "tool_choice_total",
-			Help:      metricsutil.HelpMsgWithStability("Total requests by tool_choice kind.", compbasemetrics.ALPHA),
-		},
-		[]string{"parser", "tool_choice_kind"},
-	)
-
-	llmdToolDefinitionsCount = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Subsystem: LLMDRouterEndpointPickerSubsystem,
-			Name:      "tool_definitions_count",
-			Help:      metricsutil.HelpMsgWithStability("Distribution of tool definition count per request.", compbasemetrics.ALPHA),
-			Buckets:   []float64{0, 1, 2, 3, 5, 10, 20, 50, 100},
-		},
-		[]string{"parser"},
-	)
-
-	llmdParallelToolCallsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Subsystem: LLMDRouterEndpointPickerSubsystem,
-			Name:      "parallel_tool_calls_total",
-			Help:      metricsutil.HelpMsgWithStability("Total requests by parallel_tool_calls value.", compbasemetrics.ALPHA),
-		},
-		[]string{"parser", "value"},
-	)
-
-	llmdToolCallingPreservedTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Subsystem: LLMDRouterEndpointPickerSubsystem,
-			Name:      "tool_calling_preserved_total",
-			Help:      metricsutil.HelpMsgWithStability("Total requests by tool-calling preservation status across the EPP boundary.", compbasemetrics.ALPHA),
-		},
-		[]string{"parser", "preserved"},
-	)
+// --- Tool-calling field integrity metric shared with the routing sidecar ---
+var llmdToolCallingFieldStatusTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "llm_d",
+		Name:      "tool_calling_field_status_total",
+		Help:      metricsutil.HelpMsgWithStability("Tool-calling request field outcomes by component, direction, field, and status.", compbasemetrics.ALPHA),
+	},
+	[]string{
+		toolcalling.MetricLabelComponent,
+		toolcalling.MetricLabelDirection,
+		toolcalling.MetricLabelField,
+		toolcalling.MetricLabelStatus,
+	},
 )
 
 var (
