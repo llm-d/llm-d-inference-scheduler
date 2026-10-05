@@ -1239,11 +1239,11 @@ var _ = Describe("NIXL Connector (v2)", func() {
 				return testMoRIRequestID, nil
 			}
 			responseKV := map[string]any{
-				requestFieldDoRemotePrefill:      true,
-				requestFieldDoRemoteDecode:       false,
-				requestFieldRemoteBlockIDs:       []int{1, 2, 3},
-				requestFieldRemoteEngineID:       "prefill-engine",
-				requestFieldRemoteHost:           testLoopbackIP,
+				reqcommon.FieldDoRemotePrefill:   true,
+				reqcommon.FieldDoRemoteDecode:    false,
+				reqcommon.FieldRemoteBlockIDs:    []int{1, 2, 3},
+				reqcommon.FieldRemoteEngineID:    "prefill-engine",
+				reqcommon.FieldRemoteHost:        testLoopbackIP,
 				requestFieldRemoteHandshakePort:  6302,
 				requestFieldRemoteNotifyPort:     61006,
 				requestFieldRemoteDPRankOverride: true,
@@ -1256,8 +1256,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 				responseKV[requestFieldRemoteDPRank] = returnedRank
 			}
 			response, err := json.Marshal(map[string]any{
-				requestFieldKVTransferParams: responseKV,
-				"usage":                      map[string]any{"prompt_tokens_details": nil},
+				reqcommon.FieldKVTransferParams: responseKV,
+				"usage":                         map[string]any{"prompt_tokens_details": nil},
 			})
 			Expect(err).ToNot(HaveOccurred())
 			env.prefillHandler.RawResponse = string(response)
@@ -1268,7 +1268,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 			decodeRank, err := strconv.Atoi(dpRankHeader(env.decodeHandler, 0))
 			Expect(err).ToNot(HaveOccurred())
 
-			requestID := env.prefillHandler.GetCompletionHeaders()[0].Get(requestHeaderRequestID)
+			requestID := env.prefillHandler.GetCompletionHeaders()[0].Get(reqcommon.RequestIDHeaderKey)
 			expectedGlobalRank, expectedLocalRank := pickDPRanks(requestID, 16, 8)
 			Expect(expectedGlobalRank).To(Equal(15))
 			Expect(expectedLocalRank).To(Equal(7))
@@ -1345,7 +1345,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(rp.StatusCode).To(Equal(http.StatusOK), string(response))
 
-			requestID := env.prefillHandler.GetCompletionHeaders()[0].Get(requestHeaderRequestID)
+			requestID := env.prefillHandler.GetCompletionHeaders()[0].Get(reqcommon.RequestIDHeaderKey)
 			Expect(pickDPRank(requestID, 16)).To(Equal(15))
 			Expect(dpRankHeader(env.prefillHandler, 0)).To(Equal("7"))
 			Expect(dpRankHeader(env.decodeHandler, 0)).To(Equal("7"))
@@ -1398,8 +1398,8 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(dkv).ToNot(HaveKey(requestFieldRemoteDPRank))
 		Expect(dkv).ToNot(HaveKey(requestFieldRemoteDPRankOverride))
 		Expect(dkv).ToNot(HaveKey("is_request_leader"))
-		Expect(dkv).To(HaveKeyWithValue(requestFieldRemoteHost, "ahost"))
-		Expect(dkv).To(HaveKeyWithValue(requestFieldRemotePort, BeNumerically("==", 4032)))
+		Expect(dkv).To(HaveKeyWithValue(reqcommon.FieldRemoteHost, "ahost"))
+		Expect(dkv).To(HaveKeyWithValue(reqcommon.FieldRemotePort, BeNumerically("==", 4032)))
 	})
 
 	// Flags-off path: the sidecar must produce the legacy NIXLv2 wire shape
