@@ -18,6 +18,7 @@ package toolcalling
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -132,6 +133,36 @@ func TestCompareRequests_ExplicitNullDiffersFromAbsent(t *testing.T) {
 	require.Equal(t, FieldStatusChanged, resultStatus(t, results, FieldResponseFormat))
 }
 
+func TestCompareRequests_AbsentFieldsAreNotObserved(t *testing.T) {
+	before, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{})
+	require.NoError(t, err)
+	after, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{})
+	require.NoError(t, err)
+
+	results, err := CompareRequests(before, after)
+	require.NoError(t, err)
+	require.False(t, resultFor(t, results, FieldToolChoice).Observed)
+	require.Equal(t, FieldStatusPreserved, resultFor(t, results, FieldToolChoice).Status)
+}
+
+func TestRejectedStatusesOnlyIncludePresentFields(t *testing.T) {
+	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{
+		"tool_choice": "required",
+	})
+	require.NoError(t, err)
+
+	results := RejectedFieldStatuses(snapshot)
+	require.Len(t, results, 1)
+	require.Equal(t, FieldToolChoice, results[0].Field)
+	require.Equal(t, FieldStatusRejected, results[0].Status)
+	require.True(t, results[0].Observed)
+}
+
+func TestCaptureRequestJSON_MalformedBody(t *testing.T) {
+	_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(`{"tools":[`))
+	require.Error(t, err)
+}
+
 func TestCompareRequests_MessagesOnlyIncludesSupportedFields(t *testing.T) {
 	before, err := CaptureRequest(APISurfaceMessages, map[string]any{
 		"tools":           []any{},
@@ -203,6 +234,37 @@ func TestRequestSummaryUsesBoundedValuesOnly(t *testing.T) {
 	require.NotContains(t, string(encoded), "sentinel_private")
 }
 
+func TestRequestSummaryPresenceIncludesAnySupportedField(t *testing.T) {
+	snapshot, err := CaptureRequest(APISurfaceMessages, map[string]any{
+		"tool_choice": nil,
+	})
+	require.NoError(t, err)
+
+	summary := snapshot.Summary()
+	require.True(t, summary.ToolCallingPresent)
+	require.True(t, summary.ToolChoicePresent)
+	require.Equal(t, ToolChoiceUnknown, summary.ToolChoiceKind)
+}
+
+func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
+	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{
+		"tools":       []any{map[string]any{"function": map[string]any{"name": "sentinel_private_name"}}},
+		"tool_choice": "required",
+	})
+	require.NoError(t, err)
+	results := []FieldStatus{{Field: FieldTools, Status: FieldStatusPreserved, Observed: true}}
+
+	attributes := snapshot.SpanAttributes(results)
+	var encoded strings.Builder
+	for _, attribute := range attributes {
+		encoded.WriteString(string(attribute.Key) + "=")
+		encoded.WriteString(attribute.Value.Emit())
+		encoded.WriteByte('\n')
+	}
+	require.Contains(t, encoded.String(), "llm_d.tool_calling.field.tools.status=preserved")
+	require.NotContains(t, encoded.String(), "sentinel_private_name")
+}
+
 func TestRequestSummaryMessagesToolChoice(t *testing.T) {
 	snapshot, err := CaptureRequest(APISurfaceMessages, map[string]any{
 		"tool_choice": map[string]any{"type": "tool", "name": "sentinel_private_name"},
@@ -212,7 +274,7 @@ func TestRequestSummaryMessagesToolChoice(t *testing.T) {
 	summary := snapshot.Summary()
 	require.True(t, summary.ToolChoicePresent)
 	require.Equal(t, ToolChoiceNamed, summary.ToolChoiceKind)
-	require.False(t, summary.ToolCallingPresent)
+	require.True(t, summary.ToolCallingPresent)
 }
 
 func TestMetricSchema(t *testing.T) {
@@ -238,7 +300,7 @@ func TestToolCountBucket(t *testing.T) {
 		{count: 5, want: ToolCountBucketTwoToFive},
 		{count: 6, want: ToolCountBucketSixToTen},
 		{count: 10, want: ToolCountBucketSixToTen},
-		{count: 11, want: ToolCountBucketTenPlus},
+		{count: 11, want: ToolCountBucketElevenPlus},
 	}
 	for _, tt := range tests {
 		require.Equal(t, tt.want, bucketToolCount(tt.count))
@@ -254,6 +316,17 @@ func resultStatus(t *testing.T, results []FieldStatus, field Field) FieldStatusV
 	}
 	t.Fatalf("field %q missing from comparison results", field)
 	return ""
+}
+
+func resultFor(t *testing.T, results []FieldStatus, field Field) FieldStatus {
+	t.Helper()
+	for _, result := range results {
+		if result.Field == field {
+			return result
+		}
+	}
+	t.Fatalf("field %q missing from comparison results", field)
+	return FieldStatus{}
 }
 
 func mustFieldsForSurface(t *testing.T, surface APISurface) []Field {

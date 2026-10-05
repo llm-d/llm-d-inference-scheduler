@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // APISurface identifies an API with a tool-calling request contract.
@@ -80,16 +82,17 @@ const (
 type ToolCountBucket string
 
 const (
-	ToolCountBucketOne       ToolCountBucket = "1"
-	ToolCountBucketTwoToFive ToolCountBucket = "2-5"
-	ToolCountBucketSixToTen  ToolCountBucket = "6-10"
-	ToolCountBucketTenPlus   ToolCountBucket = "10+"
+	ToolCountBucketOne        ToolCountBucket = "1"
+	ToolCountBucketTwoToFive  ToolCountBucket = "2-5"
+	ToolCountBucketSixToTen   ToolCountBucket = "6-10"
+	ToolCountBucketElevenPlus ToolCountBucket = "11+"
 )
 
 // FieldStatus reports the comparison result for one supported field.
 type FieldStatus struct {
-	Field  Field
-	Status FieldStatusValue
+	Field    Field
+	Status   FieldStatusValue
+	Observed bool
 }
 
 // RequestSummary contains only bounded, non-content-derived telemetry values.
@@ -128,6 +131,7 @@ func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, e
 	snapshot := RequestSnapshot{
 		surface: surface,
 		fields:  make(map[Field]capturedField, len(fields)),
+		summary: RequestSummary{ToolChoiceKind: ToolChoiceUnknown},
 	}
 	for _, field := range fields {
 		value, present := body[string(field)]
@@ -139,6 +143,9 @@ func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, e
 			}
 		}
 		snapshot.fields[field] = captured
+		if present {
+			snapshot.summary.ToolCallingPresent = true
+		}
 	}
 
 	if tools, ok := body[string(FieldTools)].([]any); ok {
@@ -153,6 +160,18 @@ func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, e
 	}
 
 	return snapshot, nil
+}
+
+// CaptureRequestJSON decodes and snapshots a JSON request object.
+func CaptureRequestJSON(surface APISurface, body []byte) (RequestSnapshot, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return RequestSnapshot{}, fmt.Errorf("decode request body: %w", err)
+	}
+	if payload == nil {
+		return RequestSnapshot{}, fmt.Errorf("decode request body: expected JSON object")
+	}
+	return CaptureRequest(surface, payload)
 }
 
 // CompareRequests compares every supported field for the common API surface.
@@ -180,14 +199,57 @@ func CompareRequests(before, after RequestSnapshot) ([]FieldStatus, error) {
 		case left.present && right.present && !bytes.Equal(left.value, right.value):
 			status = FieldStatusChanged
 		}
-		results = append(results, FieldStatus{Field: field, Status: status})
+		results = append(results, FieldStatus{
+			Field:    field,
+			Status:   status,
+			Observed: left.present || right.present,
+		})
 	}
 	return results, nil
+}
+
+// RejectedFieldStatuses marks client-supplied fields rejected at a boundary.
+func RejectedFieldStatuses(snapshot RequestSnapshot) []FieldStatus {
+	fields, err := fieldsForSurface(snapshot.surface)
+	if err != nil {
+		return nil
+	}
+
+	results := make([]FieldStatus, 0, len(fields))
+	for _, field := range fields {
+		if snapshot.fields[field].present {
+			results = append(results, FieldStatus{
+				Field:    field,
+				Status:   FieldStatusRejected,
+				Observed: true,
+			})
+		}
+	}
+	return results
 }
 
 // Summary returns the snapshot's bounded telemetry values without field data.
 func (snapshot RequestSnapshot) Summary() RequestSummary {
 	return snapshot.summary
+}
+
+// SpanAttributes returns only bounded summary values and observed field statuses.
+func (snapshot RequestSnapshot) SpanAttributes(statuses []FieldStatus) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.String("llm_d.tool_calling.api_surface", string(snapshot.surface)),
+		attribute.Bool("llm_d.tool_calling.present", snapshot.summary.ToolCallingPresent),
+		attribute.String("llm_d.tool_calling.tool_choice", string(snapshot.summary.ToolChoiceKind)),
+	}
+	if snapshot.summary.ToolCountBucket != "" {
+		attrs = append(attrs, attribute.String("llm_d.tool_calling.tool_count", string(snapshot.summary.ToolCountBucket)))
+	}
+	for _, result := range statuses {
+		if result.Observed {
+			key := "llm_d.tool_calling.field." + string(result.Field) + ".status"
+			attrs = append(attrs, attribute.String(key, string(result.Status)))
+		}
+	}
+	return attrs
 }
 
 // FieldsForSurface returns the bounded field set compared for an API surface.
@@ -269,7 +331,7 @@ func bucketToolCount(count int) ToolCountBucket {
 	case count <= 10:
 		return ToolCountBucketSixToTen
 	default:
-		return ToolCountBucketTenPlus
+		return ToolCountBucketElevenPlus
 	}
 }
 
