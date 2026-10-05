@@ -258,7 +258,7 @@ func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
 	var encoded strings.Builder
 	for _, attribute := range attributes {
 		encoded.WriteString(string(attribute.Key) + "=")
-		encoded.WriteString(attribute.Value.Emit())
+		encoded.WriteString(attribute.Value.String())
 		encoded.WriteByte('\n')
 	}
 	require.Contains(t, encoded.String(), "llm_d.tool_calling.field.tools.status=preserved")

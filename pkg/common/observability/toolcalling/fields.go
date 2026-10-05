@@ -19,6 +19,7 @@ package toolcalling
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -169,7 +170,7 @@ func CaptureRequestJSON(surface APISurface, body []byte) (RequestSnapshot, error
 		return RequestSnapshot{}, fmt.Errorf("decode request body: %w", err)
 	}
 	if payload == nil {
-		return RequestSnapshot{}, fmt.Errorf("decode request body: expected JSON object")
+		return RequestSnapshot{}, errors.New("decode request body: expected JSON object")
 	}
 	return CaptureRequest(surface, payload)
 }
