@@ -103,7 +103,7 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 	s.injectUUIDs(reqCtx)
 
 	switch format {
-	case reqcommon.APITypeChatCompletions, reqcommon.APITypeVLLMGenerate:
+	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses, reqcommon.APITypeVLLMGenerate:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
 	case reqcommon.APITypeCompletions:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
@@ -118,34 +118,28 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 	return nil
 }
 
+// injectUUIDs stamps image parts with their multimodal hash.
+//
+// It keys on DetectAPIType(reqCtx.OriginalPath): decode proxies reqCtx.Body to
+// reqCtx.OriginalPath, so the wire shape to walk is whatever the client sent.
+// resolveFormat's answer instead reflects the encode/prefill wire-format
+// setting, which can differ from the client's own shape.
 func (s *DecodeStep) injectUUIDs(reqCtx *pipeline.RequestContext) {
-	messages, ok := reqCtx.Body["messages"].([]any)
-	if !ok {
-		return
+	apiType := reqcommon.DetectAPIType(reqCtx.OriginalPath)
+	if items, ok := promptItems(reqCtx.Body, apiType); ok {
+		injectImagePartUUIDs(items, apiType, reqCtx.MultimodalEntries)
 	}
+}
 
-	hashIdx := 0
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]any)
-		if !ok {
-			continue
+// injectImagePartUUIDs stamps each image content part with the hash of its
+// corresponding multimodal entry, pairing the two by position. Surplus parts
+// are left unstamped: the worker then hashes the image itself rather than
+// reading an entry primed under a hash that belongs to another part.
+func injectImagePartUUIDs(items []any, apiType reqcommon.APIType, entries []pipeline.MultimodalEntry) {
+	for i, image := range collectImageParts(items, apiType) {
+		if i >= len(entries) {
+			return
 		}
-		content, ok := msgMap["content"].([]any)
-		if !ok {
-			continue
-		}
-		for _, part := range content {
-			partMap, ok := part.(map[string]any)
-			if !ok {
-				continue
-			}
-			if partMap["type"] != "image_url" {
-				continue
-			}
-			if hashIdx < len(reqCtx.MultimodalEntries) {
-				partMap["uuid"] = reqCtx.MultimodalEntries[hashIdx].Hash
-				hashIdx++
-			}
-		}
+		image.part["uuid"] = entries[i].Hash
 	}
 }
