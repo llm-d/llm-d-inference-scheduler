@@ -265,6 +265,29 @@ func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
 	require.NotContains(t, encoded.String(), "sentinel_private_name")
 }
 
+func TestSpanAttributesOmittedForRequestsWithoutToolCallingFields(t *testing.T) {
+	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{"model": "test-model"})
+	require.NoError(t, err)
+
+	statuses, err := CompareRequests(snapshot, snapshot)
+	require.NoError(t, err)
+	require.Empty(t, snapshot.SpanAttributes(statuses))
+}
+
+func TestSpanAttributesRetainObservedToolCallingMutation(t *testing.T) {
+	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{"model": "test-model"})
+	require.NoError(t, err)
+
+	attrs := snapshot.SpanAttributes([]FieldStatus{{
+		Field:    FieldTools,
+		Status:   FieldStatusChanged,
+		Observed: true,
+	}})
+	require.Len(t, attrs, 4)
+	require.Equal(t, "llm_d.tool_calling.field.tools.status", string(attrs[3].Key))
+	require.Equal(t, string(FieldStatusChanged), attrs[3].Value.AsString())
+}
+
 func TestRequestSummaryMessagesToolChoice(t *testing.T) {
 	snapshot, err := CaptureRequest(APISurfaceMessages, map[string]any{
 		"tool_choice": map[string]any{"type": "tool", "name": "sentinel_private_name"},

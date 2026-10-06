@@ -234,8 +234,13 @@ func (snapshot RequestSnapshot) Summary() RequestSummary {
 	return snapshot.summary
 }
 
-// SpanAttributes returns only bounded summary values and observed field statuses.
+// SpanAttributes returns bounded summary values and observed field statuses.
+// It returns nil when the request and comparison contain no tool-calling fields.
 func (snapshot RequestSnapshot) SpanAttributes(statuses []FieldStatus) []attribute.KeyValue {
+	if !snapshot.summary.ToolCallingPresent && !hasObservedFieldStatus(statuses) {
+		return nil
+	}
+
 	attrs := []attribute.KeyValue{
 		attribute.String("llm_d.tool_calling.api_surface", string(snapshot.surface)),
 		attribute.Bool("llm_d.tool_calling.present", snapshot.summary.ToolCallingPresent),
@@ -251,6 +256,15 @@ func (snapshot RequestSnapshot) SpanAttributes(statuses []FieldStatus) []attribu
 		}
 	}
 	return attrs
+}
+
+func hasObservedFieldStatus(statuses []FieldStatus) bool {
+	for _, status := range statuses {
+		if status.Observed {
+			return true
+		}
+	}
+	return false
 }
 
 // FieldsForSurface returns the bounded field set compared for an API surface.
