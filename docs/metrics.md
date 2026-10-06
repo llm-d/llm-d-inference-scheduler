@@ -150,6 +150,15 @@ Two things are needed to see them:
 Grafana turns the exemplar into a link to the trace when the Prometheus data source has
 an exemplar link configured to a traces backend.
 
+### Tool-calling request integrity
+
+This counter records observed outcomes for supported tool-calling request fields. It does not
+include field values or request content.
+
+| Full metric name | Type | Labels | Notes |
+|---|---|---|---|
+| `llm_d_epp_tool_calling_field_status_total` | Counter | `component`, `direction`, `field`, `status` | Observed request-field preservation, change, drop, or rejection outcomes. |
+
 ### Inference pool
 
 These metrics are owned by EPP pool aggregation. They summarize model-server endpoint metrics for

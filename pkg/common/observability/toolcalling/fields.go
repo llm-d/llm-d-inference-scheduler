@@ -55,7 +55,7 @@ const (
 
 // Metric schema constants are shared by EPP and the routing sidecar.
 const (
-	MetricToolCallingFieldStatus = "llm_d_tool_calling_field_status_total"
+	MetricToolCallingFieldStatus = "llm_d_epp_tool_calling_field_status_total"
 
 	MetricLabelComponent = "component"
 	MetricLabelDirection = "direction"

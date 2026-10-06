@@ -278,7 +278,7 @@ func TestRequestSummaryMessagesToolChoice(t *testing.T) {
 }
 
 func TestMetricSchema(t *testing.T) {
-	require.Equal(t, "llm_d_tool_calling_field_status_total", MetricToolCallingFieldStatus)
+	require.Equal(t, "llm_d_epp_tool_calling_field_status_total", MetricToolCallingFieldStatus)
 	require.Equal(t, []string{"component", "direction", "field", "status"}, []string{
 		MetricLabelComponent,
 		MetricLabelDirection,
