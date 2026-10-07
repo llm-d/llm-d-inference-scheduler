@@ -133,6 +133,55 @@ func TestCompareRequests_ExplicitNullDiffersFromAbsent(t *testing.T) {
 	require.Equal(t, FieldStatusChanged, resultStatus(t, results, FieldResponseFormat))
 }
 
+func TestCompareRequestJSONNumbers(t *testing.T) {
+	tests := []struct {
+		name   string
+		before string
+		after  string
+		want   FieldStatusValue
+	}{
+		{name: "large integer changed", before: "9007199254740992", after: "9007199254740993", want: FieldStatusChanged},
+		{name: "large negative integer changed", before: "-9007199254740992", after: "-9007199254740993", want: FieldStatusChanged},
+		{name: "precise decimal changed", before: "0.100000000000000005", after: "0.100000000000000006", want: FieldStatusChanged},
+		{name: "integer and decimal equivalent", before: "1", after: "1.0", want: FieldStatusPreserved},
+		{name: "integer and exponent equivalent", before: "1000", after: "1e3", want: FieldStatusPreserved},
+		{name: "fraction and exponent equivalent", before: "0.0010", after: "1E-3", want: FieldStatusPreserved},
+		{name: "negative numbers equivalent", before: "-12.50", after: "-125e-1", want: FieldStatusPreserved},
+		{name: "negative zero equivalent", before: "-0.0", after: "0e1000", want: FieldStatusPreserved},
+		{name: "beyond float range equivalent", before: "1e400", after: "10e399", want: FieldStatusPreserved},
+		{name: "large exponent equivalent", before: "1e1000000000", after: "10e999999999", want: FieldStatusPreserved},
+		{name: "large exponent changed", before: "1e1000000000", after: "1e1000000001", want: FieldStatusChanged},
+		{name: "exponent beyond int64 equivalent", before: "1e9223372036854775808", after: "10e9223372036854775807", want: FieldStatusPreserved},
+		{name: "number and string differ", before: "1", after: `"1"`, want: FieldStatusChanged},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := func(value string) []byte {
+				return []byte(`{"tools":[{"type":"function","function":{"name":"example","parameters":{"enum":[` + value + `]}}}]}`)
+			}
+			before, err := CaptureRequestJSON(APISurfaceChatCompletions, body(tt.before))
+			require.NoError(t, err)
+			after, err := CaptureRequestJSON(APISurfaceChatCompletions, body(tt.after))
+			require.NoError(t, err)
+			statuses, err := CompareRequests(before, after)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, resultStatus(t, statuses, FieldTools))
+		})
+	}
+}
+
+func TestCompareRequestNumbersAcrossPayloadTypes(t *testing.T) {
+	before, err := CaptureRequest(APISurfaceMessages, map[string]any{
+		"tools": []any{map[string]any{"input_schema": map[string]any{"maximum": int64(9007199254740993)}}},
+	})
+	require.NoError(t, err)
+	after, err := CaptureRequestJSON(APISurfaceMessages, []byte(`{"tools":[{"input_schema":{"maximum":9007199254740993.0}}]}`))
+	require.NoError(t, err)
+	statuses, err := CompareRequests(before, after)
+	require.NoError(t, err)
+	require.Equal(t, FieldStatusPreserved, resultStatus(t, statuses, FieldTools))
+}
+
 func TestCompareRequests_AbsentFieldsAreNotObserved(t *testing.T) {
 	before, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{})
 	require.NoError(t, err)
@@ -161,6 +210,13 @@ func TestRejectedStatusesOnlyIncludePresentFields(t *testing.T) {
 func TestCaptureRequestJSON_MalformedBody(t *testing.T) {
 	_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(`{"tools":[`))
 	require.Error(t, err)
+}
+
+func TestCaptureRequestJSONRejectsTrailingData(t *testing.T) {
+	for _, body := range []string{`{"tools":[]} {}`, `{"tools":[]} 1`, `{"tools":[]} invalid`} {
+		_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(body))
+		require.Error(t, err)
+	}
 }
 
 func TestCompareRequests_MessagesOnlyIncludesSupportedFields(t *testing.T) {

@@ -21,6 +21,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/big"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -109,7 +112,7 @@ type capturedField struct {
 	value   []byte
 }
 
-// RequestSnapshot stores canonical JSON for supported fields so later body
+// RequestSnapshot stores serialized JSON for supported fields so later body
 // mutations cannot alter the comparison baseline. Field contents remain
 // private and are never included in Summary or metric labels.
 type RequestSnapshot struct {
@@ -165,9 +168,14 @@ func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, e
 
 // CaptureRequestJSON decodes and snapshots a JSON request object.
 func CaptureRequestJSON(surface APISurface, body []byte) (RequestSnapshot, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
 	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := decoder.Decode(&payload); err != nil {
 		return RequestSnapshot{}, fmt.Errorf("decode request body: %w", err)
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return RequestSnapshot{}, errors.New("decode request body: unexpected trailing data")
 	}
 	if payload == nil {
 		return RequestSnapshot{}, errors.New("decode request body: expected JSON object")
@@ -177,7 +185,8 @@ func CaptureRequestJSON(surface APISurface, body []byte) (RequestSnapshot, error
 
 // CompareRequests compares every supported field for the common API surface.
 // An absent field and an explicit null are different values. Fields absent on
-// both sides are reported as preserved.
+// both sides are reported as preserved. Numbers are compared exactly, allowing
+// equivalent decimal and exponent notation.
 func CompareRequests(before, after RequestSnapshot) ([]FieldStatus, error) {
 	if before.surface != after.surface {
 		return nil, fmt.Errorf("cannot compare API surfaces %q and %q", before.surface, after.surface)
@@ -197,7 +206,7 @@ func CompareRequests(before, after RequestSnapshot) ([]FieldStatus, error) {
 			status = FieldStatusDropped
 		case !left.present && right.present:
 			status = FieldStatusChanged
-		case left.present && right.present && !bytes.Equal(left.value, right.value):
+		case left.present && right.present && !equalJSONFieldValues(left.value, right.value):
 			status = FieldStatusChanged
 		}
 		results = append(results, FieldStatus{
@@ -207,6 +216,61 @@ func CompareRequests(before, after RequestSnapshot) ([]FieldStatus, error) {
 		})
 	}
 	return results, nil
+}
+
+// Snapshots are serialized with sorted object keys, so token order is comparable.
+// UseNumber preserves precision; normalization equates forms such as 1 and 1.0.
+func equalJSONFieldValues(left, right []byte) bool {
+	if bytes.Equal(left, right) {
+		return true
+	}
+	leftDecoder := json.NewDecoder(bytes.NewReader(left))
+	leftDecoder.UseNumber()
+	rightDecoder := json.NewDecoder(bytes.NewReader(right))
+	rightDecoder.UseNumber()
+	for {
+		leftToken, leftErr := leftDecoder.Token()
+		rightToken, rightErr := rightDecoder.Token()
+		if leftErr != nil || rightErr != nil {
+			return leftErr == io.EOF && rightErr == io.EOF
+		}
+		if leftToken == rightToken {
+			continue
+		}
+		leftNumber, leftOK := leftToken.(json.Number)
+		rightNumber, rightOK := rightToken.(json.Number)
+		if !leftOK || !rightOK || normalizeJSONNumber(leftNumber) != normalizeJSONNumber(rightNumber) {
+			return false
+		}
+	}
+}
+
+// Normalize numbers to a signed coefficient and decimal exponent without rounding.
+// Keep the exponent separate to avoid expanding numbers such as 1e1000000000.
+func normalizeJSONNumber(number json.Number) string {
+	value := string(number)
+	sign := ""
+	if value[0] == '-' {
+		sign = "-"
+		value = value[1:]
+	}
+	var exponent big.Int
+	if i := strings.IndexAny(value, "eE"); i >= 0 {
+		exponent.SetString(value[i+1:], 10)
+		value = value[:i]
+	}
+	fractionalDigits := 0
+	if i := strings.IndexByte(value, '.'); i >= 0 {
+		fractionalDigits = len(value) - i - 1
+		value = value[:i] + value[i+1:]
+	}
+	value = strings.TrimLeft(value, "0")
+	if value == "" {
+		return "0"
+	}
+	coefficient := strings.TrimRight(value, "0")
+	exponent.Add(&exponent, big.NewInt(int64(len(value)-len(coefficient)-fractionalDigits)))
+	return sign + coefficient + "e" + exponent.String()
 }
 
 // RejectedFieldStatuses marks client-supplied fields rejected at a boundary.
