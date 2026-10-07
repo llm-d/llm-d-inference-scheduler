@@ -39,6 +39,58 @@ func TestConvertFromV1Alpha2(t *testing.T) {
 			want: nil,
 		},
 		{
+			name: "superset poolRefs pass through with defaults applied",
+			in: &v1alpha2.InferenceObjective{
+				ObjectMeta: metav1.ObjectMeta{Name: "tier", Namespace: "ns"},
+				Spec: v1alpha2.InferenceObjectiveSpec{
+					Priority: &priority,
+					PoolRefs: []v1alpha2.PoolObjectReference{{Name: "pool1"}, {Name: "pool2", Group: "inference.networking.k8s.io", Kind: "InferencePool"}},
+				},
+			},
+			want: &InferenceObjective{
+				ObjectMeta: metav1.ObjectMeta{Name: "tier", Namespace: "ns"},
+				Spec: InferenceObjectiveSpec{
+					Priority: &priority,
+					PoolRefs: []PoolObjectReference{
+						{Name: "pool1", Group: "inference.networking.k8s.io", Kind: "InferencePool"},
+						{Name: "pool2", Group: "inference.networking.k8s.io", Kind: "InferencePool"},
+					},
+				},
+			},
+		},
+		{
+			name: "superset poolSelector passes through",
+			in: &v1alpha2.InferenceObjective{
+				ObjectMeta: metav1.ObjectMeta{Name: "tier", Namespace: "ns"},
+				Spec: v1alpha2.InferenceObjectiveSpec{
+					Priority:     &priority,
+					PoolSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"model": "llama"}},
+				},
+			},
+			want: &InferenceObjective{
+				ObjectMeta: metav1.ObjectMeta{Name: "tier", Namespace: "ns"},
+				Spec: InferenceObjectiveSpec{
+					Priority:     &priority,
+					PoolSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"model": "llama"}},
+				},
+			},
+		},
+		{
+			name: "unnamed superset entries are dropped",
+			in: &v1alpha2.InferenceObjective{
+				ObjectMeta: metav1.ObjectMeta{Name: "tier", Namespace: "ns"},
+				Spec: v1alpha2.InferenceObjectiveSpec{
+					PoolRefs: []v1alpha2.PoolObjectReference{{Name: "pool1"}, {Group: "inference.networking.k8s.io"}},
+				},
+			},
+			want: &InferenceObjective{
+				ObjectMeta: metav1.ObjectMeta{Name: "tier", Namespace: "ns"},
+				Spec: InferenceObjectiveSpec{
+					PoolRefs: []PoolObjectReference{{Name: "pool1", Group: "inference.networking.k8s.io", Kind: "InferencePool"}},
+				},
+			},
+		},
+		{
 			name: "single reference becomes the list",
 			in: &v1alpha2.InferenceObjective{
 				ObjectMeta: metav1.ObjectMeta{Name: "tier", Namespace: "ns"},

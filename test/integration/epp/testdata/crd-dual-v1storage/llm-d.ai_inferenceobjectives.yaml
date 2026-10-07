@@ -246,6 +246,8 @@ spec:
         - jsonPath: .metadata.creationTimestamp
           name: Age
           type: date
+      deprecated: true
+      deprecationWarning: llm-d.ai/v1alpha2 InferenceObjective is deprecated; use llm-d.ai/v1
       name: v1alpha2
       schema:
         openAPIV3Schema:
@@ -279,6 +281,10 @@ spec:
                 performance and latency goals for the model. These workloads are
                 expected to operate within an InferencePool sharing compute capacity with other
                 InferenceObjectives, defined by the Inference Platform Admin.
+
+                The schema accepts the v1 targeting fields so objects written through
+                either version store losslessly under None conversion; author new objects
+                in v1. poolRef is exclusive with poolRefs and poolSelector.
               properties:
                 poolRef:
                   description: PoolRef is a reference to the inference pool, the pool must exist in the same namespace.
@@ -304,6 +310,94 @@ spec:
                   required:
                     - name
                   type: object
+                poolRefs:
+                  description: |-
+                    PoolRefs targets the inference pools in the same namespace that
+                    this objective applies to. An objective applies to a pool when any
+                    entry matches. Entries are unique by pool name.
+                  items:
+                    description: |-
+                      PoolObjectReference identifies an API object within the namespace of the
+                      referrer.
+                    properties:
+                      group:
+                        default: inference.networking.k8s.io
+                        description: Group is the group of the referent.
+                        maxLength: 253
+                        pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                      kind:
+                        default: InferencePool
+                        description: Kind is kind of the referent. For example "InferencePool".
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$
+                        type: string
+                      name:
+                        description: Name is the name of the referent.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                    required:
+                      - name
+                    type: object
+                  maxItems: 16
+                  minItems: 1
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - name
+                  x-kubernetes-list-type: map
+                poolSelector:
+                  description: |-
+                    PoolSelector selects inference pools in the same namespace by
+                    label. An objective applies to a pool when the selector matches
+                    its labels. The selector must not be empty; targeting every pool
+                    in the namespace is not a supported objective.
+                  properties:
+                    matchExpressions:
+                      description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                      items:
+                        description: |-
+                          A label selector requirement is a selector that contains values, a key, and an operator that
+                          relates the key and values.
+                        properties:
+                          key:
+                            description: key is the label key that the selector applies to.
+                            type: string
+                          operator:
+                            description: |-
+                              operator represents a key's relationship to a set of values.
+                              Valid operators are In, NotIn, Exists and DoesNotExist.
+                            type: string
+                          values:
+                            description: |-
+                              values is an array of string values. If the operator is In or NotIn,
+                              the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                              the values array must be empty. This array is replaced during a strategic
+                              merge patch.
+                            items:
+                              type: string
+                            type: array
+                            x-kubernetes-list-type: atomic
+                        required:
+                          - key
+                          - operator
+                        type: object
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    matchLabels:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                        map is equivalent to an element of matchExpressions, whose key field is "key", the
+                        operator is "In", and the values array contains only "value". The requirements are ANDed.
+                      type: object
+                  type: object
+                  x-kubernetes-map-type: atomic
+                  x-kubernetes-validations:
+                    - message: poolSelector must not be empty
+                      rule: (has(self.matchLabels) && size(self.matchLabels) > 0) || (has(self.matchExpressions) && size(self.matchExpressions) > 0)
                 priority:
                   description: |-
                     Priority defines how important it is to serve the request compared to other requests in the same pool.
@@ -320,9 +414,12 @@ spec:
                     Similarly requests with a Priority of -10 will always be served after requests with Priority of 0.
                   format: int32
                   type: integer
-              required:
-                - poolRef
               type: object
+              x-kubernetes-validations:
+                - message: one of poolRef, poolRefs or poolSelector must be set
+                  rule: has(self.poolRef) || has(self.poolRefs) || has(self.poolSelector)
+                - message: poolRef cannot be combined with poolRefs or poolSelector
+                  rule: '!(has(self.poolRef) && self.poolRef.name != "" && (has(self.poolRefs) || has(self.poolSelector)))'
             status:
               description: InferenceObjectiveStatus defines the observed state of InferenceObjective
               properties:
