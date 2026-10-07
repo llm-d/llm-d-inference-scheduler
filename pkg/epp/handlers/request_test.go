@@ -24,6 +24,8 @@ import (
 
 	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+	envoyTypePb "github.com/envoyproxy/go-control-plane/envoy/type/v3"
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -35,14 +37,20 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 	grpcmetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/anthropic"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
+	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
 )
 
 func TestExtractTraceContext(t *testing.T) {
@@ -705,4 +713,185 @@ func statusForField(t *testing.T, statuses []toolcalling.FieldStatus, field tool
 	}
 	t.Fatalf("field %q missing from status list", field)
 	return toolcalling.FieldStatus{}
+}
+
+type requestIntegrityDirector struct {
+	mockDirector
+	outbound string
+	err      error
+	called   bool
+}
+
+func (d *requestIntegrityDirector) HandleRequest(_ context.Context, reqCtx *RequestContext, _ *fwkrh.InferenceRequestBody) (*RequestContext, error) {
+	d.called = true
+	if d.outbound != "" {
+		reqCtx.Request.RawBody = []byte(d.outbound)
+		reqCtx.RequestSize = len(d.outbound)
+	}
+	return reqCtx, d.err
+}
+
+func TestProcessRequestToolCallingIntegrity(t *testing.T) {
+	const (
+		chatBody  = `{"model":"m","messages":[{"role":"user","content":"private_prompt_content"}],"tools":[{"type":"function","function":{"name":"private_tool_name","parameters":{"type":"object","description":"private_schema_content"}}}],"tool_choice":"required","parallel_tool_calls":true,"response_format":{"type":"json_object"}}`
+		plainBody = `{"model":"m","messages":[{"role":"user","content":"hello"}]}`
+	)
+	for _, tt := range []struct {
+		name           string
+		path           string
+		body           string
+		outbound       string
+		directorErr    error
+		wantRejection  bool
+		wantDirector   bool
+		wantSurface    string
+		wantChoice     string
+		wantToolBucket string
+		wantFields     map[string]string
+	}{
+		{
+			name: "chat fields preserved", path: reqcommon.PathChatCompletions,
+			body: chatBody, wantDirector: true, wantSurface: "chat_completions",
+			wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved", "response_format": "preserved"},
+		},
+		{
+			name: "serialized body changes and drops fields", path: reqcommon.PathChatCompletions,
+			body:         chatBody,
+			outbound:     `{"model":"m","messages":[{"role":"user","content":"private_prompt_content"}],"tools":[{"function":{"parameters":{"description":"private_schema_content","type":"object"},"name":"private_tool_name"},"type":"function"}],"tool_choice":"auto","response_format":{"type":"json_object"}}`,
+			wantDirector: true, wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "changed", "parallel_tool_calls": "dropped", "response_format": "preserved"},
+		},
+		{
+			name: "all tool fields dropped", path: reqcommon.PathChatCompletions,
+			body: chatBody, outbound: plainBody, wantDirector: true,
+			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "dropped", "tool_choice": "dropped", "parallel_tool_calls": "dropped", "response_format": "dropped"},
+		},
+		{
+			name: "parser rejects valid JSON", path: reqcommon.PathChatCompletions,
+			body: `{"model":"m","tools":[],"tool_choice":"required"}`, wantRejection: true,
+			wantSurface: "chat_completions", wantChoice: "required",
+			wantFields: map[string]string{"tools": "rejected", "tool_choice": "rejected"},
+		},
+		{
+			name: "director rejects captured fields", path: reqcommon.PathChatCompletions,
+			body: chatBody, directorErr: errcommon.Error{Code: errcommon.BadRequest, Msg: "request rejected"},
+			wantRejection: true, wantDirector: true,
+			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "rejected", "tool_choice": "rejected", "parallel_tool_calls": "rejected", "response_format": "rejected"},
+		},
+		{
+			name: "malformed body has no guessed statuses", path: reqcommon.PathChatCompletions,
+			body: `{"model":"m","tools":[`, wantRejection: true,
+		},
+		{
+			name: "non-tool request", path: reqcommon.PathChatCompletions,
+			body: plainBody, wantDirector: true,
+		},
+		{
+			name: "nested tool fields are not request fields", path: reqcommon.PathChatCompletions,
+			body: `{"model":"m","messages":[{"role":"user","content":"hello","tools":[],"tool_choice":"required"}]}`, wantDirector: true,
+		},
+		{
+			name: "Messages counts only supported fields", path: reqcommon.PathMessages,
+			body:         `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"private_tool_name","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"private_tool_name"},"parallel_tool_calls":true,"response_format":null}`,
+			outbound:     `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"private_tool_name","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"private_tool_name"}}`,
+			wantDirector: true, wantSurface: "messages", wantChoice: "named", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved"},
+		},
+		{
+			name: "Messages unsupported fields emit no telemetry", path: reqcommon.PathMessages,
+			body: `{"model":"m","messages":[{"role":"user","content":"hello"}],"parallel_tool_calls":true,"response_format":null}`, wantDirector: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			metrics.Register()
+			metrics.Reset()
+			t.Cleanup(metrics.Reset)
+			exporter := tracetest.NewInMemoryExporter()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter), sdktrace.WithSampler(sdktrace.AlwaysSample()))
+			useTracerProvider(t, provider)
+			t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+			director := &requestIntegrityDirector{outbound: tt.outbound, err: tt.directorErr}
+			srv := &scriptedProcessServer{
+				ctx: context.Background(),
+				reqs: []*extProcPb.ProcessingRequest{
+					newRequestHeaders(map[string]string{":path": tt.path, "traceparent": upstreamTraceparent}),
+					{Request: &extProcPb.ProcessingRequest_RequestBody{RequestBody: &extProcPb.HttpBody{
+						Body: []byte(tt.body), EndOfStream: true,
+					}}},
+				},
+			}
+			registry := NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}, logr.Discard())
+			require.NoError(t, NewStreamingServer(nil, director, registry, 0).Process(srv))
+			require.Equal(t, tt.wantDirector, director.called)
+			if tt.wantRejection {
+				require.Len(t, srv.sentResponses, 1)
+				require.Equal(t, envoyTypePb.StatusCode_BadRequest, srv.sentResponses[0].GetImmediateResponse().GetStatus().GetCode())
+			} else {
+				require.Len(t, srv.sentResponses, 2)
+				wantBody := tt.body
+				if tt.outbound != "" {
+					wantBody = tt.outbound
+				}
+				require.Equal(t, wantBody, string(srv.sentResponses[1].GetRequestBody().GetResponse().GetBodyMutation().GetStreamedResponse().GetBody()))
+			}
+
+			gotFields := make(map[string]string)
+			families, err := ctrlmetrics.Registry.Gather()
+			require.NoError(t, err)
+			for _, family := range families {
+				if family.GetName() != toolcalling.MetricToolCallingFieldStatus {
+					continue
+				}
+				for _, metric := range family.GetMetric() {
+					labels := make(map[string]string)
+					for _, label := range metric.GetLabel() {
+						labels[label.GetName()] = label.GetValue()
+					}
+					require.Len(t, labels, 4)
+					require.Equal(t, toolcalling.ComponentEPP, labels[toolcalling.MetricLabelComponent])
+					require.Equal(t, toolcalling.DirectionRequest, labels[toolcalling.MetricLabelDirection])
+					require.Equal(t, float64(1), metric.GetCounter().GetValue())
+					field := labels[toolcalling.MetricLabelField]
+					require.NotContains(t, gotFields, field, "a field must be counted only once")
+					gotFields[field] = labels[toolcalling.MetricLabelStatus]
+				}
+			}
+			require.Len(t, gotFields, len(tt.wantFields))
+			for field, status := range tt.wantFields {
+				require.Equal(t, status, gotFields[field])
+			}
+
+			var requestSpans tracetest.SpanStubs
+			for _, span := range exporter.GetSpans() {
+				if span.Name == "request" {
+					requestSpans = append(requestSpans, span)
+				}
+			}
+			require.Len(t, requestSpans, 1)
+			require.Equal(t, upstreamTraceID, requestSpans[0].SpanContext.TraceID().String())
+			require.Equal(t, "00f067aa0c9902b7", requestSpans[0].Parent.SpanID().String())
+			gotAttrs := make(map[string]any)
+			for _, attr := range requestSpans[0].Attributes {
+				if strings.HasPrefix(string(attr.Key), "llm_d.tool_calling.") {
+					gotAttrs[string(attr.Key)] = attr.Value.AsInterface()
+				}
+			}
+			wantAttrs := make(map[string]any)
+			if len(tt.wantFields) > 0 {
+				wantAttrs["llm_d.tool_calling.api_surface"] = tt.wantSurface
+				wantAttrs["llm_d.tool_calling.present"] = true
+				wantAttrs["llm_d.tool_calling.tool_choice"] = tt.wantChoice
+				if tt.wantToolBucket != "" {
+					wantAttrs["llm_d.tool_calling.tool_count"] = tt.wantToolBucket
+				}
+				for field, status := range tt.wantFields {
+					wantAttrs["llm_d.tool_calling.field."+field+".status"] = status
+				}
+			}
+			require.Equal(t, wantAttrs, gotAttrs)
+		})
+	}
 }
