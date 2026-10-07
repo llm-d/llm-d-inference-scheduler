@@ -659,23 +659,22 @@ func TestRequestAttributionAtIngress(t *testing.T) {
 	}
 }
 
-func TestCompareEPPToolCallingBodies(t *testing.T) {
-	inbound := []byte(`{"tools":[{"function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"required","parallel_tool_calls":true}`)
+func TestCompareEPPToolCallingSnapshotToBody(t *testing.T) {
+	inboundBody := []byte(`{"tools":[{"function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"required","parallel_tool_calls":true}`)
 	outbound := []byte(`{"parallel_tool_calls":true,"tool_choice":"auto","tools":[{"function":{"parameters":{"type":"object"},"name":"private"}}]}`)
 
-	_, statuses, err := compareEPPToolCallingBodies(toolcalling.APISurfaceChatCompletions, inbound, outbound)
+	inbound, err := toolcalling.CaptureRequestJSON(toolcalling.APISurfaceChatCompletions, inboundBody)
+	require.NoError(t, err)
+	inboundBody[0] = 'x' // The captured snapshot remains stable if the request buffer is later reused.
+	statuses, err := compareEPPToolCallingSnapshotToBody(toolcalling.APISurfaceChatCompletions, inbound, outbound)
 	require.NoError(t, err)
 	require.Equal(t, toolcalling.FieldStatusPreserved, statusForField(t, statuses, toolcalling.FieldTools).Status)
 	require.Equal(t, toolcalling.FieldStatusChanged, statusForField(t, statuses, toolcalling.FieldToolChoice).Status)
 	require.True(t, statusForField(t, statuses, toolcalling.FieldToolChoice).Observed)
 
-	_, statuses, err = compareEPPToolCallingBodies(toolcalling.APISurfaceChatCompletions, inbound, []byte(`{"tools":[`))
+	statuses, err = compareEPPToolCallingSnapshotToBody(toolcalling.APISurfaceChatCompletions, inbound, []byte(`{"tools":[`))
 	require.Error(t, err)
 	require.Equal(t, toolcalling.FieldStatusRejected, statusForField(t, statuses, toolcalling.FieldTools).Status)
-
-	_, statuses, err = compareEPPToolCallingBodies(toolcalling.APISurfaceChatCompletions, []byte(`{"tools":[`), outbound)
-	require.Error(t, err)
-	require.Empty(t, statuses, "malformed inbound JSON must not produce guessed field outcomes")
 }
 
 func TestToolCallingSurfaceForPath(t *testing.T) {

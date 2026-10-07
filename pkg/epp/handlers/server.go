@@ -261,20 +261,16 @@ func toolCallingSurfaceForPath(path string) (toolcalling.APISurface, bool) {
 	}
 }
 
-func compareEPPToolCallingBodies(surface toolcalling.APISurface, inboundBody, outboundBody []byte) (toolcalling.RequestSnapshot, []toolcalling.FieldStatus, error) {
-	inbound, err := toolcalling.CaptureRequestJSON(surface, inboundBody)
-	if err != nil {
-		return toolcalling.RequestSnapshot{}, nil, err
-	}
+func compareEPPToolCallingSnapshotToBody(surface toolcalling.APISurface, inbound toolcalling.RequestSnapshot, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
 	outbound, err := toolcalling.CaptureRequestJSON(surface, outboundBody)
 	if err != nil {
-		return inbound, toolcalling.RejectedFieldStatuses(inbound), err
+		return toolcalling.RejectedFieldStatuses(inbound), err
 	}
 	statuses, err := toolcalling.CompareRequests(inbound, outbound)
 	if err != nil {
-		return inbound, nil, err
+		return nil, err
 	}
-	return inbound, statuses, nil
+	return statuses, nil
 }
 
 // extractTraceContext returns ctx augmented with the upstream trace context
@@ -555,12 +551,11 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: resolveErr.Error()}
 					break
 				}
-				inboundBody := bytes.Clone(reqCtx.Request.RawBody)
 				apiSurface, hasToolCallingSurface := toolCallingSurfaceForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
 				var inboundToolSnapshot toolcalling.RequestSnapshot
 				hasInboundToolSnapshot := false
 				if hasToolCallingSurface {
-					inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiSurface, inboundBody)
+					inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiSurface, reqCtx.Request.RawBody)
 					if err != nil {
 						// A malformed body has no trustworthy field snapshot. Leave
 						// rejection reporting to the normal request parser below.
@@ -599,13 +594,13 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				}
 
 				if hasToolCallingSurface && hasInboundToolSnapshot {
-					inboundSnapshot, statuses, compareErr := compareEPPToolCallingBodies(apiSurface, inboundBody, reqCtx.Request.RawBody)
+					statuses, compareErr := compareEPPToolCallingSnapshotToBody(apiSurface, inboundToolSnapshot, reqCtx.Request.RawBody)
 					if compareErr != nil {
 						logger.Error(compareErr, "Error comparing tool-calling request fields")
 					}
 					metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
 					if span != nil {
-						span.SetAttributes(inboundSnapshot.SpanAttributes(statuses)...)
+						span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
 					}
 				}
 
