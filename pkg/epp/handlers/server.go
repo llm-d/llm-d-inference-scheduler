@@ -254,7 +254,9 @@ func extractTraceContext(ctx context.Context, req *extProcPb.ProcessingRequest_R
 			carrier[strings.ToLower(header.Key)] = envoy.GetHeaderValue(header)
 		}
 	}
-	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+	ctx = otel.GetTextMapPropagator().Extract(ctx, carrier)
+	id, _ := metadata.GetLowerCaseHeaderValue(carrier, metadata.FlowFairnessIDKey)
+	return tracing.BeginRequestAttribution(ctx, id)
 }
 
 // terminationCause classifies a stream that ended without completing. ctxErr is the request
@@ -288,9 +290,9 @@ func terminationCauseFromGRPCTrailers(trailers *extProcPb.HttpTrailers) fwkrc.Te
 
 func extractFairnessAndPriority(reqCtx *RequestContext) (string, string) {
 	if reqCtx == nil {
-		return metadata.DefaultFairnessID, "0"
+		return reqcommon.DefaultFairnessID, "0"
 	}
-	fairnessID := metadata.DefaultFairnessID
+	fairnessID := reqcommon.DefaultFairnessID
 	if reqCtx.SchedulingRequest != nil && reqCtx.SchedulingRequest.FairnessID != "" {
 		fairnessID = reqCtx.SchedulingRequest.FairnessID
 	}
@@ -521,6 +523,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				}
 
 				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
+				// The Director may resolve agent identity after this request span opened.
+				tracing.AttributeRequest(ctx, span)
 				if err != nil {
 					break
 				}
