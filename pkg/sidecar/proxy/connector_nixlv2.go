@@ -88,6 +88,10 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 		return
 	}
 
+	// Telemetry failure must not change routing or reject an inference request.
+	toolFields, _ := captureToolCallingRequest(apiType, original)
+	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
+
 	// Prefill Stage
 	tracer := tracing.Tracer(tracerScope)
 	ctx := r.Context()
@@ -200,6 +204,8 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	// reset → 502) are common when the prefill pod's accept queue overflows
 	// under load. Retrying the same host avoids expensive local prefill on
 	// decode. Non-transient errors (500/501) fail immediately.
+	// Every attempt uses the same serialized body, so compare it once.
+	_, _ = toolFields.compareDispatched(pbody)
 	var pw *bufferedResponseWriter
 retryLoop:
 	for attempt := 0; ; attempt++ {
@@ -422,12 +428,19 @@ retryLoop:
 	decodeWriter, finalizeDecodeWriter := decodeResponseWriter(statusWriter, pCachedTokens, rewriteCachedTokens, streamingEnabled)
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
-	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeWriter, dreq)
+	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeWriter, dreq, func() {
+		_, _ = toolFields.compareDispatched(dbody)
+	})
 	decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDataParallel(dataParallelUsed))
 
 	if !dataParallelUsed {
 		s.logger.V(logging.DEBUG).Info("sending request to decoder", "to", s.config.DecoderURL.Host)
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeTarget(s.config.DecoderURL.Host))
+		// Chunked decode constructs its own outbound bodies; this prepared body
+		// is only dispatched directly when chunking is disabled for the API.
+		if s.config.DecodeChunkSize <= 0 || apiType != reqcommon.APITypeChatCompletions {
+			_, _ = toolFields.compareDispatched(dbody)
+		}
 		s.dispatchDecode(decodeWriter, dreq, body)
 	}
 	decodeReturned = true
@@ -492,6 +505,9 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 	body map[string]any, uuidStr, transferID, prefillPodHostPort, kvCacheSource string,
 	apiType reqcommon.APIType,
 ) {
+	toolFields, _ := captureToolCallingRequest(apiType, original)
+	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
+
 	s.logger.V(logging.DEBUG).Info("running NIXL protocol V2 (concurrent dispatch)",
 		"url", prefillPodHostPort, "request_id", uuidStr)
 
@@ -681,6 +697,7 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 	// KV wait aborts immediately.
 	var prefillResp *bufferedResponseWriter
 	prefillDone := make(chan struct{})
+	_, _ = toolFields.compareDispatched(pbody)
 	prefillStartedAt := time.Now()
 	go func() {
 		defer close(prefillDone)
@@ -740,10 +757,14 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 					"request_id", uuidStr)
 			}
 		}()
-		dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(dcw, dreq)
+		// The request goroutine reads the aggregate only after decodeDone closes.
+		dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(dcw, dreq, func() {
+			_, _ = toolFields.compareDispatched(dbody)
+		})
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDataParallel(dataParallelUsed))
 		if !dataParallelUsed {
 			decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeTarget(s.config.DecoderURL.Host))
+			_, _ = toolFields.compareDispatched(dbody)
 			s.decoderProxy.ServeHTTP(dcw, dreq)
 		}
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDurationMs(float64(time.Since(decodeStartedAt).Milliseconds())))
@@ -851,8 +872,6 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 			semconv.LLMDPDProxyParallelDispatch(true),
 		)
 	}
-	_ = original // kept for signature symmetry with the strictly-serial path
-
 	// Replay the decode abort here, on the request goroutine, so it reaches the
 	// client the way it does on the strictly-serial path. Skipped when the
 	// commit point already wrote the prefill error or the KV-wait timeout,

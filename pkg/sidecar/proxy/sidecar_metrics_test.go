@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/common/usage"
@@ -417,6 +419,137 @@ func TestHandleNIXLV2SerialMetrics(t *testing.T) {
 	}
 }
 
+func TestHandleNIXLV2SerialToolCallingMetrics(t *testing.T) {
+	chatBody := `{"model":"test-model","messages":[],"max_tokens":11,"tools":[{"type":"function","function":{"name":"example","parameters":{"z":9007199254740993,"a":1}}}],"tool_choice":"auto","parallel_tool_calls":false,"response_format":{"type":"json_object"}}`
+	chatFields := []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice, toolcalling.FieldParallelToolCalls, toolcalling.FieldResponseFormat}
+	messagesFields := []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice}
+	tests := []struct {
+		name            string
+		api             reqcommon.APIType
+		body            string
+		failPrefill     int
+		prefillStatus   int
+		prefillResponse string
+		decodeStatus    int
+		requestIDError  bool
+		denyTarget      bool
+		invalidTarget   bool
+		dataParallel    bool
+		wantCode        int
+		wantPrefill     int
+		wantDecode      int
+		wantFields      []toolcalling.Field
+	}{
+		{name: "chat fields preserved across both stages", body: chatBody, wantCode: 200, wantPrefill: 1, wantDecode: 1, wantFields: chatFields},
+		{name: "messages ignores unsupported fields", api: reqcommon.APITypeMessages, body: chatBody, wantCode: 200, wantPrefill: 1, wantDecode: 1, wantFields: messagesFields},
+		{name: "data-parallel decode preserves fields", body: chatBody, dataParallel: true, wantCode: 200, wantPrefill: 1, wantDecode: 1, wantFields: chatFields},
+		{name: "null and empty fields are observed", body: `{"tools":[],"tool_choice":null}`, wantCode: 200, wantPrefill: 1, wantDecode: 1, wantFields: messagesFields},
+		{name: "non-tool request", body: `{"messages":[]}`, wantCode: 200, wantPrefill: 1, wantDecode: 1},
+		{name: "nested tools are not observed", body: `{"messages":[{"tools":[]}]}`, wantCode: 200, wantPrefill: 1, wantDecode: 1},
+		{name: "malformed body keeps existing rejection", body: `{"tools":`, wantCode: 400},
+		{name: "retry success counts fields once", body: chatBody, failPrefill: 2, prefillStatus: 503, wantCode: 200, wantPrefill: 3, wantDecode: 1, wantFields: chatFields},
+		{name: "exhausted retries do not imply field rejection", body: chatBody, failPrefill: 3, prefillStatus: 503, wantCode: 503, wantPrefill: 3, wantFields: chatFields},
+		{name: "generic upstream 400 does not imply field rejection", body: chatBody, failPrefill: 1, prefillStatus: 400, wantCode: 400, wantPrefill: 1, wantFields: chatFields},
+		{name: "invalid prefill response skips decode", body: chatBody, prefillResponse: `not-json`, wantCode: 400, wantPrefill: 1, wantFields: chatFields},
+		{name: "decode failure does not imply field rejection", body: chatBody, decodeStatus: 500, wantCode: 500, wantPrefill: 1, wantDecode: 1, wantFields: chatFields},
+		{name: "request ID failure sends no request", body: chatBody, requestIDError: true, wantCode: 502},
+		{name: "SSRF denial sends no request", body: chatBody, denyTarget: true, wantCode: 403},
+		{name: "handler initialization failure sends no request", body: chatBody, invalidTarget: true, wantCode: 502},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prefillBodies := make(chan []byte, 4)
+			decodeBodies := make(chan []byte, 1)
+			var attempts atomic.Int32
+			prefill := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, readErr := io.ReadAll(r.Body)
+				assert.NoError(t, readErr)
+				prefillBodies <- raw
+				if int(attempts.Add(1)) <= tt.failPrefill {
+					statusHandler(tt.prefillStatus, `{"error":"upstream failure"}`).ServeHTTP(w, r)
+					return
+				}
+				response := tt.prefillResponse
+				if response == "" {
+					response = `{"kv_transfer_params":{}}`
+				}
+				statusHandler(http.StatusOK, response).ServeHTTP(w, r)
+			}))
+			defer prefill.Close()
+			decode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, readErr := io.ReadAll(r.Body)
+				assert.NoError(t, readErr)
+				decodeBodies <- raw
+				code := tt.decodeStatus
+				if code == 0 {
+					code = http.StatusOK
+				}
+				statusHandler(code, `{"choices":[]}`).ServeHTTP(w, r)
+			}))
+			defer decode.Close()
+			decodeURL, parseErr := url.Parse(decode.URL)
+			require.NoError(t, parseErr)
+			prefillURL, parseErr := url.Parse(prefill.URL)
+			require.NoError(t, parseErr)
+			s := NewProxy(Config{DecoderURL: decodeURL, KVConnector: constants.KVConnectorNIXLV2, PrefillMaxRetries: 2})
+			s.logger = log.Log
+			s.allowlistValidator = &AllowlistValidator{enabled: tt.denyTarget}
+			if tt.requestIDError {
+				s.nixlRequestIDFn = func() (string, error) { return "", errors.New("request ID failure") }
+			}
+			target := prefillURL.Host
+			if tt.invalidTarget {
+				target = "%invalid"
+			}
+			before := toolFieldCounters(t)
+			r := httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body))
+			r.Header.Set(routing.PrefillEndpointHeader, target)
+			routes := s.createRoutes()
+			if tt.dataParallel {
+				s.forwardDataParallel = true
+				s.dataParallelProxies[decodeURL.Host] = s.decoderProxy
+				s.decoderProxy = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					t.Error("local decode must not run after data-parallel dispatch")
+				})
+				r.Header.Set(routing.DataParallelEndpointHeader, decodeURL.Host)
+			}
+			rw := httptest.NewRecorder()
+			routes.ServeHTTP(rw, r)
+			require.Equal(t, tt.wantCode, rw.Code, rw.Body.String())
+			require.Len(t, prefillBodies, tt.wantPrefill)
+			require.Len(t, decodeBodies, tt.wantDecode)
+
+			delta := make(map[[2]string]float64)
+			for key, value := range toolFieldCounters(t) {
+				if change := value - before[key]; change != 0 {
+					delta[key] = change
+				}
+			}
+			want := make(map[[2]string]float64)
+			for _, field := range tt.wantFields {
+				want[[2]string{string(field), string(toolcalling.FieldStatusPreserved)}] = 1
+			}
+			require.Equal(t, want, delta)
+
+			// Check the bytes received upstream, including nested field key order
+			// and numbers that cannot be represented exactly as float64.
+			if tt.wantPrefill+tt.wantDecode > 0 {
+				var original map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal([]byte(tt.body), &original))
+				for _, bodies := range []chan []byte{prefillBodies, decodeBodies} {
+					for len(bodies) > 0 {
+						var actual map[string]json.RawMessage
+						require.NoError(t, json.Unmarshal(<-bodies, &actual))
+						for _, field := range chatFields {
+							require.Equal(t, original[string(field)], actual[string(field)], "upstream field %s", field)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestHandleP2PMetrics(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -603,6 +736,182 @@ func TestCaptureResponseStatus(t *testing.T) {
 	})
 }
 
+func TestHandleNIXLV2ParallelToolCallingMetrics(t *testing.T) {
+	const chatBody = `{"model":"test-model","messages":[],"tools":[{"type":"function","function":{"name":"example","parameters":{"z":9007199254740993,"a":1}}}],"tool_choice":"auto","parallel_tool_calls":false,"response_format":{"type":"json_object"}}`
+	chatFields := []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice, toolcalling.FieldParallelToolCalls, toolcalling.FieldResponseFormat}
+	messagesFields := []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice}
+	for _, tt := range []struct {
+		name           string
+		api            reqcommon.APIType
+		body           string
+		prefillCode    int
+		decodeCode     int
+		wantCode       int
+		wantFields     []toolcalling.Field
+		waitForDecode  bool
+		requestIDError bool
+		invalidTarget  bool
+		dataParallel   bool
+		missingReplica bool
+		prefillChoice  string
+		decodeChoice   string
+	}{
+		{name: "chat fields counted once across both stages", body: chatBody, wantCode: 200, wantFields: chatFields},
+		{name: "Messages ignores unsupported fields", api: reqcommon.APITypeMessages, body: chatBody, wantCode: 200, wantFields: messagesFields},
+		{name: "null and empty fields", body: `{"tools":[],"tool_choice":null}`, wantCode: 200, wantFields: messagesFields},
+		{name: "non-tool request", body: `{"messages":[]}`, wantCode: 200},
+		{name: "nested fields", body: `{"messages":[{"tools":[]}]}`, wantCode: 200},
+		{name: "structured output only", body: `{"response_format":null}`, wantCode: 200, wantFields: []toolcalling.Field{toolcalling.FieldResponseFormat}},
+		{name: "Responses is outside sidecar coverage", api: reqcommon.APITypeResponses, body: chatBody, wantCode: 200},
+		{name: "decode starts before prefill completes", body: chatBody, waitForDecode: true, wantCode: 200, wantFields: chatFields},
+		{name: "upstream rejection does not imply tool rejection", body: chatBody, prefillCode: 400, wantCode: 400, wantFields: chatFields},
+		{name: "decode failure retains field outcomes", body: chatBody, decodeCode: 500, wantCode: 500, wantFields: chatFields},
+		{name: "malformed input", body: `{"tools":`, wantCode: 400},
+		{name: "request ID failure", body: chatBody, requestIDError: true, wantCode: 502},
+		{name: "handler initialization failure", body: chatBody, invalidTarget: true, wantCode: 502},
+		{name: "only decode changes choice", body: chatBody, prefillChoice: "auto", decodeChoice: "none", wantCode: 200, wantFields: chatFields},
+		{name: "only prefill changes choice", body: chatBody, prefillChoice: "none", decodeChoice: "auto", wantCode: 200, wantFields: chatFields},
+		{name: "data-parallel decode changes choice", body: chatBody, dataParallel: true, prefillChoice: "auto", decodeChoice: "none", wantCode: 200, wantFields: chatFields},
+		{name: "Messages data-parallel decode changes choice", api: reqcommon.APITypeMessages, body: chatBody, dataParallel: true, prefillChoice: "auto", decodeChoice: "none", wantCode: 200, wantFields: messagesFields},
+		{name: "non-tool data-parallel request", body: `{"messages":[]}`, dataParallel: true, wantCode: 200},
+		{name: "missing replica supplies no decode evidence", body: chatBody, dataParallel: true, missingReplica: true, prefillChoice: "auto", decodeChoice: "none", wantCode: 400, wantFields: chatFields},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			prefillBodies, decodeBodies := make(chan []byte, 1), make(chan []byte, 1)
+			decodeStarted := make(chan struct{})
+			prefill := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				assert.NoError(t, err)
+				prefillBodies <- raw
+				if tt.waitForDecode {
+					select {
+					case <-decodeStarted:
+					case <-r.Context().Done():
+						return
+					}
+				}
+				code := tt.prefillCode
+				if code == 0 {
+					code = http.StatusOK
+				}
+				statusHandler(code, `{}`).ServeHTTP(w, r)
+			}))
+			defer prefill.Close()
+			prefillURL, err := url.Parse(prefill.URL)
+			require.NoError(t, err)
+			s := NewProxy(Config{
+				DecoderURL: prefillURL, KVConnector: constants.KVConnectorNIXLV2,
+				MoRIIOWriteMode: true, MoRIIOParallelDispatch: true,
+				MoRIIODecodePodIP: "127.0.0.1", MoRIIOParallelDecodeWaitTimeout: 2 * time.Second,
+			})
+			s.logger = log.Log
+			s.allowlistValidator = &AllowlistValidator{}
+			if tt.requestIDError {
+				s.nixlRequestIDFn = func() (string, error) { return "", errors.New("request ID failure") }
+			}
+			s.decoderProxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				assert.NoError(t, err)
+				decodeBodies <- raw
+				close(decodeStarted)
+				code := tt.decodeCode
+				if code == 0 {
+					code = http.StatusOK
+				}
+				statusHandler(code, `{"choices":[]}`).ServeHTTP(w, r)
+			})
+			target := prefillURL.Host
+			if tt.invalidTarget {
+				target = "%invalid"
+			}
+			before := toolFieldCounters(t)
+			rw := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body))
+			if tt.dataParallel {
+				s.forwardDataParallel = true
+				if !tt.missingReplica {
+					s.dataParallelProxies[prefillURL.Host] = s.decoderProxy
+				}
+				s.decoderProxy = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					t.Error("local decode must not run after data-parallel selection")
+				})
+				r.Header.Set(routing.DataParallelEndpointHeader, prefillURL.Host)
+			}
+			if tt.prefillChoice != "" {
+				// Supply different serialization results to verify each dispatch independently.
+				body, err := decodeRequestBody([]byte(tt.body))
+				require.NoError(t, err)
+				body[string(toolcalling.FieldToolChoice)] = &parallelToolChoice{prefill: tt.prefillChoice, decode: tt.decodeChoice}
+				s.runNIXLProtocolV2WriteParallel(rw, r, []byte(tt.body), body, "request-id", "txrequest-id", target, "", tt.api)
+			} else {
+				s.handleNIXLV2(rw, r, target, "", tt.api)
+			}
+			require.Equal(t, tt.wantCode, rw.Code)
+			if tt.wantCode == http.StatusOK {
+				require.Equal(t, `{"choices":[]}`, rw.Body.String())
+			}
+			delta := make(map[[2]string]float64)
+			for key, value := range toolFieldCounters(t) {
+				if change := value - before[key]; change != 0 {
+					delta[key] = change
+				}
+			}
+			want := make(map[[2]string]float64)
+			for _, field := range tt.wantFields {
+				status := toolcalling.FieldStatusPreserved
+				if field == toolcalling.FieldToolChoice && tt.prefillChoice != "" && !tt.missingReplica {
+					status = toolcalling.FieldStatusChanged
+				}
+				want[[2]string{string(field), string(status)}] = 1
+			}
+			require.Equal(t, want, delta)
+			if tt.requestIDError || tt.invalidTarget || tt.wantCode == http.StatusBadRequest && tt.prefillCode == 0 && !tt.missingReplica {
+				require.Empty(t, prefillBodies)
+				require.Empty(t, decodeBodies)
+				return
+			}
+			var original map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &original))
+			for i, bodies := range []chan []byte{prefillBodies, decodeBodies} {
+				if i == 1 && tt.missingReplica {
+					require.Empty(t, bodies)
+					continue
+				}
+				require.Len(t, bodies, 1)
+				var actual map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(<-bodies, &actual))
+				for _, field := range chatFields {
+					if field == toolcalling.FieldToolChoice && tt.prefillChoice != "" {
+						choice := tt.prefillChoice
+						if i == 1 {
+							choice = tt.decodeChoice
+						}
+						encoded, err := json.Marshal(choice)
+						require.NoError(t, err)
+						require.JSONEq(t, string(encoded), string(actual[string(field)]))
+					} else {
+						require.Equal(t, original[string(field)], actual[string(field)])
+					}
+				}
+			}
+		})
+	}
+}
+
+type parallelToolChoice struct {
+	prefill, decode string
+	marshaled       bool
+}
+
+func (choice *parallelToolChoice) MarshalJSON() ([]byte, error) {
+	value := choice.prefill
+	if choice.marshaled {
+		value = choice.decode
+	}
+	choice.marshaled = true
+	return json.Marshal(value)
+}
+
 func TestHandleNIXLV2ParallelWriteMetrics(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -783,9 +1092,13 @@ func TestHandleNIXLV2ParallelWriteFailureMetrics(t *testing.T) {
 			s.decoderProxy = tt.decoder
 
 			before := snapshotStageMetrics(t)
+			beforeFields := toolFieldCounters(t)
 			rw := httptest.NewRecorder()
 			serve := func() {
-				s.handleNIXLV2(rw, chatRequest(t, textChatBody()), prefillURL.Host, "", reqcommon.APITypeChatCompletions)
+				body := textChatBody()
+				body[string(toolcalling.FieldTools)] = []any{}
+				body[string(toolcalling.FieldToolChoice)] = "auto"
+				s.handleNIXLV2(rw, chatRequest(t, body), prefillURL.Host, "", reqcommon.APITypeChatCompletions)
 			}
 			if tt.wantPanic {
 				assert.PanicsWithValue(t, http.ErrAbortHandler, serve)
@@ -795,6 +1108,16 @@ func TestHandleNIXLV2ParallelWriteFailureMetrics(t *testing.T) {
 
 			assert.Equal(t, tt.wantCode, rw.Code)
 			assert.Equal(t, tt.wantDelta, snapshotStageMetrics(t).delta(before))
+			fieldDelta := make(map[[2]string]float64)
+			for key, value := range toolFieldCounters(t) {
+				if change := value - beforeFields[key]; change != 0 {
+					fieldDelta[key] = change
+				}
+			}
+			assert.Equal(t, map[[2]string]float64{
+				{string(toolcalling.FieldTools), string(toolcalling.FieldStatusPreserved)}:      1,
+				{string(toolcalling.FieldToolChoice), string(toolcalling.FieldStatusPreserved)}: 1,
+			}, fieldDelta)
 		})
 	}
 }
