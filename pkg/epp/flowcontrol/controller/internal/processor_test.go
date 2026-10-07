@@ -1430,6 +1430,44 @@ func TestProcessor(t *testing.T) {
 				assert.NotContains(t, stages, "", "unpartitioned series should have been deleted")
 			})
 
+			t.Run("should drop unpartitioned stale-endpoints series once stages are evaluated", func(t *testing.T) {
+				t.Parallel()
+				metrics.Register()
+				h := newTestHarness(t, testCleanupTick)
+				const detector = "unpartitioned-stale-test"
+
+				h.saturationDetector.SaturationFunc = func(ctx context.Context, _ []fwkdl.Endpoint) float64 {
+					metrics.RecordFlowControlStaleEndpoints(detector, flowcontrol.SaturationStageFromContext(ctx), 1)
+					return 1.0
+				}
+
+				// Empty pool: the detector is evaluated without a stage.
+				h.endpointCandidates.Candidates = nil
+				h.processor.dispatchCycle(context.Background())
+
+				h.endpointCandidates.Candidates = []fwkdl.Endpoint{makeEndpoint(bylabel.RoleDecode)}
+				h.processor.dispatchCycle(context.Background())
+
+				families, err := ctrlmetrics.Registry.Gather()
+				require.NoError(t, err)
+				var stages []string
+				for _, mf := range families {
+					if mf.GetName() != "llm_d_epp_flow_control_stale_endpoints" {
+						continue
+					}
+					for _, m := range mf.GetMetric() {
+						labels := map[string]string{}
+						for _, lp := range m.GetLabel() {
+							labels[lp.GetName()] = lp.GetValue()
+						}
+						if labels["detector"] == detector {
+							stages = append(stages, labels["stage"])
+						}
+					}
+				}
+				assert.NotContains(t, stages, "", "unpartitioned series should have been deleted")
+			})
+
 			t.Run("should include interleaved endpoints in both stage pools", func(t *testing.T) {
 				t.Parallel()
 				h := newTestHarness(t, testCleanupTick)
