@@ -183,8 +183,15 @@ kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
 | **Parameter Name** | **Description** | **Default** |
 | :--- | :--- | :--- |
 | `router.epp.parsers` | List of request parser types for EPP. Options: `[openai-parser, anthropic-parser, vllmgrpc-parser, vllmhttp-parser, passthrough-parser]`. Empty for auto-selection. | `[]` |
-| `router.epp.replicas` | Number of EPP replicas. Set > 1 to enable multi-replica EPP. | `1` |
-| `router.epp.deploymentStrategy` | Overrides the EPP Deployment's `spec.strategy`. See [Multi-replica EPP and Helm `--wait`](#multi-replica-epp-and-helm---wait). | `{type: Recreate}` |
+| `router.epp.replicas` | Number of EPP replicas. Set > 1 to enable multi-replica EPP. Ignored when `router.epp.autoscaling.enabled` is `true`. | `1` |
+| `router.epp.deploymentStrategy` | Overrides the EPP Deployment's `spec.strategy`. Defaults to `RollingUpdate` with `maxUnavailable: 0` and `maxSurge: 1` when autoscaling is enabled; otherwise defaults to `{type: Recreate}`. See [Multi-replica EPP and Helm `--wait`](#multi-replica-epp-and-helm---wait). | `{type: Recreate}` |
+| `router.epp.autoscaling.enabled` | Enable Horizontal Pod Autoscaler (HPA v2) for the EPP Deployment. Requires active-active mode (`router.epp.flags.ha-enable-leader-election` must not be `true`). See [Horizontal Pod Autoscaling (HPA)](../../docs/operations.md#horizontal-pod-autoscaling-hpa). | `false` |
+| `router.epp.autoscaling.minReplicas` | Minimum number of EPP replicas for the HPA. | `1` |
+| `router.epp.autoscaling.maxReplicas` | Maximum number of EPP replicas for the HPA. Must be greater than or equal to `minReplicas`. | `5` |
+| `router.epp.autoscaling.targetCPUUtilizationPercentage` | Target average CPU utilization percentage across EPP pods (1-100). | `80` |
+| `router.epp.autoscaling.targetMemoryUtilizationPercentage` | Target average memory utilization percentage across EPP pods (1-100). | `""` |
+| `router.epp.autoscaling.behavior` | Scaling behavior policies for HPA scale-up and scale-down. | `{}` |
+| `router.epp.autoscaling.metrics` | Custom HPA v2 metrics override; replaces auto-generated CPU and memory metrics. Target percentage fields remain range-validated if defined. | `[]` |
 | `router.epp.extProcPort` | Port EPP uses for external processing gRPC communication. | `9002` |
 | `router.epp.image.registry` | EPP container image registry. | `ghcr.io/llm-d` |
 | `router.epp.image.repository` | EPP container image repository. | `llm-d-router-endpoint-picker` |
