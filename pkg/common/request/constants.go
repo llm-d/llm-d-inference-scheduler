@@ -37,6 +37,11 @@ const (
 	// system.
 	DefaultFairnessID = "default-flow"
 
+	// HeaderContentType names the HTTP header that carries the media type of a body.
+	HeaderContentType = "content-type"
+	// ContentTypeJSON is the media type of JSON bodies.
+	ContentTypeJSON = "application/json"
+
 	FieldKVTransferParams     = "kv_transfer_params"
 	FieldECTransferParams     = "ec_transfer_params"
 	FieldMaxTokens            = "max_tokens"

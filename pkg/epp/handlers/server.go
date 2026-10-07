@@ -25,9 +25,7 @@ import (
 	"sync"
 	"time"
 
-	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
-	envoyTypePb "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -233,6 +231,16 @@ func (s *StreamingServer) getOrResolveParser(reqCtx *RequestContext) (fwkrh.Pars
 
 	reqCtx.Parser = parser
 	return parser, nil
+}
+
+// apiType classifies the request by its path. A request rejected before its
+// headers are copied has no path and classifies as chat completions.
+func (r *RequestContext) apiType() reqcommon.APIType {
+	var headers map[string]string
+	if r.Request != nil {
+		headers = r.Request.Headers
+	}
+	return reqcommon.DetectAPIType(fwkrequest.GetRequestPath(headers))
 }
 
 // extractTraceContext returns ctx augmented with the upstream trace context
@@ -631,7 +639,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			} else {
 				logger.Error(err, "Failed to process request")
 			}
-			resp, err := errcommon.BuildErrResponse(err)
+			resp, err := errcommon.BuildErrResponse(err, reqCtx.apiType())
 			if err != nil {
 				return err
 			}
@@ -718,29 +726,15 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 	// Handle eviction — send ImmediateResponse(429) to Envoy to reset the upstream connection.
 	if r.requestState == requestEvicted {
 		loggerTrace.Info("Sending ImmediateResponse for evicted request")
-		ir := &extProcPb.ImmediateResponse{
-			Status: &envoyTypePb.HttpStatus{
-				Code: envoyTypePb.StatusCode_TooManyRequests,
-			},
-			Body: []byte("request evicted by flow control"),
-		}
+		evicted := errcommon.Error{Code: errcommon.ResourceExhausted, Msg: "request evicted by flow control"}
 		if r.requestDroppedReason != "" {
-			ir.Headers = &extProcPb.HeaderMutation{
-				SetHeaders: []*configPb.HeaderValueOption{
-					{
-						Header: &configPb.HeaderValue{
-							Key:      errcommon.RequestDroppedReasonHeaderKey,
-							RawValue: []byte(r.requestDroppedReason),
-						},
-					},
-				},
-			}
+			evicted.Headers = map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(r.requestDroppedReason)}
 		}
-		return srv.Send(&extProcPb.ProcessingResponse{
-			Response: &extProcPb.ProcessingResponse_ImmediateResponse{
-				ImmediateResponse: ir,
-			},
-		})
+		resp, err := errcommon.BuildErrResponse(evicted, r.apiType())
+		if err != nil {
+			return err
+		}
+		return srv.Send(resp)
 	}
 
 	// Handle skip — send response with the director's routing decision to the proxy.
