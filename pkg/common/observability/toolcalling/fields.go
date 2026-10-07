@@ -166,19 +166,47 @@ func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, e
 	return snapshot, nil
 }
 
-// CaptureRequestJSON decodes and snapshots a JSON request object.
+// CaptureRequestJSON decodes only supported fields in a JSON request object.
 func CaptureRequestJSON(surface APISurface, body []byte) (RequestSnapshot, error) {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	var payload map[string]any
-	if err := decoder.Decode(&payload); err != nil {
+	fields, err := fieldsForSurface(surface)
+	if err != nil {
+		return RequestSnapshot{}, err
+	}
+	// Escaped field names contain Unicode escapes. Possible matches still need
+	// exact top-level lookup; nested keys and prompt text can match this precheck.
+	possibleFields := bytes.Contains(body, []byte(`\u`))
+	for _, field := range fields {
+		possibleFields = possibleFields || bytes.Contains(body, []byte(field))
+	}
+	if !possibleFields {
+		trimmed := bytes.TrimSpace(body)
+		if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(body) {
+			return RequestSnapshot{}, errors.New("decode request body: expected valid JSON object")
+		}
+		return RequestSnapshot{
+			surface: surface,
+			summary: RequestSummary{ToolChoiceKind: ToolChoiceUnknown},
+		}, nil
+	}
+
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &rawFields); err != nil {
 		return RequestSnapshot{}, fmt.Errorf("decode request body: %w", err)
 	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return RequestSnapshot{}, errors.New("decode request body: unexpected trailing data")
-	}
-	if payload == nil {
+	if rawFields == nil {
 		return RequestSnapshot{}, errors.New("decode request body: expected JSON object")
+	}
+	payload := make(map[string]any, len(fields))
+	for _, field := range fields {
+		if raw, present := rawFields[string(field)]; present {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			var value any
+			if err := decoder.Decode(&value); err != nil {
+				return RequestSnapshot{}, fmt.Errorf("decode %s field: %w", field, err)
+			}
+			payload[string(field)] = value
+		}
 	}
 	return CaptureRequest(surface, payload)
 }

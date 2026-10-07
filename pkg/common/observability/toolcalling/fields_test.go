@@ -18,6 +18,7 @@ package toolcalling
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -216,6 +217,64 @@ func TestCaptureRequestJSONRejectsTrailingData(t *testing.T) {
 	for _, body := range []string{`{"tools":[]} {}`, `{"tools":[]} 1`, `{"tools":[]} invalid`} {
 		_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(body))
 		require.Error(t, err)
+	}
+}
+
+func TestCaptureRequestJSONFieldLookup(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		body    string
+		present bool
+	}{
+		{name: "absent", body: `{"messages":[{"content":"hello"}]}`},
+		{name: "nested field", body: `{"messages":[{"tools":[]}]}`},
+		{name: "field name in content", body: `{"messages":[{"content":"tools tool_choice"}]}`},
+		{name: "case sensitive", body: `{"TOOLS":[]}`},
+		{name: "escaped field name", body: `{"to\u006fls":[]}`, present: true},
+		{name: "explicit null", body: `{"tools":null}`, present: true},
+		{name: "duplicate field", body: `{"tool_choice":"required","tool_choice":"auto"}`, present: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(tt.body))
+			require.NoError(t, err)
+			require.Equal(t, tt.present, snapshot.Summary().ToolCallingPresent)
+			if tt.name == "duplicate field" {
+				require.Equal(t, ToolChoiceAuto, snapshot.Summary().ToolChoiceKind)
+			}
+		})
+	}
+	for _, body := range []string{`null`, `[]`, `42`, `{"messages":[}`, `{"model":"m"} {}`} {
+		_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(body))
+		require.Error(t, err)
+	}
+}
+
+func TestCaptureRequestJSONNonToolAllocations(t *testing.T) {
+	small := []byte(`{"messages":[{"content":"hello"}]}`)
+	large := []byte(`{"messages":[{"content":"` + strings.Repeat("x", 64*1024) + `"}]}`)
+	capture := func(body []byte) float64 {
+		return testing.AllocsPerRun(20, func() {
+			snapshot, err := CaptureRequestJSON(APISurfaceChatCompletions, body)
+			if err != nil || snapshot.Summary().ToolCallingPresent {
+				t.Fatal("expected a valid non-tool snapshot", err)
+			}
+		})
+	}
+	require.LessOrEqual(t, capture(large), float64(2), "non-tool bodies should not be decoded into Go values")
+	require.LessOrEqual(t, capture(small), float64(2))
+}
+
+func BenchmarkCaptureRequestJSONNonTool(b *testing.B) {
+	for _, size := range []int{1024, 64 * 1024, 1024 * 1024} {
+		body := []byte(`{"messages":[{"content":"` + strings.Repeat("x", size) + `"}]}`)
+		b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := CaptureRequestJSON(APISurfaceChatCompletions, body); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
