@@ -351,6 +351,54 @@ for chart in llm-d-router-gateway llm-d-router-standalone; do
   echo "EPP autoscaling checks passed for ${chart}."
 done
 
+echo "Verifying metrics authentication RBAC..."
+verify_metrics_auth_rbac() {
+  local chart="$1" expected_delegation="$2" expected_metrics_reader="$3"
+  shift 3
+  local output="${TEMP_DIR}/${chart}-metrics-auth.yaml"
+  local args=()
+  if [ "${chart}" == "llm-d-router-standalone" ]; then
+    args+=(--set router.inferencePool.create=false)
+  fi
+  if ! "${HELM}" template metrics-auth "${SCRIPT_ROOT}/config/charts/${chart}" \
+    --namespace metrics-test --set router.modelServers.matchLabels.app=llm-instance-gateway \
+    "${args[@]}" "$@" > "${output}"; then
+    echo "Metrics authentication rendering failed for ${chart}: $*"
+    exit 1
+  fi
+  local resource actual
+  for resource in tokenreviews subjectaccessreviews; do
+    if grep -q -- "^    - ${resource}$" "${output}"; then
+      actual=true
+    else
+      actual=false
+    fi
+    if [ "${actual}" != "${expected_delegation}" ]; then
+      echo "${chart}: expected ${resource} rule present=${expected_delegation}, got ${actual}; flags: $*"
+      exit 1
+    fi
+  done
+  # The EPP ClusterRole quotes the path; the GMP metrics reader ClusterRole does not.
+  if grep -q -- '^    - "/metrics"$' "${output}"; then
+    actual=true
+  else
+    actual=false
+  fi
+  if [ "${actual}" != "${expected_metrics_reader}" ]; then
+    echo "${chart}: expected EPP /metrics rule present=${expected_metrics_reader}, got ${actual}; flags: $*"
+    exit 1
+  fi
+}
+
+for chart in llm-d-router-gateway llm-d-router-standalone; do
+  verify_metrics_auth_rbac "${chart}" true false
+  verify_metrics_auth_rbac "${chart}" true true --set router.monitoring.prometheus.enabled=true
+  verify_metrics_auth_rbac "${chart}" false false --set router.monitoring.prometheus.auth.enabled=false
+  verify_metrics_auth_rbac "${chart}" false false --set router.monitoring.prometheus.enabled=true --set router.monitoring.prometheus.auth.enabled=false
+  verify_metrics_auth_rbac "${chart}" true false --set router.monitoring.prometheus.enabled=true --set router.monitoring.provider.name=gmp
+  echo "Metrics authentication RBAC checks passed for ${chart}."
+done
+
 echo "Running llm-d-router-standalone negative validation tests..."
 missing_endpoint_selector_command="${HELM} template ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --set router.inferencePool.create=false --set router.modelServers.type=vllm --set 'router.modelServers.targetPorts[0].number=8000' >/dev/null"
 echo "Executing: ${missing_endpoint_selector_command}"
