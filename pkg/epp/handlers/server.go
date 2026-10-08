@@ -264,7 +264,7 @@ func toolCallingSurfaceForPath(path string) (toolcalling.APISurface, bool) {
 func compareEPPToolCallingSnapshotToBody(surface toolcalling.APISurface, inbound toolcalling.RequestSnapshot, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
 	outbound, err := toolcalling.CaptureRequestJSON(surface, outboundBody)
 	if err != nil {
-		return toolcalling.RejectedFieldStatuses(inbound), err
+		return nil, err
 	}
 	statuses, err := toolcalling.CompareRequests(inbound, outbound)
 	if err != nil {
@@ -557,8 +557,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				if hasToolCallingSurface {
 					inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiSurface, reqCtx.Request.RawBody)
 					if err != nil {
-						// A malformed body has no trustworthy field snapshot. Leave
-						// rejection reporting to the normal request parser below.
+						// A malformed body has no trustworthy field snapshot. The
+						// request parser controls the client error response.
 						hasToolCallingSurface = false
 					} else {
 						hasInboundToolSnapshot = true
@@ -569,12 +569,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				metrics.RecordPluginProcessingLatency(fwkrh.RequestParsingExtensionPoint, parser.TypedName().Type, parser.TypedName().Name, time.Since(before))
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
-					if hasInboundToolSnapshot {
-						statuses := toolcalling.RejectedFieldStatuses(inboundToolSnapshot)
-						metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
-						if span != nil {
-							span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
-						}
+					// Generic parser errors do not identify rejected tool fields.
+					if hasInboundToolSnapshot && span != nil {
+						span.SetAttributes(inboundToolSnapshot.SpanAttributes(nil)...)
 					}
 					break
 				}
@@ -583,12 +580,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				// The Director may resolve agent identity after this request span opened.
 				tracing.AttributeRequest(ctx, span)
 				if err != nil {
-					if hasInboundToolSnapshot {
-						statuses := toolcalling.RejectedFieldStatuses(inboundToolSnapshot)
-						metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
-						if span != nil {
-							span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
-						}
+					if hasInboundToolSnapshot && span != nil {
+						span.SetAttributes(inboundToolSnapshot.SpanAttributes(nil)...)
 					}
 					break
 				}

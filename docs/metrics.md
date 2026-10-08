@@ -157,7 +157,13 @@ include field values or request content.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_tool_calling_field_status_total` | Counter | `component`, `direction`, `field`, `status` | Observed request-field preservation, change, drop, or rejection outcomes. |
+| `llm_d_epp_tool_calling_field_status_total` | Counter | `component`, `direction`, `field`, `status` | Observed request-field preservation, change, or drop outcomes. |
+
+Request parsing errors, scheduling failures, and failures to read fields for telemetry
+produce no field-status metrics. The trace retains summary metadata, such as tool presence,
+tool-choice mode, and a tool-count bucket, when it can be read from the incoming request.
+EPP does not emit `rejected` because parser errors do not reliably identify which tool field
+caused a request to be rejected.
 
 ### Inference pool
 

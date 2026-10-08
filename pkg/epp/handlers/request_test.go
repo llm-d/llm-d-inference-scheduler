@@ -682,7 +682,7 @@ func TestCompareEPPToolCallingSnapshotToBody(t *testing.T) {
 
 	statuses, err = compareEPPToolCallingSnapshotToBody(toolcalling.APISurfaceChatCompletions, inbound, []byte(`{"tools":[`))
 	require.Error(t, err)
-	require.Equal(t, toolcalling.FieldStatusRejected, statusForField(t, statuses, toolcalling.FieldTools).Status)
+	require.Empty(t, statuses, "a failed capture does not establish field rejection")
 }
 
 func TestToolCallingSurfaceForPath(t *testing.T) {
@@ -737,17 +737,17 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 		plainBody = `{"model":"m","messages":[{"role":"user","content":"hello"}]}`
 	)
 	for _, tt := range []struct {
-		name           string
-		path           string
-		body           string
-		outbound       string
-		directorErr    error
-		wantRejection  bool
-		wantDirector   bool
-		wantSurface    string
-		wantChoice     string
-		wantToolBucket string
-		wantFields     map[string]string
+		name            string
+		path            string
+		body            string
+		outbound        string
+		directorErr     error
+		wantErrorStatus envoyTypePb.StatusCode
+		wantDirector    bool
+		wantSurface     string
+		wantChoice      string
+		wantToolBucket  string
+		wantFields      map[string]string
 	}{
 		{
 			name: "chat fields preserved", path: reqcommon.PathChatCompletions,
@@ -769,21 +769,53 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			wantFields: map[string]string{"tools": "dropped", "tool_choice": "dropped", "parallel_tool_calls": "dropped", "response_format": "dropped"},
 		},
 		{
-			name: "parser rejects valid JSON", path: reqcommon.PathChatCompletions,
-			body: `{"model":"m","tools":[],"tool_choice":"required"}`, wantRejection: true,
+			name: "missing messages does not reject tool fields", path: reqcommon.PathChatCompletions,
+			body: `{"model":"m","tools":[],"tool_choice":"required"}`, wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
 			wantSurface: "chat_completions", wantChoice: "required",
-			wantFields: map[string]string{"tools": "rejected", "tool_choice": "rejected"},
 		},
 		{
-			name: "director rejects captured fields", path: reqcommon.PathChatCompletions,
+			name: "generic director BadRequest does not reject tool fields", path: reqcommon.PathChatCompletions,
 			body: chatBody, directorErr: errcommon.Error{Code: errcommon.BadRequest, Msg: "request rejected"},
-			wantRejection: true, wantDirector: true,
+			wantErrorStatus: envoyTypePb.StatusCode_BadRequest, wantDirector: true,
 			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
-			wantFields: map[string]string{"tools": "rejected", "tool_choice": "rejected", "parallel_tool_calls": "rejected", "response_format": "rejected"},
+		},
+		{
+			name: "no endpoints does not reject tool fields", path: reqcommon.PathChatCompletions,
+			body: chatBody, directorErr: errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "no endpoints available"},
+			wantErrorStatus: envoyTypePb.StatusCode_ServiceUnavailable, wantDirector: true,
+			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+		},
+		{
+			name: "capacity shedding does not reject tool fields", path: reqcommon.PathChatCompletions,
+			body: chatBody, directorErr: errcommon.Error{Code: errcommon.ResourceExhausted, Msg: "no request capacity"},
+			wantErrorStatus: envoyTypePb.StatusCode_TooManyRequests, wantDirector: true,
+			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+		},
+		{
+			name: "internal director error does not reject tool fields", path: reqcommon.PathChatCompletions,
+			body: chatBody, directorErr: errcommon.Error{Code: errcommon.Internal, Msg: "request processing failed"},
+			wantErrorStatus: envoyTypePb.StatusCode_InternalServerError, wantDirector: true,
+			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+		},
+		{
+			name: "non-tool scheduling failure emits no tool telemetry", path: reqcommon.PathChatCompletions,
+			body: plainBody, directorErr: errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "no endpoints available"},
+			wantErrorStatus: envoyTypePb.StatusCode_ServiceUnavailable, wantDirector: true,
+		},
+		{
+			name: "failed outbound capture emits no guessed field outcomes", path: reqcommon.PathChatCompletions,
+			body: chatBody, outbound: `{"tools":[`, wantDirector: true,
+			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+		},
+		{
+			name: "Messages missing messages does not reject tool fields", path: reqcommon.PathMessages,
+			body:            `{"model":"m","tools":[],"tool_choice":{"type":"any"}}`,
+			wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
+			wantSurface:     "messages", wantChoice: "required",
 		},
 		{
 			name: "malformed body has no guessed statuses", path: reqcommon.PathChatCompletions,
-			body: `{"model":"m","tools":[`, wantRejection: true,
+			body: `{"model":"m","tools":[`, wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
 		},
 		{
 			name: "non-tool request", path: reqcommon.PathChatCompletions,
@@ -826,9 +858,9 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			registry := NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}, logr.Discard())
 			require.NoError(t, NewStreamingServer(nil, director, registry, 0).Process(srv))
 			require.Equal(t, tt.wantDirector, director.called)
-			if tt.wantRejection {
+			if tt.wantErrorStatus != 0 {
 				require.Len(t, srv.sentResponses, 1)
-				require.Equal(t, envoyTypePb.StatusCode_BadRequest, srv.sentResponses[0].GetImmediateResponse().GetStatus().GetCode())
+				require.Equal(t, tt.wantErrorStatus, srv.sentResponses[0].GetImmediateResponse().GetStatus().GetCode())
 			} else {
 				require.Len(t, srv.sentResponses, 2)
 				wantBody := tt.body
@@ -880,7 +912,7 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 				}
 			}
 			wantAttrs := make(map[string]any)
-			if len(tt.wantFields) > 0 {
+			if tt.wantSurface != "" {
 				wantAttrs["llm_d.tool_calling.api_surface"] = tt.wantSurface
 				wantAttrs["llm_d.tool_calling.present"] = true
 				wantAttrs["llm_d.tool_calling.tool_choice"] = tt.wantChoice
