@@ -252,6 +252,9 @@ func TestCaptureRequestJSONFieldLookup(t *testing.T) {
 		{name: "case sensitive", body: `{"TOOLS":[]}`},
 		{name: "escaped field name", body: `{"to\u006fls":[]}`, present: true},
 		{name: "explicit null", body: `{"tools":null}`, present: true},
+		{name: "structured output only", body: `{"response_format":{"type":"json_object"}}`},
+		{name: "null structured output", body: `{"response_format":null}`},
+		{name: "parallel calls only", body: `{"parallel_tool_calls":false}`, present: true},
 		{name: "duplicate field", body: `{"tool_choice":"required","tool_choice":"auto"}`, present: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -369,16 +372,33 @@ func TestRequestSummaryUsesBoundedValuesOnly(t *testing.T) {
 	require.NotContains(t, string(encoded), "sentinel_private")
 }
 
-func TestRequestSummaryPresenceIncludesAnySupportedField(t *testing.T) {
-	snapshot, err := CaptureRequest(APISurfaceMessages, map[string]any{
-		"tool_choice": nil,
-	})
-	require.NoError(t, err)
-
-	summary := snapshot.Summary()
-	require.True(t, summary.ToolCallingPresent)
-	require.True(t, summary.ToolChoicePresent)
-	require.Equal(t, ToolChoiceUnknown, summary.ToolChoiceKind)
+func TestRequestSummaryPresenceIncludesOnlySupportedToolFields(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		surface     APISurface
+		body        map[string]any
+		wantPresent bool
+		wantChoice  bool
+	}{
+		{name: "absent fields", surface: APISurfaceChatCompletions},
+		{name: "structured output only", surface: APISurfaceChatCompletions, body: map[string]any{"response_format": map[string]any{"type": "json_object"}}},
+		{name: "null structured output", surface: APISurfaceChatCompletions, body: map[string]any{"response_format": nil}},
+		{name: "empty tools", surface: APISurfaceChatCompletions, body: map[string]any{"tools": []any{}}, wantPresent: true},
+		{name: "null tools", surface: APISurfaceChatCompletions, body: map[string]any{"tools": nil}, wantPresent: true},
+		{name: "tool choice only", surface: APISurfaceChatCompletions, body: map[string]any{"tool_choice": "required"}, wantPresent: true, wantChoice: true},
+		{name: "parallel calls only", surface: APISurfaceChatCompletions, body: map[string]any{"parallel_tool_calls": false}, wantPresent: true},
+		{name: "Messages null choice", surface: APISurfaceMessages, body: map[string]any{"tool_choice": nil}, wantPresent: true, wantChoice: true},
+		{name: "Messages unsupported fields", surface: APISurfaceMessages, body: map[string]any{"response_format": nil, "parallel_tool_calls": true}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot, err := CaptureRequest(tt.surface, tt.body)
+			require.NoError(t, err)
+			summary := snapshot.Summary()
+			require.Equal(t, tt.wantPresent, summary.ToolCallingPresent)
+			require.Equal(t, tt.wantChoice, summary.ToolChoicePresent)
+			require.Empty(t, summary.ToolCountBucket)
+		})
+	}
 }
 
 func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
@@ -418,9 +438,9 @@ func TestSpanAttributesRetainObservedToolCallingMutation(t *testing.T) {
 		Status:   FieldStatusChanged,
 		Observed: true,
 	}})
-	require.Len(t, attrs, 4)
-	require.Equal(t, "llm_d.tool_calling.field.tools.status", string(attrs[3].Key))
-	require.Equal(t, string(FieldStatusChanged), attrs[3].Value.AsString())
+	require.Len(t, attrs, 3)
+	require.Equal(t, "llm_d.tool_calling.field.tools.status", string(attrs[2].Key))
+	require.Equal(t, string(FieldStatusChanged), attrs[2].Value.AsString())
 }
 
 func TestRequestSummaryMessagesToolChoice(t *testing.T) {

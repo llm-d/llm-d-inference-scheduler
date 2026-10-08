@@ -148,7 +148,7 @@ func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, e
 			}
 		}
 		snapshot.fields[field] = captured
-		if present {
+		if present && field != FieldResponseFormat {
 			snapshot.summary.ToolCallingPresent = true
 		}
 	}
@@ -328,16 +328,19 @@ func (snapshot RequestSnapshot) Summary() RequestSummary {
 }
 
 // SpanAttributes returns bounded summary values and observed field statuses.
-// It returns nil when the request and comparison contain no tool-calling fields.
+// It returns nil when there is no tool-field presence or observed field outcome.
 func (snapshot RequestSnapshot) SpanAttributes(statuses []FieldStatus) []attribute.KeyValue {
 	if !snapshot.summary.ToolCallingPresent && !hasObservedFieldStatus(statuses) {
 		return nil
 	}
 
-	attrs := []attribute.KeyValue{
+	attrs := make([]attribute.KeyValue, 0, 3)
+	attrs = append(attrs,
 		attribute.String("llm_d.tool_calling.api_surface", string(snapshot.surface)),
 		attribute.Bool("llm_d.tool_calling.present", snapshot.summary.ToolCallingPresent),
-		attribute.String("llm_d.tool_calling.tool_choice", string(snapshot.summary.ToolChoiceKind)),
+	)
+	if snapshot.summary.ToolCallingPresent {
+		attrs = append(attrs, attribute.String("llm_d.tool_calling.tool_choice", string(snapshot.summary.ToolChoiceKind)))
 	}
 	if snapshot.summary.ToolCountBucket != "" {
 		attrs = append(attrs, attribute.String("llm_d.tool_calling.tool_count", string(snapshot.summary.ToolCountBucket)))

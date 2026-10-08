@@ -738,18 +738,19 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 		plainBody = `{"model":"m","messages":[{"role":"user","content":"hello"}]}`
 	)
 	for _, tt := range []struct {
-		name             string
-		path             string
-		body             string
-		outbound         string
-		directorErr      error
-		wantErrorStatus  envoyTypePb.StatusCode
-		wantErrorMessage string
-		wantDirector     bool
-		wantSurface      string
-		wantChoice       string
-		wantToolBucket   string
-		wantFields       map[string]string
+		name                  string
+		path                  string
+		body                  string
+		outbound              string
+		directorErr           error
+		wantErrorStatus       envoyTypePb.StatusCode
+		wantErrorMessage      string
+		wantDirector          bool
+		wantSurface           string
+		wantChoice            string
+		wantToolBucket        string
+		wantFields            map[string]string
+		wantToolCallingAbsent bool
 	}{
 		{
 			name: "chat fields preserved", path: reqcommon.PathChatCompletions,
@@ -769,6 +770,31 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			body: chatBody, outbound: plainBody, wantDirector: true,
 			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
 			wantFields: map[string]string{"tools": "dropped", "tool_choice": "dropped", "parallel_tool_calls": "dropped", "response_format": "dropped"},
+		},
+		{
+			name: "structured output preserved without tool presence", path: reqcommon.PathChatCompletions,
+			body:         `{"model":"m","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"json_object"}}`,
+			wantDirector: true, wantSurface: "chat_completions", wantToolCallingAbsent: true,
+			wantFields: map[string]string{"response_format": "preserved"},
+		},
+		{
+			name: "structured output changed without tool presence", path: reqcommon.PathChatCompletions,
+			body:         `{"model":"m","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"json_object"}}`,
+			outbound:     `{"model":"m","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"text"}}`,
+			wantDirector: true, wantSurface: "chat_completions", wantToolCallingAbsent: true,
+			wantFields: map[string]string{"response_format": "changed"},
+		},
+		{
+			name: "structured output dropped without tool presence", path: reqcommon.PathChatCompletions,
+			body:     `{"model":"m","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"json_object"}}`,
+			outbound: plainBody, wantDirector: true, wantSurface: "chat_completions", wantToolCallingAbsent: true,
+			wantFields: map[string]string{"response_format": "dropped"},
+		},
+		{
+			name: "null structured output without tool presence", path: reqcommon.PathChatCompletions,
+			body:         `{"model":"m","messages":[{"role":"user","content":"hello"}],"response_format":null}`,
+			wantDirector: true, wantSurface: "chat_completions", wantToolCallingAbsent: true,
+			wantFields: map[string]string{"response_format": "preserved"},
 		},
 		{
 			name: "missing messages does not reject tool fields", path: reqcommon.PathChatCompletions,
@@ -980,8 +1006,10 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			wantAttrs := make(map[string]any)
 			if tt.wantSurface != "" {
 				wantAttrs["llm_d.tool_calling.api_surface"] = tt.wantSurface
-				wantAttrs["llm_d.tool_calling.present"] = true
-				wantAttrs["llm_d.tool_calling.tool_choice"] = tt.wantChoice
+				wantAttrs["llm_d.tool_calling.present"] = !tt.wantToolCallingAbsent
+				if !tt.wantToolCallingAbsent {
+					wantAttrs["llm_d.tool_calling.tool_choice"] = tt.wantChoice
+				}
 				if tt.wantToolBucket != "" {
 					wantAttrs["llm_d.tool_calling.tool_count"] = tt.wantToolBucket
 				}
