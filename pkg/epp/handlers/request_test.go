@@ -19,6 +19,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -737,17 +738,18 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 		plainBody = `{"model":"m","messages":[{"role":"user","content":"hello"}]}`
 	)
 	for _, tt := range []struct {
-		name            string
-		path            string
-		body            string
-		outbound        string
-		directorErr     error
-		wantErrorStatus envoyTypePb.StatusCode
-		wantDirector    bool
-		wantSurface     string
-		wantChoice      string
-		wantToolBucket  string
-		wantFields      map[string]string
+		name             string
+		path             string
+		body             string
+		outbound         string
+		directorErr      error
+		wantErrorStatus  envoyTypePb.StatusCode
+		wantErrorMessage string
+		wantDirector     bool
+		wantSurface      string
+		wantChoice       string
+		wantToolBucket   string
+		wantFields       map[string]string
 	}{
 		{
 			name: "chat fields preserved", path: reqcommon.PathChatCompletions,
@@ -772,6 +774,54 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			name: "missing messages does not reject tool fields", path: reqcommon.PathChatCompletions,
 			body: `{"model":"m","tools":[],"tool_choice":"required"}`, wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
 			wantSurface: "chat_completions", wantChoice: "required",
+		},
+		{
+			name: "chat invalid tools type rejects only tools", path: reqcommon.PathChatCompletions,
+			body:             `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":"private_tool_value","tool_choice":"required","parallel_tool_calls":true}`,
+			wantErrorStatus:  envoyTypePb.StatusCode_BadRequest,
+			wantErrorMessage: "error extracting request body: invalid chat completions request: must have valid messages field",
+			wantSurface:      "chat_completions", wantChoice: "required",
+			wantFields: map[string]string{"tools": "rejected"},
+		},
+		{
+			name: "chat invalid message role does not reject tools", path: reqcommon.PathChatCompletions,
+			body:             `{"model":"m","messages":[{"role":123,"content":"hello"}],"tools":[],"tool_choice":"required"}`,
+			wantErrorStatus:  envoyTypePb.StatusCode_BadRequest,
+			wantErrorMessage: "error extracting request body: invalid chat completions request: must have valid messages field",
+			wantSurface:      "chat_completions", wantChoice: "required",
+		},
+		{
+			name: "Messages invalid tools type rejects only tools", path: reqcommon.PathMessages,
+			body:            `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":false,"tool_choice":{"type":"any"}}`,
+			wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
+			wantSurface:     "messages", wantChoice: "required",
+			wantFields: map[string]string{"tools": "rejected"},
+		},
+		{
+			name: "Messages invalid tool name type rejects only tools", path: reqcommon.PathMessages,
+			body:            `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[{"name":123}],"tool_choice":{"type":"any"}}`,
+			wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
+			wantSurface:     "messages", wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "rejected"},
+		},
+		{
+			name: "Messages invalid tool strict type rejects only tools", path: reqcommon.PathMessages,
+			body:            `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"private_tool_name","strict":"private_invalid_value"}],"tool_choice":{"type":"any"}}`,
+			wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
+			wantSurface:     "messages", wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "rejected"},
+		},
+		{
+			name: "Messages invalid message role does not reject tools", path: reqcommon.PathMessages,
+			body:            `{"model":"m","messages":[{"role":123,"content":"hello"}],"tools":[],"tool_choice":{"type":"any"}}`,
+			wantErrorStatus: envoyTypePb.StatusCode_BadRequest,
+			wantSurface:     "messages", wantChoice: "required",
+		},
+		{
+			name: "unvalidated tool choice remains accepted", path: reqcommon.PathChatCompletions,
+			body:         `{"model":"m","messages":[{"role":"user","content":"hello"}],"tool_choice":123}`,
+			wantDirector: true, wantSurface: "chat_completions", wantChoice: "unknown",
+			wantFields: map[string]string{"tool_choice": "preserved"},
 		},
 		{
 			name: "generic director BadRequest does not reject tool fields", path: reqcommon.PathChatCompletions,
@@ -861,6 +911,22 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			if tt.wantErrorStatus != 0 {
 				require.Len(t, srv.sentResponses, 1)
 				require.Equal(t, tt.wantErrorStatus, srv.sentResponses[0].GetImmediateResponse().GetStatus().GetCode())
+				wantErrorMessage := tt.wantErrorMessage
+				if tt.path == reqcommon.PathMessages {
+					var messages fwkrh.MessagesRequest
+					if decodeErr := json.Unmarshal([]byte(tt.body), &messages); decodeErr != nil {
+						wantErrorMessage = "error parsing messages request: " + decodeErr.Error()
+					}
+				}
+				if wantErrorMessage != "" {
+					var errorBody struct {
+						Error struct {
+							Message string `json:"message"`
+						} `json:"error"`
+					}
+					require.NoError(t, json.Unmarshal(srv.sentResponses[0].GetImmediateResponse().GetBody(), &errorBody))
+					require.Equal(t, wantErrorMessage, errorBody.Error.Message)
+				}
 			} else {
 				require.Len(t, srv.sentResponses, 2)
 				wantBody := tt.body

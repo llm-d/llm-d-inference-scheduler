@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -301,8 +302,8 @@ func normalizeJSONNumber(number json.Number) string {
 	return sign + coefficient + "e" + exponent.String()
 }
 
-// RejectedFieldStatuses marks client-supplied fields rejected at a boundary.
-func RejectedFieldStatuses(snapshot RequestSnapshot) []FieldStatus {
+// RejectedFieldStatuses reports explicitly rejected fields present in the snapshot.
+func RejectedFieldStatuses(snapshot RequestSnapshot, rejectedFields ...Field) []FieldStatus {
 	fields, err := fieldsForSurface(snapshot.surface)
 	if err != nil {
 		return nil
@@ -310,7 +311,7 @@ func RejectedFieldStatuses(snapshot RequestSnapshot) []FieldStatus {
 
 	results := make([]FieldStatus, 0, len(fields))
 	for _, field := range fields {
-		if snapshot.fields[field].present {
+		if snapshot.fields[field].present && slices.Contains(rejectedFields, field) {
 			results = append(results, FieldStatus{
 				Field:    field,
 				Status:   FieldStatusRejected,

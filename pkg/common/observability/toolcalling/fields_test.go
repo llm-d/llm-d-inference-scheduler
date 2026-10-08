@@ -195,17 +195,37 @@ func TestCompareRequests_AbsentFieldsAreNotObserved(t *testing.T) {
 	require.Equal(t, FieldStatusPreserved, resultFor(t, results, FieldToolChoice).Status)
 }
 
-func TestRejectedStatusesOnlyIncludePresentFields(t *testing.T) {
+func TestRejectedStatusesOnlyIncludeExplicitPresentFields(t *testing.T) {
 	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{
+		"tools":       []any{},
 		"tool_choice": "required",
 	})
 	require.NoError(t, err)
 
-	results := RejectedFieldStatuses(snapshot)
-	require.Len(t, results, 1)
-	require.Equal(t, FieldToolChoice, results[0].Field)
-	require.Equal(t, FieldStatusRejected, results[0].Status)
-	require.True(t, results[0].Observed)
+	for _, tt := range []struct {
+		name   string
+		fields []Field
+		want   []Field
+	}{
+		{name: "no explicit rejection"},
+		{name: "only tools", fields: []Field{FieldTools}, want: []Field{FieldTools}},
+		{name: "only choice", fields: []Field{FieldToolChoice}, want: []Field{FieldToolChoice}},
+		{name: "duplicates count once", fields: []Field{FieldTools, FieldTools}, want: []Field{FieldTools}},
+		{name: "absent field", fields: []Field{FieldParallelToolCalls}},
+		{name: "unsupported field", fields: []Field{"private_unknown_field"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			results := RejectedFieldStatuses(snapshot, tt.fields...)
+			require.Len(t, results, len(tt.want))
+			for i, field := range tt.want {
+				require.Equal(t, FieldStatus{Field: field, Status: FieldStatusRejected, Observed: true}, results[i])
+			}
+		})
+	}
+
+	messages, err := CaptureRequest(APISurfaceMessages, map[string]any{"parallel_tool_calls": true})
+	require.NoError(t, err)
+	require.Empty(t, RejectedFieldStatuses(messages, FieldParallelToolCalls))
 }
 
 func TestCaptureRequestJSON_MalformedBody(t *testing.T) {
