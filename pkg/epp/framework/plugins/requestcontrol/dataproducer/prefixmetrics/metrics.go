@@ -87,6 +87,30 @@ var promptTokens = prometheus.NewHistogramVec(
 	[]string{"plugin_name", "plugin_type", "endpoint_role"},
 )
 
+var mmPredictedCachedTokens = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Subsystem: eppmetrics.LLMDRouterEndpointPickerSubsystem,
+		Name:      "prefix_mm_predicted_cached_tokens",
+		Help: metricsutil.HelpMsgWithStability(
+			"Multimodal prompt tokens the producer predicted the scheduler's chosen endpoint holds in its prefix cache, per request.",
+			compbasemetrics.ALPHA),
+		Buckets: metricsutil.TokenCountBuckets,
+	},
+	[]string{"plugin_name", "plugin_type", "endpoint_role"},
+)
+
+var mmPromptTokens = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Subsystem: eppmetrics.LLMDRouterEndpointPickerSubsystem,
+		Name:      "prefix_mm_prompt_tokens",
+		Help: metricsutil.HelpMsgWithStability(
+			"Multimodal prompt tokens the multimodal prediction was measured against, per request.",
+			compbasemetrics.ALPHA),
+		Buckets: metricsutil.TokenCountBuckets,
+	},
+	[]string{"plugin_name", "plugin_type", "endpoint_role"},
+)
+
 var registerOnce sync.Once
 
 // Register makes the shared prefix metrics collectable. Every prefix producer
@@ -94,7 +118,7 @@ var registerOnce sync.Once
 func Register() {
 	registerOnce.Do(func() {
 		metrics.Registry.MustRegister(predictedCachedTokens, bestPredictedCachedTokens,
-			bestAvailableCachedTokens, promptTokens)
+			bestAvailableCachedTokens, promptTokens, mmPredictedCachedTokens, mmPromptTokens)
 	})
 }
 
@@ -131,6 +155,17 @@ func RecordPrediction(pluginName, pluginType, role, modality string, p Predictio
 	bestPredictedCachedTokens.WithLabelValues(pluginName, pluginType, role, modality).Observe(float64(p.BestPredicted))
 	bestAvailableCachedTokens.WithLabelValues(pluginName, pluginType, role, modality).Observe(float64(p.BestAvailable))
 	promptTokens.WithLabelValues(pluginName, pluginType, role).Observe(float64(p.PromptTokens))
+}
+
+// RecordMMPrediction records a request's multimodal prompt tokens alongside
+// the subset the producer expects the endpoint chosen by PredictionTarget to
+// serve from its prefix cache for multimodal content. Observed only for
+// requests whose producer attached multimodal match info, so text-only
+// requests never enter these series. The two are observed together so the
+// ratio divides counts taken over the same requests.
+func RecordMMPrediction(pluginName, pluginType, role string, mmPredictedCached, mmPrompt int) {
+	mmPredictedCachedTokens.WithLabelValues(pluginName, pluginType, role).Observe(float64(mmPredictedCached))
+	mmPromptTokens.WithLabelValues(pluginName, pluginType, role).Observe(float64(mmPrompt))
 }
 
 // PredictionTarget returns the profile result whose first target endpoint the

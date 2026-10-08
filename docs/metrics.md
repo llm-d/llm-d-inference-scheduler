@@ -230,6 +230,8 @@ match data but is not instrumented here. Requests that reach no endpoint are not
 | `llm_d_epp_prefix_best_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the endpoints the scheduler selected from. |
 | `llm_d_epp_prefix_best_available_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the request's candidate endpoints before filtering. |
 | `llm_d_epp_prefix_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Prompt tokens the predictions were measured against. |
+| `llm_d_epp_prefix_mm_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens predicted to hit the chosen endpoint's prefix cache. |
+| `llm_d_epp_prefix_mm_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens the multimodal prediction was measured against. |
 
 For a request disaggregated into prefill and decode stages, the prediction is recorded for the
 `prefill` profile's endpoint and `endpoint_role` is `prefill`, since the sidecar's default `nixlv2`
@@ -239,6 +241,16 @@ the primary profile's endpoint, and `endpoint_role` is `decode`.
 The `modality` label holds the modalities the request carries as a comma-joined sorted list (`none`
 for text-only), the same value as the `mm.modality` span attribute. Each request is observed once,
 so summing over `modality` keeps every ratio below exact.
+
+The mm pair covers only requests whose match info carries multimodal attribution, so text-only
+requests never enter it and a zero observation means a multimodal request matched no blocks. Only
+the `precise-prefix-cache-producer` records it: the approximate producer's match is not
+multimodal-tainted. The predicted count sums each feature's tokens inside the matched prefix, so a
+feature that starts or ends mid-block contributes only the tokens it holds. Dividing
+`llm_d_epp_prefix_mm_predicted_cached_tokens_sum` by `llm_d_epp_prefix_mm_prompt_tokens_sum` gives
+the share of the request's multimodal tokens the routing decision served from cache; the
+prompt-level pair mixes text and multimodal tokens, so it cannot report that share. The pair
+carries no modality label: its predicted count aggregates every modality the request carries.
 
 The prefix hit rate the router predicted is `llm_d_epp_prefix_predicted_cached_tokens_sum` divided
 by `llm_d_epp_prefix_prompt_tokens_sum`. All four metrics are observed in one call, so any ratio

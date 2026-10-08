@@ -528,11 +528,271 @@ func tokenizedRequest(id string, tokenCount int) *scheduling.InferenceRequest {
 	}
 }
 
+// mmRequest wraps tokenizedRequest with one image feature spanning the
+// prompt's placeholder tokens.
+func mmRequest(id string, featureTokens int) *scheduling.InferenceRequest {
+	req := tokenizedRequest(id, featureTokens)
+	req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures = []fwkrh.MultiModalFeature{
+		{Modality: fwkrh.ModalityImage, Hash: "img", Offset: 0, Length: featureTokens},
+	}
+	return req
+}
+
+// A request whose match info carries multimodal attribution records its
+// multimodal prediction alongside the prompt-level pair: the matched
+// multimodal blocks in tokens, measured against the request's multimodal
+// token total.
+func TestPreRequest_RecordsMMPrediction(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-records"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(5, 8, testBlockSize).
+		WithCachedBlockCount(5).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 5, MatchTokens: 5 * testBlockSize}))
+
+	beforePredicted := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	beforePrompt := sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	_ = p.PreRequest(ctx, mmRequest("req-mm", 8*testBlockSize), primaryOnly("decode", endpoint))
+
+	assert.Equal(t, beforePredicted+float64(5*testBlockSize),
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+	assert.Equal(t, beforePrompt+float64(8*testBlockSize),
+		sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+}
+
+// A zero multimodal match is a real observation: the endpoint held none of the
+// multimodal blocks, and the request still contributes its multimodal tokens
+// to the denominator.
+func TestPreRequest_RecordsMMPrediction_ZeroMatch(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-zero"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(0, 4, testBlockSize).
+		WithCachedBlockCount(0).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 0, MatchTokens: 0}))
+
+	beforePredicted := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount()
+	beforePrompt := sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	_ = p.PreRequest(ctx, mmRequest("req-mm-zero", 4*testBlockSize), primaryOnly("decode", endpoint))
+
+	assert.Equal(t, beforePredicted+1,
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount())
+	assert.Equal(t, beforePrompt+float64(4*testBlockSize),
+		sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+}
+
+// Match info without multimodal attribution covers a text-only request, and
+// attribution on a request without multimodal tokens has nothing to measure
+// against. Neither records in the mm pair, so a zero observation keeps
+// meaning a multimodal request matched no blocks.
+func TestPreRequest_NoMMAttribution_RecordsNothing(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-absent"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(2, 8, testBlockSize).
+		WithCachedBlockCount(4))
+
+	before := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount()
+	_ = p.PreRequest(ctx, mmRequest("req-mm-no-attribution", 8*testBlockSize), primaryOnly("decode", endpoint))
+	assert.Equal(t, before, sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount())
+
+	// Attribution present but the request carries no multimodal tokens: the
+	// pair would hold a zero-over-zero observation.
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(2, 8, testBlockSize).
+		WithCachedBlockCount(4).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 2, MatchTokens: 2 * testBlockSize}))
+	_ = p.PreRequest(ctx, tokenizedRequest("req-text-only", 8*testBlockSize), primaryOnly("decode", endpoint))
+	assert.Equal(t, before, sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount())
+}
+
+// A feature that starts or ends mid-block contributes only the tokens it
+// holds: one matched block covering a 5-token feature records the feature's 5
+// tokens, not the matched block's token multiple.
+func TestPreRequest_RecordsMMPrediction_MidBlockFeature(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-mid-block"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(1, 1, testBlockSize).
+		WithCachedBlockCount(1).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 1, MatchTokens: 5}))
+
+	beforePredicted := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	_ = p.PreRequest(ctx, mmRequest("req-mm-mid-block", 5), primaryOnly("decode", endpoint))
+
+	assert.Equal(t, beforePredicted+float64(5),
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum(),
+		"a matched block of %d tokens must record the feature's 5 tokens", testBlockSize)
+}
+
+// Two images with only the first matched: the pair records the first image's
+// tokens. The matched MM blocks hold text at the image's edges, and a
+// block-granular count would pick that text up (32 of a 40-token MM total).
+func TestPreRequest_RecordsMMPrediction_TwoImagesFirstMatched(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-two-images"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(2, 4, testBlockSize).
+		WithCachedBlockCount(2).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 2, MatchTokens: 20}))
+
+	req := tokenizedRequest("req-mm-two-images", 4*testBlockSize)
+	req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures = []fwkrh.MultiModalFeature{
+		{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 2, Length: 20},
+		{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 32, Length: 20},
+	}
+
+	beforePredicted := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	beforePrompt := sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	_ = p.PreRequest(ctx, req, primaryOnly("decode", endpoint))
+
+	assert.Equal(t, beforePredicted+float64(20),
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+	assert.Equal(t, beforePrompt+float64(40),
+		sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+}
+
+// The denominator sums multimodal feature tokens across prompts, and the
+// numerator reads the matched-block total the producer attached across
+// prompts.
+func TestPreRequest_RecordsMMPrediction_MultiPrompt(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-multi"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(7, 11, testBlockSize).
+		WithCachedBlockCount(7).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 7, MatchTokens: 7 * testBlockSize}))
+
+	req := &scheduling.InferenceRequest{
+		RequestID: "req-mm-multi",
+		Body: &fwkrh.InferenceRequestBody{
+			TokenizedRequest: &fwkrh.TokenizedRequest{
+				Prompts: []fwkrh.PromptTokens{
+					{
+						TokenIDs: make([]uint32, 4*testBlockSize),
+						MultiModalFeatures: []fwkrh.MultiModalFeature{
+							{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 0, Length: 4 * testBlockSize},
+						},
+					},
+					{
+						TokenIDs: make([]uint32, 3*testBlockSize),
+						MultiModalFeatures: []fwkrh.MultiModalFeature{
+							{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 0, Length: 3 * testBlockSize},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	beforePredicted := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	beforePrompt := sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	_ = p.PreRequest(ctx, req, primaryOnly("decode", endpoint))
+
+	assert.Equal(t, beforePredicted+float64(7*testBlockSize),
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+	assert.Equal(t, beforePrompt+float64(7*testBlockSize),
+		sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+}
+
+// A prompt carrying several multimodal items contributes every feature's
+// tokens to the denominator, not just the first item's.
+func TestPreRequest_RecordsMMPrediction_MultipleFeaturesInPrompt(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-features"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(7, 7, testBlockSize).
+		WithCachedBlockCount(7).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 7, MatchTokens: 7 * testBlockSize}))
+
+	req := tokenizedRequest("req-mm-features", 7*testBlockSize)
+	req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures = []fwkrh.MultiModalFeature{
+		{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 0, Length: 4 * testBlockSize},
+		{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 4 * testBlockSize, Length: 3 * testBlockSize},
+	}
+
+	beforePredicted := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	beforePrompt := sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum()
+	_ = p.PreRequest(ctx, req, primaryOnly("decode", endpoint))
+
+	assert.Equal(t, beforePredicted+float64(7*testBlockSize),
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+	assert.Equal(t, beforePrompt+float64(7*testBlockSize),
+		sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RoleDecode).GetSampleSum())
+}
+
+// A disaggregated request's multimodal prediction follows the prefill
+// endpoint's match info and the prefill role, as the prompt-level pair does.
+func TestPreRequest_PD_RecordsMMPrediction(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-mm-predicted-pd"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoints := freshEndpoints()
+	decode, prefill := endpoints[0], endpoints[1]
+	decode.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(8, 8, testBlockSize).
+		WithCachedBlockCount(8).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 8, MatchTokens: 8 * testBlockSize}))
+	prefill.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(3, 8, testBlockSize).
+		WithCachedBlockCount(3).
+		WithMM(attrprefix.MMMatchInfo{MatchBlocks: 3, MatchTokens: 3 * testBlockSize}))
+
+	beforePrefill := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RolePrefill).GetSampleSum()
+	beforePrompt := sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RolePrefill).GetSampleSum()
+	beforeDecode := sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount()
+	_ = p.PreRequest(ctx, mmRequest("req-mm-pd", 8*testBlockSize), &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"decode":                   {TargetEndpoints: []scheduling.Endpoint{decode}},
+			experimentalPrefillProfile: {TargetEndpoints: []scheduling.Endpoint{prefill}},
+		},
+	})
+
+	assert.Equal(t, beforePrefill+float64(3*testBlockSize),
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RolePrefill).GetSampleSum())
+	assert.Equal(t, beforePrompt+float64(8*testBlockSize),
+		sharedPrefixHistogram(t, mmPromptTokensMetric, name, prefixmetrics.RolePrefill).GetSampleSum())
+	assert.Equal(t, beforeDecode,
+		sharedPrefixHistogram(t, mmPredictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount(),
+		"the multimodal prediction must follow the prefill endpoint, not the decode one")
+}
+
 const (
-	predictedCachedTokensMetric = "llm_d_epp_prefix_predicted_cached_tokens"      //nolint:gosec // G101: metric name, not a credential
-	bestPredictedMetric         = "llm_d_epp_prefix_best_predicted_cached_tokens" //nolint:gosec // G101: metric name, not a credential
-	bestAvailableMetric         = "llm_d_epp_prefix_best_available_cached_tokens" //nolint:gosec // G101: metric name, not a credential
-	promptTokensMetric          = "llm_d_epp_prefix_prompt_tokens"                //nolint:gosec // G101: metric name, not a credential
+	predictedCachedTokensMetric   = "llm_d_epp_prefix_predicted_cached_tokens"      //nolint:gosec // G101: metric name, not a credential
+	bestPredictedMetric           = "llm_d_epp_prefix_best_predicted_cached_tokens" //nolint:gosec // G101: metric name, not a credential
+	bestAvailableMetric           = "llm_d_epp_prefix_best_available_cached_tokens" //nolint:gosec // G101: metric name, not a credential
+	promptTokensMetric            = "llm_d_epp_prefix_prompt_tokens"                //nolint:gosec // G101: metric name, not a credential
+	mmPredictedCachedTokensMetric = "llm_d_epp_prefix_mm_predicted_cached_tokens"   //nolint:gosec // G101: metric name, not a credential
+	mmPromptTokensMetric          = "llm_d_epp_prefix_mm_prompt_tokens"             //nolint:gosec // G101: metric name, not a credential
 )
 
 // sharedPrefixHistogram reads a shared prefix metric out of the registry it is

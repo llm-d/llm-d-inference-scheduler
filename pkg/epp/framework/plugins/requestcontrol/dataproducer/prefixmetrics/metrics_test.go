@@ -89,6 +89,43 @@ func resetPredictionMetrics() {
 	promptTokens.Reset()
 }
 
+// A zero multimodal prediction is a real observation: the router expected no
+// multimodal cache hit, and the request still contributes its multimodal
+// tokens to the denominator. Both histograms observe the same requests so the
+// ratio divides counts taken over the same observations, per role series.
+func TestRecordMMPrediction(t *testing.T) {
+	mmPredictedCachedTokens.Reset()
+	mmPromptTokens.Reset()
+	t.Cleanup(func() {
+		mmPredictedCachedTokens.Reset()
+		mmPromptTokens.Reset()
+	})
+
+	RecordMMPrediction("test-plugin", "test-type", RoleDecode, 512, 1024)
+	RecordMMPrediction("test-plugin", "test-type", RoleDecode, 0, 256)
+	RecordMMPrediction("test-plugin", "test-type", RolePrefill, 64, 128)
+
+	predicted, err := histogramFor(mmPredictedCachedTokens, "test-plugin", "test-type", RoleDecode)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), predicted.GetSampleCount())
+	assert.Equal(t, float64(512), predicted.GetSampleSum())
+
+	prompt, err := histogramFor(mmPromptTokens, "test-plugin", "test-type", RoleDecode)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), prompt.GetSampleCount())
+	assert.Equal(t, float64(1280), prompt.GetSampleSum())
+
+	predicted, err = histogramFor(mmPredictedCachedTokens, "test-plugin", "test-type", RolePrefill)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), predicted.GetSampleCount())
+	assert.Equal(t, float64(64), predicted.GetSampleSum())
+
+	prompt, err = histogramFor(mmPromptTokens, "test-plugin", "test-type", RolePrefill)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), prompt.GetSampleCount())
+	assert.Equal(t, float64(128), prompt.GetSampleSum())
+}
+
 // Under P/D the sidecar reports the prefill stage's cached tokens, so the
 // prediction follows the prefill profile when the request was disaggregated and
 // the primary profile otherwise.

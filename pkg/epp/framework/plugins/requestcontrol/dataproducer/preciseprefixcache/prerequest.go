@@ -119,7 +119,6 @@ func (p *Producer) recordPrediction(request *scheduling.InferenceRequest, schedu
 	if request == nil || request.Body == nil || request.Body.TokenizedRequest == nil {
 		return
 	}
-
 	selected := predictedCachedTokens(info)
 	// A profile that reports no scored candidates leaves only the chosen
 	// endpoint to go on, so selected stands in for both maxima. That keeps the
@@ -147,6 +146,32 @@ func (p *Producer) recordPrediction(request *scheduling.InferenceRequest, schedu
 		BestAvailable: bestAvailable,
 		PromptTokens:  request.Body.TokenizedRequest.TokenCount(),
 	})
+	p.recordMMPrediction(request, role, info)
+}
+
+// recordMMPrediction reports the multimodal prompt tokens the index expects
+// the endpoint to serve from its prefix cache, measured against the request's
+// multimodal token total. Match info without multimodal attribution covers a
+// text-only request, which records nothing, so a zero observation means a
+// multimodal request matched no blocks. The producer counts each feature's
+// tokens inside the matched prefix, so a feature that starts or ends
+// mid-block contributes only the tokens it holds.
+func (p *Producer) recordMMPrediction(request *scheduling.InferenceRequest, role string, info *attrprefix.PrefixCacheMatchInfo) {
+	mm := info.MM()
+	if mm == nil {
+		return
+	}
+	mmPromptTokens := 0
+	for _, prompt := range request.Body.TokenizedRequest.Prompts {
+		for _, feature := range prompt.MultiModalFeatures {
+			mmPromptTokens += feature.Length
+		}
+	}
+	if mmPromptTokens == 0 {
+		return
+	}
+	prefixmetrics.RecordMMPrediction(p.typedName.Name, p.typedName.Type, role,
+		mm.MatchTokens, mmPromptTokens)
 }
 
 // buildSpeculativeCache constructs the TTL cache used to evict speculative
