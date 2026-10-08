@@ -50,7 +50,7 @@ var (
 )
 
 // SGLangHTTPParser implements fwkrh.Parser for SGLang's native /generate
-// endpoint. Only pre-tokenized prompts are supported.
+// endpoint. Pre-tokenized prompts and raw text prompts are supported.
 type SGLangHTTPParser struct {
 	typedName fwkplugin.TypedName
 }
