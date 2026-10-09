@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"slices"
 	"strings"
@@ -191,19 +190,39 @@ func CaptureRequestJSON(surface reqcommon.APIType, body []byte) (RequestSnapshot
 	if rawFields == nil {
 		return RequestSnapshot{}, errors.New("decode request body: expected JSON object")
 	}
-	payload := make(map[string]any, len(fields))
+	snapshot := RequestSnapshot{
+		surface: surface,
+		summary: RequestSummary{ToolChoiceKind: ToolChoiceUnknown},
+	}
 	for _, field := range fields {
 		if raw, present := rawFields[string(field)]; present {
-			decoder := json.NewDecoder(bytes.NewReader(raw))
-			decoder.UseNumber()
-			var value any
-			if err := decoder.Decode(&value); err != nil {
-				return RequestSnapshot{}, fmt.Errorf("decode %s field: %w", field, err)
+			if snapshot.fields == nil {
+				snapshot.fields = make(map[Field]capturedField, len(fields))
 			}
-			payload[string(field)] = value
+			// RawMessage owns its bytes, so later body mutations cannot alter them.
+			snapshot.fields[field] = capturedField{present: true, value: raw}
+			if field != FieldResponseFormat {
+				snapshot.summary.ToolCallingPresent = true
+			}
+			switch field {
+			case FieldTools:
+				var tools []json.RawMessage
+				if json.Unmarshal(raw, &tools) == nil && len(tools) > 0 {
+					snapshot.summary.ToolCountBucket = bucketToolCount(len(tools))
+				}
+			case FieldToolChoice:
+				decoder := json.NewDecoder(bytes.NewReader(raw))
+				decoder.UseNumber()
+				var value any
+				if err := decoder.Decode(&value); err != nil {
+					return RequestSnapshot{}, fmt.Errorf("decode %s field: %w", field, err)
+				}
+				snapshot.summary.ToolChoicePresent = true
+				snapshot.summary.ToolChoiceKind = normalizeToolChoiceValue(surface, value)
+			}
 		}
 	}
-	return CaptureRequest(surface, payload)
+	return snapshot, nil
 }
 
 // CompareRequests compares every supported field for the common API surface.
@@ -241,7 +260,7 @@ func CompareRequests(before, after RequestSnapshot) ([]FieldStatus, error) {
 	return results, nil
 }
 
-// Snapshots are serialized with sorted object keys, so token order is comparable.
+// Only fields whose bytes differ need decoding for semantic comparison.
 // UseNumber preserves precision; normalization equates forms such as 1 and 1.0.
 func equalJSONFieldValues(left, right []byte) bool {
 	if bytes.Equal(left, right) {
@@ -251,20 +270,43 @@ func equalJSONFieldValues(left, right []byte) bool {
 	leftDecoder.UseNumber()
 	rightDecoder := json.NewDecoder(bytes.NewReader(right))
 	rightDecoder.UseNumber()
-	for {
-		leftToken, leftErr := leftDecoder.Token()
-		rightToken, rightErr := rightDecoder.Token()
-		if leftErr != nil || rightErr != nil {
-			return leftErr == io.EOF && rightErr == io.EOF
-		}
-		if leftToken == rightToken {
-			continue
-		}
-		leftNumber, leftOK := leftToken.(json.Number)
-		rightNumber, rightOK := rightToken.(json.Number)
-		if !leftOK || !rightOK || normalizeJSONNumber(leftNumber) != normalizeJSONNumber(rightNumber) {
+	var leftValue, rightValue any
+	if leftDecoder.Decode(&leftValue) != nil || rightDecoder.Decode(&rightValue) != nil {
+		return false
+	}
+	return equalJSONValues(leftValue, rightValue)
+}
+
+func equalJSONValues(left, right any) bool {
+	switch left := left.(type) {
+	case map[string]any:
+		right, ok := right.(map[string]any)
+		if !ok || len(left) != len(right) {
 			return false
 		}
+		for key, value := range left {
+			other, present := right[key]
+			if !present || !equalJSONValues(value, other) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		right, ok := right.([]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for i, value := range left {
+			if !equalJSONValues(value, right[i]) {
+				return false
+			}
+		}
+		return true
+	case json.Number:
+		right, ok := right.(json.Number)
+		return ok && (left == right || normalizeJSONNumber(left) == normalizeJSONNumber(right))
+	default:
+		return left == right
 	}
 }
 

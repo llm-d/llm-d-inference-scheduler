@@ -17,6 +17,7 @@ limitations under the License.
 package toolcalling
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -300,6 +301,104 @@ func BenchmarkCaptureRequestJSONNonTool(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkCaptureRequestJSON(b *testing.B) {
+	for _, size := range []int{1024, 64 * 1024, 1024 * 1024} {
+		prompt := strings.Repeat("x", size)
+		for _, tt := range []struct {
+			name string
+			body string
+		}{
+			{name: "non_tool", body: `{"messages":[{"content":"` + prompt + `"}]}`},
+			{name: "prompt_field_words", body: `{"messages":[{"content":"tools tool_choice parallel_tool_calls response_format ` + prompt + `"}]}`},
+			{name: "prompt_unicode_escape", body: `{"messages":[{"content":"\u0061` + prompt + `"}]}`},
+			{name: "nested_fields", body: `{"messages":[{"tools":[],"content":"` + prompt + `"}]}`},
+			{name: "tool", body: `{"messages":[{"content":"` + prompt + `"}],"tools":[{"type":"function","function":{"name":"private","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}],"tool_choice":"auto"}`},
+			{name: "escaped_tool_key", body: `{"messages":[{"content":"` + prompt + `"}],"to\u006fls":[{"name":"private","parameters":{"type":"object"}}]}`},
+		} {
+			b.Run(fmt.Sprintf("%s/%d", tt.name, size), func(b *testing.B) {
+				body := []byte(tt.body)
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestCaptureRequestJSONRetainsRawFields(t *testing.T) {
+	body := []byte(`{"tools":[{"function":{"parameters":{"properties":{"city":{"type":"string"}},"type":"object"},"name":"private"},"type":"function"}],"tool_choice":"auto","response_format":{"type":"json_object"}}`)
+	snapshot, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body)
+	require.NoError(t, err)
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &raw))
+	for _, field := range []Field{FieldTools, FieldToolChoice, FieldResponseFormat} {
+		require.Equal(t, []byte(raw[string(field)]), snapshot.fields[field].value, "capture should retain raw JSON without re-encoding")
+	}
+	copy(body, bytes.Repeat([]byte{'x'}, len(body)))
+	require.Equal(t, []byte(raw["tools"]), snapshot.fields[FieldTools].value, "captured fields must own their bytes")
+}
+
+func TestCompareRequestJSONRepresentations(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		before string
+		after  string
+		want   FieldStatusValue
+	}{
+		{name: "reordered nested keys", before: `[{"name":"n","parameters":{"b":2,"a":1}}]`, after: `[{"parameters":{"a":1,"b":2},"name":"n"}]`, want: FieldStatusPreserved},
+		{name: "whitespace and escaped values", before: `[{"name":"\u006e"}]`, after: `[ { "name" : "n" } ]`, want: FieldStatusPreserved},
+		{name: "duplicate nested key last wins", before: `[{"parameters":{"a":0,"a":1}}]`, after: `[{"parameters":{"a":1}}]`, want: FieldStatusPreserved},
+		{name: "number differs from string", before: `[{"value":1}]`, after: `[{"value":"1"}]`, want: FieldStatusChanged},
+		{name: "missing nested key differs from null", before: `[{}]`, after: `[{"value":null}]`, want: FieldStatusChanged},
+		{name: "array order differs", before: `[1,2]`, after: `[2,1]`, want: FieldStatusChanged},
+		{name: "container types differ", before: `[]`, after: `{}`, want: FieldStatusChanged},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			before, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(`{"tools":`+tt.before+`}`))
+			require.NoError(t, err)
+			after, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(`{"tools":`+tt.after+`}`))
+			require.NoError(t, err)
+			statuses, err := CompareRequests(before, after)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, resultStatus(t, statuses, FieldTools))
+		})
+	}
+}
+
+func TestCaptureRequestJSONMatchesDecodedCapture(t *testing.T) {
+	for _, api := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages, reqcommon.APITypeResponses} {
+		for _, body := range []string{
+			`{"tools":null,"tool_choice":null,"response_format":null}`,
+			`{"tools":[],"tool_choice":"required","parallel_tool_calls":false}`,
+			`{"tools":[null,true,1e999,"x",{}],"tool_choice":{"type":"function","name":"private","function":{"name":"private"}}}`,
+			`{"tools":42,"tool_choice":1e999}`,
+			`{"tools":{},"tool_choice":{"type":"tool","name":"private","extra":1e999}}`,
+			`{"tools":[{},{}],"tools":[{}],"tool_choice":"required","tool_choice":"auto"}`,
+			`{"tools":[{},{},{},{},{},{},{},{},{},{},{}],"response_format":{"b":2,"a":1}}`,
+		} {
+			t.Run(api.String()+"/"+body, func(t *testing.T) {
+				decoder := json.NewDecoder(strings.NewReader(body))
+				decoder.UseNumber()
+				var decoded map[string]any
+				require.NoError(t, decoder.Decode(&decoded))
+				want, err := CaptureRequest(api, decoded)
+				require.NoError(t, err)
+				got, err := CaptureRequestJSON(api, []byte(body))
+				require.NoError(t, err)
+				require.Equal(t, want.Summary(), got.Summary())
+				statuses, err := CompareRequests(want, got)
+				require.NoError(t, err)
+				for _, status := range statuses {
+					require.Equal(t, FieldStatusPreserved, status.Status)
+				}
+			})
+		}
 	}
 }
 
