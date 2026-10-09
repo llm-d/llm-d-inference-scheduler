@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
@@ -508,9 +509,26 @@ func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
 		"tool_choice": "required",
 	})
 	require.NoError(t, err)
-	results := []FieldStatus{{Field: FieldTools, Status: FieldStatusPreserved, Observed: true}}
+	results := []FieldStatus{
+		{Field: FieldTools, Status: FieldStatusPreserved, Observed: true},
+		{Field: FieldToolChoice, Status: FieldStatusChanged, Observed: true},
+		{Field: FieldParallelToolCalls, Status: FieldStatusDropped, Observed: true},
+		{Field: FieldResponseFormat, Status: FieldStatusRejected, Observed: true},
+		{Field: FieldTools, Status: FieldStatusRejected},
+		{Field: Field("sentinel_private_name"), Status: FieldStatusChanged, Observed: true},
+	}
 
 	attributes := snapshot.SpanAttributes(results)
+	require.Equal(t, []attribute.KeyValue{
+		attribute.String("llm_d.tool_calling.api_surface", "chat_completions"),
+		attribute.Bool("llm_d.tool_calling.present", true),
+		attribute.String("llm_d.tool_calling.tool_choice", "required"),
+		attribute.String("llm_d.tool_calling.tool_count", "1"),
+		attribute.String("llm_d.tool_calling.field.tools.status", "preserved"),
+		attribute.String("llm_d.tool_calling.field.tool_choice.status", "changed"),
+		attribute.String("llm_d.tool_calling.field.parallel_tool_calls.status", "dropped"),
+		attribute.String("llm_d.tool_calling.field.response_format.status", "rejected"),
+	}, attributes)
 	var encoded strings.Builder
 	for _, attribute := range attributes {
 		encoded.WriteString(string(attribute.Key) + "=")

@@ -27,6 +27,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
@@ -372,20 +373,33 @@ func (snapshot RequestSnapshot) SpanAttributes(statuses []FieldStatus) []attribu
 
 	attrs := make([]attribute.KeyValue, 0, 3)
 	attrs = append(attrs,
-		attribute.String("llm_d.tool_calling.api_surface", snapshot.surface.String()),
-		attribute.Bool("llm_d.tool_calling.present", snapshot.summary.ToolCallingPresent),
+		semconv.LLMDToolCallingAPISurfaceKey.String(snapshot.surface.String()),
+		semconv.LLMDToolCallingPresentKey.Bool(snapshot.summary.ToolCallingPresent),
 	)
 	if snapshot.summary.ToolCallingPresent {
-		attrs = append(attrs, attribute.String("llm_d.tool_calling.tool_choice", string(snapshot.summary.ToolChoiceKind)))
+		attrs = append(attrs, semconv.LLMDToolCallingToolChoiceKey.String(string(snapshot.summary.ToolChoiceKind)))
 	}
 	if snapshot.summary.ToolCountBucket != "" {
-		attrs = append(attrs, attribute.String("llm_d.tool_calling.tool_count", string(snapshot.summary.ToolCountBucket)))
+		attrs = append(attrs, semconv.LLMDToolCallingToolCountKey.String(string(snapshot.summary.ToolCountBucket)))
 	}
 	for _, result := range statuses {
-		if result.Observed {
-			key := "llm_d.tool_calling.field." + string(result.Field) + ".status"
-			attrs = append(attrs, attribute.String(key, string(result.Status)))
+		if !result.Observed {
+			continue
 		}
+		var key attribute.Key
+		switch result.Field {
+		case FieldTools:
+			key = semconv.LLMDToolCallingFieldToolsStatusKey
+		case FieldToolChoice:
+			key = semconv.LLMDToolCallingFieldToolChoiceStatusKey
+		case FieldParallelToolCalls:
+			key = semconv.LLMDToolCallingFieldParallelToolCallsStatusKey
+		case FieldResponseFormat:
+			key = semconv.LLMDToolCallingFieldResponseFormatStatusKey
+		default:
+			continue
+		}
+		attrs = append(attrs, key.String(string(result.Status)))
 	}
 	return attrs
 }
