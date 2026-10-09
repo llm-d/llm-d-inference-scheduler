@@ -119,41 +119,22 @@ func CaptureRequestJSON(surface reqcommon.APIType, body []byte) (RequestSnapshot
 	if err != nil {
 		return RequestSnapshot{}, err
 	}
-	// Escaped field names contain Unicode escapes. Possible matches still need
-	// exact top-level lookup; nested keys and prompt text can match this precheck.
-	possibleFields := bytes.Contains(body, []byte(`\u`))
-	for _, field := range fields {
-		possibleFields = possibleFields || bytes.Contains(body, []byte(field))
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(body) {
+		return RequestSnapshot{}, errors.New("decode request body: expected valid JSON object")
 	}
-	if !possibleFields {
-		trimmed := bytes.TrimSpace(body)
-		if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(body) {
-			return RequestSnapshot{}, errors.New("decode request body: expected valid JSON object")
-		}
-		return RequestSnapshot{
-			surface: surface,
-			summary: RequestSummary{ToolChoiceKind: ToolChoiceUnknown},
-		}, nil
-	}
-
-	var rawFields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &rawFields); err != nil {
-		return RequestSnapshot{}, fmt.Errorf("decode request body: %w", err)
-	}
-	if rawFields == nil {
-		return RequestSnapshot{}, errors.New("decode request body: expected JSON object")
+	captured, err := captureJSONFields(fields, trimmed)
+	if err != nil {
+		return RequestSnapshot{}, err
 	}
 	snapshot := RequestSnapshot{
 		surface: surface,
+		fields:  captured,
 		summary: RequestSummary{ToolChoiceKind: ToolChoiceUnknown},
 	}
 	for _, field := range fields {
-		if raw, present := rawFields[string(field)]; present {
-			if snapshot.fields == nil {
-				snapshot.fields = make(map[Field]capturedField, len(fields))
-			}
-			// RawMessage owns its bytes, so later body mutations cannot alter them.
-			snapshot.fields[field] = capturedField{present: true, value: raw}
+		if value := snapshot.fields[field]; value.present {
+			raw := value.value
 			if field != FieldResponseFormat {
 				snapshot.summary.ToolCallingPresent = true
 			}
@@ -176,6 +157,82 @@ func CaptureRequestJSON(surface reqcommon.APIType, body []byte) (RequestSnapshot
 		}
 	}
 	return snapshot, nil
+}
+
+// captureJSONFields walks an object already validated by encoding/json. Only
+// supported top-level values are copied; unknown values are skipped by boundary.
+func captureJSONFields(fields []Field, body []byte) (map[Field]capturedField, error) {
+	var captured map[Field]capturedField
+	for rest := body[1:]; ; {
+		rest = bytes.TrimLeft(rest, " \t\r\n")
+		if rest[0] == '}' {
+			return captured, nil
+		}
+		end := jsonStringEnd(rest)
+		rawKey := rest[:end]
+		key := rawKey[1 : end-1]
+		rest = bytes.TrimLeft(rest[end:], " \t\r\n")[1:] // Validated colon.
+		rest = bytes.TrimLeft(rest, " \t\r\n")
+		end = jsonValueEnd(rest)
+		if bytes.IndexByte(key, '\\') >= 0 {
+			var name string
+			if err := json.Unmarshal(rawKey, &name); err != nil {
+				return nil, fmt.Errorf("decode request field name: %w", err)
+			}
+			key = []byte(name)
+		}
+		for _, field := range fields {
+			if bytes.Equal(key, []byte(field)) {
+				if captured == nil {
+					captured = make(map[Field]capturedField, len(fields))
+				}
+				captured[field] = capturedField{present: true, value: bytes.Clone(rest[:end])}
+				break
+			}
+		}
+		rest = bytes.TrimLeft(rest[end:], " \t\r\n")
+		if rest[0] == ',' {
+			rest = rest[1:]
+		}
+	}
+}
+
+// jsonStringEnd and jsonValueEnd find boundaries only in validated JSON.
+func jsonStringEnd(body []byte) int {
+	for offset := 1; ; {
+		end := offset + bytes.IndexByte(body[offset:], '"')
+		backslashes := 0
+		for i := end - 1; i >= 0 && body[i] == '\\'; i-- {
+			backslashes++
+		}
+		if backslashes%2 == 0 {
+			return end + 1
+		}
+		offset = end + 1
+	}
+}
+
+func jsonValueEnd(body []byte) int {
+	switch body[0] {
+	case '"':
+		return jsonStringEnd(body)
+	case '{', '[':
+		depth := 0
+		for i := 0; i < len(body); i++ {
+			switch body[i] {
+			case '"':
+				i += jsonStringEnd(body[i:]) - 1
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return i + 1
+				}
+			}
+		}
+	}
+	return bytes.IndexAny(body, ",}] \t\r\n")
 }
 
 // CompareRequests compares every supported field for the common API surface.

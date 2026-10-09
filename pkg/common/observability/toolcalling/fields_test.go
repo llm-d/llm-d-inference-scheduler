@@ -238,7 +238,7 @@ func TestCaptureRequestJSON_MalformedBody(t *testing.T) {
 }
 
 func TestCaptureRequestJSONRejectsTrailingData(t *testing.T) {
-	for _, body := range []string{`{"tools":[]} {}`, `{"tools":[]} 1`, `{"tools":[]} invalid`} {
+	for _, body := range []string{`{"tools":[]} {}`, `{"tools":[]} 1`, `{"tools":[]} invalid`, "\f{}", "{}\u0085", "\u00a0{}"} {
 		_, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(body))
 		require.Error(t, err)
 	}
@@ -255,6 +255,8 @@ func TestCaptureRequestJSONFieldLookup(t *testing.T) {
 		{name: "field name in content", body: `{"messages":[{"content":"tools tool_choice"}]}`},
 		{name: "case sensitive", body: `{"TOOLS":[]}`},
 		{name: "escaped field name", body: `{"to\u006fls":[]}`, present: true},
+		{name: "literal Unicode escape in key", body: `{"to\\u006fls":[]}`},
+		{name: "escaped duplicate last wins", body: `{"tool_choice":"required","tool\u005fchoice":"auto"}`, present: true},
 		{name: "explicit null", body: `{"tools":null}`, present: true},
 		{name: "structured output only", body: `{"response_format":{"type":"json_object"}}`},
 		{name: "null structured output", body: `{"response_format":null}`},
@@ -265,7 +267,7 @@ func TestCaptureRequestJSONFieldLookup(t *testing.T) {
 			snapshot, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(tt.body))
 			require.NoError(t, err)
 			require.Equal(t, tt.present, snapshot.Summary().ToolCallingPresent)
-			if tt.name == "duplicate field" {
+			if tt.name == "duplicate field" || tt.name == "escaped duplicate last wins" {
 				require.Equal(t, ToolChoiceAuto, snapshot.Summary().ToolChoiceKind)
 			}
 		})
@@ -277,18 +279,60 @@ func TestCaptureRequestJSONFieldLookup(t *testing.T) {
 }
 
 func TestCaptureRequestJSONNonToolAllocations(t *testing.T) {
-	small := []byte(`{"messages":[{"content":"hello"}]}`)
-	large := []byte(`{"messages":[{"content":"` + strings.Repeat("x", 64*1024) + `"}]}`)
-	capture := func(body []byte) float64 {
-		return testing.AllocsPerRun(20, func() {
-			snapshot, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body)
-			if err != nil || snapshot.Summary().ToolCallingPresent {
-				t.Fatal("expected a valid non-tool snapshot", err)
-			}
-		})
+	for _, content := range []string{"hello", "tools tool_choice parallel_tool_calls response_format", `\u0061`, `quote: \"tools\" and backslash: \\`} {
+		for _, size := range []int{0, 64 * 1024, 1024 * 1024} {
+			t.Run(fmt.Sprintf("%s/%d", content, size), func(t *testing.T) {
+				body := []byte(`{"metadata":{"tools":[]},"messages":[{"content":"` + content + strings.Repeat("x", size) + `"}]}`)
+				allocations := testing.AllocsPerRun(20, func() {
+					snapshot, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body)
+					if err != nil || snapshot.Summary().ToolCallingPresent {
+						t.Fatal("expected a valid non-tool snapshot", err)
+					}
+				})
+				require.LessOrEqual(t, allocations, float64(2), "non-tool values should not be copied or decoded")
+			})
+		}
 	}
-	require.LessOrEqual(t, capture(large), float64(2), "non-tool bodies should not be decoded into Go values")
-	require.LessOrEqual(t, capture(small), float64(2))
+}
+
+func FuzzCaptureRequestJSON(f *testing.F) {
+	for _, body := range []string{
+		`{}`, `null`, `[]`, `{"tools":[`, `{"tools":[]} {}`, "\f{}", "{}\u0085", "\u00a0{}",
+		`{"messages":[{"content":"tools \u0061 \"tools\" \\"}]}`,
+		`{"to\u006fls":[{"parameters":{"b":2,"a":1e999}}],"tool_choice":"auto"}`,
+		`{"tools":[],"to\u006fls":null,"tool_choice":"none","tool_choice":"auto"}`,
+		`{"TOOLS":[],"ignored":[{},[1,null,true,"}"]],"response_format":null}`,
+		`{"tools":[{"name":"` + string([]byte{0xff}) + `"}]}`,
+		`{"a":-1.2e+30,"b":true,"c":false,"d":null,"tools":[]}`,
+		"{ \n\t\"ignored\" : [ {\"x\": [false, null, {\"text\": \"[{}]\\\"\"}]} ], \r\n\"tool_choice\" : \"auto\" }",
+	} {
+		f.Add([]byte(body))
+	}
+	f.Fuzz(func(t *testing.T, body []byte) {
+		trimmed := bytes.TrimSpace(body)
+		validObject := len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(body)
+		for _, api := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages, reqcommon.APITypeResponses} {
+			got, err := CaptureRequestJSON(api, body)
+			if !validObject {
+				require.Error(t, err)
+				continue
+			}
+			require.NoError(t, err)
+			decoder := json.NewDecoder(bytes.NewReader(body))
+			decoder.UseNumber()
+			var decoded map[string]any
+			require.NoError(t, decoder.Decode(&decoded))
+			want, err := captureRequest(api, decoded)
+			require.NoError(t, err)
+			require.Equal(t, want.Summary(), got.Summary())
+			statuses, err := CompareRequests(want, got)
+			require.NoError(t, err)
+			for _, status := range statuses {
+				require.Equal(t, FieldStatusPreserved, status.Status)
+				require.Equal(t, want.fields[status.Field].present, status.Observed)
+			}
+		}
+	})
 }
 
 func BenchmarkCaptureRequestJSONNonTool(b *testing.B) {
