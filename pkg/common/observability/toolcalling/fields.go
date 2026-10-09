@@ -27,14 +27,8 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
-)
 
-// APISurface identifies an API with a tool-calling request contract.
-type APISurface string
-
-const (
-	APISurfaceChatCompletions APISurface = "chat_completions"
-	APISurfaceMessages        APISurface = "messages"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
 // Field is a request field compared at a request-mutating boundary.
@@ -117,14 +111,14 @@ type capturedField struct {
 // mutations cannot alter the comparison baseline. Field contents remain
 // private and are never included in Summary or metric labels.
 type RequestSnapshot struct {
-	surface APISurface
+	surface reqcommon.APIType
 	fields  map[Field]capturedField
 	summary RequestSummary
 }
 
 // CaptureRequest snapshots the fields supported by the selected API surface.
 // Object-key order is normalized by encoding/json; array order is preserved.
-func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, error) {
+func CaptureRequest(surface reqcommon.APIType, body map[string]any) (RequestSnapshot, error) {
 	fields, err := fieldsForSurface(surface)
 	if err != nil {
 		return RequestSnapshot{}, err
@@ -161,14 +155,14 @@ func CaptureRequest(surface APISurface, body map[string]any) (RequestSnapshot, e
 	}
 	if choice, present := body[string(FieldToolChoice)]; present {
 		snapshot.summary.ToolChoicePresent = true
-		snapshot.summary.ToolChoiceKind = normalizeToolChoiceValue(choice)
+		snapshot.summary.ToolChoiceKind = normalizeToolChoiceValue(surface, choice)
 	}
 
 	return snapshot, nil
 }
 
 // CaptureRequestJSON decodes only supported fields in a JSON request object.
-func CaptureRequestJSON(surface APISurface, body []byte) (RequestSnapshot, error) {
+func CaptureRequestJSON(surface reqcommon.APIType, body []byte) (RequestSnapshot, error) {
 	fields, err := fieldsForSurface(surface)
 	if err != nil {
 		return RequestSnapshot{}, err
@@ -336,7 +330,7 @@ func (snapshot RequestSnapshot) SpanAttributes(statuses []FieldStatus) []attribu
 
 	attrs := make([]attribute.KeyValue, 0, 3)
 	attrs = append(attrs,
-		attribute.String("llm_d.tool_calling.api_surface", string(snapshot.surface)),
+		attribute.String("llm_d.tool_calling.api_surface", snapshot.surface.String()),
 		attribute.Bool("llm_d.tool_calling.present", snapshot.summary.ToolCallingPresent),
 	)
 	if snapshot.summary.ToolCallingPresent {
@@ -364,7 +358,7 @@ func hasObservedFieldStatus(statuses []FieldStatus) bool {
 }
 
 // FieldsForSurface returns the bounded field set compared for an API surface.
-func FieldsForSurface(surface APISurface) ([]Field, error) {
+func FieldsForSurface(surface reqcommon.APIType) ([]Field, error) {
 	fields, err := fieldsForSurface(surface)
 	if err != nil {
 		return nil, err
@@ -384,18 +378,20 @@ func WorstFieldStatus(statuses ...FieldStatusValue) FieldStatusValue {
 	return worst
 }
 
-func fieldsForSurface(surface APISurface) ([]Field, error) {
+func fieldsForSurface(surface reqcommon.APIType) ([]Field, error) {
 	switch surface {
-	case APISurfaceChatCompletions:
+	case reqcommon.APITypeChatCompletions:
 		return []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls, FieldResponseFormat}, nil
-	case APISurfaceMessages:
+	case reqcommon.APITypeResponses:
+		return []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls}, nil
+	case reqcommon.APITypeMessages:
 		return []Field{FieldTools, FieldToolChoice}, nil
 	default:
 		return nil, fmt.Errorf("unsupported tool-calling API surface %q", surface)
 	}
 }
 
-func normalizeToolChoiceValue(value any) ToolChoiceKind {
+func normalizeToolChoiceValue(surface reqcommon.APIType, value any) ToolChoiceKind {
 	switch choice := value.(type) {
 	case string:
 		switch choice {
@@ -421,10 +417,12 @@ func normalizeToolChoiceValue(value any) ToolChoiceKind {
 				return ToolChoiceNamed
 			}
 		case "function":
-			if function, ok := choice["function"].(map[string]any); ok {
-				if name, ok := function["name"].(string); ok && name != "" {
-					return ToolChoiceNamed
-				}
+			function := choice
+			if surface != reqcommon.APITypeResponses {
+				function, _ = choice["function"].(map[string]any)
+			}
+			if name, ok := function["name"].(string); ok && name != "" {
+				return ToolChoiceNamed
 			}
 		}
 	}

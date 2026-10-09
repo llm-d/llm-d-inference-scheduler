@@ -23,12 +23,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
 func TestCompareRequestFields(t *testing.T) {
 	tests := []struct {
 		name       string
-		api        APISurface
+		api        reqcommon.APIType
 		before     map[string]any
 		after      map[string]any
 		field      Field
@@ -36,7 +38,7 @@ func TestCompareRequestFields(t *testing.T) {
 	}{
 		{
 			name: "reordered object keys are preserved",
-			api:  APISurfaceChatCompletions,
+			api:  reqcommon.APITypeChatCompletions,
 			before: map[string]any{
 				"tools": []any{map[string]any{
 					"type": "function",
@@ -60,7 +62,7 @@ func TestCompareRequestFields(t *testing.T) {
 		},
 		{
 			name:       "tool choice value changed",
-			api:        APISurfaceChatCompletions,
+			api:        reqcommon.APITypeChatCompletions,
 			before:     map[string]any{"tool_choice": "required"},
 			after:      map[string]any{"tool_choice": "auto"},
 			field:      FieldToolChoice,
@@ -68,7 +70,7 @@ func TestCompareRequestFields(t *testing.T) {
 		},
 		{
 			name:       "field removed is dropped",
-			api:        APISurfaceChatCompletions,
+			api:        reqcommon.APITypeChatCompletions,
 			before:     map[string]any{"parallel_tool_calls": true},
 			after:      map[string]any{},
 			field:      FieldParallelToolCalls,
@@ -76,7 +78,7 @@ func TestCompareRequestFields(t *testing.T) {
 		},
 		{
 			name:       "absent to null is changed",
-			api:        APISurfaceMessages,
+			api:        reqcommon.APITypeMessages,
 			before:     map[string]any{},
 			after:      map[string]any{"tool_choice": nil},
 			field:      FieldToolChoice,
@@ -84,7 +86,7 @@ func TestCompareRequestFields(t *testing.T) {
 		},
 		{
 			name:       "explicit null preserved",
-			api:        APISurfaceMessages,
+			api:        reqcommon.APITypeMessages,
 			before:     map[string]any{"tool_choice": nil},
 			after:      map[string]any{"tool_choice": nil},
 			field:      FieldToolChoice,
@@ -92,7 +94,7 @@ func TestCompareRequestFields(t *testing.T) {
 		},
 		{
 			name:       "response format compared for chat completions",
-			api:        APISurfaceChatCompletions,
+			api:        reqcommon.APITypeChatCompletions,
 			before:     map[string]any{"response_format": map[string]any{"type": "json_object"}},
 			after:      map[string]any{"response_format": map[string]any{"type": "text"}},
 			field:      FieldResponseFormat,
@@ -100,7 +102,7 @@ func TestCompareRequestFields(t *testing.T) {
 		},
 		{
 			name:       "array order is significant",
-			api:        APISurfaceChatCompletions,
+			api:        reqcommon.APITypeChatCompletions,
 			before:     map[string]any{"tools": []any{map[string]any{"name": "a"}, map[string]any{"name": "b"}}},
 			after:      map[string]any{"tools": []any{map[string]any{"name": "b"}, map[string]any{"name": "a"}}},
 			field:      FieldTools,
@@ -123,10 +125,10 @@ func TestCompareRequestFields(t *testing.T) {
 }
 
 func TestCompareRequests_ExplicitNullDiffersFromAbsent(t *testing.T) {
-	absent, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{})
+	absent, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
 
-	withNull, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{"response_format": nil})
+	withNull, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{"response_format": nil})
 	require.NoError(t, err)
 
 	results, err := CompareRequests(absent, withNull)
@@ -160,9 +162,9 @@ func TestCompareRequestJSONNumbers(t *testing.T) {
 			body := func(value string) []byte {
 				return []byte(`{"tools":[{"type":"function","function":{"name":"example","parameters":{"enum":[` + value + `]}}}]}`)
 			}
-			before, err := CaptureRequestJSON(APISurfaceChatCompletions, body(tt.before))
+			before, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body(tt.before))
 			require.NoError(t, err)
-			after, err := CaptureRequestJSON(APISurfaceChatCompletions, body(tt.after))
+			after, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body(tt.after))
 			require.NoError(t, err)
 			statuses, err := CompareRequests(before, after)
 			require.NoError(t, err)
@@ -172,11 +174,11 @@ func TestCompareRequestJSONNumbers(t *testing.T) {
 }
 
 func TestCompareRequestNumbersAcrossPayloadTypes(t *testing.T) {
-	before, err := CaptureRequest(APISurfaceMessages, map[string]any{
+	before, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tools": []any{map[string]any{"input_schema": map[string]any{"maximum": int64(9007199254740993)}}},
 	})
 	require.NoError(t, err)
-	after, err := CaptureRequestJSON(APISurfaceMessages, []byte(`{"tools":[{"input_schema":{"maximum":9007199254740993.0}}]}`))
+	after, err := CaptureRequestJSON(reqcommon.APITypeMessages, []byte(`{"tools":[{"input_schema":{"maximum":9007199254740993.0}}]}`))
 	require.NoError(t, err)
 	statuses, err := CompareRequests(before, after)
 	require.NoError(t, err)
@@ -184,9 +186,9 @@ func TestCompareRequestNumbersAcrossPayloadTypes(t *testing.T) {
 }
 
 func TestCompareRequests_AbsentFieldsAreNotObserved(t *testing.T) {
-	before, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{})
+	before, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
-	after, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{})
+	after, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
 
 	results, err := CompareRequests(before, after)
@@ -196,7 +198,7 @@ func TestCompareRequests_AbsentFieldsAreNotObserved(t *testing.T) {
 }
 
 func TestRejectedStatusesOnlyIncludeExplicitPresentFields(t *testing.T) {
-	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{
+	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{
 		"tools":       []any{},
 		"tool_choice": "required",
 	})
@@ -223,19 +225,19 @@ func TestRejectedStatusesOnlyIncludeExplicitPresentFields(t *testing.T) {
 		})
 	}
 
-	messages, err := CaptureRequest(APISurfaceMessages, map[string]any{"parallel_tool_calls": true})
+	messages, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{"parallel_tool_calls": true})
 	require.NoError(t, err)
 	require.Empty(t, RejectedFieldStatuses(messages, FieldParallelToolCalls))
 }
 
 func TestCaptureRequestJSON_MalformedBody(t *testing.T) {
-	_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(`{"tools":[`))
+	_, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(`{"tools":[`))
 	require.Error(t, err)
 }
 
 func TestCaptureRequestJSONRejectsTrailingData(t *testing.T) {
 	for _, body := range []string{`{"tools":[]} {}`, `{"tools":[]} 1`, `{"tools":[]} invalid`} {
-		_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(body))
+		_, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(body))
 		require.Error(t, err)
 	}
 }
@@ -258,7 +260,7 @@ func TestCaptureRequestJSONFieldLookup(t *testing.T) {
 		{name: "duplicate field", body: `{"tool_choice":"required","tool_choice":"auto"}`, present: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			snapshot, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(tt.body))
+			snapshot, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(tt.body))
 			require.NoError(t, err)
 			require.Equal(t, tt.present, snapshot.Summary().ToolCallingPresent)
 			if tt.name == "duplicate field" {
@@ -267,7 +269,7 @@ func TestCaptureRequestJSONFieldLookup(t *testing.T) {
 		})
 	}
 	for _, body := range []string{`null`, `[]`, `42`, `{"messages":[}`, `{"model":"m"} {}`} {
-		_, err := CaptureRequestJSON(APISurfaceChatCompletions, []byte(body))
+		_, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(body))
 		require.Error(t, err)
 	}
 }
@@ -277,7 +279,7 @@ func TestCaptureRequestJSONNonToolAllocations(t *testing.T) {
 	large := []byte(`{"messages":[{"content":"` + strings.Repeat("x", 64*1024) + `"}]}`)
 	capture := func(body []byte) float64 {
 		return testing.AllocsPerRun(20, func() {
-			snapshot, err := CaptureRequestJSON(APISurfaceChatCompletions, body)
+			snapshot, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body)
 			if err != nil || snapshot.Summary().ToolCallingPresent {
 				t.Fatal("expected a valid non-tool snapshot", err)
 			}
@@ -293,7 +295,7 @@ func BenchmarkCaptureRequestJSONNonTool(b *testing.B) {
 		b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := CaptureRequestJSON(APISurfaceChatCompletions, body); err != nil {
+				if _, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -302,13 +304,13 @@ func BenchmarkCaptureRequestJSONNonTool(b *testing.B) {
 }
 
 func TestCompareRequests_MessagesOnlyIncludesSupportedFields(t *testing.T) {
-	before, err := CaptureRequest(APISurfaceMessages, map[string]any{
+	before, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tools":           []any{},
 		"tool_choice":     map[string]any{"type": "auto"},
 		"response_format": map[string]any{"type": "json_object"},
 	})
 	require.NoError(t, err)
-	after, err := CaptureRequest(APISurfaceMessages, map[string]any{
+	after, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tools":           []any{},
 		"tool_choice":     map[string]any{"type": "auto"},
 		"response_format": map[string]any{"type": "text"},
@@ -324,9 +326,9 @@ func TestCompareRequests_MessagesOnlyIncludesSupportedFields(t *testing.T) {
 }
 
 func TestCompareRequests_RejectsDifferentSurfaces(t *testing.T) {
-	chat, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{})
+	chat, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
-	messages, err := CaptureRequest(APISurfaceMessages, map[string]any{})
+	messages, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{})
 	require.NoError(t, err)
 
 	_, err = CompareRequests(chat, messages)
@@ -335,10 +337,10 @@ func TestCompareRequests_RejectsDifferentSurfaces(t *testing.T) {
 
 func TestCaptureRequest_CopiesFieldValues(t *testing.T) {
 	body := map[string]any{"tool_choice": "auto"}
-	before, err := CaptureRequest(APISurfaceChatCompletions, body)
+	before, err := CaptureRequest(reqcommon.APITypeChatCompletions, body)
 	require.NoError(t, err)
 	body["tool_choice"] = "required"
-	after, err := CaptureRequest(APISurfaceChatCompletions, body)
+	after, err := CaptureRequest(reqcommon.APITypeChatCompletions, body)
 	require.NoError(t, err)
 
 	results, err := CompareRequests(before, after)
@@ -353,7 +355,7 @@ func TestWorstFieldStatus(t *testing.T) {
 }
 
 func TestRequestSummaryUsesBoundedValuesOnly(t *testing.T) {
-	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{
+	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{
 		"tools": []any{
 			map[string]any{"type": "function", "function": map[string]any{"name": "sentinel_private_name", "parameters": map[string]any{"description": "sentinel_private_schema"}}},
 		},
@@ -375,20 +377,20 @@ func TestRequestSummaryUsesBoundedValuesOnly(t *testing.T) {
 func TestRequestSummaryPresenceIncludesOnlySupportedToolFields(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
-		surface     APISurface
+		surface     reqcommon.APIType
 		body        map[string]any
 		wantPresent bool
 		wantChoice  bool
 	}{
-		{name: "absent fields", surface: APISurfaceChatCompletions},
-		{name: "structured output only", surface: APISurfaceChatCompletions, body: map[string]any{"response_format": map[string]any{"type": "json_object"}}},
-		{name: "null structured output", surface: APISurfaceChatCompletions, body: map[string]any{"response_format": nil}},
-		{name: "empty tools", surface: APISurfaceChatCompletions, body: map[string]any{"tools": []any{}}, wantPresent: true},
-		{name: "null tools", surface: APISurfaceChatCompletions, body: map[string]any{"tools": nil}, wantPresent: true},
-		{name: "tool choice only", surface: APISurfaceChatCompletions, body: map[string]any{"tool_choice": "required"}, wantPresent: true, wantChoice: true},
-		{name: "parallel calls only", surface: APISurfaceChatCompletions, body: map[string]any{"parallel_tool_calls": false}, wantPresent: true},
-		{name: "Messages null choice", surface: APISurfaceMessages, body: map[string]any{"tool_choice": nil}, wantPresent: true, wantChoice: true},
-		{name: "Messages unsupported fields", surface: APISurfaceMessages, body: map[string]any{"response_format": nil, "parallel_tool_calls": true}},
+		{name: "absent fields", surface: reqcommon.APITypeChatCompletions},
+		{name: "structured output only", surface: reqcommon.APITypeChatCompletions, body: map[string]any{"response_format": map[string]any{"type": "json_object"}}},
+		{name: "null structured output", surface: reqcommon.APITypeChatCompletions, body: map[string]any{"response_format": nil}},
+		{name: "empty tools", surface: reqcommon.APITypeChatCompletions, body: map[string]any{"tools": []any{}}, wantPresent: true},
+		{name: "null tools", surface: reqcommon.APITypeChatCompletions, body: map[string]any{"tools": nil}, wantPresent: true},
+		{name: "tool choice only", surface: reqcommon.APITypeChatCompletions, body: map[string]any{"tool_choice": "required"}, wantPresent: true, wantChoice: true},
+		{name: "parallel calls only", surface: reqcommon.APITypeChatCompletions, body: map[string]any{"parallel_tool_calls": false}, wantPresent: true},
+		{name: "Messages null choice", surface: reqcommon.APITypeMessages, body: map[string]any{"tool_choice": nil}, wantPresent: true, wantChoice: true},
+		{name: "Messages unsupported fields", surface: reqcommon.APITypeMessages, body: map[string]any{"response_format": nil, "parallel_tool_calls": true}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			snapshot, err := CaptureRequest(tt.surface, tt.body)
@@ -402,7 +404,7 @@ func TestRequestSummaryPresenceIncludesOnlySupportedToolFields(t *testing.T) {
 }
 
 func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
-	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{
+	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{
 		"tools":       []any{map[string]any{"function": map[string]any{"name": "sentinel_private_name"}}},
 		"tool_choice": "required",
 	})
@@ -421,7 +423,7 @@ func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
 }
 
 func TestSpanAttributesOmittedForRequestsWithoutToolCallingFields(t *testing.T) {
-	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{"model": "test-model"})
+	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{"model": "test-model"})
 	require.NoError(t, err)
 
 	statuses, err := CompareRequests(snapshot, snapshot)
@@ -430,7 +432,7 @@ func TestSpanAttributesOmittedForRequestsWithoutToolCallingFields(t *testing.T) 
 }
 
 func TestSpanAttributesRetainObservedToolCallingMutation(t *testing.T) {
-	snapshot, err := CaptureRequest(APISurfaceChatCompletions, map[string]any{"model": "test-model"})
+	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{"model": "test-model"})
 	require.NoError(t, err)
 
 	attrs := snapshot.SpanAttributes([]FieldStatus{{
@@ -444,7 +446,7 @@ func TestSpanAttributesRetainObservedToolCallingMutation(t *testing.T) {
 }
 
 func TestRequestSummaryMessagesToolChoice(t *testing.T) {
-	snapshot, err := CaptureRequest(APISurfaceMessages, map[string]any{
+	snapshot, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tool_choice": map[string]any{"type": "tool", "name": "sentinel_private_name"},
 	})
 	require.NoError(t, err)
@@ -463,8 +465,20 @@ func TestMetricSchema(t *testing.T) {
 		MetricLabelField,
 		MetricLabelStatus,
 	})
-	require.Equal(t, []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls, FieldResponseFormat}, mustFieldsForSurface(t, APISurfaceChatCompletions))
-	require.Equal(t, []Field{FieldTools, FieldToolChoice}, mustFieldsForSurface(t, APISurfaceMessages))
+	require.Equal(t, []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls, FieldResponseFormat}, mustFieldsForSurface(t, reqcommon.APITypeChatCompletions))
+	require.Equal(t, []Field{FieldTools, FieldToolChoice}, mustFieldsForSurface(t, reqcommon.APITypeMessages))
+	require.Equal(t, []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls}, mustFieldsForSurface(t, reqcommon.APITypeResponses))
+}
+
+func TestCaptureRequestRejectsUnsupportedAPIs(t *testing.T) {
+	for _, apiType := range []reqcommon.APIType{reqcommon.APITypeCompletions, reqcommon.APITypeVLLMGenerate, reqcommon.APITypeSGLangGenerate, reqcommon.APIType(-1)} {
+		t.Run(apiType.String(), func(t *testing.T) {
+			_, err := CaptureRequest(apiType, map[string]any{"tools": []any{}})
+			require.Error(t, err)
+			_, err = CaptureRequestJSON(apiType, []byte(`{"tools":[]}`))
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestToolCountBucket(t *testing.T) {
@@ -507,7 +521,7 @@ func resultFor(t *testing.T, results []FieldStatus, field Field) FieldStatus {
 	return FieldStatus{}
 }
 
-func mustFieldsForSurface(t *testing.T, surface APISurface) []Field {
+func mustFieldsForSurface(t *testing.T, surface reqcommon.APIType) []Field {
 	t.Helper()
 	fields, err := FieldsForSurface(surface)
 	require.NoError(t, err)

@@ -251,18 +251,20 @@ func (r *RequestContext) apiType() reqcommon.APIType {
 	return reqcommon.DetectAPIType(fwkrequest.GetRequestPath(headers))
 }
 
-func toolCallingSurfaceForPath(path string) (toolcalling.APISurface, bool) {
-	switch {
-	case strings.Contains(path, reqcommon.PathChatCompletions):
-		return toolcalling.APISurfaceChatCompletions, true
-	case strings.Contains(path, reqcommon.PathMessages):
-		return toolcalling.APISurfaceMessages, true
-	default:
-		return "", false
+func toolCallingAPIForPath(path string) (reqcommon.APIType, bool) {
+	path, _, _ = strings.Cut(path, "?")
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	for _, apiType := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages, reqcommon.APITypeResponses} {
+		// Keep the slash boundary while allowing provider-specific prefixes.
+		suffix := strings.TrimPrefix(apiType.Path(), "/v1")
+		if strings.HasSuffix(path, suffix) {
+			return apiType, true
+		}
 	}
+	return 0, false
 }
 
-func compareEPPToolCallingSnapshotToBody(surface toolcalling.APISurface, inbound toolcalling.RequestSnapshot, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
+func compareEPPToolCallingSnapshotToBody(surface reqcommon.APIType, inbound toolcalling.RequestSnapshot, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
 	outbound, err := toolcalling.CaptureRequestJSON(surface, outboundBody)
 	if err != nil {
 		return nil, err
@@ -552,15 +554,15 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: resolveErr.Error()}
 					break
 				}
-				apiSurface, hasToolCallingSurface := toolCallingSurfaceForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
+				apiType, hasToolCallingAPI := toolCallingAPIForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
 				var inboundToolSnapshot toolcalling.RequestSnapshot
 				hasInboundToolSnapshot := false
-				if hasToolCallingSurface {
-					inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiSurface, reqCtx.Request.RawBody)
+				if hasToolCallingAPI {
+					inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiType, reqCtx.Request.RawBody)
 					if err != nil {
 						// A malformed body has no trustworthy field snapshot. The
 						// request parser controls the client error response.
-						hasToolCallingSurface = false
+						hasToolCallingAPI = false
 					} else {
 						hasInboundToolSnapshot = true
 					}
@@ -595,8 +597,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					break
 				}
 
-				if hasToolCallingSurface && hasInboundToolSnapshot {
-					statuses, compareErr := compareEPPToolCallingSnapshotToBody(apiSurface, inboundToolSnapshot, reqCtx.Request.RawBody)
+				if hasToolCallingAPI && hasInboundToolSnapshot {
+					statuses, compareErr := compareEPPToolCallingSnapshotToBody(apiType, inboundToolSnapshot, reqCtx.Request.RawBody)
 					if compareErr != nil {
 						logger.Error(compareErr, "Error comparing tool-calling request fields")
 					}

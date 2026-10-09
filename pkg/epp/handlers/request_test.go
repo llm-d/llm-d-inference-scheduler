@@ -672,36 +672,53 @@ func TestCompareEPPToolCallingSnapshotToBody(t *testing.T) {
 	inboundBody := []byte(`{"tools":[{"function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"required","parallel_tool_calls":true}`)
 	outbound := []byte(`{"parallel_tool_calls":true,"tool_choice":"auto","tools":[{"function":{"parameters":{"type":"object"},"name":"private"}}]}`)
 
-	inbound, err := toolcalling.CaptureRequestJSON(toolcalling.APISurfaceChatCompletions, inboundBody)
+	inbound, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, inboundBody)
 	require.NoError(t, err)
 	inboundBody[0] = 'x' // The captured snapshot remains stable if the request buffer is later reused.
-	statuses, err := compareEPPToolCallingSnapshotToBody(toolcalling.APISurfaceChatCompletions, inbound, outbound)
+	statuses, err := compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, inbound, outbound)
 	require.NoError(t, err)
 	require.Equal(t, toolcalling.FieldStatusPreserved, statusForField(t, statuses, toolcalling.FieldTools).Status)
 	require.Equal(t, toolcalling.FieldStatusChanged, statusForField(t, statuses, toolcalling.FieldToolChoice).Status)
 	require.True(t, statusForField(t, statuses, toolcalling.FieldToolChoice).Observed)
 
-	statuses, err = compareEPPToolCallingSnapshotToBody(toolcalling.APISurfaceChatCompletions, inbound, []byte(`{"tools":[`))
+	statuses, err = compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, inbound, []byte(`{"tools":[`))
 	require.Error(t, err)
 	require.Empty(t, statuses, "a failed capture does not establish field rejection")
 }
 
-func TestToolCallingSurfaceForPath(t *testing.T) {
+func TestToolCallingAPIForPath(t *testing.T) {
 	tests := []struct {
 		path   string
-		want   toolcalling.APISurface
+		want   reqcommon.APIType
 		wantOK bool
 	}{
-		{path: "/v1/chat/completions", want: toolcalling.APISurfaceChatCompletions, wantOK: true},
-		{path: "/prefix/v1/messages", want: toolcalling.APISurfaceMessages, wantOK: true},
+		{path: "/v1/chat/completions", want: reqcommon.APITypeChatCompletions, wantOK: true},
+		{path: "/prefix/v1/messages", want: reqcommon.APITypeMessages, wantOK: true},
+		{path: "/v1/responses", want: reqcommon.APITypeResponses, wantOK: true},
+		{path: "/v1/projects/demo/locations/us/endpoints/model/chat/completions", want: reqcommon.APITypeChatCompletions, wantOK: true},
+		{path: "/provider/messages/", want: reqcommon.APITypeMessages, wantOK: true},
+		{path: "/provider/responses?stream=true", want: reqcommon.APITypeResponses, wantOK: true},
+		{path: "/v1/chat/completions/?stream=true", want: reqcommon.APITypeChatCompletions, wantOK: true},
+		{path: "/v1/chat/completions/render", wantOK: false},
+		{path: "/v1/messages/render", wantOK: false},
+		{path: "/v1/messages/count_tokens", wantOK: false},
+		{path: "/v1/responses/response-id", wantOK: false},
+		{path: "/v1/notchat/completions", wantOK: false},
+		{path: "/v1/notmessages", wantOK: false},
+		{path: "/v1/chat/completions-extra", wantOK: false},
+		{path: "/v1/embeddings?route=/v1/chat/completions", wantOK: false},
+		{path: "/unknown", wantOK: false},
+		{path: "", wantOK: false},
 		{path: "/v1/embeddings", wantOK: false},
 	}
 	for _, tt := range tests {
-		got, ok := toolCallingSurfaceForPath(tt.path)
-		require.Equal(t, tt.wantOK, ok)
-		if ok {
-			require.Equal(t, tt.want, got)
-		}
+		t.Run(tt.path, func(t *testing.T) {
+			got, ok := toolCallingAPIForPath(tt.path)
+			require.Equal(t, tt.wantOK, ok)
+			if ok {
+				require.Equal(t, tt.want, got)
+			}
+		})
 	}
 }
 
@@ -734,8 +751,9 @@ func (d *requestIntegrityDirector) HandleRequest(_ context.Context, reqCtx *Requ
 
 func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 	const (
-		chatBody  = `{"model":"m","messages":[{"role":"user","content":"private_prompt_content"}],"tools":[{"type":"function","function":{"name":"private_tool_name","parameters":{"type":"object","description":"private_schema_content"}}}],"tool_choice":"required","parallel_tool_calls":true,"response_format":{"type":"json_object"}}`
-		plainBody = `{"model":"m","messages":[{"role":"user","content":"hello"}]}`
+		chatBody      = `{"model":"m","messages":[{"role":"user","content":"private_prompt_content"}],"tools":[{"type":"function","function":{"name":"private_tool_name","parameters":{"type":"object","description":"private_schema_content"}}}],"tool_choice":"required","parallel_tool_calls":true,"response_format":{"type":"json_object"}}`
+		plainBody     = `{"model":"m","messages":[{"role":"user","content":"hello"}]}`
+		responsesBody = `{"model":"m","input":"private_prompt_content","tools":[{"type":"function","name":"private_tool_name","parameters":{"type":"object","description":"private_schema_content"}}],"tool_choice":{"type":"function","name":"private_tool_name"},"parallel_tool_calls":true,"response_format":null}`
 	)
 	for _, tt := range []struct {
 		name                  string
@@ -757,6 +775,41 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			body: chatBody, wantDirector: true, wantSurface: "chat_completions",
 			wantChoice: "required", wantToolBucket: "1",
 			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved", "response_format": "preserved"},
+		},
+		{
+			name: "provider chat route records request telemetry", path: "/v1/projects/demo/locations/us/endpoints/model/chat/completions?stream=true",
+			body: chatBody, wantDirector: true, wantSurface: "chat_completions",
+			wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved", "response_format": "preserved"},
+		},
+		{
+			name: "Responses preserves supported fields and sanitizes named choice", path: reqcommon.PathResponses,
+			body: responsesBody, wantDirector: true, wantSurface: "responses",
+			wantChoice: "named", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved"},
+		},
+		{
+			name: "Responses compares serialized changes and drops", path: "/provider/responses/?stream=true",
+			body: responsesBody, outbound: `{"model":"m","input":"hello","tools":[],"tool_choice":"auto","response_format":null}`,
+			wantDirector: true, wantSurface: "responses", wantChoice: "named", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "changed", "tool_choice": "changed", "parallel_tool_calls": "dropped"},
+		},
+		{
+			name: "Responses structured output emits no tool telemetry", path: reqcommon.PathResponses,
+			body:         `{"model":"m","input":"hello","text":{"format":{"type":"json_object"}},"response_format":null}`,
+			wantDirector: true,
+		},
+		{
+			name: "chat render does not emit inference tool telemetry", path: reqcommon.PathChatCompletions + "/render",
+			body: chatBody, wantDirector: true,
+		},
+		{
+			name: "Messages render does not emit inference tool telemetry", path: reqcommon.PathMessages + "/render",
+			body: `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[],"tool_choice":{"type":"any"}}`, wantDirector: true,
+		},
+		{
+			name: "Messages count_tokens does not emit inference tool telemetry", path: reqcommon.PathMessages + "/count_tokens",
+			body: `{"model":"m","messages":[{"role":"user","content":"hello"}],"tools":[],"tool_choice":{"type":"any"}}`, wantDirector: true,
 		},
 		{
 			name: "serialized body changes and drops fields", path: reqcommon.PathChatCompletions,

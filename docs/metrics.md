@@ -155,6 +155,12 @@ an exemplar link configured to a traces backend.
 This counter records observed outcomes for supported tool-calling request fields. It does not
 include field values or request content.
 
+Request checks cover Chat Completions (`tools`, `tool_choice`, `parallel_tool_calls`,
+`response_format`), Messages (`tools`, `tool_choice`), and Responses (`tools`, `tool_choice`,
+`parallel_tool_calls`). Provider-prefixed inference endpoints are supported. Render,
+count-token, and response-management subpaths do not emit these request-integrity metrics.
+Responses structured output (`text.format`) is outside these field checks.
+
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
 | `llm_d_epp_tool_calling_field_status_total` | Counter | `component`, `direction`, `field`, `status` | Observed request-field preservation, change, drop, or rejection outcomes. |
