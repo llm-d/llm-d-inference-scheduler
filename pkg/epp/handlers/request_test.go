@@ -1102,7 +1102,7 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			families, err := ctrlmetrics.Registry.Gather()
 			require.NoError(t, err)
 			for _, family := range families {
-				if family.GetName() != toolcalling.MetricToolCallingFieldStatus {
+				if family.GetName() != "llm_d_epp_tool_calling_field_status_total" {
 					continue
 				}
 				for _, metric := range family.GetMetric() {

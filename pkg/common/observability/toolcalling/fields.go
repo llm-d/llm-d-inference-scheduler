@@ -51,17 +51,14 @@ const (
 	FieldStatusRejected  FieldStatusValue = "rejected"
 )
 
-// Metric schema constants are shared by EPP and the routing sidecar.
+// Request field outcome metric labels and component values.
 const (
-	MetricToolCallingFieldStatus = "llm_d_epp_tool_calling_field_status_total"
-
 	MetricLabelComponent = "component"
 	MetricLabelDirection = "direction"
 	MetricLabelField     = "field"
 	MetricLabelStatus    = "status"
 
-	ComponentEPP            = "epp"
-	ComponentRoutingSidecar = "routing_sidecar"
+	ComponentEPP = "epp"
 
 	DirectionRequest = "request"
 )
@@ -114,51 +111,6 @@ type RequestSnapshot struct {
 	surface reqcommon.APIType
 	fields  map[Field]capturedField
 	summary RequestSummary
-}
-
-// CaptureRequest snapshots the fields supported by the selected API surface.
-// Object-key order is normalized by encoding/json; array order is preserved.
-func CaptureRequest(surface reqcommon.APIType, body map[string]any) (RequestSnapshot, error) {
-	fields, err := fieldsForSurface(surface)
-	if err != nil {
-		return RequestSnapshot{}, err
-	}
-	if body == nil {
-		body = map[string]any{}
-	}
-
-	snapshot := RequestSnapshot{
-		surface: surface,
-		fields:  make(map[Field]capturedField, len(fields)),
-		summary: RequestSummary{ToolChoiceKind: ToolChoiceUnknown},
-	}
-	for _, field := range fields {
-		value, present := body[string(field)]
-		captured := capturedField{present: present}
-		if present {
-			captured.value, err = json.Marshal(value)
-			if err != nil {
-				return RequestSnapshot{}, fmt.Errorf("marshal %s field: %w", field, err)
-			}
-		}
-		snapshot.fields[field] = captured
-		if present && field != FieldResponseFormat {
-			snapshot.summary.ToolCallingPresent = true
-		}
-	}
-
-	if tools, ok := body[string(FieldTools)].([]any); ok {
-		if len(tools) > 0 {
-			snapshot.summary.ToolCallingPresent = true
-			snapshot.summary.ToolCountBucket = bucketToolCount(len(tools))
-		}
-	}
-	if choice, present := body[string(FieldToolChoice)]; present {
-		snapshot.summary.ToolChoicePresent = true
-		snapshot.summary.ToolChoiceKind = normalizeToolChoiceValue(surface, choice)
-	}
-
-	return snapshot, nil
 }
 
 // CaptureRequestJSON decodes only supported fields in a JSON request object.
@@ -413,27 +365,6 @@ func hasObservedFieldStatus(statuses []FieldStatus) bool {
 	return false
 }
 
-// FieldsForSurface returns the bounded field set compared for an API surface.
-func FieldsForSurface(surface reqcommon.APIType) ([]Field, error) {
-	fields, err := fieldsForSurface(surface)
-	if err != nil {
-		return nil, err
-	}
-	return append([]Field(nil), fields...), nil
-}
-
-// WorstFieldStatus returns the highest-priority status according to the shared
-// precedence: rejected, dropped, changed, preserved.
-func WorstFieldStatus(statuses ...FieldStatusValue) FieldStatusValue {
-	worst := FieldStatusPreserved
-	for _, status := range statuses {
-		if statusRank(status) > statusRank(worst) {
-			worst = status
-		}
-	}
-	return worst
-}
-
 func fieldsForSurface(surface reqcommon.APIType) ([]Field, error) {
 	switch surface {
 	case reqcommon.APITypeChatCompletions:
@@ -497,20 +428,5 @@ func bucketToolCount(count int) ToolCountBucket {
 		return ToolCountBucketSixToTen
 	default:
 		return ToolCountBucketElevenPlus
-	}
-}
-
-func statusRank(status FieldStatusValue) int {
-	switch status {
-	case FieldStatusPreserved:
-		return 0
-	case FieldStatusChanged:
-		return 1
-	case FieldStatusDropped:
-		return 2
-	case FieldStatusRejected:
-		return 3
-	default:
-		return -1
 	}
 }

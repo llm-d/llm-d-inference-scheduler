@@ -114,9 +114,9 @@ func TestCompareRequestFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			before, err := CaptureRequest(tt.api, tt.before)
+			before, err := captureRequest(tt.api, tt.before)
 			require.NoError(t, err)
-			after, err := CaptureRequest(tt.api, tt.after)
+			after, err := captureRequest(tt.api, tt.after)
 			require.NoError(t, err)
 
 			results, err := CompareRequests(before, after)
@@ -127,10 +127,10 @@ func TestCompareRequestFields(t *testing.T) {
 }
 
 func TestCompareRequests_ExplicitNullDiffersFromAbsent(t *testing.T) {
-	absent, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
+	absent, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
 
-	withNull, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{"response_format": nil})
+	withNull, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{"response_format": nil})
 	require.NoError(t, err)
 
 	results, err := CompareRequests(absent, withNull)
@@ -176,7 +176,7 @@ func TestCompareRequestJSONNumbers(t *testing.T) {
 }
 
 func TestCompareRequestNumbersAcrossPayloadTypes(t *testing.T) {
-	before, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
+	before, err := captureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tools": []any{map[string]any{"input_schema": map[string]any{"maximum": int64(9007199254740993)}}},
 	})
 	require.NoError(t, err)
@@ -188,9 +188,9 @@ func TestCompareRequestNumbersAcrossPayloadTypes(t *testing.T) {
 }
 
 func TestCompareRequests_AbsentFieldsAreNotObserved(t *testing.T) {
-	before, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
+	before, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
-	after, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
+	after, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
 
 	results, err := CompareRequests(before, after)
@@ -200,7 +200,7 @@ func TestCompareRequests_AbsentFieldsAreNotObserved(t *testing.T) {
 }
 
 func TestRejectedStatusesOnlyIncludeExplicitPresentFields(t *testing.T) {
-	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{
+	snapshot, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{
 		"tools":       []any{},
 		"tool_choice": "required",
 	})
@@ -227,7 +227,7 @@ func TestRejectedStatusesOnlyIncludeExplicitPresentFields(t *testing.T) {
 		})
 	}
 
-	messages, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{"parallel_tool_calls": true})
+	messages, err := captureRequest(reqcommon.APITypeMessages, map[string]any{"parallel_tool_calls": true})
 	require.NoError(t, err)
 	require.Empty(t, RejectedFieldStatuses(messages, FieldParallelToolCalls))
 }
@@ -388,7 +388,7 @@ func TestCaptureRequestJSONMatchesDecodedCapture(t *testing.T) {
 				decoder.UseNumber()
 				var decoded map[string]any
 				require.NoError(t, decoder.Decode(&decoded))
-				want, err := CaptureRequest(api, decoded)
+				want, err := captureRequest(api, decoded)
 				require.NoError(t, err)
 				got, err := CaptureRequestJSON(api, []byte(body))
 				require.NoError(t, err)
@@ -404,13 +404,13 @@ func TestCaptureRequestJSONMatchesDecodedCapture(t *testing.T) {
 }
 
 func TestCompareRequests_MessagesOnlyIncludesSupportedFields(t *testing.T) {
-	before, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
+	before, err := captureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tools":           []any{},
 		"tool_choice":     map[string]any{"type": "auto"},
 		"response_format": map[string]any{"type": "json_object"},
 	})
 	require.NoError(t, err)
-	after, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
+	after, err := captureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tools":           []any{},
 		"tool_choice":     map[string]any{"type": "auto"},
 		"response_format": map[string]any{"type": "text"},
@@ -426,9 +426,9 @@ func TestCompareRequests_MessagesOnlyIncludesSupportedFields(t *testing.T) {
 }
 
 func TestCompareRequests_RejectsDifferentSurfaces(t *testing.T) {
-	chat, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
+	chat, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{})
 	require.NoError(t, err)
-	messages, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{})
+	messages, err := captureRequest(reqcommon.APITypeMessages, map[string]any{})
 	require.NoError(t, err)
 
 	_, err = CompareRequests(chat, messages)
@@ -437,10 +437,10 @@ func TestCompareRequests_RejectsDifferentSurfaces(t *testing.T) {
 
 func TestCaptureRequest_CopiesFieldValues(t *testing.T) {
 	body := map[string]any{"tool_choice": "auto"}
-	before, err := CaptureRequest(reqcommon.APITypeChatCompletions, body)
+	before, err := captureRequest(reqcommon.APITypeChatCompletions, body)
 	require.NoError(t, err)
 	body["tool_choice"] = "required"
-	after, err := CaptureRequest(reqcommon.APITypeChatCompletions, body)
+	after, err := captureRequest(reqcommon.APITypeChatCompletions, body)
 	require.NoError(t, err)
 
 	results, err := CompareRequests(before, after)
@@ -448,14 +448,8 @@ func TestCaptureRequest_CopiesFieldValues(t *testing.T) {
 	require.Equal(t, FieldStatusChanged, resultStatus(t, results, FieldToolChoice))
 }
 
-func TestWorstFieldStatus(t *testing.T) {
-	require.Equal(t, FieldStatusRejected, WorstFieldStatus(FieldStatusPreserved, FieldStatusChanged, FieldStatusRejected))
-	require.Equal(t, FieldStatusDropped, WorstFieldStatus(FieldStatusChanged, FieldStatusDropped))
-	require.Equal(t, FieldStatusPreserved, WorstFieldStatus(FieldStatusPreserved, FieldStatusPreserved))
-}
-
 func TestRequestSummaryUsesBoundedValuesOnly(t *testing.T) {
-	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{
+	snapshot, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{
 		"tools": []any{
 			map[string]any{"type": "function", "function": map[string]any{"name": "sentinel_private_name", "parameters": map[string]any{"description": "sentinel_private_schema"}}},
 		},
@@ -493,7 +487,7 @@ func TestRequestSummaryPresenceIncludesOnlySupportedToolFields(t *testing.T) {
 		{name: "Messages unsupported fields", surface: reqcommon.APITypeMessages, body: map[string]any{"response_format": nil, "parallel_tool_calls": true}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			snapshot, err := CaptureRequest(tt.surface, tt.body)
+			snapshot, err := captureRequest(tt.surface, tt.body)
 			require.NoError(t, err)
 			summary := snapshot.Summary()
 			require.Equal(t, tt.wantPresent, summary.ToolCallingPresent)
@@ -504,7 +498,7 @@ func TestRequestSummaryPresenceIncludesOnlySupportedToolFields(t *testing.T) {
 }
 
 func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
-	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{
+	snapshot, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{
 		"tools":       []any{map[string]any{"function": map[string]any{"name": "sentinel_private_name"}}},
 		"tool_choice": "required",
 	})
@@ -540,7 +534,7 @@ func TestSpanAttributesContainOnlyBoundedSummaryAndFieldStatuses(t *testing.T) {
 }
 
 func TestSpanAttributesOmittedForRequestsWithoutToolCallingFields(t *testing.T) {
-	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{"model": "test-model"})
+	snapshot, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{"model": "test-model"})
 	require.NoError(t, err)
 
 	statuses, err := CompareRequests(snapshot, snapshot)
@@ -549,7 +543,7 @@ func TestSpanAttributesOmittedForRequestsWithoutToolCallingFields(t *testing.T) 
 }
 
 func TestSpanAttributesRetainObservedToolCallingMutation(t *testing.T) {
-	snapshot, err := CaptureRequest(reqcommon.APITypeChatCompletions, map[string]any{"model": "test-model"})
+	snapshot, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{"model": "test-model"})
 	require.NoError(t, err)
 
 	attrs := snapshot.SpanAttributes([]FieldStatus{{
@@ -563,7 +557,7 @@ func TestSpanAttributesRetainObservedToolCallingMutation(t *testing.T) {
 }
 
 func TestRequestSummaryMessagesToolChoice(t *testing.T) {
-	snapshot, err := CaptureRequest(reqcommon.APITypeMessages, map[string]any{
+	snapshot, err := captureRequest(reqcommon.APITypeMessages, map[string]any{
 		"tool_choice": map[string]any{"type": "tool", "name": "sentinel_private_name"},
 	})
 	require.NoError(t, err)
@@ -574,14 +568,7 @@ func TestRequestSummaryMessagesToolChoice(t *testing.T) {
 	require.True(t, summary.ToolCallingPresent)
 }
 
-func TestMetricSchema(t *testing.T) {
-	require.Equal(t, "llm_d_epp_tool_calling_field_status_total", MetricToolCallingFieldStatus)
-	require.Equal(t, []string{"component", "direction", "field", "status"}, []string{
-		MetricLabelComponent,
-		MetricLabelDirection,
-		MetricLabelField,
-		MetricLabelStatus,
-	})
+func TestSupportedRequestFields(t *testing.T) {
 	require.Equal(t, []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls, FieldResponseFormat}, mustFieldsForSurface(t, reqcommon.APITypeChatCompletions))
 	require.Equal(t, []Field{FieldTools, FieldToolChoice}, mustFieldsForSurface(t, reqcommon.APITypeMessages))
 	require.Equal(t, []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls}, mustFieldsForSurface(t, reqcommon.APITypeResponses))
@@ -590,7 +577,7 @@ func TestMetricSchema(t *testing.T) {
 func TestCaptureRequestRejectsUnsupportedAPIs(t *testing.T) {
 	for _, apiType := range []reqcommon.APIType{reqcommon.APITypeCompletions, reqcommon.APITypeVLLMGenerate, reqcommon.APITypeSGLangGenerate, reqcommon.APIType(-1)} {
 		t.Run(apiType.String(), func(t *testing.T) {
-			_, err := CaptureRequest(apiType, map[string]any{"tools": []any{}})
+			_, err := captureRequest(apiType, map[string]any{"tools": []any{}})
 			require.Error(t, err)
 			_, err = CaptureRequestJSON(apiType, []byte(`{"tools":[]}`))
 			require.Error(t, err)
@@ -614,6 +601,50 @@ func TestToolCountBucket(t *testing.T) {
 	for _, tt := range tests {
 		require.Equal(t, tt.want, bucketToolCount(tt.count))
 	}
+}
+
+// captureRequest provides a decoded-body reference for JSON capture tests.
+func captureRequest(surface reqcommon.APIType, body map[string]any) (RequestSnapshot, error) {
+	fields, err := fieldsForSurface(surface)
+	if err != nil {
+		return RequestSnapshot{}, err
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+
+	snapshot := RequestSnapshot{
+		surface: surface,
+		fields:  make(map[Field]capturedField, len(fields)),
+		summary: RequestSummary{ToolChoiceKind: ToolChoiceUnknown},
+	}
+	for _, field := range fields {
+		value, present := body[string(field)]
+		captured := capturedField{present: present}
+		if present {
+			captured.value, err = json.Marshal(value)
+			if err != nil {
+				return RequestSnapshot{}, fmt.Errorf("marshal %s field: %w", field, err)
+			}
+		}
+		snapshot.fields[field] = captured
+		if present && field != FieldResponseFormat {
+			snapshot.summary.ToolCallingPresent = true
+		}
+	}
+
+	if tools, ok := body[string(FieldTools)].([]any); ok {
+		if len(tools) > 0 {
+			snapshot.summary.ToolCallingPresent = true
+			snapshot.summary.ToolCountBucket = bucketToolCount(len(tools))
+		}
+	}
+	if choice, present := body[string(FieldToolChoice)]; present {
+		snapshot.summary.ToolChoicePresent = true
+		snapshot.summary.ToolChoiceKind = normalizeToolChoiceValue(surface, choice)
+	}
+
+	return snapshot, nil
 }
 
 func resultStatus(t *testing.T, results []FieldStatus, field Field) FieldStatusValue {
@@ -640,7 +671,7 @@ func resultFor(t *testing.T, results []FieldStatus, field Field) FieldStatus {
 
 func mustFieldsForSurface(t *testing.T, surface reqcommon.APIType) []Field {
 	t.Helper()
-	fields, err := FieldsForSurface(surface)
+	fields, err := fieldsForSurface(surface)
 	require.NoError(t, err)
 	return fields
 }

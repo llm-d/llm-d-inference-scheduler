@@ -573,11 +573,13 @@ var (
 	)
 )
 
-// --- Tool-calling field integrity metric shared with the routing sidecar ---
+// --- Tool-calling request field integrity metric ---
+const toolCallingFieldStatusMetricName = "tool_calling_field_status_total"
+
 var llmdToolCallingFieldStatusTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Subsystem: LLMDRouterEndpointPickerSubsystem,
-		Name:      "tool_calling_field_status_total",
+		Name:      toolCallingFieldStatusMetricName,
 		Help:      metricsutil.HelpMsgWithStability("Tool-calling request field outcomes by component, direction, field, and status.", compbasemetrics.ALPHA),
 	},
 	[]string{
