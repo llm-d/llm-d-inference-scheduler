@@ -62,6 +62,19 @@ func newNIXLV2RequestID() (string, error) {
 	return id.String(), nil
 }
 
+// marshalPrefillBody encodes the prefill request. On failure it answers the
+// client and reports false.
+func (s *Server) marshalPrefillBody(w http.ResponseWriter, prefillRequest map[string]any) ([]byte, bool) {
+	pbody, err := json.Marshal(prefillRequest)
+	if err != nil {
+		if err := errorJSONInvalid(err, w); err != nil {
+			s.logger.Error(err, "failed to send error response to client")
+		}
+		return nil, false
+	}
+	return pbody, true
+}
+
 func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPodHostPort, kvCacheSource string, apiType reqcommon.APIType) {
 	s.logger.V(logging.DEBUG).Info("running NIXL protocol V2", "url", prefillPodHostPort, "api", apiType.String())
 
@@ -170,17 +183,22 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 			reqcommon.FieldRemotePort:      nil,
 		}
 	}
+	prefillKVParams := prefillRequest[reqcommon.FieldKVTransferParams].(map[string]any)
+
+	// transfer_id of the current prefill attempt in NIXL push mode, else empty.
+	var pushTransferID string
+	if s.config.NIXLPushMode {
+		pushTransferID = newTransferID()
+		prefillKVParams[requestFieldTransferID] = pushTransferID
+	}
 
 	// Compose the OffloadingConnector p2p pull onto the NIXL prefill request.
-	s.addP2PPullToPrefill(prefillRequest[reqcommon.FieldKVTransferParams].(map[string]any), kvCacheSource, prefillPodHostPort)
+	s.addP2PPullToPrefill(prefillKVParams, kvCacheSource, prefillPodHostPort)
 
 	reqcommon.CapSingleToken(prefillRequest, apiType)
 
-	pbody, err := json.Marshal(prefillRequest)
-	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
-		}
+	pbody, ok := s.marshalPrefillBody(w, prefillRequest)
+	if !ok {
 		return
 	}
 	preq.Body = io.NopCloser(bytes.NewReader(pbody))
@@ -236,6 +254,16 @@ retryLoop:
 		case <-time.After(s.config.PrefillRetryBackoff):
 		case <-preq.Context().Done():
 			break retryLoop
+		}
+
+		// A failed attempt may still finish on P, so each attempt gets its own
+		// transfer_id and D pairs only with the attempt that succeeded.
+		if pushTransferID != "" {
+			pushTransferID = newTransferID()
+			prefillKVParams[requestFieldTransferID] = pushTransferID
+			if pbody, ok = s.marshalPrefillBody(w, prefillRequest); !ok {
+				return
+			}
 		}
 	}
 
@@ -409,6 +437,10 @@ retryLoop:
 				}
 			}
 		}
+	}
+	// P's response carries no transfer_id.
+	if dKVParams, ok := pKVTransferParams.(map[string]any); ok && pushTransferID != "" {
+		dKVParams[requestFieldTransferID] = pushTransferID
 	}
 	body[reqcommon.FieldKVTransferParams] = pKVTransferParams
 

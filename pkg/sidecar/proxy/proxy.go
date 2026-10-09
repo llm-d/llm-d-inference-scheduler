@@ -137,6 +137,9 @@ type Config struct {
 	// no effect with --kv-connector=offloading, where the tier is always present.
 	EnableP2PPull bool
 
+	// NIXLPushMode declares that the engines run vLLM's NixlPushConnector.
+	NIXLPushMode bool
+
 	// EnableSSRFProtection enables SSRF protection using InferencePool allowlisting.
 	EnableSSRFProtection bool
 	// InferencePoolNamespace is the Kubernetes namespace of the InferencePool to watch.
