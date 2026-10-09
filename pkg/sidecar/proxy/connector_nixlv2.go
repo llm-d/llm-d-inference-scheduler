@@ -335,6 +335,10 @@ retryLoop:
 		trace.Info("received prefiller response", fields...)
 	}
 
+	if s.config.NIXLPushMode {
+		s.storeNIXLPushIdentity(prefillPodHostPort, pKVTransferParams)
+	}
+
 	// Decode Stage
 
 	ctx, decodeSpan := tracer.Start(ctx, "decode",
