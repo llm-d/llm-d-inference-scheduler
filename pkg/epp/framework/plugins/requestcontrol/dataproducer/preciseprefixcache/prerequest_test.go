@@ -34,6 +34,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	mmobs "github.com/llm-d/llm-d-router/pkg/epp/framework/observability/multimodal"
 	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/prefixmetrics"
 	"github.com/llm-d/llm-d-router/test/utils"
@@ -252,6 +253,59 @@ func TestPreRequest_PD_RecordsPrefillPrediction(t *testing.T) {
 		sharedPrefixHistogram(t, promptTokensMetric, name, prefixmetrics.RolePrefill).GetSampleSum())
 	assert.Equal(t, beforeDecode,
 		sharedPrefixHistogram(t, predictedCachedTokensMetric, name, prefixmetrics.RoleDecode).GetSampleCount())
+}
+
+// A request carrying multimodal content records its prediction once, under
+// the comma-joined sorted list of the modalities it carries, leaving the
+// text-only series untouched.
+func TestPreRequest_RecordsPredictionModality(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	prefixmetrics.Register()
+
+	const name = "precise-predicted-modality"
+	p := newNamedProducerForPreRequest(ctx, name, false, &fakeKVBlockIndex{})
+
+	endpoint := freshEndpoints()[0]
+	endpoint.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(2, 8, testBlockSize).
+		WithCachedBlockCount(4))
+
+	req := tokenizedRequest("req-predicted-mm", 8*testBlockSize)
+	req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures = []fwkrh.MultiModalFeature{
+		{Modality: fwkrh.ModalityImage, Hash: "img"},
+		{Modality: "audio", Hash: "aud"},
+	}
+
+	const modality = "audio,image"
+	// histogram reads the plugin's decode series for one modality label value.
+	histogram := func(metricName, modality string) *dto.Histogram {
+		t.Helper()
+		families, err := ctrlmetrics.Registry.Gather()
+		require.NoError(t, err)
+		for _, family := range families {
+			if family.GetName() != metricName {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				labels := map[string]string{}
+				for _, label := range metric.GetLabel() {
+					labels[label.GetName()] = label.GetValue()
+				}
+				if labels["plugin_name"] == name && labels["endpoint_role"] == prefixmetrics.RoleDecode && labels["modality"] == modality {
+					return metric.GetHistogram()
+				}
+			}
+		}
+		return nil
+	}
+	beforePredicted := histogram(predictedCachedTokensMetric, modality).GetSampleSum()
+	beforePrompt := histogram(promptTokensMetric, modality).GetSampleSum()
+	beforeNone := histogram(predictedCachedTokensMetric, mmobs.ModalityNone).GetSampleCount()
+	_ = p.PreRequest(ctx, req, primaryOnly("default", endpoint))
+
+	assert.Equal(t, beforePredicted+float64(4*testBlockSize), histogram(predictedCachedTokensMetric, modality).GetSampleSum())
+	assert.Equal(t, beforePrompt+float64(8*testBlockSize), histogram(promptTokensMetric, modality).GetSampleSum())
+	assert.Equal(t, beforeNone, histogram(predictedCachedTokensMetric, mmobs.ModalityNone).GetSampleCount(),
+		"a multimodal request must not record in the text-only series")
 }
 
 // Under P/D the best the picker could have chosen comes from the prefill

@@ -44,11 +44,11 @@ var predictedCachedTokens = prometheus.NewHistogramVec(
 		Subsystem: eppmetrics.LLMDRouterEndpointPickerSubsystem,
 		Name:      "prefix_predicted_cached_tokens",
 		Help: metricsutil.HelpMsgWithStability(
-			"Prompt tokens the producer predicted the scheduler's chosen endpoint holds in its prefix cache, per request.",
+			"Prompt tokens the producer predicted the scheduler's chosen endpoint holds in its prefix cache, per request. "+modalityLabelHelp,
 			compbasemetrics.ALPHA),
 		Buckets: metricsutil.TokenCountBuckets,
 	},
-	[]string{"plugin_name", "plugin_type", "endpoint_role"},
+	[]string{"plugin_name", "plugin_type", "endpoint_role", "modality"},
 )
 
 var bestPredictedCachedTokens = prometheus.NewHistogramVec(
@@ -80,11 +80,11 @@ var promptTokens = prometheus.NewHistogramVec(
 		Subsystem: eppmetrics.LLMDRouterEndpointPickerSubsystem,
 		Name:      "prefix_prompt_tokens",
 		Help: metricsutil.HelpMsgWithStability(
-			"Prompt tokens the producer measured its prediction against, per request.",
+			"Prompt tokens the producer measured its prediction against, per request. "+modalityLabelHelp,
 			compbasemetrics.ALPHA),
 		Buckets: metricsutil.TokenCountBuckets,
 	},
-	[]string{"plugin_name", "plugin_type", "endpoint_role"},
+	[]string{"plugin_name", "plugin_type", "endpoint_role", "modality"},
 )
 
 var mmPredictedCachedTokens = prometheus.NewHistogramVec(
@@ -143,18 +143,18 @@ type Prediction struct {
 	PromptTokens int
 }
 
-// RecordPrediction records a request's prefix-cache prediction under role, and
-// the two maxima also under modality. Every field is observed in one call so
-// each histogram covers the same requests, which is what lets their sums be
-// divided by one another once modality is summed over.
+// RecordPrediction records a request's prefix-cache prediction under role and
+// modality. Every field is observed in one call so each histogram covers the
+// same requests, which is what lets their sums be divided by one another once
+// modality is summed over.
 // llm_d_epp_request_input_tokens is not a usable denominator here: it is
 // recorded from the model server's response, so it omits requests that fail or
 // return no usage, which these metrics still count.
 func RecordPrediction(pluginName, pluginType, role, modality string, p Prediction) {
-	predictedCachedTokens.WithLabelValues(pluginName, pluginType, role).Observe(float64(p.Selected))
+	predictedCachedTokens.WithLabelValues(pluginName, pluginType, role, modality).Observe(float64(p.Selected))
 	bestPredictedCachedTokens.WithLabelValues(pluginName, pluginType, role, modality).Observe(float64(p.BestPredicted))
 	bestAvailableCachedTokens.WithLabelValues(pluginName, pluginType, role, modality).Observe(float64(p.BestAvailable))
-	promptTokens.WithLabelValues(pluginName, pluginType, role).Observe(float64(p.PromptTokens))
+	promptTokens.WithLabelValues(pluginName, pluginType, role, modality).Observe(float64(p.PromptTokens))
 }
 
 // RecordMMPrediction records a request's multimodal prompt tokens alongside
