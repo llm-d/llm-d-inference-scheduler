@@ -264,7 +264,10 @@ func toolCallingAPIForPath(path string) (reqcommon.APIType, bool) {
 	return 0, false
 }
 
-func compareEPPToolCallingSnapshotToBody(surface reqcommon.APIType, inbound toolcalling.RequestSnapshot, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
+func compareEPPToolCallingSnapshotToBody(surface reqcommon.APIType, inbound toolcalling.RequestSnapshot, inboundBody, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
+	if bytes.Equal(inboundBody, outboundBody) {
+		return toolcalling.CompareRequests(inbound, inbound)
+	}
 	outbound, err := toolcalling.CaptureRequestJSON(surface, outboundBody)
 	if err != nil {
 		return nil, err
@@ -542,8 +545,12 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			if v.RequestBody.EndOfStream {
 				loggerTrace.Info("decoding")
 				reqCtx.Request.Metadata = envoy.ExtractMetadataValues(req)
+				// Reset does not overwrite the buffer's bytes, and RawBody is a
+				// separate copy. This baseline stays unchanged until processing
+				// finishes and the next body chunk can write to the buffer.
+				inboundBody := buf.Bytes()
 				reqCtx.Request.RawBody = make([]byte, buf.Len())
-				copy(reqCtx.Request.RawBody, buf.Bytes())
+				copy(reqCtx.Request.RawBody, inboundBody)
 
 				// Body stream complete. Capture raw size for flow control.
 				reqCtx.RequestSize = buf.Len()
@@ -598,7 +605,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				}
 
 				if hasToolCallingAPI && hasInboundToolSnapshot {
-					statuses, compareErr := compareEPPToolCallingSnapshotToBody(apiType, inboundToolSnapshot, reqCtx.Request.RawBody)
+					statuses, compareErr := compareEPPToolCallingSnapshotToBody(apiType, inboundToolSnapshot, inboundBody, reqCtx.Request.RawBody)
 					if compareErr != nil {
 						logger.Error(compareErr, "Error comparing tool-calling request fields")
 					}

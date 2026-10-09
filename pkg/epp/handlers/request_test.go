@@ -18,8 +18,10 @@ limitations under the License.
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -672,18 +674,65 @@ func TestCompareEPPToolCallingSnapshotToBody(t *testing.T) {
 	inboundBody := []byte(`{"tools":[{"function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"required","parallel_tool_calls":true}`)
 	outbound := []byte(`{"parallel_tool_calls":true,"tool_choice":"auto","tools":[{"function":{"parameters":{"type":"object"},"name":"private"}}]}`)
 
-	inbound, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, inboundBody)
+	parserBody := bytes.Clone(inboundBody)
+	inbound, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, parserBody)
 	require.NoError(t, err)
-	inboundBody[0] = 'x' // The captured snapshot remains stable if the request buffer is later reused.
-	statuses, err := compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, inbound, outbound)
+	parserBody[0] = 'x' // The captured snapshot remains stable if the parser's copy is changed.
+	statuses, err := compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, inbound, inboundBody, outbound)
 	require.NoError(t, err)
 	require.Equal(t, toolcalling.FieldStatusPreserved, statusForField(t, statuses, toolcalling.FieldTools).Status)
 	require.Equal(t, toolcalling.FieldStatusChanged, statusForField(t, statuses, toolcalling.FieldToolChoice).Status)
 	require.True(t, statusForField(t, statuses, toolcalling.FieldToolChoice).Observed)
 
-	statuses, err = compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, inbound, []byte(`{"tools":[`))
+	statuses, err = compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, inbound, inboundBody, []byte(`{"tools":[`))
 	require.Error(t, err)
 	require.Empty(t, statuses, "a failed capture does not establish field rejection")
+}
+
+func TestCompareEPPToolCallingUnchangedBodyAllocations(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"function","function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"required"}`)
+	snapshot, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, body)
+	require.NoError(t, err)
+	outbound := bytes.Clone(body)
+	baseline := testing.AllocsPerRun(20, func() {
+		_, compareErr := toolcalling.CompareRequests(snapshot, snapshot)
+		require.NoError(t, compareErr)
+	})
+	unchanged := testing.AllocsPerRun(20, func() {
+		_, compareErr := compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, snapshot, body, outbound)
+		require.NoError(t, compareErr)
+	})
+	require.LessOrEqual(t, unchanged, baseline, "unchanged bodies should reuse the captured fields")
+}
+
+func BenchmarkCompareEPPToolCallingSnapshotToBody(b *testing.B) {
+	for _, size := range []int{1024, 64 * 1024, 1024 * 1024} {
+		plain := []byte(`{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("x", size) + `"}]}`)
+		toolBody := append(bytes.Clone(plain[:len(plain)-1]), []byte(`,"tools":[{"type":"function","function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"auto"}`)...)
+		for _, tt := range []struct {
+			name     string
+			inbound  []byte
+			outbound []byte
+		}{
+			{name: "unchanged_tool", inbound: toolBody, outbound: bytes.Clone(toolBody)},
+			{name: "changed_tool", inbound: toolBody, outbound: bytes.Replace(toolBody, []byte(`"auto"`), []byte(`"none"`), 1)},
+			{name: "unchanged_non_tool", inbound: plain, outbound: bytes.Clone(plain)},
+		} {
+			b.Run(tt.name+"/"+strconv.Itoa(size), func(b *testing.B) {
+				snapshot, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, tt.inbound)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if _, err := compareEPPToolCallingSnapshotToBody(reqcommon.APITypeChatCompletions, snapshot, tt.inbound, tt.outbound); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
 }
 
 func TestToolCallingAPIForPath(t *testing.T) {
@@ -736,6 +785,7 @@ func statusForField(t *testing.T, statuses []toolcalling.FieldStatus, field tool
 type requestIntegrityDirector struct {
 	mockDirector
 	outbound string
+	inPlace  bool
 	err      error
 	called   bool
 }
@@ -743,7 +793,11 @@ type requestIntegrityDirector struct {
 func (d *requestIntegrityDirector) HandleRequest(_ context.Context, reqCtx *RequestContext, _ *fwkrh.InferenceRequestBody) (*RequestContext, error) {
 	d.called = true
 	if d.outbound != "" {
-		reqCtx.Request.RawBody = []byte(d.outbound)
+		if d.inPlace {
+			copy(reqCtx.Request.RawBody, d.outbound)
+		} else {
+			reqCtx.Request.RawBody = []byte(d.outbound)
+		}
 		reqCtx.RequestSize = len(d.outbound)
 	}
 	return reqCtx, d.err
@@ -760,6 +814,7 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 		path                  string
 		body                  string
 		outbound              string
+		inPlace               bool
 		directorErr           error
 		wantErrorStatus       envoyTypePb.StatusCode
 		wantErrorMessage      string
@@ -774,6 +829,31 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			name: "chat fields preserved", path: reqcommon.PathChatCompletions,
 			body: chatBody, wantDirector: true, wantSurface: "chat_completions",
 			wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved", "response_format": "preserved"},
+		},
+		{
+			name: "in-place tool choice change", path: reqcommon.PathChatCompletions,
+			body:     `{"model":"m","messages":[{"role":"user","content":"hello"}],"tool_choice":"auto"}`,
+			outbound: `{"model":"m","messages":[{"role":"user","content":"hello"}],"tool_choice":"none"}`, inPlace: true,
+			wantDirector: true, wantSurface: "chat_completions", wantChoice: "auto",
+			wantFields: map[string]string{"tool_choice": "changed"},
+		},
+		{
+			name: "introduced tool fields", path: reqcommon.PathChatCompletions,
+			body: plainBody, outbound: chatBody,
+			wantDirector: true, wantSurface: "chat_completions", wantToolCallingAbsent: true,
+			wantFields: map[string]string{"tools": "changed", "tool_choice": "changed", "parallel_tool_calls": "changed", "response_format": "changed"},
+		},
+		{
+			name: "model rewrite preserves tool fields", path: reqcommon.PathChatCompletions,
+			body: chatBody, outbound: strings.Replace(chatBody, `"model":"m"`, `"model":"other"`, 1),
+			wantDirector: true, wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved", "response_format": "preserved"},
+		},
+		{
+			name: "equivalent reserialization preserves tool fields", path: reqcommon.PathChatCompletions,
+			body: chatBody, outbound: strings.ReplaceAll(chatBody, `,`, ",\n "),
+			wantDirector: true, wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
 			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved", "response_format": "preserved"},
 		},
 		{
@@ -974,7 +1054,10 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter), sdktrace.WithSampler(sdktrace.AlwaysSample()))
 			useTracerProvider(t, provider)
 			t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
-			director := &requestIntegrityDirector{outbound: tt.outbound, err: tt.directorErr}
+			if tt.inPlace {
+				require.Len(t, tt.outbound, len(tt.body))
+			}
+			director := &requestIntegrityDirector{outbound: tt.outbound, inPlace: tt.inPlace, err: tt.directorErr}
 			srv := &scriptedProcessServer{
 				ctx: context.Background(),
 				reqs: []*extProcPb.ProcessingRequest{
