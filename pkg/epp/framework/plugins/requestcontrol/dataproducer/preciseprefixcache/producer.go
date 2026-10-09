@@ -386,6 +386,7 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 	}
 
 	maxMatch := 0
+	maxMMMatch := 0
 	results := make([]endpointResult, 0, len(endpoints))
 	for _, ep := range endpoints {
 		if err := ctx.Err(); err != nil {
@@ -397,6 +398,9 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 		}
 		podKey := fmt.Sprintf("%s:%s", md.Address, md.Port)
 		match := matches[podKey]
+		if mmTracked {
+			maxMMMatch = max(maxMMMatch, mmMatches[podKey])
+		}
 		if match.BlocksByTier == nil {
 			match.BlocksByTier = map[string]int{} // no match: consumers still read a map
 		}
@@ -436,6 +440,16 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 		semconv.LLMDEPPProducerTotalBlocks(totalBlocks),
 		semconv.LLMDEPPProducerMaxMatchBlocks(maxMatch),
 	)
+	// The total is request-wide, matching the mm pair's denominator: a
+	// prompt shorter than one block produces no keys and cannot match,
+	// but its MM content still counts toward the request's total. The
+	// IsRecording guard skips the feature walk on the tracing-disabled path.
+	if mmTracked && span.IsRecording() {
+		span.SetAttributes(
+			mmMatchedBlocksKey.Int(maxMMMatch),
+			mmTotalBlocksKey.Int(totalMMBlocks(request, p.blockSizeTokens)),
+		)
+	}
 
 	if v := logger.V(logging.TRACE); v.Enabled() {
 		v.Info("Produce completed", "blockKeys", totalBlocks, "matches", matches)
