@@ -153,21 +153,30 @@ func (p *Plugin) Filter(ctx context.Context, request *fwksched.InferenceRequest,
 	}
 
 	saturation := p.detector.Saturation(ctx, asPool(endpoints))
+	wasActive := p.shedding.Load()
 	active := p.updateState(saturation)
 	recordState(p.typedName.Name, active, saturation)
+	if active != wasActive {
+		log.FromContext(ctx).V(logutil.DEFAULT).Info("PrefixCacheShedFilter: shedding state changed",
+			"shedding", active, "saturation", saturation, "threshold", p.config.ShedThreshold,
+			"hysteresis", p.config.Hysteresis)
+	}
 	if !active {
 		recordDecision(p.typedName.Name, outcomePassBelowThreshold)
 		return endpoints
 	}
 
 	hot := 0
+	bestHit := 0.0
 	admitted := make([]fwksched.Endpoint, 0, len(endpoints))
 	minUncached := int64(math.MaxInt64)
 	for _, ep := range endpoints {
 		if ep == nil {
 			continue
 		}
-		if p.hitRatio(ep) < p.config.MinHitRatio {
+		ratio := p.hitRatio(ep)
+		bestHit = max(bestHit, ratio)
+		if ratio < p.config.MinHitRatio {
 			continue
 		}
 		hot++
@@ -202,6 +211,10 @@ func (p *Plugin) Filter(ctx context.Context, request *fwksched.InferenceRequest,
 		outcome = outcomeShedDisplacedHot
 		msg = "request shed: pool near saturation and the endpoints holding the prompt's prefix cache are full"
 	}
+	// The numbers behind the decision travel in the response body so a client (or a load
+	// test) can tell a genuinely cold request from an index miss without EPP debug logs.
+	msg = fmt.Sprintf("%s (saturation=%.3f bestHitRatio=%.3f hotEndpoints=%d endpoints=%d)",
+		msg, saturation, bestHit, hot, len(endpoints))
 	if request != nil {
 		request.PutAttribute(fwksched.RequestDropDataKey, &fwksched.RequestDrop{
 			Code:   p.errorCode,
