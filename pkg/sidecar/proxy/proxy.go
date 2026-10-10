@@ -139,6 +139,10 @@ type Config struct {
 
 	// NIXLPushMode declares that the engines run vLLM's NixlPushConnector.
 	NIXLPushMode bool
+	// NIXLPushPrefillTimeout bounds how long a NIXL push dispatch that sends
+	// the prefill and decode requests at once waits for the prefill response
+	// before it cancels both. Zero falls back to defaultNIXLPushPrefillTimeout.
+	NIXLPushPrefillTimeout time.Duration
 
 	// EnableSSRFProtection enables SSRF protection using InferencePool allowlisting.
 	EnableSSRFProtection bool

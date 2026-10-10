@@ -48,6 +48,25 @@ type nixlPushIdentity struct {
 	dcpSize float64
 }
 
+// kvTransferParams returns the identity as the kv_transfer_params fields of a
+// decode request. It leaves out transfer_mode, which decode does not read, and
+// the sizes the prefill answer left out.
+func (id nixlPushIdentity) kvTransferParams() map[string]any {
+	kv := map[string]any{
+		reqcommon.FieldRemoteEngineID: id.engineID,
+		reqcommon.FieldRemoteHost:     id.host,
+		reqcommon.FieldRemotePort:     id.port,
+		requestFieldTPSize:            id.tpSize,
+	}
+	if id.ppSize != 0 {
+		kv[requestFieldPPSize] = id.ppSize
+	}
+	if id.dcpSize != 0 {
+		kv[requestFieldDCPSize] = id.dcpSize
+	}
+	return kv
+}
+
 // extractNIXLPushIdentity returns the identity in a prefill answer's
 // kv_transfer_params. It reports false unless transfer_mode is push and every
 // identity field has its type; pp_size and dcp_size may be absent.
