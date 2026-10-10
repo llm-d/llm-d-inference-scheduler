@@ -122,16 +122,19 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	defer toolFields.report(r.Context())
 
 	// When the parallel dispatch below is retried on the serial path, it counts
-	// as the first prefill attempt for --prefill-max-retries.
+	// as the first prefill attempt, for --prefill-max-retries and for the
+	// prefill duration.
 	attempt := 0
+	prefillStart := time.Now()
 	// A cached NIXL push identity tells the decode request everything it needs
 	// about the prefill pod, so both requests can go out at once instead of one
 	// after the other.
-	if identity, parallel := s.nixlPushParallelIdentity(prefillPodHostPort); parallel {
+	if identity, parallel := s.nixlPushParallelIdentity(r.Context(), prefillPodHostPort); parallel {
 		answered := s.runNIXLProtocolV2PushParallel(w, r, body, uuidStr, prefillPodHostPort, kvCacheSource, apiType, identity, toolFields)
 		if answered {
 			return
 		}
+		recordNIXLPushDispatch(r.Context(), metrics.NIXLPushReasonPrefillRetry)
 		attempt = 1
 	}
 
@@ -147,7 +150,6 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 		semconv.LLMDPDProxyPrefillTarget(prefillPodHostPort),
 		semconv.LLMDPDProxyConnector(constants.KVConnectorNIXLV2),
 	)
-	prefillStart := time.Now()
 
 	// 1. Prepare prefill request
 	preq := r.Clone(ctx)
@@ -964,7 +966,8 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 
 // nixlPushParallelIdentity returns the cached NIXL push identity of the
 // prefill endpoint when the request can send its prefill and decode requests
-// at once. On a cache miss the serial path runs and learns the identity.
+// at once. On a cache miss the serial path runs and learns the identity. In
+// NIXL push mode it records the reason for the dispatch mode.
 //
 // The identity belongs to the vLLM engine that answered. An endpoint with
 // several data-parallel ranks behind one HTTP port answers from a different
@@ -972,11 +975,25 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 // is sent again.
 // TODO: key the identity by data-parallel rank and pin the prefill request to
 // it with x-data-parallel-rank, once ranks behind one endpoint can be routed to.
-func (s *Server) nixlPushParallelIdentity(prefillPodHostPort string) (nixlPushIdentity, bool) {
+func (s *Server) nixlPushParallelIdentity(ctx context.Context, prefillPodHostPort string) (nixlPushIdentity, bool) {
 	if !s.config.NIXLPushMode {
 		return nixlPushIdentity{}, false
 	}
-	return s.nixlPushIdentities.get(prefillPodHostPort)
+	identity, ok := s.nixlPushIdentities.get(prefillPodHostPort)
+	if !ok {
+		recordNIXLPushDispatch(ctx, metrics.NIXLPushReasonCacheMiss)
+		return nixlPushIdentity{}, false
+	}
+	recordNIXLPushDispatch(ctx, metrics.NIXLPushReasonCacheHit)
+	return identity, true
+}
+
+// recordNIXLPushDispatch counts a NIXL push dispatch and sets its reason on the
+// request span, where the reason of a later dispatch of the same request
+// replaces it.
+func recordNIXLPushDispatch(ctx context.Context, reason string) {
+	metrics.RecordNIXLPushDispatch(reason)
+	trace.SpanFromContext(ctx).SetAttributes(semconv.LLMDPDProxyNIXLPushDispatchReason(reason))
 }
 
 // nixlPushDecodeKVParams returns the kv_transfer_params of a decode request
@@ -1089,6 +1106,11 @@ func (s *Server) runNIXLProtocolV2PushParallel(
 				panic(rec)
 			}
 			prefillSpan.SetStatus(codes.Error, "prefill handler aborted")
+			if pCtx.Err() != nil {
+				s.logger.V(logging.DEBUG).Info("concurrent-dispatch prefill handler aborted after the dispatch was cancelled",
+					"request_id", uuidStr)
+				return
+			}
 			cancel()
 			s.logger.Error(nil, "concurrent-dispatch prefill handler aborted", "request_id", uuidStr)
 		}()
@@ -1096,17 +1118,24 @@ func (s *Server) runNIXLProtocolV2PushParallel(
 		prefillHandler.ServeHTTP(pw, preq)
 		prefillResp = pw
 		prefillDuration = time.Since(prefillStartedAt)
-		metrics.RecordPrefillDuration(prefillDuration)
 		prefillSpan.SetAttributes(
 			semconv.LLMDPDProxyPrefillStatusCode(pw.statusCode),
 			semconv.LLMDPDProxyPrefillDurationMs(float64(prefillDuration.Milliseconds())),
 		)
-		if isHTTPError(pw.statusCode) {
-			prefillSpan.SetStatus(codes.Error, "prefill request failed")
-			cancel()
-			s.logger.Error(nil, "concurrent-dispatch prefill returned error status",
-				"status", pw.statusCode, "request_id", uuidStr, logBodyBytesKey, pw.buffer.Len())
+		if !isHTTPError(pw.statusCode) {
+			return
 		}
+		prefillSpan.SetStatus(codes.Error, "prefill request failed")
+		// A prefill cancelled with the dispatch fails because of decode, the
+		// prefill timeout or the client, which the request goroutine handles.
+		if pCtx.Err() != nil {
+			s.logger.V(logging.DEBUG).Info("concurrent-dispatch prefill cancelled with the dispatch",
+				"status", pw.statusCode, "request_id", uuidStr)
+			return
+		}
+		cancel()
+		s.logger.Error(nil, "concurrent-dispatch prefill returned error status",
+			"status", pw.statusCode, "request_id", uuidStr, logBodyBytesKey, pw.buffer.Len())
 	}()
 
 	// 2.2 Decode, held back until prefill's outcome is known
@@ -1153,6 +1182,11 @@ func (s *Server) runNIXLProtocolV2PushParallel(
 			decodeSpan.SetStatus(codes.Error, "decode handler aborted")
 			decodeAborted.Store(true)
 			dcw.abort()
+			if dCtx.Err() != nil {
+				s.logger.V(logging.DEBUG).Info("concurrent-dispatch decode handler aborted after the dispatch was cancelled",
+					"request_id", uuidStr)
+				return
+			}
 			s.logger.Error(nil, "concurrent-dispatch decode handler aborted", "request_id", uuidStr)
 		}()
 		dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(dcw, dreq, func() {
@@ -1212,6 +1246,7 @@ func (s *Server) runNIXLProtocolV2PushParallel(
 				cancel()
 				dcw.abort()
 				clientResponded = true
+				metrics.RecordNIXLPushIdentityMismatch()
 				s.logger.Info("concurrent-dispatch: prefill response does not carry the NIXL push identity decode was given; sending decode again",
 					"request_id", uuidStr, "target", prefillPodHostPort)
 				break
@@ -1298,6 +1333,12 @@ func (s *Server) runNIXLProtocolV2PushParallel(
 		<-prefillDone // let the cancelled prefill goroutine finish to avoid a leak
 	}
 
+	// Prefill has finished. The serial path samples the prefill stage of a
+	// request it retries. An aborted prefill handler left no response.
+	if !retrySerially && prefillResp != nil {
+		metrics.RecordPrefillDuration(prefillDuration)
+	}
+
 	// 4. Wait for decode, then record metrics and drop a stale identity
 
 	// Wait for decode to finish (streamed on success, or promptly aborted) so
@@ -1343,6 +1384,7 @@ func (s *Server) runNIXLProtocolV2PushParallel(
 	// endpoint runs serially and learns the identity again. A client that went
 	// away says nothing about the identity.
 	if dispatchFailed && parentCtx.Err() == nil && s.nixlPushIdentities.dropIfMatches(prefillPodHostPort, identity) {
+		metrics.RecordNIXLPushIdentityDrop()
 		s.logger.V(logging.TRACE).Info("dropped NIXL push identity", "target", prefillPodHostPort, "request_id", uuidStr)
 	}
 
@@ -1355,6 +1397,7 @@ func (s *Server) runNIXLProtocolV2PushParallel(
 			semconv.LLMDPDProxyTotalDurationMs(float64(totalDuration.Milliseconds())),
 			semconv.LLMDPDProxyParallelWindowMs(float64(time.Since(requestStartedAt).Milliseconds())),
 			semconv.LLMDPDProxyParallelDispatch(true),
+			semconv.LLMDPDProxyNIXLPushIdentityMismatch(resendWith != nil),
 		)
 	}
 
