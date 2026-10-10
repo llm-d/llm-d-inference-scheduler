@@ -21,6 +21,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/require"
 
@@ -176,11 +177,28 @@ func TestNIXLPushIdentityCache_EvictsLeastRecentlyUsed(t *testing.T) {
 	require.True(t, ok)
 }
 
+// An answer without a NIXL push identity, for example from a prefill pod that
+// runs pull mode after a restart, leaves nothing for a parallel dispatch.
+func TestStoreNIXLPushIdentity_RemovesEntryWithoutIdentity(t *testing.T) {
+	s := NewProxy(Config{NIXLPushMode: true})
+	s.logger = logr.Discard()
+	s.nixlPushIdentities.put(testNIXLPushEndpoint, testNIXLPushIdentity("prefill-engine"))
+
+	answerKV := testNIXLPushIdentity("restarted-engine").kvTransferParams()
+	answerKV[requestFieldTransferMode] = "pull"
+	_, ok := s.storeNIXLPushIdentity(testNIXLPushEndpoint, answerKV)
+	require.False(t, ok)
+
+	_, ok = s.nixlPushIdentities.get(testNIXLPushEndpoint)
+	require.False(t, ok)
+}
+
 // Request goroutines and the data-parallel rank servers share one cache, so
 // the race detector must find no unguarded access.
 func TestNIXLPushIdentityCache_ConcurrentUse(t *testing.T) {
 	cache := newTestNIXLPushIdentityCache(t, 4)
 	identity := testNIXLPushIdentity("prefill-engine")
+	restarted := testNIXLPushIdentity("restarted-engine")
 	// Goroutines that run one after another are ordered by the WaitGroup and
 	// would hide a missing lock from the race detector.
 	start := make(chan struct{})
@@ -190,8 +208,10 @@ func TestNIXLPushIdentityCache_ConcurrentUse(t *testing.T) {
 			<-start
 			for range 100 {
 				cache.put(testNIXLPushEndpoint, identity)
+				cache.put(testNIXLPushEndpoint, restarted)
 				_, _ = cache.get(testNIXLPushEndpoint)
 				cache.dropIfMatches(testNIXLPushEndpoint, identity)
+				cache.remove(testNIXLPushEndpoint)
 			}
 		})
 	}
