@@ -1612,19 +1612,6 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		}
 		Expect(prefillRequests[1]).To(Equal(prefillRequests[0]))
 	})
-
-	It("keeps a NIXL push request with chunked decode serial on a cache hit", func() {
-		testInfo.proxy.config.NIXLPushMode = true
-		// Above the request's max_tokens, so decode still gets a single request.
-		testInfo.proxy.config.DecodeChunkSize = 64
-		testInfo.prefillHandler.RawResponse = pushPrefillAnswer(nixlTransferModePush)
-		testInfo.proxy.nixlPushIdentities.put(testInfo.prefillBackend.URL[len("http://"):], testNIXLPushIdentity(testNIXLPushEngineID))
-		proxyBaseAddr := startProxy()
-
-		sendChatCompletionsRequest(proxyBaseAddr)
-
-		Expect(kvParams(testInfo.decodeHandler, 0)).To(Equal(serialPushDecodeKV(0)))
-	})
 })
 
 // moriProxyEnv bundles a running MoRI-IO proxy with its mock prefill/decode
