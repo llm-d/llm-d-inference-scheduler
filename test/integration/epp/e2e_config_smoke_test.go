@@ -140,10 +140,10 @@ plugins:
 - type: topology-extractor
 - type: topology-affinity-filter
   parameters:
-    peerTopologyHeader: x-peer-topology
+    peerTopologyHeader: x-llm-d-peer-topology
 - type: topology-affinity-scorer
   parameters:
-    peerTopologyHeader: x-peer-topology
+    peerTopologyHeader: x-llm-d-peer-topology
 - type: single-profile-handler
 schedulingProfiles:
 - name: default

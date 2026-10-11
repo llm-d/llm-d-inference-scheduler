@@ -134,14 +134,14 @@ func TestForwardedHeaders_UsesCoordinatorRevisionDecisionID(t *testing.T) {
 func TestForwardedHeaders_ExcludesClientSuppliedPeerTopology(t *testing.T) {
 	rc := &RequestContext{
 		OriginalHeaders: http.Header{
-			"X-Peer-Topology": {"host=spoofed"},
+			"X-LLM-D-Peer-Topology": {"host=spoofed"},
 		},
 	}
 
 	out := rc.ForwardedHeaders()
 
-	if _, ok := out["x-peer-topology"]; ok {
-		t.Fatalf("x-peer-topology should not be forwarded: %v", out)
+	if _, ok := out["x-llm-d-peer-topology"]; ok {
+		t.Fatalf("x-llm-d-peer-topology should not be forwarded: %v", out)
 	}
 }
 

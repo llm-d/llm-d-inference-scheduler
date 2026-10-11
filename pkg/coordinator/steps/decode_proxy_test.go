@@ -38,7 +38,7 @@ import (
 
 // TestNewDecodeProxyRequest_ForwardsPeerTopology verifies that a non-empty
 // reqCtx.PeerTopology, captured by PrefillStep from the prefill response, is
-// set on the outgoing decode request's x-peer-topology header.
+// set on the outgoing decode request's x-llm-d-peer-topology header.
 func TestNewDecodeProxyRequest_ForwardsPeerTopology(t *testing.T) {
 	gwClient := gateway.New(config.GatewayConfig{Address: "http://example.invalid"})
 
@@ -53,12 +53,12 @@ func TestNewDecodeProxyRequest_ForwardsPeerTopology(t *testing.T) {
 		t.Fatalf("newDecodeProxyRequest: %v", err)
 	}
 	if got, want := req.Header.Get(reqcommon.PeerTopologyHeaderKey), "host=node12,zone=us-east1-a"; got != want {
-		t.Fatalf("x-peer-topology header = %q, want %q", got, want)
+		t.Fatalf("x-llm-d-peer-topology header = %q, want %q", got, want)
 	}
 }
 
 // TestNewDecodeProxyRequest_OmitsPeerTopologyWhenEmpty verifies that no
-// x-peer-topology header is set on the decode request when the prefill
+// x-llm-d-peer-topology header is set on the decode request when the prefill
 // response carried none (single-EPP-in-coordinator or no topology-stamp-handler).
 func TestNewDecodeProxyRequest_OmitsPeerTopologyWhenEmpty(t *testing.T) {
 	gwClient := gateway.New(config.GatewayConfig{Address: "http://example.invalid"})
@@ -73,12 +73,12 @@ func TestNewDecodeProxyRequest_OmitsPeerTopologyWhenEmpty(t *testing.T) {
 		t.Fatalf("newDecodeProxyRequest: %v", err)
 	}
 	if got := req.Header.Get(reqcommon.PeerTopologyHeaderKey); got != "" {
-		t.Fatalf("expected no x-peer-topology header, got %q", got)
+		t.Fatalf("expected no x-llm-d-peer-topology header, got %q", got)
 	}
 }
 
 // TestNewDecodeProxy_StripsPeerTopologyFromClientResponse verifies that
-// x-peer-topology never reaches the client, even if a decode profile's
+// x-llm-d-peer-topology never reaches the client, even if a decode profile's
 // response carries it (e.g. topology-stamp-handler misconfigured on decode
 // rather than prefill). The header is meaningful only between the prefill and
 // decode legs; ModifyResponse must strip it before ReverseProxy copies
@@ -100,7 +100,7 @@ func TestNewDecodeProxy_StripsPeerTopologyFromClientResponse(t *testing.T) {
 	proxy.ServeHTTP(rec, req)
 
 	if got := rec.Header().Get(reqcommon.PeerTopologyHeaderKey); got != "" {
-		t.Fatalf("x-peer-topology leaked to client response, got %q", got)
+		t.Fatalf("x-llm-d-peer-topology leaked to client response, got %q", got)
 	}
 }
 

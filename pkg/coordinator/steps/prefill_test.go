@@ -706,7 +706,7 @@ func TestPrefillStep_ConflictingECParams_RejectsRequest(t *testing.T) {
 	}
 }
 
-// TestPrefillStep_CapturesPeerTopologyHeader verifies that the x-peer-topology
+// TestPrefillStep_CapturesPeerTopologyHeader verifies that the x-llm-d-peer-topology
 // response header set by the prefill EPP's topology-stamp-handler is captured
 // into reqCtx.PeerTopology for later forwarding to the decode request.
 func TestPrefillStep_CapturesPeerTopologyHeader(t *testing.T) {
