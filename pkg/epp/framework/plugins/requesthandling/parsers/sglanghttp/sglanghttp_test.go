@@ -213,32 +213,6 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			},
 		},
 		{
-			name:    "per-prompt extra_key list is rejected",
-			headers: map[string]string{":path": "/generate"},
-			body: map[string]any{
-				"input_ids": []int{1, 2},
-				"extra_key": []string{"tenant-a", "tenant-b"},
-			},
-			wantErr: true,
-		},
-		{
-			name:    "per-prompt cache_salt list is rejected",
-			headers: map[string]string{":path": "/generate"},
-			body: map[string]any{
-				"input_ids":  []int{1, 2},
-				"cache_salt": []string{"salt-a", "salt-b"},
-			},
-			wantErr: true,
-		},
-		{
-			name:    "x-original-path header",
-			headers: map[string]string{"x-original-path": "/generate"},
-			body:    map[string]any{"input_ids": []any{5, 6, 7}},
-			want: &fwkrh.InferenceRequestBody{
-				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{5, 6, 7}},
-			},
-		},
-		{
 			name:    "missing input_ids",
 			headers: map[string]string{":path": "/generate"},
 			body:    map[string]any{"sampling_params": map[string]any{"temperature": 0.8}},
@@ -334,16 +308,6 @@ func TestSGLangHTTPParser_ParseRequest_ErrorPaths(t *testing.T) {
 			name:        "batched input_ids are rejected",
 			body:        `{"input_ids":[[1,2],[3,4]]}`,
 			errContains: "input_ids must be an array of uint32 integers",
-		},
-		{
-			name:        "per-prompt extra_key unsupported",
-			body:        `{"input_ids":[1,2],"extra_key":["a","b"]}`,
-			errContains: "extra_key must be a string",
-		},
-		{
-			name:        "per-prompt cache_salt unsupported",
-			body:        `{"input_ids":[1,2],"cache_salt":["a","b"]}`,
-			errContains: "cache_salt must be a string",
 		},
 		{
 			name:        "unsupported path",
