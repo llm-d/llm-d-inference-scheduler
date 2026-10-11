@@ -45,7 +45,7 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
 	if req.RequestHeaders.EndOfStream {
 		// A reservation cannot be scheduled without a body, and the random
 		// fallback would send it to a model server.
-		if routing.HasPreferenceToken(envoy.ExtractHeaderValue(req, routing.PreferHeader), routing.PreferReserveEndpoint) {
+		if routing.HasPreference(collectRequestHeaders(map[string]string{}, req.RequestHeaders.GetHeaders().GetHeaders()), routing.PreferReserveEndpoint) {
 			return errcommon.Error{Code: errcommon.BadRequest, Msg: "reserve-endpoint request has no body"}
 		}
 		// We will route this request to a random endpoint as this is assumed to just be a GET
@@ -55,18 +55,30 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
 		return s.fallbackToRandomEndpoint(ctx, reqCtx, 0)
 	}
 
-	for _, header := range req.RequestHeaders.Headers.Headers {
-		key := strings.ToLower(header.Key)
-		if request.InternalRoutingHeaders.Has(key) {
-			continue
-		}
-		reqCtx.Request.Headers[key] = envoy.GetHeaderValue(header)
-	}
+	collectRequestHeaders(reqCtx.Request.Headers, req.RequestHeaders.Headers.Headers)
 
 	reqCtx.ObjectiveKey, _ = metadata.GetLowerCaseHeaderValue(reqCtx.Request.Headers, metadata.ObjectiveKey)
 	reqCtx.TargetModelName, _ = metadata.GetLowerCaseHeaderValue(reqCtx.Request.Headers, metadata.ModelNameRewriteKey)
 
 	return nil
+}
+
+// collectRequestHeaders adds the request headers to dst with lowercase keys,
+// dropping the InternalRoutingHeaders, and returns dst.
+func collectRequestHeaders(dst map[string]string, headers []*configPb.HeaderValue) map[string]string {
+	for _, header := range headers {
+		key := strings.ToLower(header.Key)
+		if request.InternalRoutingHeaders.Has(key) {
+			continue
+		}
+		value := envoy.GetHeaderValue(header)
+		if previous, ok := dst[key]; ok {
+			// Repeated entries form one list value (RFC 9110 section 5.3).
+			value = previous + ", " + value
+		}
+		dst[key] = value
+	}
+	return dst
 }
 
 func (s *StreamingServer) fallbackToRandomEndpoint(ctx context.Context, reqCtx *RequestContext, requestSize int) error {

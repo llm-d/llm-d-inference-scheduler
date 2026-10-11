@@ -97,13 +97,7 @@ func StripScheme(endpoint string) string {
 }
 
 // HasPreference reports whether the request headers carry the given Prefer
-// token. See HasPreferenceToken.
-func HasPreference(headers map[string]string, want string) bool {
-	return HasPreferenceToken(headers[PreferHeader], want)
-}
-
-// HasPreferenceToken reports whether the Prefer header value prefer carries
-// the given token.
+// token.
 //
 // Per RFC 7240 the Prefer header value is a comma-separated list of
 // preferences. Each preference is a token with an optional "=" value and
@@ -113,7 +107,8 @@ func HasPreference(headers map[string]string, want string) bool {
 // it. For example, "return=minimal" matches the token "return". A want that is
 // empty or only whitespace always returns false. Quoted-string values that
 // contain "," or ";" are not supported.
-func HasPreferenceToken(prefer, want string) bool {
+func HasPreference(headers map[string]string, want string) bool {
+	prefer := headers[PreferHeader]
 	want = strings.TrimSpace(want)
 	if prefer == "" || want == "" {
 		return false

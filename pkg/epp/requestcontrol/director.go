@@ -330,20 +330,21 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	if err != nil {
 		return reqCtx, err
 	}
+	// An answered request is not forwarded: it is not tracked for eviction and
+	// its body is not rewritten. A forwarded request is tracked before the
+	// reservation is released, so an eviction pass on the freed capacity sees it.
+	if reqCtx.Answer == nil && d.requestEvictor != nil {
+		// A tracking failure only costs evictability, so the request still proceeds.
+		if err := d.requestEvictor.PreRequest(ctx, reqCtx.SchedulingRequest, result); err != nil {
+			log.FromContext(ctx).Error(err, "Failed to track request for in-flight eviction")
+		}
+	}
 	if reservationPending {
 		reservationReleaser.ReleaseDispatchReservation(reqCtx.SchedulingRequest.RequestID)
 		reservationPending = false
 	}
 	if reqCtx.Answer != nil {
-		// An answered request is not forwarded: it is not tracked for eviction and
-		// its body is not rewritten.
 		return reqCtx, nil
-	}
-	if d.requestEvictor != nil {
-		// A tracking failure only costs evictability, so the request still proceeds.
-		if err := d.requestEvictor.PreRequest(ctx, reqCtx.SchedulingRequest, result); err != nil {
-			log.FromContext(ctx).Error(err, "Failed to track request for in-flight eviction")
-		}
 	}
 	if err := d.priorityRewriteIfNeeded(ctx, reqCtx, inferenceRequestBody); err != nil {
 		return reqCtx, err
@@ -494,25 +495,22 @@ func (d *Director) selectWeightedModel(ctx context.Context, models []v1alpha2.Ta
 // for allowing plugging customized logic based on the scheduling result.
 func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestContext, result *fwksched.SchedulingResult) (*handlers.RequestContext, error) {
 	logger := log.FromContext(ctx)
-	if result == nil || len(result.ProfileResults) == 0 {
-		return reqCtx, errcommon.Error{Code: errcommon.Internal, Msg: "results must be greater than zero"}
-	}
 	// primary profile is used to set destination
+	primary := result.PrimaryEndpoint()
+	if primary == nil {
+		return reqCtx, errcommon.Error{Code: errcommon.Internal, Msg: "primary profile picked no endpoint"}
+	}
 	primaryResult := result.ProfileResults[result.PrimaryProfileName]
-	targetMetadatas := []*fwkdl.EndpointMetadata{}
-	targetEndpoints := []string{}
-
+	targetEndpoints := make([]string, 0, len(primaryResult.TargetEndpoints))
 	for _, pod := range primaryResult.TargetEndpoints {
 		curMetadata := pod.GetMetadata()
-		curEndpoint := net.JoinHostPort(curMetadata.GetIPAddress(), curMetadata.GetPort())
-		targetMetadatas = append(targetMetadatas, curMetadata)
-		targetEndpoints = append(targetEndpoints, curEndpoint)
+		targetEndpoints = append(targetEndpoints, net.JoinHostPort(curMetadata.GetIPAddress(), curMetadata.GetPort()))
 	}
 
 	multiEndpointString := strings.Join(targetEndpoints, ",")
 	logger.V(logutil.VERBOSE).Info("Request handled", "objectiveKey", reqCtx.ObjectiveKey, "incomingModelName", reqCtx.IncomingModelName, "targetModel", reqCtx.TargetModelName, "endpoint", multiEndpointString)
 
-	reqCtx.TargetPod = targetMetadatas[0]
+	reqCtx.TargetPod = primary.GetMetadata()
 	reqCtx.TargetEndpoint = multiEndpointString
 
 	if len(primaryResult.ScoredCandidates) > 0 {
@@ -572,11 +570,8 @@ func (d *Director) prepareRequest(ctx context.Context, reqCtx *handlers.RequestC
 }
 
 // reserveEndpointAnswer builds the "Prefer: reserve-endpoint" answer: 204 with
-// the picked endpoint, Preference-Applied, and the internal routing headers
-// that the scheduling plugins set on the request. EPP drops those headers on
-// ingress, so every one present was set by a plugin and would have gone to
-// the model server on a forwarded request. The caller gets them instead, as
-// the sidecar does on the request EPP forwards to it.
+// the picked endpoint, Preference-Applied, and the InternalRoutingHeaders set
+// on the request. The caller gets them instead of the sidecar.
 func reserveEndpointAnswer(endpoint string, requestHeaders map[string]string) *handlers.Answer {
 	headers := map[string]string{
 		routing.ReservedEndpointHeader:  endpoint,

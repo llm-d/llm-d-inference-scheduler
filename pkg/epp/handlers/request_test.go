@@ -36,6 +36,7 @@ import (
 	grpcmetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
@@ -144,6 +145,14 @@ func TestHandleRequestHeaders(t *testing.T) {
 				{Key: "X-Test", Value: "val"},
 			},
 			wantHeaders: map[string]string{"x-test": "val"},
+		},
+		{
+			name: "Joins repeated header entries into one list value",
+			headers: []*configPb.HeaderValue{
+				{Key: "Prefer", Value: "wait=10"},
+				{Key: "prefer", Value: routing.PreferReserveEndpoint},
+			},
+			wantHeaders: map[string]string{routing.PreferHeader: "wait=10, " + routing.PreferReserveEndpoint},
 		},
 		{
 			name: "Prefers RawValue over Value",
@@ -308,10 +317,7 @@ func TestGenerateHeaders_Sanitization(t *testing.T) {
 
 	results := server.generateHeaders(context.Background(), reqCtx)
 
-	gotHeaders := make(map[string]string)
-	for _, h := range results {
-		gotHeaders[h.Header.Key] = string(h.Header.RawValue)
-	}
+	gotHeaders := envoy.SetHeadersMap(results)
 
 	assert.Contains(t, gotHeaders, "x-user-data")
 	assert.NotContains(t, gotHeaders, metadata.ObjectiveKey)
@@ -516,7 +522,7 @@ func TestGenerateRequestHeaderResponse_RemovesUnsetRoutingHeaders(t *testing.T) 
 			mutation := server.generateRequestHeaderResponse(context.Background(), reqCtx).
 				GetRequestHeaders().GetResponse().GetHeaderMutation()
 
-			gotSet := setHeadersMap(mutation.GetSetHeaders())
+			gotSet := envoy.SetHeadersMap(mutation.GetSetHeaders())
 			for k, v := range tc.wantSet {
 				assert.Equal(t, v, gotSet[k])
 			}
@@ -604,14 +610,19 @@ func TestHandleRequestHeaders_Bodyless(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		prefer   string
-		wantCode string
+		name   string
+		prefer []string // one Prefer header entry per element
+		// noHeaderMap sends a headers message with no header map at all.
+		noHeaderMap bool
+		wantCode    string
 	}{
 		{name: "no preference falls back to a random endpoint"},
-		{name: "another preference falls back to a random endpoint", prefer: routing.PreferIfAvailable},
-		{name: "reserve-endpoint is rejected", prefer: routing.PreferReserveEndpoint, wantCode: errcommon.BadRequest},
-		{name: "reserve-endpoint among tokens is rejected", prefer: "if-available, Reserve-Endpoint", wantCode: errcommon.BadRequest},
+		{name: "no header map falls back to a random endpoint", noHeaderMap: true},
+		{name: "another preference falls back to a random endpoint", prefer: []string{routing.PreferIfAvailable}},
+		{name: "reserve-endpoint is rejected", prefer: []string{routing.PreferReserveEndpoint}, wantCode: errcommon.BadRequest},
+		{name: "reserve-endpoint among tokens is rejected", prefer: []string{"if-available, Reserve-Endpoint"}, wantCode: errcommon.BadRequest},
+		{name: "reserve-endpoint in the last repeated entry is rejected", prefer: []string{"wait=10", routing.PreferReserveEndpoint}, wantCode: errcommon.BadRequest},
+		{name: "reserve-endpoint in the first repeated entry is rejected", prefer: []string{routing.PreferReserveEndpoint, "wait=10"}, wantCode: errcommon.BadRequest},
 	}
 
 	for _, tc := range tests {
@@ -622,14 +633,17 @@ func TestHandleRequestHeaders_Bodyless(t *testing.T) {
 				Response: &Response{Headers: make(map[string]string)},
 			}
 			var headers []*configPb.HeaderValue
-			if tc.prefer != "" {
-				headers = append(headers, &configPb.HeaderValue{Key: "Prefer", RawValue: []byte(tc.prefer)})
+			for _, prefer := range tc.prefer {
+				headers = append(headers, &configPb.HeaderValue{Key: "Prefer", RawValue: []byte(prefer)})
 			}
 			req := &extProcPb.ProcessingRequest_RequestHeaders{
 				RequestHeaders: &extProcPb.HttpHeaders{
 					Headers:     &configPb.HeaderMap{Headers: headers},
 					EndOfStream: true,
 				},
+			}
+			if tc.noHeaderMap {
+				req.RequestHeaders.Headers = nil
 			}
 
 			err := server.HandleRequestHeaders(context.Background(), reqCtx, req)
@@ -645,15 +659,6 @@ func TestHandleRequestHeaders_Bodyless(t *testing.T) {
 			assert.Nil(t, reqCtx.reqHeaderResp, "a rejected reservation prepares no routing response")
 		})
 	}
-}
-
-// setHeadersMap flattens a header mutation's set headers into key-value pairs.
-func setHeadersMap(headers []*configPb.HeaderValueOption) map[string]string {
-	got := make(map[string]string, len(headers))
-	for _, h := range headers {
-		got[h.GetHeader().GetKey()] = string(h.GetHeader().GetRawValue())
-	}
-	return got
 }
 
 type mockDirectorRequest struct {

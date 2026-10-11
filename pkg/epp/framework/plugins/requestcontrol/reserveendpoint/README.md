@@ -11,11 +11,9 @@ the request there.
 SGLang disaggregation needs the decode request body to name the prefill pod,
 so the coordinator must know the prefill pod before it sends either request.
 The coordinator sends the prefill request body to the prefill profile with the
-header `Prefer: reserve-endpoint`. EPP schedules that request as usual. The
-caller gets `204 No Content` with the picked endpoint on the
-`x-llm-d-reserved-host-port` response header, `Preference-Applied:
-reserve-endpoint`, and the internal routing headers the scheduling plugins set
-on the request. EPP forwards nothing to a model server.
+header `Prefer: reserve-endpoint`. EPP schedules that request as usual and
+answers `204 No Content` with the picked endpoint. EPP forwards nothing to a
+model server.
 
 ## How It Works
 
@@ -24,12 +22,10 @@ on the request. EPP forwards nothing to a model server.
    primary profile's first target endpoint as a request attribute.
 3. After every PreRequest plugin ran, the director reads the attribute and
    builds the answer: `x-llm-d-reserved-host-port` with the recorded endpoint,
-   `Preference-Applied: reserve-endpoint`, and each of these headers that a
-   plugin set on the request: `x-prefiller-host-port`, `x-encoder-hosts-ports`,
-   `x-data-parallel-host-port`, `x-kv-cache-source-host-port`. EPP drops those
-   four headers on ingress, so a value present after scheduling was set by a
-   plugin, and a forwarded request would have carried it to the model server
-   or its sidecar. The caller gets it instead.
+   `Preference-Applied: reserve-endpoint`, and each internal routing header
+   (`InternalRoutingHeaders` in `pkg/epp/util/request`) that a plugin set on
+   the request. Only plugins can set these headers, so the caller gets what a
+   forwarded request would have carried to the model server or its sidecar.
 4. The ext_proc stream handler sends the answer to Envoy as an immediate
    response with status `204`, the answer headers and no body. Envoy replies to
    the caller and opens no connection to a model server.
@@ -59,9 +55,8 @@ span ends without an error status.
 ## Output produced
 
 - The request attribute `reserve-endpoint.endpoint`, the recorded `<ip:port>`.
-- Through the director, a `204` answer with the headers
-  `x-llm-d-reserved-host-port: <ip:port>`, `Preference-Applied: reserve-endpoint`
-  and the internal routing headers set on the request, and no body.
+- Through the director, the `204` answer described in How It Works, with no
+  body.
 
 ## Configuration
 
@@ -87,8 +82,7 @@ schedulingProfiles:
 ```
 
 The plugin is discovered from the top-level `plugins` list. Do not add it to a
-scheduling profile. Its position in the list does not matter: the director
-builds the answer after every PreRequest plugin ran.
+scheduling profile. Its position in the list does not matter.
 
 ## Limitations
 

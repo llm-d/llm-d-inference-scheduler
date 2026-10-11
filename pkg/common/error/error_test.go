@@ -24,6 +24,7 @@ import (
 
 	envoyTypePb "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 
+	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
@@ -327,8 +328,8 @@ func TestBuildErrResponse(t *testing.T) {
 			wantHeaders:    map[string]string{RequestDroppedReasonHeaderKey: string(RequestDroppedReasonSaturated)},
 		},
 		{
-			name:           "content-type in the error's headers is replaced",
-			err:            Error{Code: ResourceExhausted, Msg: "no capacity", Headers: map[string]string{"content-type": "text/plain"}},
+			name:           "Content-Type in the error's headers is replaced",
+			err:            Error{Code: ResourceExhausted, Msg: "no capacity", Headers: map[string]string{"Content-Type": "text/plain"}},
 			wantHTTPStatus: envoyTypePb.StatusCode_TooManyRequests,
 			wantBody:       `{"error":{"message":"no capacity","type":"rate_limit_error","code":429}}`,
 		},
@@ -367,10 +368,7 @@ func TestBuildErrResponse(t *testing.T) {
 			}
 
 			setHeaders := ir.GetHeaders().GetSetHeaders()
-			gotHeaders := make(map[string]string, len(setHeaders))
-			for _, h := range setHeaders {
-				gotHeaders[h.GetHeader().GetKey()] = string(h.GetHeader().GetRawValue())
-			}
+			gotHeaders := envoy.SetHeadersMap(setHeaders)
 			wantHeaders := map[string]string{"content-type": "application/json"}
 			maps.Copy(wantHeaders, tt.wantHeaders)
 			if len(setHeaders) != len(wantHeaders) || !maps.Equal(gotHeaders, wantHeaders) {

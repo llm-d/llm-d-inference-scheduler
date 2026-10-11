@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 )
@@ -96,10 +97,7 @@ func TestUpdateStateAndSendIfNeeded_Evicted(t *testing.T) {
 			assert.Equal(t, `{"error":{"message":"request evicted by flow control","type":"rate_limit_error","code":429}}`, string(ir.Body))
 
 			require.NotNil(t, ir.Headers, "Should label the body as JSON")
-			gotHeaders := make(map[string]string, len(ir.Headers.SetHeaders))
-			for _, header := range ir.Headers.SetHeaders {
-				gotHeaders[header.Header.Key] = string(header.Header.RawValue)
-			}
+			gotHeaders := envoy.SetHeadersMap(ir.Headers.SetHeaders)
 			wantHeaders := map[string]string{"content-type": "application/json"}
 			if tt.wantHeader {
 				wantHeaders[errcommon.RequestDroppedReasonHeaderKey] = string(tt.requestDroppedReason)

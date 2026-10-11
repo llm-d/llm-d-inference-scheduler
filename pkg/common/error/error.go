@@ -21,7 +21,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"maps"
+	"strings"
 
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	envoyTypePb "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -60,8 +60,8 @@ const (
 type Error struct {
 	Code string
 	Msg  string
-	// Headers are set on the error response. The response body is JSON, so a
-	// content-type entry is replaced by application/json.
+	// Headers are set on the error response with lowercase keys. The response
+	// body is JSON, so a content-type entry is replaced by application/json.
 	Headers map[string]string
 }
 
@@ -171,7 +171,9 @@ func BuildErrResponse(err error, apiType reqcommon.APIType) (*extProcPb.Processi
 	}
 
 	headers := make(map[string]string, len(e.Headers)+1)
-	maps.Copy(headers, e.Headers)
+	for key, value := range e.Headers {
+		headers[strings.ToLower(key)] = value
+	}
 	headers[reqcommon.HeaderContentType] = reqcommon.ContentTypeJSON
 	return envoy.BuildImmediateResponse(code.httpCode, headers, body), nil
 }

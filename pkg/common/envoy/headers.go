@@ -46,6 +46,16 @@ func ExtractHeaderValue(req *extProcPb.ProcessingRequest_RequestHeaders, headerK
 	return ""
 }
 
+// SetHeadersMap flattens header value options, as GenerateHeadersMutation
+// builds them, into a key to value map.
+func SetHeadersMap(options []*corev3.HeaderValueOption) map[string]string {
+	headers := make(map[string]string, len(options))
+	for _, option := range options {
+		headers[option.GetHeader().GetKey()] = GetHeaderValue(option.GetHeader())
+	}
+	return headers
+}
+
 func GenerateHeadersMutation(headers map[string]string) []*corev3.HeaderValueOption {
 	headersMutation := make([]*corev3.HeaderValueOption, 0, len(headers))
 	for key, value := range headers {

@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
@@ -107,18 +108,9 @@ func TestProcessAnswersWithoutForwarding(t *testing.T) {
 			wantNoLogs:  []string{"ERROR", "inference error"},
 		},
 		{
-			name:        "answer carries the director's status",
-			director:    &answeringDirector{answer: &Answer{Status: envoyTypePb.StatusCode_OK, Headers: answer}},
+			name:        "answer with another status and no headers",
+			director:    &answeringDirector{answer: &Answer{Status: envoyTypePb.StatusCode_OK}},
 			wantStatus:  envoyTypePb.StatusCode_OK,
-			wantHeaders: answer,
-			wantCause:   fwkrc.TerminationCauseAnswered,
-			wantLogs:    []string{"Answered request without forwarding"},
-			wantNoLogs:  []string{"ERROR"},
-		},
-		{
-			name:        "answer without headers",
-			director:    &answeringDirector{answer: &Answer{Status: envoyTypePb.StatusCode_NoContent}},
-			wantStatus:  envoyTypePb.StatusCode_NoContent,
 			wantHeaders: map[string]string{},
 			wantCause:   fwkrc.TerminationCauseAnswered,
 			wantLogs:    []string{"Answered request without forwarding"},
@@ -156,7 +148,7 @@ func TestProcessAnswersWithoutForwarding(t *testing.T) {
 			require.NotNil(t, ir)
 			assert.Equal(t, tt.wantStatus, ir.Status.Code)
 			assert.Equal(t, tt.wantBody, string(ir.Body))
-			assert.Equal(t, tt.wantHeaders, setHeadersMap(ir.GetHeaders().GetSetHeaders()))
+			assert.Equal(t, tt.wantHeaders, envoy.SetHeadersMap(ir.GetHeaders().GetSetHeaders()))
 			assert.Equal(t, 1, tt.director.endOfStreamSeen, "stream-end cleanup releases per-request plugin state")
 			assert.Equal(t, tt.wantCause, tt.director.cause)
 			errorSeries, err := promtestutil.GatherAndCount(ctrlmetrics.Registry, "llm_d_epp_request_error_total")

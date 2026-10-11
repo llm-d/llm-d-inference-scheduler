@@ -58,8 +58,9 @@ var (
 	reserveConfig   = fmt.Sprintf(reserveConfigBase, "  - type: reserve-endpoint")
 	noReserveConfig = fmt.Sprintf(reserveConfigBase, "")
 
-	// The prefill pods that setupPDHarness creates.
+	// The prefill and decode pods that setupPDHarness creates.
 	reservePrefillEndpoints = []string{"192.168.1.1:8000", "192.168.1.2:8000"}
+	reserveDecodeEndpoints  = []string{"192.168.1.3:8000", "192.168.1.4:8000"}
 )
 
 // reservePDConfig is the EPP config of a single EPP that schedules prefill and
@@ -99,9 +100,6 @@ schedulingProfiles:
     - pluginRef: queue-scorer
     - pluginRef: max-score-picker
 `
-
-// The decode pods that setupPDHarness creates.
-var reserveDecodeEndpoints = []string{"192.168.1.3:8000", "192.168.1.4:8000"}
 
 // TestReserveEndpoint_Answered sends the ask of the coordinator: it is answered
 // with 204 and a prefill endpoint on the response headers, and is not routed.

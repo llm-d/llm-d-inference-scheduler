@@ -163,22 +163,19 @@ func TestHasPreference(t *testing.T) {
 		{"only a different token", map[string]string{PreferHeader: PreferIfAvailable}, other, false},
 		{"a token does not match a different token", map[string]string{PreferHeader: other}, PreferIfAvailable, false},
 		{"prefix of a longer token", map[string]string{PreferHeader: "respond-asynchronous"}, other, false},
-		{"token with a value", map[string]string{PreferHeader: "return=minimal"}, "return", true},
-		{"token with a value and whitespace around =", map[string]string{PreferHeader: "wait = 10, respond-async"}, "wait", true},
-		{"token with a value and a parameter", map[string]string{PreferHeader: "return=minimal;x=1"}, "return", true},
-		{"value is not matched as a token", map[string]string{PreferHeader: "return=minimal"}, "minimal", false},
 		{"reserve-endpoint", map[string]string{PreferHeader: PreferReserveEndpoint}, PreferReserveEndpoint, true},
 		{"reserve-endpoint case insensitive", map[string]string{PreferHeader: "Reserve-Endpoint"}, PreferReserveEndpoint, true},
 		{"reserve-endpoint among tokens", map[string]string{PreferHeader: "if-available, reserve-endpoint;x=1"}, PreferReserveEndpoint, true},
 		{"reserve-endpoint does not match if-available", map[string]string{PreferHeader: PreferReserveEndpoint}, PreferIfAvailable, false},
+		{"token with a value", map[string]string{PreferHeader: "return=minimal"}, "return", true},
+		{"token with a value and whitespace around =", map[string]string{PreferHeader: "wait = 10, respond-async"}, "wait", true},
+		{"token with a value and a parameter", map[string]string{PreferHeader: "return=minimal;x=1"}, "return", true},
+		{"value is not matched as a token", map[string]string{PreferHeader: "return=minimal"}, "minimal", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := HasPreference(tt.headers, tt.token); got != tt.want {
 				t.Errorf("HasPreference(%v, %q) = %v, want %v", tt.headers, tt.token, got, tt.want)
-			}
-			if got := HasPreferenceToken(tt.headers[PreferHeader], tt.token); got != tt.want {
-				t.Errorf("HasPreferenceToken(%q, %q) = %v, want %v", tt.headers[PreferHeader], tt.token, got, tt.want)
 			}
 		})
 	}

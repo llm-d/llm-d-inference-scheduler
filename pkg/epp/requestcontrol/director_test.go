@@ -58,11 +58,15 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-router/pkg/epp/datastore"
+	"github.com/llm-d/llm-d-router/pkg/epp/flowcontrol/eviction"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkfc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/flowcontrol"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/eviction/filtering"
+	evictionordering "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/eviction/ordering"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/agentidentity"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/reserveendpoint"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/anthropic"
@@ -2287,6 +2291,75 @@ func TestDirector_ReleasesDispatchReservationAfterPreRequest(t *testing.T) {
 	require.True(t, released)
 }
 
+// TestDirector_TracksForEvictionBeforeReservationRelease verifies that a
+// dispatched request is in the eviction registry when its dispatch
+// reservation is released, so an eviction pass admitted on the freed capacity
+// can pick it. An answered request is released without being tracked.
+func TestDirector_TracksForEvictionBeforeReservationRelease(t *testing.T) {
+	result := singleEndpointResult("decode", &fwkdl.EndpointMetadata{
+		Address: "192.168.1.100",
+		Port:    "8000",
+		ID:      types.NamespacedName{Name: "pod1", Namespace: "default"},
+	})
+	ordering, err := evictionordering.PriorityThenTimeOrderingFactory("", nil, nil)
+	require.NoError(t, err)
+	filter, err := filtering.SheddableFilterFactory("", nil, nil)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		headers     map[string]string
+		plugins     []fwkrc.PreRequest
+		wantTracked bool
+	}{
+		{
+			name:        "forwarded request is tracked before the release",
+			headers:     map[string]string{},
+			wantTracked: true,
+		},
+		{
+			name:    "answered request is not tracked",
+			headers: map[string]string{routing.PreferHeader: routing.PreferReserveEndpoint},
+			plugins: []fwkrc.PreRequest{reserveendpoint.New()},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, ctx := newSinglePodDirector(t, result)
+			dir.SetRequestEvictor(eviction.NewRequestEvictor(
+				ordering.(fwkfc.EvictionOrderingPolicy),
+				filter.(fwkfc.EvictionFilterPolicy),
+				&eviction.NoOpEvictor{},
+			))
+			dir.requestControlPlugins = *NewConfig().WithPreRequestPlugins(tt.plugins...)
+			released := false
+			dir.admissionController = &mockAdmissionController{releaseDispatch: func(requestID string) {
+				released = true
+				tracked := dir.requestEvictor.EvictionRegistry().Get(requestID) != nil
+				assert.Equal(t, tt.wantTracked, tracked, "tracked at release time")
+			}}
+
+			body, err := json.Marshal(map[string]any{"model": "m", "prompt": "p"})
+			require.NoError(t, err)
+			headers := maps.Clone(tt.headers)
+			headers[reqcommon.RequestIDHeaderKey] = "req-" + tt.name
+			headers[":path"] = "/v1/completions"
+			reqCtx := &handlers.RequestContext{
+				Request: &handlers.Request{Headers: headers, RawBody: body},
+				Parser:  openai.NewOpenAIParser(),
+			}
+			parseResult, err := reqCtx.Parser.ParseRequest(ctx, body, headers)
+			require.NoError(t, err)
+
+			_, err = dir.HandleRequest(ctx, reqCtx, parseResult.Body)
+			require.NoError(t, err)
+			require.True(t, released)
+			tracked := dir.requestEvictor.EvictionRegistry().Get(headers[reqcommon.RequestIDHeaderKey]) != nil
+			assert.Equal(t, tt.wantTracked, tracked, "tracked after HandleRequest")
+		})
+	}
+}
+
 // TestRunPreRequestPlugins_NoPlugins verifies that runPreRequestPlugins returns
 // nil when no PreRequest plugins are registered.
 func TestRunPreRequestPlugins_NoPlugins(t *testing.T) {
@@ -2497,6 +2570,46 @@ func TestPrepareRequest_ConditionalDecodeDefaultDeny(t *testing.T) {
 			var e errcommon.Error
 			require.ErrorAs(t, err, &e)
 			assert.Equal(t, tt.wantErrCode, e.Code)
+		})
+	}
+}
+
+// TestPrepareRequest_NoPrimaryEndpoint verifies that a scheduling result
+// whose primary profile picked no endpoint is rejected with 500, not a panic.
+func TestPrepareRequest_NoPrimaryEndpoint(t *testing.T) {
+	ctx := logutil.NewTestLoggerIntoContext(context.Background())
+	tests := []struct {
+		name   string
+		result *fwksched.SchedulingResult
+	}{
+		{
+			name: "primary profile missing from the results",
+			result: &fwksched.SchedulingResult{
+				PrimaryProfileName: "decode",
+				ProfileResults:     map[string]*fwksched.ProfileRunResult{"prefill": {}},
+			},
+		},
+		{
+			name: "primary profile picked no endpoint",
+			result: &fwksched.SchedulingResult{
+				PrimaryProfileName: "decode",
+				ProfileResults:     map[string]*fwksched.ProfileRunResult{"decode": {}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := &Director{requestControlPlugins: *NewConfig()}
+			reqCtx := &handlers.RequestContext{
+				Request:           &handlers.Request{Headers: map[string]string{}},
+				SchedulingRequest: &fwksched.InferenceRequest{RequestID: "req-" + tt.name, Headers: map[string]string{}},
+			}
+
+			_, err := dir.prepareRequest(ctx, reqCtx, tt.result)
+
+			var e errcommon.Error
+			require.ErrorAs(t, err, &e)
+			assert.Equal(t, errcommon.Internal, e.Code)
 		})
 	}
 }
