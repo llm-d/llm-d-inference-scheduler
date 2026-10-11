@@ -47,7 +47,7 @@ func testProducer(t *testing.T, identityProducer string, handle fwkplugin.Handle
 	return producer
 }
 
-func putIdentity(request *fwksched.InferenceRequest, producer string) requestcontrol.SessionIdentity {
+func putIdentity(request *fwksched.InferenceRequest, producer string) {
 	identity := requestcontrol.SessionIdentity{
 		SessionTag:     "opaque-tag",
 		IdentitySource: requestcontrol.IdentitySourceAgentIdentityAttribute,
@@ -57,7 +57,6 @@ func putIdentity(request *fwksched.InferenceRequest, producer string) requestcon
 		requestcontrol.SessionIdentityDataKey.WithNonEmptyProducerName(producer),
 		identity,
 	)
-	return identity
 }
 
 func TestProducePublishesStampedCacheRequestAfterIdentity(t *testing.T) {
