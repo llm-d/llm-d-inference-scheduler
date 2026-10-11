@@ -51,7 +51,7 @@ func (c Config) resolve() (resolvedConfig, error) {
 	if keyPath == "" {
 		return resolvedConfig{}, errors.New("hmacKeyFile is required")
 	}
-	encoded, err := os.ReadFile(keyPath)
+	encoded, err := os.ReadFile(keyPath) // #nosec G304 -- path is operator-configured for a mounted secret
 	if err != nil {
 		return resolvedConfig{}, fmt.Errorf("read hmacKeyFile: %w", err)
 	}
