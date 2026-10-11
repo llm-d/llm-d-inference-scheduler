@@ -225,6 +225,21 @@ func (s *ReplaceMediaURLsStep) Execute(ctx context.Context, reqCtx *pipeline.Req
 			"count", declined.count, "types", declined.types, "extracted", len(refs), "apiType", apiType)
 	}
 
+	// main records one observation per request under the image label. refs can
+	// now be audio or video too, and boundMediaType folds both into
+	// MediaTypeOther, so count the two buckets and record each. Still above the
+	// return below, so a request carrying no media observes zero as it did.
+	var imageItems, otherItems int
+	for _, ref := range refs {
+		if ref.modality == reqcommon.ModalityImage {
+			imageItems++
+			continue
+		}
+		otherItems++
+	}
+	coordmetrics.RecordMediaItems(coordmetrics.MediaTypeImage, imageItems)
+	coordmetrics.RecordMediaItems(coordmetrics.MediaTypeOther, otherItems)
+
 	if len(refs) == 0 {
 		return nil
 	}
@@ -339,8 +354,8 @@ func (s *ReplaceMediaURLsStep) Execute(ctx context.Context, reqCtx *pipeline.Req
 // body instead, so it needs the base64 data; its format, MIME and size are
 // validated by validateInlineAudio, which Execute runs before any download.
 func collectMediaRefs(items []any, apiType reqcommon.APIType) ([]mediaRef, declinedParts, error) {
-	var refs []mediaRef
 	parts, declined := collectMediaParts(items, apiType)
+	refs := make([]mediaRef, 0, len(parts))
 	for _, media := range parts {
 		partType, _ := media.part[reqcommon.FieldType].(string)
 		if partType == reqcommon.PartTypeInputAudio {
@@ -444,7 +459,7 @@ func appendMultimodalEntry(reqCtx *pipeline.RequestContext, modality reqcommon.M
 	})
 }
 
-func (s *ReplaceMediaURLsStep) download(ctx context.Context, rawURL string, modality reqcommon.Modality) ([]byte, string, error) {
+func (s *ReplaceMediaURLsStep) download(ctx context.Context, rawURL string, modality reqcommon.Modality) (data []byte, contentType string, err error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid URL: %w: %w", err, pipeline.ErrBadRequest)
@@ -459,6 +474,14 @@ func (s *ReplaceMediaURLsStep) download(ctx context.Context, rawURL string, moda
 	}
 
 	sizeCap := s.downloadSizeFor(modality)
+
+	// Timing starts after pre-dial validation: URL parse, scheme, and
+	// allowed_domains rejections are not download attempts, so they must not
+	// drag the error bucket's duration distribution toward zero.
+	start := time.Now()
+	defer func() {
+		coordmetrics.RecordMediaDownloadDuration(coordmetrics.ClassifyDownloadResult(ctx, err), time.Since(start))
+	}()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -483,7 +506,7 @@ func (s *ReplaceMediaURLsStep) download(ctx context.Context, rawURL string, moda
 
 	// Normalize before the fallback, so a header that is only parameters
 	// ("; charset=utf-8") lands on the default like an absent one does.
-	contentType := normalizeMediaType(resp.Header.Get("Content-Type"))
+	contentType = normalizeMediaType(resp.Header.Get("Content-Type"))
 	if contentType == "" {
 		contentType = defaultContentType
 	}
@@ -500,7 +523,7 @@ func (s *ReplaceMediaURLsStep) download(ctx context.Context, rawURL string, moda
 		return nil, "", fmt.Errorf("response too large: Content-Length %d exceeds max %d: %w", resp.ContentLength, sizeCap, pipeline.ErrBadRequest)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, sizeCap+1))
+	data, err = io.ReadAll(io.LimitReader(resp.Body, sizeCap+1))
 	if err != nil {
 		return nil, "", err
 	}

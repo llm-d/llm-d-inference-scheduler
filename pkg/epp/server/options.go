@@ -210,7 +210,7 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&opts.GRPCMaxSendMsgSizeStr, "grpc-max-send-msg-size", opts.GRPCMaxSendMsgSizeStr, "Maximum size of a gRPC message to send (e.g., 10MiB, 25MB).")
 	fs.StringVar(&opts.PoolGroup, "pool-group", opts.PoolGroup,
 		"Kubernetes resource group of the InferencePool this Endpoint Picker is associated with. "+
-			"Only `inference.networking.k8s.io` is currently supported (`inference.networking.x-k8s.io` is deprecated but still accepted).")
+			"Only `inference.networking.k8s.io` is currently supported.")
 	fs.StringVar(&opts.PoolNamespace, "pool-namespace", opts.PoolNamespace,
 		"Namespace of the InferencePool this Endpoint Picker is associated with.")
 	fs.StringVar(&opts.PoolName, "pool-name", opts.PoolName, "Name of the InferencePool this Endpoint Picker is associated with.")
@@ -471,8 +471,8 @@ func (opts *Options) Validate() error {
 	if opts.PluginStateStalenessThreshold <= 0 {
 		return fmt.Errorf("plugin-state-staleness-threshold must be positive, got %v", opts.PluginStateStalenessThreshold)
 	}
-	if opts.PoolGroup != routing.InferencePoolAPIGroup && opts.PoolGroup != "inference.networking.x-k8s.io" {
-		return fmt.Errorf("pool-group must be %q or the deprecated %q, got %q", routing.InferencePoolAPIGroup, "inference.networking.x-k8s.io", opts.PoolGroup)
+	if opts.PoolGroup != routing.InferencePoolAPIGroup {
+		return fmt.Errorf("pool-group must be %q, got %q", routing.InferencePoolAPIGroup, opts.PoolGroup)
 	}
 	if opts.MetricsStalenessThreshold <= 0 {
 		return fmt.Errorf("metrics-staleness-threshold must be positive, got %v", opts.MetricsStalenessThreshold)
@@ -537,9 +537,6 @@ func parseTLSVersion(s string) (uint16, error) {
 func parseCipherSuites(names []string) ([]uint16, error) {
 	byName := make(map[string]uint16)
 	for _, cs := range tls.CipherSuites() {
-		byName[cs.Name] = cs.ID
-	}
-	for _, cs := range tls.InsecureCipherSuites() {
 		byName[cs.Name] = cs.ID
 	}
 	ids := make([]uint16, 0, len(names))

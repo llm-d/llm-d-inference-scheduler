@@ -40,6 +40,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
+	"github.com/llm-d/llm-d-router/pkg/coordinator/metrics/metricstest"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
@@ -74,6 +75,19 @@ func (s *captureRevisionDecisionStep) Name() string { return "capture-revision-d
 func (s *captureRevisionDecisionStep) Execute(_ context.Context, reqCtx *pipeline.RequestContext) error {
 	s.requestID = reqCtx.RequestID
 	s.revisionDecisionID = reqCtx.RevisionDecisionID
+	return nil
+}
+
+// capturingStep records the RequestContext it saw, for assertions on what the
+// handler populated before the pipeline ran.
+type capturingStep struct {
+	captured *pipeline.RequestContext
+}
+
+func (s *capturingStep) Name() string { return "capture" }
+
+func (s *capturingStep) Execute(_ context.Context, rc *pipeline.RequestContext) error {
+	s.captured = rc
 	return nil
 }
 
@@ -416,6 +430,38 @@ func TestHandleInference_OverlongRequestIDIsRejected(t *testing.T) {
 	}
 }
 
+func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
+	// x-peer-topology and epp-profile are headers the coordinator alone injects
+	// (copied from the prefill response, or set to select a profile); a
+	// client-supplied value must never survive into OriginalHeaders, since a
+	// later step trusts it as coordinator-generated.
+	step := &capturingStep{}
+	p := pipeline.New([]pipeline.Step{step})
+	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+	req.Header.Set(reqcommon.PeerTopologyHeaderKey, "host=attacker,zone=evil")
+	req.Header.Set(reqcommon.EPPProfileHeaderKey, "decode")
+	req.Header.Set("x-user-data", "keep-me")
+	rec := httptest.NewRecorder()
+	srv.handleInference(rec, req)
+
+	if step.captured == nil {
+		t.Fatal("pipeline step did not run")
+	}
+	if got := step.captured.OriginalHeaders.Get(reqcommon.PeerTopologyHeaderKey); got != "" {
+		t.Fatalf("client-supplied x-peer-topology must be stripped, got %q", got)
+	}
+	if got := step.captured.OriginalHeaders.Get(reqcommon.EPPProfileHeaderKey); got != "" {
+		t.Fatalf("client-supplied epp-profile must be stripped, got %q", got)
+	}
+	if got := step.captured.OriginalHeaders.Get("x-user-data"); got != "keep-me" {
+		t.Fatalf("unrelated headers must pass through, got %q", got)
+	}
+}
+
 func TestRoutesRegistered(t *testing.T) {
 	// With the NotFound passthrough in place, an unregistered path no longer
 	// returns 404 — it reverse-proxies to the stub gateway and returns 502.
@@ -453,11 +499,7 @@ func TestRoutesRegistered(t *testing.T) {
 // level vectors the handler mutates. Reset clears the vectors' state so
 // concurrent tests do not see each other's increments.
 func newMetricsRegistry(t *testing.T) *prometheus.Registry {
-	t.Helper()
-	reg := prometheus.NewRegistry()
-	require.NoError(t, coordmetrics.Register(reg))
-	coordmetrics.Reset()
-	return reg
+	return metricstest.NewRegistry(t, coordmetrics.Register, coordmetrics.Reset)
 }
 
 func TestHandleInference_SuccessRecordsRequestFamily(t *testing.T) {
@@ -798,39 +840,11 @@ func mustCounter(t *testing.T, reg *prometheus.Registry, name string, labels map
 }
 
 func histogramCount(t *testing.T, reg *prometheus.Registry, name string, labels map[string]string) uint64 {
-	t.Helper()
-	mfs, err := reg.Gather()
-	require.NoError(t, err)
-	for _, mf := range mfs {
-		if mf.GetName() != name {
-			continue
-		}
-		for _, m := range mf.GetMetric() {
-			if labelsMatch(m.GetLabel(), labels) {
-				return m.GetHistogram().GetSampleCount()
-			}
-		}
-	}
-	t.Fatalf("histogram %s%v not present", name, labels)
-	return 0
+	return metricstest.HistogramCount(t, reg, name, labels)
 }
 
 func histogramSum(t *testing.T, reg *prometheus.Registry, name string, labels map[string]string) float64 {
-	t.Helper()
-	mfs, err := reg.Gather()
-	require.NoError(t, err)
-	for _, mf := range mfs {
-		if mf.GetName() != name {
-			continue
-		}
-		for _, m := range mf.GetMetric() {
-			if labelsMatch(m.GetLabel(), labels) {
-				return m.GetHistogram().GetSampleSum()
-			}
-		}
-	}
-	t.Fatalf("histogram %s%v not present", name, labels)
-	return 0
+	return metricstest.HistogramSum(t, reg, name, labels)
 }
 
 // seriesCount returns the number of series (label-set combinations) that the
@@ -875,4 +889,103 @@ func TestRoutesRegistered_MethodMismatchReturns405(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405 for GET on POST-only %s, got %d", reqcommon.PathChatCompletions, rec.Code)
 	}
+}
+
+func TestHandleInference_RecordsOrchestrationOverheadAndResponseBytes(t *testing.T) {
+	reg := newMetricsRegistry(t)
+	rec := postInference(t, newTestServer(nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	if hc := histogramCount(t, reg, "llm_d_coordinator_orchestration_overhead_seconds", map[string]string{"route": coordmetrics.RouteChatCompletions}); hc != 1 {
+		t.Fatalf("expected 1 orchestration_overhead_seconds observation, got %d", hc)
+	}
+	if hc := histogramCount(t, reg, "llm_d_coordinator_response_size_bytes", map[string]string{"stream": coordmetrics.StreamFalse}); hc != 1 {
+		t.Fatalf("expected 1 response_size_bytes observation, got %d", hc)
+	}
+	if hs := histogramSum(t, reg, "llm_d_coordinator_response_size_bytes", map[string]string{"stream": coordmetrics.StreamFalse}); hs != 0 {
+		t.Fatalf("expected 0 response bytes on a silent success path, got %v", hs)
+	}
+}
+
+// TestHandleInference_ParseDurationIsNotInflatedByPipelineTime guards the
+// parse-phase measurement: ParseDuration must be recorded before the
+// pipeline runs and must cover only body read + JSON unmarshal. A regression
+// that defers the capture to handler exit (after the pipeline) would leave
+// RequestContext.ParseDuration at 0 during pipeline execution and drive
+// orchestration_overhead_seconds to zero by absorbing step time into the
+// parse term.
+func TestHandleInference_ParseDurationIsNotInflatedByPipelineTime(t *testing.T) {
+	var capturedParseDuration time.Duration
+	const stepSleep = 50 * time.Millisecond
+	step := stubStep{name: "decode", fn: func(_ context.Context, rc *pipeline.RequestContext) error {
+		capturedParseDuration = rc.ParseDuration
+		time.Sleep(stepSleep)
+		return nil
+	}}
+	p := pipeline.New([]pipeline.Step{step})
+	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(nil, stubGatewayURL))
+	require.NoError(t, err)
+
+	// A padded body (~64 KiB of JSON string) makes parse time comfortably
+	// measurable so the > 0 assertion cannot flake on coarse clocks.
+	bigPad := strings.Repeat("x", 64*1024)
+	body := `{"model":"m","pad":"` + bigPad + `"}`
+	req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.handleInference(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Greater(t, capturedParseDuration, time.Duration(0),
+		"ParseDuration must be set before the pipeline runs, got 0")
+	require.Less(t, capturedParseDuration, stepSleep,
+		"ParseDuration must not absorb pipeline execution time")
+}
+
+func TestHandleInference_ResponseBytesCountsStreamedAndErrorBodies(t *testing.T) {
+	reg := newMetricsRegistry(t)
+	const streamedBody = "partial streamed body"
+	step := stubStep{name: "decode", fn: func(_ context.Context, rc *pipeline.RequestContext) error {
+		_, _ = rc.ResponseWriter.Write([]byte(streamedBody))
+		return &pipeline.UpstreamStreamedError{Step: "decode", StatusCode: http.StatusInternalServerError}
+	}}
+	p := pipeline.New([]pipeline.Step{step})
+	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(nil, stubGatewayURL))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(`{"model":"m","stream":true}`))
+	rec := httptest.NewRecorder()
+	srv.handleInference(rec, req)
+	require.Equal(t, streamedBody, rec.Body.String())
+
+	if hc := histogramCount(t, reg, "llm_d_coordinator_response_size_bytes", map[string]string{"stream": coordmetrics.StreamTrue}); hc != 1 {
+		t.Fatalf("expected 1 streaming response_size_bytes observation, got %d", hc)
+	}
+	if hs := histogramSum(t, reg, "llm_d_coordinator_response_size_bytes", map[string]string{"stream": coordmetrics.StreamTrue}); hs != float64(len(streamedBody)) {
+		t.Fatalf("expected streamed length %d, got %v", len(streamedBody), hs)
+	}
+}
+
+func TestHandleInference_ErrorPathRecordsResponseBytes(t *testing.T) {
+	reg := newMetricsRegistry(t)
+	req := httptest.NewRequest(http.MethodPost, reqcommon.PathCompletions, strings.NewReader("not-json"))
+	rec := httptest.NewRecorder()
+	newTestServer(nil).handleInference(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	if hc := histogramCount(t, reg, "llm_d_coordinator_orchestration_overhead_seconds", map[string]string{"route": coordmetrics.RouteCompletions}); hc != 1 {
+		t.Fatalf("expected 1 orchestration_overhead_seconds observation on completions, got %d", hc)
+	}
+	if hc := histogramCount(t, reg, "llm_d_coordinator_response_size_bytes", map[string]string{"stream": coordmetrics.StreamFalse}); hc != 1 {
+		t.Fatalf("expected 1 response_size_bytes observation on parse error, got %d", hc)
+	}
+	if hs := histogramSum(t, reg, "llm_d_coordinator_response_size_bytes", map[string]string{"stream": coordmetrics.StreamFalse}); hs <= 0 {
+		t.Fatalf("expected error body bytes > 0, got %v", hs)
+	}
+}
+
+func TestInferenceRoute(t *testing.T) {
+	require.Equal(t, coordmetrics.RouteChatCompletions, inferenceRoute(reqcommon.PathChatCompletions))
+	require.Equal(t, coordmetrics.RouteCompletions, inferenceRoute(reqcommon.PathCompletions))
+	require.Equal(t, coordmetrics.RouteGenerate, inferenceRoute(reqcommon.PathVLLMGenerate))
+	require.Equal(t, coordmetrics.RouteUnknown, inferenceRoute("/other"))
 }

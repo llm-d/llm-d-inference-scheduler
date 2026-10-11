@@ -43,6 +43,25 @@ registered by EPP plugins, including the embedded KV-cache collectors. Metric au
 configurable via `--metrics-endpoint-auth` (default `true`). TLS is a separate setting, configurable
 via `--metrics-cert-dir`; mutual TLS additionally requires `--metrics-client-ca-file`.
 
+With authentication enabled, the EPP validates scrapes with a TokenReview and a
+SubjectAccessReview. The Helm charts grant the EPP ServiceAccount `create` on both resources through
+a ClusterRole when `router.monitoring.prometheus.auth.enabled` is `true`, so installing with that
+setting requires permission to create cluster-scoped RBAC. Setting it to `false` serves `/metrics`
+without authentication and renders no cluster-scoped RBAC.
+
+A scraper must send a bearer token for an identity that is allowed `get` on the `/metrics`
+non-resource URL. To grant that to a scraper ServiceAccount:
+
+```bash
+kubectl create clusterrole <release>-metrics-reader --verb=get --non-resource-url=/metrics
+kubectl create clusterrolebinding <release>-metrics-reader \
+    --clusterrole=<release>-metrics-reader \
+    --serviceaccount=<namespace>:<scraper-sa>
+```
+
+The charts create this grant themselves for the ServiceMonitor and GMP PodMonitoring they render
+when `router.monitoring.prometheus.enabled` is `true`.
+
 ### Model server / engine
 
 The `metrics-data-source` plugin sends an HTTP or HTTPS request (`scheme`, default `http`; TLS
@@ -139,6 +158,15 @@ an `InferencePool`.
 | `llm_d_epp_std_dev_running_requests` | Gauge | `name` (InferencePool name) | Spread of in-flight requests. |
 | `llm_d_epp_ready_endpoints` | Gauge | `name` (InferencePool name) | Ready endpoints in the pool. |
 | `llm_d_epp_per_endpoint_queue_size` | Gauge | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint queue depth. |
+| `llm_d_epp_per_endpoint_nixl_failed_transfers_total` | Counter | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint failed NIXL KV cache transfers. |
+| `llm_d_epp_per_endpoint_nixl_failed_notifications_total` | Counter | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint failed NIXL KV cache notifications. |
+| `llm_d_epp_per_endpoint_nixl_kv_expired_requests_total` | Counter | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint requests whose KV cache expired before it was read. |
+
+The `llm_d_epp_per_endpoint_nixl_*` series expose the counters that the
+[core metrics extractor](../pkg/epp/framework/plugins/datalayer/extractor/metrics/README.md#attributes-produced)
+reads from each endpoint. A series appears once an endpoint reports the counter, and restarts from
+zero when the model server restarts. If an endpoint stops reporting the counter while its pod stays
+Ready, the series keeps its last value.
 
 ### Scheduler
 
@@ -198,20 +226,61 @@ match data but is not instrumented here. Requests that reach no endpoint are not
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_prefix_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Prompt tokens predicted to hit the chosen endpoint's prefix cache. |
-| `llm_d_epp_prefix_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Prompt tokens the prediction was measured against. |
+| `llm_d_epp_prefix_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Prompt tokens predicted to hit the chosen endpoint's prefix cache. |
+| `llm_d_epp_prefix_best_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the endpoints the scheduler selected from. |
+| `llm_d_epp_prefix_best_available_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the request's candidate endpoints before filtering. |
+| `llm_d_epp_prefix_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Prompt tokens the predictions were measured against. |
+| `llm_d_epp_prefix_mm_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens predicted to hit the chosen endpoint's prefix cache. |
+| `llm_d_epp_prefix_mm_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens the multimodal prediction was measured against. |
 
 For a request disaggregated into prefill and decode stages, the prediction is recorded for the
 `prefill` profile's endpoint and `endpoint_role` is `prefill`, since the sidecar's default `nixlv2`
 KV connector returns the prefiller's cached-token count. For every other request it is recorded for
 the primary profile's endpoint, and `endpoint_role` is `decode`.
 
-The prefix hit rate the router predicted is `llm_d_epp_prefix_predicted_cached_tokens_sum` divided
-by `llm_d_epp_prefix_prompt_tokens_sum`. Both are observed in one call, so the ratio divides counts
-taken over the same requests. The rate the model server delivered is a separate ratio,
-`llm_d_epp_request_cached_tokens_sum` divided by `llm_d_epp_request_input_tokens_sum`.
+The `modality` label holds the modalities the request carries as a comma-joined sorted list (`none`
+for text-only), the same value as the `mm.modality` span attribute. Each request is observed once,
+so summing over `modality` keeps the all-requests ratio exact. Per-modality breakdowns filter the
+label, e.g. `modality=~".*image.*"` covers requests carrying an image.
 
-Comparing the two ratios is what the prediction metrics are for, subject to three limits.
+The modality split applies to the predicted rate only. The delivered pair, `llm_d_epp_request_cached_tokens`
+divided by `llm_d_epp_request_input_tokens`, carries no modality label, so a per-modality predicted
+rate has no delivered counterpart to compare against.
+
+For the `approx-prefix-cache-producer`, the modality series describes the request mix, not
+multimodal hash correlation: that producer hashes token IDs, so on the vLLM render backend two
+requests with different images but the same placeholder tokens still match fully and its image
+series reads high for that reason. The `estimate` backend hashes the asset content into its
+multimodal placeholder tokens, so different images produce different tokens and do not match.
+
+The mm pair covers only requests whose match info carries multimodal attribution, so text-only
+requests never enter it and a zero observation means a multimodal request matched no blocks. Only
+the `precise-prefix-cache-producer` records it: the approximate producer's match is not
+multimodal-tainted. The predicted count sums each feature's tokens inside the matched prefix, so a
+feature that starts or ends mid-block contributes only the tokens it holds. Dividing
+`llm_d_epp_prefix_mm_predicted_cached_tokens_sum` by `llm_d_epp_prefix_mm_prompt_tokens_sum` gives
+the share of the request's multimodal tokens the routing decision served from cache; the
+prompt-level pair mixes text and multimodal tokens, so it cannot report that share. The pair
+carries no modality label: its predicted count aggregates every modality the request carries.
+
+The prefix hit rate the router predicted is `llm_d_epp_prefix_predicted_cached_tokens_sum` divided
+by `llm_d_epp_prefix_prompt_tokens_sum`. All four metrics are observed in one call, so any ratio
+among them divides counts taken over the same requests. The rate the model server delivered is a
+separate ratio, `llm_d_epp_request_cached_tokens_sum` divided by
+`llm_d_epp_request_input_tokens_sum`.
+
+The two maxima locate a shortfall in the prediction. Their endpoint sets narrow into each other:
+every candidate the request could have reached, those that survived the scheduler's filters and
+reached the picker, and the one the picker chose. Dividing
+`llm_d_epp_prefix_predicted_cached_tokens_sum` by `llm_d_epp_prefix_best_predicted_cached_tokens_sum`
+gives the share of the reachable reuse the routing decision captured, which is a scoring and picking
+question. Dividing `llm_d_epp_prefix_best_predicted_cached_tokens_sum` by
+`llm_d_epp_prefix_best_available_cached_tokens_sum` gives the share that survived filtering, which a
+filter may be right to reduce when it is shedding load away from a saturated endpoint holding the
+prefix. A profile that reports no scored candidates leaves only the chosen endpoint to go on, so both
+maxima fall back to the prediction for it and the ratios read as 1.
+
+Comparing these ratios is what the prediction metrics are for, subject to the limits below.
 
 The request cohorts differ. A prediction is recorded before the request is forwarded, while the
 request token metrics come from the model server's response, so a request that fails or returns no
@@ -223,13 +292,22 @@ The `prefill` attribution matches only the `nixlv2` KV connector. The `shared-st
 request `llm_d_epp_request_cached_tokens` carries the decode pod's count while the prediction
 describes the prefill pod. Under those connectors the gap between the ratios is not index accuracy.
 
+The two maxima are scoped differently from each other for a disaggregated request.
+`llm_d_epp_prefix_best_predicted_cached_tokens` covers the `prefill` profile's scored candidates,
+while `llm_d_epp_prefix_best_available_cached_tokens` is taken before the role filters run and so
+spans prefill and decode pods together. A decode pod holding the prefix raises the available maximum
+while being unreachable by the prefill decision. Read the ratio between the two maxima as a filtering
+signal only where prefill and decode are served by the same pods. The decode profile's routing
+decision is not measured for a disaggregated request.
+
 Token units follow the tokenizer backend. The vLLM render backend counts the same tokens the model
 server reports, and the two ratios are directly comparable. The `estimate` backend, which is the
 zero-config default, packs bytes into four-byte pseudo-tokens: the predicted rate stays
 self-consistent, but CJK, code, and chat-template-heavy inputs shift it against the server's figure.
 
-`llm_d_epp_kv_cache_index_lookup_hits_total` answers a different question: it counts the best
-candidate rather than the chosen one, which bounds the reuse available to any routing decision.
+`llm_d_epp_kv_cache_index_lookup_hits_total` also reports a best candidate, but not on terms that
+compare with these metrics: it counts blocks rather than tokens, only the precise producer feeds it,
+and it accumulates once per prompt rather than once per request.
 
 ### Token producer render
 
@@ -300,6 +378,7 @@ only when that plugin is configured and records the related prediction, observat
 | `llm_d_epp_request_predicted_tpot_seconds` | Histogram | `plugin_name`, `plugin_type`, `model_name`, `target_model_name` | Predicted time per output token. |
 | `llm_d_epp_request_tpot_prediction_duration_seconds` | Histogram | `plugin_name`, `plugin_type`, `model_name`, `target_model_name` | Time spent computing the TPOT prediction. |
 | `llm_d_epp_request_slo_violation_total` | Counter | `plugin_name`, `plugin_type`, `model_name`, `target_model_name`, `type` | SLO violations. |
+| `llm_d_epp_request_prediction_failures_total` | Counter | `plugin_name`, `plugin_type`, `reason` | Failed latency prediction attempts (`request_error`, `nil_response`, `length_mismatch`, `predictor_unavailable`). |
 
 ### Disaggregation
 

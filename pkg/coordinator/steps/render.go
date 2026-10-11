@@ -201,6 +201,21 @@ func (s *RenderStep) executeGenerate(ctx context.Context, reqCtx *pipeline.Reque
 	}
 	reqCtx.MultimodalEntries = entries
 
+	// Per modality rather than main's single image observation: a token-in
+	// features map names its own modalities, so attributing every entry to
+	// image would mislabel an audio or video one. boundMediaType folds
+	// anything but image into MediaTypeOther.
+	var imageItems, otherItems int
+	for _, entry := range entries {
+		if entry.Modality == reqcommon.ModalityImage {
+			imageItems++
+			continue
+		}
+		otherItems++
+	}
+	coordmetrics.RecordMediaItems(coordmetrics.MediaTypeImage, imageItems)
+	coordmetrics.RecordMediaItems(coordmetrics.MediaTypeOther, otherItems)
+
 	logger.V(logutil.DEFAULT).Info("complete", "token_ids_len", len(tokenIDs), "mm_entries", len(entries))
 	return nil
 }
@@ -376,7 +391,7 @@ func (s *RenderStep) postRender(ctx context.Context, reqCtx *pipeline.RequestCon
 		return fmt.Errorf("creating render request: %w", err)
 	}
 	req.ContentLength = int64(len(body))
-	req.Header.Set(gateway.ContentTypeHeader, gateway.ContentTypeJSON)
+	req.Header.Set(gateway.ContentTypeHeader, reqcommon.ContentTypeJSON)
 	for k, v := range reqCtx.ForwardedHeaders() {
 		req.Header.Set(k, v)
 	}
