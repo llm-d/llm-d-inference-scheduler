@@ -48,9 +48,9 @@ func hashTokens(t []uint32) uint64 {
 // hashing, so the scorer's cache keys are unchanged.
 func TestPackBytes_KeyPreserving(t *testing.T) {
 	raw := []byte("the quick brown fox jumps over!!") // len 32, 4-byte aligned
-	require.Zero(t, len(raw)%bytesPerToken, "fixture must be %d-byte aligned, got len %d", bytesPerToken, len(raw))
+	require.Zero(t, len(raw)%fwkrh.BytesPerToken, "fixture must be %d-byte aligned, got len %d", fwkrh.BytesPerToken, len(raw))
 	tokens := packBytes(raw)
-	require.Len(t, tokens, len(raw)/bytesPerToken)
+	require.Len(t, tokens, len(raw)/fwkrh.BytesPerToken)
 	assert.Equal(t, xxhash.Sum64(raw), hashTokens(tokens), "packed-token hash != raw-byte hash; estimate path is not key-preserving")
 }
 
@@ -63,6 +63,18 @@ func TestEstimateBackend_GeneratePassthrough(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, in, tp.Prompts[0].TokenIDs)
+}
+
+// TestEstimateBackend_GenerateTextEstimatesPseudoTokens asserts text generate
+// input is byte-estimated into pseudo-tokens.
+func TestEstimateBackend_GenerateTextEstimatesPseudoTokens(t *testing.T) {
+	prompt := "hello world"
+	tp, err := estimateBackend{}.produce(context.Background(), &fwkrh.InferenceRequestBody{
+		Generate: &fwkrh.GenerateRequest{Text: prompt},
+	})
+	require.NoError(t, err)
+	require.Len(t, tp.Prompts, 1)
+	assert.Equal(t, packBytes([]byte(prompt)), tp.Prompts[0].TokenIDs)
 }
 
 // TestEstimateBackend_CompletionsTokenIDsPassthrough asserts token-ID completions
@@ -1065,7 +1077,7 @@ func TestEstimateBackend_ChatToolsBeforeSystem(t *testing.T) {
 	toolsJSON, err := json.Marshal(tools)
 	require.NoError(t, err)
 	// -1 skips the token straddling the tools/system byte boundary.
-	sharedTokens := len(toolsJSON)/bytesPerToken - 1
+	sharedTokens := len(toolsJSON)/fwkrh.BytesPerToken - 1
 	chat := func(systemContent string) *fwkrh.InferenceRequestBody {
 		return &fwkrh.InferenceRequestBody{ChatCompletions: &fwkrh.ChatCompletionsRequest{
 			Messages: []fwkrh.Message{
@@ -1096,7 +1108,7 @@ func TestEstimateBackend_MessagesToolsBeforeSystem(t *testing.T) {
 	toolsJSON, err := json.Marshal(tools)
 	require.NoError(t, err)
 	// -1 skips the token straddling the tools/system byte boundary.
-	sharedTokens := len(toolsJSON)/bytesPerToken - 1
+	sharedTokens := len(toolsJSON)/fwkrh.BytesPerToken - 1
 	build := func(systemContent string) *fwkrh.InferenceRequestBody {
 		return &fwkrh.InferenceRequestBody{Messages: &fwkrh.MessagesRequest{
 			System: fwkrh.AnthropicContent{Raw: systemContent},

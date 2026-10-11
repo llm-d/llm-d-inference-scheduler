@@ -209,6 +209,12 @@ func MaxOutputTokensFromPayload(m PayloadMap, keys ...string) *int64 {
 	return nil
 }
 
+// BytesPerToken is the average number of request bytes per prompt token, used
+// to estimate token counts without a tokenizer. The tokenizer's estimate
+// backend packs this many bytes into each pseudo-token, so its counts agree
+// with byte-based estimates.
+const BytesPerToken = 4
+
 // TokenizedRequest contains the result of tokenizing the request prompt.
 // It is consumed by scheduling and request-control plugins that benefit from
 // actual token data such as prefix-cache awareness.
@@ -607,7 +613,9 @@ func (i *ImagesGenerationsRequest) String() string {
 // This struct includes fields usable for plugins and scheduling decisions.
 type GenerateRequest struct {
 	// TokenIDs are the pre-tokenized input token IDs.
-	TokenIDs []uint32 `json:"token_ids"`
+	TokenIDs []uint32 `json:"token_ids,omitempty"`
+	// Text is the prompt text when pre-tokenized token IDs are not provided.
+	Text string `json:"text,omitempty"`
 	// Features carries multimodal metadata (per-modality content hashes and
 	// placeholder ranges) parsed out of the wire `features` block. Populated
 	// by UnmarshalJSON; not itself a JSON-tagged field.
@@ -829,6 +837,8 @@ type Usage struct {
 }
 
 type PromptTokenDetails struct {
+	// CachedTokens is the prompt-cache read count, counted inside PromptTokens
+	// rather than added to it.
 	CachedTokens int `json:"cached_tokens"`
 }
 
