@@ -649,7 +649,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 			// Built here rather than at function entry: this path is per-chunk, and
 			// deriving a logger allocates whether or not anything is emitted.
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Skipping response body chunk because the async queue is closed",
-				"stage", "bodyChunk", "requestID", reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey])
+				"stage", "bodyChunk", "requestID", reqCtx.Request.ID)
 		}
 	}
 	return reqCtx
