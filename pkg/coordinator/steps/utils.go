@@ -342,11 +342,10 @@ func buildMMFeatures(entries []pipeline.MultimodalEntry, includeKwargs bool) map
 // for either of those two changing, and it sits at one call site for that
 // reason rather than at every reader.
 //
-// Failing is what keeps a mislabeled entry from corrupting a response. Every
-// reader pairs per-modality by position on this field, so an entry defaulted to
-// some modality would splice into that modality's index sequence, pair with
-// another entry's part or response slot, and shift every later entry sharing
-// the label. The request would complete on a guess.
+// Every reader pairs per-modality by position on this field, so an entry
+// defaulted to some modality would splice into that modality's index sequence,
+// pair with another entry's part or response slot, and shift every later entry
+// sharing the label.
 func validateEntryModalities(entries []pipeline.MultimodalEntry) error {
 	for i, entry := range entries {
 		if entry.Modality == "" {
@@ -496,7 +495,7 @@ func mmModalityArray(features map[string]any, field string, modality reqcommon.M
 // for, and the pipeline carries it through rather than refusing a request its
 // model server understands. Only the empty key is rejected, and it is rejected
 // whatever value it carries: a null value means "modality absent" for a named
-// key, but it cannot excuse a key that names nothing.
+// key, and has no bearing on an empty one.
 func modalitiesInFeatures(features map[string]any, field string) ([]reqcommon.Modality, error) {
 	raw, ok := features[field]
 	if !ok || raw == nil {
@@ -509,8 +508,8 @@ func modalitiesInFeatures(features map[string]any, field string) ([]reqcommon.Mo
 	var out []reqcommon.Modality
 	for k, v := range m {
 		// Before the null skip below, so the key is judged on its own rather
-		// than on the value that follows it: {"": null} is as malformed as
-		// {"": []} and has to answer the same way.
+		// than on the value that follows it. Both {"": null} and {"": []}
+		// carry an empty key, and both are rejected here.
 		if k == "" {
 			return nil, fmt.Errorf("%s has an empty modality key: %w", field, pipeline.ErrBadRequest)
 		}

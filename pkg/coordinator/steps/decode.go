@@ -166,8 +166,7 @@ func injectMediaPartUUIDs(items []any, apiType reqcommon.APIType, entries []pipe
 	// because PreparePrefillECParams flattens every encode response into
 	// ec_transfer_params, so the prefill body describes an EC buffer that no
 	// part of the decode body names by uuid. DEBUG matches the surplus-part
-	// branch, so one verbosity shows both directions of the same mismatch:
-	// seeing only the half that is enabled is its own wrong answer.
+	// branch, so one verbosity shows both directions of the same mismatch.
 	for mod, hashes := range hashesByMod {
 		if partCount := modCounter[mod]; partCount < len(hashes) {
 			logger.V(logutil.DEBUG).Info("MultimodalEntry with no media part",
