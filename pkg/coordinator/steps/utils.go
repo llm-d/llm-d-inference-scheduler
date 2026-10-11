@@ -195,19 +195,16 @@ type mediaPart struct {
 // builds the entries (see collectMediaRefs), so filtering here would instead
 // let one through and shift every later part of its modality onto another
 // part's hash. Which part types count is reqcommon.PartModality's rule,
-// shared with the sidecar's encoder fan-out.
-//
-// The second return names the part types the walk passed over because this API
-// does not define them, so the caller can report a decision that would
-// otherwise be silent. See declinedParts.
-func collectMediaParts(items []any, apiType reqcommon.APIType) ([]mediaPart, declinedParts) {
+// shared with the sidecar's encoder fan-out. That rule is the same on every
+// API, so this walk collects the same parts whichever one carried them;
+// apiType only selects the item label and which arrays an item holds.
+func collectMediaParts(items []any, apiType reqcommon.APIType) []mediaPart {
 	itemLabel := "message"
 	if apiType == reqcommon.APITypeResponses {
 		itemLabel = "input item"
 	}
 
 	var parts []mediaPart
-	var declined declinedParts
 	for itemIdx, item := range items {
 		itemMap, ok := item.(map[string]any)
 		if !ok {
@@ -220,9 +217,8 @@ func collectMediaParts(items []any, apiType reqcommon.APIType) ([]mediaPart, dec
 					continue
 				}
 				partType, _ := partMap[reqcommon.FieldType].(string)
-				modality, ok := reqcommon.PartModality(partType, apiType)
+				modality, ok := reqcommon.PartModality(partType)
 				if !ok {
-					declined.record(partType, apiType)
 					continue
 				}
 				parts = append(parts, mediaPart{
@@ -233,35 +229,7 @@ func collectMediaParts(items []any, apiType reqcommon.APIType) ([]mediaPart, dec
 			}
 		}
 	}
-	return parts, declined
-}
-
-// declinedParts counts the content parts a walk passed over because the
-// request's API does not define them, for one operator-visible line about a
-// decision the walk makes silently. A Responses request carrying audio_url,
-// video_url or input_audio is the case it exists for: those types name media
-// on chat completions, so the coordinator recognizes them and then declines
-// them on this one path.
-type declinedParts struct {
-	count int
-	types []string
-}
-
-// record counts partType when it names media on chat completions but not on
-// apiType. Restricting it to that is what keeps the line off ordinary traffic:
-// every text and tool part also fails PartModality, and counting those would
-// report a skip on every request that carries any prose.
-func (d *declinedParts) record(partType string, apiType reqcommon.APIType) {
-	if _, namesMedia := reqcommon.PartModality(partType, reqcommon.APITypeChatCompletions); !namesMedia {
-		return
-	}
-	if apiType == reqcommon.APITypeChatCompletions {
-		return
-	}
-	d.count++
-	if !slices.Contains(d.types, partType) {
-		d.types = append(d.types, partType)
-	}
+	return parts
 }
 
 // inlineAudioData reads the payload of an input_audio content part, whose audio

@@ -30,9 +30,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/go-logr/logr"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
@@ -466,7 +463,7 @@ func TestReplaceMediaURLsStep_EntriesMatchTheMediaPartWalk(t *testing.T) {
 	items := []any{map[string]any{"role": "user", "content": parts}}
 
 	// What the shared walk says the answer is, over the same body Execute reads.
-	walked, _ := collectMediaParts(items, reqcommon.APITypeChatCompletions)
+	walked := collectMediaParts(items, reqcommon.APITypeChatCompletions)
 	wantModalities := make([]reqcommon.Modality, 0, len(walked))
 	for _, media := range walked {
 		wantModalities = append(wantModalities, media.modality)
@@ -2326,107 +2323,6 @@ func TestReplaceMediaURLsStep_AudioDataURI_UsesAudioCap(t *testing.T) {
 	}
 }
 
-// The one operator-visible line about a decision the walk otherwise makes in
-// silence: a Responses request carrying input_audio has that part passed over,
-// because the input union defines input_text / input_image / input_file only.
-// The sidecar reports the same decision in extractMMItems, so leaving the
-// coordinator quiet meant the identical request was visible through one
-// component and invisible through the other.
-//
-// Pinned at the sidecar's level and fields, so the two stay reportable
-// together: bare Info, naming the types and the apiType. Those fields are what
-// say which assumption was applied, and are what would show the input-union
-// assumption behind PartModality to be wrong if it ever is. The line also has
-// to precede the early return Execute takes when nothing was collected, since
-// a request carrying only declined parts leaves refs empty and is the case
-// most worth seeing.
-func TestReplaceMediaURLsStep_DeclinedPartsOnResponsesAreLogged(t *testing.T) {
-	step := newLoopbackStep(t, map[string]any{"download_timeout": "5s"})
-	sink := &logCaptureSink{}
-	reqCtx := &pipeline.RequestContext{
-		OriginalPath: reqcommon.PathResponses,
-		Body: map[string]any{
-			"input": []any{
-				map[string]any{
-					"role": "user",
-					"content": []any{
-						map[string]any{"type": "input_text", "text": "transcribe"},
-						map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "AAAA", "format": "wav"}},
-						map[string]any{"type": "video_url", "video_url": map[string]any{"url": "http://example.test/v.mp4"}},
-					},
-				},
-			},
-		},
-	}
-
-	if err := step.Execute(log.IntoContext(context.Background(), logr.New(sink)), reqCtx); err != nil {
-		t.Fatalf("a declined part is not an error: %v", err)
-	}
-	if len(reqCtx.MultimodalEntries) != 0 {
-		t.Errorf("declined parts must build no entries, got %v", reqCtx.MultimodalEntries)
-	}
-
-	var line *capturedLog
-	for i := range sink.infos {
-		if sink.infos[i].msg == "skipped multimodal content parts the encoder cannot be primed with" {
-			line = &sink.infos[i]
-		}
-	}
-	if line == nil {
-		t.Fatalf("expected a line reporting the declined parts, got %+v", sink.infos)
-	}
-	// V(0): bare Info, the level extractMMItems reports the same decision at.
-	if line.level != 0 {
-		t.Errorf("reported at V(%d), want V(0) to match the sidecar", line.level)
-	}
-	// Each field is checked for presence before value, so a line that stops
-	// carrying one names the field rather than reporting it as <nil>.
-	if got, ok := line.value("count"); !ok || got != 2 {
-		t.Errorf("count = %v (present %t), want 2", got, ok)
-	}
-	if got, ok := line.value("apiType"); !ok || got != reqcommon.APITypeResponses {
-		t.Errorf("apiType = %v (present %t), want %v", got, ok, reqcommon.APITypeResponses)
-	}
-	gotTypes, ok := line.value("types")
-	if !ok {
-		t.Fatalf("line carries no types field: %v", line.kvs)
-	}
-	wantTypes := []string{"input_audio", "video_url"}
-	if types, ok := gotTypes.([]string); !ok || !slices.Equal(types, wantTypes) {
-		t.Errorf("types = %v, want %v", gotTypes, wantTypes)
-	}
-}
-
-// A chat-completions request carrying the same parts declines nothing, so the
-// line stays off the path these types are defined on.
-func TestReplaceMediaURLsStep_NothingDeclinedOnChatCompletions(t *testing.T) {
-	step := newLoopbackStep(t, map[string]any{"download_timeout": "5s"})
-	sink := &logCaptureSink{}
-	reqCtx := &pipeline.RequestContext{
-		OriginalPath: reqcommon.PathChatCompletions,
-		Body: map[string]any{
-			"messages": []any{
-				map[string]any{
-					"role": "user",
-					"content": []any{
-						map[string]any{"type": "text", "text": "transcribe"},
-						map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "AAAA", "format": "wav"}},
-					},
-				},
-			},
-		},
-	}
-
-	if err := step.Execute(log.IntoContext(context.Background(), logr.New(sink)), reqCtx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	for _, got := range sink.infos {
-		if got.msg == "skipped multimodal content parts the encoder cannot be primed with" {
-			t.Errorf("nothing is declined on chat completions, got %+v", got)
-		}
-	}
-}
-
 // Pins the default in enforceInlineSize: with no max_image_download_size set,
 // an image data URI is bounded by the server's max_request_body_size, not by
 // max_download_size. Every deployment setting max_download_size relies on that
@@ -2915,8 +2811,7 @@ func TestReplaceMediaURLsStep_MixedAudio_WalkerOrder(t *testing.T) {
 	// entries[1] (URL) with partsByMod[audio][1]. A regression that swaps the
 	// entries would break this pairing silently.
 	items, _ := promptItems(reqCtx.Body, reqcommon.APITypeChatCompletions)
-	grouped, _ := collectMediaParts(items, reqcommon.APITypeChatCompletions)
-	partsByMod := groupMediaPartsByModality(grouped)
+	partsByMod := groupMediaPartsByModality(collectMediaParts(items, reqcommon.APITypeChatCompletions))
 	audioParts := partsByMod[reqcommon.ModalityAudio]
 	if got := len(audioParts); got != 2 {
 		t.Fatalf("partsByMod[audio] len = %d, want 2", got)
@@ -3521,13 +3416,15 @@ func TestReplaceMediaURLsStep_Responses_InlinesFunctionCallOutputImage(t *testin
 	}
 }
 
-// TestReplaceMediaURLsStep_ResponsesIgnoresChatImagePart is the other half of
-// reqcommon.PartModality's rule. The Responses input union does not define image_url, so a
-// request carrying one fails the model server's input validation and no worker
-// sees it. Collecting it here would download an image the request never uses
-// and leave an entry the render service reports no hash for, failing the
-// request on the feature count instead.
-func TestReplaceMediaURLsStep_ResponsesIgnoresChatImagePart(t *testing.T) {
+// A chat image_url part on a Responses request is collected and downloaded,
+// the same as on a chat request: reqcommon.PartModality's answer does not
+// depend on the API that carried the part.
+//
+// The model server's own input validation is what rejects such a request, so
+// the download here is work spent on a request that will not be served. Note
+// also that the entry has to pair with a hash from the render service, or the
+// feature count fails the request in render rather than at the model server.
+func TestReplaceMediaURLsStep_ResponsesCollectsChatImagePart(t *testing.T) {
 	var hits atomic.Int32
 	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
@@ -3560,10 +3457,13 @@ func TestReplaceMediaURLsStep_ResponsesIgnoresChatImagePart(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(reqCtx.MultimodalEntries) != 0 {
-		t.Errorf("expected no multimodal entry for a chat image part on a Responses request, got %d", len(reqCtx.MultimodalEntries))
+	if len(reqCtx.MultimodalEntries) != 1 {
+		t.Fatalf("expected one multimodal entry for the chat image part, got %d", len(reqCtx.MultimodalEntries))
 	}
-	if n := hits.Load(); n != 0 {
-		t.Errorf("expected no download, got %d", n)
+	if got := reqCtx.MultimodalEntries[0].Modality; got != reqcommon.ModalityImage {
+		t.Errorf("entry modality = %q, want %q", got, reqcommon.ModalityImage)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Errorf("expected the part to be downloaded once, got %d", n)
 	}
 }

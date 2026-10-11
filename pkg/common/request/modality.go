@@ -41,36 +41,23 @@ const (
 	ModalityVideo Modality = "video"
 )
 
-// PartModality reports the Modality a content part of type partType names on a
-// request to apiType. ok is false for a part type that names no media on that
-// API, and this is the only place that decides which do.
+// PartModality reports the Modality a content part of type partType names. ok
+// is false for a part type that names no media, and this is the only place that
+// decides which do.
 //
-// A chat-completions request may name an image either way: vLLM's chat parser
-// primes input_image and image_url through the same content part map, so an
-// input_image on a chat request reaches the model and has to be collected. It
-// alone also carries the audio and video part types, inline or by URL.
-//
-// A Responses request names an image input_image only, and names no audio or
-// video at all: its input content union is input_text / input_image /
-// input_file, so a Responses request carrying any of the others fails the model
-// server's input validation before a worker sees it. An entry built for such a
-// part would carry placeholder tokens no worker ever produces, and an encoder
-// primed with one would fail the fanout first.
+// The answer does not depend on which API carries the part. An image is named
+// either way, since vLLM's chat parser primes input_image and image_url through
+// the same content part map; audio and video are named by their own part types,
+// inline or by URL.
 //
 // What a caller does with ok == false is its own business, and the callers
 // differ: the coordinator's walkers pass over the part, while the sidecar's
-// encoder fan-out counts a part type that names media on some other API as a
-// skipped part so the drop is visible in a log line. What they may not do is
-// disagree about which parts exist at all, which is why they share this.
-func PartModality(partType string, apiType APIType) (Modality, bool) {
-	if partType == PartTypeInputImage {
-		return ModalityImage, true
-	}
-	if apiType == APITypeResponses {
-		return "", false
-	}
+// encoder fan-out treats an input_image it cannot fetch as a skipped part so
+// the drop is visible in a log line. What they may not do is disagree about
+// which parts exist at all, which is why they share this.
+func PartModality(partType string) (Modality, bool) {
 	switch partType {
-	case PartTypeImageURL:
+	case PartTypeImageURL, PartTypeInputImage:
 		return ModalityImage, true
 	case PartTypeAudioURL, PartTypeInputAudio:
 		return ModalityAudio, true

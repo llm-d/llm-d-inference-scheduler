@@ -192,24 +192,12 @@ type capturedLog struct {
 	level int
 	msg   string
 	err   error
-	kvs   []any
-}
-
-// value returns the key-value a log line carried under key, for a test that
-// asserts on a field rather than only the message.
-func (c capturedLog) value(key string) (any, bool) {
-	for i := 0; i+1 < len(c.kvs); i += 2 {
-		if k, ok := c.kvs[i].(string); ok && k == key {
-			return c.kvs[i+1], true
-		}
-	}
-	return nil, false
 }
 
 func (s *logCaptureSink) Init(_ logr.RuntimeInfo) {}
 func (s *logCaptureSink) Enabled(_ int) bool      { return true }
-func (s *logCaptureSink) Info(level int, msg string, kvs ...any) {
-	s.infos = append(s.infos, capturedLog{level: level, msg: msg, kvs: kvs})
+func (s *logCaptureSink) Info(level int, msg string, _ ...any) {
+	s.infos = append(s.infos, capturedLog{level: level, msg: msg})
 }
 func (s *logCaptureSink) Error(err error, msg string, _ ...any) {
 	s.errors = append(s.errors, capturedLog{msg: msg, err: err})

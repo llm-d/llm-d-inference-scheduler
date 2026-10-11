@@ -24,7 +24,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1042,8 +1041,7 @@ func TestCollectMediaParts_MixedModalities(t *testing.T) {
 			},
 		},
 	}
-	walked, _ := collectMediaParts(items, reqcommon.APITypeChatCompletions)
-	partsByMod := groupMediaPartsByModality(walked)
+	partsByMod := groupMediaPartsByModality(collectMediaParts(items, reqcommon.APITypeChatCompletions))
 	if got := len(partsByMod[reqcommon.ModalityImage]); got != 2 {
 		t.Errorf("image parts = %d, want 2", got)
 	}
@@ -1062,17 +1060,13 @@ func TestCollectMediaParts_MixedModalities(t *testing.T) {
 	}
 }
 
-// A Responses request names an image input_image only, and names no audio or
-// video: its input content union does not define the chat part types, so a
-// request carrying one fails the model server's own validation. Collecting one
-// would build an entry whose placeholder tokens no worker produces.
+// A Responses request collects every media-typed part, the same set a chat
+// request does. PartModality's answer does not depend on the API, so the walk
+// differs between the two only in which arrays an item holds.
 //
-// The declined accounting is asserted alongside, because dropping these is a
-// decision rather than a non-event: replace-media-urls turns this into the one
-// operator-visible line about it. input_text is the control. It fails
-// PartModality too, but it names media on no API, so counting it would put
-// that line out for every request carrying prose.
-func TestCollectMediaParts_ResponsesKeepsInputImageOnly(t *testing.T) {
+// input_text is the control: it names no media on any API, so it is passed
+// over here while the five media parts are collected.
+func TestCollectMediaParts_ResponsesCollectsEveryMediaPart(t *testing.T) {
 	items := []any{
 		map[string]any{
 			"role": "user",
@@ -1086,46 +1080,26 @@ func TestCollectMediaParts_ResponsesKeepsInputImageOnly(t *testing.T) {
 			},
 		},
 	}
-	parts, declined := collectMediaParts(items, reqcommon.APITypeResponses)
-	if len(parts) != 1 {
-		t.Fatalf("collected %d parts, want only the input_image: %+v", len(parts), parts)
+	parts := collectMediaParts(items, reqcommon.APITypeResponses)
+	if len(parts) != 5 {
+		t.Fatalf("collected %d parts, want 5: %+v", len(parts), parts)
 	}
-	if parts[0].modality != reqcommon.ModalityImage || parts[0].part["image_url"] != "u1" {
-		t.Errorf("collected %+v, want the input_image part tagged image", parts[0])
+	want := []reqcommon.Modality{
+		reqcommon.ModalityImage, // input_image
+		reqcommon.ModalityImage, // image_url
+		reqcommon.ModalityAudio, // audio_url
+		reqcommon.ModalityVideo, // video_url
+		reqcommon.ModalityAudio, // input_audio
 	}
-
-	// Four media-typed parts were passed over, in request order, and the
-	// input_text was not among them.
-	if declined.count != 4 {
-		t.Errorf("declined.count = %d, want 4", declined.count)
+	for i, mod := range want {
+		if parts[i].modality != mod {
+			t.Errorf("part %d modality = %q, want %q", i, parts[i].modality, mod)
+		}
 	}
-	wantTypes := []string{"image_url", "audio_url", "video_url", "input_audio"}
-	if !slices.Equal(declined.types, wantTypes) {
-		t.Errorf("declined.types = %v, want %v", declined.types, wantTypes)
-	}
-}
-
-// The same part types on chat completions: nothing is declined, so the line
-// replace-media-urls emits stays off the path these types are defined on.
-func TestCollectMediaParts_ChatCompletionsDeclinesNothing(t *testing.T) {
-	items := []any{
-		map[string]any{
-			"role": "user",
-			"content": []any{
-				map[string]any{"type": "text", "text": "describe"},
-				map[string]any{"type": "image_url", "image_url": map[string]any{"url": "u2"}},
-				map[string]any{"type": "audio_url", "audio_url": map[string]any{"url": "u3"}},
-				map[string]any{"type": "video_url", "video_url": map[string]any{"url": "u4"}},
-				map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "d5", "format": "wav"}},
-			},
-		},
-	}
-	parts, declined := collectMediaParts(items, reqcommon.APITypeChatCompletions)
-	if len(parts) != 4 {
-		t.Fatalf("collected %d parts, want 4: %+v", len(parts), parts)
-	}
-	if declined.count != 0 || declined.types != nil {
-		t.Errorf("declined = %+v, want nothing declined on chat completions", declined)
+	// Request order is what pairs entries with parts, so the walk must not
+	// reorder the two images around the audio between them.
+	if parts[0].part["image_url"] != "u1" {
+		t.Errorf("part 0 = %+v, want the input_image carrying u1", parts[0].part)
 	}
 }
 
@@ -1158,8 +1132,7 @@ func TestCollectMediaParts_KeepsEveryMediaTypedPart(t *testing.T) {
 			},
 		},
 	}
-	walked, _ := collectMediaParts(items, reqcommon.APITypeChatCompletions)
-	partsByMod := groupMediaPartsByModality(walked)
+	partsByMod := groupMediaPartsByModality(collectMediaParts(items, reqcommon.APITypeChatCompletions))
 	if got := len(partsByMod[reqcommon.ModalityImage]); got != 3 {
 		t.Fatalf("image parts = %d, want 3 (every image-typed part)", got)
 	}

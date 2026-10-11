@@ -122,7 +122,9 @@ const (
 //
 // The Responses input content union is input_text / input_image / input_file, so
 // a Responses request carrying one of the others is refused by the model
-// server. FieldFileID on an input_image, input_file or
+// server. PartModality does not act on that: it answers by part type alone, so
+// such a part is still collected and primed and the refusal happens at the
+// model server. FieldFileID on an input_image, input_file or
 // computer_screenshot names a Files API upload the serving engine has to fetch.
 const (
 	PartTypeImageURL           = "image_url"

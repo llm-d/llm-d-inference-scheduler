@@ -134,17 +134,12 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 				continue
 			}
 
-			// Which part types name media on this API is
-			// reqcommon.PartModality's rule, shared with the coordinator steps
-			// so the two cannot disagree about which parts exist.
-			if _, isMedia := reqcommon.PartModality(partType, apiType); !isMedia {
-				// Counted only when the type names media on some other API --
-				// a chat-only part on a Responses request -- since counting a
-				// text or tool part would fire the line on ordinary traffic.
-				if _, chatOnly := reqcommon.PartModality(partType, reqcommon.APITypeChatCompletions); chatOnly {
-					logger.V(logging.DEBUG).Info("skipping content part the Responses input union does not define", "type", partType, "apiType", apiType)
-					droppedParts++
-				}
+			// Which part types name media is reqcommon.PartModality's rule,
+			// shared with the coordinator steps so the two cannot disagree
+			// about which parts exist. A part naming none is not counted as a
+			// drop: every text and tool part lands here, so counting them
+			// would fire the line below on ordinary traffic.
+			if _, isMedia := reqcommon.PartModality(partType); !isMedia {
 				continue
 			}
 

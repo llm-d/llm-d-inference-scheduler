@@ -1262,16 +1262,17 @@ forwards the `output` array as a tool message's content, so an image in it
 reaches the model like any other part.
 
 The Responses input content union is `input_text` / `input_image` / `input_file`,
-so audio and video reach the pipeline on chat completions only, and a Responses
-request names an image `input_image` only while a chat request names one either
-way. `reqcommon.PartModality` is the single implementation of that rule --
-`pkg/common/request/modality.go`, where its godoc records why each case falls
-the way it does -- and every stage of both the coordinator and the sidecar
-calls it rather than carrying its own copy.
+so a Responses request carrying `image_url`, `audio_url`, `video_url` or
+`input_audio` is refused by the model server. The pipeline does not pre-empt
+that refusal: `reqcommon.PartModality` answers by part type alone, so those
+parts are collected, downloaded and primed on either API, and the request then
+fails at the model server rather than earlier. `pkg/common/request/modality.go`
+is the single implementation of that rule, and every stage of both the
+coordinator and the sidecar calls it rather than carrying its own copy.
 
 Per stage:
 
-1. **replace-media-urls**: walks `input` for `input_image` parts and inlines each URL as a data URI (see [Stage 1](#stage-1-replace-media-urls))
+1. **replace-media-urls**: walks `input` for media parts and inlines each URL as a data URI; a request the model server accepts carries `input_image` (see [Stage 1](#stage-1-replace-media-urls))
 2. **render**: posts to `/v1/responses/render`; same response shape as chat completions (see [2.D](#2d-v1responsesrender))
 3. **conditional-decode**: forwards the body unchanged to `/v1/responses`
 4. **encode**: one `/v1/responses` sub-request per image, each carrying a single `input_image` part (see [Option C](#option-c-v1responses))
