@@ -2379,13 +2379,18 @@ func TestReplaceMediaURLsStep_DeclinedPartsOnResponsesAreLogged(t *testing.T) {
 	if line.level != 0 {
 		t.Errorf("reported at V(%d), want V(0) to match the sidecar", line.level)
 	}
-	if got, _ := line.value("count"); got != 2 {
-		t.Errorf("count = %v, want 2", got)
+	// Each field is checked for presence before value, so a line that stops
+	// carrying one names the field rather than reporting it as <nil>.
+	if got, ok := line.value("count"); !ok || got != 2 {
+		t.Errorf("count = %v (present %t), want 2", got, ok)
 	}
-	if got, _ := line.value("apiType"); got != reqcommon.APITypeResponses {
-		t.Errorf("apiType = %v, want %v", got, reqcommon.APITypeResponses)
+	if got, ok := line.value("apiType"); !ok || got != reqcommon.APITypeResponses {
+		t.Errorf("apiType = %v (present %t), want %v", got, ok, reqcommon.APITypeResponses)
 	}
-	gotTypes, _ := line.value("types")
+	gotTypes, ok := line.value("types")
+	if !ok {
+		t.Fatalf("line carries no types field: %v", line.kvs)
+	}
 	wantTypes := []string{"input_audio", "video_url"}
 	if types, ok := gotTypes.([]string); !ok || !slices.Equal(types, wantTypes) {
 		t.Errorf("types = %v, want %v", gotTypes, wantTypes)
