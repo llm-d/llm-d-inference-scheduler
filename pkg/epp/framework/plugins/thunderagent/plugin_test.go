@@ -123,3 +123,13 @@ func TestRuntimeReleaseEndpointRemovesEndpoint(t *testing.T) {
 	runtime.ReleaseEndpoint(endpoint)
 	require.Equal(t, float64(-1), endpointTokens(a, "default/pod-a"))
 }
+
+// PreRequest stores each turn's estimate under inflightEstimateKey for its
+// later hooks. The data layer drops undeclared request-attribute writes and
+// fails the request, so the key must be declared.
+func TestProducesInflightEstimate(t *testing.T) {
+	a := newTestAgent(testConfig())
+	produced, ok := a.Produces()[inflightEstimateKey]
+	require.True(t, ok)
+	require.IsType(t, int64(0), produced)
+}

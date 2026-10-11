@@ -142,6 +142,12 @@ func (a *ThunderAgent) Consumes() fwkplugin.DataDependencies {
 	}
 }
 
+// Produces declares the request attribute PreRequest writes for the plugin's own
+// later hooks; the data layer drops undeclared writes and fails the request.
+func (a *ThunderAgent) Produces() map[fwkplugin.DataKey]any {
+	return map[fwkplugin.DataKey]any{inflightEstimateKey: int64(0)}
+}
+
 // sessionID returns the session identifier published by the agent-identity
 // plugin, or "" for requests carrying none. The fairness ID is not used: an
 // explicit fairness header often carries a tenant rather than a session.
