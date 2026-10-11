@@ -94,8 +94,6 @@ func TestBuildImmediateResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := BuildImmediateResponse(tt.code, tt.headers, tt.body)
-			sortHeadersByKey(got.GetImmediateResponse().GetHeaders().GetSetHeaders())
-			sortHeadersByKey(tt.want.GetHeaders().GetSetHeaders())
 			want := &extProcPb.ProcessingResponse{
 				Response: &extProcPb.ProcessingResponse_ImmediateResponse{ImmediateResponse: tt.want},
 			}

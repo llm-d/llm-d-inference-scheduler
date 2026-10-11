@@ -17,7 +17,6 @@ limitations under the License.
 package envoy
 
 import (
-	"sort"
 	"testing"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -153,8 +152,6 @@ func TestGenerateHeadersMutation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GenerateHeadersMutation(tt.headers)
-			sortHeadersByKey(got)
-			sortHeadersByKey(tt.want)
 			if diff := cmp.Diff(tt.want, got, protocmp.Transform()); diff != "" {
 				t.Errorf("GenerateHeadersMutation() mismatch (-want +got):\n%s", diff)
 			}
@@ -214,12 +211,4 @@ func TestGetHeaderValue(t *testing.T) {
 			}
 		})
 	}
-}
-
-// sortHeadersByKey orders a header mutation built from a map, whose iteration
-// order is unspecified, for comparison.
-func sortHeadersByKey(opts []*corev3.HeaderValueOption) {
-	sort.Slice(opts, func(i, j int) bool {
-		return opts[i].GetHeader().GetKey() < opts[j].GetHeader().GetKey()
-	})
 }

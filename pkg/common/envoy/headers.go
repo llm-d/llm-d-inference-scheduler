@@ -17,6 +17,8 @@ limitations under the License.
 package envoy
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -56,13 +58,15 @@ func SetHeadersMap(options []*corev3.HeaderValueOption) map[string]string {
 	return headers
 }
 
+// GenerateHeadersMutation builds the set-header options for headers, in key
+// order, so the mutation does not depend on map iteration order.
 func GenerateHeadersMutation(headers map[string]string) []*corev3.HeaderValueOption {
 	headersMutation := make([]*corev3.HeaderValueOption, 0, len(headers))
-	for key, value := range headers {
+	for _, key := range slices.Sorted(maps.Keys(headers)) {
 		headersMutation = append(headersMutation, &corev3.HeaderValueOption{
 			Header: &corev3.HeaderValue{
 				Key:      key,
-				RawValue: []byte(value),
+				RawValue: []byte(headers[key]),
 			},
 		})
 	}
