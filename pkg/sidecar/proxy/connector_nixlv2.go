@@ -89,7 +89,7 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	}
 
 	// Telemetry failure must not change routing or reject an inference request.
-	toolFields, _ := captureToolCallingRequest(apiType, original)
+	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
 	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
 
 	// Prefill Stage
@@ -436,12 +436,7 @@ retryLoop:
 	if !dataParallelUsed {
 		s.logger.V(logging.DEBUG).Info("sending request to decoder", "to", s.config.DecoderURL.Host)
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeTarget(s.config.DecoderURL.Host))
-		// Chunked decode constructs its own outbound bodies; this prepared body
-		// is only dispatched directly when chunking is disabled for the API.
-		if s.config.DecodeChunkSize <= 0 || apiType != reqcommon.APITypeChatCompletions {
-			_, _ = toolFields.compareDispatched(dbody)
-		}
-		s.dispatchDecode(decodeWriter, dreq, body)
+		s.dispatchDecode(decodeWriter, dreq, body, dbody, toolFields)
 	}
 	decodeReturned = true
 	if err := finalizeDecodeWriter(); err != nil {
@@ -505,7 +500,7 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 	body map[string]any, uuidStr, transferID, prefillPodHostPort, kvCacheSource string,
 	apiType reqcommon.APIType,
 ) {
-	toolFields, _ := captureToolCallingRequest(apiType, original)
+	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
 	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
 
 	s.logger.V(logging.DEBUG).Info("running NIXL protocol V2 (concurrent dispatch)",
