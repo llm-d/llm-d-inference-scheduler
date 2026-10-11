@@ -197,13 +197,32 @@ func (s *ReplaceMediaURLsStep) Execute(ctx context.Context, reqCtx *pipeline.Req
 	// collectMediaParts); two passes over URL and inline parts would reorder
 	// audio whenever a request mixes audio_url and input_audio.
 	var refs []mediaRef
+	var declined declinedParts
 	apiType := reqcommon.DetectAPIType(reqCtx.OriginalPath)
 	if items, ok := promptItems(reqCtx.Body, apiType); ok {
 		var err error
-		refs, err = collectMediaRefs(items, apiType)
+		refs, declined, err = collectMediaRefs(items, apiType)
 		if err != nil {
 			return err
 		}
+	}
+
+	// Audio and video are declined on a Responses request, whose input union
+	// defines input_text / input_image / input_file only. The walk recognizes
+	// those part types and passes over them, which is a policy decision rather
+	// than a non-event, so report it the way the sidecar reports the same
+	// decision (extractMMItems in connector_ec_common.go). Before the return
+	// below, because a request carrying nothing else leaves refs empty and is
+	// exactly the case worth seeing. It is also what would say so if the
+	// input-union assumption behind PartModality is ever wrong.
+	// Bare Info, the level and the wording extractMMItems uses, so the two
+	// components report the same decision the same way and one query finds
+	// both. That is above the V(logutil.DEFAULT) the rest of this package
+	// logs at, which is the point: the line fires only on a request whose
+	// media the coordinator declined.
+	if declined.count > 0 {
+		logger.Info("skipped multimodal content parts the encoder cannot be primed with",
+			"count", declined.count, "types", declined.types, "extracted", len(refs), "apiType", apiType)
 	}
 
 	if len(refs) == 0 {
@@ -319,21 +338,22 @@ func (s *ReplaceMediaURLsStep) Execute(ctx context.Context, reqCtx *pipeline.Req
 // URL to download or inline. An input_audio part carries its payload in the
 // body instead, so it needs the base64 data; its format, MIME and size are
 // validated by validateInlineAudio, which Execute runs before any download.
-func collectMediaRefs(items []any, apiType reqcommon.APIType) ([]mediaRef, error) {
+func collectMediaRefs(items []any, apiType reqcommon.APIType) ([]mediaRef, declinedParts, error) {
 	var refs []mediaRef
-	for _, media := range collectMediaParts(items, apiType) {
+	parts, declined := collectMediaParts(items, apiType)
+	for _, media := range parts {
 		partType, _ := media.part[reqcommon.FieldType].(string)
 		if partType == reqcommon.PartTypeInputAudio {
 			ref, err := inlineAudioRef(media)
 			if err != nil {
-				return nil, err
+				return nil, declined, err
 			}
 			refs = append(refs, ref)
 			continue
 		}
 		url, setURL := reqcommon.MediaPartURLRef(media.part)
 		if setURL == nil || url == "" {
-			return nil, fmt.Errorf("%s: %s part carries no fetchable URL: %w",
+			return nil, declined, fmt.Errorf("%s: %s part carries no fetchable URL: %w",
 				media.location, media.modality, pipeline.ErrBadRequest)
 		}
 		refs = append(refs, mediaRef{
@@ -343,7 +363,7 @@ func collectMediaRefs(items []any, apiType reqcommon.APIType) ([]mediaRef, error
 			setURL:   setURL,
 		})
 	}
-	return refs, nil
+	return refs, declined, nil
 }
 
 // inlineAudioRef builds the ref for an input_audio part, whose payload sits in

@@ -137,7 +137,10 @@ func injectMediaPartUUIDs(items []any, apiType reqcommon.APIType, entries []pipe
 	}
 
 	modCounter := make(map[reqcommon.Modality]int)
-	for _, media := range collectMediaParts(items, apiType) {
+	// Declined parts are reported by replace-media-urls, which walks this body
+	// before any of this runs; see the note at the encode walk.
+	parts, _ := collectMediaParts(items, apiType)
+	for _, media := range parts {
 		localIdx := modCounter[media.modality]
 		modCounter[media.modality]++
 		hashes := hashesByMod[media.modality]

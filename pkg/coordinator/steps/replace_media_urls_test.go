@@ -30,6 +30,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
@@ -463,7 +466,7 @@ func TestReplaceMediaURLsStep_EntriesMatchTheMediaPartWalk(t *testing.T) {
 	items := []any{map[string]any{"role": "user", "content": parts}}
 
 	// What the shared walk says the answer is, over the same body Execute reads.
-	walked := collectMediaParts(items, reqcommon.APITypeChatCompletions)
+	walked, _ := collectMediaParts(items, reqcommon.APITypeChatCompletions)
 	wantModalities := make([]reqcommon.Modality, 0, len(walked))
 	for _, media := range walked {
 		wantModalities = append(wantModalities, media.modality)
@@ -2323,6 +2326,102 @@ func TestReplaceMediaURLsStep_AudioDataURI_UsesAudioCap(t *testing.T) {
 	}
 }
 
+// The one operator-visible line about a decision the walk otherwise makes in
+// silence: a Responses request carrying input_audio has that part passed over,
+// because the input union defines input_text / input_image / input_file only.
+// The sidecar reports the same decision in extractMMItems, so leaving the
+// coordinator quiet meant the identical request was visible through one
+// component and invisible through the other.
+//
+// Pinned at the sidecar's level and fields, so the two stay reportable
+// together: bare Info, naming the types and the apiType. Those fields are what
+// say which assumption was applied, and are what would show the input-union
+// assumption behind PartModality to be wrong if it ever is. The line also has
+// to precede the early return Execute takes when nothing was collected, since
+// a request carrying only declined parts leaves refs empty and is the case
+// most worth seeing.
+func TestReplaceMediaURLsStep_DeclinedPartsOnResponsesAreLogged(t *testing.T) {
+	step := newLoopbackStep(t, map[string]any{"download_timeout": "5s"})
+	sink := &logCaptureSink{}
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathResponses,
+		Body: map[string]any{
+			"input": []any{
+				map[string]any{
+					"role": "user",
+					"content": []any{
+						map[string]any{"type": "input_text", "text": "transcribe"},
+						map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "AAAA", "format": "wav"}},
+						map[string]any{"type": "video_url", "video_url": map[string]any{"url": "http://example.test/v.mp4"}},
+					},
+				},
+			},
+		},
+	}
+
+	if err := step.Execute(log.IntoContext(context.Background(), logr.New(sink)), reqCtx); err != nil {
+		t.Fatalf("a declined part is not an error: %v", err)
+	}
+	if len(reqCtx.MultimodalEntries) != 0 {
+		t.Errorf("declined parts must build no entries, got %v", reqCtx.MultimodalEntries)
+	}
+
+	var line *capturedLog
+	for i := range sink.infos {
+		if sink.infos[i].msg == "skipped multimodal content parts the encoder cannot be primed with" {
+			line = &sink.infos[i]
+		}
+	}
+	if line == nil {
+		t.Fatalf("expected a line reporting the declined parts, got %+v", sink.infos)
+	}
+	// V(0): bare Info, the level extractMMItems reports the same decision at.
+	if line.level != 0 {
+		t.Errorf("reported at V(%d), want V(0) to match the sidecar", line.level)
+	}
+	if got, _ := line.value("count"); got != 2 {
+		t.Errorf("count = %v, want 2", got)
+	}
+	if got, _ := line.value("apiType"); got != reqcommon.APITypeResponses {
+		t.Errorf("apiType = %v, want %v", got, reqcommon.APITypeResponses)
+	}
+	gotTypes, _ := line.value("types")
+	wantTypes := []string{"input_audio", "video_url"}
+	if types, ok := gotTypes.([]string); !ok || !slices.Equal(types, wantTypes) {
+		t.Errorf("types = %v, want %v", gotTypes, wantTypes)
+	}
+}
+
+// A chat-completions request carrying the same parts declines nothing, so the
+// line stays off the path these types are defined on.
+func TestReplaceMediaURLsStep_NothingDeclinedOnChatCompletions(t *testing.T) {
+	step := newLoopbackStep(t, map[string]any{"download_timeout": "5s"})
+	sink := &logCaptureSink{}
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathChatCompletions,
+		Body: map[string]any{
+			"messages": []any{
+				map[string]any{
+					"role": "user",
+					"content": []any{
+						map[string]any{"type": "text", "text": "transcribe"},
+						map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "AAAA", "format": "wav"}},
+					},
+				},
+			},
+		},
+	}
+
+	if err := step.Execute(log.IntoContext(context.Background(), logr.New(sink)), reqCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, got := range sink.infos {
+		if got.msg == "skipped multimodal content parts the encoder cannot be primed with" {
+			t.Errorf("nothing is declined on chat completions, got %+v", got)
+		}
+	}
+}
+
 // Pins the default in enforceInlineSize: with no max_image_download_size set,
 // an image data URI is bounded by the server's max_request_body_size, not by
 // max_download_size. Every deployment setting max_download_size relies on that
@@ -2811,7 +2910,8 @@ func TestReplaceMediaURLsStep_MixedAudio_WalkerOrder(t *testing.T) {
 	// entries[1] (URL) with partsByMod[audio][1]. A regression that swaps the
 	// entries would break this pairing silently.
 	items, _ := promptItems(reqCtx.Body, reqcommon.APITypeChatCompletions)
-	partsByMod := groupMediaPartsByModality(collectMediaParts(items, reqcommon.APITypeChatCompletions))
+	grouped, _ := collectMediaParts(items, reqcommon.APITypeChatCompletions)
+	partsByMod := groupMediaPartsByModality(grouped)
 	audioParts := partsByMod[reqcommon.ModalityAudio]
 	if got := len(audioParts); got != 2 {
 		t.Fatalf("partsByMod[audio] len = %d, want 2", got)

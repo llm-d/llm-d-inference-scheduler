@@ -103,7 +103,11 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	format := resolveFormat(s.useOpenAIFormat, reqCtx.OriginalPath)
 	var partsByMod map[reqcommon.Modality][]mediaPart
 	if items, ok := promptItems(reqCtx.Body, format); ok {
-		partsByMod = groupMediaPartsByModality(collectMediaParts(items, format))
+		// Declined parts go unreported here: replace-media-urls walks the same
+		// body first and logs them once, so repeating it would put the same
+		// line out three times per request.
+		parts, _ := collectMediaParts(items, format)
+		partsByMod = groupMediaPartsByModality(parts)
 	}
 
 	// Entry i's local index is its position among the entries sharing its
