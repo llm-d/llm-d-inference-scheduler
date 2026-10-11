@@ -124,14 +124,11 @@ func (s *RenderStep) SetServiceAddress(addr string) {
 func (s *RenderStep) Name() string { return RenderStepName }
 
 func (s *RenderStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) error {
-	// The one check of this invariant for the whole pipeline, placed here
-	// because this is the first step to pair on Modality (see modIndex in
-	// applyRenderResponse) and because entries from replace_media_urls are
-	// already in place by now. The later readers take the entries this
-	// accepted, so repeating it in each of them bought nothing. On the
-	// generate path the slice is still empty here; executeGenerate fills it
-	// below, and extractMultimodalEntries rejects an empty modality key as it
-	// builds, so that producer guards itself.
+	// The pipeline's only check of this invariant: this is the first step to
+	// pair on Modality (see modIndex in applyRenderResponse), replace-media-urls
+	// entries are already in place, and the later readers take whatever this
+	// accepted. The generate path arrives with an empty slice and fills it in
+	// executeGenerate below, where extractMultimodalEntries guards itself.
 	if err := validateEntryModalities(reqCtx.MultimodalEntries); err != nil {
 		return fmt.Errorf("render: %w", err)
 	}
@@ -201,10 +198,9 @@ func (s *RenderStep) executeGenerate(ctx context.Context, reqCtx *pipeline.Reque
 	}
 	reqCtx.MultimodalEntries = entries
 
-	// Per modality rather than main's single image observation: a token-in
-	// features map names its own modalities, so attributing every entry to
-	// image would mislabel an audio or video one. boundMediaType folds
-	// anything but image into MediaTypeOther.
+	// Counted per modality: a token-in features map names its own modalities,
+	// so attributing every entry to image would mislabel an audio or video
+	// one. boundMediaType folds anything but image into MediaTypeOther.
 	var imageItems, otherItems int
 	for _, entry := range entries {
 		if entry.Modality == reqcommon.ModalityImage {
@@ -337,10 +333,9 @@ func (s *RenderStep) applyRenderResponse(ctx context.Context, reqCtx *pipeline.R
 		return fmt.Errorf("render returned %d kwargs_data but expected %d", totalKwargs, expected)
 	}
 
-	// Walk entries in order, pulling hash/placeholder/kwargs from the response
-	// by a per-modality position counter: for an image-only request against an
-	// image-only response, modIndex[image] counts 0, 1, 2... and each entry
-	// pairs with the response slot at that position.
+	// Entries in order, each pulling its hash/placeholder/kwargs from the
+	// response slot at its per-modality position. For an image-only request
+	// that is plain positional pairing: modIndex[image] counts 0, 1, 2...
 	modIndex := make(map[reqcommon.Modality]int)
 	for i := range reqCtx.MultimodalEntries {
 		mod := reqCtx.MultimodalEntries[i].Modality

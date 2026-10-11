@@ -55,15 +55,13 @@ func MediaPartURL(part map[string]any) string {
 }
 
 // Base64DecodedLen returns the number of bytes a standard base64 payload
-// decodes to, without decoding it. Callers measuring an inline media payload
-// use it to size or bound the payload while it is still a string, so an
-// oversized one is never allocated.
+// decodes to, without decoding it, so a caller can bound an inline media
+// payload while it is still a string and never allocate an oversized one.
 //
-// Exact for a padded payload: stripping the padding leaves the characters that
-// carry data, and n*3/4 floors to the byte count for every length. Two cases
-// read long. A line-wrapped payload counts its newlines, about 1% high, and a
-// malformed one is measured rather than refused, since this reports a length
-// and the serving engine is what validates the encoding.
+// Exact for a padded payload. Two cases read long: a line-wrapped payload
+// counts its newlines (about 1% high), and a malformed one is measured rather
+// than refused, since this reports a length and the serving engine is what
+// validates the encoding.
 func Base64DecodedLen(rawB64 string) int {
 	n := len(rawB64)
 	for n > 0 && rawB64[n-1] == '=' {
@@ -89,14 +87,12 @@ type PartArray struct {
 // part type a media walk collects. A chat-completions message defines no
 // output, so walking one there would collect a part the client never sent.
 //
-// Callers share this array-selection rule, and PartModality for which parts in
-// an array name media. Together those are the whole of "which parts exist",
-// which is the one thing none of them may disagree about: a caller deciding
-// either for itself could walk a part another never saw. What callers still
-// decide for themselves is what to do with a part they skip -- the sidecar's
-// encoder fan-out logs and counts one it cannot prime, while the coordinator
-// steps keep every part that names a modality, since they pair parts with
-// multimodal entries by position and dropping one would shift that pairing.
+// Callers share this rule, and PartModality for which parts in an array name
+// media -- together the whole of "which parts exist", the one thing none of them
+// may disagree about. What they still decide for themselves is what to do with a
+// part they skip: the sidecar's fan-out logs and counts one it cannot prime,
+// while the coordinator steps keep every part that names a modality, since
+// dropping one would shift their positional pairing.
 //
 // Parts aliases the item it came from. A coordinator step writes a uuid or a
 // rewritten URL through it; the sidecar decodes its own copy, where a write

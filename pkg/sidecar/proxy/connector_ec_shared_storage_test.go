@@ -526,8 +526,8 @@ func TestExtractMMItemsDropsAreLogged(t *testing.T) {
 		{
 			// Two drops beside two survivors: the smallest input that tells a
 			// real count apart from one hardcoded to 1, and a real surviving
-			// total apart from 0. An input_image carrying no fetchable URL is
-			// the only part-drop reason left, so both drops are that shape.
+			// total apart from 0. An input_image with no fetchable URL is the
+			// only part-drop reason left, so both drops are that shape.
 			name: "every drop is counted alongside what survived",
 			request: map[string]any{"input": []any{userContent(
 				inputImageItem("https://example.com/keep.jpg"),

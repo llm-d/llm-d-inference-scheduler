@@ -193,14 +193,12 @@ type RequestContext struct {
 }
 
 // MultimodalEntry describes one multimodal item in the request and where it
-// sits in the tokenized prompt. Modality names the kind of content the item
-// carries; reqcommon.PartModality derives it from the content-part type
-// for a request that carries parts, and a token-in request's own feature-map
-// key supplies it otherwise. Hash and KwargsData are filled in by the render
-// step; Placeholder marks the span of placeholder tokens the encode step
-// replaces. The bytes stay in the request body (data URI or input_audio.data)
-// rather than on the entry, so a large audio or video payload is not duplicated
-// on reqCtx for the request's lifetime.
+// sits in the tokenized prompt. Modality comes from reqcommon.PartModality for
+// a request that carries content parts, and from the feature-map key for a
+// token-in one. Hash and KwargsData are filled in by the render step;
+// Placeholder marks the span of placeholder tokens the encode step replaces.
+// The bytes stay in the request body (data URI or input_audio.data) rather than
+// on the entry, so a large audio or video payload is not duplicated on reqCtx.
 //
 // An entry's position in this slice means nothing on its own: steps pair an
 // entry with its content part by counting entries of the same Modality. See

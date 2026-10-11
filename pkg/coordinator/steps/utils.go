@@ -184,20 +184,17 @@ type mediaPart struct {
 // input array and returns the media content parts in order.
 //
 // Every step that pairs reqCtx.MultimodalEntries with parts by position walks
-// from here: replace-media-urls builds the entries, encode picks the part to
-// prime, and decode stamps the hash. They agree because they see the same parts
-// in the same order, so a second walk elsewhere would reintroduce the chance to
-// disagree. Walking once also lets the encode fan-out index by position instead
-// of re-walking per entry (O(N*M) -> O(N+M)).
+// from here -- replace-media-urls builds the entries, encode picks the part to
+// prime, decode stamps the hash -- so they see the same parts in the same order
+// and a second walk elsewhere could disagree. Walking once also lets the encode
+// fan-out index by position instead of re-walking per entry (O(N*M) -> O(N+M)).
 //
 // Parts are returned whenever the type names a modality, with no check that the
 // part carries usable media: replace-media-urls rejects an unusable one as it
-// builds the entries (see collectMediaRefs), so filtering here would instead
-// let one through and shift every later part of its modality onto another
-// part's hash. Which part types count is reqcommon.PartModality's rule,
-// shared with the sidecar's encoder fan-out. That rule is the same on every
-// API, so this walk collects the same parts whichever one carried them;
-// apiType only selects the item label and which arrays an item holds.
+// builds the entries (see collectMediaRefs), so filtering here would shift every
+// later part of its modality onto another part's hash. Which types count is
+// reqcommon.PartModality's rule, the same on every API; apiType only selects the
+// item label and which arrays an item holds.
 func collectMediaParts(items []any, apiType reqcommon.APIType) []mediaPart {
 	itemLabel := "message"
 	if apiType == reqcommon.APITypeResponses {
@@ -234,10 +231,9 @@ func collectMediaParts(items []any, apiType reqcommon.APIType) []mediaPart {
 
 // inlineAudioData reads the payload of an input_audio content part, whose audio
 // sits in the request body rather than behind a URL: "data" holds the base64
-// audio and "format" names the codec. ok is false when there is no base64 data
-// to encode, the inline counterpart of reqcommon.MediaPartURLRef reporting no
-// URL. format is returned unchecked, since what names a codec is the audio
-// allowlist's business (see audioFormatToMIME).
+// audio and "format" names the codec. ok is false when there is no base64 data,
+// the inline counterpart of reqcommon.MediaPartURLRef reporting no URL. format
+// is returned unchecked; audioFormatToMIME is what judges it.
 func inlineAudioData(part map[string]any) (data, format string, ok bool) {
 	inner, isObject := part[reqcommon.PartTypeInputAudio].(map[string]any)
 	if !isObject {
@@ -253,9 +249,8 @@ func inlineAudioData(part map[string]any) (data, format string, ok bool) {
 
 // mediaPartCarriesPayload reports whether a media content part still carries
 // the media it names: a readable URL for a URL-based part, base64 data for an
-// inline input_audio part. replace-media-urls rejects a part carrying neither
-// as it builds the entries (see collectMediaRefs), so a step checking a part it
-// reached by position is being defensive.
+// inline input_audio part. replace-media-urls already rejects a part carrying
+// neither (see collectMediaRefs), so a later check is defensive.
 func mediaPartCarriesPayload(part map[string]any) bool {
 	if partType, _ := part[reqcommon.FieldType].(string); partType == reqcommon.PartTypeInputAudio {
 		_, _, ok := inlineAudioData(part)
@@ -265,8 +260,8 @@ func mediaPartCarriesPayload(part map[string]any) bool {
 }
 
 // groupMediaPartsByModality indexes a collectMediaParts walk by modality, each
-// list keeping the walk's order. Entries pair with parts within a modality, so
-// this is the shape a step indexes by an entry's per-modality position.
+// list keeping the walk's order: the shape a step indexes by an entry's
+// per-modality position.
 func groupMediaPartsByModality(parts []mediaPart) map[reqcommon.Modality][]mediaPart {
 	byMod := make(map[reqcommon.Modality][]mediaPart)
 	for _, p := range parts {
@@ -291,11 +286,9 @@ func modalityLocalIndexes(entries []pipeline.MultimodalEntry) []int {
 // buildMMFeatures builds the multimodal features map (mm_hashes, mm_placeholders,
 // and optionally kwargs_data) from the request's multimodal entries. It returns
 // nil when there are no entries. Entries are grouped by Modality, so a
-// mixed-modality request has one key per modality in each feature map.
-//
-// The per-modality maps are keyed by reqcommon.Modality rather than string:
-// encoding/json keys a map by any string-kind type, so the body on the wire is
-// the same and no conversion stands between an entry and its feature slot.
+// mixed-modality request has one key per modality in each feature map. Those
+// maps are keyed by reqcommon.Modality rather than string: encoding/json keys a
+// map by any string-kind type, so the wire body is identical.
 func buildMMFeatures(entries []pipeline.MultimodalEntry, includeKwargs bool) map[string]any {
 	if len(entries) == 0 {
 		return nil
@@ -303,8 +296,7 @@ func buildMMFeatures(entries []pipeline.MultimodalEntry, includeKwargs bool) map
 	hashesByMod := make(map[reqcommon.Modality][]string)
 	placeholdersByMod := make(map[reqcommon.Modality][]any)
 	// Left nil unless the caller asked for kwargs_data: the decode and
-	// conditional-decode bodies never carry it, and building it there would
-	// allocate a map, a slice per modality, and a box per entry for nothing.
+	// conditional-decode bodies never carry it.
 	var kwargsByMod map[reqcommon.Modality][]any
 	if includeKwargs {
 		kwargsByMod = make(map[reqcommon.Modality][]any)
@@ -330,24 +322,15 @@ func buildMMFeatures(entries []pipeline.MultimodalEntry, includeKwargs bool) map
 	return features
 }
 
-// validateEntryModalities rejects a MultimodalEntry with no Modality. Render
-// calls it, as the first step that pairs on the field; the later readers
-// (encode, prefill, decode) inherit the entries it passed. The error is
-// deliberately not ErrBadRequest: both producers set the field, so an untagged
-// entry is a coordinator bug and should surface as a 5xx rather than blame the
-// caller.
+// validateEntryModalities rejects a MultimodalEntry with no Modality. Render is
+// the only caller, as the first step that pairs on the field; the later readers
+// inherit the entries it passed. Not ErrBadRequest: both producers set the
+// field, so an untagged entry is a coordinator bug and should surface as a 5xx.
 //
-// Neither producer can currently emit one. reqcommon.PartModality returns
-// ok == false rather than an empty Modality, and the entries it feeds are
-// appended only when it returns true; extractMultimodalEntries rejects an
-// empty feature-map key itself. This is the backstop for a third producer, or
-// for either of those two changing, and it sits at one call site for that
-// reason rather than at every reader.
-//
-// Every reader pairs per-modality by position on this field, so an entry
-// defaulted to some modality would splice into that modality's index sequence,
-// pair with another entry's part or response slot, and shift every later entry
-// sharing the label.
+// It is a backstop -- reqcommon.PartModality returns ok == false rather than an
+// empty Modality, and extractMultimodalEntries rejects an empty feature-map key
+// -- against an entry defaulted to some modality, which would splice into that
+// modality's index sequence and shift every later entry sharing the label.
 func validateEntryModalities(entries []pipeline.MultimodalEntry) error {
 	for i, entry := range entries {
 		if entry.Modality == "" {
@@ -361,7 +344,7 @@ func validateEntryModalities(entries []pipeline.MultimodalEntry) error {
 // one kwargs_data slot. Our sentinel is the empty string, which MUST serialize
 // as null, not "": vLLM reads null (or an absent field) as a cache-hit item to
 // fetch by hash, while "" is decoded as an inline tensor and fails with "Input
-// data was truncated". Non-empty entries are base64 tensor blobs, verbatim.
+// data was truncated".
 func kwargsSentinel(k string) any {
 	if k == "" {
 		return nil
@@ -370,8 +353,7 @@ func kwargsSentinel(k string) any {
 }
 
 // singleEntryKwargs builds a kwargs_data value for one entry: each encode
-// fanout sub-request carries exactly one entry's kwargs under its modality
-// key. Used by encode.buildEncodeBody.
+// fanout sub-request carries exactly one entry's kwargs under its modality key.
 func singleEntryKwargs(modality reqcommon.Modality, kwargs string) map[reqcommon.Modality][]any {
 	return map[reqcommon.Modality][]any{modality: {kwargsSentinel(kwargs)}}
 }
@@ -470,9 +452,8 @@ func mmModalityArray(features map[string]any, field string, modality reqcommon.M
 	if !ok {
 		return nil, false, fmt.Errorf("%s must be an object: %w", field, pipeline.ErrBadRequest)
 	}
-	// The client's features map is keyed by plain JSON strings, so the
-	// modality converts back here: this is the boundary between the typed
-	// vocabulary and whatever keys a request arrived with.
+	// The client's features map is keyed by plain JSON strings: this is the
+	// boundary between the typed vocabulary and the keys a request arrived with.
 	raw, ok := m[string(modality)]
 	if !ok || raw == nil {
 		return nil, false, nil
@@ -485,19 +466,15 @@ func mmModalityArray(features map[string]any, field string, modality reqcommon.M
 }
 
 // modalitiesInFeatures returns the modality keys present in features[field],
-// sorted so entry ordering stays deterministic across map iteration for tests
-// and stable-order consumers. (nil, nil) when absent or an empty object,
-// ErrBadRequest when present but not an object. An empty key is rejected here
-// because this is where a client-supplied features map becomes entries, and the
-// key becomes MultimodalEntry.Modality, every reader's key for positional
-// pairing; validateEntryModalities states what an untagged entry would cost.
+// sorted so entry ordering stays deterministic across map iteration.
+// (nil, nil) when absent or an empty object, ErrBadRequest when present but not
+// an object.
 //
 // A key here is whatever the client sent, so this is where the vocabulary opens
-// up: a token-in request may name a modality reqcommon declares no constant
-// for, and the pipeline carries it through rather than refusing a request its
-// model server understands. Only the empty key is rejected, and it is rejected
-// whatever value it carries: a null value means "modality absent" for a named
-// key, and has no bearing on an empty one.
+// up: a token-in request may name a modality reqcommon declares no constant for,
+// and the pipeline carries it through. The one rejection is the empty key, which
+// would become an untagged MultimodalEntry (see validateEntryModalities),
+// whatever value it carries -- null means "modality absent" only for a named key.
 func modalitiesInFeatures(features map[string]any, field string) ([]reqcommon.Modality, error) {
 	raw, ok := features[field]
 	if !ok || raw == nil {
@@ -509,9 +486,8 @@ func modalitiesInFeatures(features map[string]any, field string) ([]reqcommon.Mo
 	}
 	var out []reqcommon.Modality
 	for k, v := range m {
-		// Before the null skip below, so the key is judged on its own rather
-		// than on the value that follows it. Both {"": null} and {"": []}
-		// carry an empty key, and both are rejected here.
+		// Before the null skip below, so the key is judged on its own: both
+		// {"": null} and {"": []} are rejected.
 		if k == "" {
 			return nil, fmt.Errorf("%s has an empty modality key: %w", field, pipeline.ErrBadRequest)
 		}
@@ -525,7 +501,7 @@ func modalitiesInFeatures(features map[string]any, field string) ([]reqcommon.Mo
 }
 
 // checkModalitiesHashed reports an error when mm_placeholders or kwargs_data
-// carries a modality hashed does not name: only modalities mm_hashes names
+// carries a modality hashed does not name. Only modalities mm_hashes names
 // become entries, so skipping the extra key would drop the item from the
 // prefill and decode bodies while its placeholder tokens stay in token_ids,
 // leaving the engine placeholders with nothing behind them.
@@ -551,15 +527,14 @@ func checkModalitiesHashed(features map[string]any, hashed []reqcommon.Modality)
 
 // extractMultimodalEntries builds []pipeline.MultimodalEntry from the parallel
 // slices in a generate-format features map. Each modality key under mm_hashes
-// produces a run of entries, modalities visited in sorted order for
-// determinism. Returns nil for a text-only request.
+// produces a run of entries, modalities visited in sorted order. Returns nil for
+// a text-only request.
 //
-// mm_hashes names the modality set, so a modality only the other fields carry
-// is ErrBadRequest: it describes an item with no hash to build an entry from.
-// Per modality, mm_hashes and mm_placeholders are required and of equal length;
-// kwargs_data is optional, and an absent field or a null item means "resolve
-// from the encoder cache by hash", which maps to an empty KwargsData. A wrong
-// type, a length mismatch, or an unexpected element is ErrBadRequest.
+// mm_hashes names the modality set, so a modality only the other fields carry is
+// ErrBadRequest (see checkModalitiesHashed). Per modality, mm_hashes and
+// mm_placeholders are required and of equal length; kwargs_data is optional, and
+// an absent field or null item means "resolve from the encoder cache by hash".
+// A wrong type, length mismatch, or unexpected element is ErrBadRequest.
 func extractMultimodalEntries(features map[string]any) ([]pipeline.MultimodalEntry, error) {
 	if features == nil {
 		return nil, nil

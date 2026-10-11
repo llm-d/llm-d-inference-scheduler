@@ -682,17 +682,16 @@ func TestDecodeStep_TransportError(t *testing.T) {
 
 // ---- injectUUIDs across audio, video, and input_audio ---------------------
 
-// Entry hashes reused across the injectUUIDs tests. Extracted so goconst does
-// not flag their repetition and so a rename lands in one place.
+// Entry hashes reused across the injectUUIDs tests, extracted so goconst does
+// not flag their repetition.
 const (
 	testHashImage = "H-img"
 	testHashAudio = "H-aud"
 	testHashVideo = "H-vid"
 )
 
-// Every recognized media content-part type receives a uuid tag matching its
-// (modality, local index) entry in MultimodalEntries. Non-media parts (text,
-// unknown types) are left alone.
+// Every recognized media content-part type receives the uuid of its
+// (modality, local index) entry; non-media parts are left alone.
 func TestInjectUUIDs_TagsAllMediaParts(t *testing.T) {
 	step := &DecodeStep{}
 	imagePart := map[string]any{"type": "image_url", "image_url": map[string]any{"url": "u-img"}}
@@ -762,13 +761,10 @@ func TestInjectUUIDs_TagsRepeatedModalityInOrder(t *testing.T) {
 	}
 }
 
-// Every media-typed part consumes a slot here, whether or not it still carries
-// usable media. replace-media-urls rejects a part with no payload as it builds
-// the entries (see collectMediaRefs), so a request that reaches decode has one
-// entry per part of its modality, and this walk must count the same parts in
-// the same order. A walk that skipped one would hand every later part of that
-// modality the hash that belongs to its neighbour, which is the mispairing this
-// pins: the part at position 0 gets the position-0 hash even when it is the
+// Every media-typed part consumes a slot, whether or not it still carries usable
+// media: replace-media-urls already rejected the payload-less ones (see
+// collectMediaRefs), so this walk must count the same parts in the same order.
+// Here the part at position 0 gets the position-0 hash even when it is the
 // broken one, and the surplus part is left untagged.
 func TestInjectUUIDs_CountsEveryMediaPart(t *testing.T) {
 	step := &DecodeStep{}
@@ -810,22 +806,16 @@ func TestInjectUUIDs_CountsEveryMediaPart(t *testing.T) {
 	}
 }
 
-// Pins what happens when a modality has more well-formed parts than entries:
-// the surplus part is left without a uuid and the request proceeds.
+// A modality with more well-formed parts than entries: the surplus part is left
+// without a uuid and the request proceeds. Degrading rather than failing is
+// deliberate -- uuid is only the decode backend's prefix-cache key, so the
+// request stays correct and the cost is the worker re-processing that media. The
+// encode fanout fails on the same mismatch because it would pair an entry with
+// another part's bytes.
 //
-// Degrading rather than failing is deliberate, and differs from the encode step
-// on purpose: uuid is only the decode backend's prefix-cache key, so an
-// untagged part still carries its payload and the request stays correct. What
-// it costs is the worker hashing and re-processing that media, which is cheap
-// for an image and is not for audio or video. The encode fanout fails on the
-// same mismatch because it would otherwise pair an entry with another part's
-// bytes.
-//
-// The surplus parts are the trailing ones, so every earlier part keeps the hash
-// it would have received anyway. Asserting the key's absence, rather than a
-// non-matching value, is what makes a "tagged with the wrong hash" regression
-// fail here. The image part is a control: an audio overflow must not shift
-// another modality's positions.
+// Asserting the key's absence, not a non-matching value, is what makes a "tagged
+// with the wrong hash" regression fail here. The image part is a control: an
+// audio overflow must not shift another modality's positions.
 func TestInjectUUIDs_ExtraPartForModalityStaysUntagged(t *testing.T) {
 	step := &DecodeStep{}
 	imagePart := map[string]any{"type": "image_url", "image_url": map[string]any{"url": "u-img"}}
@@ -869,18 +859,14 @@ func TestInjectUUIDs_ExtraPartForModalityStaysUntagged(t *testing.T) {
 	}
 }
 
-// The opposite mismatch to the test above, which the stamping walk cannot see:
-// it iterates parts, so an entry with no part to stamp is never visited and
-// used to pass unrecorded. That direction is the worse one. The entry's hash
-// still reaches the prefiller, because PreparePrefillECParams flattens every
-// encode response into ec_transfer_params, so the prefill body ends up
-// describing an EC buffer that no part of the decode body names by uuid.
+// The opposite mismatch, which the stamping walk cannot see: it iterates parts,
+// so an entry with no part to stamp used to pass unrecorded. See
+// injectMediaPartUUIDs for why that direction is the worse one.
 //
-// Pinning the level is the point of the test, since the whole branch is a log
-// line: DEBUG, the same as the surplus-part branch, so one verbosity shows
-// both directions of the mismatch. The image entry has no part at all, the
-// audio entry has one of its two, and both must be reported; the single video
-// part is a control that a fully paired modality stays quiet.
+// The whole branch is a log line, so the level is what gets pinned: DEBUG, as
+// for the surplus-part branch. The image entry has no part at all and the audio
+// entry one of its two; the video part is a control that a fully paired modality
+// stays quiet.
 func TestInjectUUIDs_EntryWithNoMediaPartIsLogged(t *testing.T) {
 	step := &DecodeStep{}
 	audioPart := map[string]any{"type": "audio_url", "audio_url": map[string]any{"url": "u-aud"}}

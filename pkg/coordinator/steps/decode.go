@@ -122,15 +122,13 @@ func (s *DecodeStep) injectUUIDs(reqCtx *pipeline.RequestContext, logger logr.Lo
 }
 
 // injectMediaPartUUIDs stamps each media content part with the hash of its
-// corresponding multimodal entry, pairing the two by position within a
-// modality. Surplus parts are left unstamped: the worker then hashes the media
-// itself rather than reading an entry primed under a hash that belongs to
-// another part. A surplus entry has no part to stamp at all. Neither is fatal
-// here, and the two branches below record what each one costs.
+// corresponding multimodal entry, pairing the two by position within a modality.
+// A surplus part is left unstamped, so the worker hashes the media itself rather
+// than reading an entry primed under another part's hash; a surplus entry has no
+// part to stamp. Neither is fatal; the branches below record what each costs.
 func injectMediaPartUUIDs(items []any, apiType reqcommon.APIType, entries []pipeline.MultimodalEntry, logger logr.Logger) {
-	// Group hashes by modality in entry order, so the walk below can index
-	// hashesByMod[modality] at the per-modality position: O(1) per part after
-	// an O(n) build.
+	// Grouped in entry order, so the walk below indexes by the per-modality
+	// position: O(1) per part after an O(n) build.
 	hashesByMod := make(map[reqcommon.Modality][]string)
 	for _, entry := range entries {
 		hashesByMod[entry.Modality] = append(hashesByMod[entry.Modality], entry.Hash)
@@ -146,13 +144,10 @@ func injectMediaPartUUIDs(items []any, apiType reqcommon.APIType, entries []pipe
 			continue
 		}
 		// A miss means entries and parts got out of line upstream (see
-		// collectMediaParts). The part still reaches the backend without its
-		// uuid, so the request is answered rather than failed, but the worker
-		// hashes and re-processes that media itself. At the caps
-		// coordinator.yaml suggests that part can be 200 MB of video or 60 MB
-		// of audio, so the decode worker redoes the encode work the EPD split
-		// exists to do once elsewhere. DEBUG keeps the mismatch visible when
-		// someone looks.
+		// collectMediaParts). The request is still answered, but the worker
+		// hashes and re-processes that media itself -- at the caps
+		// coordinator.yaml suggests, up to 200 MB of video, redoing the encode
+		// work the EPD split exists to do once elsewhere.
 		logger.V(logutil.DEBUG).Info("no MultimodalEntry for media part",
 			"location", media.location,
 			"modality", media.modality,
@@ -160,13 +155,12 @@ func injectMediaPartUUIDs(items []any, apiType reqcommon.APIType, entries []pipe
 			"modality_entry_count", len(hashes))
 	}
 
-	// The walk above iterates parts, so it can only ever see a surplus part.
-	// The other direction needs its own pass over the entries, and it is the
-	// worse of the two: a surplus entry's hash still reaches the prefiller,
-	// because PreparePrefillECParams flattens every encode response into
-	// ec_transfer_params, so the prefill body describes an EC buffer that no
-	// part of the decode body names by uuid. DEBUG matches the surplus-part
-	// branch, so one verbosity shows both directions of the same mismatch.
+	// The walk above iterates parts, so it can only see a surplus part; the
+	// other direction needs its own pass, and is the worse of the two. A
+	// surplus entry's hash still reaches the prefiller, since
+	// PreparePrefillECParams flattens every encode response into
+	// ec_transfer_params, so the prefill body describes an EC buffer no part of
+	// the decode body names by uuid.
 	for mod, hashes := range hashesByMod {
 		if partCount := modCounter[mod]; partCount < len(hashes) {
 			logger.V(logutil.DEBUG).Info("MultimodalEntry with no media part",

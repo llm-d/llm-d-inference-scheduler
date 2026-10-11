@@ -17,22 +17,17 @@ limitations under the License.
 package request
 
 // Modality identifies the kind of multimodal content a prompt carries. Values
-// match the model server's multimodal hash keys, so the same label names a
-// modality in a request body's mm_hashes, mm_placeholders and kwargs_data maps,
-// on a pipeline.MultimodalEntry, in the EPP's multimodal features, and in a
-// metric label.
-//
-// The vocabulary lives here because the coordinator, the sidecar and the EPP
-// framework all key on it and all already import this package; the framework
-// contract aliases these names rather than declaring its own
+// match the model server's multimodal hash keys, so one label names a modality
+// in a body's mm_hashes / mm_placeholders / kwargs_data maps, on a
+// pipeline.MultimodalEntry, in the EPP's features, and in a metric label. It
+// lives here because the coordinator, the sidecar and the EPP framework all key
+// on it; the framework contract aliases these names
 // (pkg/epp/framework/interface/requesthandling).
 //
-// The three constants name the modalities this repo's pipeline produces, not
-// the only values the type holds: a token-in request may carry a feature map
-// keyed by anything its model server understands, and the coordinator turns
-// those keys into entries as it finds them (see steps.modalitiesInFeatures).
-// So the type is a vocabulary, not a validated enum, and a reader of an entry
-// cannot assume one of these three.
+// This is a vocabulary, not a validated enum. The constants name the modalities
+// this repo's pipeline produces, but a token-in request may carry a feature map
+// keyed by anything its model server understands (see
+// steps.modalitiesInFeatures), so a reader cannot assume one of these three.
 type Modality string
 
 const (
@@ -41,20 +36,15 @@ const (
 	ModalityVideo Modality = "video"
 )
 
-// PartModality reports the Modality a content part of type partType names. ok
-// is false for a part type that names no media, and this is the only place that
-// decides which do.
+// PartModality reports the Modality a content part of type partType names, with
+// ok false for a part type that names no media. This is the only place that
+// decides which types do, and the answer does not depend on which API carries
+// the part: vLLM's chat parser primes input_image and image_url through the same
+// content part map, so an image is named either way.
 //
-// The answer does not depend on which API carries the part. An image is named
-// either way, since vLLM's chat parser primes input_image and image_url through
-// the same content part map; audio and video are named by their own part types,
-// inline or by URL.
-//
-// What a caller does with ok == false is its own business, and the callers
-// differ: the coordinator's walkers pass over the part, while the sidecar's
-// encoder fan-out treats an input_image it cannot fetch as a skipped part so
-// the drop is visible in a log line. What they may not do is disagree about
-// which parts exist at all, which is why they share this.
+// Callers may handle ok == false however they like -- the coordinator's walkers
+// pass over the part, the sidecar's fan-out logs a drop -- but may not disagree
+// about which parts exist, which is why they share this.
 func PartModality(partType string) (Modality, bool) {
 	switch partType {
 	case PartTypeImageURL, PartTypeInputImage:

@@ -36,10 +36,9 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
-// MIME literals reused across tests. Extracted so goconst does not flag
-// their repetition and so a rename or typo lands in one place.
-// image/jpeg is not declared here: conditional_decode_test.go already names
-// that value testImageJPEGContentType, and this package shares one test scope.
+// MIME literals reused across tests, extracted so goconst does not flag their
+// repetition. image/jpeg is absent because conditional_decode_test.go already
+// names it testImageJPEGContentType in this same test scope.
 const (
 	testAudioWAVMIME = "audio/wav"
 	testImagePNGMIME = "image/png"
@@ -141,7 +140,7 @@ func TestReplaceMediaURLsStep_Responses_DownloadsAndInlines(t *testing.T) {
 		t.Fatalf("expected 1 multimodal entry, got %d", len(reqCtx.MultimodalEntries))
 	}
 	// The downloaded bytes stay in the body as a data URI (asserted below)
-	// rather than on the entry, so the modality is all the entry carries here.
+	// rather than on the entry, so modality is all the entry carries.
 	if got := reqCtx.MultimodalEntries[0].Modality; got != reqcommon.ModalityImage {
 		t.Fatalf("entry modality = %q, want %q", got, reqcommon.ModalityImage)
 	}
@@ -333,12 +332,8 @@ func TestReplaceMediaURLsStep_DataURIInput(t *testing.T) {
 	}
 }
 
-// An uppercase data: scheme, which RFC 3986 allows, must be recognized as
-// inline data and left alone; a case-sensitive prefix check would send it down
-// the download path, where the scheme guard rejects it for not being http(s).
-// The url is asserted unchanged, casing included: the step does not rewrite an
-// inline payload, and vLLM lowercases the scheme through urlparse, so the
-// client's casing reaches the backend and still parses.
+// An uppercase data: scheme must be recognized as inline data and left alone,
+// casing included; see isDataURI.
 func TestReplaceMediaURLsStep_UppercaseDataURIScheme(t *testing.T) {
 	step, _ := NewReplaceMediaURLsStep(nil, map[string]any{})
 
@@ -373,11 +368,9 @@ func TestReplaceMediaURLsStep_UppercaseDataURIScheme(t *testing.T) {
 	}
 }
 
-// One MultimodalEntry must be appended per media part, in request order,
-// whether the part came from a download or an inline data: URI. The encode
-// fanout and decode.injectUUIDs pair the Nth entry of a modality with its Nth
-// part (see collectMediaParts), so drift here attaches the wrong bytes to
-// the wrong entry. Asserted in both source orderings.
+// One MultimodalEntry per media part, in request order, whether the part came
+// from a download or an inline data: URI -- asserted in both source orderings,
+// since drift here mispairs entries with parts downstream.
 func TestReplaceMediaURLsStep_MixedHTTPAndDataURIOrdering(t *testing.T) {
 	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", testImagePNGMIME)
@@ -441,11 +434,9 @@ func TestReplaceMediaURLsStep_MixedHTTPAndDataURIOrdering(t *testing.T) {
 	}
 }
 
-// Execute and collectMediaParts must agree on exactly which parts count.
-// Execute fixes the entry order the encode fanout and decode.injectUUIDs index
-// into, and those two walk with collectMediaParts, so a part counted by one and
-// not the other shifts the pairing. Asserted end to end over every recognized
-// part type rather than by trusting the shared walk.
+// Execute and collectMediaParts must agree on exactly which parts count, or the
+// entry order Execute fixes and the walk the later steps index into disagree.
+// Asserted end to end over every recognized part type.
 func TestReplaceMediaURLsStep_EntriesMatchTheMediaPartWalk(t *testing.T) {
 	parts := []any{
 		map[string]any{"type": "text", "text": "hi"},
@@ -468,8 +459,8 @@ func TestReplaceMediaURLsStep_EntriesMatchTheMediaPartWalk(t *testing.T) {
 	for _, media := range walked {
 		wantModalities = append(wantModalities, media.modality)
 	}
-	// Guard the guard: a fixture typo that made every part unrecognized would
-	// otherwise let this test pass with both sides at zero.
+	// Guard the guard: a fixture typo making every part unrecognized would
+	// otherwise pass with both sides at zero.
 	if len(wantModalities) != 5 {
 		t.Fatalf("fixture drift: the walk collected %d parts, want 5 (%v)", len(wantModalities), wantModalities)
 	}
@@ -492,12 +483,10 @@ func TestReplaceMediaURLsStep_EntriesMatchTheMediaPartWalk(t *testing.T) {
 	}
 }
 
-// A media part the step cannot resolve fails the request, for every recognized
-// part type and every way of being unusable. Skipping one instead would shift
-// every later part of its modality onto another part's hash downstream, which
-// is why collectMediaRefs rejects rather than skips. Each case puts a
-// well-formed part of the same modality after the broken one, the shape that
-// would be mispaired.
+// A media part the step cannot resolve fails the request rather than being
+// skipped (see collectMediaRefs), for every recognized part type and every way
+// of being unusable. Each case puts a well-formed part of the same modality
+// after the broken one, the shape that would be mispaired.
 func TestReplaceMediaURLsStep_RejectsUnusableMediaPart(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -585,11 +574,9 @@ func TestReplaceMediaURLsStep_RejectsUnusableMediaPart(t *testing.T) {
 	}
 }
 
-// The inline size check measures the payload, so it is exact at the cap for
-// every size, including the non-multiples of 3 where padding decides the
-// answer. This is the property the old encoded-length bound could not hold:
-// it compared against 4*ceil(cap/3), which for a cap that is not a multiple
-// of 3 sits up to 2 bytes above the cap.
+// The inline size check is exact at the cap for every size, including the
+// non-multiples of 3 where padding decides the answer and the old
+// encoded-length bound sat up to 2 bytes high.
 func TestInlineSizeExceeded_ExactAtEveryBoundary(t *testing.T) {
 	for _, sizeCap := range []int64{1, 2, 3, 4, 5, 6, 100, 1023, 1024, 1048576} {
 		step := &ReplaceMediaURLsStep{maxDownloadSize: sizeCap}
@@ -608,7 +595,7 @@ func TestInlineSizeExceeded_ExactAtEveryBoundary(t *testing.T) {
 }
 
 // A cap so large that the encoded-length bound saturates must still accept a
-// normal payload. Before the saturating multiply this rejected everything.
+// normal payload.
 func TestReplaceMediaURLsStep_InputAudio_HugeCapStillAccepts(t *testing.T) {
 	hugeMB := (math.MaxInt - 1) / config.BytesPerMB
 	step, err := NewReplaceMediaURLsStep(nil, map[string]any{"max_audio_download_size": hugeMB})
@@ -638,10 +625,9 @@ func TestReplaceMediaURLsStep_InputAudio_HugeCapStillAccepts(t *testing.T) {
 	}
 }
 
-// encodeDataURI streams into a strings.Builder instead of encoding then
-// concatenating, so it must still agree with the obvious implementation byte
-// for byte. Lengths 0-4 cover every padding case, where a missed Close() flush
-// would show up.
+// encodeDataURI streams into a strings.Builder, so it must agree with the
+// obvious implementation byte for byte. Lengths 0-4 cover every padding case,
+// where a missed Close() flush would show up.
 func TestEncodeDataURI_MatchesNaiveEncoding(t *testing.T) {
 	for n := 0; n <= 4; n++ {
 		data := make([]byte, n)
@@ -940,7 +926,6 @@ func TestReplaceMediaURLsStep_MalformedBody(t *testing.T) {
 	}
 }
 
-// TestReplaceMediaURLsStep_RejectsMalformedImageURLPart locks in that
 // collectMediaRefs rejects a malformed image_url part rather than silently
 // skipping it; see its doc comment for why.
 func TestReplaceMediaURLsStep_RejectsMalformedImageURLPart(t *testing.T) {
@@ -987,10 +972,8 @@ func TestReplaceMediaURLsStep_RejectsMalformedImageURLPart(t *testing.T) {
 	}
 }
 
-// TestReplaceMediaURLsStep_RejectsMixedMalformedAndValidImageParts covers the
-// concrete failure collectMediaRefs's doc comment describes:
-// skipping the malformed part instead of rejecting it would leave the valid
-// image's hash misassigned to the malformed part.
+// The concrete failure collectMediaRefs's doc comment describes: skipping the
+// malformed part would misassign the valid image's hash to it.
 func TestReplaceMediaURLsStep_RejectsMixedMalformedAndValidImageParts(t *testing.T) {
 	step, _ := NewReplaceMediaURLsStep(nil, map[string]any{})
 	reqCtx := &pipeline.RequestContext{
@@ -1618,7 +1601,7 @@ func TestReplaceMediaURLsStep_CancelledContextSkipsDataURIParse(t *testing.T) {
 // ---- Audio / video ingestion -----------------------------------------------
 
 // An audio_url is fetched, size-capped, MIME-checked, inlined as a data URI,
-// and added to MultimodalEntries as one audio entry.
+// and seeds one audio entry.
 func TestReplaceMediaURLsStep_AudioURL_Downloads(t *testing.T) {
 	audioServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", testAudioWAVMIME)
@@ -1660,10 +1643,9 @@ func TestReplaceMediaURLsStep_AudioURL_Downloads(t *testing.T) {
 	}
 }
 
-// A Content-Type carrying only parameters and no type ("; charset=utf-8") must
-// be stripped, noticed as empty, and replaced with the default type so the
-// rewritten URL stays well-formed. With the fallback before the strip, the URL
-// would come out as data:;base64,... and be unusable.
+// A Content-Type carrying only parameters ("; charset=utf-8") must be stripped,
+// noticed as empty, and replaced with the default type: with the fallback before
+// the strip the URL comes out as the unusable data:;base64,...
 func TestReplaceMediaURLsStep_ImageURL_ParameterOnlyContentType(t *testing.T) {
 	oddServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "; charset=utf-8")
@@ -1697,10 +1679,9 @@ func TestReplaceMediaURLsStep_ImageURL_ParameterOnlyContentType(t *testing.T) {
 	}
 }
 
-// What a Content-Type header or data URI media type is reduced to before it
-// reaches the allowlist or the emitted URI. The comma cases are the ones that
-// matter for that URI: RFC 2397 ends the metadata at the first comma, so a type
-// keeping one would move the payload boundary.
+// What a Content-Type header or data URI media type is reduced to before the
+// allowlist and the emitted URI see it. The comma cases are what matter for
+// that URI; see normalizeMediaType.
 func TestNormalizeMediaType(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -1726,9 +1707,7 @@ func TestNormalizeMediaType(t *testing.T) {
 }
 
 // An origin whose Content-Type holds more than one value: the comma must not
-// reach the rewritten data URI, since a reader splitting on the first comma
-// would take "image/png" as the whole metadata and " image/png;base64,..." as
-// the payload, failing the base64 decode.
+// reach the rewritten data URI, where it would move the payload boundary.
 func TestReplaceMediaURLsStep_ImageURL_MultiValueContentType(t *testing.T) {
 	data := []byte("png-bytes")
 	oddServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1779,11 +1758,10 @@ func TestReplaceMediaURLsStep_ImageURL_MultiValueContentType(t *testing.T) {
 	}
 }
 
-// An audio_url / video_url whose origin returns a Content-Type with MIME
-// parameters (";codecs=...", ";charset=...") is accepted, and the parameters
-// are stripped at the download boundary so the rewritten data URI carries a
-// bare MIME. The codecs case embeds a comma inside a quoted parameter value,
-// which is what breaks parseDataURI when the raw header value flows through.
+// An audio_url / video_url origin returning a Content-Type with MIME parameters
+// is accepted, the parameters stripped at the download boundary. The codecs case
+// embeds a comma inside a quoted parameter value, which is what breaks
+// parseDataURI when the raw header value flows through.
 func TestReplaceMediaURLsStep_AudioVideo_AcceptsContentTypeWithParams(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -1825,9 +1803,9 @@ func TestReplaceMediaURLsStep_AudioVideo_AcceptsContentTypeWithParams(t *testing
 			if got := len(reqCtx.MultimodalEntries); got != 1 {
 				t.Fatalf("expected 1 entry, got %d", got)
 			}
-			// The rewritten URL must round-trip through parseDataURI: with a
-			// comma inside a parameter value, the pre-normalization code put
-			// the first comma inside the codecs list and parseDataURI failed.
+			// Must round-trip through parseDataURI: pre-normalization, a comma
+			// inside a parameter value put the first comma inside the codecs
+			// list and the parse failed.
 			part := reqCtx.Body["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)
 			inner := part[tc.urlKey].(map[string]any)
 			rewritten, _ := inner["url"].(string)
@@ -1842,17 +1820,10 @@ func TestReplaceMediaURLsStep_AudioVideo_AcceptsContentTypeWithParams(t *testing
 	}
 }
 
-// An audio_url whose origin serves a non-audio Content-Type (text/html) is
-// rejected as ErrBadRequest, closing an SSRF-style widening where a caller
-// uses an audio_url slot to smuggle text or HTML.
-// An object store that serves its objects unlabeled must not fail the download
-// check. S3, GCS and presigned URLs return application/octet-stream for
-// anything whose type was not set at upload, and an absent header lands on the
-// same value, so the strict form rejected ordinary audio and video hosting. It
-// bought nothing: an origin that is lying sends audio/wav just as easily, so
-// the only thing refusing octet-stream stopped was honest hosting -- and both
-// documented escapes turn the check off wholesale, losing the text/html case
-// below with it.
+// An audio_url origin serving a non-audio Content-Type (text/html) is rejected
+// as ErrBadRequest, closing an SSRF-style widening where a caller uses the slot
+// to smuggle HTML. An unlabeled object store must still pass; see
+// allowedDownloadContentType for why octet-stream is tolerated.
 func TestReplaceMediaURLsStep_Download_AcceptsUnlabeledOrigin(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -1905,10 +1876,8 @@ func TestReplaceMediaURLsStep_Download_AcceptsUnlabeledOrigin(t *testing.T) {
 	}
 }
 
-// The allowance is for the built-in list only. An operator who writes the param
-// has said exactly what to accept, and coordinator.yaml tells them to add
-// application/octet-stream when they want unlabeled origins too -- so honoring
-// the list literally is what keeps that line meaningful.
+// The octet-stream allowance covers the built-in list only: an explicit param
+// is read literally. See allowedDownloadContentType.
 func TestReplaceMediaURLsStep_Download_ExplicitListExcludesUnlabeled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", defaultContentType)
@@ -1955,8 +1924,7 @@ func TestReplaceMediaURLsStep_Download_ExplicitListExcludesUnlabeled(t *testing.
 	}
 }
 
-// A data URI gets no such allowance: there the client wrote the media type, so
-// an unlabeled one is a request to fix rather than an origin to tolerate.
+// A data URI gets no such allowance: there the client wrote the media type.
 func TestReplaceMediaURLsStep_DataURI_StillRejectsUnlabeled(t *testing.T) {
 	step, err := NewReplaceMediaURLsStep(nil, map[string]any{})
 	if err != nil {
@@ -2048,8 +2016,8 @@ func TestReplaceMediaURLsStep_VideoURL_RejectsUnexpectedContentType(t *testing.T
 }
 
 // readTrackingBody is a response body that records whether anything read it.
-// Read returns EOF immediately, so a caller reaching the body gets an empty
-// payload rather than blocking.
+// Read returns EOF immediately, so a caller reaching it gets an empty payload
+// rather than blocking.
 type readTrackingBody struct {
 	read atomic.Bool
 }
@@ -2061,16 +2029,10 @@ func (b *readTrackingBody) Read([]byte) (int, error) {
 
 func (b *readTrackingBody) Close() error { return nil }
 
-// Pins the order of the two download-path checks: an audio origin serving a
-// type the allowlist rejects is turned away on its headers, body left unread.
-// Checking after the read rejects the same request, but only once up to the
-// modality's cap has crossed the network and been held in memory, the cost the
-// cap exists to bound.
-//
-// ContentLength is -1, as for a chunked response, so the Content-Length guard
-// does not fire and only the ordering decides whether the body is read. The
-// assertion is on whether it was read at all; timing or handler-side byte
-// counts would race with the client closing the connection.
+// Pins the order of the two download-path checks: an origin serving a type the
+// allowlist rejects is turned away on its headers, before up to the modality's
+// cap crosses the network. ContentLength is -1, as for a chunked response, so
+// the Content-Length guard cannot fire and only the ordering decides.
 func TestReplaceMediaURLsStep_Download_RejectsContentTypeBeforeReadingBody(t *testing.T) {
 	body := &readTrackingBody{}
 	step := newLoopbackStep(t, map[string]any{"download_timeout": "5s"})
@@ -2096,10 +2058,8 @@ func TestReplaceMediaURLsStep_Download_RejectsContentTypeBeforeReadingBody(t *te
 }
 
 // image_url downloads accept any Content-Type under the built-in default
-// allowlist. Audio and video are stricter; the image default stays permissive
-// so traffic relying on it keeps working. Setting allowed_image_content_types
-// explicitly does enforce here, covered by
-// TestReplaceMediaURLsStep_ImageURL_ExplicitAllowlistAppliesToDownload.
+// allowlist, which stays permissive so existing traffic keeps working (see
+// enforceDownloadContentType). The explicit-allowlist half is below.
 func TestReplaceMediaURLsStep_ImageURL_PermissiveContentType(t *testing.T) {
 	oddServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
@@ -2128,10 +2088,9 @@ func TestReplaceMediaURLsStep_ImageURL_PermissiveContentType(t *testing.T) {
 	}
 }
 
-// The other half of the image content-type rule: once an operator sets
-// allowed_image_content_types, the list is enforced on downloaded bytes too,
-// not just data URIs. Otherwise the origin's Content-Type is inlined verbatim
-// into the rewritten data URI and the lockdown is a no-op on the HTTP path.
+// The other half of the image content-type rule: once allowed_image_content_types
+// is set, the list is enforced on downloaded bytes too, or the lockdown is a
+// no-op on the HTTP path.
 func TestReplaceMediaURLsStep_ImageURL_ExplicitAllowlistAppliesToDownload(t *testing.T) {
 	jpegServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", testImageJPEGContentType)
@@ -2212,8 +2171,8 @@ func TestReplaceMediaURLsStep_VideoURL_Downloads(t *testing.T) {
 	}
 }
 
-// A valid audio data URI under audio_url is accepted, kept in place, and added
-// to MultimodalEntries as one audio entry.
+// A valid audio data URI under audio_url is accepted, kept in place, and seeds
+// one audio entry.
 func TestReplaceMediaURLsStep_AudioDataURI(t *testing.T) {
 	step, _ := NewReplaceMediaURLsStep(nil, map[string]any{})
 	const dataURI = "data:audio/wav;base64,UklGRg=="
@@ -2268,10 +2227,8 @@ func dataURIReqCtx(partType, mediaType, b64 string) *pipeline.RequestContext {
 	}
 }
 
-// The per-modality cap applies to bytes arriving inline in a URL slot, not only
-// to bytes pulled over the network. validateInlineAudio rejects the same
-// payload sent as input_audio, so accepting it here would let the two ways of
-// sending one audio clip disagree.
+// The per-modality cap applies to a data URI in a URL slot too, not only to
+// bytes pulled over the network, so the two ways of sending one clip agree.
 func TestReplaceMediaURLsStep_AudioVideoDataURI_RejectsOversized(t *testing.T) {
 	// 1 MB cap allows ~1_398_101 base64 chars; go well past it.
 	oversized := strings.Repeat("A", 2*1024*1024)
@@ -2303,8 +2260,7 @@ func TestReplaceMediaURLsStep_AudioVideoDataURI_RejectsOversized(t *testing.T) {
 	}
 }
 
-// The data URI bound reads the per-modality override, not the global default: a
-// payload over the 1 MB global cap is accepted once the audio cap is raised.
+// The data URI bound reads the per-modality override, not the global default.
 func TestReplaceMediaURLsStep_AudioDataURI_UsesAudioCap(t *testing.T) {
 	payload := strings.Repeat("A", 2*1024*1024) // ~1.5 MB decoded
 	step, err := NewReplaceMediaURLsStep(nil, map[string]any{
@@ -2323,10 +2279,9 @@ func TestReplaceMediaURLsStep_AudioDataURI_UsesAudioCap(t *testing.T) {
 	}
 }
 
-// Pins the default in enforceInlineSize: with no max_image_download_size set,
-// an image data URI is bounded by the server's max_request_body_size, not by
-// max_download_size. Every deployment setting max_download_size relies on that
-// pre-existing behavior, so the fallback must not reach a data URI.
+// Pins the default in enforceInlineSize: with no max_image_download_size set, an
+// image data URI is bounded by server.max_request_body_size, the behavior every
+// deployment setting only max_download_size relies on.
 func TestReplaceMediaURLsStep_ImageDataURI_ExemptFromGlobalCap(t *testing.T) {
 	oversized := strings.Repeat("A", 2*1024*1024)
 	step, err := NewReplaceMediaURLsStep(nil, map[string]any{"max_download_size": 1})
@@ -2343,8 +2298,7 @@ func TestReplaceMediaURLsStep_ImageDataURI_ExemptFromGlobalCap(t *testing.T) {
 }
 
 // The other half of the pair above: max_image_download_size is an explicit
-// request to bound image payloads, so it reaches a data URI too, not only the
-// download path, as an operator setting it to bound memory would expect.
+// request to bound image payloads, so it reaches data URIs too.
 func TestReplaceMediaURLsStep_ImageDataURI_HonorsExplicitImageCap(t *testing.T) {
 	step, err := NewReplaceMediaURLsStep(nil, map[string]any{"max_image_download_size": 1})
 	if err != nil {
@@ -2398,8 +2352,7 @@ func TestReplaceMediaURLsStep_VideoDataURI(t *testing.T) {
 	}
 }
 
-// A well-formed input_audio part (base64 payload, known format) passes
-// validation and leaves the body unchanged.
+// A well-formed input_audio part passes validation and leaves the body unchanged.
 func TestReplaceMediaURLsStep_InputAudio_Valid(t *testing.T) {
 	step, _ := NewReplaceMediaURLsStep(nil, map[string]any{})
 	reqCtx := &pipeline.RequestContext{
@@ -2515,8 +2468,7 @@ func TestReplaceMediaURLsStep_InputAudio_UnknownFormat(t *testing.T) {
 	}
 }
 
-// Exactly cap bytes must be accepted: the base64 length of cap bytes equals the
-// size-check bound, so a strictly-greater comparison must not reject it.
+// Exactly cap bytes must be accepted: the measured length equals the bound.
 func TestReplaceMediaURLsStep_InputAudio_ExactlyAtCap(t *testing.T) {
 	const capMB = 1
 	step, _ := NewReplaceMediaURLsStep(nil, map[string]any{"max_download_size": capMB})
@@ -2544,8 +2496,7 @@ func TestReplaceMediaURLsStep_InputAudio_ExactlyAtCap(t *testing.T) {
 	}
 }
 
-// An input_audio item whose base64 payload alone exceeds 4/3 *
-// max_download_size is rejected without being decoded.
+// An input_audio payload over 4/3 * max_download_size is rejected undecoded.
 func TestReplaceMediaURLsStep_InputAudio_OversizedPayload(t *testing.T) {
 	// max_download_size in the constructor is given in megabytes.
 	step, _ := NewReplaceMediaURLsStep(nil, map[string]any{"max_download_size": 1})
@@ -2575,10 +2526,9 @@ func TestReplaceMediaURLsStep_InputAudio_OversizedPayload(t *testing.T) {
 	}
 }
 
-// Pins the vocabulary an operator has to write. An input_audio part names a
-// format and the allowlist names MIME types, so "mp3" is checked as audio/mpeg
-// and an allowlist of audio/mp3 alone does not admit it. The rejection must
-// name the format, or the operator cannot connect it back to the config.
+// Pins the vocabulary an operator has to write: a part names a format and the
+// allowlist names MIME types, so "mp3" is checked as audio/mpeg and audio/mp3
+// alone does not admit it. The rejection must name the format.
 func TestReplaceMediaURLsStep_InputAudio_AllowlistUsesCanonicalMIME(t *testing.T) {
 	mp3Part := func() map[string]any {
 		return map[string]any{
@@ -2628,12 +2578,9 @@ func TestReplaceMediaURLsStep_InputAudio_AllowlistUsesCanonicalMIME(t *testing.T
 }
 
 // The companion to the test above: that one pins which MIME a format maps to,
-// this one pins the shape it has to be written in. validateInlineAudio hands
-// audioFormatMIME's value to allowedContentTypeForModality without
-// normalizing it, and that match is by equality, so a value carrying a MIME
-// parameter or any upper case would miss every allowlist entry and refuse its
-// format however the operator wrote the config. Adding such an entry fails
-// here rather than on a request.
+// this one the shape it must be written in. An unnormalized audioFormatMIME
+// value would refuse its format however the allowlist is written, so adding one
+// fails here rather than on a request.
 func TestAudioFormatMIMEValuesAreNormalized(t *testing.T) {
 	for format, mime := range audioFormatMIME {
 		if got := normalizeMediaType(mime); got != mime {
@@ -2644,9 +2591,8 @@ func TestAudioFormatMIMEValuesAreNormalized(t *testing.T) {
 }
 
 // A bad input_audio LAST in walker order, behind an audio_url that would
-// otherwise be downloaded. The inline checks are local, so they must all run
-// before any download starts, or a request that will be rejected anyway still
-// pays for the bytes. The assertion is the server counter: never hit.
+// otherwise be downloaded: the local checks all run first, so a request that
+// will be rejected never pays for the bytes. Asserted on the server counter.
 func TestReplaceMediaURLsStep_InputAudio_RejectedBeforeDownloads(t *testing.T) {
 	var hits atomic.Int32
 	audioServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -2686,9 +2632,8 @@ func TestReplaceMediaURLsStep_InputAudio_RejectedBeforeDownloads(t *testing.T) {
 	}
 }
 
-// One request with one image URL, one audio URL, and one video URL: all three
-// are inlined as data URIs, added to MultimodalEntries in walker order, and
-// counted against max_multimodal_entries.
+// One image URL, one audio URL and one video URL: all three are inlined, seed
+// entries in walker order, and count against max_multimodal_entries.
 func TestReplaceMediaURLsStep_MixedImageAudioVideo(t *testing.T) {
 	mediaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -2752,12 +2697,10 @@ func TestReplaceMediaURLsStep_MixedImageAudioVideo(t *testing.T) {
 	}
 }
 
-// Locks in the walker-order invariant for audio, the only modality carrying
-// both a URL-based variant (audio_url) and an inline one (input_audio). The
-// request has input_audio A first and audio_url B second, so entries[0] must
-// carry A's inline payload and entries[1] B's downloaded payload. A split
-// append (URLs first, inline second) would swap them, and encode and decode,
-// which walk parts in request order, would pair each entry with the wrong part.
+// The walker-order invariant for audio, the only modality with both a URL-based
+// variant and an inline one. input_audio A comes first and audio_url B second,
+// so entries[0] must carry A's payload: a split append (URLs first, inline
+// second) would swap them under steps that walk parts in request order.
 func TestReplaceMediaURLsStep_MixedAudio_WalkerOrder(t *testing.T) {
 	audioServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", testAudioWAVMIME)
@@ -2793,9 +2736,8 @@ func TestReplaceMediaURLsStep_MixedAudio_WalkerOrder(t *testing.T) {
 		t.Fatalf("expected 2 audio entries, got %d", got)
 	}
 	// The inline part's input_audio.data must be untouched and the URL slot
-	// overwritten in place with the downloaded data URI. With the
-	// collectMediaParts check below, this verifies entry 0 is the inline part
-	// and entry 1 the URL part.
+	// overwritten in place. With the collectMediaParts check below, this shows
+	// entry 0 is the inline part and entry 1 the URL part.
 	msgs := reqCtx.Body["messages"].([]any)
 	inlinePart := msgs[0].(map[string]any)["content"].([]any)[0].(map[string]any)["input_audio"].(map[string]any)
 	if got, _ := inlinePart["data"].(string); got != inlineData {
@@ -2808,8 +2750,7 @@ func TestReplaceMediaURLsStep_MixedAudio_WalkerOrder(t *testing.T) {
 
 	// Downstream alignment: collectMediaParts walks the SAME body in request
 	// order, so entries[0] (inline) must pair with partsByMod[audio][0] and
-	// entries[1] (URL) with partsByMod[audio][1]. A regression that swaps the
-	// entries would break this pairing silently.
+	// entries[1] (URL) with partsByMod[audio][1].
 	items, _ := promptItems(reqCtx.Body, reqcommon.APITypeChatCompletions)
 	partsByMod := groupMediaPartsByModality(collectMediaParts(items, reqcommon.APITypeChatCompletions))
 	audioParts := partsByMod[reqcommon.ModalityAudio]
@@ -2824,8 +2765,8 @@ func TestReplaceMediaURLsStep_MixedAudio_WalkerOrder(t *testing.T) {
 	}
 }
 
-// One image, one audio, and one video against a cap of 2: three media parts of
-// any mix count toward max_multimodal_entries, so the request is rejected.
+// Three media parts of any mix count toward max_multimodal_entries, so one
+// image, one audio and one video against a cap of 2 is rejected.
 func TestReplaceMediaURLsStep_MaxEntriesCountsAllModalities(t *testing.T) {
 	step, _ := NewReplaceMediaURLsStep(nil, map[string]any{"max_multimodal_entries": 2})
 	reqCtx := &pipeline.RequestContext{
@@ -2853,7 +2794,7 @@ func TestReplaceMediaURLsStep_MaxEntriesCountsAllModalities(t *testing.T) {
 
 // ---- Per-modality caps and allowlists --------------------------------------
 
-// A video payload rejected under max_download_size alone is accepted once
+// A video payload over max_download_size is accepted once
 // max_video_download_size raises the video-only cap.
 func TestReplaceMediaURLsStep_MaxVideoDownloadSize_OverridesGlobal(t *testing.T) {
 	// 2 MB video payload.
@@ -2946,8 +2887,8 @@ func TestReplaceMediaURLsStep_InputAudio_UsesAudioCap(t *testing.T) {
 	}
 }
 
-// For all three per-modality caps, non-positive and megabyte-overflow values
-// must fail step construction rather than silently disabling the cap.
+// Non-positive and megabyte-overflow values must fail step construction for all
+// three per-modality caps, rather than silently disabling one.
 func TestReplaceMediaURLsStep_RejectsInvalidPerModalityCap(t *testing.T) {
 	tooLarge := (math.MaxInt-1)/config.BytesPerMB + 1
 	for _, tc := range []struct {
@@ -3092,9 +3033,8 @@ func TestReplaceMediaURLsStep_AllowedContentTypes_DefaultsWhenUnset(t *testing.T
 	}
 }
 
-// Construction fails when a per-modality allowlist entry is not a string.
-// Silently dropping the bad entry would be a security downgrade: the operator's
-// intent to lock down the allowlist is lost.
+// Construction fails when a per-modality allowlist entry is not a string:
+// silently dropping it loses the operator's intent to lock the allowlist down.
 func TestReplaceMediaURLsStep_RejectsNonStringAllowedContentType(t *testing.T) {
 	_, err := NewReplaceMediaURLsStep(nil, map[string]any{
 		"allowed_audio_content_types": []any{testAudioWAVMIME, 42},
@@ -3114,12 +3054,10 @@ func TestReplaceMediaURLsStep_RejectsNonListAllowedContentTypes(t *testing.T) {
 	}
 }
 
-// Construction fails when a per-modality allowlist key is present with a null
-// value, the shape a template produces when its variable is unset. Treating it
-// as absent is worse than an empty list: for image it also leaves the
-// download-path Content-Type check off, so a line written to add enforcement
-// adds none. allowed_domains rejects null the same way, and the image case is
-// asserted below as the one with two behaviors riding on the param.
+// Construction fails on a per-modality allowlist key present with a null value,
+// the shape a template produces from an unset variable. Treating it as absent is
+// worse than an empty list: for image it also leaves the download-path check
+// off, so a line written to add enforcement adds none.
 func TestReplaceMediaURLsStep_RejectsNullAllowedContentTypes(t *testing.T) {
 	for _, key := range []string{
 		"allowed_image_content_types",
@@ -3134,11 +3072,9 @@ func TestReplaceMediaURLsStep_RejectsNullAllowedContentTypes(t *testing.T) {
 	}
 }
 
-// Construction fails on an allowlist entry that normalizes to nothing, the
-// same class of templating slip as the null value above and a worse outcome:
-// such an entry keys the set at "", which no normalized Content-Type equals,
-// so the modality would reject every request while an empty list accepts
-// anything. A typo would invert the control rather than relax it.
+// Construction fails on an allowlist entry that normalizes to nothing: it keys
+// the set at "", which nothing matches, so the modality would reject every
+// request while an empty list accepts anything.
 func TestReplaceMediaURLsStep_RejectsEmptyAllowedContentTypeEntry(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -3167,11 +3103,9 @@ func TestReplaceMediaURLsStep_RejectsEmptyAllowedContentTypeEntry(t *testing.T) 
 }
 
 // allowed_domains inverts the same way, which is why it shares the parser: an
-// empty set means unrestricted in hostAllowed, so [""] is a live allowlist
-// whose only key no lowercased host equals, and every download would be
-// refused by a line written to permit one. Whitespace-only entries are not
-// covered here: this guard folds case and nothing else, since trimming would
-// widen what it matches.
+// empty set means unrestricted, so [""] refuses every download by a line written
+// to permit one. Whitespace-only entries are not covered -- this guard folds
+// case only (see parseAllowedDomains).
 func TestReplaceMediaURLsStep_RejectsEmptyAllowedDomainEntry(t *testing.T) {
 	if _, err := NewReplaceMediaURLsStep(nil, map[string]any{
 		"allowed_domains": []any{"example.com", ""},
@@ -3186,9 +3120,8 @@ func TestReplaceMediaURLsStep_RejectsEmptyAllowedDomainEntry(t *testing.T) {
 	}
 }
 
-// Pins the pairing the null case above protects: setting the image allowlist at
-// all, empty list included, turns on the download-path Content-Type check,
-// while leaving it unset keeps the permissive path.
+// Setting the image allowlist at all, empty list included, turns on the
+// download-path Content-Type check.
 func TestReplaceMediaURLsStep_ExplicitImageAllowlistEnablesDownloadCheck(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -3213,8 +3146,7 @@ func TestReplaceMediaURLsStep_ExplicitImageAllowlistEnablesDownloadCheck(t *test
 }
 
 // An empty allowed_<modality>_content_types list disables that modality's
-// allowlist, so any type is accepted, mirroring the "empty means unrestricted"
-// convention allowed_domains uses.
+// allowlist, mirroring allowed_domains's "empty means unrestricted".
 func TestReplaceMediaURLsStep_AllowedContentTypes_EmptyMeansUnrestricted(t *testing.T) {
 	step, err := NewReplaceMediaURLsStep(nil, map[string]any{
 		"allowed_video_content_types": []any{},
@@ -3236,10 +3168,8 @@ func TestReplaceMediaURLsStep_AllowedContentTypes_EmptyMeansUnrestricted(t *test
 	}
 }
 
-// A caller mutating the returned per-modality set must not reach the
-// package-level defaultAllowedContentTypesByModality: an entry added to the
-// returned image set must not appear in a fresh call. This keeps every
-// subsequent ReplaceMediaURLsStep from picking up leaked overrides.
+// A caller mutating the returned set must not reach the package-level
+// defaultAllowedContentTypesByModality, or every later step inherits the leak.
 func TestParsePerModalityContentTypes_DoesNotAliasDefaults(t *testing.T) {
 	first, _, err := parsePerModalityContentTypes(nil)
 	if err != nil {
@@ -3260,16 +3190,11 @@ func TestParsePerModalityContentTypes_DoesNotAliasDefaults(t *testing.T) {
 	}
 }
 
-// TestReplaceMediaURLsStep_ChatCompletionsInputImage covers an input_image part
-// sent on a chat-completions request. vLLM's chat parser primes input_image and
-// image_url through the same content part map, so such a part reaches the model
-// and has to be fetched under this step's address guard and size limit rather
-// than left for the model server to fetch itself. The sidecar's encoder fan-out
-// collects it for the same reason.
-//
-// The URL sits where a Responses input_image keeps it, a bare string on the
-// part, even though the request is chat completions, so this also pins that the
-// rewritten data URI goes back in that shape.
+// An input_image part on a chat-completions request reaches the model (see
+// reqcommon.PartModality), so it has to be fetched under this step's address
+// guard and size limit. Its URL sits where a Responses input_image keeps it, a
+// bare string on the part, so this also pins that the data URI goes back in
+// that shape.
 func TestReplaceMediaURLsStep_ChatCompletionsInputImage(t *testing.T) {
 	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", testImageJPEGContentType)
@@ -3320,7 +3245,7 @@ func TestReplaceMediaURLsStep_ChatCompletionsInputImage(t *testing.T) {
 }
 
 // A chat-completions message defines no output array, so an image_url part
-// under one names content the client never sent and is left alone.
+// under one names content the client never sent.
 func TestReplaceMediaURLsStep_IgnoresOutputOnChatCompletions(t *testing.T) {
 	var hits atomic.Int32
 	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -3360,12 +3285,9 @@ func TestReplaceMediaURLsStep_IgnoresOutputOnChatCompletions(t *testing.T) {
 	}
 }
 
-// TestReplaceMediaURLsStep_Responses_InlinesFunctionCallOutputImage covers a
-// Responses function_call_output, which carries its parts under output rather
-// than content. vLLM forwards that array as a tool message's content, so media
-// in it reaches the model like any other part and has to be fetched under this
-// step's address guard and size limit rather than left for the model server to
-// fetch itself.
+// A Responses function_call_output carries its parts under output rather than
+// content, and vLLM forwards that array as a tool message's content, so media in
+// it has to be fetched under this step's address guard and size limit.
 func TestReplaceMediaURLsStep_Responses_InlinesFunctionCallOutputImage(t *testing.T) {
 	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", testImageJPEGContentType)
@@ -3416,14 +3338,10 @@ func TestReplaceMediaURLsStep_Responses_InlinesFunctionCallOutputImage(t *testin
 	}
 }
 
-// A chat image_url part on a Responses request is collected and downloaded,
-// the same as on a chat request: reqcommon.PartModality's answer does not
-// depend on the API that carried the part.
-//
-// The model server's own input validation is what rejects such a request, so
-// the download here is work spent on a request that will not be served. Note
-// also that the entry has to pair with a hash from the render service, or the
-// feature count fails the request in render rather than at the model server.
+// A chat image_url part on a Responses request is collected and downloaded the
+// same as on a chat request: reqcommon.PartModality's answer does not depend on
+// the API that carried the part. The model server is what rejects the request,
+// so the download is work spent on a request that will not be served.
 func TestReplaceMediaURLsStep_ResponsesCollectsChatImagePart(t *testing.T) {
 	var hits atomic.Int32
 	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

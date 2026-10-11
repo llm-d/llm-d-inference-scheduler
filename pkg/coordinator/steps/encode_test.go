@@ -1025,8 +1025,8 @@ func TestEncodeStep_GenerateFormat_CapsSingleToken(t *testing.T) {
 
 // ---- multimodal encoder fanout ---------------------------------------------
 
-// The walker returns the media parts in request order, and grouping them by
-// modality keeps each modality's own discovery order.
+// The walker returns media parts in request order; grouping by modality keeps
+// each modality's own discovery order.
 func TestCollectMediaParts_MixedModalities(t *testing.T) {
 	items := []any{
 		map[string]any{
@@ -1061,11 +1061,8 @@ func TestCollectMediaParts_MixedModalities(t *testing.T) {
 }
 
 // A Responses request collects every media-typed part, the same set a chat
-// request does. PartModality's answer does not depend on the API, so the walk
-// differs between the two only in which arrays an item holds.
-//
-// input_text is the control: it names no media on any API, so it is passed
-// over here while the five media parts are collected.
+// request does: the two walks differ only in which arrays an item holds.
+// input_text is the control -- it names no media on any API.
 func TestCollectMediaParts_ResponsesCollectsEveryMediaPart(t *testing.T) {
 	items := []any{
 		map[string]any{
@@ -1104,11 +1101,9 @@ func TestCollectMediaParts_ResponsesCollectsEveryMediaPart(t *testing.T) {
 }
 
 // Every part whose type names a modality is collected, whether or not it still
-// carries usable media. Filtering an unusable part out here is what would break
-// the pairing: replace-media-urls rejects the request as it builds the entries
-// (see collectMediaRefs), so by the time this walk runs on a request that got
-// through, every part it returns has an entry. A walk that dropped one would
-// instead shift every later part of that modality onto another part's hash.
+// carries usable media: replace-media-urls already rejected the unusable ones
+// (see collectMediaRefs), so filtering here would drop a part that has an entry
+// and shift the pairing.
 func TestCollectMediaParts_KeepsEveryMediaTypedPart(t *testing.T) {
 	items := []any{
 		map[string]any{
@@ -1140,8 +1135,8 @@ func TestCollectMediaParts_KeepsEveryMediaTypedPart(t *testing.T) {
 		t.Fatalf("audio parts = %d, want 5 (every audio-typed part)", got)
 	}
 
-	// mediaPartCarriesPayload is what separates the usable parts, and it has to
-	// agree with the rule replace-media-urls rejects on.
+	// mediaPartCarriesPayload separates the usable parts, and has to agree with
+	// the rule replace-media-urls rejects on.
 	wantPayload := map[reqcommon.Modality][]bool{
 		reqcommon.ModalityImage: {false, false, true},
 		reqcommon.ModalityAudio: {false, true, false, false, true},
@@ -1210,9 +1205,8 @@ func TestBuildEncodeBody_PerModalityPart(t *testing.T) {
 	}
 }
 
-// An out-of-range local index is an error rather than a stand-in content part.
-// The path only runs when entries and parts got out of line upstream, a
-// coordinator bug, so there is nothing worth sending the encoder; the error
+// An out-of-range local index is an error rather than a stand-in content part:
+// it only happens when entries and parts got out of line upstream. The error
 // names the modality to keep the miss traceable.
 func TestBuildEncodeBody_OutOfRangeErrors(t *testing.T) {
 	step := &EncodeStep{}
@@ -1248,9 +1242,9 @@ func TestBuildEncodeBody_OutOfRangeErrors(t *testing.T) {
 	}
 }
 
-// Drives the full step with one more entry than the request has media parts,
-// the shape of an entry<->part pairing bug: the fanout must fail instead of
-// sending the encoder a sub-request with no media in it.
+// One more entry than the request has media parts, the shape of an entry<->part
+// pairing bug: the fanout must fail rather than send the encoder a sub-request
+// with no media in it.
 func TestEncodeStep_MissingMediaPartFails(t *testing.T) {
 	// The well-formed entry may or may not reach the encoder before the
 	// broken one fails the group, so this only has to answer plausibly.
@@ -1297,21 +1291,19 @@ func TestEncodeStep_MissingMediaPartFails(t *testing.T) {
 	}
 }
 
-// fanoutPairing is what one encode sub-request says about the entry it was
-// built for: the content part's type and the payload that part carries.
-//
-// A chat-completions sub-request carries no mm_hashes, so the entry a
-// sub-request belongs to is identified by its position in the fanout rather
-// than by a hash in the body: captureFanout pins max_parallel to 1, which makes
-// errgroup issue the sub-requests one entry at a time, in entry order.
+// fanoutPairing is what one encode sub-request says about the entry it was built
+// for: the content part's type and the payload it carries. A chat-completions
+// sub-request carries no mm_hashes, so its entry is identified by position in
+// the fanout -- captureFanout pins max_parallel to 1 so errgroup issues them one
+// at a time, in entry order.
 type fanoutPairing struct {
 	partType string
 	payload  string
 }
 
 // readFanoutPairing extracts the pairing a single encode sub-request asserts.
-// A sub-request carries exactly one entry, so it must carry exactly one message
-// holding exactly one content part; anything else is itself a failure.
+// One entry per sub-request means exactly one message holding exactly one
+// content part; anything else is itself a failure.
 func readFanoutPairing(t *testing.T, body map[string]any) fanoutPairing {
 	t.Helper()
 	msgs, _ := body["messages"].([]any)
@@ -1343,10 +1335,9 @@ func captureFanout(t *testing.T, reqCtx *pipeline.RequestContext) []fanoutPairin
 	var pairings []fanoutPairing
 	inFlight := 0
 	encoderBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A sub-request's position identifies its entry only while the fanout
-		// is serialized. Fail loudly if two ever overlap, so raising
-		// max_parallel cannot quietly turn the assertions below into claims
-		// about arrival order.
+		// Position identifies a sub-request's entry only while the fanout is
+		// serialized, so fail loudly if two overlap: raising max_parallel must
+		// not quietly turn the assertions below into claims about arrival order.
 		mu.Lock()
 		inFlight++
 		if inFlight > 1 {
@@ -1403,12 +1394,10 @@ func assertPairings(t *testing.T, got, want []fanoutPairing) {
 	}
 }
 
-// Drives the full encode step with a mixed-modality request: each entry
-// produces one fanout sub-request, and the hash, the modality key it sits
-// under, and the media bytes beside it must all belong to the same entry.
-// Asserting only that every modality and part type appeared somewhere would
-// pass on any permutation of them, the failure this guards (see
-// collectMediaParts).
+// A mixed-modality request: each entry produces one fanout sub-request, and the
+// hash, the modality key it sits under, and the media bytes beside it must all
+// belong to the same entry. Asserting only that each appeared somewhere would
+// pass on any permutation of them.
 func TestEncodeStep_MixedModalityFanout(t *testing.T) {
 	reqCtx := &pipeline.RequestContext{
 		RequestID:    "mixed-fanout",
@@ -1445,11 +1434,10 @@ func TestEncodeStep_MixedModalityFanout(t *testing.T) {
 	})
 }
 
-// The pairing case a cross-modality test cannot reach: two audio entries in one
-// request, one carried as audio_url and one as input_audio. Both share the
-// audio modality key, so only the per-modality local index distinguishes them,
-// and mixing the two part types is where a local-index regression sends one
-// entry's hash with the other's bytes.
+// The pairing case a cross-modality test cannot reach: two audio entries, one
+// audio_url and one input_audio. They share the modality key, so only the local
+// index distinguishes them, and a regression there sends one entry's hash with
+// the other's bytes.
 func TestEncodeStep_WithinModalityFanoutPairing(t *testing.T) {
 	reqCtx := &pipeline.RequestContext{
 		RequestID:    "within-modality-fanout",
@@ -1743,8 +1731,8 @@ func TestEncodeStep_ResponsesFormat_RejectsEntryIndexBeyondImageParts(t *testing
 	if errors.Is(err, pipeline.ErrBadRequest) {
 		t.Errorf("a coordinator pairing bug is not a client error, got %v", err)
 	}
-	// The message is asserted because the sibling no-payload guard fails the
-	// same way, so "an error occurred" alone would not pin this branch.
+	// Asserted on the message, since the sibling no-payload guard fails the
+	// same way.
 	if !strings.Contains(err.Error(), "no image media part at index") {
 		t.Fatalf("expected the index guard to reject, got %v", err)
 	}

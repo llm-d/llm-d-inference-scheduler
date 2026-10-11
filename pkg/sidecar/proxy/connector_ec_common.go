@@ -134,20 +134,18 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 				continue
 			}
 
-			// Which part types name media is reqcommon.PartModality's rule,
-			// shared with the coordinator steps so the two cannot disagree
-			// about which parts exist. A part naming none is not counted as a
-			// drop: every text and tool part lands here, so counting them
-			// would fire the line below on ordinary traffic.
+			// reqcommon.PartModality's rule, shared with the coordinator steps
+			// so the two cannot disagree about which parts exist. A part naming
+			// no media is not counted as a drop: every text and tool part lands
+			// here, so counting them would fire droppedParts on ordinary traffic.
 			if _, isMedia := reqcommon.PartModality(partType); !isMedia {
 				continue
 			}
 
-			// An input_image carries its media behind a URL only, so one
-			// without a readable URL has nothing to prime an encoder with. The
-			// check stays specific to it: an input_audio holds its bytes inline
-			// and reports no URL, so a general one would drop audio the encoder
-			// can be primed with.
+			// An input_image carries its media behind a URL only, so one without
+			// a readable URL has nothing to prime an encoder with. Specific to
+			// it: an input_audio holds its bytes inline and reports no URL, so a
+			// general check would drop audio the encoder can be primed with.
 			if partType == reqcommon.PartTypeInputImage && reqcommon.MediaPartURL(partMap) == "" {
 				logger.V(logging.DEBUG).Info("skipping input_image with no fetchable URL")
 				droppedParts++

@@ -70,11 +70,11 @@ All requests from the coordinator to workers include the `x-llm-d-epp-profile` H
 
 ## Stage 1: replace-media-urls
 
-Downloads external `image_url`, `audio_url`, and `video_url` references and replaces them with inline data URIs in the request body. Inline `input_audio` parts carry their bytes already and are validated and size-checked in place.
+Downloads external `image_url`, `audio_url`, and `video_url` references and replaces them with inline data URIs in the request body. Inline `input_audio` parts already carry their bytes and are validated and size-checked in place.
 
 **Skipped for `/v1/completions` requests** (completions cannot contain multimedia content).
 
-The worked examples in this document use images throughout. Audio and video take the same path, with `audio_url` / `video_url` / `input_audio` content parts and `audio` / `video` keys wherever an example shows `image`.
+The worked examples below use images throughout; audio and video take the same path, with `audio_url` / `video_url` / `input_audio` parts and `audio` / `video` keys wherever an example shows `image`.
 
 ### Input
 
@@ -151,11 +151,11 @@ A request mixing modalities seeds one entry per part in request-walker order, so
 }
 ```
 
-This step sets `Modality` only. `Hash`, `KwargsData`, and `Placeholder` are filled in by [render](#stage-2-render).
+This step sets `Modality` only; [render](#stage-2-render) fills in `Hash`, `KwargsData`, and `Placeholder`.
 
-The entry does **not** carry the media bytes. They stay on the request body -- in the `data:` URI this step wrote, or in `input_audio.data` where the client put them -- so a large audio or video payload is not duplicated on `reqCtx` for the lifetime of the request.
+The entry does **not** carry the media bytes. They stay on the request body -- in the `data:` URI this step wrote, or in `input_audio.data` where the client put them -- so a large payload is not duplicated on `reqCtx`.
 
-An entry's absolute position in the slice carries no meaning on its own. Every step that pairs an entry with its content part counts entries of the same `Modality`, so the `i`-th `audio` entry pairs with the `i`-th audio part.
+An entry's absolute position in the slice carries no meaning on its own: every step pairs an entry with its content part by counting entries of the same `Modality`, so the `i`-th `audio` entry pairs with the `i`-th audio part.
 
 ---
 
@@ -294,7 +294,7 @@ For the single-image example above:
   - `entries[0].KwargsData = "<base64-encoded-msgpack blob, ~1.1 MB>"`
   - `entries[0].Placeholder = {Offset: 8, Length: 70}`
 
-For a multi-entry request the coordinator walks `reqCtx.MultimodalEntries` in order and reads each entry's slot from the response maps for that entry's own modality, using a per-modality position counter. Writing `m` for `entries[i].Modality` and `k` for the number of earlier entries that also had modality `m`:
+For a multi-entry request the coordinator walks `reqCtx.MultimodalEntries` in order, reading each entry's slot from the response maps for its own modality at a per-modality position counter. Writing `m` for `entries[i].Modality` and `k` for the number of earlier entries with that same modality:
 
 - `entries[i].Hash = features.mm_hashes[m][k]`
 - `entries[i].KwargsData = features.kwargs_data[m][k]`
@@ -302,7 +302,7 @@ For a multi-entry request the coordinator walks `reqCtx.MultimodalEntries` in or
 
 For an image-only request `k == i`, so this is the same positional pairing as `features.mm_hashes.image[i]`.
 
-The coordinator validates that the per-modality lengths of `mm_hashes`, `mm_placeholders`, and `kwargs_data` each **sum** to `len(reqCtx.MultimodalEntries)`, and that every entry finds an element at its per-modality position. Either failure fails the request: a response that returns the right total but splits it across the wrong modalities (two audio hashes for one image entry and one audio entry) is rejected, not silently mispaired.
+The coordinator validates that the per-modality lengths of `mm_hashes`, `mm_placeholders`, and `kwargs_data` each **sum** to `len(reqCtx.MultimodalEntries)`, and that every entry finds an element at its per-modality position. Either failure fails the request, so a response with the right total split across the wrong modalities is rejected rather than silently mispaired.
 
 ---
 
@@ -399,7 +399,7 @@ The client request body (tokens-in format):
 #### Output (mutates RequestContext)
 
 - `reqCtx.TokenIDs` = the `token_ids` array from the body
-- `reqCtx.MultimodalEntries` = one entry per item named in `features.mm_hashes`, populated from `features` (`Modality`, `Hash`, `Placeholder`, `KwargsData`). `mm_hashes` decides which modalities the request describes: a modality that `mm_placeholders` or `kwargs_data` names but `mm_hashes` does not is a client error, not a skipped key. There is no request walker on this path, so entries are grouped by modality in sorted modality order (`audio`, then `image`, then `video`) and by index within each modality -- which still satisfies the per-modality pairing the chat-completions path relies on
+- `reqCtx.MultimodalEntries` = one entry per item named in `features.mm_hashes`, populated from `features` (`Modality`, `Hash`, `Placeholder`, `KwargsData`). `mm_hashes` decides which modalities the request describes: one that only `mm_placeholders` or `kwargs_data` names is a client error, not a skipped key. There is no request walker on this path, so entries are grouped by modality in sorted order (`audio`, `image`, `video`) and by index within each -- which still satisfies the per-modality pairing
 - `reqCtx.Body` is left as-is; downstream stages read it directly
 
 ---
@@ -559,7 +559,7 @@ Like chat completions, the body is sent unchanged:
 
 ## Stage 4: encode (fan-out, one per media entry)
 
-Sends one encode request per multimodal entry, whatever its modality. Each request contains only the BOS token plus the placeholder tokens for that one entry, with `mm_hashes` and `kwargs_data` keyed under the entry's own modality (`audio` for an audio entry, not `image`). On the chat-completions path the request also carries the one matching content part, located by counting parts of that same modality. The encoder runs and stores the result in the EC (Embedding Cache).
+Sends one encode request per multimodal entry, whatever its modality. Each carries only the BOS token plus that entry's placeholder tokens, with `mm_hashes` and `kwargs_data` keyed under the entry's own modality. On the chat-completions path it also carries the one matching content part, located by counting parts of that modality. The encoder runs and stores the result in the EC (Embedding Cache).
 
 **Skipped for `/v1/completions` requests** (completions cannot contain multimedia content).
 
@@ -1264,11 +1264,10 @@ reaches the model like any other part.
 The Responses input content union is `input_text` / `input_image` / `input_file`,
 so a Responses request carrying `image_url`, `audio_url`, `video_url` or
 `input_audio` is refused by the model server. The pipeline does not pre-empt
-that refusal: `reqcommon.PartModality` answers by part type alone, so those
-parts are collected, downloaded and primed on either API, and the request then
-fails at the model server rather than earlier. `pkg/common/request/modality.go`
-is the single implementation of that rule, and every stage of both the
-coordinator and the sidecar calls it rather than carrying its own copy.
+that: `reqcommon.PartModality` answers by part type alone, so those parts are
+collected, downloaded and primed on either API. That rule has one
+implementation, `pkg/common/request/modality.go`, which every coordinator and
+sidecar stage calls rather than carrying its own copy.
 
 Per stage:
 

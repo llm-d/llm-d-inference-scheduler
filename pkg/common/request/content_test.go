@@ -26,9 +26,9 @@ import (
 )
 
 // Base64DecodedLen must be exact, not an estimate: the coordinator bounds an
-// inline media payload with it, so a size read even one byte high would reject
-// a payload of exactly the configured cap. Padding is what makes it exact, so
-// every residue of 3 is covered rather than a sample.
+// inline media payload with it, so a size read one byte high would reject a
+// payload of exactly the configured cap. Padding is what makes it exact, so
+// every residue of 3 is covered.
 func TestBase64DecodedLen(t *testing.T) {
 	for n := 0; n < 300; n++ {
 		b64 := base64.StdEncoding.EncodeToString(make([]byte, n))

@@ -88,9 +88,8 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	logger := log.FromContext(ctx).WithName(EncodeStepName)
 
 	// On the generate path the prefill worker runs the encoder inline from
-	// kwargs_data (image tensors, audio spectrograms, and video frames all take
-	// this path), so the encode fanout and EC handoff would be redundant and
-	// would ship the preprocessed tensor a second time
+	// kwargs_data, whatever the modality, so the encode fanout and EC handoff
+	// would be redundant and would ship the preprocessed tensor a second time
 	// (see https://github.com/vllm-project/vllm/issues/46722).
 	if reqcommon.DetectAPIType(reqCtx.OriginalPath) == reqcommon.APITypeVLLMGenerate {
 		logger.V(logutil.DEFAULT).Info("skipping encode for generate request")
@@ -108,9 +107,8 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 		partsByMod = groupMediaPartsByModality(collectMediaParts(items, format))
 	}
 
-	// Entry i's local index is its position among the entries sharing its
-	// modality. Resolved up front so each sub-request carries its own
-	// coordinate; see collectMediaParts for how entries and parts stay lined up.
+	// Each entry's position among the entries sharing its modality, resolved up
+	// front so every sub-request carries its own coordinate into partsByMod.
 	localIdx := modalityLocalIndexes(reqCtx.MultimodalEntries)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -154,12 +152,10 @@ func (s *EncodeStep) executeOne(
 	body, err := s.buildEncodeBody(reqCtx, entry, localIdx, format, partsByMod)
 	if err != nil {
 		// Every failure here is a coordinator bug rather than a bad request:
-		// either entries and parts got out of line upstream, though
-		// collectMediaParts builds both from one walk by one rule, or a format
+		// either entries and parts got out of line upstream, or a format
 		// reached this fan-out that should never carry media. Fail rather than
-		// send the encoder a request known to be wrong. Which one it was is in
-		// the wrapped err, so the message names the stage and asserts nothing;
-		// the part count the pairing failures care about is in there too.
+		// send the encoder a request known to be wrong; the wrapped err says
+		// which it was.
 		err = fmt.Errorf("encode[%d]: %w", index, err)
 		logger.Error(err, "encode fanout build body",
 			"modality", entry.Modality,
@@ -226,18 +222,16 @@ func (s *EncodeStep) buildEncodeTokenIDs(fullTokenIDs []int, entry pipeline.Mult
 }
 
 // buildEncodeBody builds one fanout sub-request. localIdx is the entry's
-// position among the entries sharing its modality, resolved by Execute; the
-// modality itself comes off the entry.
+// position among the entries sharing its modality, resolved by Execute.
 func (s *EncodeStep) buildEncodeBody(reqCtx *pipeline.RequestContext, entry pipeline.MultimodalEntry, localIdx int, format reqcommon.APIType, partsByMod map[reqcommon.Modality][]mediaPart) (map[string]any, error) {
 	mod := entry.Modality
 	switch format {
 	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses:
-		// Neither failure below is ErrBadRequest. replace-media-urls builds the
+		// Neither failure below is ErrBadRequest: replace-media-urls builds the
 		// entries from this same walk and rejects a part with no payload as it
 		// goes (see collectMediaRefs), so a client request cannot reach either
-		// guard: both mean entries and parts got out of line inside the
-		// coordinator, which should surface as a 5xx rather than blame the
-		// caller. validateEntryModalities states the same rule for its field.
+		// guard. Both mean entries and parts got out of line inside the
+		// coordinator, which should surface as a 5xx.
 		parts := partsByMod[mod]
 		if localIdx < 0 || localIdx >= len(parts) {
 			return nil, fmt.Errorf("no %s media part at index %d, request has %d", mod, localIdx, len(parts))

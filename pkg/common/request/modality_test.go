@@ -18,15 +18,14 @@ package request
 
 import "testing"
 
-// The rule over every part type this package names. Asserted as a full table
-// rather than per case, because the coordinator's walkers and the sidecar's
-// encoder fan-out pair media with multimodal entries on this one answer: a
-// part type that changed sides would shift that pairing rather than fail
-// outright.
+// The rule over every part type this package names, asserted as a full table:
+// the coordinator's walkers and the sidecar's encoder fan-out pair media with
+// multimodal entries on this one answer, so a part type that changed sides
+// would shift that pairing rather than fail outright.
 //
 // The answer is the same on every API. Which API carried the part decides only
 // which arrays an item holds (ItemPartArrays) and whether a part walk runs at
-// all (steps.promptItems), not what a part type names.
+// all (steps.promptItems).
 func TestPartModality(t *testing.T) {
 	for _, tc := range []struct {
 		partType string
