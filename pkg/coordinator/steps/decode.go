@@ -63,10 +63,6 @@ func (s *DecodeStep) Name() string { return DecodeStepName }
 func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) error {
 	logger := log.FromContext(ctx).WithName(DecodeStepName)
 
-	if err := validateEntryModalities(reqCtx.MultimodalEntries); err != nil {
-		return fmt.Errorf("decode: %w", err)
-	}
-
 	if err := s.prepareDecodeBody(ctx, reqCtx); err != nil {
 		return err
 	}

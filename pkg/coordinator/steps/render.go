@@ -124,9 +124,14 @@ func (s *RenderStep) SetServiceAddress(addr string) {
 func (s *RenderStep) Name() string { return RenderStepName }
 
 func (s *RenderStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) error {
-	// Entries reaching here came from replace_media_urls; on the generate path
-	// executeGenerate builds them below, where extractMultimodalEntries
-	// rejects an empty modality key outright.
+	// The one check of this invariant for the whole pipeline, placed here
+	// because this is the first step to pair on Modality (see modIndex in
+	// applyRenderResponse) and because entries from replace_media_urls are
+	// already in place by now. The later readers take the entries this
+	// accepted, so repeating it in each of them bought nothing. On the
+	// generate path the slice is still empty here; executeGenerate fills it
+	// below, and extractMultimodalEntries rejects an empty modality key as it
+	// builds, so that producer guards itself.
 	if err := validateEntryModalities(reqCtx.MultimodalEntries); err != nil {
 		return fmt.Errorf("render: %w", err)
 	}

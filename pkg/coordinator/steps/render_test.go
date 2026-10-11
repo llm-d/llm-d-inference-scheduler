@@ -1012,15 +1012,18 @@ func TestRenderStep_GenerateFormat_MissingTokenIDs(t *testing.T) {
 	}
 }
 
-// The render counterpart of TestPrefillStep_EntryWithoutModalityFails: covers
-// the validateEntryModalities guard at this step's boundary, not the guard
-// itself (utils_test.go does that). The chat-completions path is the one that
-// matters: its entries arrive from replace_media_urls and render fills each
-// from the response slot for its Modality, so an untagged entry would look for
-// a slot under the empty key, while on the generate path render builds the
-// entries itself and extractMultimodalEntries rejects an empty modality key as
-// a client error before this guard is reachable. The render service fails the
-// test if it is called: the guard must reject before the upstream request.
+// Covers validateEntryModalities at the one boundary that calls it, not the
+// guard itself (utils_test.go does that). Render is the only caller: the later
+// readers take the entries it accepted, so they no longer repeat the check and
+// have no equivalent test.
+//
+// The chat-completions path is the one that matters: its entries arrive from
+// replace_media_urls and render fills each from the response slot for its
+// Modality, so an untagged entry would look for a slot under the empty key,
+// while on the generate path render builds the entries itself and
+// extractMultimodalEntries rejects an empty modality key as a client error
+// before this guard is reachable. The render service fails the test if it is
+// called: the guard must reject before the upstream request.
 func TestRenderStep_EntryWithoutModalityFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("render must not reach the rendering service with an untagged entry")

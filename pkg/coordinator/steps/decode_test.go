@@ -930,53 +930,6 @@ func TestInjectUUIDs_EntryWithNoMediaPartIsLogged(t *testing.T) {
 	}
 }
 
-// The decode counterpart of TestPrefillStep_EntryWithoutModalityFails: covers
-// the validateEntryModalities guard at this step's boundary, not the guard
-// itself (utils_test.go does that). Decode proxies straight to the worker, and
-// uuid tagging keys on Modality, so without the guard the response would be
-// built on whichever part the empty label paired with. The upstream handler
-// fails the test if it runs, and nothing may be written to the client: the
-// guard must reject before the proxy takes over the response.
-func TestDecodeStep_EntryWithoutModalityFails(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		t.Error("decode must not reach the upstream with an untagged entry")
-	}))
-	defer server.Close()
-
-	step, err := NewDecodeStep(gateway.New(config.GatewayConfig{Address: server.URL}), map[string]any{
-		ParamKVConnector: kv.NIXL,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	recorder := httptest.NewRecorder()
-	reqCtx := &pipeline.RequestContext{
-		RequestID:    "req-1",
-		OriginalPath: testChatCompletionsPath,
-		Model:        "test-model",
-		TokenIDs:     []int{1, 32000, 2345},
-		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Hash: "hash-a", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 1}},
-		},
-		KVTransferParams: make(map[string]any),
-		Body:             map[string]any{"model": "test-model", "stream": false, "messages": []any{}},
-		ResponseWriter:   recorder,
-	}
-
-	err = step.Execute(context.Background(), reqCtx)
-	if err == nil {
-		t.Fatal("expected an error for an entry with no modality")
-	}
-	// A coordinator-side invariant break, so a 5xx rather than blaming the client.
-	if errors.Is(err, pipeline.ErrBadRequest) {
-		t.Errorf("expected a non-ErrBadRequest failure, got %v", err)
-	}
-	if recorder.Body.Len() != 0 {
-		t.Errorf("expected nothing written to the client, got %q", recorder.Body.String())
-	}
-}
-
 // TestDecodeStep_Responses_StampsFunctionCallOutputImage verifies the uuid
 // stamping walk sees the same image set replace-media-urls built entries from,
 // including an image under a function_call_output's output. An unstamped part

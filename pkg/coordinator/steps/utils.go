@@ -328,10 +328,19 @@ func buildMMFeatures(entries []pipeline.MultimodalEntry, includeKwargs bool) map
 	return features
 }
 
-// validateEntryModalities rejects a MultimodalEntry with no Modality; steps
-// that read entries call it first. Both producers set the field, so reaching
-// here means a coordinator bug: the error is deliberately not ErrBadRequest,
-// since such a request should surface as a 5xx rather than blame the caller.
+// validateEntryModalities rejects a MultimodalEntry with no Modality. Render
+// calls it, as the first step that pairs on the field; the later readers
+// (encode, prefill, decode) inherit the entries it passed. The error is
+// deliberately not ErrBadRequest: both producers set the field, so an untagged
+// entry is a coordinator bug and should surface as a 5xx rather than blame the
+// caller.
+//
+// Neither producer can currently emit one. reqcommon.PartModality returns
+// ok == false rather than an empty Modality, and the entries it feeds are
+// appended only when it returns true; extractMultimodalEntries rejects an
+// empty feature-map key itself. This is the backstop for a third producer, or
+// for either of those two changing, and it sits at one call site for that
+// reason rather than at every reader.
 //
 // Failing is what keeps a mislabeled entry from corrupting a response. Every
 // reader pairs per-modality by position on this field, so an entry defaulted to

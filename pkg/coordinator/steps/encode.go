@@ -84,9 +84,6 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	if len(reqCtx.MultimodalEntries) == 0 {
 		return nil
 	}
-	if err := validateEntryModalities(reqCtx.MultimodalEntries); err != nil {
-		return fmt.Errorf("encode: %w", err)
-	}
 
 	logger := log.FromContext(ctx).WithName(EncodeStepName)
 

@@ -19,7 +19,6 @@ package steps
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -826,46 +825,6 @@ func TestPrefillStep_CoercesInvalidKVTransferParams(t *testing.T) {
 				t.Fatalf("did not expect a warning log for %s, infos=%v", tc.kvConn, sink.infos)
 			}
 		})
-	}
-}
-
-// The invariant guard at a step boundary. An entry with no Modality fails the
-// request instead of being grouped under a default modality, which would pair
-// it with another entry's slot and shift the local index of every later entry
-// sharing that label. The upstream handler fails the test if it runs: the guard
-// must reject before the prefill call, not after the engine has been handed a
-// body built on a guess.
-func TestPrefillStep_EntryWithoutModalityFails(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		t.Error("prefill must not reach the upstream with an untagged entry")
-	}))
-	defer server.Close()
-
-	step, err := NewPrefillStep(gateway.New(config.GatewayConfig{Address: server.URL}), map[string]any{
-		"use_openai_format": false,
-		ParamECConnector:    ec.NIXL,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	reqCtx := &pipeline.RequestContext{
-		RequestID: "req-1",
-		Model:     "test-model",
-		TokenIDs:  []int{1, 32000, 2345},
-		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Hash: "hash-a", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 1}},
-		},
-		KVTransferParams: make(map[string]any),
-	}
-
-	err = step.Execute(context.Background(), reqCtx)
-	if err == nil {
-		t.Fatal("expected an error for an entry with no modality")
-	}
-	// A coordinator-side invariant break, so a 5xx rather than blaming the client.
-	if errors.Is(err, pipeline.ErrBadRequest) {
-		t.Errorf("expected a non-ErrBadRequest failure, got %v", err)
 	}
 }
 

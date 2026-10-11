@@ -559,10 +559,10 @@ func TestBuildMMFeatures_GroupsByModality(t *testing.T) {
 	}
 }
 
-// The invariant guard the steps run before reading entries. An entry with no
-// Modality is an error rather than a value resolved to some default, because
-// every reader keys per-modality pairing on the field and a defaulted entry
-// would splice into another modality's index sequence. The error is
+// The invariant guard render runs before the pipeline reads entries. An entry
+// with no Modality is an error rather than a value resolved to some default,
+// because every reader keys per-modality pairing on the field and a defaulted
+// entry would splice into another modality's index sequence. The error is
 // deliberately not ErrBadRequest: both producers set the field, so reaching the
 // guard means a coordinator bug, not bad client input.
 func TestValidateEntryModalities(t *testing.T) {

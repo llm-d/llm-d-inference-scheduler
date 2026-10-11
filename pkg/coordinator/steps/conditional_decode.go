@@ -19,7 +19,6 @@ package steps
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"net/http"
 
@@ -57,10 +56,6 @@ func (s *ConditionalDecodeStep) Name() string { return ConditionalDecodeStepName
 
 func (s *ConditionalDecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) error {
 	logger := log.FromContext(ctx).WithName(ConditionalDecodeStepName)
-
-	if err := validateEntryModalities(reqCtx.MultimodalEntries); err != nil {
-		return fmt.Errorf("conditional-decode: %w", err)
-	}
 
 	body, err := s.prepareBody(reqCtx)
 	if err != nil {
