@@ -357,7 +357,9 @@ func (h *Handler) Pick(ctx context.Context, request *scheduling.InferenceRequest
 	if request.TargetModel != "" {
 		span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 	}
-	span.SetAttributes(semconv.GenAIRequestID(request.Headers[reqcommon.RequestIDHeaderKey]))
+	if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+		span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
+	}
 	span.SetAttributes(mmobs.SpanAttributes(request)...)
 
 	if h.stageOrder == StageOrderPrefillFirst {
@@ -581,7 +583,9 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 	if request.TargetModel != "" {
 		span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 	}
-	span.SetAttributes(semconv.GenAIRequestID(request.Headers[reqcommon.RequestIDHeaderKey]))
+	if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+		span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
+	}
 	span.SetAttributes(mmobs.SpanAttributes(request)...)
 
 	// Prefill header
