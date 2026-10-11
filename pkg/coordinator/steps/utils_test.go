@@ -700,6 +700,12 @@ func TestExtractMultimodalEntries_UnhashedModalityRejected(t *testing.T) {
 // modality reaching a reader would be a coordinator bug, and an accepted empty
 // key would let a client manufacture one. Rejected as a client error, since the
 // request body is what is wrong.
+//
+// The null cases are the ones that pin the check's position. A null value is a
+// skip for a named modality, so while that skip ran first an empty key paired
+// with null returned before the key was ever judged, and {"": null} was
+// accepted while {"": []} was refused. The subtests below cover the empty key
+// against both a list and a null, in each field that carries modality keys.
 func TestExtractMultimodalEntries_EmptyModalityKeyRejected(t *testing.T) {
 	placeholder := func(offset, length int) any {
 		return map[string]any{"offset": float64(offset), "length": float64(length)}
@@ -729,6 +735,44 @@ func TestExtractMultimodalEntries_EmptyModalityKeyRejected(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:     "mm_hashes_null_value",
+			features: map[string]any{"mm_hashes": map[string]any{"": nil}},
+		},
+		{
+			// The named modality is fully formed in every field, so the empty
+			// key is the only thing left to object to. Without that, the
+			// request fails for a missing mm_placeholders[image] instead and
+			// the subtest would pass whatever order the checks run in.
+			name: "mm_placeholders_null_value",
+			features: map[string]any{
+				"mm_hashes": map[string]any{string(reqcommon.ModalityImage): []any{"img-a"}},
+				"mm_placeholders": map[string]any{
+					string(reqcommon.ModalityImage): []any{placeholder(1, 2)},
+					"":                              nil,
+				},
+			},
+		},
+		{
+			name: "kwargs_data_null_value",
+			features: map[string]any{
+				"mm_hashes":       map[string]any{string(reqcommon.ModalityImage): []any{"img-a"}},
+				"mm_placeholders": map[string]any{string(reqcommon.ModalityImage): []any{placeholder(1, 2)}},
+				"kwargs_data":     map[string]any{"": nil},
+			},
+		},
+		{
+			name: "null_value_alongside_a_named_modality",
+			features: map[string]any{
+				"mm_hashes": map[string]any{
+					string(reqcommon.ModalityImage): []any{"img-a"},
+					"":                              nil,
+				},
+				"mm_placeholders": map[string]any{
+					string(reqcommon.ModalityImage): []any{placeholder(1, 2)},
+				},
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entries, err := extractMultimodalEntries(tc.features)
@@ -739,6 +783,32 @@ func TestExtractMultimodalEntries_EmptyModalityKeyRejected(t *testing.T) {
 				t.Fatalf("expected ErrBadRequest, got %v", err)
 			}
 		})
+	}
+}
+
+// The other half of the branch the test above pins. A null value under a named
+// modality means the modality is absent, so it is skipped rather than refused,
+// and the keys beside it still produce their entries. Only the empty key is
+// judged before the value; moving that check ahead of the null skip must not
+// start rejecting this.
+func TestExtractMultimodalEntries_NamedModalityWithNullValueSkipped(t *testing.T) {
+	entries, err := extractMultimodalEntries(map[string]any{
+		"mm_hashes": map[string]any{
+			string(reqcommon.ModalityImage): []any{"img-a"},
+			string(reqcommon.ModalityAudio): nil,
+		},
+		"mm_placeholders": map[string]any{
+			string(reqcommon.ModalityImage): []any{map[string]any{"offset": float64(1), "length": float64(2)}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("a named modality with a null value must be skipped, not refused: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected the image entry alone, got %v", entries)
+	}
+	if entries[0].Modality != reqcommon.ModalityImage {
+		t.Errorf("entry modality = %q, want %q", entries[0].Modality, reqcommon.ModalityImage)
 	}
 }
 

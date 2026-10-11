@@ -494,7 +494,9 @@ func mmModalityArray(features map[string]any, field string, modality reqcommon.M
 // A key here is whatever the client sent, so this is where the vocabulary opens
 // up: a token-in request may name a modality reqcommon declares no constant
 // for, and the pipeline carries it through rather than refusing a request its
-// model server understands. Only the empty key is rejected.
+// model server understands. Only the empty key is rejected, and it is rejected
+// whatever value it carries: a null value means "modality absent" for a named
+// key, but it cannot excuse a key that names nothing.
 func modalitiesInFeatures(features map[string]any, field string) ([]reqcommon.Modality, error) {
 	raw, ok := features[field]
 	if !ok || raw == nil {
@@ -506,11 +508,14 @@ func modalitiesInFeatures(features map[string]any, field string) ([]reqcommon.Mo
 	}
 	var out []reqcommon.Modality
 	for k, v := range m {
-		if v == nil {
-			continue
-		}
+		// Before the null skip below, so the key is judged on its own rather
+		// than on the value that follows it: {"": null} is as malformed as
+		// {"": []} and has to answer the same way.
 		if k == "" {
 			return nil, fmt.Errorf("%s has an empty modality key: %w", field, pipeline.ErrBadRequest)
+		}
+		if v == nil {
+			continue
 		}
 		out = append(out, reqcommon.Modality(k))
 	}
