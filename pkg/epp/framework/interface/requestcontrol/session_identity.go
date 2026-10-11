@@ -46,7 +46,7 @@ func (i SessionIdentity) Valid() bool {
 }
 
 // SessionIdentityDataKey has no default producer. Consumers must name the
-// configured session-manager instance explicitly.
+// configured session-identity instance explicitly.
 var SessionIdentityDataKey = plugin.NewDataKey("SessionIdentity", "")
 
 // ReadSessionIdentity reads and validates identity from a named producer.
