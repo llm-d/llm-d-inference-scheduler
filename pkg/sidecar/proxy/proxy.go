@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 )
 
@@ -238,7 +240,7 @@ func (c Config) String() string {
 }
 
 // pdConnectorHandler handles a P/D KV connector request. kvCacheSource is the
-// validated x-kv-cache-source-host-port peer to pull cached prefix from ("" when
+// validated x-llm-d-kv-cache-source-host-port peer to pull cached prefix from ("" when
 // absent); the APIType selects the fields that cap the prefill request.
 type pdConnectorHandler func(http.ResponseWriter, *http.Request, string, string, reqcommon.APIType)
 
@@ -263,7 +265,8 @@ type Server struct {
 	dataParallelProxies map[string]http.Handler               // Proxies to other vLLM servers
 	forwardDataParallel bool                                  // Use special Data Parallel work around
 
-	prefillSamplerFn func(n int) int // allow test override
+	prefillSamplerFn func(n int) int        // allow test override
+	nixlRequestIDFn  func() (string, error) // allow test override
 
 	// dpBasePort is the rank-0 proxy port. Rank clones override config.Port
 	// (data_parallel.go), so rank derivation from a routed endpoint's port
@@ -375,6 +378,7 @@ func NewProxy(config Config) *Server {
 		dataParallelProxies: map[string]http.Handler{},
 		forwardDataParallel: true,
 		prefillSamplerFn:    rand.IntN,
+		nixlRequestIDFn:     newNIXLV2RequestID,
 	}
 	if basePort, err := strconv.Atoi(config.Port); err == nil {
 		server.dpBasePort = basePort
@@ -413,6 +417,16 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 
+	// The server logs this so it appears once: every data parallel rank starts the shared validator.
+	if !s.allowlistValidator.enabled {
+		s.logger.Info("warning: SSRF protection is disabled; targets taken from request headers are not checked against the InferencePool",
+			"flag", "--"+enableSSRFProtection,
+			"headers", slices.Concat(
+				routing.HeaderNames(routing.PrefillEndpointHeader),
+				routing.HeaderNames(routing.EncoderEndpointsHeader),
+				routing.HeaderNames(routing.KVCacheSourceHeader)))
+	}
+
 	// Configure handlers
 	s.handler = s.createRoutes()
 
@@ -431,18 +445,14 @@ func (s *Server) Start(ctx context.Context) error {
 	return grp.Wait()
 }
 
-// Clone returns a clone of the current Server struct.
-// Note: decoderURL and decoderProxy are intentionally not copied — callers (e.g. startDataParallel)
-// always set them explicitly after cloning.
-// HTTPListener is not copied; each instance owns its listener.
+// Clone returns a partially initialized Server that is not ready to serve requests.
+// Routes, connector handlers, decoderProxy, and listeners are not copied;
+// callers initialize them after setting the clone's serving and decoder addresses.
 func (s *Server) Clone() *Server {
 	return &Server{
 		addr:                s.addr,
 		readyCh:             make(chan struct{}),
-		handler:             s.handler,
 		allowlistValidator:  s.allowlistValidator,
-		handlePDConnector:   s.handlePDConnector,
-		handleECConnector:   s.handleECConnector,
 		prefillerURLPrefix:  s.prefillerURLPrefix,
 		encoderURLPrefix:    s.encoderURLPrefix,
 		prefillerProxies:    s.prefillerProxies,
@@ -451,6 +461,7 @@ func (s *Server) Clone() *Server {
 		dataParallelProxies: s.dataParallelProxies,
 		forwardDataParallel: s.forwardDataParallel,
 		prefillSamplerFn:    s.prefillSamplerFn,
+		nixlRequestIDFn:     s.nixlRequestIDFn,
 		dpBasePort:          s.dpBasePort,
 		config:              s.config,
 	}

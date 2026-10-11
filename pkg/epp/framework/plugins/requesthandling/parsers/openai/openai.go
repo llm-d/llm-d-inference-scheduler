@@ -49,8 +49,6 @@ const (
 	completionsAPI     = "completions"
 	promptField        = "prompt"
 
-	// Shared multipart form field names for image edits and videos.
-	formFieldModel             = "model"
 	formFieldNumInferenceSteps = "num_inference_steps"
 	embeddingsAPI              = "embeddings"
 	// imagesGenerationsAPI is the OpenAI-compatible image generation endpoint/
@@ -169,7 +167,7 @@ func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers ma
 	}
 
 	extractedBody.Payload = bodyMap
-	if model, ok := bodyMap[formFieldModel].(string); ok {
+	if model, ok := bodyMap[reqcommon.FieldModel].(string); ok {
 		extractedBody.Model = model
 	}
 	extractedBody.MaxOutputTokens = maxOutputTokensForAPI(apiType, bodyMap)
@@ -201,7 +199,7 @@ func tokenInputField(body *fwkrh.InferenceRequestBody) string {
 func (p *OpenAIParser) RewriteModelName(payload fwkrh.MarshalablePayload, model string) (fwkrh.MarshalablePayload, error) {
 	switch m := payload.(type) {
 	case fwkrh.PayloadMap:
-		m[formFieldModel] = model
+		m[reqcommon.FieldModel] = model
 		return m, nil
 	default:
 		return payload, nil
@@ -286,7 +284,7 @@ func isStreamTerminator(content []byte) bool {
 }
 
 func responseMediaType(headers map[string]string) string {
-	value, ok := headerValue(headers, request.HeaderContentType)
+	value, ok := headerValue(headers, reqcommon.HeaderContentType)
 	if !ok {
 		return ""
 	}
@@ -462,7 +460,7 @@ func extractRequestBody(apiType string, rawBody []byte) (*fwkrh.InferenceRequest
 }
 
 func parseMultipartFields(body []byte, headers map[string]string, kind string, visit func(string, []byte) error) error {
-	contentTypeValue, _ := headerValue(headers, request.HeaderContentType)
+	contentTypeValue, _ := headerValue(headers, reqcommon.HeaderContentType)
 	mediaType, params, err := mime.ParseMediaType(contentTypeValue)
 	if err != nil || mediaType != "multipart/form-data" {
 		return fmt.Errorf("%s request must have a multipart/form-data content-type", kind)
@@ -506,7 +504,7 @@ func parseImagesEditsRequest(body []byte, headers map[string]string) (*fwkrh.Par
 	}
 	err := parseMultipartFields(body, headers, "images edits", func(name string, value []byte) error {
 		switch name {
-		case formFieldModel:
+		case reqcommon.FieldModel:
 			extractedBody.Model = string(value)
 		case "prompt":
 			images.Prompt = string(value)
@@ -553,7 +551,7 @@ func parseVideosRequest(body []byte, headers map[string]string) (*fwkrh.ParseRes
 	}
 	err := parseMultipartFields(body, headers, "videos", func(name string, value []byte) error {
 		switch name {
-		case formFieldModel:
+		case reqcommon.FieldModel:
 			extractedBody.Model = string(value)
 		case "prompt":
 			videos.Prompt = string(value)

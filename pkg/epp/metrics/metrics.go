@@ -211,7 +211,7 @@ const (
 // With EPP tracing off the context still holds the caller's span, which isn't
 // the EPP's, so only trace_id is attached.
 //
-// Exemplars only reach the wire over OpenMetrics; see openMetricsFilterProvider
+// Exemplars only reach the wire over OpenMetrics; see newMetricsServerOptions
 // in cmd/epp/runner.
 func observeWithTraceExemplar(ctx context.Context, observer prometheus.Observer, value float64) {
 	exemplarObserver, ok := observer.(prometheus.ExemplarObserver)
@@ -538,9 +538,16 @@ func DeleteFlowControlPoolSaturation(inferencePool, stage string) {
 }
 
 // RecordFlowControlStaleEndpoints records how many candidate endpoints the given saturation
-// detector scored as fully saturated because their metrics were missing or stale.
-func RecordFlowControlStaleEndpoints(detector string, count int) {
-	llmdFlowControlStaleEndpoints.WithLabelValues(detector).Set(float64(count))
+// detector scored as fully saturated because their metrics were missing or stale, for the
+// given pipeline stage (empty when unpartitioned).
+func RecordFlowControlStaleEndpoints(detector, stage string, count int) {
+	llmdFlowControlStaleEndpoints.WithLabelValues(detector, stage).Set(float64(count))
+}
+
+// DeleteFlowControlStaleEndpointsStage removes the stale-endpoints gauge series of every
+// detector for a pipeline stage.
+func DeleteFlowControlStaleEndpointsStage(stage string) {
+	llmdFlowControlStaleEndpoints.DeletePartialMatch(prometheus.Labels{"stage": stage})
 }
 
 // RecordFlowControlDetectorSaturation records the saturation signal reported by a single

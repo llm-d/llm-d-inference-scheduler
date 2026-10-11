@@ -79,10 +79,13 @@ to estimation when rendering fails.
 Legacy conversion uses the configured `modelName` and logs a deprecation
 warning once per plugin instance. It reshapes string Input, Input items that
 are simple `{role, content}` messages, and Instructions as a leading system
-message. An Input item or content part it cannot represent this way — for
-example `function_call`, `function_call_output`, `reasoning`, or an image
-part — fails the conversion rather than tokenizing a prompt shorter than the
-one vLLM serves. The forwarded request is unchanged.
+message; `input_text`/`output_text` and `input_image` content parts convert,
+the latter carrying its URL as a bare string rather than chat completions'
+nested `{"image_url": {"url": ...}}` shape. An Input item or content part it
+cannot represent this way — for example `function_call`,
+`function_call_output`, `reasoning`, or `input_audio` — fails the conversion
+rather than tokenizing a prompt shorter than the one vLLM serves. The
+forwarded request is unchanged.
 
 The compatibility implementation and tests are contained in `responses.go`
 and `responses_test.go`. Its integration points are the
@@ -101,7 +104,9 @@ It does not substitute the model, translate protocols, rewrite messages or
 tools, or reconstruct content from routing projections. Model rewrites happen
 before token production and apply to both rendering and forwarding.
 `vllm.prefillOnly` rewrites only the output budget fields of the render copy;
-see [Render-only output budget](#render-only-output-budget).
+see [Render-only output budget](#render-only-output-budget). `vllm.omitMMKwargs`
+adds one field to the render copy; see
+[Render responses without multimodal tensors](#render-responses-without-multimodal-tensors).
 
 The parsed payload keeps nested objects, arrays, Completions `prompt`, and
 Messages `system` as `json.RawMessage`.
@@ -158,6 +163,7 @@ EPP contract does not establish parity for them.
 | `vllm.endpointDiscovery.minModelLen` | `0` | Minimum eligible renderer context capacity. |
 | `vllm.endpointDiscovery.contextLimitLabel` | unset | Label supplying a positive context capacity, optionally bounded by probes. |
 | `vllm.prefillOnly` | `false` | Use a one-token output budget only for rendering; see [Render-only output budget](#render-only-output-budget). |
+| `vllm.omitMMKwargs` | `false` | Ask vLLM to leave processed multimodal tensors out of render responses; see [Render responses without multimodal tensors](#render-responses-without-multimodal-tensors). |
 | `vllm.timeout`             | `5s`                    | Completions timeout and minimum Chat/Messages/Responses timeout.            |
 | `vllm.mmTimeout`           | `30s`                   | Chat/Messages/Responses timeout budget, including multimodal processing.     |
 | `vllm.caCertPath`          | system CA pool          | PEM CA bundle for verifying the render endpoint when using `https://`.       |
@@ -205,6 +211,31 @@ apply to every video in the request.
 | `estimate.video.defaultResolution`    | 640×360   | Per-frame resolution for dynamic tokens-per-frame; fallback for the `x-llm-d-video-resolution` header.                                                      |
 | `estimate.video.defaultDuration`      | `10`      | Video length in seconds for frame counting; fallback for the `x-llm-d-video-duration-seconds` header.                                                       |
 | `estimate.video.maxVideoTokens`       | –         | Overall placeholder cap for a video (0 = uncapped).                                                                                                         |
+
+Audio estimation is `min(duration × tokensPerSecond, maxAudioTokens) +
+overheadTokens`. Audio towers turn a clip into encoder frames at a fixed rate and
+pool them into tokens, so the count follows the clip's length rather than its
+payload size. Duration is resolved per clip: the `x-llm-d-audio-duration-seconds`
+header wins, then the payload itself — exact for PCM WAV, whose header declares a
+byte rate, and payload bytes ÷ the byte rate for anything else — then
+`defaultDuration`, which is what a clip carried by reference falls back to.
+The rate is the one knob a new tower needs: gemma4's mel front end emits a token
+per 40ms of audio (`tokensPerSecond: 25`), Qwen3-Omni's encoder 13 per 1s chunk
+(`tokensPerSecond: 13`), and both wrap a clip in begin/end markers
+(`overheadTokens: 2`).
+
+| Request header                    | Format        | Description                                                                          |
+| --------------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| `x-llm-d-audio-duration-seconds`  | float seconds | Clip length; overrides the payload and `defaultDuration`.                             |
+| `x-llm-d-audio-bytes-per-second`  | integer       | Byte rate of this clip's payload; overrides `defaultBytesPerSecond`. Ignored when the payload is PCM WAV or the duration header is set. |
+
+| Parameter                                       | Default   | Description                                                                  |
+| ----------------------------------------------- | --------- | ---------------------------------------------------------------------------- |
+| `estimate.audio.tokensPerSecond`                | `13`      | The audio tower's placeholder tokens per second of audio.                     |
+| `estimate.audio.overheadTokens`                 | `14`      | Constant added to every clip, modeling the prompt template and per-clip markers. |
+| `estimate.audio.defaultBytesPerSecond`          | `16000`   | Byte rate used for a non-WAV payload when the request does not declare one (~128kbps). |
+| `estimate.audio.defaultDuration`                | `10`      | Clip length in seconds when neither the header nor a payload supplies one.    |
+| `estimate.audio.maxAudioTokens`                 | –         | Cap on the tower's tokens for a clip, before `overheadTokens`; use the model's own limit, e.g. 750 for gemma4 (0 = uncapped). |
 
 ## Failure mode
 
@@ -456,6 +487,18 @@ this option does not enable partial matching or extend inference context limits.
 
 Requests with a non-null `truncate_prompt_tokens` retain their original output
 budget because automatic truncation depends on it.
+
+#### Render responses without multimodal tensors
+
+The producer reads token IDs, `mm_hashes`, and `mm_placeholders` from a render
+response. By default vLLM also returns the processed multimodal tensors in
+`features.kwargs_data`, which the producer discards and which can reach tens of
+megabytes per request. Set `vllm.omitMMKwargs: true` to add
+`"return_mm_kwargs": false` to the render copy, so vLLM leaves the tensors out
+and skips serializing them. The inference payload is unchanged. The option
+requires a vLLM version with the `return_mm_kwargs` render field; other
+versions ignore the field and return the tensors. It is false by default and
+works with `vllm.url` and `vllm.endpointDiscovery`.
 
 A complete sample config that pairs this with `precise-prefix-cache-producer` and `prefix-cache-scorer` is at [`deploy/config/sim-epp-tokenizer-vllm-http-config.yaml`](../../../../../../../deploy/config/sim-epp-tokenizer-vllm-http-config.yaml).
 

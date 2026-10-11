@@ -30,6 +30,7 @@ import (
 	"k8s.io/utils/ptr"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
@@ -139,12 +140,12 @@ func TestOpenAIParser_RewritePriority(t *testing.T) {
 			wantMutated: true,
 		},
 		{
-			name:    "negates priority for legacy vllm target label",
+			name:    "ignores legacy GAIE vllm target label",
 			payload: fwkrh.PayloadMap{"model": "test"},
 			ctx: fwkrh.PriorityRewriteContext{TargetEndpoint: &fwkdl.EndpointMetadata{
 				Labels: map[string]string{"inference.networking.k8s.io/engine-type": "vllm"},
 			}},
-			want:        map[string]any{"model": "test", "priority": -2},
+			want:        map[string]any{"model": "test", "priority": 2},
 			wantMutated: true,
 		},
 	}
@@ -1497,7 +1498,7 @@ func TestOpenAIParser_ParseRequest_ImagesEdits(t *testing.T) {
 			if tt.contentType != "" {
 				ct = tt.contentType
 			}
-			headers := map[string]string{":path": tt.path, request.HeaderContentType: ct}
+			headers := map[string]string{":path": tt.path, reqcommon.HeaderContentType: ct}
 			got, err := parser.ParseRequest(context.Background(), body, headers)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseRequest() error = %v, wantErr %v", err, tt.wantErr)
@@ -1764,7 +1765,7 @@ func TestOpenAIParser_ParseResponse(t *testing.T) {
 		{
 			name:    "Audio stream chunk",
 			body:    []byte{0x52, 0x49, 0x46, 0x46},
-			headers: map[string]string{request.HeaderContentType: "audio/wav"},
+			headers: map[string]string{reqcommon.HeaderContentType: "audio/wav"},
 			want: &fwkrh.ParsedResponse{
 				Usage: nil,
 			},
@@ -1793,7 +1794,7 @@ func TestOpenAIParser_ParseResponse(t *testing.T) {
 			name: "Octet-stream response with malformed usage headers",
 			body: []byte{0x00, 0x01, 0x02},
 			headers: map[string]string{
-				request.HeaderContentType:        "application/octet-stream",
+				reqcommon.HeaderContentType:      "application/octet-stream",
 				"x-vllm-omni-input-tokens":       "invalid",
 				"x-vllm-omni-output-tokens":      "-1",
 				"x-vllm-omni-total-tokens":       "3.5",
@@ -1966,7 +1967,7 @@ func TestOpenAIParser_ParseResponse_Streaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{request.HeaderContentType: request.MediaTypeEventStream}, true)
+			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{reqcommon.HeaderContentType: request.MediaTypeEventStream}, true)
 			if err != nil {
 				t.Fatalf("ParseStreamResponse() error = %v", err)
 			}
@@ -2312,7 +2313,7 @@ func TestOpenAIParser_ParseRequestVideos(t *testing.T) {
 	for _, path := range []string{"/v1/videos", "/v1/videos/sync"} {
 		t.Run(path, func(t *testing.T) {
 			result, err := parser.ParseRequest(context.Background(), body,
-				map[string]string{":path": path, request.HeaderContentType: ct})
+				map[string]string{":path": path, reqcommon.HeaderContentType: ct})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2345,7 +2346,7 @@ func TestOpenAIParser_ParseRequestVideosOptionalAndDuplicateFields(t *testing.T)
 		videoFormPart{name: "prompt", value: "海边日出"},
 	)
 	result, err := NewOpenAIParser().ParseRequest(context.Background(), body,
-		map[string]string{":path": "/v1/videos", request.HeaderContentType: ct})
+		map[string]string{":path": "/v1/videos", reqcommon.HeaderContentType: ct})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2383,7 +2384,7 @@ func TestOpenAIParser_ParseRequestVideosInvalidForms(t *testing.T) {
 			}
 			body, ct := buildVideoForm(t, parts...)
 			if _, err := parser.ParseRequest(context.Background(), body,
-				map[string]string{":path": "/v1/videos", request.HeaderContentType: ct}); err == nil {
+				map[string]string{":path": "/v1/videos", reqcommon.HeaderContentType: ct}); err == nil {
 				t.Error("ParseRequest accepted invalid form")
 			}
 		})
@@ -2391,12 +2392,12 @@ func TestOpenAIParser_ParseRequestVideosInvalidForms(t *testing.T) {
 	body, ct := buildVideoForm(t, videoFormPart{name: "prompt", value: "a cat"})
 	for _, badCT := range []string{"application/json", "multipart/form-data"} {
 		if _, err := parser.ParseRequest(context.Background(), body,
-			map[string]string{":path": "/v1/videos", request.HeaderContentType: badCT}); err == nil {
+			map[string]string{":path": "/v1/videos", reqcommon.HeaderContentType: badCT}); err == nil {
 			t.Errorf("ParseRequest accepted content-type %q", badCT)
 		}
 	}
 	if _, err := parser.ParseRequest(context.Background(), body[:len(body)-20],
-		map[string]string{":path": "/v1/videos", request.HeaderContentType: ct}); err == nil {
+		map[string]string{":path": "/v1/videos", reqcommon.HeaderContentType: ct}); err == nil {
 		t.Error("ParseRequest accepted a truncated form")
 	}
 }
@@ -2440,7 +2441,7 @@ func TestOpenAIParser_ParseRequestVideosForwardsFieldBounds(t *testing.T) {
 				parts := append([]videoFormPart{{name: "prompt", value: "a cat"}}, tc.parts...)
 				body, ct := buildVideoForm(t, parts...)
 				result, err := NewOpenAIParser().ParseRequest(context.Background(), body,
-					map[string]string{":path": path, request.HeaderContentType: ct})
+					map[string]string{":path": path, reqcommon.HeaderContentType: ct})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -2463,7 +2464,7 @@ func TestOpenAIParser_ImagesEditsSharesMultipartReader(t *testing.T) {
 		videoFormPart{name: "image", value: string([]byte{0, 255, '\r', '\n'}), filename: "input.png", mediaType: "image/png"},
 	)
 	result, err := NewOpenAIParser().ParseRequest(context.Background(), body,
-		map[string]string{":path": "/v1/images/edits", request.HeaderContentType: ct})
+		map[string]string{":path": "/v1/images/edits", reqcommon.HeaderContentType: ct})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2499,7 +2500,7 @@ func BenchmarkVideoParseRequest(b *testing.B) {
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			body, ct := buildVideoForm(b, tc.parts...)
-			headers := map[string]string{":path": tc.path, request.HeaderContentType: ct}
+			headers := map[string]string{":path": tc.path, reqcommon.HeaderContentType: ct}
 			parser := NewOpenAIParser()
 			b.SetBytes(int64(len(body)))
 			b.ReportAllocs()

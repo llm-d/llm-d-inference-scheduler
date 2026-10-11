@@ -68,6 +68,7 @@ type warmer interface {
 // an authentication rejection, or on context cancellation.
 func (b renderBackend) warmup(ctx context.Context) {
 	logger := log.FromContext(ctx)
+	ctx = withUnobservedRender(ctx)
 	// The warmup credential, when set, authenticates the probe's render calls.
 	if b.warmupAuth != "" {
 		ctx = withAuthHeader(ctx, b.warmupAuth)
@@ -154,7 +155,7 @@ func (b renderBackend) produce(ctx context.Context, body *fwkrh.InferenceRequest
 			TokenIDs:           tokenIDs,
 			MultiModalFeatures: convertMMFeaturesToUpstream(mmFeatures),
 		}}}, nil
-	case body.Generate != nil:
+	case body.Generate != nil && len(body.Generate.TokenIDs) > 0:
 		return &fwkrh.TokenizedRequest{Prompts: []fwkrh.PromptTokens{{
 			TokenIDs:           body.Generate.TokenIDs,
 			MultiModalFeatures: convertMMFeaturesToUpstream(body.Generate.Features),
