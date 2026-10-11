@@ -50,7 +50,7 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 
 	engineMap, err := s.getMooncakeEngineMap(r.Context(), prefillPodHostPort, bootstrapAddr)
 	if err != nil {
-		s.logger.Error(err, "failed to query mooncake engine ID", "bootstrap_addr", bootstrapAddr)
+		s.logger.Error(jsonErrorForLog(err), "failed to query mooncake engine ID", "bootstrap_addr", bootstrapAddr)
 		if err := errorBadGateway(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
@@ -91,7 +91,7 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 	// Guarded: stringifying the body allocates a copy per request even when
 	// TRACE is disabled.
 	if trace := s.logger.V(logging.TRACE); trace.Enabled() {
-		trace.Info("Prefill request", logging.HTTPBodyKey, string(prefillBody))
+		trace.Info("Prefill request", logBodyBytesKey, len(prefillBody))
 	}
 
 	// Build decode request body
@@ -113,7 +113,7 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 	}
 
 	if trace := s.logger.V(logging.TRACE); trace.Enabled() {
-		trace.Info("Decode request", logging.HTTPBodyKey, string(decodeBody))
+		trace.Info("Decode request", logBodyBytesKey, len(decodeBody))
 	}
 
 	s.runConcurrentPD(w, r, prefillBody, decodeBody, prefillPodHostPort, constants.KVConnectorMooncake, func(prefillReq, _ *http.Request) {

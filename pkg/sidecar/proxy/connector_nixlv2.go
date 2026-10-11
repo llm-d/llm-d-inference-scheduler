@@ -90,7 +90,7 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 
 	// Telemetry failure must not change routing or reject an inference request.
 	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
-	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
+	defer toolFields.report(r.Context())
 
 	// Prefill Stage
 	tracer := tracing.Tracer(tracerScope)
@@ -197,7 +197,7 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	// Guarded: stringifying the body allocates a copy per request even when
 	// TRACE is disabled.
 	if trace := s.logger.V(logging.TRACE); trace.Enabled() {
-		trace.Info("Prefill request", logging.HTTPBodyKey, string(pbody))
+		trace.Info("Prefill request", logBodyBytesKey, len(pbody))
 	}
 
 	// Retry on transient 5xx (502/503/504): these failures (e.g. connection
@@ -205,7 +205,7 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	// under load. Retrying the same host avoids expensive local prefill on
 	// decode. Non-transient errors (500/501) fail immediately.
 	// Every attempt uses the same serialized body, so compare it once.
-	_, _ = toolFields.compareDispatched(pbody)
+	toolFields.compareDispatchedForSpan(pbody, prefillSpan)
 	var pw *bufferedResponseWriter
 retryLoop:
 	for attempt := 0; ; attempt++ {
@@ -248,7 +248,7 @@ retryLoop:
 		metrics.RecordError(metrics.StagePrefill)
 		s.logger.Error(fmt.Errorf("prefill returned %d", pw.statusCode), "prefill request failed",
 			"request_id", uuidStr,
-			logging.HTTPBodyKey, pw.buffer.String())
+			logBodyBytesKey, pw.buffer.Len())
 		prefillSpan.SetStatus(codes.Error, "prefill request failed")
 		prefillSpan.End()
 
@@ -295,8 +295,9 @@ retryLoop:
 		// The count is logged only when it was measured, so a logged zero is a
 		// measured zero rather than an absent measurement.
 		fields := []any{
-			reqcommon.FieldKVTransferParams, pKVTransferParams,
+			"kvTransferParamsPresent", pKVTransferParams != nil,
 			"rewriteCachedTokens", rewriteCachedTokens,
+			"hasCachedTokens", hasPCachedTokens,
 		}
 		if hasPCachedTokens {
 			fields = append(fields, "cachedTokens", pCachedTokens)
@@ -422,14 +423,14 @@ retryLoop:
 	// 2. Forward to local decoder.
 
 	if trace := s.logger.V(logging.TRACE); trace.Enabled() {
-		trace.Info("sending request to decoder", logging.HTTPBodyKey, string(dbody))
+		trace.Info("sending request to decoder", logBodyBytesKey, len(dbody))
 	}
 	statusWriter, decodeStatus := captureResponseStatus(w)
 	decodeWriter, finalizeDecodeWriter := decodeResponseWriter(statusWriter, pCachedTokens, rewriteCachedTokens, streamingEnabled)
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
 	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeWriter, dreq, func() {
-		_, _ = toolFields.compareDispatched(dbody)
+		toolFields.compareDispatchedForSpan(dbody, decodeSpan)
 	})
 	decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDataParallel(dataParallelUsed))
 
@@ -501,7 +502,7 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 	apiType reqcommon.APIType,
 ) {
 	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
-	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
+	defer toolFields.report(r.Context())
 
 	s.logger.V(logging.DEBUG).Info("running NIXL protocol V2 (concurrent dispatch)",
 		"url", prefillPodHostPort, "request_id", uuidStr)
@@ -677,8 +678,8 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 	dreq.ContentLength = int64(len(dbody))
 
 	if trace := s.logger.V(logging.TRACE); trace.Enabled() {
-		trace.Info("concurrent-dispatch prefill request body", logging.HTTPBodyKey, string(pbody))
-		trace.Info("concurrent-dispatch decode request body", logging.HTTPBodyKey, string(dbody))
+		trace.Info("concurrent-dispatch prefill request body", logBodyBytesKey, len(pbody))
+		trace.Info("concurrent-dispatch decode request body", logBodyBytesKey, len(dbody))
 	}
 
 	// Decode writes into a deferred writer that buffers everything until we
@@ -692,7 +693,7 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 	// KV wait aborts immediately.
 	var prefillResp *bufferedResponseWriter
 	prefillDone := make(chan struct{})
-	_, _ = toolFields.compareDispatched(pbody)
+	toolFields.compareDispatchedForSpan(pbody, prefillSpan)
 	prefillStartedAt := time.Now()
 	go func() {
 		defer close(prefillDone)
@@ -722,7 +723,7 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 			prefillSpan.SetStatus(codes.Error, "prefill request failed")
 			cancel() // KV will never arrive -> abort decode instead of hanging
 			s.logger.Error(nil, "concurrent-dispatch prefill returned error status",
-				"status", pw.statusCode, "request_id", uuidStr, logging.HTTPBodyKey, pw.buffer.String())
+				"status", pw.statusCode, "request_id", uuidStr, logBodyBytesKey, pw.buffer.Len())
 		}
 	}()
 
@@ -754,12 +755,12 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 		}()
 		// The request goroutine reads the aggregate only after decodeDone closes.
 		dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(dcw, dreq, func() {
-			_, _ = toolFields.compareDispatched(dbody)
+			toolFields.compareDispatchedForSpan(dbody, decodeSpan)
 		})
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDataParallel(dataParallelUsed))
 		if !dataParallelUsed {
 			decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeTarget(s.config.DecoderURL.Host))
-			_, _ = toolFields.compareDispatched(dbody)
+			toolFields.compareDispatchedForSpan(dbody, decodeSpan)
 			s.decoderProxy.ServeHTTP(dcw, dreq)
 		}
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDurationMs(float64(time.Since(decodeStartedAt).Milliseconds())))
@@ -803,12 +804,12 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 				}
 			}
 		}
-		bodySnippet := ""
+		bodyBytes := 0
 		if prefillResp != nil {
-			bodySnippet = truncate(prefillResp.buffer.String(), 256)
+			bodyBytes = prefillResp.buffer.Len()
 		}
 		s.logger.Info("concurrent-dispatch: prefill failed; returning prefill error and aborting decode",
-			"request_id", uuidStr, "p_status", status, "p_body_snippet", bodySnippet)
+			"request_id", uuidStr, "p_status", status, logBodyBytesKey, bodyBytes)
 		clientResponded = true
 		w.WriteHeader(status)
 		if prefillResp != nil {
@@ -884,12 +885,4 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 			s.logger.Error(err, "failed to send decode abort error to client (concurrent-dispatch)")
 		}
 	}
-}
-
-// truncate shortens s to at most n characters, appending "..." if truncated.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

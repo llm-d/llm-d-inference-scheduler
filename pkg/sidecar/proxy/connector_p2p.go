@@ -89,7 +89,7 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 		return
 	}
 	if v := s.logger.V(logging.TRACE); v.Enabled() {
-		v.Info("prefill request body", logging.HTTPBodyKey, string(prefillBody))
+		v.Info("prefill request body", logBodyBytesKey, len(prefillBody))
 	}
 
 	// Decode request: pull KV from the prefiller's OffloadingConnector P2P tier. Original body
@@ -111,7 +111,7 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 		return
 	}
 	if v := s.logger.V(logging.TRACE); v.Enabled() {
-		v.Info("decode request body", logging.HTTPBodyKey, string(decodeBody))
+		v.Info("decode request body", logBodyBytesKey, len(decodeBody))
 	}
 
 	s.handleP2PSequentialRequests(w, r, prefillBody, decodeBody, prefillPodHostPort, toolFields)
@@ -128,7 +128,7 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 // avoid. Sequencing the requests also matches the NIXL connector, which forwards to
 // the prefiller and waits for it to return before dispatching decode.
 func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Request, prefillBody, decodeBody []byte, prefillHost string, toolFields *toolCallingRequest) {
-	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
+	defer toolFields.report(r.Context())
 	tracer := tracing.Tracer(tracerScope)
 	ctx := r.Context()
 
@@ -152,7 +152,7 @@ func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Requ
 	prefillStart := time.Now()
 
 	pw := &bufferedResponseWriter{}
-	_, _ = toolFields.compareDispatched(prefillBody)
+	toolFields.compareDispatchedForSpan(prefillBody, prefillSpan)
 	prefillHandler.ServeHTTP(pw, cloneRequestWithBody(prefillCtx, r, prefillBody))
 	prefillDuration := time.Since(prefillStart)
 	metrics.RecordPrefillDuration(prefillDuration)
@@ -204,7 +204,7 @@ func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Requ
 	decodeWriter, decodeStatus := captureResponseStatus(w)
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
-	_, _ = toolFields.compareDispatched(decodeBody)
+	toolFields.compareDispatchedForSpan(decodeBody, decodeSpan)
 	s.decoderProxy.ServeHTTP(decodeWriter, cloneRequestWithBody(decodeCtx, r, decodeBody))
 	decodeReturned = true
 
@@ -355,7 +355,7 @@ func (s *Server) decodeWithP2PSource(w http.ResponseWriter, r *http.Request, sou
 	}
 	apiType := reqcommon.DetectAPIType(r.URL.Path)
 	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, raw)
-	defer func() { metrics.RecordToolCallingFieldStatuses(toolFields.fieldStatuses()) }()
+	defer toolFields.report(r.Context())
 
 	source := normalizeEndpoint(sourceHostPort)
 	self := normalizeEndpoint(net.JoinHostPort(os.Getenv("POD_IP"), s.config.Port))
@@ -384,7 +384,7 @@ func (s *Server) decodeWithP2PSource(w http.ResponseWriter, r *http.Request, sou
 		return
 	}
 	if v := s.logger.V(logging.TRACE); v.Enabled() {
-		v.Info("decoder request body with p2p source", logging.HTTPBodyKey, string(newBody))
+		v.Info("decoder request body with p2p source", logBodyBytesKey, len(newBody))
 	}
 
 	s.dispatchDecode(w, cloneRequestWithBody(r.Context(), r, newBody), requestData, newBody, toolFields)
