@@ -315,6 +315,128 @@ func TestCollectorErrorMetrics(t *testing.T) {
 	}
 }
 
+// toggleSource is a PollingDispatcher whose polls fail while failing is set.
+type toggleSource struct {
+	failing   atomic.Bool
+	CallCount int64
+}
+
+func (s *toggleSource) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: "toggle-type", Name: "toggle"}
+}
+func (s *toggleSource) Dispatch(_ context.Context, _ fwkdl.Endpoint) error {
+	atomic.AddInt64(&s.CallCount, 1)
+	if s.failing.Load() {
+		return errors.New("poll failed")
+	}
+	return nil
+}
+func (s *toggleSource) AppendExtractor(_ fwkplugin.Plugin) error { return nil }
+func (s *toggleSource) Interval() time.Duration                  { return 0 }
+
+// readPollStatus returns the PollStatus the collector recorded for toggleSource.
+func readPollStatus(ep fwkdl.Endpoint) (*fwkdl.PollStatus, bool) {
+	return fwkdl.ReadAttribute[*fwkdl.PollStatus](ep.GetAttributes(), fwkdl.PollStatusDataKey("toggle"))
+}
+
+// TestCollectorRecordsPollStatus confirms the collector records each failure
+// run under the source's plugin name and clears it on the next success.
+func TestCollectorRecordsPollStatus(t *testing.T) {
+	src := &toggleSource{}
+	src.failing.Store(true)
+	ep := defaultEndpoint()
+	c := NewCollector()
+	ticker := mocks.NewTicker()
+	require.NoError(t, c.Start(context.Background(), ticker, ep, []fwkdl.PollingDispatcher{src}))
+	defer c.Stop()
+
+	ticker.Tick()
+	var firstFailure time.Time
+	require.Eventually(t, func() bool {
+		status, ok := readPollStatus(ep)
+		if !ok || status.ConsecutiveFailures != 1 {
+			return false
+		}
+		firstFailure = status.FailingSince
+		return true
+	}, time.Second, 2*time.Millisecond)
+	require.False(t, firstFailure.IsZero())
+
+	ticker.Tick()
+	ticker.Tick()
+	require.Eventually(t, func() bool {
+		status, ok := readPollStatus(ep)
+		return ok && status.ConsecutiveFailures == 3
+	}, time.Second, 2*time.Millisecond)
+	status, _ := readPollStatus(ep)
+	assert.Equal(t, firstFailure, status.FailingSince, "FailingSince marks the start of the run")
+
+	src.failing.Store(false)
+	ticker.Tick()
+	require.Eventually(t, func() bool {
+		status, ok := readPollStatus(ep)
+		return ok && status.ConsecutiveFailures == 0 && status.FailingSince.IsZero()
+	}, time.Second, 2*time.Millisecond)
+}
+
+// TestCollectorPollStatusAbsentWithoutFailures confirms a source that never
+// fails leaves no PollStatus on the endpoint.
+func TestCollectorPollStatusAbsentWithoutFailures(t *testing.T) {
+	src := &toggleSource{}
+	ep := defaultEndpoint()
+	c := NewCollector()
+	ticker := mocks.NewTicker()
+	require.NoError(t, c.Start(context.Background(), ticker, ep, []fwkdl.PollingDispatcher{src}))
+
+	ticker.Tick()
+	ticker.Tick()
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt64(&src.CallCount) == 2
+	}, time.Second, 2*time.Millisecond)
+	c.Stop()
+
+	_, ok := readPollStatus(ep)
+	assert.False(t, ok)
+}
+
+// TestCollectorPollStatusIgnoresSkippedTicks confirms the ticks an interval
+// source skips neither count as failures nor end a failure run.
+func TestCollectorPollStatusIgnoresSkippedTicks(t *testing.T) {
+	src := &toggleSource{}
+	src.failing.Store(true)
+	ep := defaultEndpoint()
+	c := NewCollector()
+	ticker := mocks.NewTicker()
+	disp := newIntervalDispatcher(src, 3)
+	require.NoError(t, c.Start(context.Background(), ticker, ep, []fwkdl.PollingDispatcher{disp}))
+	defer c.Stop()
+
+	// Ticks 1 and 4 poll; ticks 2 and 3 are skipped.
+	for range 4 {
+		ticker.Tick()
+	}
+	require.Eventually(t, func() bool {
+		status, ok := readPollStatus(ep)
+		return ok && status.ConsecutiveFailures == 2
+	}, time.Second, 2*time.Millisecond)
+
+	// Ticks 5 and 6 are skipped while the source would succeed; tick 7 polls
+	// and fails again, extending the same run.
+	src.failing.Store(false)
+	ticker.Tick()
+	ticker.Tick()
+	require.Eventually(t, func() bool {
+		return len(ticker.Channel()) == 0
+	}, time.Second, 2*time.Millisecond)
+	src.failing.Store(true)
+	ticker.Tick()
+	require.Eventually(t, func() bool {
+		status, ok := readPollStatus(ep)
+		return ok && status.ConsecutiveFailures == 3
+	}, time.Second, 2*time.Millisecond)
+	assert.Equal(t, int64(3), atomic.LoadInt64(&src.CallCount))
+}
+
 // TestCollectorRapidStartStopRaceFree simulates the Runtime's pattern of
 // ReleaseEndpoint immediately followed by NewEndpoint for the same key.
 // Stop returns asynchronously, so a fresh Collector's goroutine may briefly

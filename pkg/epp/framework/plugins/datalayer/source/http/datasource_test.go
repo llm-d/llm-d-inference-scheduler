@@ -279,6 +279,13 @@ func TestNewHTTPDataSource_UseNodeAddressWithoutPortOverride(t *testing.T) {
 	assert.Contains(t, err.Error(), "WithUseNodeAddress requires a non-zero WithPortOverride")
 }
 
+func TestProducesPollStatus(t *testing.T) {
+	parser := func(r io.Reader) (int, error) { return 0, nil }
+	s, err := NewHTTPDataSource("http", "/metrics", TLSOptions{}, "test-type", "vllm-metrics", parser)
+	require.NoError(t, err)
+	assert.Equal(t, map[fwkplugin.DataKey]any{fwkdl.PollStatusDataKey("vllm-metrics"): &fwkdl.PollStatus{}}, s.Produces())
+}
+
 func TestGetEndpoint_UseNodeAddress_FallsBackToPodIP(t *testing.T) {
 	parser := func(r io.Reader) (int, error) { return 0, nil }
 	ep := &fwkdl.EndpointMetadata{
