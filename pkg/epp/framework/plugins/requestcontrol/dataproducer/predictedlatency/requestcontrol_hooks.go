@@ -74,7 +74,6 @@ func (pl *PredictedLatency) PreRequest(ctx context.Context, request *fwksched.In
 
 	predictedLatencyCtx, err := pl.getPredictedLatencyContextForRequest(request)
 	if err != nil {
-		id := request.RequestID
 		logger.V(logutil.DEBUG).Info("PredictedLatency.PreRequest: Failed to get SLO context for request", "error", err, "requestID", id)
 		return nil
 	}
