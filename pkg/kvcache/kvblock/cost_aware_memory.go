@@ -42,11 +42,14 @@ type CostAwareMemoryIndexConfig struct {
 	// Size is the maximum memory size that can be used by the index.
 	// Supports human-readable formats like "2GiB", "500MiB", "1GB", etc.
 	Size string `json:"size,omitempty"`
+	// NumCounters is the number of Ristretto counters used for admission and eviction.
+	NumCounters int64 `json:"numCounters,omitempty"`
 }
 
 func DefaultCostAwareMemoryIndexConfig() *CostAwareMemoryIndexConfig {
 	return &CostAwareMemoryIndexConfig{
-		Size: "2GiB", // 2GiB default size
+		Size:        "2GiB", // 2GiB default size
+		NumCounters: defaultNumCounters,
 	}
 }
 
@@ -60,6 +63,11 @@ func NewCostAwareMemoryIndex(cfg *CostAwareMemoryIndexConfig) (*CostAwareMemoryI
 	sizeBytes, err := humanize.ParseBytes(cfg.Size)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize cost aware index: %w", err)
+	}
+
+	numCounters := cfg.NumCounters
+	if numCounters == 0 {
+		numCounters = defaultNumCounters
 	}
 
 	requestKeys, err := lru.New[BlockHash, []BlockHash](defaultNumCounters)
@@ -79,8 +87,8 @@ func NewCostAwareMemoryIndex(cfg *CostAwareMemoryIndexConfig) (*CostAwareMemoryI
 	// because Add holds mu while blocking in data.Wait(), which is what drains the
 	// buffer that triggers these callbacks; taking mu here would deadlock.
 	cache, err := ristretto.NewCache(&ristretto.Config[string, *CostPodCache]{
-		NumCounters: defaultNumCounters, // number of keys to track.
-		MaxCost:     int64(sizeBytes),   // #nosec G115 , maximum cost of cache
+		NumCounters: numCounters,        // number of keys to track.
+		MaxCost:     int64(sizeBytes),   //#nosec G115 -- maximum cost of cache
 		BufferItems: defaultBufferItems, // number of keys per Get buffer.
 		OnEvict:     index.onCostCacheRemoval,
 		OnReject:    index.onCostCacheRemoval,
@@ -327,43 +335,48 @@ func (m *CostAwareMemoryIndex) Lookup(ctx context.Context, requestKeys []BlockHa
 	return podsPerKey, nil
 }
 
-// Evict removes a key and its associated pod entries from the index backend.
-// keyType indicates whether the key is an EngineKey (requires engine→request lookup)
-// or a RequestKey (used directly for speculative entries without engineKey mapping).
-func (m *CostAwareMemoryIndex) Evict(ctx context.Context, key BlockHash, keyType KeyType, entries []PodEntry) error {
+// Evict removes keys and their associated pod entries from the index backend.
+// keyType indicates whether the keys are EngineKeys (each resolved independently
+// via the engine→request mapping) or RequestKeys (used directly).
+// A non-nil error means the index is unchanged.
+func (m *CostAwareMemoryIndex) Evict(ctx context.Context, keyType KeyType, keys []BlockHash, entries []PodEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if len(entries) == 0 {
-		return fmt.Errorf("no entries provided for eviction from index")
+	if len(keys) == 0 || len(entries) == 0 {
+		return fmt.Errorf("no keys or entries provided for eviction from index")
 	}
 
 	traceLogger := log.FromContext(ctx).V(logging.TRACE).WithName("kvblock.CostAwareMemoryIndex.Evict")
 
 	switch keyType {
 	case EngineKey:
-		rks, found := m.requestKeys.Get(key)
-		if !found {
-			traceLogger.Info("engineKey not found in mapping, nothing to evict", "engineKey", key)
-			return nil
-		}
-		for _, rk := range rks {
-			m.evictPodsFromRequestKey(rk, key, entries, traceLogger)
-		}
-		allEmpty := true
-		for _, rk := range rks {
-			if pc, found := m.data.Get(rk.String()); found && pc != nil && pc.Len() > 0 {
-				allEmpty = false
-				break
+		for _, key := range keys {
+			rks, found := m.requestKeys.Get(key)
+			if !found {
+				traceLogger.Info("engineKey not found in mapping, nothing to evict", "engineKey", key)
+				continue
 			}
-		}
-		if allEmpty {
-			m.requestKeys.Remove(key)
+			for _, rk := range rks {
+				m.evictPodsFromRequestKey(rk, key, entries, traceLogger)
+			}
+			allEmpty := true
+			for _, rk := range rks {
+				if pc, found := m.data.Get(rk.String()); found && pc != nil && pc.Len() > 0 {
+					allEmpty = false
+					break
+				}
+			}
+			if allEmpty {
+				m.requestKeys.Remove(key)
+			}
 		}
 		m.data.Wait()
 		return nil
 	case RequestKey:
-		m.evictPodsFromRequestKey(key, EmptyBlockHash, entries, traceLogger)
+		for _, key := range keys {
+			m.evictPodsFromRequestKey(key, EmptyBlockHash, entries, traceLogger)
+		}
 		m.data.Wait()
 		return nil
 	default:

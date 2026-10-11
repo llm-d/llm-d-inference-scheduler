@@ -1,5 +1,6 @@
 /*
 Copyright 2024 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +19,7 @@ package utils
 
 import (
 	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/types"
@@ -52,6 +54,10 @@ func (h *testHandle) CrossReplicaSyncer() plugin.Plugin {
 
 func (h *testHandle) SetCrossReplicaSyncer(syncer plugin.Plugin) {
 	h.crossReplicaSyncer = syncer
+}
+
+func (h *testHandle) RefreshMetricsInterval() time.Duration {
+	return 0
 }
 
 type testHandlePlugins struct {

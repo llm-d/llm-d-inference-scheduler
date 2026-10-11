@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -85,6 +86,11 @@ func (p *SchedulerProfile) WithPicker(picker fwksched.Picker) *SchedulerProfile 
 // scorer object and register it to all interfaces it implements.
 func (p *SchedulerProfile) AddPlugins(pluginObjects ...plugin.Plugin) error {
 	for _, plugin := range pluginObjects {
+		switch plugin.(type) {
+		case fwksched.Filter, fwksched.Scorer, fwksched.Picker:
+		default:
+			return fmt.Errorf("plugin '%s' must implement Filter, Scorer, or Picker", plugin.TypedName())
+		}
 		if weightedScorer, ok := plugin.(*WeightedScorer); ok {
 			p.scorers = append(p.scorers, weightedScorer)
 			plugin = weightedScorer.Scorer // if we got WeightedScorer, unwrap the plugin
@@ -127,14 +133,10 @@ func (p *SchedulerProfile) String() string {
 func (p *SchedulerProfile) Run(ctx context.Context, request *fwksched.InferenceRequest, candidateEndpoints []fwksched.Endpoint) (*fwksched.ProfileRunResult, error) {
 	endpoints := p.runFilterPlugins(ctx, request, candidateEndpoints)
 	if len(endpoints) == 0 {
-		// Filters draining a non-empty candidate set means the pool is busy, not
-		// broken: an empty pool is rejected in the director before scheduling
-		// runs. Report it with the same status and drop-reason vocabulary as a
-		// flow control capacity rejection.
 		return nil, errcommon.Error{
-			Code:    errcommon.ResourceExhausted,
+			Code:    errcommon.ServiceUnavailable,
 			Msg:     "no endpoints available for the given request",
-			Headers: map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(errcommon.RequestDroppedReasonSaturated)},
+			Headers: map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(errcommon.RequestDroppedReasonNoEndpoints)},
 		}
 	}
 	// if we got here, there is at least one endpoint to score
@@ -162,7 +164,7 @@ func (p *SchedulerProfile) runFilterPlugins(ctx context.Context, request *fwksch
 	defer span.End()
 	tracingActive := span.IsRecording()
 	if tracingActive {
-		span.SetAttributes(attribute.Int("llm_d.epp.filter.candidate_endpoints", len(endpoints)))
+		span.SetAttributes(semconv.LLMDEPPFilterCandidateEndpoints(len(endpoints)))
 		span.SetAttributes(requestSpanAttributes(request)...)
 	}
 
@@ -172,13 +174,14 @@ func (p *SchedulerProfile) runFilterPlugins(ctx context.Context, request *fwksch
 			verbose.Info("Running filter plugin", "plugin", typedName)
 		}
 		// The violations are dropped: Filter has no error return, so a rejected
-		// write cannot fail the request here. Scope has already dropped the write,
-		// logged it, and counted it under plugin_data_scope_violations_total, which
-		// is where a misdeclared filter surfaces in production. Producers run under
-		// executePluginsAsDAG, which does fail the request on one.
-		scoped, _ := datalayer.Scope(logger, filterExtensionPoint, filter, filteredEndpoints)
+		// write cannot fail the request here. The scope has already dropped the
+		// write, logged it, and counted it under
+		// plugin_data_scope_violations_total, which is where a misdeclared filter
+		// surfaces in production. Producers run under executePluginsAsDAG, which
+		// does fail the request on one.
+		scopedRequest, scoped, _ := datalayer.ScopeInvocation(logger, filterExtensionPoint, filter, request, filteredEndpoints)
 		before := time.Now()
-		filteredEndpoints = datalayer.Unscope(filter.Filter(ctx, request, scoped))
+		filteredEndpoints = datalayer.Unscope(filter.Filter(ctx, scopedRequest, scoped))
 		metrics.RecordPluginProcessingLatency(filterExtensionPoint, typedName.Type, typedName.Name, time.Since(before))
 		if debugEnabled {
 			debug.Info("Completed running filter plugin successfully", "plugin", typedName, "endpoints", filteredEndpoints)
@@ -191,7 +194,7 @@ func (p *SchedulerProfile) runFilterPlugins(ctx context.Context, request *fwksch
 		}
 	}
 	if tracingActive {
-		span.SetAttributes(attribute.Int("llm_d.epp.filter.filtered_endpoints", len(filteredEndpoints)))
+		span.SetAttributes(semconv.LLMDEPPFilterFilteredEndpoints(len(filteredEndpoints)))
 	}
 	if verboseEnabled {
 		verbose.Info("Completed running filter plugins", "remainingEndpoints", len(filteredEndpoints))
@@ -230,8 +233,8 @@ func (p *SchedulerProfile) runScorerPlugins(ctx context.Context, request *fwksch
 	tracingActive := span.IsRecording()
 	if tracingActive {
 		span.SetAttributes(
-			attribute.Int("llm_d.epp.scorer.count", len(p.scorers)),
-			attribute.Int("llm_d.epp.scoring.candidate_endpoints", len(endpoints)),
+			semconv.LLMDEPPScorerCount(len(p.scorers)),
+			semconv.LLMDEPPScoringCandidateEndpoints(len(endpoints)),
 		)
 		span.SetAttributes(requestSpanAttributes(request)...)
 	}
@@ -251,7 +254,7 @@ func (p *SchedulerProfile) runScorerPlugins(ctx context.Context, request *fwksch
 			if debugEnabled {
 				debug.Info("Calculated score", "plugin", typedName, "endpoint", endpoint.GetMetadata().ID, "score", score)
 			}
-			weightedScorePerEndpoint[endpoint] += enforceScoreRange(score) * scorer.Weight()
+			weightedScorePerEndpoint[datalayer.UnscopeEndpoint(endpoint)] += enforceScoreRange(score) * scorer.Weight()
 		}
 		if debugEnabled {
 			debug.Info("Completed running scorer plugin successfully", "plugin", typedName)
@@ -265,6 +268,8 @@ func (p *SchedulerProfile) runScorerPlugins(ctx context.Context, request *fwksch
 }
 
 // runScorer invokes a single weighted scorer and records its latency metric.
+// The returned map is the scorer's own, keyed by scoped endpoints; the caller
+// unwraps each key with datalayer.UnscopeEndpoint.
 // When tracing is active it wraps the call in a scorer.<type> span
 // annotated with the scorer's identity, weight, candidate count, and aggregate
 // score signals; aggregates are derived from the returned score map only, with
@@ -277,11 +282,12 @@ func runScorer(ctx context.Context, tracer trace.Tracer, tracingActive bool, sco
 	// embeds the Scorer interface, which does not carry Produces/Consumes, so
 	// scoping the wrapper would hide every declaration the scorer makes.
 	logger := log.FromContext(ctx)
-	scoped, _ := datalayer.Scope(logger, scorerExtensionPoint, scorer.Scorer, endpoints) // violations dropped: Score has no error return, see runFilterPlugins
+	// violations dropped: Score has no error return, see runFilterPlugins
+	scopedRequest, scoped, _ := datalayer.ScopeInvocation(logger, scorerExtensionPoint, scorer.Scorer, request, endpoints)
 
 	if !tracingActive {
 		before := time.Now()
-		scores := datalayer.UnscopeScores(scorer.Score(ctx, request, scoped))
+		scores := scorer.Score(ctx, scopedRequest, scoped)
 		metrics.RecordPluginProcessingLatency(scorerExtensionPoint, typedName.Type, typedName.Name, time.Since(before))
 		return scores
 	}
@@ -296,7 +302,7 @@ func runScorer(ctx context.Context, tracer trace.Tracer, tracingActive bool, sco
 	)
 
 	before := time.Now()
-	scores := datalayer.UnscopeScores(scorer.Score(ctx, request, scoped))
+	scores := scorer.Score(ctx, scopedRequest, scoped)
 	metrics.RecordPluginProcessingLatency(scorerExtensionPoint, typedName.Type, typedName.Name, time.Since(before))
 
 	if len(scores) > 0 {
@@ -367,7 +373,7 @@ func (p *SchedulerProfile) runPickerPlugin(ctx context.Context, request *fwksche
 	defer span.End()
 
 	if span.IsRecording() {
-		span.SetAttributes(attribute.Int("llm_d.epp.picker.candidate_endpoints", len(scoredEndpoints)))
+		span.SetAttributes(semconv.LLMDEPPPickerCandidateEndpoints(len(scoredEndpoints)))
 		// The picker almost always returns a single target, so its count carries
 		// little signal. The score distribution across the strongest candidates is
 		// what explains why an endpoint was chosen, so record the highest-scoring
@@ -375,8 +381,8 @@ func (p *SchedulerProfile) runPickerPlugin(ctx context.Context, request *fwksche
 		// pickers reorder scoredEndpoints in place.
 		if names, scores := topScoredEndpoints(scoredEndpoints, maxTracedEndpointScores); len(names) > 0 {
 			span.SetAttributes(
-				attribute.StringSlice("llm_d.epp.picker.top_endpoints", names),
-				attribute.Float64Slice("llm_d.epp.picker.top_scores", scores),
+				semconv.LLMDEPPPickerTopEndpoints(names),
+				semconv.LLMDEPPPickerTopScores(scores),
 			)
 		}
 		span.SetAttributes(requestSpanAttributes(request)...)

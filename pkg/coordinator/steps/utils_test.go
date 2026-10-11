@@ -17,13 +17,28 @@ limitations under the License.
 package steps
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
+
+	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+
+	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
+	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
@@ -47,99 +62,24 @@ func TestReadErrorBody_ReturnsSmallBodyVerbatim(t *testing.T) {
 	}
 }
 
-func TestCapSingleTokenOutput(t *testing.T) {
+func TestResolveFormat(t *testing.T) {
 	tests := []struct {
-		name   string
-		format gateway.RequestFormat
-		body   map[string]any
-		want   map[string]any
+		name            string
+		useOpenAIFormat bool
+		path            string
+		want            reqcommon.APIType
 	}{
-		{
-			name:   "chat completions caps output fields and forces non-streaming",
-			format: gateway.FormatChatCompletions,
-			body: map[string]any{
-				"model":                 "m",
-				"max_tokens":            100,
-				"min_tokens":            5,
-				"max_completion_tokens": 100,
-				"stream":                true,
-				"stream_options":        map[string]any{"include_usage": true},
-			},
-			want: map[string]any{
-				"model":                 "m",
-				"max_tokens":            1,
-				"max_completion_tokens": 1,
-				"stream":                false,
-			},
-		},
-		{
-			name:   "max_completion_tokens is not added when the client omitted it",
-			format: gateway.FormatChatCompletions,
-			body:   map[string]any{"model": "m"},
-			want: map[string]any{
-				"model":      "m",
-				"max_tokens": 1,
-				"stream":     false,
-			},
-		},
-		{
-			name:   "completions caps max_tokens, strips min_tokens, forces non-streaming",
-			format: gateway.FormatCompletions,
-			body:   map[string]any{"model": "m", "max_tokens": 100, "min_tokens": 5},
-			want:   map[string]any{"model": "m", "max_tokens": 1, "stream": false},
-		},
-		{
-			name:   "streaming is forced false and stream_options stripped",
-			format: gateway.FormatCompletions,
-			body:   map[string]any{"stream": true, "stream_options": map[string]any{"include_usage": true}},
-			want:   map[string]any{"stream": false, "max_tokens": 1},
-		},
-		{
-			name:   "generate caps max_tokens and strips min_tokens inside sampling_params",
-			format: gateway.FormatGenerate,
-			body: map[string]any{
-				"model":           "m",
-				"sampling_params": map[string]any{"max_tokens": 100, "min_tokens": 5},
-			},
-			want: map[string]any{
-				"model":           "m",
-				"sampling_params": map[string]any{"max_tokens": 1},
-				"stream":          false,
-			},
-		},
-		{
-			name:   "generate synthesizes sampling_params when absent",
-			format: gateway.FormatGenerate,
-			body:   map[string]any{"model": "m"},
-			want: map[string]any{
-				"model":           "m",
-				"sampling_params": map[string]any{"max_tokens": 1},
-				"stream":          false,
-			},
-		},
-		{
-			name:   "generate preserves other sampling_params entries",
-			format: gateway.FormatGenerate,
-			body: map[string]any{
-				"sampling_params": map[string]any{
-					"extra_args": map[string]any{"kv_transfer_params": "x"},
-				},
-			},
-			want: map[string]any{
-				"sampling_params": map[string]any{
-					"max_tokens": 1,
-					"extra_args": map[string]any{"kv_transfer_params": "x"},
-				},
-				"stream": false,
-			},
-		},
+		{name: "chat completions with openai format", useOpenAIFormat: true, path: reqcommon.PathChatCompletions, want: reqcommon.APITypeChatCompletions},
+		{name: "chat completions without openai format collapses to generate", path: reqcommon.PathChatCompletions, want: reqcommon.APITypeVLLMGenerate},
+		{name: "completions ignores openai format", path: reqcommon.PathCompletions, want: reqcommon.APITypeCompletions},
+		{name: "generate", useOpenAIFormat: true, path: reqcommon.PathVLLMGenerate, want: reqcommon.APITypeVLLMGenerate},
+		{name: "responses with openai format", useOpenAIFormat: true, path: reqcommon.PathResponses, want: reqcommon.APITypeResponses},
+		{name: "responses without openai format collapses to generate", path: reqcommon.PathResponses, want: reqcommon.APITypeVLLMGenerate},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			capSingleTokenOutput(tt.body, tt.format)
-			if !reflect.DeepEqual(tt.body, tt.want) {
-				t.Fatalf("got %v, want %v", tt.body, tt.want)
+			if got := resolveFormat(tt.useOpenAIFormat, tt.path); got != tt.want {
+				t.Errorf("resolveFormat(%t, %q) = %v, want %v", tt.useOpenAIFormat, tt.path, got, tt.want)
 			}
 		})
 	}
@@ -481,41 +421,6 @@ func TestExtractMultimodalEntries(t *testing.T) {
 	}
 }
 
-func TestValidateSamplingParams(t *testing.T) {
-	obj := func(m map[string]any) map[string]any { return m }
-	tests := []struct {
-		name    string
-		body    map[string]any
-		wantErr bool
-	}{
-		{name: "absent", body: map[string]any{}},
-		{name: "null", body: map[string]any{"sampling_params": nil}},
-		{name: "valid_object", body: map[string]any{"sampling_params": obj(map[string]any{"max_tokens": float64(16)})}},
-		{name: "valid_with_extra_args", body: map[string]any{"sampling_params": obj(map[string]any{"extra_args": obj(map[string]any{})})}},
-		{name: "extra_args_null", body: map[string]any{"sampling_params": obj(map[string]any{"extra_args": nil})}},
-		{name: "sampling_params_array", body: map[string]any{"sampling_params": []any{float64(1), float64(2)}}, wantErr: true},
-		{name: "sampling_params_string", body: map[string]any{"sampling_params": "greedy"}, wantErr: true},
-		{name: "extra_args_array", body: map[string]any{"sampling_params": obj(map[string]any{"extra_args": []any{float64(1)}})}, wantErr: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateSamplingParams(tc.body)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				if !errors.Is(err, pipeline.ErrBadRequest) {
-					t.Errorf("expected ErrBadRequest, got %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
 func TestValidatePlaceholderBounds(t *testing.T) {
 	entry := func(offset, length int) pipeline.MultimodalEntry {
 		return pipeline.MultimodalEntry{
@@ -614,4 +519,261 @@ func TestBuildMMFeatures_CacheHitSentinelSerializesAsNull(t *testing.T) {
 			t.Errorf("expected kwargs_data absent when includeKwargs is false")
 		}
 	})
+}
+
+func TestGatewayHeaders(t *testing.T) {
+	reqCtx := &pipeline.RequestContext{
+		RequestID: "req-1",
+		OriginalHeaders: http.Header{
+			"X-Custom":       {"v"},
+			"X-Request-Id":   {"client-id"},
+			"Content-Length": {"12"},
+		},
+	}
+
+	headers := gatewayHeaders(reqCtx, gateway.PhaseEncode)
+
+	want := map[string]string{
+		"x-custom":                    "v",
+		reqcommon.RequestIDHeaderKey:  "req-1",
+		reqcommon.EPPProfileHeaderKey: gateway.PhaseEncode,
+	}
+	if len(headers) != len(want) {
+		t.Errorf("headers = %v, want %v", headers, want)
+	}
+	for k, v := range want {
+		if headers[k] != v {
+			t.Errorf("%s = %q, want %q", k, headers[k], v)
+		}
+	}
+
+	headers["x-added"] = "1"
+	if _, present := gatewayHeaders(reqCtx, gateway.PhaseEncode)["x-added"]; present {
+		t.Error("a change to the returned map is visible in the next call")
+	}
+}
+
+func TestGatewayHeaders_NoClientHeaders(t *testing.T) {
+	headers := gatewayHeaders(&pipeline.RequestContext{RequestID: "req-1"}, gateway.PhasePrefill)
+	if headers[reqcommon.RequestIDHeaderKey] != "req-1" || headers[reqcommon.EPPProfileHeaderKey] != gateway.PhasePrefill {
+		t.Errorf("headers = %v, want the request id and the prefill profile", headers)
+	}
+}
+
+func TestCheckStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		wantBody string
+		wantErr  bool
+	}{
+		{name: "ok", status: http.StatusOK, body: "answer"},
+		{name: "client error", status: http.StatusBadRequest, body: "bad prompt", wantBody: "bad prompt", wantErr: true},
+		{name: "server error", status: http.StatusServiceUnavailable, body: "overloaded", wantBody: "overloaded", wantErr: true},
+		{name: "success status other than 200", status: http.StatusAccepted, wantErr: true},
+		{name: "empty error body", status: http.StatusBadGateway, wantErr: true},
+		{
+			name:     "oversized error body",
+			status:   http.StatusInternalServerError,
+			body:     strings.Repeat("a", maxErrorBodySize*2),
+			wantBody: strings.Repeat("a", maxErrorBodySize),
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{StatusCode: tt.status, Body: io.NopCloser(strings.NewReader(tt.body))}
+
+			err := checkStatus(RenderStepName, resp)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("checkStatus: %v", err)
+				}
+				// The body of a 200 response stays unread for the caller.
+				if body, _ := io.ReadAll(resp.Body); string(body) != tt.body {
+					t.Errorf("response body = %q, want %q", body, tt.body)
+				}
+				return
+			}
+			var upstream *pipeline.UpstreamError
+			if !errors.As(err, &upstream) {
+				t.Fatalf("error = %v, want a pipeline.UpstreamError", err)
+			}
+			if upstream.Step != RenderStepName || upstream.StatusCode != tt.status || upstream.Body != tt.wantBody {
+				t.Errorf("error = {Step: %q, StatusCode: %d, len(Body): %d}, want {%q, %d, %d}",
+					upstream.Step, upstream.StatusCode, len(upstream.Body), RenderStepName, tt.status, len(tt.wantBody))
+			}
+		})
+	}
+}
+
+// testGatewayRequest is the base request of the postToGateway tests.
+var testGatewayRequest = gatewayRequest{
+	step:     PrefillStepName,
+	upstream: coordmetrics.UpstreamPrefill,
+	path:     reqcommon.PathCompletions,
+	body:     []byte(`{}`),
+}
+
+// captureLogger returns a logger and a function that returns the lines that
+// the logger recorded. The lock permits the concurrent encode sub-requests.
+func captureLogger(verbosity int) (logr.Logger, func() []string) {
+	var mu sync.Mutex
+	var records []string
+	logger := funcr.New(func(_, args string) {
+		mu.Lock()
+		defer mu.Unlock()
+		records = append(records, args)
+	}, funcr.Options{Verbosity: verbosity})
+	return logger, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(records)
+	}
+}
+
+func countRecords(records []string, substrs ...string) int {
+	n := 0
+	for _, record := range records {
+		missing := func(substr string) bool { return !strings.Contains(record, substr) }
+		if !slices.ContainsFunc(substrs, missing) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestPostToGateway_ReturnsResponse(t *testing.T) {
+	var gotPath, gotBody, gotHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotPath, gotBody, gotHeader = r.URL.Path, string(body), r.Header.Get("x-custom")
+		_, _ = w.Write([]byte("answer"))
+	}))
+	defer server.Close()
+
+	req := testGatewayRequest
+	req.body = []byte(`{"model":"m"}`)
+	req.headers = map[string]string{"x-custom": "v"}
+	resp, err := postToGateway(context.Background(), logr.Discard(), gateway.New(config.GatewayConfig{Address: server.URL}), req)
+	if err != nil {
+		t.Fatalf("postToGateway: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotPath != reqcommon.PathCompletions || gotBody != `{"model":"m"}` || gotHeader != "v" {
+		t.Errorf("gateway got path=%q body=%q x-custom=%q", gotPath, gotBody, gotHeader)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(body) != "answer" {
+		t.Errorf("response body = %q, want %q", body, "answer")
+	}
+}
+
+func TestPostToGateway_DebugRecord(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+
+	tests := []struct {
+		name        string
+		verbosity   int
+		logMsg      string
+		body        []byte
+		headers     map[string]string
+		wantMsg     string
+		wantKeys    []string
+		wantRecords int
+	}{
+		{
+			name:        "message from the caller",
+			verbosity:   logutil.DEBUG,
+			logMsg:      "sub-request body",
+			body:        []byte(`{"model":"m"}`),
+			headers:     map[string]string{reqcommon.EPPProfileHeaderKey: gateway.PhaseEncode},
+			wantMsg:     "sub-request body",
+			wantKeys:    []string{`"index"=2`, `"path"="` + reqcommon.PathCompletions + `"`, `"bodyLen"=13`},
+			wantRecords: 1,
+		},
+		{name: "below debug", verbosity: logutil.VERBOSE, logMsg: "request body", wantMsg: "request body"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, records := captureLogger(tt.verbosity)
+
+			req := testGatewayRequest
+			req.logMsg, req.body, req.headers = tt.logMsg, tt.body, tt.headers
+			resp, err := postToGateway(context.Background(), logger.WithValues("index", 2), gwClient, req)
+			if err != nil {
+				t.Fatalf("postToGateway: %v", err)
+			}
+			resp.Body.Close()
+
+			want := append([]string{fmt.Sprintf(`"msg"=%q`, tt.wantMsg)}, tt.wantKeys...)
+			if got := countRecords(records(), want...); got != tt.wantRecords {
+				t.Errorf("%d records contain %v, want %d, records=%v", got, want, tt.wantRecords, records())
+			}
+		})
+	}
+}
+
+func TestPostToGateway_StatusIsUpstreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	req := testGatewayRequest
+	req.step = "encode[2]"
+	resp, err := postToGateway(context.Background(), logr.Discard(), gateway.New(config.GatewayConfig{Address: server.URL}), req)
+	if resp != nil {
+		resp.Body.Close()
+		t.Error("expected no response with an error")
+	}
+	var upstream *pipeline.UpstreamError
+	if !errors.As(err, &upstream) {
+		t.Fatalf("error = %v, want a pipeline.UpstreamError", err)
+	}
+	if upstream.Step != req.step || upstream.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("error = {Step: %q, StatusCode: %d}, want {%q, %d}",
+			upstream.Step, upstream.StatusCode, req.step, http.StatusServiceUnavailable)
+	}
+}
+
+func TestPostToGateway_TransportError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+	server.Close()
+
+	tests := []struct {
+		name string
+		ctx  func() context.Context
+	}{
+		{name: "gateway unreachable", ctx: context.Background},
+		{name: "context cancelled", ctx: func() context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := postToGateway(tt.ctx(), logr.Discard(), gwClient, testGatewayRequest)
+			if resp != nil {
+				resp.Body.Close()
+				t.Error("expected no response with an error")
+			}
+			if err == nil || !strings.HasPrefix(err.Error(), "prefill: request: ") {
+				t.Fatalf("error = %v, want the prefix %q", err, "prefill: request: ")
+			}
+			var upstream *pipeline.UpstreamError
+			if errors.As(err, &upstream) {
+				t.Errorf("a transport failure must not be a pipeline.UpstreamError: %v", err)
+			}
+		})
+	}
 }

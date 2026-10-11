@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,16 +19,27 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	configPb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+	grpcmetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 )
@@ -94,6 +106,26 @@ func TestExtractTraceContext(t *testing.T) {
 	}
 }
 
+func TestExtractTraceContextPrefersHTTPHeadersOverGRPCMetadata(t *testing.T) {
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
+	const (
+		metadataTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0c9902b7-01"
+		headerTraceparent   = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+	)
+	ctx := grpcmetadata.NewIncomingContext(context.Background(), grpcmetadata.Pairs("traceparent", metadataTraceparent))
+	req := &extProcPb.ProcessingRequest_RequestHeaders{
+		RequestHeaders: &extProcPb.HttpHeaders{
+			Headers: &configPb.HeaderMap{Headers: []*configPb.HeaderValue{{Key: "traceparent", Value: headerTraceparent}}},
+		},
+	}
+
+	sc := trace.SpanContextFromContext(extractTraceContext(ctx, req))
+
+	assert.True(t, sc.IsValid())
+	assert.Equal(t, "0af7651916cd43dd8448eb211c80319c", sc.TraceID().String())
+}
+
 func TestHandleRequestHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -101,6 +133,7 @@ func TestHandleRequestHeaders(t *testing.T) {
 		name          string
 		headers       []*configPb.HeaderValue
 		wantHeaders   map[string]string
+		wantAbsent    []string
 		wantObjective string
 		wantTarget    string
 	}{
@@ -129,6 +162,23 @@ func TestHandleRequestHeaders(t *testing.T) {
 			wantObjective: "new-objective",
 			wantTarget:    "new-model",
 		},
+		{
+			name: "Drops client-supplied routing headers",
+			headers: []*configPb.HeaderValue{
+				{Key: "X-Prefiller-Host-Port", Value: "10.0.0.1:9090"},
+				{Key: routing.EncoderEndpointsHeader, Value: "10.0.0.2:9090"},
+				{Key: routing.DataParallelEndpointHeader, Value: "10.0.0.3:9090"},
+				{Key: routing.KVCacheSourceHeader, Value: "10.0.0.4:9090"},
+				{Key: "x-test", Value: "val"},
+			},
+			wantHeaders: map[string]string{"x-test": "val"},
+			wantAbsent: []string{
+				routing.PrefillEndpointHeader,
+				routing.EncoderEndpointsHeader,
+				routing.DataParallelEndpointHeader,
+				routing.KVCacheSourceHeader,
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -154,8 +204,88 @@ func TestHandleRequestHeaders(t *testing.T) {
 					assert.Equal(t, v, reqCtx.Request.Headers[k], "Header %q should match expected value", k)
 				}
 			}
+			for _, k := range tc.wantAbsent {
+				assert.NotContains(t, reqCtx.Request.Headers, k)
+			}
 		})
 	}
+}
+
+// generateHeaders must inject W3C trace context for Envoy to forward to vLLM,
+// and must not re-forward a client-supplied traceparent after injection.
+func TestGenerateHeaders_InjectsTraceContext(t *testing.T) {
+	useTracerProvider(t, sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample())))
+
+	const clientTraceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+	tracer := tracing.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "request", trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
+
+	server := &StreamingServer{}
+	reqCtx := &RequestContext{
+		TargetEndpoint: "1.2.3.4:8080",
+		Request: &Request{
+			Headers: map[string]string{
+				"traceparent": clientTraceparent,
+				"x-user-data": "important",
+			},
+		},
+	}
+
+	results := server.generateHeaders(ctx, reqCtx)
+
+	gotHeaders := make(map[string]string)
+	traceparentCount := 0
+	for _, h := range results {
+		key := strings.ToLower(h.Header.Key)
+		gotHeaders[key] = string(h.Header.RawValue)
+		if key == "traceparent" {
+			traceparentCount++
+		}
+	}
+
+	traceparent := gotHeaders["traceparent"]
+	require.NotEmpty(t, traceparent, "expected traceparent to be injected into outbound headers")
+	require.Equal(t, 1, traceparentCount, "expected exactly one traceparent header")
+	require.Contains(t, traceparent, span.SpanContext().TraceID().String(),
+		"outbound traceparent must carry the active EPP span trace ID")
+	require.NotContains(t, traceparent, "0af7651916cd43dd8448eb211c80319c",
+		"client traceparent must not be re-forwarded after injection")
+	assert.Equal(t, "important", gotHeaders["x-user-data"])
+}
+
+// With tracing disabled the noop tracer keeps the extracted remote span context,
+// so the client's trace headers are forwarded unchanged.
+func TestGenerateHeaders_ForwardsTraceContextWhenTracingDisabled(t *testing.T) {
+	useTracerProvider(t, noop.NewTracerProvider())
+	tracing.InitTextMapPropagator()
+
+	const clientTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0c9902b7-01"
+	req := &extProcPb.ProcessingRequest_RequestHeaders{RequestHeaders: &extProcPb.HttpHeaders{
+		Headers: &configPb.HeaderMap{Headers: []*configPb.HeaderValue{
+			{Key: "traceparent", RawValue: []byte(clientTraceparent)},
+			{Key: "tracestate", RawValue: []byte("vendor=abc")},
+		}},
+	}}
+	ctx := extractTraceContext(context.Background(), req)
+	ctx, span := tracing.Tracer("test").Start(ctx, "request", trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
+
+	server := &StreamingServer{}
+	reqCtx := &RequestContext{
+		TargetEndpoint: "1.2.3.4:8080",
+		Request: &Request{Headers: map[string]string{
+			"traceparent": clientTraceparent,
+			"tracestate":  "vendor=abc",
+		}},
+	}
+	got := map[string]string{}
+	for _, h := range server.generateHeaders(ctx, reqCtx) {
+		got[strings.ToLower(h.Header.Key)] = string(h.Header.RawValue)
+	}
+	assert.Equal(t, clientTraceparent, got["traceparent"])
+	assert.Equal(t, "vendor=abc", got["tracestate"])
 }
 
 func TestGenerateHeaders_Sanitization(t *testing.T) {
@@ -170,6 +300,7 @@ func TestGenerateHeaders_Sanitization(t *testing.T) {
 				metadata.OldObjectiveKey:        "old-sensitive-objective-id", // should be stripped
 				metadata.DestinationEndpointKey: "1.1.1.1:666",                // should be stripped
 				"content-length":                "99999",                      // should be stripped (re-added by logic)
+				"traceparent":                   "00-deadbeefdeadbeefdeadbeefdeadbeef-deadbeefdeadbeef-01",
 			},
 		},
 	}
@@ -186,6 +317,7 @@ func TestGenerateHeaders_Sanitization(t *testing.T) {
 	assert.NotContains(t, gotHeaders, metadata.OldObjectiveKey)
 	assert.Equal(t, "1.2.3.4:8080", gotHeaders[metadata.DestinationEndpointKey])
 	assert.Equal(t, "123", gotHeaders["Content-Length"])
+	assert.NotContains(t, gotHeaders, "traceparent")
 }
 
 func TestGenerateRequestHeaderResponse_MergeMetadata(t *testing.T) {
@@ -297,6 +429,104 @@ func TestGenerateRequestHeaderResponse_EndpointScores(t *testing.T) {
 	}
 }
 
+func TestGenerateRequestHeaderResponse_RemovesUnsetRoutingHeaders(t *testing.T) {
+	t.Parallel()
+
+	// Every spelling Envoy must strip, deprecated aliases included: a client
+	// supplying either name must not reach the sidecar.
+	canonical := []string{
+		routing.PrefillEndpointHeader,
+		routing.EncoderEndpointsHeader,
+		routing.DataParallelEndpointHeader,
+		routing.KVCacheSourceHeader,
+		routing.EndpointPinHeader,
+	}
+	allRoutingHeaders := make([]string, 0, 2*len(canonical))
+	for _, h := range canonical {
+		allRoutingHeaders = append(allRoutingHeaders, routing.HeaderNames(h)...)
+	}
+
+	tests := []struct {
+		name        string
+		headers     map[string]string
+		wantSet     map[string]string
+		wantRemoved []string
+	}{
+		{
+			name:        "decode-only removes every routing header",
+			headers:     map[string]string{},
+			wantRemoved: allRoutingHeaders,
+		},
+		{
+			// The disagg handler writes both spellings (routing.SetRoutingHeader), so
+			// a sidecar on either side of the rename reads a prefill target.
+			name: "prefill selected sets both spellings and removes the rest",
+			headers: map[string]string{
+				routing.PrefillEndpointHeader:       "10.0.0.1:8000",
+				routing.LegacyPrefillEndpointHeader: "10.0.0.1:8000",
+			},
+			wantSet: map[string]string{
+				routing.PrefillEndpointHeader:       "10.0.0.1:8000",
+				routing.LegacyPrefillEndpointHeader: "10.0.0.1:8000",
+			},
+			wantRemoved: []string{
+				routing.EncoderEndpointsHeader,
+				routing.LegacyEncoderEndpointsHeader,
+				routing.DataParallelEndpointHeader,
+				routing.KVCacheSourceHeader,
+				routing.LegacyKVCacheSourceHeader,
+				routing.EndpointPinHeader,
+			},
+		},
+		{
+			// An older EPP in a mixed fleet, or a hand-set legacy value: the canonical
+			// spelling is unset and must still be stripped.
+			name:    "legacy spelling only still strips the canonical name",
+			headers: map[string]string{routing.LegacyPrefillEndpointHeader: "10.0.0.1:8000"},
+			wantSet: map[string]string{routing.LegacyPrefillEndpointHeader: "10.0.0.1:8000"},
+			wantRemoved: []string{
+				routing.PrefillEndpointHeader,
+				routing.EncoderEndpointsHeader,
+				routing.LegacyEncoderEndpointsHeader,
+				routing.DataParallelEndpointHeader,
+				routing.KVCacheSourceHeader,
+				routing.LegacyKVCacheSourceHeader,
+				routing.EndpointPinHeader,
+			},
+		},
+		{
+			// The screener reads the client pin, so it stays on the request;
+			// the model server must not see it.
+			name:        "a client pin is removed and not set",
+			headers:     map[string]string{routing.EndpointPinHeader: "10.0.0.1:8000"},
+			wantRemoved: allRoutingHeaders,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &StreamingServer{}
+			reqCtx := &RequestContext{
+				TargetEndpoint: "1.2.3.4:8080",
+				Request:        &Request{Headers: tc.headers},
+				Response:       &Response{},
+			}
+
+			mutation := server.generateRequestHeaderResponse(context.Background(), reqCtx).
+				GetRequestHeaders().GetResponse().GetHeaderMutation()
+
+			gotSet := make(map[string]string)
+			for _, h := range mutation.GetSetHeaders() {
+				gotSet[h.Header.Key] = string(h.Header.RawValue)
+			}
+			for k, v := range tc.wantSet {
+				assert.Equal(t, v, gotSet[k])
+			}
+			assert.ElementsMatch(t, tc.wantRemoved, mutation.GetRemoveHeaders())
+		})
+	}
+}
+
 func TestFallbackToRandomEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -380,5 +610,50 @@ func (m *mockDirectorRequest) GetRandomEndpoint() *datalayer.EndpointMetadata {
 	return &datalayer.EndpointMetadata{
 		Address: "1.2.3.4",
 		Port:    "80",
+	}
+}
+
+// Attribution must be established from the incoming headers before the Director
+// runs, so a request that fails or returns early is still attributed.
+func TestRequestAttributionAtIngress(t *testing.T) {
+	previous := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	// Mirror InitTracing: the processor is what attributes spans in production.
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(tracing.NewRequestAttributionProcessor()),
+		sdktrace.WithSpanProcessor(recorder),
+	)
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() { otel.SetTracerProvider(previous); _ = provider.Shutdown(context.Background()) })
+
+	for _, tc := range []struct {
+		name               string
+		headers            []*configPb.HeaderValue
+		wantID, wantSource string
+	}{
+		{"canonical header", []*configPb.HeaderValue{{Key: metadata.FlowFairnessIDKey, Value: "team-a"}}, "team-a", tracing.AttributionSourceHeader},
+		{"deprecated alias", []*configPb.HeaderValue{{Key: metadata.OldFlowFairnessIDKey, Value: "team-b"}}, "team-b", tracing.AttributionSourceHeader},
+		{"empty canonical shadows alias", []*configPb.HeaderValue{{Key: metadata.FlowFairnessIDKey, Value: ""}, {Key: metadata.OldFlowFairnessIDKey, Value: "team-b"}}, reqcommon.DefaultFairnessID, tracing.AttributionSourceDefault},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := extractTraceContext(context.Background(), &extProcPb.ProcessingRequest_RequestHeaders{
+				RequestHeaders: &extProcPb.HttpHeaders{
+					Headers:     &configPb.HeaderMap{Headers: tc.headers},
+					EndOfStream: true,
+				},
+			})
+
+			_, span := tracing.Tracer().Start(ctx, "request")
+			span.End()
+
+			ended := recorder.Ended()
+			attrs := attribute.NewSet(ended[len(ended)-1].Attributes()...)
+			id, hasID := attrs.Value(semconv.LLMDEPPFairnessIDKey)
+			source, hasSource := attrs.Value(semconv.LLMDEPPFairnessSourceKey)
+
+			require.True(t, hasID && hasSource, "identity and source are recorded together")
+			assert.Equal(t, tc.wantID, id.AsString())
+			assert.Equal(t, tc.wantSource, source.AsString())
+		})
 	}
 }

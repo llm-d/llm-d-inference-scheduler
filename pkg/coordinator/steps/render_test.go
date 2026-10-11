@@ -27,13 +27,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
 func TestRenderStep_ParsesFullResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != gateway.PathChatCompletions+"/render" {
+		if r.URL.Path != reqcommon.PathChatCompletions+"/render" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Header.Get("Content-Type") != "application/json" {
@@ -65,7 +66,7 @@ func TestRenderStep_ParsesFullResponse(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.PathChatCompletions,
+		OriginalPath: reqcommon.PathChatCompletions,
 		Body:         map[string]any{"model": "gpt-4o", "messages": []any{}},
 		Model:        "gpt-4o",
 		MultimodalEntries: []pipeline.MultimodalEntry{
@@ -114,7 +115,7 @@ func TestRenderStep_ParsesFullResponse(t *testing.T) {
 
 func TestRenderStep_RunsEvenWithNoMultimodal(t *testing.T) {
 	var called bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"token_ids": []int{1, 2345, 6789},
@@ -131,7 +132,7 @@ func TestRenderStep_RunsEvenWithNoMultimodal(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath:      gateway.PathChatCompletions,
+		OriginalPath:      reqcommon.PathChatCompletions,
 		Body:              map[string]any{"model": "test"},
 		MultimodalEntries: nil,
 	}
@@ -148,8 +149,46 @@ func TestRenderStep_RunsEvenWithNoMultimodal(t *testing.T) {
 	}
 }
 
-func TestRenderStep_CompletionsTokenArray_SkipsRender(t *testing.T) {
+func TestRenderStep_Responses_CallsRender(t *testing.T) {
+	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.URL.Path != reqcommon.PathResponses+"/render" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token_ids": []int{1, 2345, 6789},
+			"features": map[string]any{
+				"mm_hashes":       map[string][]string{ModalityImage: {}},
+				"mm_placeholders": map[string][]any{ModalityImage: {}},
+				"kwargs_data":     map[string][]string{ModalityImage: {}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	step, _ := NewRenderStep(nil, map[string]any{})
+	step.(*RenderStep).SetServiceAddress(server.URL)
+
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathResponses,
+		Body:         map[string]any{"model": "test", "input": "describe this"},
+	}
+
+	err := step.Execute(context.Background(), reqCtx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("render should be called for a responses request")
+	}
+	if len(reqCtx.TokenIDs) != 3 {
+		t.Fatalf("expected 3 token_ids, got %d", len(reqCtx.TokenIDs))
+	}
+}
+
+func TestRenderStep_CompletionsTokenArray_SkipsRender(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatal("render service should not be called for token array prompt")
 	}))
 	defer server.Close()
@@ -158,7 +197,7 @@ func TestRenderStep_CompletionsTokenArray_SkipsRender(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.PathCompletions,
+		OriginalPath: reqcommon.PathCompletions,
 		Body: map[string]any{
 			"model":  "test",
 			"prompt": []any{float64(1), float64(2345), float64(6789)},
@@ -177,6 +216,36 @@ func TestRenderStep_CompletionsTokenArray_SkipsRender(t *testing.T) {
 	}
 }
 
+func TestRenderStep_OtherAPIs_SkipRender(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		body map[string]any
+	}{
+		{name: "messages", path: reqcommon.PathMessages, body: map[string]any{"model": "test", "max_tokens": 10}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Errorf("render service should not be called for %s", tt.path)
+			}))
+			defer server.Close()
+
+			step, _ := NewRenderStep(nil, map[string]any{})
+			step.(*RenderStep).SetServiceAddress(server.URL)
+
+			reqCtx := &pipeline.RequestContext{OriginalPath: tt.path, Body: tt.body}
+
+			if err := step.Execute(context.Background(), reqCtx); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(reqCtx.TokenIDs) != 0 {
+				t.Fatalf("expected no token_ids, got %v", reqCtx.TokenIDs)
+			}
+		})
+	}
+}
+
 func TestRenderStep_CompletionsTextPrompt_CallsRender(t *testing.T) {
 	var receivedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +260,7 @@ func TestRenderStep_CompletionsTextPrompt_CallsRender(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.PathCompletions,
+		OriginalPath: reqcommon.PathCompletions,
 		Body: map[string]any{
 			"model":  "test",
 			"prompt": "Hello, world!",
@@ -202,8 +271,8 @@ func TestRenderStep_CompletionsTextPrompt_CallsRender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if receivedPath != gateway.PathCompletions+"/render" {
-		t.Fatalf("expected %s/render, got %s", gateway.PathCompletions, receivedPath)
+	if receivedPath != reqcommon.PathCompletions+"/render" {
+		t.Fatalf("expected %s/render, got %s", reqcommon.PathCompletions, receivedPath)
 	}
 	if len(reqCtx.TokenIDs) != 3 {
 		t.Fatalf("expected 3 token_ids, got %d", len(reqCtx.TokenIDs))
@@ -234,7 +303,7 @@ func TestRenderStep_RejectsTooManyTotalTokens_ChatCompletions(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.PathChatCompletions,
+		OriginalPath: reqcommon.PathChatCompletions,
 		Body:         map[string]any{"model": "test"},
 	}
 
@@ -262,7 +331,7 @@ func TestRenderStep_RejectsTooManyTotalTokens_CompletionsString(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.PathCompletions,
+		OriginalPath: reqcommon.PathCompletions,
 		Body:         map[string]any{"model": "test", "prompt": "some text"},
 	}
 
@@ -280,7 +349,7 @@ func TestRenderStep_RejectsTooManyTotalTokens_CompletionsTokenArray(t *testing.T
 	step.(*RenderStep).SetServiceAddress("http://unused")
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.PathCompletions,
+		OriginalPath: reqcommon.PathCompletions,
 		Body:         map[string]any{"model": "test", "prompt": []any{float64(1), float64(2), float64(3)}},
 	}
 
@@ -306,7 +375,7 @@ func TestRenderStep_UpstreamErrorCarriesStatus(t *testing.T) {
 		step.(*RenderStep).SetServiceAddress(server.URL)
 
 		reqCtx := &pipeline.RequestContext{
-			OriginalPath: gateway.PathChatCompletions,
+			OriginalPath: reqcommon.PathChatCompletions,
 			Body:         map[string]any{"model": "test"},
 		}
 
@@ -348,7 +417,7 @@ func TestRenderStep_RejectsTooManyPlaceholderTokens(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.PathChatCompletions,
+		OriginalPath: reqcommon.PathChatCompletions,
 		Body:         map[string]any{"model": "test"},
 		MultimodalEntries: []pipeline.MultimodalEntry{
 			{Index: 0},
@@ -385,7 +454,7 @@ func TestRenderStep_AllowsAtPlaceholderLimit(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath:      gateway.PathChatCompletions,
+		OriginalPath:      reqcommon.PathChatCompletions,
 		Body:              map[string]any{"model": "test"},
 		MultimodalEntries: []pipeline.MultimodalEntry{{Index: 0}},
 	}
@@ -430,7 +499,7 @@ func TestRenderStep_RejectsNegativeLimits(t *testing.T) {
 }
 
 func TestRenderStep_ServiceError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("internal error"))
 	}))
@@ -440,7 +509,7 @@ func TestRenderStep_ServiceError(t *testing.T) {
 	step.(*RenderStep).SetServiceAddress(server.URL)
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath:      gateway.PathChatCompletions,
+		OriginalPath:      reqcommon.PathChatCompletions,
 		Body:              map[string]any{"model": "test"},
 		MultimodalEntries: []pipeline.MultimodalEntry{{Index: 0}},
 	}
@@ -457,7 +526,7 @@ func TestRenderStep_GenerateFormat_TextOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.DefaultGeneratePath,
+		OriginalPath: reqcommon.PathVLLMGenerate,
 		Body: map[string]any{
 			"model":     "test-model",
 			"token_ids": []any{float64(1), float64(2345), float64(6789)},
@@ -484,7 +553,7 @@ func TestRenderStep_GenerateFormat_Multimodal(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.DefaultGeneratePath,
+		OriginalPath: reqcommon.PathVLLMGenerate,
 		Body: map[string]any{
 			"model":     "test-model",
 			"token_ids": []any{float64(1), float64(32000), float64(32000), float64(32000), float64(2)},
@@ -519,7 +588,7 @@ func TestRenderStep_GenerateFormat_MultipleImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.DefaultGeneratePath,
+		OriginalPath: reqcommon.PathVLLMGenerate,
 		Body: map[string]any{
 			"model":     "test-model",
 			"token_ids": []any{float64(1), float64(32000), float64(32000), float64(3), float64(41000), float64(41000), float64(2)},
@@ -563,7 +632,7 @@ func TestRenderStep_GenerateFormat_MalformedFeatures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			step, _ := NewRenderStep(nil, map[string]any{})
 			reqCtx := &pipeline.RequestContext{
-				OriginalPath: gateway.DefaultGeneratePath,
+				OriginalPath: reqcommon.PathVLLMGenerate,
 				Body: map[string]any{
 					"model":     "test-model",
 					"token_ids": []any{float64(1), float64(2), float64(3)},
@@ -593,7 +662,7 @@ func TestRenderStep_GenerateFormat_PlaceholderOutOfBounds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			step, _ := NewRenderStep(nil, map[string]any{})
 			reqCtx := &pipeline.RequestContext{
-				OriginalPath: gateway.DefaultGeneratePath,
+				OriginalPath: reqcommon.PathVLLMGenerate,
 				Body: map[string]any{
 					"model":     "test-model",
 					"token_ids": []any{float64(1), float64(32000), float64(32000), float64(2)},
@@ -628,7 +697,7 @@ func TestRenderStep_GenerateFormat_InvalidSamplingParams(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			step, _ := NewRenderStep(nil, map[string]any{})
 			reqCtx := &pipeline.RequestContext{
-				OriginalPath: gateway.DefaultGeneratePath,
+				OriginalPath: reqcommon.PathVLLMGenerate,
 				Body: map[string]any{
 					"model":           "test-model",
 					"token_ids":       []any{float64(1), float64(2), float64(3)},
@@ -649,7 +718,7 @@ func TestRenderStep_GenerateFormat_InvalidSamplingParams(t *testing.T) {
 func TestRenderStep_GenerateFormat_NullFeatures(t *testing.T) {
 	step, _ := NewRenderStep(nil, map[string]any{})
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.DefaultGeneratePath,
+		OriginalPath: reqcommon.PathVLLMGenerate,
 		Body: map[string]any{
 			"model":     "test-model",
 			"token_ids": []any{float64(1), float64(2), float64(3)},
@@ -667,7 +736,7 @@ func TestRenderStep_GenerateFormat_NullFeatures(t *testing.T) {
 func TestRenderStep_GenerateFormat_MissingTokenIDs(t *testing.T) {
 	step, _ := NewRenderStep(nil, map[string]any{})
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath: gateway.DefaultGeneratePath,
+		OriginalPath: reqcommon.PathVLLMGenerate,
 		Body:         map[string]any{"model": "test-model"},
 	}
 	err := step.Execute(context.Background(), reqCtx)
@@ -676,5 +745,59 @@ func TestRenderStep_GenerateFormat_MissingTokenIDs(t *testing.T) {
 	}
 	if !errors.Is(err, pipeline.ErrBadRequest) {
 		t.Errorf("expected ErrBadRequest, got %v", err)
+	}
+}
+
+// A render response whose per-image feature arrays disagree with the entry
+// count fails the request. applyRenderResponse copies them onto entries by
+// index, so a short array would leave an entry carrying another image's hash
+// and kwargs. Each case shortens one array and leaves its siblings correct, so
+// all three guards are reached independently. Run on the Responses path
+// because applyRenderResponse is shared with chat completions.
+func TestRenderStep_RejectsFeatureCountMismatch(t *testing.T) {
+	const entries = 2
+	fullHashes := []string{"vllm-hash-a", "vllm-hash-b"}
+	fullPlaceholders := []any{map[string]any{"offset": 1, "length": 3}, map[string]any{"offset": 4, "length": 3}}
+	fullKwargs := []string{"dGVuc29yLWE=", "dGVuc29yLWI="}
+
+	for _, tc := range []struct {
+		name         string
+		hashes       []string
+		placeholders []any
+		kwargs       []string
+	}{
+		{name: "mm_hashes short", hashes: fullHashes[:1], placeholders: fullPlaceholders, kwargs: fullKwargs},
+		{name: "mm_placeholders short", hashes: fullHashes, placeholders: fullPlaceholders[:1], kwargs: fullKwargs},
+		{name: "kwargs_data short", hashes: fullHashes, placeholders: fullPlaceholders, kwargs: fullKwargs[:1]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"token_ids": []int{1, 32000, 32000, 32000, 32000, 32000, 32000, 2345},
+					"features": map[string]any{
+						"mm_hashes":       map[string][]string{ModalityImage: tc.hashes},
+						"mm_placeholders": map[string][]any{ModalityImage: tc.placeholders},
+						"kwargs_data":     map[string][]string{ModalityImage: tc.kwargs},
+					},
+				})
+			}))
+			defer server.Close()
+
+			step, err := NewRenderStep(nil, map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			step.(*RenderStep).SetServiceAddress(server.URL)
+
+			reqCtx := &pipeline.RequestContext{
+				OriginalPath:      reqcommon.PathResponses,
+				Body:              map[string]any{"model": "test", "input": "describe these"},
+				MultimodalEntries: make([]pipeline.MultimodalEntry, entries),
+			}
+
+			if err := step.Execute(context.Background(), reqCtx); err == nil {
+				t.Fatal("expected an error for a feature array shorter than the entry count")
+			}
+		})
 	}
 }

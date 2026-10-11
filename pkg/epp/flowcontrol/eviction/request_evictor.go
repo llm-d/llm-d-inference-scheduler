@@ -1,5 +1,6 @@
 /*
 Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -102,16 +103,14 @@ func (p *RequestEvictor) PreRequest(
 	request *scheduling.InferenceRequest,
 	result *scheduling.SchedulingResult,
 ) error {
-	if request == nil || result == nil || len(result.ProfileResults) == 0 {
+	if request == nil {
 		return nil
 	}
 
-	profileResult := result.ProfileResults[result.PrimaryProfileName]
-	if profileResult == nil || len(profileResult.TargetEndpoints) == 0 {
+	targetEndpoint := result.PrimaryEndpoint()
+	if targetEndpoint == nil {
 		return nil
 	}
-
-	targetEndpoint := profileResult.TargetEndpoints[0]
 	metadata := targetEndpoint.GetMetadata()
 	requestID := request.Headers[reqcommon.RequestIDHeaderKey]
 	if requestID == "" {

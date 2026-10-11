@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
 )
 
 var (
@@ -56,6 +59,10 @@ type Runtime struct {
 	extractors   *extractorMap
 
 	crossReplicaPub *crossReplicaPublisher
+
+	notificationSyncMu sync.RWMutex
+	// notificationSyncs remains nil until Start has registered every source.
+	notificationSyncs []*notificationInitialSync
 
 	pendingMu            sync.Mutex
 	pendingRegistrations []fwkdl.PendingRegistration // code-registered (source-type, extractor) pairs, resolved by Configure()
@@ -387,9 +394,14 @@ func (r *Runtime) findSourceByType(sourceType string, gvkFilter *schema.GroupVer
 // Start is called to enable the Runtime to start processing data collection. It wires
 // Kubernetes notifications into the manager and starts cross-replica syncing.
 func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
+	r.notificationSyncMu.Lock()
+	r.notificationSyncs = nil
+	r.notificationSyncMu.Unlock()
+
 	r.StartCrossReplicaSync(ctx)
 
-	return r.notification.ForEach(func(srcName string, src fwkdl.NotificationSource) error {
+	notificationSyncs := make([]*notificationInitialSync, 0, r.notification.Count())
+	err := r.notification.ForEach(func(srcName string, src fwkdl.NotificationSource) error {
 		var extractors []fwkdl.NotificationExtractor
 		if rawExts, ok := r.extractors.Get(srcName); ok {
 			extractors = make([]fwkdl.NotificationExtractor, len(rawExts))
@@ -397,11 +409,42 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 				extractors[i] = e.(fwkdl.NotificationExtractor)
 			}
 		}
-		if err := BindNotificationSource(src, extractors, mgr); err != nil {
+		initialSync, err := bindNotificationSource(src, extractors, mgr)
+		if err != nil {
 			return fmt.Errorf("failed to bind notification source %s: %w", src.TypedName(), err)
 		}
+		notificationSyncs = append(notificationSyncs, initialSync)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	r.notificationSyncMu.Lock()
+	r.notificationSyncs = notificationSyncs
+	r.notificationSyncMu.Unlock()
+	return nil
+}
+
+// CheckReady reports readiness after Start has registered every notification
+// source and each source has processed its initial Kubernetes events.
+func (r *Runtime) CheckReady() error {
+	r.notificationSyncMu.RLock()
+	defer r.notificationSyncMu.RUnlock()
+
+	if r.notificationSyncs == nil {
+		return errors.New("notification sources have not been initialized")
+	}
+	for _, initialSync := range r.notificationSyncs {
+		if !initialSync.hasSynced() {
+			return fmt.Errorf("notification source %s has not processed its initial events", initialSync.tracker.Name())
+		}
+	}
+	return nil
+}
+
+func (*Runtime) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: "datalayer", Name: "runtime"}
 }
 
 // StartCrossReplicaSync starts the shared cross-replica publishing loop.
@@ -482,6 +525,24 @@ func (r *Runtime) UpdateEndpoint(ctx context.Context, ep fwkdl.Endpoint) {
 	r.dispatchEndpointEvent(ctx, logger, fwkdl.EndpointEvent{Type: fwkdl.EventAddOrUpdate, Endpoint: ep})
 }
 
+// runRecoveredExtractor invokes one extractor under panic recovery, mirroring
+// the http source's runExtractor: a panic is converted into an error carrying
+// the stack in the log, so the caller's existing failure handling (counting,
+// logging, and on the notification path retry via the reconciler) applies
+// uniformly. Notification events are one-shot, so unlike the polling path a
+// swallowed panic would permanently lose the event; returning the wrapped
+// error keeps panics retryable exactly like ordinary extract failures.
+func runRecoveredExtractor(logger logr.Logger, sourceType, extractorType string, extract func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error(fmt.Errorf("%v", r), "extractor panicked",
+				"source", sourceType, "extractor", extractorType, "stack", string(debug.Stack()))
+			err = fmt.Errorf("extractor panicked: %v", r)
+		}
+	}()
+	return extract()
+}
+
 // dispatchEndpointEvent routes an endpoint lifecycle event to all registered
 // EndpointSources and their extractors.
 func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger, event fwkdl.EndpointEvent) {
@@ -504,7 +565,10 @@ func (r *Runtime) dispatchEndpointEvent(ctx context.Context, logger logr.Logger,
 		}
 		for _, ext := range exts {
 			if epExt, ok := ext.(fwkdl.EndpointExtractor); ok {
-				if err := epExt.Extract(ctx, *processed); err != nil {
+				if err := runRecoveredExtractor(logger, src.TypedName().Type, ext.TypedName().Type, func() error {
+					return epExt.Extract(ctx, *processed)
+				}); err != nil {
+					metrics.RecordDataLayerExtractError(src.TypedName().Type, ext.TypedName().Type)
 					logger.Error(err, "endpoint extractor failed", "extractor", ext.TypedName())
 				}
 				if r.crossReplicaPub != nil {
@@ -598,3 +662,4 @@ func findUnique(sourceType string, hits ...sourceHit) (sourceHit, error) {
 
 var _ EndpointFactory = (*Runtime)(nil)
 var _ fwkdl.Registrar = (*Runtime)(nil)
+var _ fwkplugin.ReadinessChecker = (*Runtime)(nil)

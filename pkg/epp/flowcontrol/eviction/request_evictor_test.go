@@ -1,5 +1,6 @@
 /*
 Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -186,13 +187,12 @@ func TestRequestEvictor_CtxCancellationTriggersCleanup(t *testing.T) {
 	// Cancel the context — the goroutine in PreRequest should fire and call cleanupRequest.
 	cancel()
 
-	// Wait briefly for the goroutine to execute.
+	// Wait briefly for the goroutine to execute all steps of cleanupRequest.
 	assert.Eventually(t, func() bool {
-		return re.queue.InFlightLen() == 0
-	}, time.Second, 10*time.Millisecond, "InFlightLen should be 0 after context cancellation")
-
-	assert.Equal(t, 0, re.queue.EvictableLen(), "EvictableLen should be 0 after context cancellation")
-	assert.Nil(t, re.EvictionRegistry().Get("req-1"), "EvictionRegistry should be cleaned up after context cancellation")
+		return re.queue.InFlightLen() == 0 &&
+			re.queue.EvictableLen() == 0 &&
+			re.EvictionRegistry().Get("req-1") == nil
+	}, time.Second, 10*time.Millisecond, "request should be untracked and deregistered after context cancellation")
 }
 
 func TestRequestEvictor_CleanupCallsEvictorCleanup(t *testing.T) {

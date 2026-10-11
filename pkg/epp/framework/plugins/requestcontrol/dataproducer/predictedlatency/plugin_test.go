@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,11 +43,15 @@ import (
 
 // mockPredictor implements PredictorInterface for testing
 type mockPredictor struct {
-	predictions map[string]*latencypredictor.PredictionResponse
-	err         error
+	predictions             map[string]*latencypredictor.PredictionResponse
+	err                     error
+	nilBulkResponse         bool
+	bulkPredictionsOverride []latencypredictor.PredictionResponse
 	// capturedBulkStrictRequests records the requests passed to the most recent
 	// PredictBulkStrict call, so tests can assert what was sent to the predictor.
 	capturedBulkStrictRequests []latencypredictor.PredictionRequest
+	// capturedTrainingEntries records entries passed to AddTrainingDataBulk.
+	capturedTrainingEntries []latencypredictor.TrainingEntry
 }
 
 func (m *mockPredictor) Predict(ctx context.Context, request latencypredictor.PredictionRequest) (*latencypredictor.PredictionResponse, error) {
@@ -81,6 +86,12 @@ func (m *mockPredictor) PredictBulkStrict(ctx context.Context, requests []latenc
 	if m.err != nil {
 		return nil, m.err
 	}
+	if m.nilBulkResponse {
+		return nil, nil //nolint:nilnil // exercises nil-response handling in bulkPredictWithMetrics
+	}
+	if m.bulkPredictionsOverride != nil {
+		return &latencypredictor.BulkPredictionResponse{Predictions: m.bulkPredictionsOverride}, nil
+	}
 	responses := make([]latencypredictor.PredictionResponse, 0, len(requests))
 	for _, request := range requests {
 		key := fmt.Sprintf("%.1f", request.KVCachePercentage)
@@ -94,6 +105,7 @@ func (m *mockPredictor) PredictBulkStrict(ctx context.Context, requests []latenc
 }
 
 func (m *mockPredictor) AddTrainingDataBulk(data []latencypredictor.TrainingEntry) error {
+	m.capturedTrainingEntries = append(m.capturedTrainingEntries, data...)
 	return nil
 }
 

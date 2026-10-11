@@ -30,6 +30,35 @@ import (
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 )
 
+func TestSGLangHTTPParser_RewritePriority(t *testing.T) {
+	t.Run("strips client priority and writes resolved priority", func(t *testing.T) {
+		parser := NewSGLangHTTPParser()
+		got, mutated, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{}, fwkrh.PayloadMap{"input_ids": []any{1, 2, 3}, "priority": 100}, 2)
+		if err != nil {
+			t.Fatalf("RewritePriority() error = %v", err)
+		}
+		if !mutated {
+			t.Errorf("mutated = false, want true")
+		}
+		if got.(fwkrh.PayloadMap)["priority"] != 2 {
+			t.Errorf("priority = %v, want 2", got.(fwkrh.PayloadMap)["priority"])
+		}
+	})
+	t.Run("writes priority when none supplied", func(t *testing.T) {
+		parser := NewSGLangHTTPParser()
+		got, mutated, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{}, fwkrh.PayloadMap{"input_ids": []any{1, 2, 3}}, 2)
+		if err != nil {
+			t.Fatalf("RewritePriority() error = %v", err)
+		}
+		if !mutated {
+			t.Errorf("mutated = false, want true")
+		}
+		if got.(fwkrh.PayloadMap)["priority"] != 2 {
+			t.Errorf("priority = %v, want 2", got.(fwkrh.PayloadMap)["priority"])
+		}
+	})
+}
+
 var benchmarkSGLangParseResult *fwkrh.ParseResult
 
 func makeSGLangTokenArrayBody(tokenCount int) []byte {
@@ -100,6 +129,22 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			body:    map[string]any{"input_ids": []any{1, 2, 3}},
 			want: &fwkrh.InferenceRequestBody{
 				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{1, 2, 3}},
+			},
+		},
+		{
+			name:    "basic text prompt",
+			headers: map[string]string{":path": "/generate"},
+			body:    map[string]any{"text": "hello world"},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{Text: "hello world"},
+			},
+		},
+		{
+			name:    "text prompt with extra_key mapped to CacheSalt",
+			headers: map[string]string{":path": "/generate"},
+			body:    map[string]any{"text": "hello world", "extra_key": "salt-abc"},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{Text: "hello world", CacheSalt: "salt-abc"},
 			},
 		},
 		{
@@ -192,7 +237,11 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			tt.want.Payload = fwkrh.RawPayload(bodyBytes)
+			var wantMap map[string]any
+			if err := json.Unmarshal(bodyBytes, &wantMap); err != nil {
+				t.Fatalf("unmarshal body: %v", err)
+			}
+			tt.want.Payload = fwkrh.PayloadMap(wantMap)
 			if got.SkipResponseProcessing {
 				t.Errorf("SkipResponseProcessing = true, want false")
 			}
@@ -235,12 +284,17 @@ func TestSGLangHTTPParser_ParseRequest_ErrorPaths(t *testing.T) {
 		{
 			name:        "input embeds without input ids",
 			body:        `{"input_embeds":[[0.1,0.2]]}`,
-			errContains: "input_ids must be provided",
+			errContains: "input_ids or text must be provided",
 		},
 		{
-			name:        "text without input ids",
-			body:        `{"text":"hello"}`,
-			errContains: "input_ids must be provided",
+			name:        "empty text without input ids",
+			body:        `{"text":""}`,
+			errContains: "text cannot be empty",
+		},
+		{
+			name:        "non-string text without input ids",
+			body:        `{"text":123}`,
+			errContains: "text must be a string",
 		},
 		{
 			name:        "batched input_ids are rejected",

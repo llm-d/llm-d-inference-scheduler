@@ -8,6 +8,7 @@
   - [Core Design Principles](#core-design-principles)
   - [Routing Flow](#routing-flow)
 - [Configuration](#configuration)
+  - [API versions](#api-versions)
   - [`Plugins` Configuration](#plugins-configuration)
   - [`SchedulingProfiles` Configuration](#schedulingprofiles-configuration)
   - [Available plugins](#available-plugins)
@@ -58,7 +59,7 @@ The design enables:
 
 ### Routing Flow
 
-See the upstream [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/scheduling.md) doc for the canonical scheduling model.
+See the upstream [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/scheduling.md) doc for the canonical scheduling model.
 
 #### Request Control
 
@@ -97,7 +98,7 @@ Each scheduling profile runs the following stages. Multiple profiles may run for
 
 The llm-d Endpoint Picker relies on a YAML-based configuration—provided either as a file or an in-line parameter—to determine which lifecycle hooks (plugins) are active.
 
-See the upstream [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/configuration.md) doc for the canonical schema.
+See the upstream [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/configuration.md) doc for the canonical schema.
 
 Specifically, this configuration establishes the following components:
 
@@ -108,7 +109,7 @@ Specifically, this configuration establishes the following components:
 The configuration text has the following form:
 
 ```yaml
-apiVersion: llm-d.ai/v1alpha1
+apiVersion: llm-d.ai/v1
 kind: EndpointPickerConfig
 plugins:
 - ....
@@ -119,6 +120,48 @@ schedulingProfiles:
 ```
 
 The first two lines of the configuration are constant and must appear as is.
+
+### API versions
+
+The EPP accepts two configuration API versions:
+
+| `apiVersion` | Status |
+|---|---|
+| `llm-d.ai/v1` | Current. |
+| `llm-d.ai/v1alpha1` | Deprecated, reported on startup. Support ends in a later release. |
+
+The deprecated version is read as `v1` and yields the same configuration as the equivalent `v1` document. The field placements that differ are all under `dataLayer`:
+
+| `v1alpha1` | `v1` |
+|---|---|
+| `crossReplicaSyncerPluginRef` | `crossReplica.syncerPluginRef` |
+| `crossReplicaSyncInterval` | `crossReplica.syncInterval` |
+| `crossReplicaPublishTimeout` | `crossReplica.publishTimeout` |
+| `discovery.pluginRef` | `discovery.endpoints.pluginRef` |
+
+Moving a configuration to `v1` means changing the `apiVersion` line, and, where these fields are set, writing them in their `v1` placement:
+
+```yaml
+# v1alpha1
+dataLayer:
+  discovery:
+    pluginRef: my-discovery
+  crossReplicaSyncerPluginRef: my-syncer
+  crossReplicaSyncInterval: 500ms
+  crossReplicaPublishTimeout: 2s
+
+# v1
+dataLayer:
+  discovery:
+    endpoints:
+      pluginRef: my-discovery
+  crossReplica:
+    syncerPluginRef: my-syncer
+    syncInterval: 500ms
+    publishTimeout: 2s
+```
+
+All other fields keep their names, defaults, and meaning.
 
 ### `Plugins` Configuration
 
@@ -160,14 +203,14 @@ in this section has the following form:
 The fields in a schedulingProfile entry are:
 
 - **name**: specifies the scheduling profile's name.
-- **plugins**: specifies the set of plugins to be used when this scheduling profile is chosen for a request.
+- **plugins**: references plugins that implement `Filter`, `Scorer`, or `Picker` to run when this scheduling profile is chosen for a request.
 - **pluginRef**: reference to the name of the plugin instance to be used
 - **weight**: weight to be used if the referenced plugin is a scorer.
 
 A complete configuration might look like this:
 
 ```yaml
-apiVersion: llm-d.ai/v1alpha1
+apiVersion: llm-d.ai/v1
 kind: EndpointPickerConfig
 plugins:
 - type: precise-prefix-cache-producer
@@ -252,7 +295,7 @@ Polling sources share one Collector goroutine per endpoint. The base tick is
 when omitted, the source runs on every base tick. The runtime converts each source's
 interval to base-tick multiples and schedules dispatches accordingly.
 
-See the upstream [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/datalayer.md) doc for the canonical model.
+See the upstream [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/datalayer.md) doc for the canonical model.
 
 ---
 
@@ -348,11 +391,11 @@ Enable chunked decode via the pd-sidecar flag:
 
 ### Canonical llm-d architecture (upstream)
 
-- [Router overview](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/README.md)
-- [Proxy](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/proxy.md)
-- [Endpoint Picker (EPP)](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/README.md)
-- [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/configuration.md)
-- [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/scheduling.md)
-- [Request Handler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/request-handling.md)
-- [Flow Control](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/flow-control.md)
-- [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/datalayer.md)
+- [Router overview](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/README.md)
+- [Proxy](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/proxy.md)
+- [Endpoint Picker (EPP)](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/epp.md)
+- [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/configuration.md)
+- [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/scheduling.md)
+- [Request Handler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/request-handling.md)
+- [Flow Control](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/flow-control.md)
+- [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/datalayer.md)

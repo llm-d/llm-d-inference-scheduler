@@ -103,7 +103,7 @@ Since both charts use `routerlib` under the hood, all configurations and customi
 
 ### 1. EPP Core Configuration
 
-Core settings for the Endpoint Picker Proxy (EPP) container and pod, including scaling, images, command-line flags, custom environment variables, resources, and custom plugins configuration (`pluginsCustomConfig`).
+Core settings for the Endpoint Picker Proxy (EPP) container and pod, including scaling, images, command-line flags, custom environment variables, resources, and plugins configuration.
 
 > [!NOTE]
 > **High Availability (HA) Modes**:
@@ -111,6 +111,10 @@ Core settings for the Endpoint Picker Proxy (EPP) container and pod, including s
 > *   **Active-Passive Mode (Default)**: The chart automatically enables the `--ha-enable-leader-election` flag. Only one leader replica active-routes traffic, coordinates lease status, and maintains absolute routing state, while other replicas act as warm standbys.
 > *   **Active-Active Mode**: You can explicitly disable leader-election by passing `ha-enable-leader-election: false` under `router.epp.flags`. In this mode, all replicas process traffic concurrently.
 >     *   *Warning*: In active-active mode, you **must only use active-active compatible plugins**—specifically plugins that pull real-time metrics/state dynamically from the backend model servers (such as the precise prefix cache, queue, and KV-cache utilization scorers). Avoid plugins that rely on local in-memory routing state, as this state is not synchronized across replicas.
+>
+> Setting `router.epp.flags.ha-enable-leader-election: true` also enables leader
+> election for a single replica. The chart grants the EPP ServiceAccount the
+> namespace-scoped lease permissions required by this flag.
 
 ##### Multi-replica EPP and Helm `--wait`
 
@@ -179,8 +183,15 @@ kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
 | **Parameter Name** | **Description** | **Default** |
 | :--- | :--- | :--- |
 | `router.epp.parsers` | List of request parser types for EPP. Options: `[openai-parser, anthropic-parser, vllmgrpc-parser, vllmhttp-parser, passthrough-parser]`. Empty for auto-selection. | `[]` |
-| `router.epp.replicas` | Number of EPP replicas. Set > 1 to enable multi-replica EPP. | `1` |
-| `router.epp.deploymentStrategy` | Overrides the EPP Deployment's `spec.strategy`. See [Multi-replica EPP and Helm `--wait`](#multi-replica-epp-and-helm---wait). | `{type: Recreate}` |
+| `router.epp.replicas` | Number of EPP replicas. Set > 1 to enable multi-replica EPP. Ignored when `router.epp.autoscaling.enabled` is `true`. | `1` |
+| `router.epp.deploymentStrategy` | Overrides the EPP Deployment's `spec.strategy`. Defaults to `RollingUpdate` with `maxUnavailable: 0` and `maxSurge: 1` when autoscaling is enabled; otherwise defaults to `{type: Recreate}`. See [Multi-replica EPP and Helm `--wait`](#multi-replica-epp-and-helm---wait). | `{type: Recreate}` |
+| `router.epp.autoscaling.enabled` | Enable Horizontal Pod Autoscaler (HPA v2) for the EPP Deployment. Requires active-active mode (`router.epp.flags.ha-enable-leader-election` must not be `true`). See [Horizontal Pod Autoscaling (HPA)](../../docs/operations.md#horizontal-pod-autoscaling-hpa). | `false` |
+| `router.epp.autoscaling.minReplicas` | Minimum number of EPP replicas for the HPA. | `1` |
+| `router.epp.autoscaling.maxReplicas` | Maximum number of EPP replicas for the HPA. Must be greater than or equal to `minReplicas`. | `5` |
+| `router.epp.autoscaling.targetCPUUtilizationPercentage` | Target average CPU utilization percentage across EPP pods (1-100). | `80` |
+| `router.epp.autoscaling.targetMemoryUtilizationPercentage` | Target average memory utilization percentage across EPP pods (1-100). | `""` |
+| `router.epp.autoscaling.behavior` | Scaling behavior policies for HPA scale-up and scale-down. | `{}` |
+| `router.epp.autoscaling.metrics` | Custom HPA v2 metrics override; replaces auto-generated CPU and memory metrics. Target percentage fields remain range-validated if defined. | `[]` |
 | `router.epp.extProcPort` | Port EPP uses for external processing gRPC communication. | `9002` |
 | `router.epp.image.registry` | EPP container image registry. | `ghcr.io/llm-d` |
 | `router.epp.image.repository` | EPP container image repository. | `llm-d-router-endpoint-picker` |
@@ -190,12 +201,16 @@ kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
 | `router.epp.extraContainerPorts` | Extra ports to expose on the EPP container. | `[]` |
 | `router.extraServicePorts` | Extra ports to expose on the EPP Service. | `[]` |
 | `router.clusterDomain` | Kubernetes cluster DNS domain used to build in-cluster Service FQDNs. | `cluster.local` |
+| `router.imagePullSecrets` | Secrets holding credentials for pulling images from private registries. | `[]` |
 | `router.epp.flags` | Map of command-line flags passed directly to the EPP binary. | `{}` |
 | `router.epp.affinity` | Affinity rules for EPP pods. | `{}` |
 | `router.epp.tolerations` | Tolerations for EPP pods. | `[]` |
+| `router.epp.podSecurityContext` | Pod-level `securityContext` for EPP pods, inherited by the EPP, proxy sidecar, and latency predictor containers. | `{}` |
+| `router.epp.securityContext` | Container-level `securityContext` for the EPP container. | `{}` |
 | `router.epp.resources` | EPP container resource requests and limits. | `requests.cpu: "8"`, `requests.memory: 8Gi`, `limits.memory: 16Gi` |
 | `router.epp.pluginsConfigFile` | EPP plugins configuration file name. | `default-plugins.yaml` |
-| `router.epp.pluginsCustomConfig` | Inline custom YAML configuration for EPP plugins. | `{}` |
+| `router.epp.pluginsConfig` | Structured EPP configuration rendered into `pluginsConfigFile`. | `{}` |
+| `router.epp.pluginsCustomConfig` | Additional raw ConfigMap entries keyed by file name. | `{}` |
 | `router.epp.volumes` | Extra volumes for EPP pod. | `[]` |
 | `router.epp.volumeMounts` | Extra volume mounts for EPP container. | `[]` |
 
@@ -237,7 +252,7 @@ router:
     pluginsConfigFile: "custom-plugins.yaml"
     pluginsCustomConfig:
       custom-plugins.yaml: |
-        apiVersion: inference.networking.x-k8s.io/v1alpha1
+        apiVersion: llm-d.ai/v1
         kind: EndpointPickerConfig
         plugins:
         - type: queue-scorer
@@ -269,6 +284,53 @@ router:
     - name: model-volume
       emptyDir: {}
 ```
+
+#### Structured Plugins Configuration
+
+Use `router.epp.pluginsConfig` to share an EPP configuration across Helm values files.
+It provides the complete contents of `pluginsConfigFile`; it does not inherit plugins
+from the chart's built-in configurations. An empty map leaves the built-in files unchanged.
+
+For example, `base-values.yaml` defines the plugins and scheduling profiles:
+
+```yaml
+router:
+  modelServers:
+    matchLabels:
+      app: vllm
+  epp:
+    pluginsConfigFile: custom-plugins.yaml
+    pluginsConfig:
+      apiVersion: llm-d.ai/v1
+      kind: EndpointPickerConfig
+      plugins:
+        - type: queue-scorer
+      schedulingProfiles:
+        - name: default
+          plugins:
+            - pluginRef: queue-scorer
+```
+
+An overlay, `feature-gates.yaml`, sets the feature gates:
+
+```yaml
+router:
+  epp:
+    pluginsConfig:
+      featureGates:
+        - flowControl
+```
+
+```shell
+helm template router config/charts/llm-d-router-gateway \
+  -f base-values.yaml -f feature-gates.yaml
+```
+
+Helm merges maps across values files and replaces lists as a whole. The overlay
+preserves the base plugins and profiles, but replaces any base `featureGates` list.
+YAML comments are not retained in the rendered structured configuration.
+`pluginsCustomConfig` can provide other raw configuration files alongside it.
+Defining the same filename through both settings is an error.
 
 ---
 
@@ -352,6 +414,18 @@ Configures metrics scraping via Prometheus (compatible with Google Managed Prome
 | `router.tracing.sampling.sampler` | Trace sampler type. | `parentbased_traceidratio` |
 | `router.tracing.sampling.samplerArg` | Sampler argument (e.g., sampling ratio `"0.1"`). | `"0.1"` |
 
+When tracing is enabled, EPP request-associated spans carry `llm_d.epp.fairness.id` and
+`llm_d.epp.fairness.source` together. The value is the fairness identity the EPP resolved
+for the request, and the source records which branch resolved it: `header` for the
+`x-llm-d-inference-fairness-id` header or its deprecated alias
+`x-gateway-inference-fairness-id`, `agent_identity` when the agent-identity plugin supplies
+the client's session identifier, or `default` for the `default-flow` sentinel. Source
+`header` identifies the resolution branch, not producer authentication. Requests that fail
+before the identity resolves keep the value set at ingress: the fairness header value, or
+`default-flow` with source `default` when the header is absent, even if the agent-identity
+plugin would have supplied one. Span values are not subject to the `fairness_id`
+metric-label cardinality cap. The pair is not propagated as request headers.
+
 #### Complete Monitoring & Tracing Example
 
 ```yaml
@@ -380,20 +454,21 @@ router:
 
 Runs a tokenizer sidecar that EPP queries to tokenize incoming requests, enabling precise, token-count-aware routing policies (e.g., precise prefix-cache matching).
 
-The sidecar runs vLLM's `vllm launch render <modelName>` and exposes `/v1/completions/render` and `/v1/chat/completions/render` over loopback HTTP. Wire EPP to it via `router.epp.pluginsCustomConfig` with `type: token-producer` and `vllm:`.
+The sidecar runs vLLM's `vllm launch render <modelName>` (Python) or `vllm-rs render <modelName>` (Rust) and exposes `/v1/completions/render` and `/v1/chat/completions/render` over loopback HTTP. Wire EPP to it via `router.epp.pluginsCustomConfig` with `type: token-producer` and `vllm:`.
 
 #### Tokenizer Sidecar Parameters
 
 | **Parameter Name** | **Description** | **Default** |
 | :--- | :--- | :--- |
 | `router.tokenizer.enabled` | Enable the vLLM `/render` tokenizer sidecar in the EPP deployment. | `false` |
-| `router.tokenizer.modelName` | **REQUIRED** when enabled. Model name passed as the first positional arg to the sidecar's `vllm launch render` command. | `""` |
+| `router.tokenizer.flavor` | Renderer backend: `"python"` runs `vllm launch render`; `"rust"` runs `vllm-rs render` (requires an image containing `vllm-rs`). | `"python"` |
+| `router.tokenizer.modelName` | **REQUIRED** when enabled. Model name passed as the first positional arg to the sidecar's render command. | `""` |
 | `router.tokenizer.image.registry` | Tokenizer container image registry. | `docker.io` |
 | `router.tokenizer.image.repository` | Tokenizer container image repository. | `vllm/vllm-openai-cpu` |
 | `router.tokenizer.image.tag` | Tokenizer container image tag. | `v0.19.1` |
 | `router.tokenizer.image.pullPolicy` | Tokenizer container image pull policy. | `IfNotPresent` |
 | `router.tokenizer.port` | Container port the sidecar listens on. | `8000` |
-| `router.tokenizer.command` | Override container command. Empty renders `["vllm", "launch", "render"]`. | `[]` |
+| `router.tokenizer.command` | Override container command. Empty renders `["vllm", "launch", "render"]` for `"python"` flavor or `["vllm-rs", "render"]` for `"rust"` flavor. | `[]` |
 | `router.tokenizer.args` | Override container args. Empty renders `["<modelName>", "--port=<port>"]`. | `[]` |
 | `router.tokenizer.extraArgs` | Extra args appended to the tokenizer container after the default or overridden args. | `[]` |
 | `router.tokenizer.initContainers` | Pod-level init containers rendered when the tokenizer is enabled. | `[]` |
@@ -439,69 +514,6 @@ router:
         name: model-cache-volume
 ```
 
-#### UDS Tokenizer Backend (deprecated)
-
-The `llm-d-uds-tokenizer` sidecar (gRPC over a Unix Domain Socket) is no longer
-templated by this chart; the render backend above supersedes it. If you still
-need it during migration, set it up in two steps.
-
-**Step 1 — inject the sidecar into the EPP deployment.** The chart does not
-render it, so patch it in yourself (e.g. via kustomize). The EPP container must
-mount the shared socket volume so it can reach the tokenizer:
-
-```yaml
-spec:
-  template:
-    spec:
-      containers:
-        # Existing EPP container — add the shared socket mount.
-        - name: epp
-          volumeMounts:
-            - name: tokenizer-uds
-              mountPath: /tmp/tokenizer
-        # The deprecated sidecar.
-        - name: tokenizer-uds
-          image: ghcr.io/llm-d/llm-d-uds-tokenizer:vllm-v0.19.1
-          env:
-            - name: TOKENIZERS_DIR
-              value: /tokenizers
-            - name: HF_HOME
-              value: /tokenizers
-            # Required for gated/private tokenizers on HuggingFace.
-            - name: HF_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: llm-d-hf-token
-                  key: HF_TOKEN
-          volumeMounts:
-            - name: tokenizers
-              mountPath: /tokenizers
-            - name: tokenizer-uds
-              mountPath: /tmp/tokenizer
-      volumes:
-        - name: tokenizers
-          emptyDir: {}
-        - name: tokenizer-uds
-          emptyDir: {}
-```
-
-**Step 2 — point EPP at the socket.** Configure the tokenizer plugin via
-`router.epp.pluginsCustomConfig` (the chart writes this into the EPP config
-mounted at `/config`). Select the deprecated UDS backend with
-`udsTokenizerConfig`:
-
-```yaml
-router:
-  epp:
-    pluginsCustomConfig:
-      custom-plugins.yaml: |
-        plugins:
-          - type: token-producer
-            parameters:
-              modelName: "Qwen/Qwen3-32B"
-              udsTokenizerConfig:
-                socketFile: /tmp/tokenizer/tokenizer-uds.socket
-```
 ---
 
 ### 6. Sidecar Latency Predictor Configuration (`router.latencyPredictor.*`)
@@ -515,6 +527,8 @@ Enables latency predictor containers inside the EPP deployment to feed metrics t
 | `router.latencyPredictor.enabled` | Enable latency-based routing (requires extra Borg/training setup). | `false` |
 | `router.latencyPredictor.trainingServer.image` | Latency training server image configuration. | |
 | `router.latencyPredictor.predictionServers.image` | Latency prediction server image configuration. | |
+| `router.latencyPredictor.trainingServer.securityContext` | Container-level `securityContext` for the training server container. | `{}` |
+| `router.latencyPredictor.predictionServers.securityContext` | Container-level `securityContext` for each prediction server container. | `{}` |
 | `router.latencyPredictor.eppEnv` | EPP tuning variables for Latency Predictor. | |
 
 #### Complete Latency Predictor Example
@@ -603,7 +617,15 @@ Configures EPP to run with a proxy (Envoy proxy or Agentgateway proxy) that inte
 | `router.proxy.enabled` | Enable the proxy (Envoy or Agentgateway) in front of EPP. | `false` |
 | `router.proxy.proxyType` | Type of proxy. Options: `[envoy, agentgateway]`. | `envoy` |
 | `router.proxy.mode` | Proxy deployment mode. `sidecar` runs the proxy in the EPP pod; `service` runs it as its own horizontally scalable Deployment and Service reaching EPP over the EPP Service. | `sidecar` |
-| `router.proxy.replicas` | Replica count for the proxy Deployment when `mode=service`. | `2` |
+| `router.proxy.replicas` | Replica count for the proxy Deployment when `mode=service`. Ignored when `router.proxy.autoscaling.enabled` is `true`. | `2` |
+| `router.proxy.terminationGracePeriodSeconds` | Grace period (seconds) before SIGKILL on proxy pod teardown. Gives Envoy's 60s draining window time to complete and allows in-flight connections to drain. | `70` |
+| `router.proxy.autoscaling.enabled` | Enable Horizontal Pod Autoscaler (HPA v2) for the proxy Deployment when `mode=service`. See [Standalone Proxy Autoscaling (Service Mode)](../../docs/operations.md#standalone-proxy-autoscaling-service-mode). | `false` |
+| `router.proxy.autoscaling.minReplicas` | Minimum number of proxy replicas for the HPA. | `1` |
+| `router.proxy.autoscaling.maxReplicas` | Maximum number of proxy replicas for the HPA. Must be greater than or equal to `minReplicas`. | `5` |
+| `router.proxy.autoscaling.targetCPUUtilizationPercentage` | Target average CPU utilization percentage across proxy pods (1-100). | `80` |
+| `router.proxy.autoscaling.targetMemoryUtilizationPercentage` | Target average memory utilization percentage across proxy pods (1-100). | `""` |
+| `router.proxy.autoscaling.behavior` | Scaling behavior policies for proxy HPA scale-up and scale-down. | `{}` |
+| `router.proxy.autoscaling.metrics` | Custom HPA v2 metrics override for the proxy; replaces auto-generated CPU and memory metrics. Target percentage fields remain range-validated if defined. | `[]` |
 | `router.proxy.failOpen` | Whether the proxy passes traffic through (fail-open) when EPP is unreachable. Applies to `proxyType=envoy` only; Agentgateway exposes no fail-open setting and rejects requests (fails closed) when EPP is unreachable. | `true` |
 | `router.proxy.name` | Name of the sidecar container. | `""` |
 | `router.proxy.image` | Sidecar container image. | `""` |

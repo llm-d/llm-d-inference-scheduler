@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,6 +51,7 @@ type DataDependencies struct {
 	// Required keys — the framework will error at init time if no producer exists for any of these.
 	Required map[DataKey]any
 	// Optional keys — the framework logs a warning at init time but does NOT error if no producer exists.
+	// Configured producers run before their optional consumers.
 	// The plugin must handle the case where this data is absent at runtime.
 	Optional map[DataKey]any
 }

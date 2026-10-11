@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
@@ -50,7 +51,7 @@ func TestTextOnlyRequest_SkipsMediaDownloadAndEncode(t *testing.T) {
 	defer renderServer.Close()
 
 	gatewayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		phase := r.Header.Get(gateway.EPPProfileHeader)
+		phase := r.Header.Get(reqcommon.EPPProfileHeaderKey)
 		switch phase {
 		case gateway.PhaseEncode:
 			encodeCalled.Store(true)
@@ -109,7 +110,7 @@ func TestTextOnlyRequest_SkipsMediaDownloadAndEncode(t *testing.T) {
 
 	reqCtx := &pipeline.RequestContext{
 		RequestID:        "text-only-test",
-		OriginalPath:     gateway.PathChatCompletions,
+		OriginalPath:     reqcommon.PathChatCompletions,
 		OriginalBody:     mustJSON(body),
 		Body:             body,
 		Model:            "llama-3",

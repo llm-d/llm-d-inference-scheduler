@@ -24,12 +24,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
@@ -124,17 +124,20 @@ func (s *RenderStep) SetServiceAddress(addr string) {
 func (s *RenderStep) Name() string { return RenderStepName }
 
 func (s *RenderStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) error {
-	if reqCtx.OriginalPath == gateway.DefaultGeneratePath {
+	switch reqcommon.DetectAPIType(reqCtx.OriginalPath) {
+	case reqcommon.APITypeVLLMGenerate:
 		return s.executeGenerate(ctx, reqCtx)
-	}
-	if strings.Contains(reqCtx.OriginalPath, gateway.PathCompletions) {
+	case reqcommon.APITypeCompletions:
 		return s.executeCompletions(ctx, reqCtx)
-	} else if strings.Contains(reqCtx.OriginalPath, gateway.PathChatCompletions) {
-		return s.executeChatCompletions(ctx, reqCtx)
+	case reqcommon.APITypeChatCompletions:
+		return s.executeRender(ctx, reqCtx, reqcommon.PathChatCompletions)
+	case reqcommon.APITypeResponses:
+		return s.executeRender(ctx, reqCtx, reqcommon.PathResponses)
+	default:
+		logger := log.FromContext(ctx).WithName(RenderStepName)
+		logger.V(logutil.DEFAULT).Info("skipping render step", "path", reqCtx.OriginalPath)
+		return nil
 	}
-	logger := log.FromContext(ctx).WithName(RenderStepName)
-	logger.V(logutil.DEFAULT).Info("skipping render step", "path", reqCtx.OriginalPath)
-	return nil
 }
 
 // executeGenerate handles the tokens-in generate path. It does not tokenize:
@@ -156,8 +159,10 @@ func (s *RenderStep) executeGenerate(ctx context.Context, reqCtx *pipeline.Reque
 	}
 	reqCtx.TokenIDs = tokenIDs
 
-	if err := validateSamplingParams(reqCtx.Body); err != nil {
-		return fmt.Errorf("render: %w", err)
+	if rawSampling := reqCtx.Body["sampling_params"]; rawSampling != nil {
+		if _, ok := rawSampling.(map[string]any); !ok {
+			return fmt.Errorf("render: sampling_params must be an object, got %T: %w", rawSampling, pipeline.ErrBadRequest)
+		}
 	}
 
 	rawFeatures := reqCtx.Body["features"]
@@ -185,6 +190,8 @@ func (s *RenderStep) executeGenerate(ctx context.Context, reqCtx *pipeline.Reque
 	}
 	reqCtx.MultimodalEntries = entries
 
+	coordmetrics.RecordMediaItems(coordmetrics.MediaTypeImage, len(entries))
+
 	logger.V(logutil.DEFAULT).Info("complete", "token_ids_len", len(tokenIDs), "images", len(entries))
 	return nil
 }
@@ -201,7 +208,7 @@ func (s *RenderStep) executeCompletions(ctx context.Context, reqCtx *pipeline.Re
 		// decode into a minimal struct so completions stays decoupled from the
 		// chat-completions response shape.
 		var renderResp []completionsRenderResponse
-		if err := s.postRender(ctx, reqCtx, gateway.PathCompletions, &renderResp); err != nil {
+		if err := s.postRender(ctx, reqCtx, reqcommon.PathCompletions, &renderResp); err != nil {
 			return err
 		}
 		if len(renderResp) != 1 {
@@ -257,13 +264,27 @@ func (s *RenderStep) executeCompletions(ctx context.Context, reqCtx *pipeline.Re
 	}
 }
 
-func (s *RenderStep) executeChatCompletions(ctx context.Context, reqCtx *pipeline.RequestContext) error {
-	logger := log.FromContext(ctx).WithName(RenderStepName)
-
+// executeRender posts the client body to the render service under path and
+// applies the token_ids and per-image features it returns. The render service
+// tokenizes whatever shape the prompt field holds, so this step does not
+// inspect it.
+//
+// Chat completions and responses share this path because vLLM's renderer
+// declares the same response model for both. /v1/completions/render returns
+// one object per prompt instead, so executeCompletions decodes and applies its
+// own shape.
+func (s *RenderStep) executeRender(ctx context.Context, reqCtx *pipeline.RequestContext, path string) error {
 	var renderResp renderResponse
-	if err := s.postRender(ctx, reqCtx, gateway.PathChatCompletions, &renderResp); err != nil {
+	if err := s.postRender(ctx, reqCtx, path, &renderResp); err != nil {
 		return err
 	}
+	return s.applyRenderResponse(ctx, reqCtx, renderResp)
+}
+
+// applyRenderResponse stores a renderResponse's token_ids and reconciles its
+// per-image features onto reqCtx.MultimodalEntries.
+func (s *RenderStep) applyRenderResponse(ctx context.Context, reqCtx *pipeline.RequestContext, renderResp renderResponse) error {
+	logger := log.FromContext(ctx).WithName(RenderStepName)
 
 	reqCtx.TokenIDs = renderResp.TokenIDs
 	if err := s.checkTokenLimit(len(reqCtx.TokenIDs)); err != nil {
@@ -322,7 +343,7 @@ func (s *RenderStep) postRender(ctx context.Context, reqCtx *pipeline.RequestCon
 		return fmt.Errorf("creating render request: %w", err)
 	}
 	req.ContentLength = int64(len(body))
-	req.Header.Set(gateway.ContentTypeHeader, gateway.ContentTypeJSON)
+	req.Header.Set(gateway.ContentTypeHeader, reqcommon.ContentTypeJSON)
 	for k, v := range reqCtx.ForwardedHeaders() {
 		req.Header.Set(k, v)
 	}
@@ -335,10 +356,10 @@ func (s *RenderStep) postRender(ctx context.Context, reqCtx *pipeline.RequestCon
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		respBody := readErrorBody(resp.Body)
-		return upstreamError(RenderStepName, resp.StatusCode, respBody)
+	if err := checkStatus(RenderStepName, resp); err != nil {
+		return err
 	}
+	reqCtx.CaptureResponseHeaders(resp.Header)
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("decoding render response: %w", err)
 	}

@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -40,28 +39,22 @@ func init() {
 }
 
 type DecodeStep struct {
-	useOpenAIFormat bool
-	gwClient        *gateway.Client
-	kv              kv.Connector
+	gwClient *gateway.Client
+	kv       kv.Connector
 }
 
 func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.Step, error) {
 	if gwClient == nil {
 		return nil, errors.New("decode: gateway client is required")
 	}
-	useOpenAI, err := parseUseOpenAIFormat(params)
+	if err := rejectUseOpenAIFormatOverride(DecodeStepName, params); err != nil {
+		return nil, err
+	}
+	kvConn, err := buildKVConnector(params)
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	kvName, err := paramString(params, ParamKVConnector)
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	kvConn, err := kv.Build(kvName)
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	return &DecodeStep{useOpenAIFormat: useOpenAI, gwClient: gwClient, kv: kvConn}, nil
+	return &DecodeStep{gwClient: gwClient, kv: kvConn}, nil
 }
 
 func (s *DecodeStep) Name() string { return DecodeStepName }
@@ -69,7 +62,9 @@ func (s *DecodeStep) Name() string { return DecodeStepName }
 func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) error {
 	logger := log.FromContext(ctx).WithName(DecodeStepName)
 
-	s.prepareDecodeBody(ctx, reqCtx)
+	if err := s.prepareDecodeBody(ctx, reqCtx); err != nil {
+		return err
+	}
 
 	logger.V(logutil.DEFAULT).Info("sending request", "path", reqCtx.OriginalPath, "stream", reqCtx.Stream)
 
@@ -78,16 +73,8 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 		return err
 	}
 
-	transport := instrumentedTransport(s.gwClient.Transport(), coordmetrics.UpstreamDecode)
-	proxy, out := newDecodeProxy(logger, transport, nil)
-	proxy.ServeHTTP(reqCtx.ResponseWriter, proxyReq)
-	if out.TransportErr != nil {
-		return &pipeline.UpstreamStreamedError{Step: DecodeStepName, Cause: out.TransportErr}
-	}
-	if out.Status >= http.StatusBadRequest {
-		return &pipeline.UpstreamStreamedError{Step: DecodeStepName, StatusCode: out.Status}
-	}
-	return nil
+	out := serveDecode(logger, s.gwClient.Transport(), reqCtx.ResponseWriter, proxyReq, coordmetrics.UpstreamDecode, nil)
+	return out.streamedError(DecodeStepName)
 }
 
 // prepareDecodeBody mutates reqCtx.Body in place rather than on a clone (unlike
@@ -96,72 +83,50 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 // would also be insufficient, since injectUUIDs mutates nested values that a shallow
 // maps.Clone would still share. This is sound only while the pipeline runs steps
 // sequentially; if it ever goes concurrent, decode must copy like the others.
-func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.RequestContext) {
+func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.RequestContext) error {
+	format := reqcommon.DetectAPIType(reqCtx.OriginalPath)
+
 	kvParams := s.kv.PrepareDecodeKVParams(ctx, reqCtx)
 	s.injectUUIDs(reqCtx)
 
-	format := resolveFormat(s.useOpenAIFormat, reqCtx.OriginalPath)
 	switch format {
-	case gateway.FormatChatCompletions:
+	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses, reqcommon.APITypeVLLMGenerate:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
-		s.injectTokensField(reqCtx)
-	case gateway.FormatCompletions:
+	case reqcommon.APITypeCompletions:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
 		if len(reqCtx.TokenIDs) > 0 {
 			reqCtx.Body["prompt"] = reqCtx.TokenIDs
 		}
-	case gateway.FormatGenerate:
-		// The /inference/v1/generate engine reads transfer params only from
-		// sampling_params.extra_args; a top-level kv_transfer_params is ignored,
-		// so the decode worker never pulls the prefill KV over NIXL. Merge into
-		// the client's sampling_params to preserve max_tokens and other fields.
-		sampling, ok := reqCtx.Body[reqcommon.FieldSamplingParams].(map[string]any)
-		if !ok {
-			sampling = map[string]any{}
-			reqCtx.Body[reqcommon.FieldSamplingParams] = sampling
-		}
-		setGenerateTransferParams(sampling, kvParams, nil)
+	default:
+		// kvParams and injectUUIDs above already ran; both are harmless here
+		// since the request fails on this return and reqCtx.Body is never sent.
+		return unreachableFormatError(format)
 	}
+	return nil
 }
 
-func (s *DecodeStep) injectTokensField(reqCtx *pipeline.RequestContext) {
-	tokens := map[string]any{
-		"token_ids": reqCtx.TokenIDs,
-	}
-	if features := buildMMFeatures(reqCtx.MultimodalEntries, false); features != nil {
-		tokens["features"] = features
-	}
-	reqCtx.Body["tokens"] = tokens
-}
-
+// injectUUIDs stamps image parts with their multimodal hash.
+//
+// It keys on DetectAPIType(reqCtx.OriginalPath): decode proxies reqCtx.Body to
+// reqCtx.OriginalPath, so the wire shape to walk is whatever the client sent.
+// resolveFormat's answer instead reflects the encode/prefill wire-format
+// setting, which can differ from the client's own shape.
 func (s *DecodeStep) injectUUIDs(reqCtx *pipeline.RequestContext) {
-	messages, ok := reqCtx.Body["messages"].([]any)
-	if !ok {
-		return
+	apiType := reqcommon.DetectAPIType(reqCtx.OriginalPath)
+	if items, ok := promptItems(reqCtx.Body, apiType); ok {
+		injectImagePartUUIDs(items, apiType, reqCtx.MultimodalEntries)
 	}
+}
 
-	hashIdx := 0
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]any)
-		if !ok {
-			continue
+// injectImagePartUUIDs stamps each image content part with the hash of its
+// corresponding multimodal entry, pairing the two by position. Surplus parts
+// are left unstamped: the worker then hashes the image itself rather than
+// reading an entry primed under a hash that belongs to another part.
+func injectImagePartUUIDs(items []any, apiType reqcommon.APIType, entries []pipeline.MultimodalEntry) {
+	for i, image := range collectImageParts(items, apiType) {
+		if i >= len(entries) {
+			return
 		}
-		content, ok := msgMap["content"].([]any)
-		if !ok {
-			continue
-		}
-		for _, part := range content {
-			partMap, ok := part.(map[string]any)
-			if !ok {
-				continue
-			}
-			if partMap["type"] != "image_url" {
-				continue
-			}
-			if hashIdx < len(reqCtx.MultimodalEntries) {
-				partMap["uuid"] = reqCtx.MultimodalEntries[hashIdx].Hash
-				hashIdx++
-			}
-		}
+		image.part["uuid"] = entries[i].Hash
 	}
 }

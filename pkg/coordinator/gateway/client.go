@@ -27,9 +27,11 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/common/httplog"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
@@ -44,7 +46,13 @@ type Client struct {
 // New creates a Client from a GatewayConfig, constructing an http.Transport
 // with the configured connection pool and timeout settings.
 func New(cfg config.GatewayConfig) *Client {
-	transport := &http.Transport{
+	return NewWithTransport(newTransport(cfg), cfg.Address)
+}
+
+// newTransport builds the connection pool for gateway traffic. Proxy is left
+// nil so in-cluster destinations are never routed through HTTP(S)_PROXY.
+func newTransport(cfg config.GatewayConfig) *http.Transport {
+	return &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -54,8 +62,6 @@ func New(cfg config.GatewayConfig) *Client {
 		ResponseHeaderTimeout: cfg.Timeout,
 		ForceAttemptHTTP2:     true,
 	}
-
-	return NewWithTransport(transport, cfg.Address)
 }
 
 // NewWithTransport creates a Client using the provided transport and base URL.
@@ -67,7 +73,12 @@ func NewWithTransport(transport *http.Transport, baseURL string) *Client {
 	// to a plain nil interface so both paths pick up http.DefaultTransport.
 	var rt http.RoundTripper
 	if transport != nil {
-		rt = transport
+		// otelhttp injects W3C trace context on every outbound request, so the
+		// gateway, EPP, and sidecar spans join the trace that started here.
+		// Transport() hands this wrapper to the decode and passthrough reverse
+		// proxies, which inject for the same reason. The default span name
+		// stays fixed per method: the passthrough forwards arbitrary paths.
+		rt = otelhttp.NewTransport(transport)
 	}
 	return &Client{
 		httpClient: &http.Client{Transport: rt},
@@ -92,7 +103,7 @@ func (c *Client) Request(ctx context.Context, method, path string, body []byte, 
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set(ContentTypeHeader, ContentTypeJSON)
+	req.Header.Set(ContentTypeHeader, reqcommon.ContentTypeJSON)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -100,11 +111,11 @@ func (c *Client) Request(ctx context.Context, method, path string, body []byte, 
 	logger := log.FromContext(ctx).WithName("gateway")
 	if body != nil {
 		if v := logger.V(logutil.TRACE); v.Enabled() {
-			v.Info("request body", "method", method, "path", path, "headers", httplog.RedactedHeaders(req.Header), "body", RedactBody(body))
+			v.Info("request body", "method", method, "path", path, "headers", httplog.RedactedHeaders(req.Header), logutil.HTTPBodyKey, RedactBody(body))
 		}
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req) //#nosec -- baseURL is operator-configured (cfg.Address); path is a fixed APIType constant, never request-derived
 	if err != nil {
 		return nil, fmt.Errorf("sending request to gateway: %w", err)
 	}
@@ -113,11 +124,11 @@ func (c *Client) Request(ctx context.Context, method, path string, body []byte, 
 	// unread stream so large prefill/encode responses are not held in memory.
 	if v := logger.V(logutil.TRACE); v.Enabled() {
 		respBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("reading response from gateway: %w", err)
 		}
-		v.Info("response body", "status", resp.StatusCode, "body", RedactBody(respBody))
+		v.Info("response body", "status", resp.StatusCode, logutil.HTTPBodyKey, RedactBody(respBody))
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 	}
 

@@ -1,5 +1,6 @@
 /*
 Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,8 +34,12 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,6 +49,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	attrmetrics "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/metrics"
 	sourcehttp "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/http"
 	sourcemetrics "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/metrics"
@@ -51,7 +57,7 @@ import (
 
 // pipeline pairs a typed HTTPDataSource with its extractor. Tests assert
 // against the dispatcher contract via Poll (which fans extract errors out
-// through DataLayerExtractErrorsTotal, not the return value), and against
+// through LlmdDataLayerExtractErrorsTotal, not the return value), and against
 // the extractor's error logic by reaching into source/ext directly.
 type pipeline struct {
 	source *sourcehttp.HTTPDataSource[sourcemetrics.PrometheusMetricMap]
@@ -60,7 +66,7 @@ type pipeline struct {
 
 // Poll dispatches the source: fetches data and runs every bound extractor.
 // Per the PollingDispatcher contract, per-extractor failures are recorded via
-// DataLayerExtractErrorsTotal and do NOT surface as a returned error here.
+// LlmdDataLayerExtractErrorsTotal and do NOT surface as a returned error here.
 func (p *pipeline) Poll(ctx context.Context, ep fwkdl.Endpoint) error {
 	return p.source.Dispatch(ctx, ep)
 }
@@ -166,6 +172,55 @@ func TestMetricsExtractionDefaultConfig(t *testing.T) {
 	assert.Equal(t, 512, m.CacheNumBlocks, "CacheNumBlocks")
 }
 
+// TestMetricsExtractionCPUBackendVLLM verifies the RHAI-195 contract for a
+// CPU-backed vLLM endpoint. CPU vLLM exposes the same scheduling metric names
+// as GPU vLLM and currently retains the num_gpu_blocks label on
+// vllm:cache_config_info even though those blocks are CPU-resident.
+//
+// The LoRA family is intentionally absent: a CPU deployment without LoRA
+// adapters must still be scrapeable and usable by the EPP.
+func TestMetricsExtractionCPUBackendVLLM(t *testing.T) {
+	srv := createMockServer([]MetricMock{
+		{Name: WaitingMetric, Value: 6},
+		{Name: RunningMetric, Value: 2},
+		{Name: KVCacheMetric, Value: 0.42},
+		{
+			Name:  CacheConfigMetric,
+			Value: 1,
+			Labels: map[string]string{
+				CacheConfigBlockSizeInfoMetricName: "16",
+				CacheConfigNumGPUBlocksMetricName:  "2048",
+			},
+		},
+	})
+	defer srv.Close()
+
+	p, err := buildPipeline(t, srv.URL, nil)
+	require.NoError(t, err)
+
+	ep := newEndpointAt(mustHost(t, srv.URL), map[string]string{
+		DefaultEngineTypeLabelKey: "vllm",
+		// The extractor must not make a GPU-specific decision based on this
+		// label; CPU and GPU vLLM use the same default metric mapping.
+		"accelerator": "cpu",
+	})
+
+	data, err := p.source.Poll(context.Background(), ep)
+	require.NoError(t, err)
+	require.NoError(t, p.ext.Extract(context.Background(), fwkdl.PollInput[sourcemetrics.PrometheusMetricMap]{
+		Payload:  data,
+		Endpoint: ep,
+	}))
+
+	m := ep.GetMetrics()
+	assert.Equal(t, 6, m.WaitingQueueSize, "WaitingQueueSize")
+	assert.Equal(t, 2, m.RunningRequestsSize, "RunningRequestsSize")
+	assert.InDelta(t, 0.42, m.KVCacheUsagePercent, 0.001, "KVCacheUsagePercent")
+	assert.Equal(t, 16, m.CacheBlockSize, "CacheBlockSize")
+	assert.Equal(t, 2048, m.CacheNumBlocks, "CPU KV cache block count")
+	assert.Empty(t, m.ActiveModels, "CPU vLLM without LoRA must have no active adapters")
+}
+
 // TestMetricsExtractionLoRADisabledViaConfig verifies the "disable a specific metric"
 // pattern: with loraSpec: "", the extractor skips LoRA entirely — no extraction attempt,
 // no error for the missing/present family, and ActiveModels stays at its zero value.
@@ -257,7 +312,7 @@ func TestMetricsExtractionMissingMetricFamilyReturnsError(t *testing.T) {
 
 			// Drive Poll + Extract directly so the extractor's error surfaces.
 			// The dispatcher contract intentionally swallows extractor errors
-			// into DataLayerExtractErrorsTotal; this test asserts on the error
+			// into LlmdDataLayerExtractErrorsTotal; this test asserts on the error
 			// itself.
 			data, err := p.source.Poll(ctx, ep)
 			require.NoError(t, err, "fetch should succeed; we are testing the extractor's error path")
@@ -275,7 +330,7 @@ func TestMetricsExtractionMissingMetricFamilyReturnsError(t *testing.T) {
 // vllm:lora_requests_info family, Extract returns no error and still populates
 // the other (required) metrics. Before the fix the extractor would return an
 // "lora_requests_info not found" error and the EPP would increment
-// DataLayerExtractErrorsTotal on every poll of any vanilla deployment.
+// LlmdDataLayerExtractErrorsTotal on every poll of any vanilla deployment.
 func TestMetricsExtractionLoRAFamilyAbsentNoError(t *testing.T) {
 	srv := createMockServer([]MetricMock{
 		{Name: WaitingMetric, Value: 4},
@@ -569,7 +624,7 @@ func TestMetricsExtractionSGLangDefaultConfig(t *testing.T) {
 	})
 
 	// Drive Poll + Extract directly: the dispatcher swallows extractor errors
-	// into DataLayerExtractErrorsTotal, and a spurious per-scrape error is
+	// into LlmdDataLayerExtractErrorsTotal, and a spurious per-scrape error is
 	// part of what this test guards against.
 	data, err := p.source.Poll(ctx, ep)
 	require.NoError(t, err)
@@ -581,4 +636,205 @@ func TestMetricsExtractionSGLangDefaultConfig(t *testing.T) {
 	assert.InDelta(t, 0.42, m.KVCacheUsagePercent, 0.001, "KVCacheUsagePercent")
 	assert.Equal(t, 64, m.CacheBlockSize, "CacheBlockSize")
 	assert.Equal(t, 11147, m.CacheNumBlocks, "CacheNumBlocks")
+}
+
+// vllmSchedulingExposition holds the vLLM families the built-in vllm engine
+// config requires on every scrape.
+const vllmSchedulingExposition = `# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{engine="0",model_name="Qwen/Qwen3-8B"} 1.0
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{engine="0",model_name="Qwen/Qwen3-8B"} 2.0
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{engine="0",model_name="Qwen/Qwen3-8B"} 0.25
+# TYPE vllm:cache_config_info gauge
+vllm:cache_config_info{block_size="16",num_gpu_blocks="1024"} 1.0
+`
+
+// vllmNixlFailureExposition is the failure counter part of a vLLM /metrics
+// response, as prometheus_client renders vLLM's NixlPromMetrics
+// (vllm/distributed/kv_transfer/kv_connector/v1/nixl/stats.py).
+const vllmNixlFailureExposition = `# HELP vllm:nixl_num_failed_transfers_total Number of failed NIXL KV Cache transfers.
+# TYPE vllm:nixl_num_failed_transfers_total counter
+vllm:nixl_num_failed_transfers_total{engine="0",model_name="Qwen/Qwen3-8B"} 44.0
+# HELP vllm:nixl_num_failed_transfers_created Number of failed NIXL KV Cache transfers.
+# TYPE vllm:nixl_num_failed_transfers_created gauge
+vllm:nixl_num_failed_transfers_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.790782437044518e+09
+# HELP vllm:nixl_num_failed_notifications_total Number of failed NIXL KV Cache notifications.
+# TYPE vllm:nixl_num_failed_notifications_total counter
+vllm:nixl_num_failed_notifications_total{engine="0",model_name="Qwen/Qwen3-8B"} 22.0
+# HELP vllm:nixl_num_failed_notifications_created Number of failed NIXL KV Cache notifications.
+# TYPE vllm:nixl_num_failed_notifications_created gauge
+vllm:nixl_num_failed_notifications_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.790782437044527e+09
+# HELP vllm:nixl_num_kv_expired_reqs_total Number of requests that had their KV expire. NOTE: This metric is tracked on the P instance.
+# TYPE vllm:nixl_num_kv_expired_reqs_total counter
+vllm:nixl_num_kv_expired_reqs_total{engine="0",model_name="Qwen/Qwen3-8B"} 0.0
+# HELP vllm:nixl_num_kv_expired_reqs_created Number of requests that had their KV expire. NOTE: This metric is tracked on the P instance.
+# TYPE vllm:nixl_num_kv_expired_reqs_created gauge
+vllm:nixl_num_kv_expired_reqs_created{engine="0",model_name="Qwen/Qwen3-8B"} 1.790782437044533e+09
+`
+
+// TestMetricsExtractionNixlFailureCounters verifies that the built-in vllm
+// engine config stores the NIXL failure counters as endpoint attributes, and
+// that a vLLM endpoint not reporting them extracts without error.
+func TestMetricsExtractionNixlFailureCounters(t *testing.T) {
+	tests := []struct {
+		name       string
+		exposition string
+		want       map[string]float64
+	}{
+		{
+			name:       "endpoint reporting the counters",
+			exposition: vllmSchedulingExposition + vllmNixlFailureExposition,
+			want: map[string]float64{
+				attrmetrics.NixlFailedTransfersKey:     44,
+				attrmetrics.NixlFailedNotificationsKey: 22,
+				attrmetrics.NixlKVExpiredRequestsKey:   0,
+			},
+		},
+		{
+			name:       "endpoint not reporting the counters",
+			exposition: vllmSchedulingExposition,
+		},
+	}
+
+	keys := []string{
+		attrmetrics.NixlFailedTransfersKey,
+		attrmetrics.NixlFailedNotificationsKey,
+		attrmetrics.NixlKVExpiredRequestsKey,
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := serveMetricsText(t, tt.exposition)
+
+			p, err := buildPipeline(t, srv.URL, nil)
+			require.NoError(t, err)
+
+			ctx := context.Background()
+			ep := newEndpointAt(mustHost(t, srv.URL), map[string]string{
+				DefaultEngineTypeLabelKey: "vllm",
+			})
+
+			// Drive Poll + Extract directly: the dispatcher swallows extractor
+			// errors into LlmdDataLayerExtractErrorsTotal.
+			data, err := p.source.Poll(ctx, ep)
+			require.NoError(t, err)
+			require.NoError(t, p.ext.Extract(ctx, fwkdl.PollInput[sourcemetrics.PrometheusMetricMap]{Payload: data, Endpoint: ep}))
+
+			assert.Equal(t, 1, ep.GetMetrics().WaitingQueueSize, "WaitingQueueSize")
+
+			for _, key := range keys {
+				got, ok := attrmetrics.ReadScalarMetricValue(ep.GetAttributes(), attrmetrics.ScalarMetricDataKey(key))
+				want, wantOK := tt.want[key]
+				require.Equal(t, wantOK, ok, "attribute %q presence", key)
+				assert.InDelta(t, want, float64(got), 0.001, "attribute %q", key)
+			}
+		})
+	}
+}
+
+// TestMetricsExtractionNixlCounterStopsBeingReported verifies what an
+// endpoint keeps when the NIXL counters disappear from its scrape while the
+// endpoint object stays registered: the attribute keeps its last value, and a
+// later scrape reporting the counter overwrites it.
+func TestMetricsExtractionNixlCounterStopsBeingReported(t *testing.T) {
+	var exposition atomic.Pointer[string]
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = w.Write([]byte(*exposition.Load()))
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := buildPipeline(t, srv.URL, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	ep := newEndpointAt(mustHost(t, srv.URL), map[string]string{
+		DefaultEngineTypeLabelKey: "vllm",
+	})
+
+	scrape := func(text string) float64 {
+		t.Helper()
+		exposition.Store(&text)
+		data, err := p.source.Poll(ctx, ep)
+		require.NoError(t, err)
+		require.NoError(t, p.ext.Extract(ctx, fwkdl.PollInput[sourcemetrics.PrometheusMetricMap]{Payload: data, Endpoint: ep}))
+		got, ok := attrmetrics.ReadScalarMetricValue(ep.GetAttributes(), attrmetrics.NixlFailedTransfersDataKey)
+		require.True(t, ok, "NixlFailedTransfers attribute should be present")
+		return float64(got)
+	}
+
+	assert.InDelta(t, 44.0, scrape(vllmSchedulingExposition+vllmNixlFailureExposition), 0.001, "reported value")
+	assert.InDelta(t, 44.0, scrape(vllmSchedulingExposition), 0.001, "value after the counter stops being reported")
+	restarted := strings.ReplaceAll(vllmNixlFailureExposition, " 44.0", " 0.0")
+	assert.InDelta(t, 0.0, scrape(vllmSchedulingExposition+restarted), 0.001, "value once the counter is reported again")
+}
+
+// TestMetricsExtractionOptionalCustomMetric verifies that a custom metric
+// marked optional is skipped when the endpoint does not report it, while a
+// custom metric without the flag still fails the extraction.
+func TestMetricsExtractionOptionalCustomMetric(t *testing.T) {
+	const (
+		presentKey = "custom.present"
+		absentKey  = "custom.absent"
+	)
+
+	tests := []struct {
+		name     string
+		optional bool
+		wantErr  bool
+	}{
+		{name: "optional and absent", optional: true},
+		{name: "required and absent", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params, err := json.Marshal(map[string]any{
+				"engineConfigs": []map[string]any{
+					{
+						"name": "vllm",
+						"customMetrics": []map[string]any{
+							{"attributeKey": absentKey, "metricSpec": "custom_absent", "optional": tt.optional},
+							{"attributeKey": presentKey, "metricSpec": "custom_present"},
+						},
+					},
+				},
+			})
+			require.NoError(t, err)
+
+			plugin, err := CoreMetricsExtractorFactory("test", fwkplugin.StrictDecoder(params), nil)
+			require.NoError(t, err)
+			ext, ok := plugin.(*Extractor)
+			require.True(t, ok)
+
+			ep := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{
+				Labels: map[string]string{DefaultEngineTypeLabelKey: "vllm"},
+			}, nil)
+			err = ext.Extract(context.Background(), fwkdl.PollInput[sourcemetrics.PrometheusMetricMap]{
+				Endpoint: ep,
+				Payload: sourcemetrics.PrometheusMetricMap{
+					"custom_present": {
+						Type: dto.MetricType_GAUGE.Enum(),
+						Metric: []*dto.Metric{
+							{Gauge: &dto.Gauge{Value: ptr.To(7.0)}},
+						},
+					},
+				},
+			})
+
+			if tt.wantErr {
+				require.ErrorContains(t, err, "custom_absent")
+			} else {
+				require.NoError(t, err)
+			}
+
+			got, ok := attrmetrics.ReadScalarMetricValue(ep.GetAttributes(), attrmetrics.ScalarMetricDataKey(presentKey))
+			require.True(t, ok, "reported custom metric should be stored")
+			assert.InDelta(t, 7.0, float64(got), 0.001)
+
+			_, ok = attrmetrics.ReadScalarMetricValue(ep.GetAttributes(), attrmetrics.ScalarMetricDataKey(absentKey))
+			assert.False(t, ok, "unreported custom metric should not be stored")
+		})
+	}
 }
