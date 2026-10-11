@@ -35,6 +35,7 @@ import (
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
+	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
@@ -277,11 +278,17 @@ func (s *Step) serveQueued(ctx context.Context, reqCtx *pipeline.RequestContext,
 		RequestQueueName: queue,
 		ResultQueueName:  resultKey(tenant, reqCtx.RequestID),
 	}
-	if err := s.sub.SubmitRequest(ctx, msg); err != nil {
+	call := coordmetrics.StartUpstreamCall(coordmetrics.UpstreamAsyncBroker)
+	err := s.sub.SubmitRequest(ctx, msg)
+	call.Done()
+	if err != nil {
 		log.FromContext(ctx).WithName(StepName).Error(err, "failed to enqueue request", "id", reqCtx.RequestID)
 		writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "ENQUEUE_FAILED",
 			"failed to enqueue request")
-		return responded(http.StatusServiceUnavailable, err)
+		if ctx.Err() != nil {
+			return pipeline.ErrPipelineDone
+		}
+		return responded(http.StatusServiceUnavailable, &pipeline.UpstreamError{Step: StepName, StatusCode: 0})
 	}
 
 	if mode == asyncModeEnqueue {
@@ -395,7 +402,7 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 			logger.Error(err, "result lookup failed during wait, retrying until the deadline", "id", id)
 		}
 		if err == nil && state == asyncStateReady {
-			result, writeErr := writeResult(w, res)
+			pipelineResult, writeErr := writeResult(w, res)
 			if writeErr == nil {
 				// Delivery confirmed on the held connection, the result's only
 				// consumer: reclaim the mailbox now instead of letting it sit
@@ -407,7 +414,7 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 					logger.Error(err, "failed to delete delivered result", "id", id)
 				}
 			}
-			return result
+			return pipelineResult
 		}
 		select {
 		case <-waitCtx.Done():
@@ -436,13 +443,13 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 					logger.Error(err, "final result lookup failed, answering 504", "id", id)
 				}
 				if err == nil && state == asyncStateReady {
-					result, writeErr := writeResult(w, res)
+					pipelineResult, writeErr := writeResult(w, res)
 					if writeErr == nil {
 						if err := s.rdb.Del(finalCtx, resultKey(tenant, id)).Err(); err != nil {
 							logger.Error(err, "failed to delete delivered result", "id", id)
 						}
 					}
-					return result
+					return pipelineResult
 				}
 				writeOpenAIError(w, http.StatusGatewayTimeout, "timeout_error", api.ErrCodeDeadlineExceeded,
 					"request deadline exceeded before a result was produced")

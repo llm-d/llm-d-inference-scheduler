@@ -240,6 +240,9 @@ func writePending(w http.ResponseWriter, id string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"id": id, "status": "pending"})
 }
 
+// statusClientClosedRequest is 499 Client Closed Request (nginx convention).
+const statusClientClosedRequest = 499
+
 // writeResult maps a stored ResultMessage onto the HTTP response. StatusCode
 // > 0 mirrors the upstream status and body verbatim (out-of-range codes
 // answer 502 instead). Error codes map:
@@ -248,7 +251,7 @@ func writePending(w http.ResponseWriter, id string) {
 // envelope. Returns the pipeline result (ErrPipelineDone, or the error status
 // written) and the body write error, so callers that confirm delivery can act
 // on it; the error-envelope branches never fail the write.
-func writeResult(w http.ResponseWriter, res *api.ResultMessage) (result, writeErr error) {
+func writeResult(w http.ResponseWriter, res *api.ResultMessage) (pipelineResult, writeErr error) {
 	if res.StatusCode > 0 {
 		// The stored result is external data: guard the range rather than
 		// letting WriteHeader panic on a corrupted value.
@@ -280,10 +283,10 @@ func writeResult(w http.ResponseWriter, res *api.ResultMessage) (result, writeEr
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", res.ErrorCode, res.ErrorMessage)
 		return upstreamFailure(http.StatusBadRequest), nil
 	case api.ErrCodeCancelled:
-		// 499 Client Closed Request (nginx convention): the caller abandoned
-		// the request and cancellation dropped it pre-dispatch.
-		writeOpenAIError(w, 499, "cancelled", res.ErrorCode, res.ErrorMessage)
-		return upstreamFailure(499), nil
+		// The caller abandoned the request and cancellation dropped it
+		// pre-dispatch.
+		writeOpenAIError(w, statusClientClosedRequest, "cancelled", res.ErrorCode, res.ErrorMessage)
+		return upstreamFailure(statusClientClosedRequest), nil
 	default:
 		writeOpenAIError(w, http.StatusBadGateway, "api_error", res.ErrorCode, res.ErrorMessage)
 		return upstreamFailure(http.StatusBadGateway), nil

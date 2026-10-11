@@ -533,8 +533,9 @@ type Step interface {
 - `Execute` does the work: it reads and mutates `reqCtx`, and returns an error to abort
   the request or `nil` to continue. Return `pipeline.ErrPipelineDone` to stop the
   pipeline early and report success (the response must already have been written to
-  `reqCtx.ResponseWriter`). A step that has written an error response itself returns a
-  `pipeline.ResponseWrittenError` instead, so the request still counts as failed.
+  `reqCtx.ResponseWriter`, or the client is gone). A step that has written an error
+  response itself returns a `pipeline.ResponseWrittenError` instead, so the request still
+  counts as failed.
 - A response-producing step writes the client response to `reqCtx.ResponseWriter`,
   typically by proxying the upstream response with `httputil.ReverseProxy` set to
   `FlushInterval: -1`, which forwards each write immediately (SSE chunks stream through; a

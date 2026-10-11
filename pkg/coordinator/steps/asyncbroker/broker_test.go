@@ -30,11 +30,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-async/api"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
+	"github.com/llm-d/llm-d-router/pkg/coordinator/metrics/metricstest"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/steps"
 )
@@ -297,6 +299,7 @@ func TestAsyncBrokerEnqueue(t *testing.T) {
 }
 
 func TestAsyncBrokerEnqueueFailure(t *testing.T) {
+	reg := metricstest.NewRegistry(t, coordmetrics.Register, coordmetrics.Reset)
 	step, _ := newAsyncTestStep(t, nil)
 	require.NoError(t, step.rdb.Close())
 	reqCtx, rec := asyncReqCtx(t, `{"model":"test-model"}`,
@@ -305,9 +308,42 @@ func TestAsyncBrokerEnqueueFailure(t *testing.T) {
 	err := step.Execute(t.Context(), reqCtx)
 	require.Error(t, err)
 	require.False(t, errors.Is(err, pipeline.ErrPipelineDone), "want a step error, got %v", err)
-	assert.Equal(t, coordmetrics.ErrorCodeInternal, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
+	assert.Equal(t, coordmetrics.ErrorCodeUpstreamTransport, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Contains(t, rec.Body.String(), "ENQUEUE_FAILED")
+	assert.InDelta(t, 1.0, upstreamRequestCount(t, reg, coordmetrics.UpstreamAsyncBroker), 1e-9)
+}
+
+// A client gone before the enqueue returns is not counted as an error.
+func TestAsyncBrokerEnqueueClientGone(t *testing.T) {
+	step, _ := newAsyncTestStep(t, nil)
+	require.NoError(t, step.rdb.Close())
+	reqCtx, _ := asyncReqCtx(t, `{"model":"test-model"}`,
+		map[string]string{defaultModeHeader: "enqueue", defaultTenantHeader: "team-a"})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := step.Execute(ctx, reqCtx)
+	assert.True(t, errors.Is(err, pipeline.ErrPipelineDone), "want ErrPipelineDone, got %v", err)
+}
+
+func upstreamRequestCount(t *testing.T, reg *prometheus.Registry, upstream string) float64 {
+	t.Helper()
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+	for _, mf := range mfs {
+		if mf.GetName() != "llm_d_coordinator_upstream_request_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "upstream" && l.GetValue() == upstream {
+					return m.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return 0
 }
 
 func TestAsyncBrokerWaitDeliversResult(t *testing.T) {
