@@ -34,17 +34,6 @@ import (
 
 const nilStr = "<nil>"
 
-// Modality identifies the type of multimodal content in a prompt. The
-// vocabulary is declared in pkg/common/request, which the coordinator and the
-// sidecar key on too, and aliased here so the framework contract names it.
-type Modality = reqcommon.Modality
-
-const (
-	ModalityImage = reqcommon.ModalityImage
-	ModalityAudio = reqcommon.ModalityAudio
-	ModalityVideo = reqcommon.ModalityVideo
-)
-
 // RequestPayload represents a strongly-typed unmarshaled request payload or raw bytes.
 type RequestPayload interface {
 	isRequestPayload()
@@ -261,10 +250,10 @@ func (tp *TokenizedRequest) TokenCount() int {
 
 // MultiModalFeature holds all data needed for prefix-cache scoring of a single
 // multimodal item. Items are ordered by token position within the prompt.
-// Currently only ModalityImage is supported.
+// Currently only reqcommon.ModalityImage is supported.
 type MultiModalFeature struct {
 	// Modality identifies the type of content.
-	Modality Modality
+	Modality reqcommon.Modality
 	// Hash is the content hash of the item, used for KV-cache reuse across requests.
 	Hash string
 	// Offset is the index of the first placeholder token for this item

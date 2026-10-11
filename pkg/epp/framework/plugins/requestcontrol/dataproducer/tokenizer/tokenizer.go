@@ -36,6 +36,7 @@ import (
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
@@ -479,7 +480,7 @@ func convertMMFeaturesToUpstream(src *tokenization.MultiModalFeatures) []fwkrh.M
 		}
 		for i := 0; i < n; i++ {
 			items = append(items, fwkrh.MultiModalFeature{
-				Modality: fwkrh.Modality(modality),
+				Modality: reqcommon.Modality(modality),
 				Hash:     hashes[i],
 				Offset:   ranges[i].Offset,
 				Length:   ranges[i].Length,
