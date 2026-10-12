@@ -9,8 +9,7 @@ instances.
 
 ## What It Does
 
-- Stores endpoint state in memory and applies the contributor's aggregation
-  function when state is set.
+- Returns the contributor's live local endpoint value.
 - Provides atomic `GetOrSet` coordination within one EPP process.
 - Uses the local hostname to isolate state associated with the EPP replica.
 
@@ -26,7 +25,8 @@ plugins:
     name: local-syncer
 
 dataLayer:
-  crossReplicaSyncerPluginRef: local-syncer
+  crossReplica:
+    syncerPluginRef: local-syncer
 ```
 
 ## Limitations

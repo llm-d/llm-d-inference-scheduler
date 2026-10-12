@@ -20,11 +20,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 )
 
@@ -76,9 +83,27 @@ func (e *UpstreamStreamedError) Error() string {
 
 func (e *UpstreamStreamedError) Unwrap() error { return e.Cause }
 
+// ResponseWrittenError signals that a step answered the client itself with
+// the error status StatusCode. StatusCode is informational and appears only in
+// Error(); classification comes from Cause (ErrBadRequest, an UpstreamError,
+// or an internal error). Callers must classify this for request_error_total /
+// step_errors_total but must not write another response body.
+type ResponseWrittenError struct {
+	Step       string
+	StatusCode int
+	Cause      error
+}
+
+func (e *ResponseWrittenError) Error() string {
+	return fmt.Sprintf("answered client with HTTP %d: %v", e.StatusCode, e.Cause)
+}
+
+func (e *ResponseWrittenError) Unwrap() error { return e.Cause }
+
 // Pipeline orchestrates the sequential execution of steps.
 type Pipeline struct {
-	steps []Step
+	steps                  []Step
+	forwardResponseHeaders map[string]struct{}
 }
 
 // New creates a pipeline from an ordered list of steps.
@@ -99,9 +124,52 @@ type stepTiming struct {
 	duration time.Duration
 }
 
+// NewWithForwardResponseHeaders creates a pipeline that relays selected
+// response headers from each step to every later step.
+func NewWithForwardResponseHeaders(steps []Step, headers []string) (*Pipeline, error) {
+	forwardResponseHeaders := make(map[string]struct{}, len(headers))
+	for index, name := range headers {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			return nil, fmt.Errorf("pipeline.forward_response_headers[%d] must not be empty", index)
+		}
+		if !isForwardableHeader(name) {
+			return nil, fmt.Errorf("pipeline.forward_response_headers contains non-forwardable header %q", name)
+		}
+		if _, duplicate := forwardResponseHeaders[name]; duplicate {
+			return nil, fmt.Errorf("pipeline.forward_response_headers contains duplicate header %q", name)
+		}
+		forwardResponseHeaders[name] = struct{}{}
+	}
+	return &Pipeline{steps: steps, forwardResponseHeaders: forwardResponseHeaders}, nil
+}
+
 // Execute runs all steps in order. Any error aborts immediately.
 func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 	logger := log.FromContext(ctx)
+
+	ctx, span := tracing.Tracer(TracerScope).Start(ctx, pipelineSpanName,
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer func() {
+		if r := recover(); r != nil {
+			span.SetStatus(codes.Error, "step panicked")
+			span.End()
+			panic(r)
+		}
+		span.End()
+	}()
+	if span.IsRecording() {
+		span.SetAttributes(semconv.LLMDCoordinatorPipelineStepCount(len(p.steps)))
+		if reqCtx.Model != "" {
+			span.SetAttributes(semconv.GenAIRequestModel(reqCtx.Model))
+		}
+	}
+
+	reqCtx.forwardResponseHeaders = p.forwardResponseHeaders
+	if reqCtx.RevisionDecisionID == "" {
+		reqCtx.RevisionDecisionID = uuid.NewString()
+	}
 
 	timings := make([]stepTiming, len(p.steps))
 	started := map[string]bool{}
@@ -113,16 +181,19 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 		}
 		for _, t := range timings {
 			if t.name != "" && t.duration > 0 {
-				stats = append(stats, t.duration.String())
+				stats = append(stats, t.name, t.duration.String())
 			}
 		}
 		logger.V(logutil.DEFAULT).Info("pipeline step timings", stats...)
 
 		// Classify path from steps that ran, success or failure, so a
 		// request that reached decode and failed there still contributes
-		// to path totals.
+		// to path totals. This defer is registered after the one that ends
+		// the span, so it runs first and the attribute lands while the span
+		// is still open.
 		if path, ok := classifyExecutionPath(started); ok {
 			coordmetrics.IncExecutionPath(reqCtx.Model, path)
+			span.SetAttributes(semconv.LLMDCoordinatorPipelineExecutionPath(path))
 		}
 		// Render populates TokenIDs on every success path (including a valid
 		// empty prompt array in the completions branch), so gate on the step
@@ -130,11 +201,14 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 		if executed["render"] {
 			coordmetrics.RecordRequestInputTokens(reqCtx.Model, len(reqCtx.TokenIDs))
 		}
+		coordmetrics.RecordEncodeSubrequests(reqCtx.Route, reqCtx.EncodeFanout)
 	}()
 
 	for idx, step := range p.steps {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("pipeline cancelled: %w", err)
+			cancelled := fmt.Errorf("pipeline cancelled: %w", err)
+			span.SetStatus(codes.Error, cancelled.Error())
+			return cancelled
 		}
 		name := step.Name()
 		started[name] = true
@@ -146,7 +220,11 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 				return nil
 			}
 			coordmetrics.IncStepErrorTotal(name, coordmetrics.ClassifyErrorCode(err, ClassifyOpts))
-			return fmt.Errorf("step %q failed: %w", name, err)
+			failed := fmt.Errorf("step %q failed: %w", name, err)
+			// UpstreamError.Error omits the response body, so the status
+			// message carries no prompt or user data.
+			span.SetStatus(codes.Error, failed.Error())
+			return failed
 		}
 		executed[name] = true
 		logger.V(logutil.TRACE).Info("step complete", "step", name)
@@ -155,10 +233,13 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 }
 
 // runStep executes one step with per-iteration observability. The defer
-// covers all three step-observability signals on every exit path (normal
+// covers all four step-observability signals on every exit path (normal
 // return, error return, panic). On panic recovery, step_errors_total
 // records the failure under error_code=internal and the panic
 // re-propagates into the chi Recoverer at the server edge.
+//
+// The span is named after the step, which is why the step name is not also
+// recorded as an attribute.
 func (p *Pipeline) runStep(
 	ctx context.Context,
 	reqCtx *RequestContext,
@@ -167,19 +248,34 @@ func (p *Pipeline) runStep(
 	timings []stepTiming,
 ) error {
 	name := step.Name()
+	ctx, span := tracing.Tracer(TracerScope).Start(ctx, name,
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
 	coordmetrics.IncStepRunning(name)
 	start := time.Now()
 	defer func() {
 		d := time.Since(start)
 		coordmetrics.RecordStepDuration(name, d)
 		coordmetrics.DecStepRunning(name)
+		reqCtx.StepDuration += d
 		timings[idx] = stepTiming{name: name, duration: d}
 		if r := recover(); r != nil {
 			coordmetrics.IncStepErrorTotal(name, coordmetrics.ErrorCodeInternal)
+			// The panic value can hold anything the step was working on, so
+			// only the fact of it is recorded.
+			span.SetStatus(codes.Error, "step panicked")
+			span.End()
 			panic(r)
 		}
+		span.End()
 	}()
-	return step.Execute(ctx, reqCtx)
+
+	err := step.Execute(ctx, reqCtx)
+	// ErrPipelineDone is the cache-hit early exit and must not show as failed.
+	if err != nil && !errors.Is(err, ErrPipelineDone) {
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
 }
 
 // classifyExecutionPath maps the set of steps that ran (success or failure)
@@ -196,11 +292,11 @@ func classifyExecutionPath(executed map[string]bool) (string, bool) {
 	}
 	switch {
 	case executed["encode"] && executed["prefill"]:
-		return coordmetrics.PathEncodePrefillDecode, true
+		return metricsutil.DisaggPathEncodePrefillDecode, true
 	case executed["prefill"]:
-		return coordmetrics.PathPrefillDecode, true
+		return metricsutil.DisaggPathPrefillDecode, true
 	default:
-		return coordmetrics.PathDecodeOnly, true
+		return metricsutil.DisaggPathDecodeOnly, true
 	}
 }
 

@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -152,7 +153,7 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 						P(1, 10, 0.4, "foo", modelSQLLoraTarget), // Winner (Affinity overrides KV)
 						P(2, 10, 0.3, "foo"),
 					},
-					wantResponses: ExpectRouteTo("192.168.1.2:8000", modelSQLLoraTarget, "test3"),
+					wantResponses: ExpectRouteTo("192.168.1.2:8000", modelSQLLoraTarget, "test3", prio(2)),
 					wantMetrics: map[string]string{
 						"llm_d_epp_request_total": cleanMetric(metricReqTotal(modelSQLLora, modelSQLLoraTarget, prio(2))),
 					},
@@ -160,13 +161,14 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 				{
 					name: "passthrough parser success",
 					configText: `
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1
 kind: EndpointPickerConfig
 plugins:
   - type: queue-scorer
   - type: kv-cache-utilization-scorer
   - type: passthrough-parser
   - type: mock-metrics-source
+  - type: core-metrics-extractor
 schedulingProfiles:
   - name: default
     plugins:
@@ -176,6 +178,7 @@ requestHandler:
   parsers:
   - pluginRef: passthrough-parser
 dataLayer:
+  injectDefaults: false
   sources:
   - pluginRef: mock-metrics-source
 `,
@@ -206,7 +209,7 @@ dataLayer:
 						P(1, 0, 0.85, "foo"),
 						P(2, 10, 0.9, "foo"),
 					},
-					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelSQLLoraTarget, "test4"),
+					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelSQLLoraTarget, "test4", prio(2)),
 					wantMetrics: map[string]string{
 						"llm_d_epp_request_total": cleanMetric(metricReqTotal(modelSQLLora, modelSQLLoraTarget, prio(2))),
 					},
@@ -224,7 +227,7 @@ dataLayer:
 					},
 					wantResponses: ExpectReject(
 						envoyTypePb.StatusCode_BadRequest,
-						"inference error: BadRequest - error extracting request body: invalid character 'o' in literal null (expecting 'u')",
+						"error extracting request body: invalid character 'o' in literal null (expecting 'u')",
 					),
 				},
 				{
@@ -243,7 +246,7 @@ dataLayer:
 						P(0, 4, 0.2, "foo", "bar", modelSheddableTarget),
 						P(1, 4, 0.85, "foo", modelSheddableTarget),
 					},
-					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelSheddableTarget, "test6"),
+					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelSheddableTarget, "test6", prio(0)),
 					wantMetrics: map[string]string{
 						"llm_d_epp_request_total": cleanMetric(metricReqTotal(modelSheddable, modelSheddableTarget, prio(0))),
 					},
@@ -276,14 +279,14 @@ dataLayer:
 						`{"model":"my-model","prompt":"edit"}`,
 					),
 					wantResponses: ExpectReject(envoyTypePb.StatusCode_BadRequest,
-						"inference error: BadRequest - images edits request must have a multipart/form-data content-type"),
+						"images edits request must have a multipart/form-data content-type"),
 				},
 				{
 					name:     "no backend pods available",
 					requests: integration.ReqHeaderOnly(map[string]string{"content-type": "application/json"}),
 					pods:     nil,
 					wantResponses: ExpectReject(envoyTypePb.StatusCode_InternalServerError,
-						"inference error: Internal - no pods available in datastore"),
+						"no pods available in datastore"),
 				},
 				{
 					name: "request missing model field",
@@ -292,7 +295,16 @@ dataLayer:
 						`{"prompt":"hello world"}`,
 					),
 					wantResponses: ExpectReject(envoyTypePb.StatusCode_BadRequest,
-						"inference error: BadRequest - model not found in request body"),
+						"model not found in request body"),
+				},
+				{
+					name: "messages API rejection uses the Anthropic envelope",
+					requests: integration.ReqRaw(
+						map[string]string{":path": "/v1/messages", "content-type": "application/json"},
+						`{"model":"my-model","max_tokens":8}`,
+					),
+					wantResponses: ExpectRejectAnthropic(envoyTypePb.StatusCode_BadRequest,
+						"no parser registered matching path suffix for: /v1/messages"),
 				},
 
 				// --- Subsetting & Metadata ---
@@ -306,7 +318,7 @@ dataLayer:
 						P(1, 0, 0.1, "foo", modelSQLLoraTarget), // Winner (Low Queue + Matches Subset)
 						P(2, 10, 0.2, "foo"),
 					},
-					wantResponses: ExpectRouteTo("192.168.1.2:8000", modelSQLLoraTarget, "test2"),
+					wantResponses: ExpectRouteTo("192.168.1.2:8000", modelSQLLoraTarget, "test2", prio(2)),
 				},
 				{
 					name:     "subsetting: partial match",
@@ -316,7 +328,7 @@ dataLayer:
 						P(1, 0, 0.1, "foo", modelSQLLoraTarget),
 						P(2, 10, 0.2, "foo"), // Winner (Matches Subset, despite load)
 					},
-					wantResponses: ExpectRouteTo("192.168.1.3:8000", modelSQLLoraTarget, "test2"),
+					wantResponses: ExpectRouteTo("192.168.1.3:8000", modelSQLLoraTarget, "test2", prio(2)),
 				},
 				{
 					name:     "subsetting: no pods match",
@@ -326,7 +338,7 @@ dataLayer:
 						P(1, 0, 0.1, "foo", modelSQLLoraTarget),
 					},
 					wantResponses: ExpectRejectWithDropReason(envoyTypePb.StatusCode_ServiceUnavailable,
-						"inference error: ServiceUnavailable - failed to find endpoint candidates for serving the request",
+						"failed to find endpoint candidates for serving the request",
 						errcommon.RequestDroppedReasonNoEndpoints),
 				},
 
@@ -346,7 +358,7 @@ dataLayer:
 					pods: []PodState{
 						P(0, 4, 0.2, "foo", "bar", modelSheddableTarget),
 					},
-					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelDirect, "test6"),
+					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelDirect, "test6", prio(2)),
 					wantMetrics: map[string]string{
 						"llm_d_epp_request_total": cleanMetric(metricReqTotal(modelDirect, modelDirect, prio(2))),
 					},
@@ -357,7 +369,7 @@ dataLayer:
 					pods: []PodState{
 						P(0, 0, 0.1, "foo", modelAfterRewrite),
 					},
-					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelAfterRewrite, "test-rewrite"),
+					wantResponses: ExpectRouteTo("192.168.1.1:8000", modelAfterRewrite, "test-rewrite", prio(0)),
 					wantMetrics: map[string]string{
 						"llm_d_epp_request_total": cleanMetric(metricReqTotal(modelToBeWritten, modelAfterRewrite, prio(0))),
 					},
@@ -476,11 +488,18 @@ dataLayer:
 					responses, err := integration.StreamedRequest(t, h.Client, tc.requests, len(tc.wantResponses))
 					require.NoError(t, err)
 
+					if len(tc.wantSpans) > 0 {
+						setHeaders := responses[0].GetRequestHeaders().GetResponse().GetHeaderMutation().GetSetHeaders()
+						require.NotEmpty(t, headerValue(setHeaders, "traceparent"), "expected traceparent when tracing is enabled")
+						removeW3CTraceContextHeaders(responses)
+					}
+
 					if diff := cmp.Diff(tc.wantResponses, responses,
 						protocmp.Transform(),
 						protocmp.SortRepeated(func(a, b *configPb.HeaderValueOption) bool {
 							return a.GetHeader().GetKey() < b.GetHeader().GetKey()
 						}),
+						protocmp.SortRepeated(func(a, b string) bool { return a < b }),
 					); diff != "" {
 						t.Errorf("Response mismatch (-want +got): %v", diff)
 					}
@@ -550,6 +569,43 @@ func expectImagesEditsRouteTo(endpoint string) []*extProcPb.ProcessingResponse {
 			Key: reqcommon.RequestIDHeaderKey, RawValue: []byte("test-request-id"),
 		}},
 	)
+}
+
+func removeW3CTraceContextHeaders(responses []*extProcPb.ProcessingResponse) {
+	for _, resp := range responses {
+		if mutation := resp.GetRequestHeaders().GetResponse().GetHeaderMutation(); mutation != nil {
+			mutation.SetHeaders = filterOutW3CTraceContextHeaders(mutation.GetSetHeaders())
+		}
+		if mutation := resp.GetResponseHeaders().GetResponse().GetHeaderMutation(); mutation != nil {
+			mutation.SetHeaders = filterOutW3CTraceContextHeaders(mutation.GetSetHeaders())
+		}
+		if mutation := resp.GetImmediateResponse().GetHeaders(); mutation != nil {
+			mutation.SetHeaders = filterOutW3CTraceContextHeaders(mutation.GetSetHeaders())
+		}
+	}
+}
+
+func filterOutW3CTraceContextHeaders(headers []*configPb.HeaderValueOption) []*configPb.HeaderValueOption {
+	if len(headers) == 0 {
+		return headers
+	}
+	filtered := make([]*configPb.HeaderValueOption, 0, len(headers))
+	for _, h := range headers {
+		if isW3CTraceContextHeader(h.GetHeader().GetKey()) {
+			continue
+		}
+		filtered = append(filtered, h)
+	}
+	return filtered
+}
+
+func isW3CTraceContextHeader(key string) bool {
+	switch strings.ToLower(key) {
+	case "traceparent", "tracestate", "baggage":
+		return true
+	default:
+		return false
+	}
 }
 
 // loadBaseResources parses the YAML manifest once at startup.

@@ -27,6 +27,18 @@ Latency Predictor Sidecar Containers
 - name: training-server
   image: {{ .Values.router.latencyPredictor.trainingServer.image.registry }}/{{ .Values.router.latencyPredictor.trainingServer.image.repository }}:{{ .Values.router.latencyPredictor.trainingServer.image.tag }}
   imagePullPolicy: {{ .Values.router.latencyPredictor.trainingServer.image.pullPolicy }}
+  {{- with .Values.router.latencyPredictor.trainingServer.securityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.router.latencyPredictor.trainingServer.command }}
+  command:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.router.latencyPredictor.trainingServer.args }}
+  args:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   ports:
   - containerPort: {{ .Values.router.latencyPredictor.trainingServer.port }}
     name: training-port
@@ -54,8 +66,18 @@ Latency Predictor Sidecar Containers
 - name: prediction-server-{{ add $i 1 }}
   image: {{ $.Values.router.latencyPredictor.predictionServers.image.registry }}/{{ $.Values.router.latencyPredictor.predictionServers.image.repository }}:{{ $.Values.router.latencyPredictor.predictionServers.image.tag }}
   imagePullPolicy: {{ $.Values.router.latencyPredictor.predictionServers.image.pullPolicy }}
-  command: ["uvicorn"]
-  args: ["llm_d_latency_predictor.prediction_server:app", "--host", "0.0.0.0", "--port", "{{ add $.Values.router.latencyPredictor.predictionServers.startPort $i }}"]
+  {{- with $.Values.router.latencyPredictor.predictionServers.securityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $.Values.router.latencyPredictor.predictionServers.command }}
+  command:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $.Values.router.latencyPredictor.predictionServers.args }}
+  args:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   ports:
   - containerPort: {{ add $.Values.router.latencyPredictor.predictionServers.startPort $i }}
     name: predict-port-{{ add $i 1 }}

@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -54,11 +55,12 @@ func (m *mockSaturationDetector) Saturation(ctx context.Context, candidatePods [
 }
 
 type mockFlowController struct {
-	outcome fctypes.QueueOutcome
-	err     error
-	called  bool
-	delay   time.Duration
-	request flowcontrol.FlowControlRequest
+	outcome           fctypes.QueueOutcome
+	err               error
+	called            bool
+	delay             time.Duration
+	request           flowcontrol.FlowControlRequest
+	releasedRequestID string
 }
 
 func (m *mockFlowController) EnqueueAndWait(
@@ -71,6 +73,20 @@ func (m *mockFlowController) EnqueueAndWait(
 	}
 	m.request = request
 	return m.outcome, m.err
+}
+
+func (m *mockFlowController) ReleaseDispatchReservation(requestID string) {
+	m.releasedRequestID = requestID
+}
+
+func TestFlowControlAdmissionController_ReleaseDispatchReservation(t *testing.T) {
+	t.Parallel()
+	fc := &mockFlowController{}
+	ac := NewFlowControlAdmissionController(fc, "pool", &mocks.MockEndpointCandidates{})
+
+	ac.ReleaseDispatchReservation("request-1")
+
+	require.Equal(t, "request-1", fc.releasedRequestID)
 }
 
 // --- Legacy Controller Tests ---

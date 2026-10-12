@@ -1,5 +1,6 @@
 /*
 Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -107,16 +108,17 @@ func InFlightLoadProducerFactory(name string, decoder *json.Decoder, handle fwkp
 	}
 
 	return &InFlightLoadProducer{
-		typedName:                fwkplugin.TypedName{Type: InFlightLoadProducerType, Name: name},
-		requestTracker:           newConcurrencyTracker(),
-		tokenTracker:             newConcurrencyTracker(),
-		tokenEstimator:           NewSimpleTokenEstimator(cfg.MaxEstimatedOutputTokens),
-		addEstimatedOutputTokens: cfg.AddEstimatedOutputTokens,
-		dk:                       attrconcurrency.InFlightLoadDataKey.WithNonEmptyProducerName(name),
-		prefixMatchInfoDK:        attrprefix.PrefixCacheMatchInfoDataKey.WithNonEmptyProducerName(cfg.PrefixMatchInfoProducerName),
-		uncachedRequestTokensDk:  attrconcurrency.UncachedRequestTokensDataKey.WithNonEmptyProducerName(name),
-		syncCrossReplicaState:    syncCrossReplicaState,
-		PluginState:              fwkplugin.NewPluginState(ctx),
+		typedName:                 fwkplugin.TypedName{Type: InFlightLoadProducerType, Name: name},
+		requestTracker:            newConcurrencyTracker(),
+		tokenTracker:              newConcurrencyTracker(),
+		tokenEstimator:            NewSimpleTokenEstimator(cfg.MaxEstimatedOutputTokens),
+		addEstimatedOutputTokens:  cfg.AddEstimatedOutputTokens,
+		dk:                        attrconcurrency.InFlightLoadDataKey.WithNonEmptyProducerName(name),
+		prefixMatchInfoDK:         attrprefix.PrefixCacheMatchInfoDataKey.WithNonEmptyProducerName(cfg.PrefixMatchInfoProducerName),
+		uncachedRequestTokensDk:   attrconcurrency.UncachedRequestTokensDataKey.WithNonEmptyProducerName(name),
+		uncachedRequestTokensSlot: datalayer.NewSlot[*attrconcurrency.UncachedRequestTokens](attrconcurrency.UncachedRequestTokensDataKey.WithNonEmptyProducerName(name)),
+		syncCrossReplicaState:     syncCrossReplicaState,
+		PluginState:               fwkplugin.NewPluginState(ctx),
 	}, nil
 }
 
@@ -141,8 +143,12 @@ type InFlightLoadProducer struct {
 	dk                       fwkplugin.DataKey
 	prefixMatchInfoDK        fwkplugin.DataKey
 	uncachedRequestTokensDk  fwkplugin.DataKey
-	syncCrossReplicaState    bool
-	registeredEndpoints      sync.Map // key: string (NamespacedName), value: datalayer.Endpoint
+	// uncachedRequestTokensSlot pins the UncachedRequestTokens value type
+	// so a future drift surfaces at the assignment boundary, not when a
+	// scorer tries to read it.
+	uncachedRequestTokensSlot *datalayer.Slot[*attrconcurrency.UncachedRequestTokens]
+	syncCrossReplicaState     bool
+	registeredEndpoints       sync.Map // key: string (NamespacedName), value: datalayer.Endpoint
 	// outlenBucketMissingWarn gates a single warning when AddEstimatedOutputTokens is
 	// enabled but no outlen-bucket attribute is present on requests (the outlen-bucket
 	// plugin is not configured or is ordered after this producer).
@@ -312,12 +318,10 @@ func (p *InFlightLoadProducer) CrossReplicaState() datalayer.CrossReplicaSpec {
 		StateKey:     datalayer.StateKey("inflight:" + p.typedName.Name),
 		AttributeKey: p.dk,
 		SyncDisabled: !p.syncCrossReplicaState,
-		Supply: func(endpointID string) func() datalayer.Cloneable {
-			return func() datalayer.Cloneable {
-				return &attrconcurrency.InFlightLoad{
-					Requests: p.requestTracker.get(endpointID),
-					Tokens:   p.tokenTracker.get(endpointID),
-				}
+		Read: func(endpointID string) datalayer.Cloneable {
+			return &attrconcurrency.InFlightLoad{
+				Requests: p.requestTracker.get(endpointID),
+				Tokens:   p.tokenTracker.get(endpointID),
 			}
 		},
 		Aggregate: func(values []any) any {
@@ -389,7 +393,7 @@ func (p *InFlightLoadProducer) Produce(_ context.Context, request *fwksched.Infe
 		}
 		if request != nil {
 			tokens := p.estimateRequestTokens(e, request, inputTokens)
-			e.Put(p.uncachedRequestTokensDk, &attrconcurrency.UncachedRequestTokens{
+			p.uncachedRequestTokensSlot.Put(e, &attrconcurrency.UncachedRequestTokens{
 				Tokens: tokens,
 			})
 		}
@@ -743,14 +747,16 @@ func (p *InFlightLoadProducer) Produces() map[fwkplugin.DataKey]any {
 // configured; without it the input-token estimate silently reads zero.
 // PrefixCacheMatchInfo is optional -- used to discount the already-cached prompt
 // prefix from the prefix producer selected by prefixMatchInfoProducerName
-// (approximate by default, or a precise-prefix-cache producer).
+// (approximate by default, or a precise-prefix-cache producer). The outlen
+// bucket is optional too: without it the output estimate falls back to UNKNOWN.
 func (p *InFlightLoadProducer) Consumes() fwkplugin.DataDependencies {
 	return fwkplugin.DataDependencies{
 		Required: map[fwkplugin.DataKey]any{
 			tokenproducer.TokenizedPromptDataKey: fwksched.TokenizedRequest{},
 		},
 		Optional: map[fwkplugin.DataKey]any{
-			p.prefixMatchInfoDK: attrprefix.PrefixCacheMatchInfo{},
+			p.prefixMatchInfoDK:       attrprefix.PrefixCacheMatchInfo{},
+			outlenbucket.AttributeKey: outlenbucket.Bucket(0),
 		},
 	}
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -97,6 +97,7 @@ func TestParseRequest(t *testing.T) {
 					},
 					Stream:  true,
 					Payload: fwkrh.PayloadProto{Message: reqMsg},
+					RawBody: reqMsg.GetHttpBody().GetData(),
 				},
 				SkipResponseProcessing: false,
 			},
@@ -307,8 +308,8 @@ func TestVertexAIParser_Metadata(t *testing.T) {
 
 func createGrpcFrameRaw(payload []byte) ([]byte, error) {
 	frame := make([]byte, 5+len(payload))
-	frame[0] = 0 // uncompressed
-	binary.BigEndian.PutUint32(frame[1:], uint32(len(payload)))
+	frame[0] = 0                                                // uncompressed
+	binary.BigEndian.PutUint32(frame[1:], uint32(len(payload))) //#nosec G115 -- test fixture, small gRPC frame payloads
 	copy(frame[5:], payload)
 	return frame, nil
 }

@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,7 +45,7 @@ type RequestObjectives struct {
 
 // InferenceRequest is a structured representation of the fields we parse out of the InferenceRequest body.
 type InferenceRequest struct {
-	// RequestID is the Envoy generated Id for the request being processed
+	// RequestID is assigned by the EPP and unique per request. Use it to key per-request state.
 	RequestID string
 	// TargetModel is the final target model after traffic split.
 	TargetModel string
@@ -65,6 +66,11 @@ type InferenceRequest struct {
 	// Access via PutAttribute, GetAttribute, AttributeKeys, and ReadRequestAttribute.
 	// A nil pointer is valid; the store is lazily allocated on first write.
 	attributes *sync.Map
+
+	// scope confines attribute access to the keys one plugin declares. Nil on
+	// the request the framework owns, which reaches the store unconfined; set
+	// on the shallow copy WithAttributeScope hands to a plugin.
+	scope AttributeScope
 }
 
 func (r *InferenceRequest) String() string {
@@ -176,6 +182,25 @@ type ProfileRunResult struct {
 type SchedulingResult struct {
 	ProfileResults     map[string]*ProfileRunResult
 	PrimaryProfileName string
+}
+
+// PrimaryEndpoint returns the first endpoint the primary profile picked, as
+// stored, or nil when the result is nil, has no primary profile name, or the
+// primary profile picked none.
+func (r *SchedulingResult) PrimaryEndpoint() Endpoint {
+	if r == nil || r.PrimaryProfileName == "" {
+		return nil
+	}
+	return r.ProfileResults[r.PrimaryProfileName].FirstEndpoint()
+}
+
+// FirstEndpoint returns the first endpoint the profile picked, as stored, or
+// nil when the result is nil or the profile picked none.
+func (r *ProfileRunResult) FirstEndpoint() Endpoint {
+	if r == nil || len(r.TargetEndpoints) == 0 {
+		return nil
+	}
+	return r.TargetEndpoints[0]
 }
 
 type SchedulerProfile interface {

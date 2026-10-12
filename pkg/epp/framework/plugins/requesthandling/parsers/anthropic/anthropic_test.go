@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The Kubernetes Authors.
+Copyright 2025 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,9 +27,18 @@ import (
 	"k8s.io/utils/ptr"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 )
+
+func TestAnthropicParser_NoPriorityRewrite(t *testing.T) {
+	// The Anthropic messages schema has no priority field and ignores extra keys.
+	var parser any = NewAnthropicParser()
+	_, ok := parser.(fwkrh.PriorityRewriter)
+	assert.False(t, ok, "anthropic-parser must not advertise PriorityRewriter")
+}
 
 func TestNewAnthropicParser(t *testing.T) {
 	parser := NewAnthropicParser()
@@ -379,6 +388,32 @@ func TestAnthropicParser_ParseRequest(t *testing.T) {
 			},
 		},
 		{
+			name:    "trailing slash on messages path",
+			headers: map[string]string{":path": "/v1/messages/"},
+			body: map[string]any{
+				"model":      "claude-sonnet-4-6",
+				"max_tokens": float64(1024),
+				"messages": []any{
+					map[string]any{"role": "user", "content": "Hello, Claude"},
+				},
+			},
+			want: &fwkrh.InferenceRequestBody{
+				MaxOutputTokens: ptr.To(int64(1024)),
+				Messages: &fwkrh.MessagesRequest{
+					Messages: []fwkrh.AnthropicMessage{
+						{Role: "user", Content: fwkrh.AnthropicContent{Raw: "Hello, Claude"}},
+					},
+				},
+				Payload: fwkrh.PayloadMap{
+					"model":      "claude-sonnet-4-6",
+					"max_tokens": json.Number("1024"),
+					"messages": []any{
+						map[string]any{"role": "user", "content": "Hello, Claude"},
+					},
+				},
+			},
+		},
+		{
 			name:    "empty messages array",
 			headers: map[string]string{":path": "/v1/messages"},
 			body: map[string]any{
@@ -448,6 +483,17 @@ func TestAnthropicParser_ParseRequest(t *testing.T) {
 				t.Errorf("ParseRequest() got.SkipResponseProcessing = %v, want false", got.SkipResponseProcessing)
 			}
 
+			tt.want.RawBody = bodyBytes
+			payload, _ := tt.want.Payload.AsMap()
+			for key, value := range payload {
+				raw, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if key == "system" || raw[0] == '{' || raw[0] == '[' {
+					payload[key] = json.RawMessage(raw)
+				}
+			}
 			// Model is extracted from the request body's "model" field.
 			tt.want.Model, _ = tt.body["model"].(string)
 
@@ -488,7 +534,7 @@ func TestAnthropicParser_ParseResponse(t *testing.T) {
 			},
 		},
 		{
-			name: "usage with cache tokens",
+			name: "usage with cache read tokens",
 			body: []byte(`{
 				"id": "msg_123",
 				"type": "message",
@@ -500,11 +546,34 @@ func TestAnthropicParser_ParseResponse(t *testing.T) {
 			}`),
 			want: &fwkrh.ParsedResponse{
 				Usage: &fwkrh.Usage{
-					PromptTokens:     100,
+					PromptTokens:     180,
 					CompletionTokens: 50,
-					TotalTokens:      150,
+					TotalTokens:      230,
 					PromptTokenDetails: &fwkrh.PromptTokenDetails{
 						CachedTokens: 80,
+					},
+				},
+			},
+		},
+		{
+			name: "usage with cache read and cache creation tokens",
+			body: []byte(`{
+				"id": "msg_123",
+				"type": "message",
+				"usage": {
+					"input_tokens": 50,
+					"output_tokens": 10,
+					"cache_read_input_tokens": 100000,
+					"cache_creation_input_tokens": 248
+				}
+			}`),
+			want: &fwkrh.ParsedResponse{
+				Usage: &fwkrh.Usage{
+					PromptTokens:     100298,
+					CompletionTokens: 10,
+					TotalTokens:      100308,
+					PromptTokenDetails: &fwkrh.PromptTokenDetails{
+						CachedTokens: 100000,
 					},
 				},
 			},
@@ -588,11 +657,37 @@ func TestAnthropicParser_ParseResponse_Streaming(t *testing.T) {
 				"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":50}}"),
 			want: &fwkrh.ParsedResponse{
 				Usage: &fwkrh.Usage{
-					PromptTokens:     100,
+					PromptTokens:     180,
 					CompletionTokens: 50,
-					TotalTokens:      150,
+					TotalTokens:      230,
 					PromptTokenDetails: &fwkrh.PromptTokenDetails{
 						CachedTokens: 80,
+					},
+				},
+			},
+		},
+		{
+			name: "message_delta input tokens supersede message_start",
+			chunk: []byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":2679,\"output_tokens\":3}}}\n\n" +
+				"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":10682,\"output_tokens\":510}}"),
+			want: &fwkrh.ParsedResponse{
+				Usage: &fwkrh.Usage{
+					PromptTokens:     10682,
+					CompletionTokens: 510,
+					TotalTokens:      11192,
+				},
+			},
+		},
+		{
+			name:  "message_delta cache tokens",
+			chunk: []byte("event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":50,\"cache_read_input_tokens\":100000,\"cache_creation_input_tokens\":248,\"output_tokens\":10}}"),
+			want: &fwkrh.ParsedResponse{
+				Usage: &fwkrh.Usage{
+					PromptTokens:     100298,
+					CompletionTokens: 10,
+					TotalTokens:      100308,
+					PromptTokenDetails: &fwkrh.PromptTokenDetails{
+						CachedTokens: 100000,
 					},
 				},
 			},
@@ -622,7 +717,7 @@ func TestAnthropicParser_ParseResponse_Streaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{contentType: eventStreamType}, true)
+			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{reqcommon.HeaderContentType: request.MediaTypeEventStream}, true)
 			if err != nil {
 				t.Fatalf("ParseResponse() error = %v", err)
 			}
@@ -665,7 +760,7 @@ func TestAnthropicParser_Claims(t *testing.T) {
 	parser := NewAnthropicParser()
 	got := parser.Claims()
 	want := fwkrh.Claims{
-		Paths:     []string{messagesAPI, countTokensAPI},
+		Paths:     []string{messagesAPI, countTokensAPI, messagesAPI + "/render"},
 		Protocols: []v1.AppProtocol{v1.AppProtocolH2C, v1.AppProtocolHTTP},
 	}
 
@@ -681,42 +776,86 @@ func TestAnthropicParser_ParseRequest_CountTokens(t *testing.T) {
 		name    string
 		headers map[string]string
 		body    []byte
+		want    *fwkrh.InferenceRequestBody
+		wantErr bool
 	}{
 		{
-			name:    "valid count_tokens body forwarded as raw payload",
+			name:    "model resolved for rewriting",
 			headers: map[string]string{":path": "/v1/messages/count_tokens"},
 			body: []byte(`{"model":"test-model",` +
 				`"system":"You are a helpful assistant.",` +
 				`"messages":[{"role":"user","content":"Hello"}]}`),
+			want: &fwkrh.InferenceRequestBody{
+				Model: "test-model",
+				Payload: fwkrh.PayloadMap{
+					"model":    "test-model",
+					"system":   json.RawMessage(`"You are a helpful assistant."`),
+					"messages": json.RawMessage(`[{"role":"user","content":"Hello"}]`),
+				},
+			},
 		},
 		{
-			name:    "empty body still forwarded",
-			headers: map[string]string{":path": "/v1/messages/count_tokens"},
-			body:    []byte{},
-		},
-		{
-			name:    "non-JSON body still forwarded",
-			headers: map[string]string{":path": "/v1/messages/count_tokens"},
-			body:    []byte("not-json"),
+			name:    "trailing slash",
+			headers: map[string]string{":path": "/v1/messages/count_tokens/"},
+			body:    []byte(`{"model":"test-model"}`),
+			want: &fwkrh.InferenceRequestBody{
+				Model:   "test-model",
+				Payload: fwkrh.PayloadMap{"model": "test-model"},
+			},
 		},
 		{
 			name:    "path read from x-original-path header",
 			headers: map[string]string{"x-original-path": "/v1/messages/count_tokens"},
-			body:    []byte(`{}`),
+			body:    []byte(`{"model":"test-model"}`),
+			want: &fwkrh.InferenceRequestBody{
+				Model:   "test-model",
+				Payload: fwkrh.PayloadMap{"model": "test-model"},
+			},
+		},
+		{
+			// A body that resolves no model reaches the director, which rejects it
+			// once the payload is marshalable, as it does on /v1/messages.
+			name:    "null body resolves no model",
+			headers: map[string]string{":path": "/v1/messages/count_tokens"},
+			body:    []byte(`null`),
+			want:    &fwkrh.InferenceRequestBody{Payload: fwkrh.PayloadMap{}},
+		},
+		{
+			name:    "body without model",
+			headers: map[string]string{":path": "/v1/messages/count_tokens"},
+			body:    []byte(`{"messages":[{"role":"user","content":"Hello"}]}`),
+			want: &fwkrh.InferenceRequestBody{
+				Payload: fwkrh.PayloadMap{"messages": json.RawMessage(`[{"role":"user","content":"Hello"}]`)},
+			},
+		},
+		{
+			name:    "empty body",
+			headers: map[string]string{":path": "/v1/messages/count_tokens"},
+			body:    []byte{},
+			wantErr: true,
+		},
+		{
+			name:    "non-JSON body",
+			headers: map[string]string{":path": "/v1/messages/count_tokens"},
+			body:    []byte("not-json"),
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.ParseRequest(context.Background(), tt.body, tt.headers)
-			if err != nil {
-				t.Fatalf("ParseRequest() error = %v", err)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseRequest() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
 			}
 			if !got.SkipResponseProcessing {
 				t.Errorf("ParseRequest() SkipResponseProcessing = false, want true")
 			}
-			want := &fwkrh.InferenceRequestBody{Payload: fwkrh.RawPayload(tt.body)}
-			if diff := cmp.Diff(want, got.Body); diff != "" {
+			tt.want.RawBody = tt.body
+			if diff := cmp.Diff(tt.want, got.Body); diff != "" {
 				t.Errorf("ParseRequest() body mismatch (-want +got):\n%s", diff)
 			}
 		})

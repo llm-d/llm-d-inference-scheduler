@@ -1,5 +1,6 @@
 /*
 Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
@@ -77,6 +79,48 @@ func TestInFlightLoadProducer_Consumes(t *testing.T) {
 	require.NotContains(t, deps.Required, attrprefix.PrefixCacheMatchInfoDataKey)
 }
 
+// Produce and PreRequest receive a request confined to the plugin's
+// declarations, so the outlen bucket must be readable through that scope.
+func TestInFlightLoadProducer_ReadsOutlenBucketThroughScope(t *testing.T) {
+	t.Parallel()
+
+	p := newTestProducer(t)
+	datagraph.RegisterScopeSpecs([]fwkplugin.Plugin{p})
+	scoped, violations := datagraph.ScopeRequest(logr.Discard(), requestcontrol.PreRequestExtensionPoint, p,
+		requestWithBucket(outlenbucket.Long, nil))
+
+	// LONG bucket estimates 4096; an unreadable bucket falls back to UNKNOWN.
+	require.Equal(t, int64(4096), p.tokenEstimator.EstimateOutputFromRequest(scoped))
+	require.NoError(t, violations.Write())
+}
+
+// The outlen-bucket plugin and this producer declare the bucket with the same
+// type, so the data graph links them and orders the bucket first.
+func TestInFlightLoadProducer_OrderedAfterOutlenBucket(t *testing.T) {
+	t.Parallel()
+
+	p := newTestProducer(t)
+	bucket, err := outlenbucket.PluginFactory("outlen-bucket", nil, nil)
+	require.NoError(t, err)
+	tokens := &tokenStubProducer{}
+
+	ordered, err := datagraph.ValidateAndOrderDataDependencies([]fwkplugin.Plugin{p, bucket, tokens})
+	require.NoError(t, err)
+	require.Less(t, slices.Index(ordered, bucket.TypedName().String()), slices.Index(ordered, p.TypedName().String()))
+}
+
+// tokenStubProducer satisfies the producer's required TokenizedRequest
+// dependency so the data graph validates.
+type tokenStubProducer struct{}
+
+func (*tokenStubProducer) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: "token-stub", Name: "token-stub"}
+}
+
+func (*tokenStubProducer) Produces() map[fwkplugin.DataKey]any {
+	return map[fwkplugin.DataKey]any{tokenproducer.TokenizedPromptDataKey: fwksched.TokenizedRequest{}}
+}
+
 // prefixMatchInfoProducerName selects which prefix producer (approximate or
 // precise) feeds the cached-prefix discount, by both the optional dependency key
 // and the runtime read.
@@ -115,15 +159,19 @@ func TestInFlightLoadProducer_PrefixMatchInfoProducerName(t *testing.T) {
 	// selected owner has 41,280 of 43,992 input tokens cached; charging the full
 	// prompt would make an idle cold endpoint look cheaper than a busy warm one.
 	cache := &cacheMatchTestProducer{key: preciseKey}
-	ordered, err := datagraph.ValidateAndOrderDataDependencies([]fwkplugin.Plugin{producer, cache})
+	tokens := &tokenizedPromptTestProducer{}
+	ordered, err := datagraph.ValidateAndOrderDataDependencies([]fwkplugin.Plugin{producer, cache, tokens})
 	require.NoError(t, err)
 	require.Less(t, slices.Index(ordered, cache.TypedName().String()), slices.Index(ordered, producer.TypedName().String()))
 	endpoints := []fwksched.Endpoint{newStubSchedulingEndpoint("warm"), newStubSchedulingEndpoint("cold")}
 	req := makeTokenRequest("warm-follow-up", 43992)
 	for _, name := range ordered {
 		var next requestcontrol.DataProducer = producer
-		if name == cache.TypedName().String() {
+		switch name {
+		case cache.TypedName().String():
 			next = cache
+		case tokens.TypedName().String():
+			next = tokens
 		}
 		require.NoError(t, next.Produce(ctx, req, endpoints))
 	}
@@ -147,6 +195,24 @@ func (p *cacheMatchTestProducer) Produces() map[fwkplugin.DataKey]any {
 func (p *cacheMatchTestProducer) Produce(_ context.Context, _ *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) error {
 	endpoints[0].Put(p.key, attrprefix.NewPrefixCacheMatchInfo(645, 687, 64))
 	endpoints[1].Put(p.key, attrprefix.NewPrefixCacheMatchInfo(0, 687, 64))
+	return nil
+}
+
+// tokenizedPromptTestProducer satisfies InFlightLoadProducer's Required
+// TokenizedPrompt dependency so the real dependency sorter accepts the
+// plugin set; makeTokenRequest already carries the tokenized prompt
+// directly on the request, so Produce is a no-op.
+type tokenizedPromptTestProducer struct{}
+
+func (p *tokenizedPromptTestProducer) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: "token-producer", Name: "token-producer"}
+}
+
+func (p *tokenizedPromptTestProducer) Produces() map[fwkplugin.DataKey]any {
+	return map[fwkplugin.DataKey]any{tokenproducer.TokenizedPromptDataKey: fwksched.TokenizedRequest{}}
+}
+
+func (p *tokenizedPromptTestProducer) Produce(_ context.Context, _ *fwksched.InferenceRequest, _ []fwksched.Endpoint) error {
 	return nil
 }
 
@@ -329,6 +395,7 @@ func TestInFlightLoadProducer_DeleteEndpointPrunesOnlyMatchingMetricSeries(t *te
 	})
 	require.NoError(t, err)
 
+	//#nosec G101 -- metric name, not a credential
 	expectedTokens := `
 # HELP llm_d_epp_inflight_tokens [ALPHA] Current number of in-flight tokens per endpoint (uncached prompt tokens, optionally plus estimated output), as tracked by the in-flight load producer.
 # TYPE llm_d_epp_inflight_tokens gauge

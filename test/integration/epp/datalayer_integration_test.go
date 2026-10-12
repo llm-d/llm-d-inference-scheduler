@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -53,6 +54,7 @@ func TestFullDuplexStreamed_DataLayer(t *testing.T) {
 				protocmp.SortRepeated(func(a, b *configPb.HeaderValueOption) bool {
 					return a.GetHeader().GetKey() < b.GetHeader().GetKey()
 				}),
+				protocmp.SortRepeated(func(a, b string) bool { return a < b }),
 			); diff != "" {
 				t.Errorf("Response mismatch (-want +got): %v", diff)
 			}
