@@ -3,6 +3,8 @@
 {{ include "llm-d-epp.config" . }}
 {{ include "llm-d-epp.deployment" . }}
 {{ include "llm-d-epp.hpa" . }}
+{{ include "llm-d-epp.latency-predictor-deployment" . }}
+{{ include "llm-d-epp.latency-predictor-service" . }}
 {{ include "llm-d-epp.proxy-deployment" . }}
 {{ include "llm-d-epp.proxy-service" . }}
 {{ include "llm-d-epp.proxy-hpa" . }}

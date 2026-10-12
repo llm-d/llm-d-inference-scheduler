@@ -66,6 +66,7 @@ test_cases_llm_d_router_gateway["basic-kubernetes-1.30"]="--kube-version 1.30.0 
 test_cases_llm_d_router_gateway["gke-provider"]="--set provider.name=gke --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_gateway["multiple-replicas"]="--set router.replicas=3 --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_gateway["latency-predictor"]="--set router.latencyPredictor.enabled=true --set router.modelServers.matchLabels.app=llm-instance-gateway"
+test_cases_llm_d_router_gateway["latency-predictor-service"]="--set router.latencyPredictor.enabled=true --set router.latencyPredictor.mode=service --set router.latencyPredictor.predictionServers.count=3 --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_gateway["tokenizer-python"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.tokenizer.enabled=true --set router.tokenizer.modelName=test-model"
 test_cases_llm_d_router_gateway["tokenizer-rust"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.tokenizer.enabled=true --set router.tokenizer.flavor=rust --set router.tokenizer.modelName=test-model"
 
@@ -103,6 +104,22 @@ for key in "${!test_cases_llm_d_router_gateway[@]}"; do
   if [ "${key}" == "triton" ]; then
     if ! grep -q "passthrough-parser" "${output_dir}/llm-d-router-gateway/templates/inferenceextension.yaml"; then
       echo "Validation failed: passthrough-parser not found in rendered output for test: ${key}"
+      exit 1
+    fi
+  fi
+
+  if [ "${key}" == "latency-predictor-service" ]; then
+    epp_yaml="${output_dir}/llm-d-router-gateway/templates/epp.yaml"
+    if ! grep -q "name: release-name-latency-prediction" "${epp_yaml}" || ! grep -q "name: release-name-latency-training" "${epp_yaml}"; then
+      echo "Validation failed: latency predictor Deployments not found in rendered output for test: ${key}"
+      exit 1
+    fi
+    if ! grep -q 'value: "http://release-name-latency-prediction.default.svc.cluster.local:8001"' "${epp_yaml}"; then
+      echo "Validation failed: EPP PREDICTION_SERVER_URL does not point at the prediction Service for test: ${key}"
+      exit 1
+    fi
+    if grep -q "localhost:8001" "${epp_yaml}"; then
+      echo "Validation failed: sidecar prediction URL rendered in service mode for test: ${key}"
       exit 1
     fi
   fi
@@ -175,6 +192,7 @@ declare -A test_cases_llm_d_router_standalone
 test_cases_llm_d_router_standalone["basic"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false"
 test_cases_llm_d_router_standalone["gke-provider"]="--set provider.name=gke --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false"
 test_cases_llm_d_router_standalone["latency-predictor"]="--set router.latencyPredictor.enabled=true --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false"
+test_cases_llm_d_router_standalone["latency-predictor-service"]="--set router.latencyPredictor.enabled=true --set router.latencyPredictor.mode=service --set router.latencyPredictor.predictionServers.count=3 --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false"
 test_cases_llm_d_router_standalone["llm-d-router-gateway"]="--set router.inferencePool.create=true --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_standalone["agentgateway"]="--set router.proxy.proxyType=agentgateway --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000'"
 test_cases_llm_d_router_standalone["proxy-service"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.replicas=3"
@@ -420,6 +438,13 @@ invalid_proxy_command="${HELM} template ${SCRIPT_ROOT}/config/charts/llm-d-route
 echo "Executing: ${invalid_proxy_command}"
 if eval "${invalid_proxy_command}"; then
   echo "Helm template unexpectedly succeeded for invalid proxyType"
+  exit 1
+fi
+
+invalid_latency_predictor_mode_command="${HELM} template ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.latencyPredictor.mode=bogus >/dev/null"
+echo "Executing: ${invalid_latency_predictor_mode_command}"
+if eval "${invalid_latency_predictor_mode_command}"; then
+  echo "Helm template unexpectedly succeeded for invalid latencyPredictor.mode"
   exit 1
 fi
 

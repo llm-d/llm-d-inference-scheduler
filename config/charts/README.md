@@ -205,7 +205,7 @@ kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
 | `router.epp.flags` | Map of command-line flags passed directly to the EPP binary. | `{}` |
 | `router.epp.affinity` | Affinity rules for EPP pods. | `{}` |
 | `router.epp.tolerations` | Tolerations for EPP pods. | `[]` |
-| `router.epp.podSecurityContext` | Pod-level `securityContext` for EPP pods, inherited by the EPP, proxy sidecar, and latency predictor containers. | `{}` |
+| `router.epp.podSecurityContext` | Pod-level `securityContext` for EPP pods, inherited by the EPP, proxy sidecar, and sidecar-mode latency predictor containers. | `{}` |
 | `router.epp.securityContext` | Container-level `securityContext` for the EPP container. | `{}` |
 | `router.epp.resources` | EPP container resource requests and limits. | `requests.cpu: "8"`, `requests.memory: 8Gi`, `limits.memory: 16Gi` |
 | `router.epp.pluginsConfigFile` | EPP plugins configuration file name. | `default-plugins.yaml` |
@@ -516,17 +516,25 @@ router:
 
 ---
 
-### 6. Sidecar Latency Predictor Configuration (`router.latencyPredictor.*`)
+### 6. Latency Predictor Configuration (`router.latencyPredictor.*`)
 
-Enables latency predictor containers inside the EPP deployment to feed metrics to a latency scorer plugin, allowing EPP to route traffic based on real-time predicted latencies.
+Runs a latency training server and one or more prediction servers that feed a latency scorer plugin, allowing EPP to route traffic based on real-time predicted latencies. EPP posts training samples to the training server and fetches predictions from the prediction servers; the prediction servers pull refreshed models from the training server over HTTP.
+
+`router.latencyPredictor.mode` selects where the servers run:
+
+*   `sidecar`: the training server and `predictionServers.count` prediction containers run inside the EPP pod and EPP reaches them over loopback.
+*   `service`: the training server runs as a single-replica Deployment and the prediction servers as a Deployment with `predictionServers.count` replicas, each behind a ClusterIP Service. EPP reaches them through the Service FQDNs, so the prediction pods scale independently of the EPP pod and the Service spreads EPP connections across them.
 
 #### Latency Predictor Parameters
 
 | **Parameter Name** | **Description** | **Default** |
 | :--- | :--- | :--- |
 | `router.latencyPredictor.enabled` | Enable latency-based routing (requires extra Borg/training setup). | `false` |
+| `router.latencyPredictor.mode` | `sidecar` runs the servers in the EPP pod; `service` runs them as their own Deployments and Services. | `sidecar` |
+| `router.latencyPredictor.podSecurityContext` | Pod-level `securityContext` for the training and prediction pods in `service` mode. | `{}` |
 | `router.latencyPredictor.trainingServer.image` | Latency training server image configuration. | |
 | `router.latencyPredictor.predictionServers.image` | Latency prediction server image configuration. | |
+| `router.latencyPredictor.predictionServers.count` | Number of prediction servers: containers in the EPP pod in `sidecar` mode, pods in `service` mode. | `1` |
 | `router.latencyPredictor.trainingServer.securityContext` | Container-level `securityContext` for the training server container. | `{}` |
 | `router.latencyPredictor.predictionServers.securityContext` | Container-level `securityContext` for each prediction server container. | `{}` |
 | `router.latencyPredictor.trainingServer.command` | Training server container command. Empty uses the image default. | `[]` |
@@ -564,6 +572,16 @@ router:
   latencyPredictor:
     predictionServers:
       args: ["prediction_server:app", "--host", "0.0.0.0", "--port", "$(PREDICT_PORT)", "--workers", "$(UVICORN_WORKERS)"]
+```
+
+#### Latency Predictor as Separate Services
+
+```bash
+helm install vllm-qwen3-32b ./config/charts/llm-d-router-gateway \
+  --set router.modelServers.matchLabels.app=vllm-qwen3-32b \
+  --set router.latencyPredictor.enabled=true \
+  --set router.latencyPredictor.mode=service \
+  --set router.latencyPredictor.predictionServers.count=3
 ```
 
 ---
