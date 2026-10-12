@@ -512,6 +512,55 @@ func TestSGLangParseMessage_EngineSchema(t *testing.T) {
 	}
 }
 
+func TestEngineSchemas_BlockRemoved(t *testing.T) {
+	t.Parallel()
+
+	for engine, adapter := range map[string]kvevents.EngineAdapter{
+		"SGLang": NewSGLangAdapter(),
+		"vLLM":   NewVLLMAdapter(),
+	} {
+		t.Run(engine, func(t *testing.T) {
+			t.Parallel()
+			for _, encoding := range []string{"array", "map tag first", "map tag last"} {
+				t.Run(encoding, func(t *testing.T) {
+					t.Parallel()
+					var buffer bytes.Buffer
+					encoder := msgpack.NewEncoder(&buffer)
+					require.NoError(t, encoder.EncodeArrayLen(3))
+					require.NoError(t, encoder.EncodeFloat64(1))
+					require.NoError(t, encoder.EncodeArrayLen(1))
+					if encoding == "array" {
+						require.NoError(t, encoder.Encode([]any{eventTagBlockRemoved, []uint64{1}, "GPU", 7}))
+					} else {
+						require.NoError(t, encoder.EncodeMapLen(4))
+						names := []string{"type", "block_hashes", "medium", "group_idx"}
+						if encoding == "map tag last" {
+							names = []string{"block_hashes", "medium", "group_idx", "type"}
+						}
+						values := map[string]any{"type": eventTagBlockRemoved, "block_hashes": []uint64{1}, "medium": "GPU", "group_idx": 7}
+						for _, name := range names {
+							require.NoError(t, encoder.EncodeString(name))
+							require.NoError(t, encoder.Encode(values[name]))
+						}
+					}
+					require.NoError(t, encoder.EncodeNil())
+					_, _, batch, err := adapter.ParseMessage(&kvevents.RawMessage{Payload: buffer.Bytes()})
+					require.NoError(t, err)
+					require.Len(t, batch.Events, 1)
+					group := 7
+					var groupIdx *int
+					if engine == "vLLM" {
+						groupIdx = &group
+					}
+					require.Equal(t, &kvevents.BlockRemovedEvent{
+						BlockHashes: []uint64{1}, DeviceTier: "GPU", GroupIdx: groupIdx,
+					}, batch.Events[0])
+				})
+			}
+		})
+	}
+}
+
 func TestSGLangParseMessage_InvalidFields(t *testing.T) {
 	for name, event := range map[string]any{
 		"stored omitted medium":  []any{eventTagBlockStored, []uint64{1}, nil, []uint32{2}, 1, nil},

@@ -27,6 +27,20 @@ import (
 // SGLangAdapter parses SGLang KV events from arrays and tagged maps.
 type SGLangAdapter struct{}
 
+var sglangBlockStoredFieldDecoders = []eventFieldDecoder{
+	{"block_hashes", decodeHashesField},
+	{"parent_block_hash", decodeParentHashField},
+	{"token_ids", decodeTokensField},
+	{"block_size", decodeBlockSizeField},
+	{"lora_id", decodeLoraID},
+	{"medium", decodeMedium},
+}
+
+var sglangBlockRemovedFieldDecoders = []eventFieldDecoder{
+	{"block_hashes", decodeHashesField},
+	{"medium", decodeMedium},
+}
+
 // NewSGLangAdapter creates a SGLang adapter.
 func NewSGLangAdapter() *SGLangAdapter {
 	return &SGLangAdapter{}

@@ -167,12 +167,12 @@ func decodeArrayTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericE
 	}
 }
 
-type vllmFieldDecoder struct {
+type eventFieldDecoder struct {
 	name   string
-	decode func(*msgpack.Decoder, *vllmEventFields) error
+	decode func(*msgpack.Decoder, *typedEventFields) error
 }
 
-var blockStoredFieldDecoders = []vllmFieldDecoder{
+var vllmBlockStoredFieldDecoders = []eventFieldDecoder{
 	{"block_hashes", decodeHashesField},
 	{"parent_block_hash", decodeParentHashField},
 	{"token_ids", decodeTokensField},
@@ -186,31 +186,31 @@ var blockStoredFieldDecoders = []vllmFieldDecoder{
 	{"kv_cache_spec_sliding_window", decodeSlidingWindow},
 }
 
-var blockRemovedFieldDecoders = []vllmFieldDecoder{
-	blockStoredFieldDecoders[0],
-	blockStoredFieldDecoders[5],
-	blockStoredFieldDecoders[8],
+var vllmBlockRemovedFieldDecoders = []eventFieldDecoder{
+	{"block_hashes", decodeHashesField},
+	{"medium", decodeMedium},
+	{"group_idx", decodeGroupIdx},
 }
 
-func typedFieldDecoders(tag string, sglang bool) []vllmFieldDecoder {
+func typedFieldDecoders(tag string, sglang bool) []eventFieldDecoder {
 	switch tag {
 	case eventTagBlockStored:
 		if sglang {
-			return blockStoredFieldDecoders[:6]
+			return sglangBlockStoredFieldDecoders
 		}
-		return blockStoredFieldDecoders
+		return vllmBlockStoredFieldDecoders
 	case eventTagBlockRemoved:
 		if sglang {
-			return blockRemovedFieldDecoders[:2]
+			return sglangBlockRemovedFieldDecoders
 		}
-		return blockRemovedFieldDecoders
+		return vllmBlockRemovedFieldDecoders
 	default:
 		return nil
 	}
 }
 
-func decodeArrayFields(dec *msgpack.Decoder, fieldCount int, tag string, sglang bool) (*vllmEventFields, error) {
-	fields := &vllmEventFields{}
+func decodeArrayFields(dec *msgpack.Decoder, fieldCount int, tag string, sglang bool) (*typedEventFields, error) {
+	fields := &typedEventFields{}
 	schema := typedFieldDecoders(tag, sglang)
 	knownCount := min(fieldCount-1, len(schema))
 	for _, field := range schema[:knownCount] {
@@ -254,14 +254,14 @@ func decodeArrayBlockRemoved(dec *msgpack.Decoder, fieldCount int, sglang bool) 
 	return fields.blockRemovedEvent(), nil
 }
 
-func decodeHashesField(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeHashesField(dec *msgpack.Decoder, fields *typedEventFields) error {
 	var err error
 	fields.blockHashes, err = decodeBlockHashes(dec)
 	fields.hasHashes = err == nil
 	return err
 }
 
-func decodeParentHashField(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeParentHashField(dec *msgpack.Decoder, fields *typedEventFields) error {
 	var err error
 	fields.parentHash, err = decodeNullableHash(dec)
 	if err != nil {
@@ -270,14 +270,14 @@ func decodeParentHashField(dec *msgpack.Decoder, fields *vllmEventFields) error 
 	return nil
 }
 
-func decodeTokensField(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeTokensField(dec *msgpack.Decoder, fields *typedEventFields) error {
 	var err error
 	fields.tokens, err = decodeTokenIDs(dec)
 	fields.hasTokens = err == nil
 	return err
 }
 
-func decodeBlockSizeField(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeBlockSizeField(dec *msgpack.Decoder, fields *typedEventFields) error {
 	var err error
 	fields.blockSize, err = decodeInt(dec)
 	fields.hasBlockSize = err == nil
@@ -287,7 +287,7 @@ func decodeBlockSizeField(dec *msgpack.Decoder, fields *vllmEventFields) error {
 	return nil
 }
 
-type vllmEventFields struct {
+type typedEventFields struct {
 	tag           string
 	hasTag        bool
 	blockHashes   []uint64
@@ -306,7 +306,7 @@ type vllmEventFields struct {
 	slidingWindow *int
 }
 
-type rawVLLMMapField struct {
+type rawTypedMapField struct {
 	name  string
 	value []byte
 }
@@ -364,9 +364,9 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 		return nil, err
 	}
 
-	fields := vllmEventFields{}
+	fields := typedEventFields{}
 	// Buffer fields before the tag because the tag defines their schema.
-	var deferred []rawVLLMMapField
+	var deferred []rawTypedMapField
 	for range fieldCount {
 		name, err := dec.DecodeString()
 		if err != nil {
@@ -404,7 +404,7 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 			if decodeErr != nil {
 				return nil, fmt.Errorf("map-encoded event field %q: %w", name, decodeErr)
 			}
-			deferred = append(deferred, rawVLLMMapField{name: name, value: value})
+			deferred = append(deferred, rawTypedMapField{name: name, value: value})
 		case isKnownVLLMEventTag(fields.tag):
 			err = decodeTypedMapField(dec, name, fields.tag, &fields, sglang)
 		default:
@@ -444,7 +444,7 @@ func decodeTypedMapField(
 	dec *msgpack.Decoder,
 	name string,
 	tag string,
-	fields *vllmEventFields,
+	fields *typedEventFields,
 	sglang bool,
 ) error {
 	for _, field := range typedFieldDecoders(tag, sglang) {
@@ -464,7 +464,7 @@ func isKnownVLLMEventTag(tag string) bool {
 	}
 }
 
-func (f *vllmEventFields) requireBlockStoredFields() error {
+func (f *typedEventFields) requireBlockStoredFields() error {
 	for _, required := range []struct {
 		name string
 		has  bool
@@ -480,7 +480,7 @@ func (f *vllmEventFields) requireBlockStoredFields() error {
 	return nil
 }
 
-func (f *vllmEventFields) blockStoredEvent() *kvevents.BlockStoredEvent {
+func (f *typedEventFields) blockStoredEvent() *kvevents.BlockStoredEvent {
 	return &kvevents.BlockStoredEvent{
 		BlockHashes:                  f.blockHashes,
 		Tokens:                       f.tokens,
@@ -496,7 +496,7 @@ func (f *vllmEventFields) blockStoredEvent() *kvevents.BlockStoredEvent {
 	}
 }
 
-func (f *vllmEventFields) blockRemovedEvent() *kvevents.BlockRemovedEvent {
+func (f *typedEventFields) blockRemovedEvent() *kvevents.BlockRemovedEvent {
 	return &kvevents.BlockRemovedEvent{
 		BlockHashes: f.blockHashes,
 		DeviceTier:  f.medium,
@@ -664,7 +664,7 @@ func decodeInt(dec *msgpack.Decoder) (int, error) {
 	return int(value), nil
 }
 
-func decodeLoraID(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeLoraID(dec *msgpack.Decoder, fields *typedEventFields) error {
 	value, err := decodeOptionalInt(dec)
 	if err != nil {
 		return fmt.Errorf("lora_id: %w", err)
@@ -673,7 +673,7 @@ func decodeLoraID(dec *msgpack.Decoder, fields *vllmEventFields) error {
 	return nil
 }
 
-func decodeMedium(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeMedium(dec *msgpack.Decoder, fields *typedEventFields) error {
 	value, err := decodeOptionalString(dec)
 	if err != nil {
 		return fmt.Errorf("medium is not a string: %w", err)
@@ -684,7 +684,7 @@ func decodeMedium(dec *msgpack.Decoder, fields *vllmEventFields) error {
 	return nil
 }
 
-func decodeLoraName(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeLoraName(dec *msgpack.Decoder, fields *typedEventFields) error {
 	value, err := decodeOptionalString(dec)
 	if err != nil {
 		return fmt.Errorf("lora_name is not a string: %w", err)
@@ -693,7 +693,7 @@ func decodeLoraName(dec *msgpack.Decoder, fields *vllmEventFields) error {
 	return nil
 }
 
-func decodeExtraKeysField(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeExtraKeysField(dec *msgpack.Decoder, fields *typedEventFields) error {
 	value, err := decodeExtraKeys(dec)
 	if err != nil {
 		return err
@@ -702,7 +702,7 @@ func decodeExtraKeysField(dec *msgpack.Decoder, fields *vllmEventFields) error {
 	return nil
 }
 
-func decodeGroupIdx(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeGroupIdx(dec *msgpack.Decoder, fields *typedEventFields) error {
 	value, err := decodeOptionalInt(dec)
 	if err != nil {
 		return fmt.Errorf("group_idx: %w", err)
@@ -714,7 +714,7 @@ func decodeGroupIdx(dec *msgpack.Decoder, fields *vllmEventFields) error {
 	return nil
 }
 
-func decodeKVCacheSpecKind(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeKVCacheSpecKind(dec *msgpack.Decoder, fields *typedEventFields) error {
 	value, err := decodeOptionalString(dec)
 	if err != nil {
 		return fmt.Errorf("kv_cache_spec_kind is not a string: %w", err)
@@ -725,7 +725,7 @@ func decodeKVCacheSpecKind(dec *msgpack.Decoder, fields *vllmEventFields) error 
 	return nil
 }
 
-func decodeSlidingWindow(dec *msgpack.Decoder, fields *vllmEventFields) error {
+func decodeSlidingWindow(dec *msgpack.Decoder, fields *typedEventFields) error {
 	value, err := decodeOptionalInt(dec)
 	if err != nil {
 		return fmt.Errorf("kv_cache_spec_sliding_window: %w", err)
