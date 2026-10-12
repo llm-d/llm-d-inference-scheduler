@@ -22,21 +22,35 @@ import "strings"
 // carry no medium are indexed under it.
 const GPUTier = "gpu"
 
+// StorageTier is the tier name of blocks resident in storage.
+const StorageTier = "storage"
+
+// FSBackendSharedStorageTier is the tier name emitted by llmd-fs-backend for
+// blocks resident in shared storage.
+const FSBackendSharedStorageTier = "shared_storage"
+
+// FSBackendObjectStoreTier is the tier name emitted by llmd-fs-backend for
+// blocks resident in an object store.
+const FSBackendObjectStoreTier = "object_store"
+
+// KVCacheBackendConfig assigns a scoring weight to a device tier, identified by the medium field in KV-cache events.
 type KVCacheBackendConfig struct {
-	// Name is the identifier for this medium (e.g., "gpu", "cpu", "disk")
+	// Name is matched case-insensitively with the event medium, e.g: "gpu", "cpu", or "storage".
 	Name string `json:"name"`
 	// Weight is the scoring weight for blocks stored on this medium
 	Weight float64 `json:"weight"`
 }
 
 // DefaultKVCacheBackendConfig returns the default backend weights, tunable
-// via IndexerConfig.BackendConfigs.
+// via IndexerConfig.BackendConfigs. The tier names and weights are documented
+// in the Precise Prefix Cache Producer README.
 func DefaultKVCacheBackendConfig() []*KVCacheBackendConfig {
 	return []*KVCacheBackendConfig{
 		{Name: GPUTier, Weight: 1.0},
 		{Name: "cpu", Weight: 0.8},
-		{Name: "shared_storage", Weight: 0.4},
-		{Name: "object_store", Weight: 0.2},
+		{Name: FSBackendSharedStorageTier, Weight: 0.4},
+		{Name: StorageTier, Weight: 0.3},
+		{Name: FSBackendObjectStoreTier, Weight: 0.2},
 	}
 }
 

@@ -140,6 +140,16 @@ func TestMatchBlockKeys(t *testing.T) {
 			},
 		},
 		{
+			name: "storage tier weighs its configured default",
+			entries: map[kvblock.BlockHash][]kvblock.PodEntry{
+				10: {{PodIdentifier: podA, DeviceTier: kvcache.StorageTier}},
+			},
+			requestKeys: []kvblock.BlockHash{10},
+			want: map[string]kvcache.PodMatch{
+				podA: {WeightedScore: 0.3, MatchedBlocks: 1, ConfirmedBlocks: 1, BlocksByTier: map[string]int{kvcache.StorageTier: 1}},
+			},
+		},
+		{
 			name: "unconfigured tier weighs zero",
 			entries: map[kvblock.BlockHash][]kvblock.PodEntry{
 				10: {{PodIdentifier: podA, DeviceTier: "disk"}},
@@ -312,19 +322,19 @@ func TestMatchBlockKeysConfiguredTierWeights(t *testing.T) {
 		{
 			name:     "default backends score shared_storage at 0.4",
 			backends: kvcache.DefaultKVCacheBackendConfig(),
-			entry:    kvblock.PodEntry{PodIdentifier: "pod-a", DeviceTier: "shared_storage"},
+			entry:    kvblock.PodEntry{PodIdentifier: "pod-a", DeviceTier: kvcache.FSBackendSharedStorageTier},
 			want:     0.4,
 		},
 		{
 			name:     "default backends score object_store at 0.2",
 			backends: kvcache.DefaultKVCacheBackendConfig(),
-			entry:    kvblock.PodEntry{PodIdentifier: "pod-a", DeviceTier: "object_store"},
+			entry:    kvblock.PodEntry{PodIdentifier: "pod-a", DeviceTier: kvcache.FSBackendObjectStoreTier},
 			want:     0.2,
 		},
 		{
 			name:     "backend names match entry tiers case-insensitively",
 			backends: []*kvcache.KVCacheBackendConfig{{Name: "SHARED_STORAGE", Weight: 0.9}},
-			entry:    kvblock.PodEntry{PodIdentifier: "pod-a", DeviceTier: "shared_storage"},
+			entry:    kvblock.PodEntry{PodIdentifier: "pod-a", DeviceTier: kvcache.FSBackendSharedStorageTier},
 			want:     0.9,
 		},
 		{

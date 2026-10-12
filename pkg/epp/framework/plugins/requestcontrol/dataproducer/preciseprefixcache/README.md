@@ -66,6 +66,48 @@ A snapshot that loads replaces that state.
 See [llm-d-kv-cache/docs/configuration.md](https://github.com/llm-d/llm-d-kv-cache/blob/main/docs/configuration.md)
 for nested parameter details.
 
+### Device tier weights
+
+`indexerConfig.kvCacheBackendConfigs` sets how much a cached block on each device tier contributes to an endpoint's prefix match score.
+The router lowercases the event `medium` value and the configured `name` before comparing them.
+An event without `medium` is treated as `gpu`.
+
+| Source | `medium` | Meaning | Default weight |
+|---|---|---|---|
+| vLLM | `GPU` | KV blocks in GPU memory | `1.0` |
+| vLLM | `CPU` | KV blocks in host memory | `0.8` |
+| vLLM | `STORAGE` | KV blocks in a filesystem or object-storage tier | `0.3` |
+| SGLang | `GPU` | KV blocks in GPU memory | `1.0` |
+| SGLang | `CPU_PINNED` | KV blocks in pinned host memory | `0.0` unless configured |
+| SGLang | `DISK` | KV blocks on SSD or NVMe | `0.0` unless configured |
+| SGLang | `EXTERNAL` | KV blocks in a shared or remote pool | `0.0` unless configured |
+| llmd-fs-backend | `SHARED_STORAGE` | KV blocks in shared filesystem storage | `0.4` |
+| llmd-fs-backend | `OBJECT_STORE` | KV blocks in object storage | `0.2` |
+
+vLLM's built-in tiering reports `STORAGE`.
+`SHARED_STORAGE` and `OBJECT_STORE` apply only to deployments running the `llmd-fs-backend` connector.
+
+The `medium` field is a string. A deployment that emits a value outside this table needs a matching `indexerConfig.kvCacheBackendConfigs` entry.
+
+Offloaded tiers default low because promotion speed varies across media; raise them for fast storage such as NVMe, example:
+```yaml
+indexerConfig:
+  kvCacheBackendConfigs:
+    - name: "gpu"
+      weight: 1.0
+    - name: "cpu"
+      weight: 0.8
+    - name: "storage"
+      weight: 0.6
+```
+
+Omit `indexerConfig.kvCacheBackendConfigs` to use the defaults. The list replaces the defaults entirely.
+An engine-reported tier absent from the effective list scores `0`; its blocks still count in `MatchedBlocks` and `BlocksByTier`,
+but contribute no `WeightedScore`. Every engine tier in use must be listed.
+
+Entries added by `speculativeIndexing` are not engine-reported. They count under the `speculative` tier and score `1.0`
+unless the list has a `speculative` entry.
+
 ## Engine compatibility
 
 Block keys are recomputed by the EPP from `TokenizedPrompt` (tokens, model,
