@@ -85,6 +85,9 @@ const (
 	FieldTools                = "tools"
 	FieldFunctions            = "functions"
 	FieldLogprobs             = "logprobs"
+	FieldReasoningEffort      = "reasoning_effort"
+	FieldChatTemplateKwargs   = "chat_template_kwargs"
+	FieldEnableThinking       = "enable_thinking"
 
 	// SGLang bootstrap coordination fields, carried inside kv_transfer_params.
 	// The prefill pod echoes them back so the decode pod can open the bootstrap

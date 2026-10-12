@@ -667,6 +667,8 @@ func TestForceStream_LossyRequest_PassThrough(t *testing.T) {
 		{"chat functions", reqcommon.PathChatCompletions, map[string]any{"functions": []any{map[string]any{"name": "f"}}}},
 		{"chat logprobs", reqcommon.PathChatCompletions, map[string]any{"logprobs": true}},
 		{"completions logprobs", reqcommon.PathCompletions, map[string]any{"logprobs": 5}},
+		{"chat enable_thinking", reqcommon.PathChatCompletions, map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}}},
+		{"chat reasoning_effort", reqcommon.PathChatCompletions, map[string]any{"reasoning_effort": "high"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -252,9 +252,10 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 
 // forceStreamLossy reports whether force-streaming would drop fields the
 // reassembler does not fold. The chat and text shapes fold only generated text,
-// so a request that may produce tool calls, function calls, or logprobs takes
-// the pass-through to keep them. The responses shape emits the upstream object
-// verbatim (keeping those fields) and generate has none, so neither is lossy.
+// so a request that may produce tool calls, function calls, logprobs, or chat
+// reasoning content takes the pass-through to keep them. The responses shape
+// emits the upstream object verbatim (keeping those fields) and generate has
+// none, so neither is lossy.
 func forceStreamLossy(shape sseShape, body map[string]any) bool {
 	if shape != sseShapeChat && shape != sseShapeText {
 		return false
@@ -272,6 +273,20 @@ func forceStreamLossy(shape sseShape, body map[string]any) bool {
 		// On the legacy Completions API logprobs is a count, and the field's
 		// presence (including the value 0) requests the sampled token's logprob.
 		return true
+	}
+	// vLLM emits chat reasoning as delta.reasoning_content, folded into
+	// message.reasoning_content, which the reassembler drops. The mode is
+	// activated by chat_template_kwargs.enable_thinking or by reasoning_effort, so
+	// a chat request carrying either keeps its reasoning via the pass-through.
+	if shape == sseShapeChat {
+		if kwargs, ok := body[reqcommon.FieldChatTemplateKwargs].(map[string]any); ok {
+			if thinking, ok := kwargs[reqcommon.FieldEnableThinking].(bool); ok && thinking {
+				return true
+			}
+		}
+		if effort, ok := body[reqcommon.FieldReasoningEffort].(string); ok && effort != "" {
+			return true
+		}
 	}
 	return false
 }

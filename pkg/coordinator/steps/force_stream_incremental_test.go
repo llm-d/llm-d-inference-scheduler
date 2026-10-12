@@ -81,10 +81,20 @@ func TestForceStreamLossy(t *testing.T) {
 	require.True(t, forceStreamLossy(sseShapeText, map[string]any{"logprobs": 0}))
 	require.True(t, forceStreamLossy(sseShapeText, map[string]any{"logprobs": float64(0)}))
 
+	// vLLM chat reasoning (delta.reasoning_content) is not folded, so a chat
+	// request that activates thinking via chat_template_kwargs.enable_thinking or
+	// reasoning_effort is lossy and takes the pass-through.
+	require.True(t, forceStreamLossy(sseShapeChat, map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}}))
+	require.True(t, forceStreamLossy(sseShapeChat, map[string]any{"reasoning_effort": "high"}))
+
 	// Absent, empty, or false forms are not lossy.
 	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{}))
 	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"tools": []any{}}))
 	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"logprobs": false}))
+	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": false}}))
+	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"reasoning_effort": ""}))
+	// Reasoning is a chat concept; the text shape has no reasoning_content to drop.
+	require.False(t, forceStreamLossy(sseShapeText, map[string]any{"reasoning_effort": "high"}))
 
 	// The responses shape emits the upstream object verbatim and generate has no
 	// such fields, so neither is ever lossy even when the request declares them.
