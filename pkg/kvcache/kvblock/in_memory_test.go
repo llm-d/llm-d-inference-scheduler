@@ -383,20 +383,17 @@ func TestInMemoryIndexRecencyPromotion(t *testing.T) {
 				{PodIdentifier: "pod4", DeviceTier: "gpu"},
 			})
 
-			podsPerKey, err := index.Lookup(ctx, []BlockHash{requestKey1, requestKey2, requestKey3}, nil)
-			require.NoError(t, err)
-
-			if tc.wantKey1 {
-				assert.Contains(t, podsPerKey, requestKey1)
-			} else {
-				assert.NotContains(t, podsPerKey, requestKey1)
+			// A lookup stops at the first missing key, so each key is looked
+			// up on its own.
+			present := func(key BlockHash) bool {
+				podsPerKey, err := index.Lookup(ctx, []BlockHash{key}, nil)
+				require.NoError(t, err)
+				_, ok := podsPerKey[key]
+				return ok
 			}
-			if tc.wantKey2 {
-				assert.Contains(t, podsPerKey, requestKey2)
-			} else {
-				assert.NotContains(t, podsPerKey, requestKey2)
-			}
-			assert.Contains(t, podsPerKey, requestKey3)
+			assert.Equal(t, tc.wantKey1, present(requestKey1), "requestKey1")
+			assert.Equal(t, tc.wantKey2, present(requestKey2), "requestKey2")
+			assert.True(t, present(requestKey3), "requestKey3")
 
 			if tc.engineKeys {
 				_, err := index.GetRequestKey(ctx, engineKey1)
