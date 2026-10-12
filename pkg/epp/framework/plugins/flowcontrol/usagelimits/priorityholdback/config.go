@@ -19,7 +19,6 @@ package priorityholdback
 import (
 	"errors"
 	"fmt"
-	"sort"
 
 	"k8s.io/utils/ptr"
 )
@@ -30,20 +29,19 @@ const (
 	shapeLinear = "linear"
 )
 
-// Domain values define how priority levels are mapped to positions in the ceiling range.
-// They are exported so other packages (for example, configuration loader) can validate policy-specific constraints.
+// domain constants define how priority levels are mapped to positions in the ceiling range.
 const (
-	// DomainRank maps by ordinal rank, ignoring numerical priority values.
-	DomainRank = "rank"
-	// DomainValue maps proportionally to numerical priority values.
-	DomainValue = "value"
-	// DomainExplicit uses operator-supplied priority anchors, interpolating missing priorities by priority value and clamping outside the anchor range.
-	DomainExplicit = "explicit"
+	// domainRank maps by ordinal rank, ignoring numerical priority values.
+	domainRank = "rank"
+	// domainValue maps proportionally to numerical priority values.
+	domainValue = "value"
+	// domainExplicit uses operator-supplied priority anchors, interpolating missing priorities by priority value and clamping outside the anchor range.
+	domainExplicit = "explicit"
 )
 
 const (
 	defaultShape              = shapeLinear
-	defaultDomain             = DomainRank
+	defaultDomain             = domainRank
 	defaultMaxCeiling float64 = 1.0
 )
 
@@ -117,7 +115,7 @@ func buildConfig(apiCfg *apiConfig) (*config, error) {
 	cfg := &config{
 		domain: *safeCfg.Domain,
 	}
-	if *safeCfg.Domain == DomainExplicit {
+	if *safeCfg.Domain == domainExplicit {
 		cfg.ceilings = safeCfg.Ceilings
 	} else {
 		cfg.shape = *safeCfg.Shape
@@ -130,7 +128,7 @@ func buildConfig(apiCfg *apiConfig) (*config, error) {
 
 // checkRequired verifies that mandatory fields are present before defaulting.
 func checkRequired(cfg *apiConfig) error {
-	if cfg.Domain != nil && *cfg.Domain == DomainExplicit {
+	if cfg.Domain != nil && *cfg.Domain == domainExplicit {
 		if len(cfg.Ceilings) == 0 {
 			return errors.New("ceilings is required when domain is \"explicit\"")
 		}
@@ -147,7 +145,7 @@ func applyDefaults(cfg *apiConfig) {
 	if cfg.Domain == nil {
 		cfg.Domain = ptr.To(defaultDomain)
 	}
-	if *cfg.Domain == DomainExplicit {
+	if *cfg.Domain == domainExplicit {
 		// shape and maxCeiling defaults do not apply for the explicit domain.
 		return
 	}
@@ -162,7 +160,7 @@ func applyDefaults(cfg *apiConfig) {
 // validateConfig checks the constraints of the fully defaulted configuration.
 // It aggregates all validation failures rather than failing on the first error.
 func validateConfig(cfg *apiConfig) error {
-	if cfg.Domain != nil && *cfg.Domain == DomainExplicit {
+	if cfg.Domain != nil && *cfg.Domain == domainExplicit {
 		return validateExplicitConfig(cfg)
 	}
 
@@ -179,10 +177,10 @@ func validateConfig(cfg *apiConfig) error {
 
 	if cfg.Domain != nil {
 		switch *cfg.Domain {
-		case DomainRank, DomainValue:
+		case domainRank, domainValue:
 		default:
 			errs = append(errs, fmt.Errorf("unsupported domain %q, must be one of: %q, %q, %q",
-				*cfg.Domain, DomainRank, DomainValue, DomainExplicit))
+				*cfg.Domain, domainRank, domainValue, domainExplicit))
 		}
 	}
 
@@ -229,18 +227,14 @@ func validateExplicitConfig(cfg *apiConfig) error {
 	// Validate monotonicity: ceilings must be non-increasing as priorities decrease.
 	// Only check after individual value errors are clear to avoid misleading messages.
 	if len(errs) == 0 {
-		priorities := make([]int, 0, len(cfg.Ceilings))
-		for p := range cfg.Ceilings {
-			priorities = append(priorities, p)
-		}
-		sort.Sort(sort.Reverse(sort.IntSlice(priorities)))
-		for i := 1; i < len(priorities); i++ {
-			if cfg.Ceilings[priorities[i]] > cfg.Ceilings[priorities[i-1]] {
+		anchors := buildExplicitAnchors(cfg.Ceilings)
+		for i := len(anchors) - 1; i > 0; i-- {
+			if anchors[i-1].ceiling > anchors[i].ceiling {
 				errs = append(errs, fmt.Errorf(
 					"ceilings must be monotonically non-increasing (highest priority first): "+
 						"priority %d has ceiling %f which exceeds priority %d ceiling %f",
-					priorities[i], cfg.Ceilings[priorities[i]],
-					priorities[i-1], cfg.Ceilings[priorities[i-1]]))
+					anchors[i-1].priority, anchors[i-1].ceiling,
+					anchors[i].priority, anchors[i].ceiling))
 				break
 			}
 		}

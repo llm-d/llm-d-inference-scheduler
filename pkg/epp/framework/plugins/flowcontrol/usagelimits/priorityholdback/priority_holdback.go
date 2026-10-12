@@ -76,7 +76,7 @@ type priorityHoldbackPolicy struct {
 	name      string
 	cMax      float64
 	cMin      float64
-	computeFn func(ctx context.Context, cMin, cMax float64, priorities []int, ceilings []float64)
+	computeFn func(cMin, cMax float64, priorities []int, ceilings []float64)
 	// enableSinglePriorityBypass controls whether a single active priority skips holdback
 	// and receives cMax directly. This optimization applies to algorithmic domains (rank, value)
 	// where the interpolation math degenerates with one input. The explicit domain does not use it
@@ -95,20 +95,16 @@ func newPriorityHoldbackPolicy(cfg config) *priorityHoldbackPolicy {
 		cMin: cfg.minCeiling,
 	}
 	switch cfg.domain {
-	case DomainRank:
+	case domainRank:
 		p.enableSinglePriorityBypass = true
-		p.computeFn = func(_ context.Context, cMin, cMax float64, priorities []int, ceilings []float64) {
-			computeLimitStepwiseSpread(cMin, cMax, priorities, ceilings)
-		}
-	case DomainValue:
+		p.computeFn = computeLimitStepwiseSpread
+	case domainValue:
 		p.enableSinglePriorityBypass = true
-		p.computeFn = func(_ context.Context, cMin, cMax float64, priorities []int, ceilings []float64) {
-			computeLimitLinearProportional(cMin, cMax, priorities, ceilings)
-		}
-	case DomainExplicit:
+		p.computeFn = computeLimitLinearProportional
+	case domainExplicit:
 		p.enableSinglePriorityBypass = false
 		p.anchors = buildExplicitAnchors(cfg.ceilings)
-		p.computeFn = func(_ context.Context, _, _ float64, priorities []int, ceilings []float64) {
+		p.computeFn = func(_, _ float64, priorities []int, ceilings []float64) {
 			computeLimitExplicit(p.anchors, priorities, ceilings)
 		}
 	}
@@ -136,7 +132,7 @@ func (p *priorityHoldbackPolicy) TypedName() plugin.TypedName {
 // ComputeLimit writes an admission ceiling for each priority into the caller-provided buffer.
 // With a single active priority, algorithmic domains bypass holdback (ceiling = cMax) to preserve work-conserving behavior.
 // The explicit domain computes ceilings from configured anchors (interpolating or clamping as needed) rather than bypassing holdback.
-func (p *priorityHoldbackPolicy) ComputeLimit(ctx context.Context, _ float64, priorities []int, ceilings []float64) {
+func (p *priorityHoldbackPolicy) ComputeLimit(_ context.Context, _ float64, priorities []int, ceilings []float64) {
 	if len(priorities) == 0 {
 		return
 	}
@@ -146,7 +142,7 @@ func (p *priorityHoldbackPolicy) ComputeLimit(ctx context.Context, _ float64, pr
 	}
 	// Ceilings are monotonically decreasing as priorities are ordered from highest to lowest per UsageLimitPolicy contract.
 	// New strategies (e.g. sigmoid/static definition) could require explicit monotizing sweep.
-	p.computeFn(ctx, p.cMin, p.cMax, priorities, ceilings)
+	p.computeFn(p.cMin, p.cMax, priorities, ceilings)
 }
 
 // computeLimitStepwiseSpread divides [cMin, cMax] into equal steps by rank.
