@@ -32,10 +32,13 @@ import (
 // never explicitly removed, e.g. a request that ends without an end-of-stream.
 const sketchPredictionCacheSize = 8192
 
-// OutputObserver is an optional TokenEstimator capability: a learning estimator
-// implements it to receive the observed output length at end-of-stream. The
-// producer calls it only when its estimator implements it, so the static estimator
-// is unaffected.
+// OutputObserver is an optional TokenEstimator capability that carries the learning
+// feedback: when a response stream ends, the producer calls Observe with the
+// request's true output token count. A learning estimator requires this signal, since
+// it is the only source of the real output lengths it must predict. The producer
+// calls Observe only on estimators that implement it: the sketch estimator folds each
+// observed length into its histograms and cannot learn without it; the static
+// estimator does not learn, does not implement it, and is unaffected.
 type OutputObserver interface {
 	Observe(request *fwksched.InferenceRequest, completionTokens int64)
 }

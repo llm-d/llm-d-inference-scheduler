@@ -46,8 +46,8 @@ func TestEncodeStep_ParallelFanOut(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
 
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhaseEncode {
-			t.Errorf("expected EPP-Profile: encode, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhaseEncode {
+			t.Errorf("expected x-llm-d-epp-profile: encode, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 
 		body, _ := io.ReadAll(r.Body)
@@ -280,7 +280,7 @@ func TestEncodeStep_SkipsInvalidECTransferParams(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"ec_transfer_params": tc.value})
 			}))
 			defer server.Close()
@@ -455,8 +455,8 @@ func TestEncodeStep_ChatCompletionsFormat(t *testing.T) {
 	var receivedBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhaseEncode {
-			t.Fatalf("expected EPP-Profile: encode, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhaseEncode {
+			t.Fatalf("expected x-llm-d-epp-profile: encode, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 
 		body, _ := io.ReadAll(r.Body)
@@ -700,7 +700,7 @@ func TestEncodeStep_ResponsesFormat_PreservesDetail(t *testing.T) {
 // replace-media-urls would otherwise prime the encoder with a blank image
 // under a real image's hash.
 func TestEncodeStep_ResponsesFormat_RejectsNonStringImageURL(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatal("encode worker should not be called for a malformed input_image part")
 	}))
 	defer server.Close()
@@ -805,7 +805,7 @@ func TestEncodeStep_ChatCompletionsFormat_CapsMaxCompletionTokens(t *testing.T) 
 // must remain nil so the prefill step emits no ec_transfer_params field.
 func TestEncodeStep_TextOnly(t *testing.T) {
 	gatewayCallCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		gatewayCallCount++
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -846,7 +846,7 @@ func TestEncodeStep_SkipsForGenerate(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			gatewayCallCount := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				gatewayCallCount++
 				w.WriteHeader(http.StatusOK)
 			}))
@@ -887,7 +887,7 @@ func TestEncodeStep_SkipsForGenerate(t *testing.T) {
 // the field. The encode step must not error -- missing metadata is warn-and-continue.
 func TestEncodeStep_EncoderReturnsNoECParams(t *testing.T) {
 	var requestCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requestCount.Add(1)
 		// 2xx with no ec_transfer_params field.
 		_ = json.NewEncoder(w).Encode(map[string]any{

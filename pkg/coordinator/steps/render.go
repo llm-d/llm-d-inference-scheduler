@@ -190,6 +190,8 @@ func (s *RenderStep) executeGenerate(ctx context.Context, reqCtx *pipeline.Reque
 	}
 	reqCtx.MultimodalEntries = entries
 
+	coordmetrics.RecordMediaItems(coordmetrics.MediaTypeImage, len(entries))
+
 	logger.V(logutil.DEFAULT).Info("complete", "token_ids_len", len(tokenIDs), "images", len(entries))
 	return nil
 }
@@ -341,7 +343,7 @@ func (s *RenderStep) postRender(ctx context.Context, reqCtx *pipeline.RequestCon
 		return fmt.Errorf("creating render request: %w", err)
 	}
 	req.ContentLength = int64(len(body))
-	req.Header.Set(gateway.ContentTypeHeader, gateway.ContentTypeJSON)
+	req.Header.Set(gateway.ContentTypeHeader, reqcommon.ContentTypeJSON)
 	for k, v := range reqCtx.ForwardedHeaders() {
 		req.Header.Set(k, v)
 	}

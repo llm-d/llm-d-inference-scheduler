@@ -30,6 +30,7 @@ import (
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
@@ -356,7 +357,9 @@ func (h *Handler) Pick(ctx context.Context, request *scheduling.InferenceRequest
 	if request.TargetModel != "" {
 		span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 	}
-	span.SetAttributes(semconv.GenAIRequestID(request.RequestID))
+	if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+		span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
+	}
 	span.SetAttributes(mmobs.SpanAttributes(request)...)
 
 	if h.stageOrder == StageOrderPrefillFirst {
@@ -420,13 +423,7 @@ func (h *Handler) pickDecodeFirst(ctx context.Context, span trace.Span, request 
 	}
 
 	// ── All stages done: record routing decision ───────────────────────────
-	encodeUsed := profileResults[h.encodeProfile] != nil
-	prefillUsed := profileResults[h.prefillProfile] != nil
-
-	decision := DisaggDecisionType(encodeUsed, prefillUsed)
-	RecordDisaggDecision(h.typedName.Name, h.typedName.Type, request.TargetModel, decision)
-	span.SetAttributes(semconv.LLMDEPPProfileHandlerDecision("complete_" + decision))
-
+	h.recordDecision(span, request, profileResults)
 	return map[string]scheduling.SchedulerProfile{}
 }
 
@@ -444,12 +441,7 @@ func (h *Handler) pickPrefillFirst(ctx context.Context, span trace.Span, request
 			return map[string]scheduling.SchedulerProfile{}
 		}
 
-		encodeUsed := profileResults[h.encodeProfile] != nil
-		prefillUsed := profileResults[h.prefillProfile] != nil
-
-		decision := DisaggDecisionType(encodeUsed, prefillUsed)
-		RecordDisaggDecision(h.typedName.Name, h.typedName.Type, request.TargetModel, decision)
-		span.SetAttributes(semconv.LLMDEPPProfileHandlerDecision("complete_" + decision))
+		h.recordDecision(span, request, profileResults)
 		return map[string]scheduling.SchedulerProfile{}
 	}
 
@@ -492,6 +484,35 @@ func (h *Handler) pickPrefillFirst(ctx context.Context, span trace.Span, request
 	return map[string]scheduling.SchedulerProfile{h.decodeProfile: decodeProfile}
 }
 
+// prefillRequiredButFailed reports whether the prefill profile was picked to
+// run and found no endpoint, as opposed to the PD decider declining it.
+func (h *Handler) prefillRequiredButFailed(request *scheduling.InferenceRequest, profileResults map[string]*scheduling.ProfileRunResult) bool {
+	prefillRes, ok := profileResults[h.prefillProfile]
+	if !ok || prefillRes != nil {
+		return false
+	}
+	declined, _ := scheduling.ReadRequestAttribute[bool](request, prefillDeclinedAttributeKey)
+	return !declined
+}
+
+// recordDecision records the routing decision once all stages are done.
+// Requests that ProcessResults rejects are not routed and are not counted.
+func (h *Handler) recordDecision(span trace.Span, request *scheduling.InferenceRequest, profileResults map[string]*scheduling.ProfileRunResult) {
+	if h.prefillRequiredButFailed(request, profileResults) {
+		span.SetAttributes(
+			semconv.LLMDEPPProfileHandlerDecision("complete"),
+			semconv.LLMDEPPProfileHandlerPrefillFailed(true),
+		)
+		return
+	}
+	encodeUsed := profileResults[h.encodeProfile] != nil
+	prefillUsed := profileResults[h.prefillProfile] != nil
+
+	decision := DisaggDecisionType(encodeUsed, prefillUsed)
+	RecordDisaggDecision(h.typedName.Name, h.typedName.Type, request.TargetModel, decision)
+	span.SetAttributes(semconv.LLMDEPPProfileHandlerDecision("complete_" + decision))
+}
+
 // ProcessResults implements scheduling.ProfileHandler.
 // Builds the final SchedulingResult from whichever stages ran successfully.
 func (h *Handler) ProcessResults(
@@ -512,16 +533,13 @@ func (h *Handler) ProcessResults(
 
 	updatedResults[h.decodeProfile] = decodeRunResults
 
-	if prefillRes, ok := profileResults[h.prefillProfile]; ok {
-		if prefillRes != nil {
-			updatedResults[h.prefillProfile] = prefillRes
-		} else if declined, _ := scheduling.ReadRequestAttribute[bool](request, prefillDeclinedAttributeKey); !declined {
-			// The PD decider picked the prefill profile to run and it found no
-			// endpoint, instead of the decider declining to run it at all.
-			// Completing decode-only here would silently run prefill work on a
-			// decode pod instead of failing the request.
-			return nil, fmt.Errorf("prefill profile %q was required but produced no result", h.prefillProfile)
-		}
+	if h.prefillRequiredButFailed(request, profileResults) {
+		// Completing decode-only here would silently run prefill work on a
+		// decode pod instead of failing the request.
+		return nil, fmt.Errorf("prefill profile %q was required but produced no result", h.prefillProfile)
+	}
+	if prefillRes := profileResults[h.prefillProfile]; prefillRes != nil {
+		updatedResults[h.prefillProfile] = prefillRes
 	}
 
 	if encodeRes, ok := profileResults[h.encodeProfile]; ok && encodeRes != nil {
@@ -565,11 +583,13 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 	if request.TargetModel != "" {
 		span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 	}
-	span.SetAttributes(semconv.GenAIRequestID(request.RequestID))
+	if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+		span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
+	}
 	span.SetAttributes(mmobs.SpanAttributes(request)...)
 
 	// Prefill header
-	delete(request.Headers, routing.PrefillEndpointHeader)
+	routing.DeleteRoutingHeader(request.Headers, routing.PrefillEndpointHeader)
 	prefillProfileRunResult := schedulingResult.ProfileResults[h.prefillProfile]
 	switch {
 	case prefillProfileRunResult == nil:
@@ -585,7 +605,7 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 	default:
 		targetPod := prefillProfileRunResult.TargetEndpoints[0].GetMetadata()
 		prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
-		request.Headers[routing.PrefillEndpointHeader] = prefillHostPort
+		routing.SetRoutingHeader(request.Headers, routing.PrefillEndpointHeader, prefillHostPort)
 		span.SetAttributes(
 			semconv.LLMDEPPPDDisaggregationUsed(true),
 			semconv.LLMDEPPPDPrefillPodAddress(targetPod.Address),
@@ -594,7 +614,7 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 	}
 
 	// Encode header
-	delete(request.Headers, routing.EncoderEndpointsHeader)
+	routing.DeleteRoutingHeader(request.Headers, routing.EncoderEndpointsHeader)
 	encodeProfileRunResult := schedulingResult.ProfileResults[h.encodeProfile]
 	if encodeProfileRunResult == nil {
 		span.SetAttributes(
@@ -618,7 +638,7 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 		return nil
 	}
 
-	request.Headers[routing.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
+	routing.SetRoutingHeader(request.Headers, routing.EncoderEndpointsHeader, strings.Join(encodeHostPorts, ","))
 	span.SetAttributes(
 		semconv.LLMDEPPEncodeDisaggregationUsed(true),
 		semconv.LLMDEPPEncodeEndpoints(strings.Join(encodeHostPorts, ",")),

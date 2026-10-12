@@ -45,7 +45,7 @@ type RequestObjectives struct {
 
 // InferenceRequest is a structured representation of the fields we parse out of the InferenceRequest body.
 type InferenceRequest struct {
-	// RequestID is the Envoy generated Id for the request being processed
+	// RequestID is assigned by the EPP and unique per request. Use it to key per-request state.
 	RequestID string
 	// TargetModel is the final target model after traffic split.
 	TargetModel string
@@ -182,6 +182,25 @@ type ProfileRunResult struct {
 type SchedulingResult struct {
 	ProfileResults     map[string]*ProfileRunResult
 	PrimaryProfileName string
+}
+
+// PrimaryEndpoint returns the first endpoint the primary profile picked, as
+// stored, or nil when the result is nil, has no primary profile name, or the
+// primary profile picked none.
+func (r *SchedulingResult) PrimaryEndpoint() Endpoint {
+	if r == nil || r.PrimaryProfileName == "" {
+		return nil
+	}
+	return r.ProfileResults[r.PrimaryProfileName].FirstEndpoint()
+}
+
+// FirstEndpoint returns the first endpoint the profile picked, as stored, or
+// nil when the result is nil or the profile picked none.
+func (r *ProfileRunResult) FirstEndpoint() Endpoint {
+	if r == nil || len(r.TargetEndpoints) == 0 {
+		return nil
+	}
+	return r.TargetEndpoints[0]
 }
 
 type SchedulerProfile interface {

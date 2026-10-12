@@ -33,8 +33,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	apixv1 "github.com/llm-d/llm-d-router/apix/v1"
 	"github.com/llm-d/llm-d-router/apix/v1alpha2"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -65,7 +67,7 @@ const (
 // Datastore defines the interface required by the Director.
 type Datastore interface {
 	PoolGet() (*datalayer.EndpointPool, error)
-	ObjectiveGet(objectiveName string) *v1alpha2.InferenceObjective
+	ObjectiveGet(objectiveName string) *apixv1.InferenceObjective
 	PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoint
 	// ModelRewriteGet returns the highest-precedence rewrite rule for a given
 	// model name (prioritizing exact matches over generic wildcard rules) and
@@ -173,15 +175,21 @@ type Director struct {
 }
 
 // getInferenceObjective fetches the inferenceObjective from the datastore otherwise creates a new one based on reqCtx.
-func (d *Director) getInferenceObjective(ctx context.Context, reqCtx *handlers.RequestContext) *v1alpha2.InferenceObjective {
+func (d *Director) getInferenceObjective(ctx context.Context, reqCtx *handlers.RequestContext) *apixv1.InferenceObjective {
 	infObjective := d.datastore.ObjectiveGet(reqCtx.ObjectiveKey)
 	if infObjective == nil {
 		log.FromContext(ctx).V(logutil.VERBOSE).Info("No associated InferenceObjective found, using default", "objectiveKey", reqCtx.ObjectiveKey)
-		infObjective = &v1alpha2.InferenceObjective{
-			Spec: v1alpha2.InferenceObjectiveSpec{
+		infObjective = &apixv1.InferenceObjective{
+			Spec: apixv1.InferenceObjectiveSpec{
 				Priority: &d.defaultPriority,
 			},
 		}
+	} else if infObjective.Spec.Priority == nil {
+		// The API defines an unset priority as 0. Copy before defaulting:
+		// stored objectives are shared with concurrent readers.
+		copied := *infObjective
+		copied.Spec.Priority = ptr.To(int32(0))
+		infObjective = &copied
 	}
 	return infObjective
 }
@@ -222,7 +230,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 
 	// Prepare InferenceRequest (needed for both saturation detection and Scheduler)
 	reqCtx.SchedulingRequest = &fwksched.InferenceRequest{
-		RequestID:        reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+		RequestID:        reqCtx.Request.ID,
 		TargetModel:      reqCtx.TargetModelName,
 		Body:             inferenceRequestBody,
 		Headers:          reqCtx.Request.Headers,
@@ -238,18 +246,33 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	if err := d.runRequestHeaderProcessors(ctx, reqCtx.SchedulingRequest); err != nil {
 		return reqCtx, err
 	}
-	// Derive FairnessID from agent-identity attribute if not already set by explicit header.
+	// Derive FairnessID from agent identity when no explicit header supplied it.
+	source := tracing.AttributionSourceHeader
 	if reqCtx.SchedulingRequest.FairnessID == "" {
 		if agentID, ok := fwksched.ReadRequestAttribute[string](reqCtx.SchedulingRequest, agentidentity.AgentIdentityKey); ok && agentID != "" {
 			reqCtx.SchedulingRequest.FairnessID = agentID
+			source = tracing.AttributionSourceAgentIdentity
 		} else {
-			reqCtx.SchedulingRequest.FairnessID = metadata.DefaultFairnessID
+			reqCtx.SchedulingRequest.FairnessID = reqcommon.DefaultFairnessID
+			source = tracing.AttributionSourceDefault
 		}
 	}
+	tracing.SetRequestAttribution(ctx, reqCtx.SchedulingRequest.FairnessID, source)
+	tracing.AttributeRequest(ctx, span)
 
 	// Admit may block until flow control admits the request.
 	if err := d.admissionController.Admit(ctx, reqCtx, priority); err != nil {
 		return reqCtx, err
+	}
+	reservationPending := false
+	reservationReleaser, hasReservationReleaser := d.admissionController.(dispatchReservationReleaser)
+	if hasReservationReleaser {
+		reservationPending = true
+		defer func() {
+			if reservationPending {
+				reservationReleaser.ReleaseDispatchReservation(reqCtx.SchedulingRequest.RequestID)
+			}
+		}()
 	}
 
 	endpointCandidates := d.endpointCandidates.Locate(ctx, reqCtx.Request.Metadata)
@@ -304,6 +327,10 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	reqCtx, err = d.prepareRequest(ctx, reqCtx, result)
 	if err != nil {
 		return reqCtx, err
+	}
+	if reservationPending {
+		reservationReleaser.ReleaseDispatchReservation(reqCtx.SchedulingRequest.RequestID)
+		reservationPending = false
 	}
 	if err := d.priorityRewriteIfNeeded(ctx, reqCtx, inferenceRequestBody); err != nil {
 		return reqCtx, err
@@ -432,10 +459,10 @@ func (d *Director) selectWeightedModel(ctx context.Context, models []v1alpha2.Ta
 
 	if totalWeight == 0 {
 		// If total weight is 0, distribute evenly
-		return models[rand.Intn(len(models))].ModelRewrite
+		return models[rand.Intn(len(models))].ModelRewrite //#nosec G404 -- model traffic split, not security-sensitive
 	}
 
-	randomNum := rand.Intn(int(totalWeight))
+	randomNum := rand.Intn(int(totalWeight)) //#nosec G404 -- model traffic split, not security-sensitive
 	var currentWeight int32
 	for _, model := range models {
 		if model.Weight != nil {
@@ -545,7 +572,7 @@ func (d *Director) HandleResponseHeader(ctx context.Context, reqCtx *handlers.Re
 		return reqCtx
 	}
 	response := &fwkrc.Response{
-		RequestID:   reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+		RequestID:   reqCtx.Request.ID,
 		Headers:     reqCtx.Response.Headers,
 		ReqMetadata: reqCtx.Request.Metadata,
 	}
@@ -577,7 +604,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 	// registered, so this runs before the early return below.
 	if endOfStream && d.requestEvictor != nil {
 		d.requestEvictor.ResponseBody(ctx, reqCtx.SchedulingRequest, &fwkrc.Response{
-			RequestID:        reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+			RequestID:        reqCtx.Request.ID,
 			EndOfStream:      true,
 			TerminationCause: cause,
 		}, reqCtx.TargetPod)
@@ -590,7 +617,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 	startOfStream := !reqCtx.ResponseBodyStarted
 	reqCtx.ResponseBodyStarted = true
 	response := &fwkrc.Response{
-		RequestID:      reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+		RequestID:      reqCtx.Request.ID,
 		Headers:        reqCtx.Response.Headers,
 		StartOfStream:  startOfStream,
 		EndOfStream:    endOfStream,
@@ -622,7 +649,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 			// Built here rather than at function entry: this path is per-chunk, and
 			// deriving a logger allocates whether or not anything is emitted.
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Skipping response body chunk because the async queue is closed",
-				"stage", "bodyChunk", "requestID", reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey])
+				"stage", "bodyChunk", "requestID", reqCtx.Request.ID)
 		}
 	}
 	return reqCtx
@@ -646,7 +673,7 @@ func (d *Director) GetRandomEndpoint() *fwkdl.EndpointMetadata {
 	if len(pods) == 0 {
 		return nil
 	}
-	number := rand.Intn(len(pods))
+	number := rand.Intn(len(pods)) //#nosec G404 -- load spreading across pods, not security-sensitive
 	pod := pods[number]
 	return pod.GetMetadata()
 }

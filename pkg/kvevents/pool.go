@@ -31,12 +31,13 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
+	"github.com/llm-d/llm-d-router/pkg/kvcache"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/metrics"
 )
 
 const (
-	defaultEventSourceDeviceTier = "gpu"
+	defaultEventSourceDeviceTier = kvcache.GPUTier
 	defaultPodSelector           = ""
 )
 
@@ -67,21 +68,23 @@ func cacheKindLabel(kind KVCacheSpecKind) string {
 	return string(kind)
 }
 
-func blockStoredEventDigestible(ev *BlockStoredEvent) (bool, string) {
+func blockStoredEventDigestible(ev *BlockStoredEvent, canonicalBlockSize int) (bool, string) {
 	if ev.GroupIdx == nil {
 		return true, ""
+	}
+	if len(ev.Tokens) > 0 {
+		if ev.BlockSize <= 0 {
+			return false, "invalid_block_size"
+		}
+		if len(ev.Tokens)%ev.BlockSize != 0 || len(ev.Tokens)/ev.BlockSize != len(ev.BlockHashes) {
+			return false, "non_dense_block_span"
+		}
 	}
 	if !isPrefixIndexableSpecKind(ev.KVCacheSpecKind) {
 		return false, "unsupported_cache_kind"
 	}
-	if len(ev.Tokens) == 0 {
-		return true, ""
-	}
-	if ev.BlockSize <= 0 {
-		return false, "invalid_block_size"
-	}
-	if len(ev.Tokens)%ev.BlockSize != 0 || len(ev.Tokens)/ev.BlockSize != len(ev.BlockHashes) {
-		return false, "non_dense_block_span"
+	if len(ev.Tokens) > 0 && len(ev.Tokens) < canonicalBlockSize {
+		return false, "incomplete_canonical_block"
 	}
 	return true, ""
 }
@@ -129,6 +132,10 @@ type PodDiscoveryConfig struct {
 	// ReplaySocketPort is the port where vLLM pods expose their ZMQ ROUTER
 	// socket for replay requests. Disabled when not set (0 or negative).
 	ReplaySocketPort int `json:"replaySocketPort,omitempty"`
+	// SnapshotSocketPort is the port where vLLM pods serve KV cache snapshots,
+	// offset by rank like SocketPort. A subscriber loads the snapshot in place
+	// of a full replay. Disabled when not set (0 or negative).
+	SnapshotSocketPort int `json:"snapshotSocketPort,omitempty"`
 }
 
 // EffectiveReplayPort returns the replay socket port.
@@ -316,7 +323,7 @@ func (p *Pool) AddTask(task *RawMessage) {
 		return
 	}
 
-	queueIndex := h.Sum32() % uint32(p.concurrency)
+	queueIndex := int64(h.Sum32()) % int64(p.concurrency)
 	p.queues[queueIndex].Add(task)
 	p.addQueueDepth(1)
 }
@@ -565,24 +572,36 @@ func (p *Pool) processEventBatch(ctx context.Context, batch *EventBatch, podIden
 
 			// Create PodEntry for this specific event's device tier.
 			podEntries := []kvblock.PodEntry{{PodIdentifier: podIdentifier, DeviceTier: deviceTier}}
+			hasExplicitKind := ev.KVCacheSpecKind != ""
 			if ev.GroupIdx != nil {
 				g := kvblock.GroupID(*ev.GroupIdx)
 				if ev.KVCacheSpecKind == "" {
 					if meta, found := p.groupCatalog.Get(podIdentifier, g); found {
 						ev.KVCacheSpecKind = KVCacheSpecKind(meta.Kind)
 					}
-				} else {
+				}
+				podEntries[0].HasGroup = true
+				podEntries[0].GroupIdx = g
+			}
+
+			digestible, reason := blockStoredEventDigestible(ev, p.tokenProcessor.BlockSize())
+			if ev.GroupIdx != nil && len(ev.Tokens) > 0 && ev.KVCacheSpecKind != "" &&
+				(digestible || reason == "unsupported_cache_kind") {
+				g := kvblock.GroupID(*ev.GroupIdx)
+				// A dense engine stream can use a different block size than the
+				// router. Prefer its larger geometry over auxiliary streams.
+				if meta, found := p.groupCatalog.Get(podIdentifier, g); found &&
+					meta.Kind == string(ev.KVCacheSpecKind) && meta.BlockSize > ev.BlockSize {
+					digestible, reason = false, "conflicting_block_size"
+				} else if hasExplicitKind {
 					p.groupCatalog.Learn(podIdentifier, g, kvblock.GroupMetadata{
 						Kind:              string(ev.KVCacheSpecKind),
 						BlockSize:         ev.BlockSize,
 						SlidingWindowSize: ev.KVCacheSpecSlidingWindowSize,
 					})
 				}
-				podEntries[0].HasGroup = true
-				podEntries[0].GroupIdx = g
 			}
-
-			if digestible, reason := blockStoredEventDigestible(ev); !digestible {
+			if !digestible {
 				metrics.KVEventStoresSkipped.WithLabelValues(cacheKindLabel(ev.KVCacheSpecKind), reason).Inc()
 				log.FromContext(ctx).V(logging.TRACE).Info("Skipping KV cache store event",
 					"podIdentifier", podIdentifier,
@@ -749,16 +768,18 @@ func (p *Pool) processEventBatch(ctx context.Context, batch *EventBatch, podIden
 					"received", len(ev.BlockHashes), "forwarded", len(hashesToEvict), "suppressed", suppressed)
 			}
 
-			// Iterate over the surviving hashes and evict each key.
-			// The Index handles engine->request key resolution internally for both
-			// 1:1 (legacy) and 1:many (canonical) mappings.
-			for _, hash := range hashesToEvict {
-				engineKey := kvblock.BlockHash(hash)
-				if err := p.index.Evict(ctx, engineKey, kvblock.EngineKey, podEntries); err != nil {
-					debugLogger.Error(err, "Failed to evict engine key from index",
-						"podIdentifier", podIdentifier, "engineKey", engineKey)
-					continue
-				}
+			if len(hashesToEvict) == 0 {
+				break
+			}
+			// The Index handles engine->request key resolution internally for
+			// both 1:1 (legacy) and 1:many (canonical) mappings.
+			engineKeys := make([]kvblock.BlockHash, len(hashesToEvict))
+			for i, hash := range hashesToEvict {
+				engineKeys[i] = kvblock.BlockHash(hash)
+			}
+			if err := p.index.Evict(ctx, kvblock.EngineKey, engineKeys, podEntries); err != nil {
+				debugLogger.Error(err, "Failed to evict engine keys from index",
+					"podIdentifier", podIdentifier, "keyCount", len(engineKeys))
 			}
 
 		case *AllBlocksClearedEvent:

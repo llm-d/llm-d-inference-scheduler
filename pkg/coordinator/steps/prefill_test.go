@@ -44,8 +44,8 @@ func TestPrefillStep_SendsCorrectGenerateRequest(t *testing.T) {
 		if r.URL.Path != "/inference/v1/generate" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 
 		body, _ := io.ReadAll(r.Body)
@@ -186,8 +186,8 @@ func TestPrefillStep_CompletionsFormat(t *testing.T) {
 		if r.URL.Path != reqcommon.PathCompletions {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &prefillBody)
@@ -292,8 +292,8 @@ func TestPrefillStep_ChatCompletionsFormat(t *testing.T) {
 		if r.URL.Path != reqcommon.PathChatCompletions {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &prefillBody)
@@ -454,8 +454,8 @@ func TestPrefillStep_ChatCompletionsFormat_ForcesNonStreaming(t *testing.T) {
 		if r.URL.Path != reqcommon.PathChatCompletions {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &prefillBody)
@@ -703,6 +703,39 @@ func TestPrefillStep_ConflictingECParams_RejectsRequest(t *testing.T) {
 	}
 	if gatewayHit {
 		t.Error("conflicting descriptors must reject the request before contacting the gateway")
+	}
+}
+
+// TestPrefillStep_CapturesPeerTopologyHeader verifies that the x-peer-topology
+// response header set by the prefill EPP's topology-stamp-handler is captured
+// into reqCtx.PeerTopology for later forwarding to the decode request.
+func TestPrefillStep_CapturesPeerTopologyHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(reqcommon.PeerTopologyHeaderKey, "host=node12,zone=us-east1-a")
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	}))
+	defer server.Close()
+
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+
+	step, err := NewPrefillStep(gwClient, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-1",
+		Model:            "test",
+		OriginalPath:     reqcommon.PathVLLMGenerate,
+		TokenIDs:         []int{1, 2345},
+		KVTransferParams: make(map[string]any),
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := reqCtx.PeerTopology, "host=node12,zone=us-east1-a"; got != want {
+		t.Fatalf("reqCtx.PeerTopology = %q, want %q", got, want)
 	}
 }
 

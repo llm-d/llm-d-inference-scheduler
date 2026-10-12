@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -47,9 +48,9 @@ func hashTokens(t []uint32) uint64 {
 // hashing, so the scorer's cache keys are unchanged.
 func TestPackBytes_KeyPreserving(t *testing.T) {
 	raw := []byte("the quick brown fox jumps over!!") // len 32, 4-byte aligned
-	require.Zero(t, len(raw)%bytesPerToken, "fixture must be %d-byte aligned, got len %d", bytesPerToken, len(raw))
+	require.Zero(t, len(raw)%fwkrh.BytesPerToken, "fixture must be %d-byte aligned, got len %d", fwkrh.BytesPerToken, len(raw))
 	tokens := packBytes(raw)
-	require.Len(t, tokens, len(raw)/bytesPerToken)
+	require.Len(t, tokens, len(raw)/fwkrh.BytesPerToken)
 	assert.Equal(t, xxhash.Sum64(raw), hashTokens(tokens), "packed-token hash != raw-byte hash; estimate path is not key-preserving")
 }
 
@@ -62,6 +63,18 @@ func TestEstimateBackend_GeneratePassthrough(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, in, tp.Prompts[0].TokenIDs)
+}
+
+// TestEstimateBackend_GenerateTextEstimatesPseudoTokens asserts text generate
+// input is byte-estimated into pseudo-tokens.
+func TestEstimateBackend_GenerateTextEstimatesPseudoTokens(t *testing.T) {
+	prompt := "hello world"
+	tp, err := estimateBackend{}.produce(context.Background(), &fwkrh.InferenceRequestBody{
+		Generate: &fwkrh.GenerateRequest{Text: prompt},
+	})
+	require.NoError(t, err)
+	require.Len(t, tp.Prompts, 1)
+	assert.Equal(t, packBytes([]byte(prompt)), tp.Prompts[0].TokenIDs)
 }
 
 // TestEstimateBackend_CompletionsTokenIDsPassthrough asserts token-ID completions
@@ -165,6 +178,104 @@ func TestEstimateBackend_ChatImageFeature(t *testing.T) {
 	for i := f.Offset; i < f.Offset+f.Length; i++ {
 		assert.Equal(t, uint32(xxhash.Sum64String(pngBase64DataURL)), tokens[i], "token %d: got %d, want image placeholder token", i, tokens[i]) //#nosec G115 -- same hash-truncation pattern as appendMMAsset, test-only
 	}
+}
+
+// TestEstimateBackend_ResponsesImageFeature mirrors
+// TestEstimateBackend_ChatImageFeature for a /v1/responses body: an
+// input_image content part must report a multimodal feature, since the
+// disagg profile handler selects the encode profile from
+// MultiModalFeatures alone.
+func TestEstimateBackend_ResponsesImageFeature(t *testing.T) {
+	body := &fwkrh.InferenceRequestBody{Responses: &fwkrh.ResponsesRequest{
+		Input: []any{map[string]any{
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "input_text", "text": "Describe what you see."},
+				map[string]any{"type": "input_image", "image_url": pngBase64DataURL},
+			},
+		}},
+	}}
+	tp, err := estimateBackend{}.produce(context.Background(), body)
+	require.NoError(t, err)
+	require.Len(t, tp.Prompts, 1)
+	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
+	f := tp.Prompts[0].MultiModalFeatures[0]
+	assert.Equal(t, fwkrh.ModalityImage, f.Modality)
+	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(pngBase64DataURL), 16), f.Hash)
+}
+
+//nolint:goconst // "role"/"content"/"type" JSON keys read clearly inline; not worth naming
+func TestEstimateBackend_ResponsesTextOnlyNoFeatures(t *testing.T) {
+	body := &fwkrh.InferenceRequestBody{Responses: &fwkrh.ResponsesRequest{
+		Input: []any{map[string]any{"role": "user", "content": "hello there"}},
+	}}
+	tp, err := estimateBackend{}.produce(context.Background(), body)
+	require.NoError(t, err)
+	require.Len(t, tp.Prompts, 1)
+	assert.Empty(t, tp.Prompts[0].MultiModalFeatures)
+	assert.NotEmpty(t, tp.Prompts[0].TokenIDs)
+}
+
+// responsesTokenCount runs the estimate backend on a single Input item and
+// returns its token count, for comparing how much a field contributes.
+func responsesTokenCount(t *testing.T, item map[string]any) int {
+	t.Helper()
+	body := &fwkrh.InferenceRequestBody{Responses: &fwkrh.ResponsesRequest{Input: []any{item}}}
+	tp, err := estimateBackend{}.produce(context.Background(), body)
+	require.NoError(t, err)
+	return len(tp.Prompts[0].TokenIDs)
+}
+
+// TestEstimateBackend_ResponsesAgenticItemsCounted verifies that
+// function_call, function_call_output, and reasoning items contribute their
+// text-bearing fields to the byte estimate rather than counting as zero.
+// Undercounting these item types -- the bulk of an agentic Responses turn --
+// feeds a too-short estimate into the P/D disaggregation decider,
+// context-length admission, and prefix-hash scoring.
+func TestEstimateBackend_ResponsesAgenticItemsCounted(t *testing.T) {
+	long := strings.Repeat("x", 4000)
+
+	empty := responsesTokenCount(t, map[string]any{"type": "function_call", "call_id": "call_1"})
+
+	withArgs := responsesTokenCount(t, map[string]any{
+		"type": "function_call", "call_id": "call_1", "name": "search", "arguments": long,
+	})
+	assert.Greater(t, withArgs, empty, "function_call arguments must count toward the estimate")
+
+	withOutput := responsesTokenCount(t, map[string]any{
+		"type": "function_call_output", "call_id": "call_1", "output": long,
+	})
+	assert.Greater(t, withOutput, empty, "function_call_output output must count toward the estimate")
+
+	withOutputParts := responsesTokenCount(t, map[string]any{
+		"type": "function_call_output", "call_id": "call_1",
+		"output": []any{map[string]any{"type": "output_text", "text": long}},
+	})
+	assert.Greater(t, withOutputParts, empty, "function_call_output output parts must count toward the estimate")
+
+	withSummary := responsesTokenCount(t, map[string]any{
+		"type": "reasoning", "id": "r1",
+		"summary": []any{map[string]any{"type": "summary_text", "text": long}},
+	})
+	assert.Greater(t, withSummary, empty, "reasoning summary must count toward the estimate")
+}
+
+// TestEstimateBackend_ResponsesSkipsUnrecognizedItems documents that an item
+// of a type this code does not know contributes nothing, rather than
+// guessing at its shape. function_call, function_call_output, and reasoning
+// have known shapes and contribute their text-bearing fields (see
+// TestEstimateBackend_ResponsesAgenticItemsCounted).
+func TestEstimateBackend_ResponsesSkipsUnrecognizedItems(t *testing.T) {
+	body := &fwkrh.InferenceRequestBody{Responses: &fwkrh.ResponsesRequest{
+		Input: []any{
+			map[string]any{"type": "some_future_item_type", "payload": strings.Repeat("x", 4000)},
+			map[string]any{"role": "user", "content": "hi"},
+		},
+	}}
+	tp, err := estimateBackend{}.produce(context.Background(), body)
+	require.NoError(t, err)
+	assert.Empty(t, tp.Prompts[0].MultiModalFeatures)
+	assert.NotEmpty(t, tp.Prompts[0].TokenIDs)
 }
 
 func TestEstimateBackend_ChatModalityLabels(t *testing.T) {
@@ -966,7 +1077,7 @@ func TestEstimateBackend_ChatToolsBeforeSystem(t *testing.T) {
 	toolsJSON, err := json.Marshal(tools)
 	require.NoError(t, err)
 	// -1 skips the token straddling the tools/system byte boundary.
-	sharedTokens := len(toolsJSON)/bytesPerToken - 1
+	sharedTokens := len(toolsJSON)/fwkrh.BytesPerToken - 1
 	chat := func(systemContent string) *fwkrh.InferenceRequestBody {
 		return &fwkrh.InferenceRequestBody{ChatCompletions: &fwkrh.ChatCompletionsRequest{
 			Messages: []fwkrh.Message{
@@ -997,7 +1108,7 @@ func TestEstimateBackend_MessagesToolsBeforeSystem(t *testing.T) {
 	toolsJSON, err := json.Marshal(tools)
 	require.NoError(t, err)
 	// -1 skips the token straddling the tools/system byte boundary.
-	sharedTokens := len(toolsJSON)/bytesPerToken - 1
+	sharedTokens := len(toolsJSON)/fwkrh.BytesPerToken - 1
 	build := func(systemContent string) *fwkrh.InferenceRequestBody {
 		return &fwkrh.InferenceRequestBody{Messages: &fwkrh.MessagesRequest{
 			System: fwkrh.AnthropicContent{Raw: systemContent},
