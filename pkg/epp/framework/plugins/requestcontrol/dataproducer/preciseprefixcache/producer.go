@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/kvcache"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-router/pkg/kvevents"
@@ -135,12 +136,44 @@ func PluginFactory(name string, rawParameters *json.Decoder, handle plugin.Handl
 	if parameters.IndexerConfig == nil {
 		return nil, errors.New("indexerConfig is required")
 	}
+
 	p, err := New(handle.Context(), name, parameters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %s plugin: %w", PluginType, err)
 	}
 
 	return p, nil
+}
+
+// ValidateTokenProducer verifies that when a precise-prefix-cache-producer is
+// configured, a token-producer with the vllm render backend is present in the
+// handle. The estimate backend emits byte-packed pseudo-tokens, which would
+// silently corrupt the KV-block hashes this producer feeds to the indexer.
+//
+// This runs at the runner level after CreateMissingDataProducers, not inside the
+// factory: factory instantiation order is decided by the plugin DAG's
+// topological sort (which seeds from a map and so varies per process start), not
+// by the plugins-list order, so a factory-time check cannot rely on the
+// token-producer being constructed first. By the time this runs, every plugin --
+// explicit and auto-defaulted (an absent token-producer is auto-created as the
+// estimate backend) -- is in the handle, so the check is order-independent. See #1471.
+func ValidateTokenProducer(handle plugin.Handle) error {
+	hasPrecise := false
+	for _, p := range handle.GetAllPlugins() {
+		if p.TypedName().Type == PluginType {
+			hasPrecise = true
+			break
+		}
+	}
+	if !hasPrecise {
+		return nil
+	}
+
+	tp, ok := handle.Plugin(tokenproducer.PluginType).(*tokenproducer.Plugin)
+	if !ok || tp.Backend() != tokenproducer.BackendVLLM {
+		return fmt.Errorf("%s requires a %s plugin with a vllm backend", PluginType, tokenproducer.PluginType)
+	}
+	return nil
 }
 
 // New constructs a precise-prefix-cache-producer. The instance name becomes
@@ -319,8 +352,8 @@ func (p *Producer) Produce(ctx context.Context,
 		if request.TargetModel != "" {
 			span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 		}
-		if request.RequestID != "" {
-			span.SetAttributes(semconv.GenAIRequestID(request.RequestID))
+		if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+			span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
 		}
 	}
 

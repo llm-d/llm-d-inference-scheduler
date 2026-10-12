@@ -42,13 +42,13 @@ import (
 func renderHistogram(t *testing.T, pluginName, result string) (uint64, float64) {
 	t.Helper()
 	m := &dto.Metric{}
-	observer := renderDurationSeconds.WithLabelValues(PluginType, pluginName, backendVLLM, result)
+	observer := renderDurationSeconds.WithLabelValues(PluginType, pluginName, BackendVLLM, result)
 	require.NoError(t, observer.(prometheus.Metric).Write(m))
 	return m.GetHistogram().GetSampleCount(), m.GetHistogram().GetSampleSum()
 }
 
 func renderFailures(pluginName, reason string) float64 {
-	return testutil.ToFloat64(renderFailuresTotal.WithLabelValues(PluginType, pluginName, backendVLLM, reason))
+	return testutil.ToFloat64(renderFailuresTotal.WithLabelValues(PluginType, pluginName, BackendVLLM, reason))
 }
 
 // renderSeriesCount returns the number of series c holds for one plugin name.

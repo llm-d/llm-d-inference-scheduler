@@ -236,6 +236,9 @@ func decodeArrayBlockStored(dec *msgpack.Decoder, fieldCount int, sglang bool) (
 	if err != nil {
 		return nil, err
 	}
+	if sglang {
+		return fields.sglangBlockStoredEvent(), nil
+	}
 	return fields.blockStoredEvent(), nil
 }
 
@@ -301,6 +304,7 @@ type typedEventFields struct {
 	medium        string
 	loraName      *string
 	extraKeys     [][]any
+	cacheSalt     string
 	groupIdx      *int
 	specKind      kvevents.KVCacheSpecKind
 	slidingWindow *int
@@ -423,6 +427,9 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 	case eventTagBlockStored:
 		if err := fields.requireBlockStoredFields(); err != nil {
 			return nil, err
+		}
+		if sglang {
+			return fields.sglangBlockStoredEvent(), nil
 		}
 		return fields.blockStoredEvent(), nil
 	case eventTagBlockRemoved:

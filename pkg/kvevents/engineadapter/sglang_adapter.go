@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/vmihailenco/msgpack/v5"
+	"github.com/vmihailenco/msgpack/v5/msgpcode"
 
 	"github.com/llm-d/llm-d-router/pkg/kvevents"
 )
@@ -34,6 +35,7 @@ var sglangBlockStoredFieldDecoders = []eventFieldDecoder{
 	{"block_size", decodeBlockSizeField},
 	{"lora_id", decodeLoraID},
 	{"medium", decodeMedium},
+	{"cache_salt", decodeSGLangCacheSalt},
 }
 
 var sglangBlockRemovedFieldDecoders = []eventFieldDecoder{
@@ -72,4 +74,32 @@ func (s *SGLangAdapter) ParseMessage(msg *kvevents.RawMessage) (string, string, 
 	}
 
 	return podID, modelName, eventBatch, nil
+}
+
+func decodeSGLangCacheSalt(dec *msgpack.Decoder, fields *typedEventFields) error {
+	code, err := dec.PeekCode()
+	if err != nil {
+		return err
+	}
+	if msgpcode.IsFixedMap(code) || code == msgpcode.Map16 || code == msgpcode.Map32 {
+		return skipValue(dec)
+	}
+	value, err := decodeOptionalString(dec)
+	if err != nil {
+		return fmt.Errorf("cache_salt is not a string: %w", err)
+	}
+	if value != nil {
+		fields.cacheSalt = *value
+	}
+	return nil
+}
+
+func (f *typedEventFields) sglangBlockStoredEvent() *kvevents.BlockStoredEvent {
+	event := f.blockStoredEvent()
+	// Child blocks inherit the salt through the parent's request key.
+	if f.cacheSalt != "" && f.parentHash == 0 && len(f.blockHashes) > 0 {
+		event.ExtraKeys = make([][]any, len(f.blockHashes))
+		event.ExtraKeys[0] = []any{f.cacheSalt}
+	}
+	return event
 }
