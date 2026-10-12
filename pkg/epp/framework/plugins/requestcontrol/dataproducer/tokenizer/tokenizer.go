@@ -369,8 +369,7 @@ func (p *Plugin) TypedName() plugin.TypedName {
 type Kind string
 
 const (
-	// KindRender is the engine-aligned tokenizer backend (vllm /render and the
-	// deprecated UDS gRPC both render real token IDs).
+	// KindRender is the vllm /render backend, which returns the engine's token IDs.
 	KindRender Kind = "render"
 	// KindEstimate is the byte-packing pseudo-token backend used when no real
 	// tokenizer is configured.

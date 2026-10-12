@@ -146,8 +146,8 @@ func PluginFactory(name string, rawParameters *json.Decoder, handle plugin.Handl
 }
 
 // ValidateTokenProducer verifies that when a precise-prefix-cache-producer is
-// configured, an engine-aligned token-producer (vllm/uds backend) is present in
-// the handle. The estimate backend emits byte-packed pseudo-tokens, which would
+// configured, a token-producer with the vllm render backend is present in the
+// handle. The estimate backend emits byte-packed pseudo-tokens, which would
 // silently corrupt the KV-block hashes this producer feeds to the indexer.
 //
 // This runs at the runner level after CreateMissingDataProducers, not inside the
@@ -170,22 +170,11 @@ func ValidateTokenProducer(handle plugin.Handle) error {
 	}
 
 	for _, p := range handle.GetAllPlugins() {
-		typeName := p.TypedName().Type
-		//nolint:staticcheck // SA1019: intentionally accept the deprecated 'tokenizer' alias so existing configs keep working.
-		if typeName != tokenproducer.PluginType && typeName != tokenproducer.LegacyPluginType {
-			continue
-		}
-		tp, ok := p.(*tokenproducer.Plugin)
-		if !ok {
-			continue
-		}
-		if tp.BackendKind() == tokenproducer.KindRender {
+		if tp, ok := p.(*tokenproducer.Plugin); ok && tp.BackendKind() == tokenproducer.KindRender {
 			return nil
 		}
 	}
-	return fmt.Errorf(
-		"%s requires an engine-aligned token-producer (vllm or udsTokenizerConfig backend); "+
-			"configure a token-producer plugin with a vllm or udsTokenizerConfig backend", PluginType)
+	return fmt.Errorf("%s requires a token-producer plugin with a vllm backend", PluginType)
 }
 
 // New constructs a precise-prefix-cache-producer. The instance name becomes
