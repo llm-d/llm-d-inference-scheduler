@@ -55,10 +55,15 @@ func (s *Server) runConcurrentPD(
 	prepareRequests func(prefillReq, decodeReq *http.Request),
 ) {
 	tracer := tracing.Tracer(tracerScope)
-	ctx := r.Context()
+	ctx, cancelDecode := context.WithCancel(r.Context())
+	defer cancelDecode()
 
 	// WithoutCancel for prefill so it isn't aborted when the decode response finishes first.
-	prefillReq := cloneRequestWithBody(context.WithoutCancel(ctx), r, prefillBody)
+	prefillCtx, cancelPrefill := context.WithCancel(context.WithoutCancel(ctx))
+	// Client disconnect aborts prefill too. Stop on return: net/http also cancels
+	// r.Context() once the handler finishes, which must not abort prefill.
+	defer context.AfterFunc(r.Context(), cancelPrefill)()
+	prefillReq := cloneRequestWithBody(prefillCtx, r, prefillBody)
 	decodeReq := cloneRequestWithBody(ctx, r, decodeBody)
 	if prepareRequests != nil {
 		prepareRequests(prefillReq, decodeReq)
@@ -87,6 +92,7 @@ func (s *Server) runConcurrentPD(
 	}
 
 	go func() {
+		defer cancelPrefill()
 		defer prefillSpan.End()
 		defer func() {
 			if rec := recover(); rec != nil && rec != http.ErrAbortHandler {
@@ -104,6 +110,7 @@ func (s *Server) runConcurrentPD(
 		if isHTTPError(pw.statusCode) {
 			metrics.RecordError(metrics.StagePrefill)
 			prefillSpan.SetStatus(codes.Error, "prefill request failed")
+			cancelDecode()
 		}
 		s.logger.V(logging.DEBUG).Info("concurrent-dispatch prefill request completed", "connector", connector, "status", pw.statusCode)
 	}()
