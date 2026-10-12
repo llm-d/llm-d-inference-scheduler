@@ -193,8 +193,8 @@ type Runner struct {
 	customCollectors     []prometheus.Collector
 	parserRegistry       *handlers.ParserRegistry
 	dlRuntime            *datalayer.Runtime
-	flowControlCtx       context.Context
-	cancelFlowControl    context.CancelFunc
+	servingCtx           context.Context
+	cancelServing        context.CancelFunc
 	PluginHandle         fwkplugin.Handle
 	// rawConfig caches the result of parseConfigurationPhaseOne.
 	rawConfig *configapiv1.EndpointPickerConfig
@@ -236,7 +236,7 @@ func (r *Runner) WithCustomCollectors(collectors ...prometheus.Collector) *Runne
 }
 
 func (r *Runner) Run(ctx context.Context) error {
-	defer r.stopFlowControl()
+	defer r.stopServing()
 
 	// Setup a very basic logger in case command line argument parsing fails
 	logutil.InitSetupLogging("llm-d-epp")
@@ -326,25 +326,21 @@ func (r *Runner) runWithGracefulShutdown(ctx context.Context, mgr ctrl.Manager, 
 	if leaderElection {
 		elected = r.isLeader
 	}
-	return serveWithDrain(ctx, mgr.Start, extProc, health, r.stopFlowControl, r.draining, elected, drainTimeout)
+	return serveWithDrain(ctx, mgr.Start, extProc, health, r.stopServing, r.draining, elected, drainTimeout)
 }
 
-func (r *Runner) stopFlowControl() {
-	if r.cancelFlowControl != nil {
-		r.cancelFlowControl()
+func (r *Runner) stopServing() {
+	if r.cancelServing != nil {
+		r.cancelServing()
 	}
 }
 
-// Flow control and endpoint metrics polling must outlive SIGTERM until ext_proc
-// finishes its streams.
-func (r *Runner) flowControlContext(ctx context.Context) context.Context {
-	if !r.featureGates[flowcontrol.FeatureGate] {
-		return ctx
+// Serving dependencies must outlive SIGTERM until ext_proc finishes its streams.
+func (r *Runner) servingContext(ctx context.Context) context.Context {
+	if r.servingCtx == nil {
+		r.servingCtx, r.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
 	}
-	if r.flowControlCtx == nil {
-		r.flowControlCtx, r.cancelFlowControl = context.WithCancel(context.WithoutCancel(ctx))
-	}
-	return r.flowControlCtx
+	return r.servingCtx
 }
 
 // serveWithDrain runs extProc and health on a context that outlives the manager.
@@ -355,14 +351,14 @@ func (r *Runner) flowControlContext(ctx context.Context) context.Context {
 // accepting requests for drainTimeout so in-flight and pre-DNS-refresh requests
 // are served rather than rejected. ext_proc then stops gracefully, finishing its
 // streams, and the health server stops after it so liveness holds meanwhile.
-// Flow control and its endpoint metrics polling stop after the servers return.
+// Serving dependencies stop after the servers return.
 // A drainTimeout of 0 stops ext_proc as soon as the manager terminates. A manager
 // that fails before election, or with leader election disabled (elected is nil),
 // stops both servers at once.
-func serveWithDrain(ctx context.Context, startManager func(context.Context) error, extProc, health func(context.Context) error, stopFlowControl func(),
+func serveWithDrain(ctx context.Context, startManager func(context.Context) error, extProc, health func(context.Context) error, stopServing func(),
 	draining, elected *atomic.Bool, drainTimeout time.Duration) error {
-	if stopFlowControl != nil {
-		defer stopFlowControl()
+	if stopServing != nil {
+		defer stopServing()
 	}
 	// serveCtx is intentionally rooted at Background, not ctx, so SIGTERM does not
 	// immediately stop the ext_proc/health servers. stopExtProc ends ext_proc alone.
@@ -457,13 +453,13 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		return nil, nil, err
 	}
 
-	ds, err := setupDatastore(r.flowControlContext(ctx), epf, startCrdReconcilers,
+	ds, err := setupDatastore(r.servingContext(ctx), epf, startCrdReconcilers,
 		gknn.Namespace, gknn.Name, opts.EndpointSelector, opts.EndpointTargetPorts)
 	if err != nil {
 		setupLog.Error(err, "Failed to setup datastore")
 		return nil, nil, err
 	}
-	eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds, opts.RefreshMetricsInterval)
+	eppConfig, err := r.parseConfigurationPhaseTwo(r.servingContext(ctx), rawConfig, ds, opts.RefreshMetricsInterval)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse configuration")
 		return nil, nil, err
@@ -947,7 +943,7 @@ func (r *Runner) configureAndStartDatalayer(ctx context.Context, cfg *datalayer.
 		return err
 	}
 
-	return r.dlRuntime.Start(ctx, mgr)
+	return r.dlRuntime.Start(r.servingContext(ctx), mgr)
 }
 
 func (r *Runner) setupMetricsCollection(opts *runserver.Options) datalayer.EndpointFactory {
@@ -1103,7 +1099,7 @@ func (r *Runner) initAdmissionControl(
 			nil,
 			nil
 	}
-	ctx = r.flowControlContext(ctx)
+	ctx = r.servingContext(ctx)
 	endpointCandidates = requestcontrol.NewCachedEndpointCandidates(ctx, endpointCandidates, 50*time.Millisecond)
 	setupLog.Info("Initializing Flow Control layer")
 	registry := fcregistry.NewFlowRegistry(eppConfig.FlowControlConfig.Registry, setupLog)
@@ -1185,8 +1181,10 @@ func buildRequestEvictor() (*fceviction.RequestEvictor, error) {
 
 // runWithFileDiscovery handles the execution path when a discovery plugin is configured.
 // It builds the EPP server stack without a Kubernetes cluster or controller manager.
+// SIGTERM starts GracefulStop immediately, without a DrainTimeout window or
+// readiness draining. Only already-open streams finish.
 func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Options, rawConfig *configapiv1.EndpointPickerConfig) error {
-	defer r.stopFlowControl()
+	defer r.stopServing()
 
 	epf := r.setupMetricsCollection(opts)
 
@@ -1196,7 +1194,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 		poolName = "epp"
 	}
 	pool := datalayer.NewEndpointPool(namespace, poolName)
-	ds := datastore.NewDatastore(r.flowControlContext(ctx), epf).WithEndpointPool(pool)
+	ds := datastore.NewDatastore(r.servingContext(ctx), epf).WithEndpointPool(pool)
 
 	// On bare metal / Slurm / Ray (or any deployment without the K8s Downward
 	// API), neither --pool-namespace nor the NAMESPACE env var is set, so the
@@ -1227,7 +1225,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 		"(InferenceModelRewrite, InferenceObjective reconciler, and any " +
 		"k8s-notification-source data layer plugins); see docs/discovery.md")
 
-	eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds, opts.RefreshMetricsInterval)
+	eppConfig, err := r.parseConfigurationPhaseTwo(r.servingContext(ctx), rawConfig, ds, opts.RefreshMetricsInterval)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse configuration")
 		return err
@@ -1315,7 +1313,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 		return disc.Start(ctx, fwkdl.NewDiscoveryNotifier(ds))
 	})
 	g.Add("cross-replica-sync", func(ctx context.Context) error {
-		r.dlRuntime.StartCrossReplicaSync(ctx)
+		r.dlRuntime.StartCrossReplicaSync(r.servingContext(ctx))
 		<-ctx.Done()
 		return nil
 	})

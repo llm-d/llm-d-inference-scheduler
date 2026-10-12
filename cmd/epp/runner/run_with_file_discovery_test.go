@@ -467,8 +467,9 @@ dataLayer:
 	err = r.runWithFileDiscovery(ctx, opts, rawConfig)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "has Alpha stability level, but command line flag --allow-experimental-plugins is not set")
-	require.NotNil(t, r.flowControlCtx)
-	require.ErrorIs(t, r.flowControlCtx.Err(), context.Canceled, "serving dependencies must stop on startup failure")
+	require.NotNil(t, r.servingCtx)
+	require.ErrorIs(t, r.servingCtx.Err(), context.Canceled, "serving dependencies must stop on startup failure")
+	require.ErrorIs(t, r.PluginHandle.Context().Err(), context.Canceled, "plugin dependencies must stop on startup failure")
 }
 
 func TestRunWithFileDiscovery_AlphaPluginAllowedWithFlag(t *testing.T) {

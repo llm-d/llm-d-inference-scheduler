@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	corePb "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -47,8 +48,12 @@ import (
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/datastore"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	attrconcurrency "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/concurrency"
+	localsyncer "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/cross_plugin/local"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/inflightload"
 	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 	runserver "github.com/llm-d/llm-d-router/pkg/epp/server"
@@ -278,7 +283,7 @@ featureGates:
 - flowControl
 `
 			r := NewRunner()
-			t.Cleanup(r.stopFlowControl)
+			t.Cleanup(r.stopServing)
 			rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
 			require.NoError(t, err)
 			ds := datastore.NewDatastore(ctx, r.setupMetricsCollection(opts))
@@ -324,7 +329,7 @@ featureGates:
 			elected := &atomic.Bool{}
 			elected.Store(true)
 			go func() {
-				done <- serveWithDrain(ctx, startManager, extProc.run, health.run, r.stopFlowControl,
+				done <- serveWithDrain(ctx, startManager, extProc.run, health.run, r.stopServing,
 					&atomic.Bool{}, elected, 300*time.Millisecond)
 			}()
 			if tc.mgrErr == nil {
@@ -370,19 +375,26 @@ featureGates:
 }
 
 func TestRunnerDrainKeepsEndpointMetrics(t *testing.T) {
+	fwkplugin.Register(localsyncer.LocalSyncerType, fwkplugin.StabilityBeta, localsyncer.LocalSyncerFactory)
+
 	for _, tc := range []struct {
 		name          string
 		drain         time.Duration
 		fileDiscovery bool
+		flowControl   bool
+		crossReplica  bool
 	}{
-		{name: "Kubernetes drain", drain: time.Second},
-		{name: "Kubernetes zero drain"},
-		{name: "file discovery", fileDiscovery: true},
+		{name: "Kubernetes drain", drain: 3 * time.Second, flowControl: true},
+		{name: "Kubernetes zero drain", flowControl: true},
+		{name: "file discovery", fileDiscovery: true, flowControl: true},
+		{name: "Kubernetes legacy drain", drain: 3 * time.Second},
+		{name: "Kubernetes cross-replica drain", drain: 3 * time.Second, flowControl: true, crossReplica: true},
+		{name: "file discovery cross-replica", fileDiscovery: true, flowControl: true, crossReplica: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var saturated atomic.Bool
 			var scrapes atomic.Int64
-			saturated.Store(true)
+			saturated.Store(tc.flowControl && !tc.crossReplica)
 			modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if req.URL.Path != "/metrics" {
 					http.NotFound(w, req)
@@ -413,7 +425,10 @@ func TestRunnerDrainKeepsEndpointMetrics(t *testing.T) {
 			opts.GRPCHealthPort = 0
 			opts.MetricsPort = 0
 			opts.RefreshMetricsInterval = 20 * time.Millisecond
-			discoveryPlugin, discoveryConfig := "", ""
+			discoveryPlugin, dataConfig := "", ""
+			if tc.fileDiscovery || tc.crossReplica {
+				dataConfig = "dataLayer:\n"
+			}
 			if tc.fileDiscovery {
 				path := filepath.Join(t.TempDir(), "endpoints.yaml")
 				require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf(`endpoints:
@@ -427,25 +442,41 @@ func TestRunnerDrainKeepsEndpointMetrics(t *testing.T) {
     path: %q
     watchFile: false
 `, path)
-				discoveryConfig = `dataLayer:
-  discovery:
+				dataConfig += `  discovery:
     endpoints:
       pluginRef: file-discovery
+`
+			}
+			crossReplicaPlugins, flowConfig := "", ""
+			if tc.crossReplica {
+				crossReplicaPlugins = fmt.Sprintf(`- type: %s
+- type: %s
+- type: concurrency-detector
+  parameters:
+    maxConcurrency: 1
+`, localsyncer.LocalSyncerType, inflightload.InFlightLoadProducerType)
+				dataConfig += fmt.Sprintf(`  crossReplica:
+    syncerPluginRef: %s
+    syncInterval: 20ms
+`, localsyncer.LocalSyncerType)
+				flowConfig = `flowControl:
+  saturationDetector:
+    pluginRef: concurrency-detector
 `
 			}
 			opts.ConfigText = fmt.Sprintf(`apiVersion: llm-d.ai/v1
 kind: EndpointPickerConfig
 featureGates:
-- flowControl
+- flowControl=%t
 plugins:
-%s- type: random-picker
+%s%s- type: random-picker
 schedulingProfiles:
 - name: default
   plugins:
   - pluginRef: random-picker
-%s`, discoveryPlugin, discoveryConfig)
+%s%s`, tc.flowControl, discoveryPlugin, crossReplicaPlugins, dataConfig, flowConfig)
 			r := NewRunner()
-			t.Cleanup(r.stopFlowControl)
+			t.Cleanup(r.stopServing)
 			listener, err := fwknet.ReserveListener()
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = listener.Close() })
@@ -485,8 +516,12 @@ schedulingProfiles:
 				endpoints := ds.PodList(func(fwkdl.Endpoint) bool { return true })
 				require.Len(t, endpoints, 1)
 				endpoint = endpoints[0]
+				initialKVUsage := 0.0
+				if tc.flowControl && !tc.crossReplica {
+					initialKVUsage = 1
+				}
 				require.Eventually(t, func() bool {
-					return endpoint.GetMetrics().KVCacheUsagePercent == 1
+					return endpoint.GetMetrics().KVCacheUsagePercent == initialKVUsage
 				}, time.Second, opts.RefreshMetricsInterval)
 				r.serverRunner.GrpcListener = listener
 				stopManager := make(chan error, 1)
@@ -503,7 +538,7 @@ schedulingProfiles:
 					}, r.serverRunner.AsRunnable(ctrl.Log).Start, func(c context.Context) error {
 						<-c.Done()
 						return nil
-					}, r.stopFlowControl, r.draining, nil, tc.drain)
+					}, r.stopServing, r.draining, nil, tc.drain)
 				}()
 			}
 			require.Eventually(t, func() bool {
@@ -515,9 +550,9 @@ schedulingProfiles:
 			t.Cleanup(func() {
 				sigterm()
 				_ = conn.Close()
-				require.True(t, closedWithin(finished, 5*time.Second), "drain did not finish after streams closed")
+				require.True(t, closedWithin(finished, 10*time.Second), "drain did not finish after streams closed")
 			})
-			streamCtx, cancelStreams := context.WithTimeout(t.Context(), 5*time.Second)
+			streamCtx, cancelStreams := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancelStreams()
 			type routeResult struct {
 				response *extProcPb.ProcessingResponse
@@ -540,11 +575,38 @@ schedulingProfiles:
 				}()
 				return stream, result
 			}
+			var inFlightStream extProcPb.ExternalProcessor_ProcessClient
+			if tc.crossReplica {
+				var routed <-chan routeResult
+				inFlightStream, routed = send("in-flight-before-sigterm")
+				select {
+				case route := <-routed:
+					require.NoError(t, route.err)
+					require.NotNil(t, route.response.GetRequestHeaders())
+				case <-time.After(3 * time.Second):
+					t.Fatal("initial request did not route")
+				}
+				response, err := inFlightStream.Recv()
+				require.NoError(t, err)
+				require.NotNil(t, response.GetRequestBody())
+				syncer, ok := r.PluginHandle.CrossReplicaSyncer().(fwkdl.CrossReplicaSyncer)
+				require.True(t, ok)
+				contributor, ok := r.PluginHandle.Plugin(inflightload.InFlightLoadProducerType).(fwkdl.CrossReplicaContributor)
+				require.True(t, ok)
+				spec := contributor.CrossReplicaState()
+				require.Eventually(t, func() bool {
+					value, found, err := syncer.Get(streamCtx, spec.StateKey, opts.PoolNamespace+"/model-server")
+					load, ok := value.(*attrconcurrency.InFlightLoad)
+					return err == nil && found && ok && load.Requests == 1
+				}, 3*time.Second, opts.RefreshMetricsInterval, "in-flight load was not published before shutdown")
+			}
 			queuedStream, queued := send("queued-before-sigterm")
-			select {
-			case result := <-queued:
-				t.Fatalf("request did not queue against saturated endpoint: %+v", result)
-			case <-time.After(100 * time.Millisecond):
+			if tc.flowControl {
+				select {
+				case result := <-queued:
+					t.Fatalf("request did not queue against saturated endpoint: %+v", result)
+				case <-time.After(100 * time.Millisecond):
+				}
 			}
 			shutdownAt := time.Now()
 			sigterm()
@@ -552,13 +614,43 @@ schedulingProfiles:
 				require.True(t, closedWithin(managerStopped, time.Second))
 			}
 			time.Sleep(utilization.DefaultMetricsStalenessThreshold + 100*time.Millisecond)
+			require.NoError(t, r.PluginHandle.Context().Err(), "plugin dependencies stopped during shutdown")
 
 			streams := []extProcPb.ExternalProcessor_ProcessClient{queuedStream}
 			results := []<-chan routeResult{queued}
-			if tc.drain > 0 {
+			if tc.drain > 0 && !tc.crossReplica {
 				arrivingStream, arriving := send("arrived-during-drain")
 				streams = append(streams, arrivingStream)
 				results = append(results, arriving)
+			}
+			if tc.crossReplica {
+				require.NoError(t, inFlightStream.Send(&extProcPb.ProcessingRequest{
+					Request: &extProcPb.ProcessingRequest_ResponseHeaders{
+						ResponseHeaders: &extProcPb.HttpHeaders{
+							Headers: &corePb.HeaderMap{Headers: []*corePb.HeaderValue{
+								{Key: ":status", RawValue: []byte("200")},
+								{Key: "content-type", RawValue: []byte("application/json")},
+							}},
+						},
+					},
+				}))
+				response, err := inFlightStream.Recv()
+				require.NoError(t, err)
+				require.NotNil(t, response.GetResponseHeaders())
+				require.NoError(t, inFlightStream.Send(&extProcPb.ProcessingRequest{
+					Request: &extProcPb.ProcessingRequest_ResponseBody{
+						ResponseBody: &extProcPb.HttpBody{
+							Body:        []byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"Hi"},"finish_reason":"stop"}]}`),
+							EndOfStream: true,
+						},
+					},
+				}))
+				response, err = inFlightStream.Recv()
+				require.NoError(t, err)
+				require.NotNil(t, response.GetResponseBody())
+				require.NoError(t, inFlightStream.CloseSend())
+				_, err = inFlightStream.Recv()
+				require.ErrorIs(t, err, io.EOF)
 			}
 			saturated.Store(false)
 			for _, result := range results {
@@ -577,7 +669,7 @@ schedulingProfiles:
 					if tc.drain > 0 {
 						require.Less(t, time.Since(shutdownAt), tc.drain, "request did not dispatch within the drain window")
 					}
-				case <-time.After(time.Second):
+				case <-time.After(3 * time.Second):
 					t.Fatal("queued request did not dispatch after backend capacity recovered during shutdown")
 				}
 			}
@@ -590,7 +682,7 @@ schedulingProfiles:
 				require.NotNil(t, response.GetRequestBody())
 			}
 			if tc.drain > 0 {
-				time.Sleep(tc.drain)
+				time.Sleep(time.Until(shutdownAt.Add(tc.drain)))
 			}
 			require.False(t, isClosed(finished), "ext_proc exited while streams were still open")
 			snapshot := scrapes.Load()
@@ -606,7 +698,8 @@ schedulingProfiles:
 			if !tc.fileDiscovery || !errors.Is(err, context.Canceled) {
 				require.NoError(t, err)
 			}
-			require.ErrorIs(t, r.flowControlCtx.Err(), context.Canceled)
+			require.ErrorIs(t, r.servingCtx.Err(), context.Canceled)
+			require.ErrorIs(t, r.PluginHandle.Context().Err(), context.Canceled)
 			time.Sleep(3 * opts.RefreshMetricsInterval)
 			snapshot = scrapes.Load()
 			time.Sleep(3 * opts.RefreshMetricsInterval)

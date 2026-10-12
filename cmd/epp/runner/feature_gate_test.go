@@ -131,7 +131,7 @@ featureGates:
 			opts.PoolName = testPoolName
 
 			r := NewRunner()
-			t.Cleanup(r.stopFlowControl)
+			t.Cleanup(r.stopServing)
 			rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
 			require.NoError(t, err)
 
@@ -191,11 +191,11 @@ func TestFeatureGatesFlagNotDuplicatedAcrossCalls(t *testing.T) {
 	require.Len(t, second.FeatureGates, 1, "the flag gate must not be appended twice")
 }
 
-func TestFlowControlContext(t *testing.T) {
+func TestServingContext(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
 			r := NewRunner()
-			t.Cleanup(r.stopFlowControl)
+			t.Cleanup(r.stopServing)
 			opts := runserver.NewOptions()
 			opts.FeatureGates = []string{flowcontrol.FeatureGate + "=" + strconv.FormatBool(enabled)}
 			type lifecycleKey struct{}
@@ -204,18 +204,13 @@ func TestFlowControlContext(t *testing.T) {
 			defer cancel()
 			_, err := r.parseConfigurationPhaseOne(ctx, opts)
 			require.NoError(t, err)
-			servingCtx := r.flowControlContext(ctx)
-			require.Same(t, servingCtx, r.flowControlContext(ctx), "datastore and flow control must share their lifecycle")
+			servingCtx := r.servingContext(ctx)
+			require.Same(t, servingCtx, r.servingContext(ctx), "serving dependencies must share their lifecycle")
 			require.Equal(t, "request-serving", servingCtx.Value(key))
 
 			cancel()
-			if enabled {
-				require.NoError(t, servingCtx.Err(), "flow control dependencies must remain running during drain")
-			} else {
-				require.Same(t, ctx, servingCtx, "legacy admission must retain the signal context")
-				require.ErrorIs(t, servingCtx.Err(), context.Canceled)
-			}
-			r.stopFlowControl()
+			require.NoError(t, servingCtx.Err(), "serving dependencies must remain running during drain")
+			r.stopServing()
 			require.ErrorIs(t, servingCtx.Err(), context.Canceled)
 		})
 	}
