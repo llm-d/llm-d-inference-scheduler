@@ -17,6 +17,7 @@ spec:
       - name: vllm-render
         image: vllm/vllm-openai-cpu:v0.21.0
         imagePullPolicy: IfNotPresent
+        # Native sidecars require Kubernetes 1.29 or newer.
         restartPolicy: Always
         command:
         - vllm
@@ -51,6 +52,15 @@ spec:
           periodSeconds: 5
           failureThreshold: 1
           timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+            ephemeral-storage: 10Gi
+          requests:
+            cpu: "1"
+            memory: 2Gi
+            ephemeral-storage: 10Gi
         volumeMounts:
         - name: model-cache
           mountPath: /root/.cache/huggingface
@@ -87,4 +97,5 @@ spec:
             cpu: 10m
       volumes:
       - name: model-cache
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 10Gi
