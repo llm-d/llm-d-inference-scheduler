@@ -1648,3 +1648,598 @@ func TestBlockStoredEvent_LoRAExtraKeysMatchRequestKeys(t *testing.T) {
 		})
 	}
 }
+
+// A store whose engine blocks are smaller than the canonical block and whose
+// parent was never seen (or was evicted from the per-pod tracker) cannot be
+// chained. It is counted as skipped rather than logged as an error; a
+// canonical-size store with an unknown parent is not counted under that reason.
+func TestProcessEventBatch_UnresolvedSubCanonicalParent(t *testing.T) {
+	groupIdx := 5
+	tests := []struct {
+		name        string
+		events      []GenericEvent
+		childHash   uint64
+		wantSkipped float64
+	}{
+		{
+			name: "sub-canonical child of an unknown parent",
+			events: []GenericEvent{
+				&BlockStoredEvent{
+					BlockHashes:     []uint64{7002},
+					Tokens:          makeTokens(32)[16:],
+					ParentHash:      7001,
+					GroupIdx:        &groupIdx,
+					KVCacheSpecKind: KVCacheSpecKindFullAttention,
+					BlockSize:       16,
+				},
+			},
+			childHash:   7002,
+			wantSkipped: 1,
+		},
+		{
+			name: "canonical-size child of an unknown parent",
+			events: []GenericEvent{
+				&BlockStoredEvent{
+					BlockHashes:     []uint64{8002},
+					Tokens:          makeTokens(64),
+					ParentHash:      8001,
+					GroupIdx:        &groupIdx,
+					KVCacheSpecKind: KVCacheSpecKindFullAttention,
+					BlockSize:       64,
+				},
+			},
+			childHash:   8002,
+			wantSkipped: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := logging.NewTestLoggerIntoContext(context.Background())
+			pool, idx, _ := newTestPool(t, 64)
+			skipped := metrics.KVEventStoresSkipped.WithLabelValues(
+				cacheKindLabel(KVCacheSpecKindFullAttention), skipReasonUnresolvedSubCanonicalParent)
+			before := counterValue(t, skipped)
+
+			pool.processEventBatch(ctx, &EventBatch{Events: tt.events}, "pod-a", "test-model")
+
+			assert.Equal(t, tt.wantSkipped, counterValue(t, skipped)-before)
+			_, err := idx.GetRequestKey(ctx, kvblock.BlockHash(tt.childHash))
+			assert.Error(t, err, "a store with an unresolved parent is not indexed")
+		})
+	}
+}
+
+func TestSubCanonicalParentChain_Gemma4MTPSequence(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	pool, idx, tp := newTestPool(t, 64)
+	recording := &recordingIndex{Index: idx}
+	pool.index = recording
+
+	groupIdx := 5
+	allTokens := makeTokens(128)
+	engineKeys := makeEngineKeys(8, 1000)
+
+	// Emit 8 consecutive 16-token BlockStored events chained via ParentHash,
+	// reproducing Gemma 4 MTP speculative decoding with canonical block size 64.
+	for i := range 8 {
+		parentHash := uint64(0)
+		if i > 0 {
+			parentHash = engineKeys[i-1]
+		}
+		pool.processEventBatch(ctx, &EventBatch{
+			Events: []GenericEvent{
+				&BlockStoredEvent{
+					BlockHashes:     []uint64{engineKeys[i]},
+					Tokens:          allTokens[i*16 : (i+1)*16],
+					ParentHash:      parentHash,
+					GroupIdx:        &groupIdx,
+					KVCacheSpecKind: KVCacheSpecKindFullAttention,
+					BlockSize:       16,
+				},
+			},
+		}, "pod-gemma4", "test-model")
+	}
+
+	canonicalKeys, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, allTokens, "test-model", nil)
+	require.NoError(t, err)
+	require.Len(t, canonicalKeys, 2)
+
+	// Only engineKeys[3] (boundary of canonical block 0) should hit idx.GetRequestKey;
+	// intermediate 16/32/48-token parents resolve via sub-canonical lineage.
+	assert.Equal(t, 1, recording.getRequestKeyCalls)
+
+	result, err := idx.Lookup(ctx, canonicalKeys, nil)
+	require.NoError(t, err)
+	for _, ck := range canonicalKeys {
+		require.Len(t, result[ck], 1)
+		assert.Equal(t, "pod-gemma4", result[ck][0].PodIdentifier)
+		assert.Equal(t, kvblock.GroupID(groupIdx), result[ck][0].GroupIdx)
+	}
+
+	for i, ek := range engineKeys {
+		rk, err := idx.GetRequestKey(ctx, kvblock.BlockHash(ek))
+		require.NoError(t, err, "engine key %d should resolve to its canonical block", ek)
+		assert.Equal(t, canonicalKeys[i/4], rk)
+	}
+}
+
+func TestSubCanonicalParentChain_UnalignedMultiBlockEvent(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	pool, idx, tp := newTestPool(t, 64)
+
+	groupIdx := 5
+	allTokens := makeTokens(128)
+	engineKeys := makeEngineKeys(8, 2000)
+
+	// Event 1: 80 tokens (5 blocks of 16 tokens) -> 1 complete canonical block + 16-token tail.
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     engineKeys[:5],
+				Tokens:          allTokens[:80],
+				ParentHash:      0,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-gemma4", "test-model")
+
+	canonicalKeys, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, allTokens, "test-model", nil)
+	require.NoError(t, err)
+	require.Len(t, canonicalKeys, 2)
+
+	// After event 1, engineKeys[4] (tokens 64..79) belongs to incomplete block 1, not block 0.
+	_, err = idx.GetRequestKey(ctx, kvblock.BlockHash(engineKeys[4]))
+	require.Error(t, err)
+
+	// Event 2: remaining 48 tokens (3 blocks of 16 tokens) referencing engineKeys[4].
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     engineKeys[5:],
+				Tokens:          allTokens[80:],
+				ParentHash:      engineKeys[4],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-gemma4", "test-model")
+
+	result, err := idx.Lookup(ctx, canonicalKeys, nil)
+	require.NoError(t, err)
+	for _, ck := range canonicalKeys {
+		require.Len(t, result[ck], 1)
+		assert.Equal(t, "pod-gemma4", result[ck][0].PodIdentifier)
+	}
+	for i, ek := range engineKeys {
+		rk, err := idx.GetRequestKey(ctx, kvblock.BlockHash(ek))
+		require.NoError(t, err)
+		assert.Equal(t, canonicalKeys[i/4], rk)
+	}
+}
+
+func TestSubCanonicalParentChain_PrefixBranchingFromSubBlock(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	pool, idx, tp := newTestPool(t, 64)
+
+	groupIdx := 5
+	branchATokens := makeTokens(64)
+	branchBTokens := make([]uint32, 64)
+	copy(branchBTokens, branchATokens[:32])
+	for i := 32; i < 64; i++ {
+		branchBTokens[i] = uint32(10000 + i)
+	}
+
+	sharedKeys := makeEngineKeys(2, 3000)
+	branchAKeys := makeEngineKeys(2, 3100)
+	branchBKeys := makeEngineKeys(2, 3200)
+
+	// Shared 32-token sub-canonical prefix (2 blocks of 16 tokens).
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     sharedKeys,
+				Tokens:          branchATokens[:32],
+				ParentHash:      0,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-gemma4", "test-model")
+
+	// Branch A completes 64 tokens from sharedKeys[1].
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     branchAKeys,
+				Tokens:          branchATokens[32:],
+				ParentHash:      sharedKeys[1],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-gemma4", "test-model")
+
+	// Branch B also forks from sharedKeys[1] with distinct tokens.
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     branchBKeys,
+				Tokens:          branchBTokens[32:],
+				ParentHash:      sharedKeys[1],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-gemma4", "test-model")
+
+	keysA, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, branchATokens, "test-model", nil)
+	require.NoError(t, err)
+	keysB, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, branchBTokens, "test-model", nil)
+	require.NoError(t, err)
+
+	resA, err := idx.Lookup(ctx, keysA, nil)
+	require.NoError(t, err)
+	require.Len(t, resA[keysA[0]], 1)
+
+	resB, err := idx.Lookup(ctx, keysB, nil)
+	require.NoError(t, err)
+	require.Len(t, resB[keysB[0]], 1)
+}
+
+func TestSubCanonicalParentChain_EvictAndClear(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	pool, idx, tp := newTestPool(t, 64)
+
+	groupIdx := 5
+	tokens := makeTokens(64)
+	engineKeys := makeEngineKeys(4, 4000)
+
+	// Store first 32 tokens (2 blocks) then remove both blocks before child arrives,
+	// dropping activeEntries to zero while leaving an empty per-pod cache entry.
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     engineKeys[:2],
+				Tokens:          tokens[:32],
+				ParentHash:      0,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+			&BlockRemovedEvent{
+				BlockHashes: engineKeys[:2],
+				GroupIdx:    &groupIdx,
+			},
+			&BlockStoredEvent{
+				BlockHashes:     engineKeys[2:],
+				Tokens:          tokens[32:],
+				ParentHash:      engineKeys[1],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-evict", "test-model")
+
+	canonicalKeys, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, "test-model", nil)
+	require.NoError(t, err)
+	res, err := idx.Lookup(ctx, canonicalKeys, nil)
+	require.NoError(t, err)
+	assert.Empty(t, res[canonicalKeys[0]], "evicted sub-canonical parent must not be extended")
+	assert.Zero(t, pool.subBlocks.activeEntries.Load())
+	assert.Contains(t, pool.subBlocks.pods, "pod-evict")
+
+	// Clearing the pod after all sub-canonical entries were already evicted deletes the empty pod entry.
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&AllBlocksClearedEvent{},
+		},
+	}, "pod-evict", "test-model")
+	assert.NotContains(t, pool.subBlocks.pods, "pod-evict")
+
+	// Storing sub-canonical blocks followed by AllBlocksClearedEvent drops tracked prefixes and pod map entry.
+	clearKeys := makeEngineKeys(4, 5000)
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     clearKeys[:2],
+				Tokens:          tokens[:32],
+				ParentHash:      0,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+			&AllBlocksClearedEvent{},
+			&BlockStoredEvent{
+				BlockHashes:     clearKeys[2:],
+				Tokens:          tokens[32:],
+				ParentHash:      clearKeys[1],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-clear", "test-model")
+
+	resAfterClear, err := idx.Lookup(ctx, canonicalKeys, nil)
+	require.NoError(t, err)
+	assert.Empty(t, resAfterClear[canonicalKeys[0]], "cleared sub-canonical parent must not be extended")
+	assert.Zero(t, pool.subBlocks.activeEntries.Load())
+	assert.NotContains(t, pool.subBlocks.pods, "pod-clear")
+}
+
+func TestSubCanonicalParentChain_BlockSizeMismatch(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	pool, idx, tp := newTestPool(t, 64)
+
+	groupIdx := 5
+	tokens := makeTokens(64)
+	engineKeys := makeEngineKeys(3, 6000)
+
+	// Parent sub-canonical prefix uses BlockSize 16 (32 tokens across 2 blocks),
+	// followed by a child event referencing that parent with BlockSize 32 (32 tokens in 1 block).
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     engineKeys[:2],
+				Tokens:          tokens[:32],
+				ParentHash:      0,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+			&BlockStoredEvent{
+				BlockHashes:     []uint64{engineKeys[2]},
+				Tokens:          tokens[32:],
+				ParentHash:      engineKeys[1],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       32,
+			},
+		},
+	}, "pod-mismatch", "test-model")
+
+	canonicalKeys, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, "test-model", nil)
+	require.NoError(t, err)
+	res, err := idx.Lookup(ctx, canonicalKeys, nil)
+	require.NoError(t, err)
+	assert.Empty(t, res[canonicalKeys[0]], "mismatched engine block size child must not extend sub-canonical parent")
+}
+
+func TestSubCanonicalParentChain_ShortExtraKeysNoPrefix(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	pool, idx, tp := newTestPool(t, 64)
+
+	groupIdx := 5
+	tokens := makeTokens(64)
+	engineKeys := makeEngineKeys(4, 9000)
+	mmHash := "mm-hash-1"
+
+	// 1 extra_key entry for 4 sub-canonical engine block hashes without a prior prefix.
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     engineKeys,
+				Tokens:          tokens,
+				ParentHash:      0,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+				ExtraKeys:       [][]any{{mmHash}},
+			},
+		},
+	}, "pod-short-extra", "test-model")
+
+	expectedExtra := []*kvblock.BlockExtraFeatures{
+		{MMHashes: []kvblock.MMHash{{Hash: mmHash}}},
+	}
+	canonicalKeys, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, "test-model", expectedExtra)
+	require.NoError(t, err)
+	res, err := idx.Lookup(ctx, canonicalKeys, nil)
+	require.NoError(t, err)
+	require.Len(t, res[canonicalKeys[0]], 1)
+
+	// Empty non-nil extra_keys slice also does not panic.
+	emptyExtraKeys := makeEngineKeys(4, 9100)
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     emptyExtraKeys,
+				Tokens:          tokens,
+				ParentHash:      0,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+				ExtraKeys:       [][]any{},
+			},
+		},
+	}, "pod-empty-extra", "test-model")
+
+	plainKeys, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, "test-model", nil)
+	require.NoError(t, err)
+	resPlain, err := idx.Lookup(ctx, plainKeys, nil)
+	require.NoError(t, err)
+	require.Len(t, resPlain[plainKeys[0]], 1)
+}
+
+func TestSubCanonicalParentChain_ConfigurableCacheSize(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	tp, err := kvblock.NewChunkedTokenDatabase(&kvblock.TokenProcessorConfig{
+		BlockSizeTokens: 64,
+		HashSeed:        "test",
+	})
+	require.NoError(t, err)
+	idx, err := kvblock.NewInMemoryIndex(&kvblock.InMemoryIndexConfig{
+		Size:         1024,
+		PodCacheSize: 8,
+	})
+	require.NoError(t, err)
+
+	cfg := DefaultConfig()
+	cfg.SubCanonicalCacheSize = 2
+	pool, err := NewPool(cfg, idx, tp, nil)
+	require.NoError(t, err)
+
+	skipped := metrics.KVEventStoresSkipped.WithLabelValues(
+		cacheKindLabel(KVCacheSpecKindFullAttention), skipReasonUnresolvedSubCanonicalParent)
+	before := counterValue(t, skipped)
+
+	groupIdx := 5
+	tokens := makeTokens(64)
+	// Store 3 independent 16-token root blocks on the same pod; with capacity 2,
+	// root 10001 is evicted when 10003 is recorded.
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     []uint64{10001},
+				Tokens:          tokens[:16],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+			&BlockStoredEvent{
+				BlockHashes:     []uint64{10002},
+				Tokens:          tokens[:16],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+			&BlockStoredEvent{
+				BlockHashes:     []uint64{10003},
+				Tokens:          tokens[:16],
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-small-lru", "test-model")
+	assert.Equal(t, int64(2), pool.subBlocks.activeEntries.Load())
+
+	// Extending evicted parent 10001 is counted under unresolved_sub_canonical_parent;
+	// extending retained parent 10003 completes the canonical block.
+	pool.processEventBatch(ctx, &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes:     []uint64{10011, 10012, 10013},
+				Tokens:          tokens[16:],
+				ParentHash:      10001,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+			&BlockStoredEvent{
+				BlockHashes:     []uint64{10021, 10022, 10023},
+				Tokens:          tokens[16:],
+				ParentHash:      10003,
+				GroupIdx:        &groupIdx,
+				KVCacheSpecKind: KVCacheSpecKindFullAttention,
+				BlockSize:       16,
+			},
+		},
+	}, "pod-small-lru", "test-model")
+
+	assert.Equal(t, float64(1), counterValue(t, skipped)-before)
+	canonicalKeys, err := tp.TokensToKVBlockKeys(kvblock.EmptyBlockHash, tokens, "test-model", nil)
+	require.NoError(t, err)
+	res, err := idx.Lookup(ctx, canonicalKeys, nil)
+	require.NoError(t, err)
+	require.Len(t, res[canonicalKeys[0]], 1)
+}
+
+func BenchmarkProcessEventBatch_Homogeneous64(b *testing.B) {
+	ctx := context.Background()
+	tp, err := kvblock.NewChunkedTokenDatabase(&kvblock.TokenProcessorConfig{
+		BlockSizeTokens: 64,
+		HashSeed:        "bench",
+	})
+	require.NoError(b, err)
+	idx, err := kvblock.NewInMemoryIndex(&kvblock.InMemoryIndexConfig{
+		Size:         65536,
+		PodCacheSize: 16,
+	})
+	require.NoError(b, err)
+	pool, err := NewPool(DefaultConfig(), idx, tp, nil)
+	require.NoError(b, err)
+
+	tokens := makeTokens(128)
+	batch1 := &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes: []uint64{101},
+				Tokens:      tokens[:64],
+				ParentHash:  0,
+				BlockSize:   64,
+			},
+		},
+	}
+	batch2 := &EventBatch{
+		Events: []GenericEvent{
+			&BlockStoredEvent{
+				BlockHashes: []uint64{102},
+				Tokens:      tokens[64:],
+				ParentHash:  101,
+				BlockSize:   64,
+			},
+		},
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		pool.processEventBatch(ctx, batch1, "pod-bench", "test-model")
+		pool.processEventBatch(ctx, batch2, "pod-bench", "test-model")
+	}
+}
+
+func BenchmarkProcessEventBatch_SubCanonical16Chain(b *testing.B) {
+	ctx := context.Background()
+	tp, err := kvblock.NewChunkedTokenDatabase(&kvblock.TokenProcessorConfig{
+		BlockSizeTokens: 64,
+		HashSeed:        "bench",
+	})
+	require.NoError(b, err)
+	idx, err := kvblock.NewInMemoryIndex(&kvblock.InMemoryIndexConfig{
+		Size:         65536,
+		PodCacheSize: 16,
+	})
+	require.NoError(b, err)
+	pool, err := NewPool(DefaultConfig(), idx, tp, nil)
+	require.NoError(b, err)
+
+	tokens := makeTokens(64)
+	groupIdx := 5
+	batches := make([]*EventBatch, 4)
+	for i := range 4 {
+		parent := uint64(0)
+		if i > 0 {
+			parent = uint64(200 + i - 1)
+		}
+		batches[i] = &EventBatch{
+			Events: []GenericEvent{
+				&BlockStoredEvent{
+					BlockHashes:     []uint64{uint64(200 + i)},
+					Tokens:          tokens[i*16 : (i+1)*16],
+					ParentHash:      parent,
+					GroupIdx:        &groupIdx,
+					KVCacheSpecKind: KVCacheSpecKindFullAttention,
+					BlockSize:       16,
+				},
+			},
+		}
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, batch := range batches {
+			pool.processEventBatch(ctx, batch, "pod-bench", "test-model")
+		}
+	}
+}

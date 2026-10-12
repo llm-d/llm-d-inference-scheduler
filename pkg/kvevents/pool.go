@@ -68,6 +68,19 @@ func cacheKindLabel(kind KVCacheSpecKind) string {
 	return string(kind)
 }
 
+const skipReasonUnresolvedSubCanonicalParent = "unresolved_sub_canonical_parent"
+
+// subCanonicalStore reports whether ev's engine blocks are smaller than the
+// canonical block size. Events without a declared block size fall back to
+// tokens per block hash.
+func subCanonicalStore(ev *BlockStoredEvent, canonicalBlockSize int) bool {
+	engineBlockSize := ev.BlockSize
+	if engineBlockSize <= 0 && len(ev.BlockHashes) > 0 {
+		engineBlockSize = len(ev.Tokens) / len(ev.BlockHashes)
+	}
+	return engineBlockSize > 0 && engineBlockSize < canonicalBlockSize
+}
+
 func blockStoredEventDigestible(ev *BlockStoredEvent) (bool, string) {
 	if ev.GroupIdx == nil {
 		return true, ""
@@ -112,6 +125,10 @@ type Config struct {
 	// PodDiscoveryConfig holds the configuration for pod discovery.
 	// Only used when DiscoverPods is true.
 	PodDiscoveryConfig *PodDiscoveryConfig `json:"podDiscoveryConfig,omitempty"`
+	// SubCanonicalCacheSize sets the maximum number of sub-canonical prefix
+	// entries tracked per pod when engine blocks are smaller than the canonical
+	// block size. Default: 4096.
+	SubCanonicalCacheSize int `json:"subCanonicalCacheSize,omitempty"`
 }
 
 // PodDiscoveryConfig holds configuration for the Kubernetes pod reconciler.
@@ -156,10 +173,11 @@ func DefaultPodReconcilerConfig() *PodDiscoveryConfig {
 // DefaultConfig returns a default configuration for the event processing pool.
 func DefaultConfig() *Config {
 	return &Config{
-		TopicFilter:        "kv@",
-		Concurrency:        4,
-		DiscoverPods:       true,
-		PodDiscoveryConfig: DefaultPodReconcilerConfig(),
+		TopicFilter:           "kv@",
+		Concurrency:           4,
+		DiscoverPods:          true,
+		PodDiscoveryConfig:    DefaultPodReconcilerConfig(),
+		SubCanonicalCacheSize: defaultSubCanonicalCacheSize,
 	}
 }
 
@@ -178,7 +196,8 @@ type Pool struct {
 	// built from event fields absent from the Index.Evict signature (device
 	// tier, KV-cache group, DP rank) and a store must be counted only after
 	// Index.Add succeeds — both of which only the Pool observes.
-	dedup *eventDedupFilter
+	dedup     *eventDedupFilter
+	subBlocks *subCanonicalTracker
 	// tracer is resolved once: tracing.Tracer rebuilds its instrumentation
 	// options on every call, which is not free on the per-message event path.
 	// Nil when Config.Tracing is unset, which is what startSpan tests to skip
@@ -216,6 +235,7 @@ func NewPool(cfg *Config, index kvblock.Index, tokenProcessor kvblock.TokenProce
 		adapter:        adapter,
 		groupCatalog:   kvblock.NewGroupCatalog(),
 		dedup:          newEventDedupFilter(),
+		subBlocks:      newSubCanonicalTracker(cfg.SubCanonicalCacheSize),
 		tracer:         newEventTracer(cfg.Tracing),
 	}
 
@@ -441,6 +461,7 @@ func (p *Pool) clearPod(ctx context.Context, podIdentifier string, retire bool) 
 			"podIdentifier", podIdentifier)
 	}
 	p.dedup.clear(podIdentifier)
+	p.subBlocks.clearPod(podIdentifier)
 	if retire {
 		p.groupCatalog.Clear(podIdentifier)
 	}
@@ -605,22 +626,67 @@ func (p *Pool) processEventBatch(ctx context.Context, batch *EventBatch, podIden
 				engineKeys[i] = kvblock.BlockHash(hash)
 			}
 
+			if len(ev.Tokens) == 0 {
+				if p.handleDeviceTierUpdate(ctx, ev.Tokens, engineKeys, podEntries, podIdentifier, deviceTier) {
+					p.dedup.trackStore(storeScope, ev.BlockHashes)
+				}
+				continue
+			}
+
+			canonicalBlockSize := p.tokenProcessor.BlockSize()
+			engineBlockSize := ev.BlockSize
+			if engineBlockSize <= 0 && len(ev.BlockHashes) > 0 {
+				engineBlockSize = len(ev.Tokens) / len(ev.BlockHashes)
+			}
+
 			parentRequestKey := kvblock.EmptyBlockHash
+			var prefix subCanonicalBlock
+			hasPrefix := false
 			if ev.ParentHash != 0 {
 				parentEngineKey := kvblock.BlockHash(ev.ParentHash)
-				key, err := p.index.GetRequestKey(ctx, parentEngineKey)
-				if err != nil {
-					debugLogger.Error(err, "Failed to get request key for parent block",
-						"parentEngineKey", parentEngineKey,
-						"effectiveModelName", effectiveModelName,
-						"groupIdx", ev.GroupIdx,
-						"cacheKind", ev.KVCacheSpecKind,
-						"numTokens", len(ev.Tokens),
-						"numBlockHashes", len(ev.BlockHashes),
-						"blockSize", ev.BlockSize)
-					continue
+				if sb, ok := p.subBlocks.get(podIdentifier, parentEngineKey); ok {
+					if engineBlockSize != sb.engineBlockSize {
+						debugLogger.Info("Skipping sub-canonical child with mismatched engine block size",
+							"podIdentifier", podIdentifier,
+							"parentEngineKey", parentEngineKey,
+							"prefixBlockSize", sb.engineBlockSize,
+							"eventBlockSize", engineBlockSize)
+						continue
+					}
+					prefix = sb
+					parentRequestKey = sb.parentReqKey
+					hasPrefix = true
+				} else {
+					key, err := p.index.GetRequestKey(ctx, parentEngineKey)
+					if err != nil {
+						// Sub-canonical stores whose parent was never observed or was evicted
+						// from the per-pod tracker cannot be chained.
+						if subCanonicalStore(ev, canonicalBlockSize) {
+							metrics.KVEventStoresSkipped.WithLabelValues(
+								cacheKindLabel(ev.KVCacheSpecKind), skipReasonUnresolvedSubCanonicalParent).Inc()
+							log.FromContext(ctx).V(logging.TRACE).Info("Skipping KV cache store event",
+								"podIdentifier", podIdentifier,
+								"groupIdx", ev.GroupIdx,
+								"cacheKind", ev.KVCacheSpecKind,
+								"reason", skipReasonUnresolvedSubCanonicalParent,
+								"parentEngineKey", parentEngineKey,
+								"numTokens", len(ev.Tokens),
+								"numBlockHashes", len(ev.BlockHashes),
+								"blockSize", ev.BlockSize)
+							continue
+						}
+						debugLogger.Error(err, "Failed to get request key for parent block",
+							"parentEngineKey", parentEngineKey,
+							"effectiveModelName", effectiveModelName,
+							"groupIdx", ev.GroupIdx,
+							"cacheKind", ev.KVCacheSpecKind,
+							"numTokens", len(ev.Tokens),
+							"numBlockHashes", len(ev.BlockHashes),
+							"blockSize", ev.BlockSize)
+						continue
+					}
+					parentRequestKey = key
 				}
-				parentRequestKey = key
 			}
 
 			var extraFeatures []*kvblock.BlockExtraFeatures
@@ -638,11 +704,31 @@ func (p *Pool) processEventBatch(ctx context.Context, batch *EventBatch, podIden
 				}
 			}
 
+			if hasPrefix || (engineBlockSize > 0 && engineBlockSize < canonicalBlockSize && canonicalBlockSize%engineBlockSize == 0) {
+				p.processSubCanonicalStore(
+					ctx,
+					debugLogger,
+					ev,
+					podIdentifier,
+					effectiveModelName,
+					canonicalBlockSize,
+					engineBlockSize,
+					parentRequestKey,
+					hasPrefix,
+					prefix,
+					engineKeys,
+					extraFeatures,
+					podEntries,
+					storeScope,
+				)
+				continue
+			}
+
 			// Realign extraFeatures from engine-block granularity to canonical-block
 			// granularity. ParseRawExtraKeys returns one entry per engine block, but
 			// TokensToKVBlockKeys expects one entry per canonical block.
 			if extraFeatures != nil {
-				canonicalBlockCount := len(ev.Tokens) / p.tokenProcessor.BlockSize()
+				canonicalBlockCount := len(ev.Tokens) / canonicalBlockSize
 				if canonicalBlockCount == 0 {
 					// Tokens don't fill a complete canonical block; no realignment needed
 					// since TokensToKVBlockKeys will produce zero keys anyway.
@@ -687,9 +773,6 @@ func (p *Pool) processEventBatch(ctx context.Context, batch *EventBatch, podIden
 			}
 
 			if len(requestKeys) == 0 {
-				if p.handleDeviceTierUpdate(ctx, ev.Tokens, engineKeys, podEntries, podIdentifier, deviceTier) {
-					p.dedup.trackStore(storeScope, ev.BlockHashes)
-				}
 				continue
 			}
 
@@ -757,6 +840,7 @@ func (p *Pool) processEventBatch(ctx context.Context, batch *EventBatch, podIden
 			if len(hashesToEvict) == 0 {
 				break
 			}
+			p.subBlocks.evict(podIdentifier, hashesToEvict)
 			// The Index handles engine->request key resolution internally for
 			// both 1:1 (legacy) and 1:many (canonical) mappings.
 			engineKeys := make([]kvblock.BlockHash, len(hashesToEvict))
