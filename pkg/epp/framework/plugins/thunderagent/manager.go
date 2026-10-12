@@ -162,8 +162,10 @@ func (m *sessionManager) idleSessionsLocked(p *endpointState, now time.Time, que
 
 func (m *sessionManager) reclaimableTokensLocked(p *endpointState, now time.Time, queued map[string]bool) float64 {
 	var total float64
-	for _, s := range m.idleSessionsLocked(p, now, queued) {
-		total += s.size()
+	for id, s := range p.sessions {
+		if m.reclaimableLocked(s, now) && !queued[id] {
+			total += s.size()
+		}
 	}
 	return total
 }

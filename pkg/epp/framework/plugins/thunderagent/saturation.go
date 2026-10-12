@@ -42,6 +42,7 @@ func (a *ThunderAgent) Saturation(ctx context.Context, endpoints []datalayer.End
 	now := time.Now()
 	m := a.mgr
 
+	var prefillPods []string
 	m.mu.Lock()
 	for _, endpoint := range endpoints {
 		md := endpoint.GetMetadata()
@@ -52,7 +53,7 @@ func (a *ThunderAgent) Saturation(ctx context.Context, endpoints []datalayer.End
 		_, known := m.endpoints[id]
 		m.ensureEndpointLocked(id, a.endpointCapacity(endpoint.GetMetrics()), now)
 		if role := md.Labels[bylabel.RoleLabel]; !known && (role == bylabel.RolePrefill || role == bylabel.RoleEncodePrefill) {
-			log.FromContext(ctx).V(logutil.DEFAULT).Info("thunder-agent does not support prefill/decode disaggregation: prefill pods enter its ledger", "pod", id)
+			prefillPods = append(prefillPods, id)
 		}
 	}
 	// A pod the endpoint list has stopped reporting is gone: unbind its
@@ -69,5 +70,8 @@ func (a *ThunderAgent) Saturation(ctx context.Context, endpoints []datalayer.End
 		delete(m.endpoints, id)
 	}
 	m.mu.Unlock()
+	for _, id := range prefillPods {
+		log.FromContext(ctx).V(logutil.DEFAULT).Info("thunder-agent does not support prefill/decode disaggregation: prefill pods enter its ledger", "pod", id)
+	}
 	return 0.0
 }

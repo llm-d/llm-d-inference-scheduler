@@ -70,9 +70,10 @@ type candidate struct {
 // processor tries again on its next dispatch cycle.
 //
 // Room is capacity * utilThreshold minus the working set. When the picked
-// session does not fit, or an admitted session's turn pushes its pod over the
-// ceiling, sessions idle past idleLeaseSeconds give up their room, longest
-// idle first, and are paused. Sessions with a turn queued are never paused,
+// session does not fit (including a session force-admitted onto its own pod),
+// or an admitted session's turn pushes its pod over the ceiling, sessions idle
+// past idleLeaseSeconds give up their room, longest idle first, and are
+// paused. Sessions with a turn queued are never paused,
 // and nothing is paused until a session is picked.
 func (a *ThunderAgent) Pick(ctx context.Context, band fwkfc.PriorityBandAccessor) (fwkfc.FlowQueueAccessor, error) {
 	if band == nil {
@@ -256,6 +257,9 @@ func (a *ThunderAgent) admitLocked(best *candidate, now time.Time, queued map[st
 		// A force-admitted new session that fits no pod: the scheduler
 		// places it and PreRequest binds it.
 		return 0
+	case s.endpoint != nil:
+		// A force-admitted session that fits no pod returns to its own pod.
+		paused = m.reclaimLocked(s.endpoint, now, queued, a.roomLocked(s.endpoint, now), a.fitTokens(s.endpoint, best.tokens))
 	}
 	s.reservedTokens = best.tokens
 	s.reservedUntil = now.Add(reservationTTL)

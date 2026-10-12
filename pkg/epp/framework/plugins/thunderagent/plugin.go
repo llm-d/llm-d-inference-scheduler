@@ -189,6 +189,7 @@ func (a *ThunderAgent) Extract(_ context.Context, event fwkdl.EndpointEvent) err
 type stateDump struct {
 	RunningSessions int                     `json:"runningSessions"`
 	IdleSessions    int                     `json:"idleSessions"`
+	PausedSessions  int                     `json:"pausedSessions"`
 	Endpoints       map[string]endpointDump `json:"endpoints"`
 }
 
@@ -204,6 +205,7 @@ func (a *ThunderAgent) DumpState() (json.RawMessage, error) {
 	dump := stateDump{
 		RunningSessions: snap.running,
 		IdleSessions:    snap.idle,
+		PausedSessions:  snap.paused,
 		Endpoints:       make(map[string]endpointDump, len(snap.endpoints)),
 	}
 	for id, e := range snap.endpoints {

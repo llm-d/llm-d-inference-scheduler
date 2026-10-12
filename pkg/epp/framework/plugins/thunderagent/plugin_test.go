@@ -73,6 +73,8 @@ func TestDumpState(t *testing.T) {
 	a := newTestAgent(testConfig())
 	runTurn(t, a, "secret-session", schedEndpoint("pod-a", 0, 0), 400, 300)
 	_ = startTurn(t, a, "other", schedEndpoint("pod-a", 0, 0), 800)
+	runTurn(t, a, "paused", schedEndpoint("pod-a", 0, 0), 400, 200)
+	pause(a, "paused")
 
 	raw, err := a.DumpState()
 	require.NoError(t, err)
@@ -83,6 +85,7 @@ func TestDumpState(t *testing.T) {
 	require.Equal(t, stateDump{
 		RunningSessions: 1,
 		IdleSessions:    1,
+		PausedSessions:  1,
 		Endpoints: map[string]endpointDump{
 			"default/pod-a": {WorkingSetTokens: 500, CapacityTokens: 1000},
 		},

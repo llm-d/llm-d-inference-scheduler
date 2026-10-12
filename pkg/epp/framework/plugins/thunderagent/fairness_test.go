@@ -255,6 +255,28 @@ func TestStarvationForcesAdmission(t *testing.T) {
 	require.Equal(t, q, pick(t, a, q))
 }
 
+// A paused session force-admitted past the deadline that fits even after
+// reclaim takes the room of its pod's sessions idle past the lease.
+func TestStarvingPausedSessionReclaimsIdle(t *testing.T) {
+	cfg := testConfig()
+	cfg.HeadWaitStarvationMs = 1000
+	a := newTestAgent(cfg)
+	seed(t, a, "s1", "pod-a", 600)
+	seed(t, a, "s3", "pod-a", 400) // within the lease
+	seed(t, a, "s2", "pod-a", 700)
+	pause(a, "s2")
+	idleFor(a, "s1", time.Minute)
+	primeFitView(a, dlEndpoint("pod-a"))
+
+	// s2 needs 700; room 0 plus s1's reclaimable 600 is not enough.
+	q := makeQueue("s2", time.Now().Add(-2*time.Second), 2000)
+	require.Equal(t, q, pick(t, a, q))
+	require.True(t, isPaused(a, "s1"))
+	require.False(t, isPaused(a, "s3"))
+	// s3 plus the 700 reserved for s2.
+	require.Equal(t, float64(1100), endpointTokens(a, "default/pod-a"))
+}
+
 // Without a fit view (the plugin not wired as the saturation detector) the
 // gate fails open and only class ordering remains.
 func TestFailsOpenWithoutFitView(t *testing.T) {
