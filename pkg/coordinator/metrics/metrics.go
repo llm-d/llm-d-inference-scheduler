@@ -83,14 +83,18 @@ const (
 // cannot be reserved: it declares no output token limit, or the limit it declares
 // would reserve more than the per-request cap allows. FallbackUnsupported is a chat or
 // text request whose reply may carry fields the reassembler drops (tool or
-// function calls, logprobs). ErrorCeiling is a forced request whose reassembled
+// function calls, logprobs). FallbackOversize is a Responses request whose
+// completed frame did not fit the reservation (which prices generated tokens, not
+// the request fields the frame echoes); it falls back rather than failing a reply
+// the pod returned intact. ErrorCeiling is a forced request whose reassembled
 // response exceeded its reserved budget and was aborted before any bytes reached
-// the client. The three fallback outcomes take the non-forced pass-through.
+// the client. The four fallback outcomes take the non-forced pass-through.
 const (
 	ForceStreamResultForced              = "forced"
 	ForceStreamResultFallbackBudget      = "fallback_budget"
 	ForceStreamResultFallbackUnbounded   = "fallback_unbounded"
 	ForceStreamResultFallbackUnsupported = "fallback_unsupported"
+	ForceStreamResultFallbackOversize    = "fallback_oversize"
 	ForceStreamResultErrorCeiling        = "error_ceiling"
 )
 

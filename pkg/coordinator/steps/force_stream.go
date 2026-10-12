@@ -83,6 +83,14 @@ const (
 // nothing was written to the client when this is returned.
 var errForceStreamCeiling = errors.New("force-stream: buffered response exceeded its reserved budget")
 
+// errForceStreamOversize marks a Responses forced reply whose response.completed
+// frame did not fit the reservation. The reservation prices generated tokens, not
+// the request-derived fields (tools, instructions, schema, metadata) the completed
+// frame echoes, so the shortfall is a coordinator estimate miss, not a pod fault.
+// Nothing has reached the client, so the decode step falls back to the
+// pass-through rather than failing a reply the pod returned intact.
+var errForceStreamOversize = errors.New("force-stream: responses reply exceeded its reserved budget; falling back to pass-through")
+
 // sseDataPrefix and sseDoneMarker delimit the SSE frames the upstream streams.
 // Each data line carries one JSON object; the stream ends with data: [DONE].
 // sseDataPrefix is intentionally the bare "data:" without the trailing space
@@ -350,10 +358,16 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		// The scanner's frame cap is the request's reservation (or the 1 MiB
-		// guard), so a frame that trips it has overflowed the reserved budget;
-		// count it as a ceiling abort rather than a generic read error.
 		if errors.Is(err, bufio.ErrTooLong) {
+			// The Responses reply arrives in one frame whose cap is the reservation,
+			// but the reservation prices only generated tokens, not the request
+			// fields (tools, instructions, schema) the completed frame echoes. An
+			// overflow there is a coordinator shortfall, not a pod fault, so fall
+			// back to the pass-through. For the other shapes an oversized frame is
+			// anomalous: a ceiling abort.
+			if reassembler.shape == sseShapeResponses {
+				return errForceStreamOversize
+			}
 			return errForceStreamCeiling
 		}
 		return fmt.Errorf("force-stream: read upstream: %w", err)

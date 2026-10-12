@@ -100,7 +100,12 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 				case !ok:
 					coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackUnbounded)
 				case s.budget.tryReserve(reserved):
-					return s.executeForceStream(ctx, logger, reqCtx, shape, reserved)
+					if err := s.executeForceStream(ctx, logger, reqCtx, shape, reserved); !errors.Is(err, errForceStreamOversize) {
+						return err
+					}
+					// The Responses completed frame did not fit the reservation and
+					// nothing was written, so fall through to the pass-through below.
+					coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackOversize)
 				default:
 					coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackBudget)
 				}

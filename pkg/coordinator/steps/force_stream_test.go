@@ -853,6 +853,78 @@ func TestForceStream_MalformedFrame_BufferedPath(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation must be released after an abort")
 }
 
+// TestForceStream_Responses_OversizedFrame_FallsBack covers the regression where
+// a Responses response.completed frame echoes request fields the reservation does
+// not price (tools, instructions, schema), so the frame can exceed the reservation
+// that is also its scanner cap. Rather than failing a reply the pod returned
+// intact, the request falls back to the pass-through: the client gets 200, and the
+// outcome is counted as fallback_oversize.
+func TestForceStream_Responses_OversizedFrame_FallsBack(t *testing.T) {
+	passthroughReply := `{"id":"resp-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			// The completed frame's echoed request field dwarfs the ~2.5KB reserved
+			// for max_output_tokens=16, so it trips the scanner's frame cap.
+			echo := strings.Repeat("x", 16<<10)
+			completed := fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp-1","model":"llama-3","status":"completed","instructions":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}}`, echo)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			for _, f := range []string{
+				`{"type":"response.created","response":{"id":"resp-1","model":"llama-3","status":"in_progress"}}`,
+				`{"type":"response.output_text.delta","delta":"hi"}`,
+				completed,
+			} {
+				fmt.Fprintf(w, "data: %s\n\n", f)
+				flusher.Flush()
+			}
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			flusher.Flush()
+			return
+		}
+		// Fallback pass-through: the pod returns the reply non-streaming.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-resp-oversize",
+		OriginalPath:     reqcommon.PathResponses,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model":             "llama-3",
+			"stream":            false,
+			"max_output_tokens": 16,
+			"input":             "hi",
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "an oversized completed frame must fall back, not error")
+
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client must get the pod's reply, not a 500")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body), "the client receives the pass-through reply")
+
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackOversize), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorCeiling), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "the reservation is released after the fallback")
+}
+
 func TestForceStream_Concurrency(t *testing.T) {
 	frames := []string{
 		`{"request_id":"c","choices":[{"index":0,"token_ids":[1,2]}],"usage":null}`,
