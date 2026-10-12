@@ -62,10 +62,10 @@ const (
 	tokenizedPromptKeyID = "TokenizedPrompt"
 )
 
-// Backend identifiers reported on the tokenize span.
+// Backend identifiers reported on the tokenize span and returned by Plugin.Backend.
 const (
-	backendVLLM     = "vllm"
-	backendEstimate = "estimate"
+	BackendVLLM     = "vllm"
+	BackendEstimate = "estimate"
 )
 
 // resultSkippedNoTokens marks a tokenize span whose backend returned no tokens,
@@ -314,14 +314,14 @@ func NewPlugin(ctx context.Context, name string, config *tokenizerPluginConfig) 
 			legacyMessages: legacyMessages, legacyResponses: legacyResponses,
 			warmupAuth: vllmWarmupAuthHeader(),
 		}
-		backendName = backendVLLM
+		backendName = BackendVLLM
 		endpointPicker, _ = renderer.endpointPicker.(*discoveredEndpointPicker)
 		if endpointPicker != nil && endpointPicker.config.DiscoverModelLimits {
 			go endpointPicker.watchModelLimits(ctx, renderer.client, config.ModelName)
 		}
 	default:
 		backend = estimateBackend{img: newImageEstimator(config.Estimate), vid: newVideoEstimator(config.Estimate), aud: newAudioEstimator(config.Estimate)}
-		backendName = backendEstimate
+		backendName = BackendEstimate
 	}
 
 	typedName := plugin.TypedName{Type: PluginType, Name: name}
@@ -363,32 +363,9 @@ func (p *Plugin) TypedName() plugin.TypedName {
 	return p.typedName
 }
 
-// Kind names a token-producer backend internally so consumers can whitelist
-// the backends they accept. The names are stable code identifiers, not
-// user-settable config strings.
-type Kind string
-
-const (
-	// KindRender is the vllm /render backend, which returns the engine's token IDs.
-	KindRender Kind = "render"
-	// KindEstimate is the byte-packing pseudo-token backend used when no real
-	// tokenizer is configured.
-	KindEstimate Kind = "estimate"
-)
-
-// BackendKind reports which backend drives this plugin. Downstream consumers
-// that need engine-aligned token IDs (e.g. precise-prefix-cache, whose
-// KV-block hashes must match the model server) check the kind at startup
-// against an explicit whitelist.
-func (p *Plugin) BackendKind() Kind {
-	switch p.backend.(type) {
-	case renderBackend:
-		return KindRender
-	case estimateBackend:
-		return KindEstimate
-	default:
-		return ""
-	}
+// Backend returns the configured backend identifier (BackendVLLM or BackendEstimate).
+func (p *Plugin) Backend() string {
+	return p.backendName
 }
 
 // Produces returns the data keys this plugin produces.

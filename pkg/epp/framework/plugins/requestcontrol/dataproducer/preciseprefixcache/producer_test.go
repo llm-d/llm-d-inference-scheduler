@@ -1020,6 +1020,18 @@ func TestValidateTokenProducer(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "token-producer")
 	})
+
+	t.Run("precise with custom-named render producer and estimate default: rejected", func(t *testing.T) {
+		handle := newHandle(t)
+		addTokenProducer(t, handle, `{}`)
+		customTP, err := tokenproducer.PluginFactory("render-tp", plugin.StrictDecoder(json.RawMessage(`{"modelName":"test-model"}`)), handle)
+		require.NoError(t, err)
+		handle.AddPlugin("render-tp", customTP)
+		addPrecise(t, handle)
+		err = ValidateTokenProducer(handle)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "token-producer")
+	})
 }
 
 // A null kvEventsConfig resets the seeded defaults to a nil pointer; the

@@ -92,7 +92,7 @@ func TestProduce_EmitsTokenizeSpan(t *testing.T) {
 	require.NoError(t, p.Produce(context.Background(), chatRequest(), nil))
 
 	attrs := spanAttrs(tokenizeSpan(t, recorder))
-	assert.Equal(t, backendVLLM, attrs[semconv.LLMDEPPTokenProducerBackendKey].AsString())
+	assert.Equal(t, BackendVLLM, attrs[semconv.LLMDEPPTokenProducerBackendKey].AsString())
 	assert.Equal(t, int64(3), attrs[semconv.LLMDEPPTokenProducerTokenCountKey].AsInt64())
 	assert.Equal(t, "model-a", attrs[semconv.GenAIRequestModelKey].AsString())
 	assert.Equal(t, "req-1", attrs[semconv.GenAIRequestIDKey].AsString())

@@ -169,12 +169,11 @@ func ValidateTokenProducer(handle plugin.Handle) error {
 		return nil
 	}
 
-	for _, p := range handle.GetAllPlugins() {
-		if tp, ok := p.(*tokenproducer.Plugin); ok && tp.BackendKind() == tokenproducer.KindRender {
-			return nil
-		}
+	tp, ok := handle.Plugin(tokenproducer.PluginType).(*tokenproducer.Plugin)
+	if !ok || tp.Backend() != tokenproducer.BackendVLLM {
+		return fmt.Errorf("%s requires a %s plugin with a vllm backend", PluginType, tokenproducer.PluginType)
 	}
-	return fmt.Errorf("%s requires a token-producer plugin with a vllm backend", PluginType)
+	return nil
 }
 
 // New constructs a precise-prefix-cache-producer. The instance name becomes
