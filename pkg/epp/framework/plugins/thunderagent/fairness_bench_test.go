@@ -46,7 +46,6 @@ func BenchmarkPickAdmittedHeads(b *testing.B) {
 	band := bandOf(qs...)
 	ctx := context.Background()
 
-	b.ResetTimer()
 	for b.Loop() {
 		if _, err := a.Pick(ctx, band); err != nil {
 			b.Fatal(err)

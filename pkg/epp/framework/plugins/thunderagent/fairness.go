@@ -60,9 +60,7 @@ type candidate struct {
 // TODO(#3221): add an option to restore a paused session onto another pod
 // with room when its own pod stays full.
 //
-// Order among the sessions allowed to dispatch:
-// waited past headWaitStarvationMs (oldest first) ->
-// class (admitted -> paused -> new) -> smallest footprint -> oldest.
+// The sessions allowed to dispatch are ranked by betterThan.
 // A session that fits no pod does not block the others, so smaller sessions
 // can take room a larger paused one waits for; the starvation backstop bounds
 // that wait.
@@ -113,8 +111,6 @@ func (a *ThunderAgent) Pick(ctx context.Context, band fwkfc.PriorityBandAccessor
 
 	m := a.mgr
 	m.mu.Lock()
-	// Admitted and anonymous heads always dispatch, so pod room is computed
-	// only when a paused or new session is waiting.
 	var rooms, spare map[*endpointState]float64
 	if a.needsFitCheckLocked(candidates) {
 		rooms = make(map[*endpointState]float64, len(m.endpoints))
@@ -158,7 +154,8 @@ func (a *ThunderAgent) Pick(ctx context.Context, band fwkfc.PriorityBandAccessor
 }
 
 // needsFitCheckLocked reports whether any candidate is a paused or new
-// session, the only classes that must fit a pod before they dispatch.
+// session, the only classes that must fit a pod before they dispatch. When
+// none is, Pick skips computing pod room.
 func (a *ThunderAgent) needsFitCheckLocked(candidates []*candidate) bool {
 	for _, c := range candidates {
 		if c.id == "" {

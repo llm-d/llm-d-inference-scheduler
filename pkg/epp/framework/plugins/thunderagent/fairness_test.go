@@ -295,7 +295,7 @@ func TestGateUsesHeadSession(t *testing.T) {
 func TestAdmittedSizeAddsTurnsInFlight(t *testing.T) {
 	a := newTestAgent(testConfig())
 	seed(t, a, "s1", "pod-a", 300)
-	_ = startTurn(t, a, "s1", schedEndpoint("pod-a", 0, 0), 1600) // 400 in flight
+	startTurn(t, a, "s1", schedEndpoint("pod-a", 0, 0), 1600) // 400 in flight
 	primeFitView(a, dlEndpoint("pod-a"))
 
 	q := makeQueue("s1", time.Now(), 1200) // estimate 300: 400 + 300 = 700

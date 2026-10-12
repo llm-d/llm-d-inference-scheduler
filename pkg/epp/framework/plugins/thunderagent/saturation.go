@@ -37,8 +37,7 @@ import (
 // only stall the pool. The per-session gate lives in Pick instead, where an
 // admitted session's turn can be told apart from a new one. This hook is
 // used because it is the only flow-control callback that receives the
-// endpoint list each dispatch cycle. There is no pause sweep: Pick pauses
-// idle sessions on demand, when a picked turn needs their room.
+// endpoint list each dispatch cycle.
 func (a *ThunderAgent) Saturation(ctx context.Context, endpoints []datalayer.Endpoint) float64 {
 	now := time.Now()
 	m := a.mgr
