@@ -10,6 +10,8 @@ live local value and combines it with the cached peer aggregate.
 
 ## Configuration
 
+Enable this Alpha plugin with `--allow-experimental-plugins=true`.
+
 The plugin also accepts `redis-state-store` as a compatibility alias.
 
 ```yaml

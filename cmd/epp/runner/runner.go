@@ -666,9 +666,9 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(attrtopology.TopologyExtractorType, fwkplugin.StabilityAlpha, exttopology.Factory)
 
 	// cross-replica syncers
-	// Beta
-	fwkplugin.Register(redis.RedisSyncerType, fwkplugin.StabilityBeta, redis.RedisSyncerFactory)
-	fwkplugin.Register("redis-state-store", fwkplugin.StabilityBeta, redis.RedisSyncerFactory)
+	// Alpha
+	fwkplugin.Register(redis.RedisSyncerType, fwkplugin.StabilityAlpha, redis.RedisSyncerFactory)
+	fwkplugin.Register("redis-state-store", fwkplugin.StabilityAlpha, redis.RedisSyncerFactory)
 
 	// data layer DCGM source/extractor
 	// Alpha
