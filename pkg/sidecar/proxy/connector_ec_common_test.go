@@ -413,6 +413,8 @@ func TestExtractMMItemsConvertsAnthropicImages(t *testing.T) {
 			map[string]any{"type": "tool_result", "tool_use_id": "toolu_1", "content": []any{
 				map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": "aaaa"}},
 				map[string]any{"type": "image", "source": map[string]any{"media_type": "image/gif", "data": "bbbb"}},
+				map[string]any{"type": "image", "source": map[string]any{"type": "base64", "data": "cccc"}},
+				map[string]any{"type": "image", "source": map[string]any{"url": "https://example.com/bare.png"}},
 				map[string]any{"type": "tool_result", "content": []any{
 					map[string]any{"type": "image", "source": map[string]any{"type": "url", "url": "https://example.com/deep.png"}},
 				}},
@@ -437,6 +439,8 @@ func TestExtractMMItemsConvertsAnthropicImages(t *testing.T) {
 		map[string]any{"url": "https://example.com/a.png"},
 		map[string]any{"url": "data:image/png;base64,aaaa"},
 		map[string]any{"url": "data:image/gif;base64,bbbb"},
+		map[string]any{"url": "data:image/jpeg;base64,cccc"},
+		map[string]any{"url": "https://example.com/bare.png"},
 		map[string]any{"url": "https://example.com/assistant.png"},
 	}, urls)
 
