@@ -39,6 +39,7 @@ import (
 // opts.GRPCPort is ignored.
 func NewTestRunnerSetup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, mockDataSource fwkdl.DataSource, grpcListener net.Listener) (*Runner, ctrl.Manager, datastore.Datastore, error) {
 	runner := NewRunner()
+	runner.servingCtx, runner.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
 
 	if mockDataSource != nil {
 		mockType := mockDataSource.TypedName().Type

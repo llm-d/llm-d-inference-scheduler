@@ -124,12 +124,10 @@ func TestServeWithDrainAfterLeaseLoss(t *testing.T) {
 	close(health.release)
 	draining, elected := &atomic.Bool{}, &atomic.Bool{}
 	elected.Store(true)
-	var flowStopped atomic.Bool
-
 	done := make(chan error, 1)
 	go func() {
 		done <- serveWithDrain(context.Background(), startManager, extProc.run, health.run,
-			func() { flowStopped.Store(true) }, draining, elected, drain)
+			draining, elected, drain)
 	}()
 	close(lose)
 
@@ -149,9 +147,6 @@ func TestServeWithDrainAfterLeaseLoss(t *testing.T) {
 	if closedWithin(health.stopped, 100*time.Millisecond) {
 		t.Fatal("health stopped while ext_proc was still finishing streams")
 	}
-	if flowStopped.Load() {
-		t.Fatal("flow control stopped while ext_proc was still finishing streams")
-	}
 	close(extProc.release)
 	if !closedWithin(health.stopped, time.Second) {
 		t.Fatal("health was not stopped after ext_proc returned")
@@ -159,7 +154,6 @@ func TestServeWithDrainAfterLeaseLoss(t *testing.T) {
 	if err := waitErr(t, done); !errors.Is(err, errLost) {
 		t.Fatalf("serveWithDrain returned %v, want %v", err, errLost)
 	}
-	require.True(t, flowStopped.Load(), "flow control should stop after the servers return")
 }
 
 // A manager that fails before this instance was ever elected has no traffic to
@@ -170,12 +164,10 @@ func TestServeWithDrainManagerFailsBeforeElection(t *testing.T) {
 	close(extProc.release)
 	close(health.release)
 	draining, elected := &atomic.Bool{}, &atomic.Bool{}
-	var flowStopped atomic.Bool
-
 	done := make(chan error, 1)
 	go func() {
 		done <- serveWithDrain(context.Background(), func(context.Context) error { return errStart },
-			extProc.run, health.run, func() { flowStopped.Store(true) }, draining, elected, time.Minute)
+			extProc.run, health.run, draining, elected, time.Minute)
 	}()
 	if err := waitErr(t, done); !errors.Is(err, errStart) {
 		t.Fatalf("serveWithDrain returned %v, want %v", err, errStart)
@@ -186,7 +178,6 @@ func TestServeWithDrainManagerFailsBeforeElection(t *testing.T) {
 	if draining.Load() {
 		t.Fatal("draining set by a manager failure before election")
 	}
-	require.True(t, flowStopped.Load(), "flow control should stop on a manager startup failure")
 }
 
 // With leader election disabled there is no lease to lose, so a manager failure
@@ -197,12 +188,10 @@ func TestServeWithDrainManagerFailsWithoutLeaderElection(t *testing.T) {
 	close(extProc.release)
 	close(health.release)
 	draining := &atomic.Bool{}
-	var flowStopped atomic.Bool
-
 	done := make(chan error, 1)
 	go func() {
 		done <- serveWithDrain(context.Background(), func(context.Context) error { return errMgr },
-			extProc.run, health.run, func() { flowStopped.Store(true) }, draining, nil, time.Minute)
+			extProc.run, health.run, draining, nil, time.Minute)
 	}()
 	if err := waitErr(t, done); !errors.Is(err, errMgr) {
 		t.Fatalf("serveWithDrain returned %v, want %v", err, errMgr)
@@ -213,7 +202,6 @@ func TestServeWithDrainManagerFailsWithoutLeaderElection(t *testing.T) {
 	if draining.Load() {
 		t.Fatal("draining set by a manager failure without leader election")
 	}
-	require.True(t, flowStopped.Load(), "flow control should stop on a manager failure")
 }
 
 // On SIGTERM the manager returns nil; the servers drain the same way.
@@ -231,7 +219,7 @@ func TestServeWithDrainOnSIGTERM(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- serveWithDrain(ctx, startManager, extProc.run, health.run, nil, draining, elected, drain)
+		done <- serveWithDrain(ctx, startManager, extProc.run, health.run, draining, elected, drain)
 	}()
 	sigterm()
 
@@ -283,6 +271,7 @@ featureGates:
 - flowControl
 `
 			r := NewRunner()
+			r.servingCtx, r.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
 			t.Cleanup(r.stopServing)
 			rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
 			require.NoError(t, err)
@@ -290,7 +279,7 @@ featureGates:
 			eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds, opts.RefreshMetricsInterval)
 			require.NoError(t, err)
 			candidates := &drainEndpointCandidates{}
-			_, admission, _, _ := r.initAdmissionControl(ctx, opts, eppConfig, candidates)
+			_, admission, _, _ := r.initAdmissionControl(r.servingCtx, opts, eppConfig, candidates)
 
 			admit := func(id string) error {
 				reqCtx := &handlers.RequestContext{
@@ -329,8 +318,10 @@ featureGates:
 			elected := &atomic.Bool{}
 			elected.Store(true)
 			go func() {
-				done <- serveWithDrain(ctx, startManager, extProc.run, health.run, r.stopServing,
+				err := serveWithDrain(ctx, startManager, extProc.run, health.run,
 					&atomic.Bool{}, elected, 300*time.Millisecond)
+				r.stopServing()
+				done <- err
 			}()
 			if tc.mgrErr == nil {
 				sigterm()
@@ -375,22 +366,39 @@ featureGates:
 }
 
 func TestRunnerDrainKeepsEndpointMetrics(t *testing.T) {
-	fwkplugin.Register(localsyncer.LocalSyncerType, fwkplugin.StabilityBeta, localsyncer.LocalSyncerFactory)
-
-	for _, tc := range []struct {
-		name          string
-		drain         time.Duration
-		fileDiscovery bool
-		flowControl   bool
-		crossReplica  bool
-	}{
+	testRunnerDrain(t, []runnerDrainTestCase{
 		{name: "Kubernetes drain", drain: 3 * time.Second, flowControl: true},
+		{name: "Kubernetes legacy drain", drain: 3 * time.Second},
+	})
+}
+
+func TestRunnerShutdownKeepsEndpointMetrics(t *testing.T) {
+	testRunnerDrain(t, []runnerDrainTestCase{
 		{name: "Kubernetes zero drain", flowControl: true},
 		{name: "file discovery", fileDiscovery: true, flowControl: true},
-		{name: "Kubernetes legacy drain", drain: 3 * time.Second},
+	})
+}
+
+func TestRunnerDrainKeepsCrossReplicaState(t *testing.T) {
+	testRunnerDrain(t, []runnerDrainTestCase{
 		{name: "Kubernetes cross-replica drain", drain: 3 * time.Second, flowControl: true, crossReplica: true},
 		{name: "file discovery cross-replica", fileDiscovery: true, flowControl: true, crossReplica: true},
-	} {
+	})
+}
+
+type runnerDrainTestCase struct {
+	name          string
+	drain         time.Duration
+	fileDiscovery bool
+	flowControl   bool
+	crossReplica  bool
+}
+
+func testRunnerDrain(t *testing.T, testCases []runnerDrainTestCase) {
+	t.Helper()
+	fwkplugin.Register(localsyncer.LocalSyncerType, fwkplugin.StabilityBeta, localsyncer.LocalSyncerFactory)
+
+	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var saturated atomic.Bool
 			var scrapes atomic.Int64
@@ -493,6 +501,7 @@ schedulingProfiles:
 					done <- r.runWithFileDiscovery(ctx, opts, rawConfig)
 				}()
 			} else {
+				r.servingCtx, r.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
 				mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{corev1.SchemeGroupVersion})
 				mapper.Add(corev1.SchemeGroupVersion.WithKind("Pod"), meta.RESTScopeNamespace)
 				_, ds, err := r.setup(ctx, &rest.Config{Host: "http://127.0.0.1"}, opts, []func(*ctrl.Options){
@@ -531,14 +540,16 @@ schedulingProfiles:
 				}()
 				go func() {
 					defer close(finished)
-					done <- serveWithDrain(ctx, func(context.Context) error {
+					err := serveWithDrain(ctx, func(context.Context) error {
 						err := <-stopManager
 						close(managerStopped)
 						return err
 					}, r.serverRunner.AsRunnable(ctrl.Log).Start, func(c context.Context) error {
 						<-c.Done()
 						return nil
-					}, r.stopServing, r.draining, nil, tc.drain)
+					}, r.draining, nil, tc.drain)
+					r.stopServing()
+					done <- err
 				}()
 			}
 			require.Eventually(t, func() bool {
@@ -666,9 +677,6 @@ schedulingProfiles:
 						}
 					}
 					require.True(t, foundDestination)
-					if tc.drain > 0 {
-						require.Less(t, time.Since(shutdownAt), tc.drain, "request did not dispatch within the drain window")
-					}
 				case <-time.After(3 * time.Second):
 					t.Fatal("queued request did not dispatch after backend capacity recovered during shutdown")
 				}

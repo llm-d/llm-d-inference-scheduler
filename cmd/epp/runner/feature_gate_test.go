@@ -131,6 +131,7 @@ featureGates:
 			opts.PoolName = testPoolName
 
 			r := NewRunner()
+			r.servingCtx, r.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
 			t.Cleanup(r.stopServing)
 			rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
 			require.NoError(t, err)
@@ -151,7 +152,7 @@ featureGates:
 			endpointCandidates := contracts.EndpointCandidates(
 				requestcontrol.NewDatastoreEndpointCandidates(ds))
 			_, admissionController, controlPlane, _ :=
-				r.initAdmissionControl(ctx, opts, eppConfig, endpointCandidates)
+				r.initAdmissionControl(r.servingCtx, opts, eppConfig, endpointCandidates)
 
 			if wantEnabled {
 				require.IsType(t, &requestcontrol.FlowControlAdmissionController{}, admissionController)
@@ -202,16 +203,19 @@ func TestServingContext(t *testing.T) {
 			key := lifecycleKey{}
 			ctx, cancel := context.WithCancel(context.WithValue(t.Context(), key, "request-serving"))
 			defer cancel()
-			_, err := r.parseConfigurationPhaseOne(ctx, opts)
+			r.servingCtx, r.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
+			rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
 			require.NoError(t, err)
-			servingCtx := r.servingContext(ctx)
-			require.Same(t, servingCtx, r.servingContext(ctx), "serving dependencies must share their lifecycle")
-			require.Equal(t, "request-serving", servingCtx.Value(key))
+			ds := datastore.NewDatastore(r.servingCtx, r.setupMetricsCollection(opts))
+			_, err = r.parseConfigurationPhaseTwo(r.servingCtx, rawConfig, ds, opts.RefreshMetricsInterval)
+			require.NoError(t, err)
+			require.Same(t, r.servingCtx, r.PluginHandle.Context(), "serving dependencies must share their lifecycle")
+			require.Equal(t, "request-serving", r.PluginHandle.Context().Value(key))
 
 			cancel()
-			require.NoError(t, servingCtx.Err(), "serving dependencies must remain running during drain")
+			require.NoError(t, r.PluginHandle.Context().Err(), "serving dependencies must remain running during drain")
 			r.stopServing()
-			require.ErrorIs(t, servingCtx.Err(), context.Canceled)
+			require.ErrorIs(t, r.PluginHandle.Context().Err(), context.Canceled)
 		})
 	}
 }
