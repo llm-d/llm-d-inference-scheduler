@@ -19,6 +19,7 @@ package kvblock_test
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -165,6 +166,33 @@ func TestInMemoryIndexClearIgnoresCancellation(t *testing.T) {
 	for _, key := range keys {
 		assert.Equal(t, []PodEntry{retained}, found[key], "key %v", key)
 	}
+}
+
+// cancelAfterFirstErrCheck reports no error on its first Err call and
+// context.Canceled afterwards, so a lookup sees the cancellation only after
+// its first cancellation checkpoint.
+type cancelAfterFirstErrCheck struct {
+	context.Context
+	calls atomic.Int32
+}
+
+func (c *cancelAfterFirstErrCheck) Err() error {
+	if c.calls.Add(1) == 1 {
+		return nil
+	}
+	return context.Canceled
+}
+
+// A lookup cancelled between a checkpoint and a missing key reports the
+// cancellation instead of the partial prefix read before the miss.
+func TestInMemoryIndexLookupCancelledBeforeMiss(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(t.Context())
+	index := createInMemoryIndexForTesting(t)
+	require.NoError(t, index.Add(ctx, nil, []BlockHash{1}, []PodEntry{{PodIdentifier: "pod-a", DeviceTier: "gpu"}}))
+
+	found, err := index.Lookup(&cancelAfterFirstErrCheck{Context: ctx}, []BlockHash{1, 2}, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, found)
 }
 
 // TestSpeculativeAnnotation tests that speculative and confirmed PodEntries

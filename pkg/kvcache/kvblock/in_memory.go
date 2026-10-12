@@ -290,7 +290,7 @@ func (m *InMemoryIndex) Lookup(ctx context.Context, requestKeys []BlockHash,
 			if traceLogger.Enabled() {
 				traceLogger.Info("no pods found for key, cutting search", "key", requestKey)
 			}
-			return podsPerKey, nil // early stop since prefix-chain breaks here
+			break // early stop since prefix-chain breaks here
 		}
 		var filtered []PodEntry
 		if pods != nil {
@@ -301,10 +301,7 @@ func (m *InMemoryIndex) Lookup(ctx context.Context, requestKeys []BlockHash,
 			if traceLogger.Enabled() {
 				traceLogger.Info("no pods found for key, cutting search", "key", requestKey)
 			}
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return podsPerKey, nil // early stop since prefix-chain breaks here
+			break // early stop since prefix-chain breaks here
 		}
 
 		highestHitIdx = idx
