@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,8 +43,8 @@ func createGrpcPayload(t *testing.T, msg proto.Message) []byte {
 	}
 
 	payload := make([]byte, 5+len(b))
-	payload[0] = 0 // 0 = uncompressed
-	binary.BigEndian.PutUint32(payload[1:5], uint32(len(b)))
+	payload[0] = 0                                           // 0 = uncompressed
+	binary.BigEndian.PutUint32(payload[1:5], uint32(len(b))) //#nosec G115 -- test fixture, small proto messages
 	copy(payload[5:], b)
 
 	return payload

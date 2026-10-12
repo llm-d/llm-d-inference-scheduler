@@ -1,5 +1,6 @@
 /*
 Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,10 +31,13 @@ import (
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
+	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	mmobs "github.com/llm-d/llm-d-router/pkg/epp/framework/observability/multimodal"
 	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	approxprefixconstants "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/approximateprefix/constants"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/prefixhash"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/prefixmetrics"
 	tokenproducer "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
 
@@ -158,6 +162,7 @@ func newDataProducer(ctx context.Context, name string, config config, handle plu
 	if err := registerMetrics(handle.Metrics()); err != nil {
 		return nil, err
 	}
+	prefixmetrics.Register()
 	// Surface the override to the operator so a too-small configured value is
 	// not silently swallowed. The clamp itself happens at request time in
 	// GetBlockSize and applies uniformly across endpoint metric, autotune
@@ -228,25 +233,45 @@ func (p *dataProducer) PluginState() *plugin.PluginState {
 // Produce is called by the director before scheduling requests.
 func (p *dataProducer) Produce(ctx context.Context, request *fwksched.InferenceRequest, pods []fwksched.Endpoint) error {
 	blockSize := p.GetBlockSize(pods)
-	perPromptHashes := prefixhash.GetBlockHashes(ctx, request, blockSize, p.resolveMaxBlocks(blockSize))
+	perPromptHashes, perPromptTokens := prefixhash.GetBlockHashesWithPromptTokens(ctx, request, blockSize, p.resolveMaxBlocks(blockSize))
 
+	candidates := make([]ServerID, len(pods))
+	for i, pod := range pods {
+		candidates[i] = ServerID(pod.GetMetadata().ID)
+	}
 	prefixCacheServers := make(map[ServerID]int)
+	predictedCachedTokens := make(map[ServerID]int)
 	totalBlocks := 0
-	for _, hashes := range perPromptHashes {
-		for server, matchLen := range p.matchLongestPrefix(ctx, hashes) {
-			prefixCacheServers[server] += matchLen
+	for i, hashes := range perPromptHashes {
+		for j, matchLen := range p.indexerInst.MatchLongestPrefix(hashes, candidates) {
+			if matchLen == 0 {
+				continue
+			}
+			prefixCacheServers[candidates[j]] += matchLen
+			predictedCachedTokens[candidates[j]] += min(matchLen*blockSize, perPromptTokens[i])
 		}
 		totalBlocks += len(hashes)
 	}
+	if v := log.FromContext(ctx).V(logutil.TRACE); v.Enabled() {
+		matched := make(map[string]int, len(prefixCacheServers))
+		for server, blocks := range prefixCacheServers {
+			matched[server.String()] = blocks
+		}
+		v.Info("Prefix cache match", "matchedBlocks", matched, "totalBlocks", totalBlocks)
+	}
 
+	bestAvailable := 0
 	for _, pod := range pods {
-		matchLen := prefixCacheServers[ServerID(pod.GetMetadata().ID)]
-		pod.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(matchLen, totalBlocks, blockSize))
+		id := ServerID(pod.GetMetadata().ID)
+		pod.Put(p.dk, attrprefix.NewPrefixCacheMatchInfo(prefixCacheServers[id], totalBlocks, blockSize))
+		bestAvailable = max(bestAvailable, predictedCachedTokens[id])
 	}
 
 	state := &SchedulingContextState{
-		PerPromptHashes:    perPromptHashes,
-		PrefixCacheServers: prefixCacheServers,
+		PerPromptHashes:           perPromptHashes,
+		PrefixCacheServers:        prefixCacheServers,
+		PredictedCachedTokens:     predictedCachedTokens,
+		BestAvailableCachedTokens: bestAvailable,
 	}
 
 	p.pluginState.Write(request.RequestID, plugin.StateKey(p.typedName.Name), state)
@@ -288,16 +313,49 @@ func (p *dataProducer) PreRequest(ctx context.Context, request *fwksched.Inferen
 		}
 	})
 
-	// Record metrics. Lengths are reported as a byte estimate (~averageCharactersPerToken bytes/token).
+	// Record metrics. Lengths are reported as a byte estimate (fwkrh.BytesPerToken bytes per token).
 	total := 0
 	for _, hashes := range state.PerPromptHashes {
 		total += len(hashes)
 	}
 	matchLen := state.PrefixCacheServers[ServerID(targetEndpoint.GetMetadata().ID)]
 	blockSize := p.GetBlockSize(primaryProfileResult.TargetEndpoints)
-	const averageCharactersPerToken = 4
-	recordPrefixCacheMatch(p.typedName.Name, p.typedName.Type, matchLen*blockSize*averageCharactersPerToken, total*blockSize*averageCharactersPerToken)
+	recordPrefixCacheMatch(p.typedName.Name, p.typedName.Type, matchLen*blockSize*fwkrh.BytesPerToken, total*blockSize*fwkrh.BytesPerToken)
+	if request.Body != nil {
+		predictionProfile, role := prefixmetrics.PredictionTarget(schedulingResult, experimentalDefaultPrefillProfile)
+		selected := state.PredictedCachedTokens[ServerID(predictionProfile.TargetEndpoints[0].GetMetadata().ID)]
+		// A profile that reports no scored candidates leaves only the chosen
+		// endpoint to go on, so selected stands in for both maxima. That keeps
+		// the histograms on the same requests, at the cost of reading as a
+		// perfect routing decision.
+		bestPredicted, bestAvailable := selected, selected
+		if scored := predictionProfile.ScoredCandidates; len(scored) > 0 {
+			bestPredicted = bestAmongScored(scored, state.PredictedCachedTokens, selected)
+			bestAvailable = state.BestAvailableCachedTokens
+		}
+		modality, _ := mmobs.Summary(request)
+		prefixmetrics.RecordPrediction(p.typedName.Name, p.typedName.Type, role, modality, prefixmetrics.Prediction{
+			Selected:      selected,
+			BestPredicted: bestPredicted,
+			BestAvailable: bestAvailable,
+			PromptTokens:  request.Body.TokenizedRequest.TokenCount(),
+		})
+	}
 	return nil
+}
+
+// bestAmongScored returns the highest prediction the picker could have chosen.
+// It walks the scored candidates rather than the prediction map, because the
+// map covers every candidate endpoint, including those the scheduler's filters
+// removed before the picker ran.
+func bestAmongScored(scored []fwksched.ScoredEndpoint, predicted map[ServerID]int, selected int) int {
+	best := selected
+	for _, candidate := range scored {
+		if md := candidate.GetMetadata(); md != nil {
+			best = max(best, predicted[ServerID(md.ID)])
+		}
+	}
+	return best
 }
 
 func (p *dataProducer) makeserver(targetEndpoint fwksched.Endpoint) server {
@@ -311,25 +369,6 @@ func (p *dataProducer) makeserver(targetEndpoint fwksched.Endpoint) server {
 		ServerID:       ServerID(targetEndpoint.GetMetadata().ID),
 		NumOfGPUBlocks: gpuBlocks,
 	}
-}
-
-// matchLongestPrefix returns a map of servers and length of prefix that each server caches, prefix length is defined in blocks.
-func (p *dataProducer) matchLongestPrefix(ctx context.Context, hashes []blockHash) map[ServerID]int {
-	loggerTrace := log.FromContext(ctx).V(logutil.TRACE)
-	res := make(map[ServerID]int)
-
-	// Use a greedy strategy to search from the longest prefix.
-	for _, hash := range hashes {
-		cachedServers := p.indexerInst.Get(hash)
-		if len(cachedServers) == 0 {
-			break
-		}
-		loggerTrace.Info("Found cached servers", "cachedServers", cachedServers, "total # blocks", len(hashes))
-		for server := range cachedServers {
-			res[server]++
-		}
-	}
-	return res
 }
 
 // GetBlockSize returns the block size in tokens, potentially auto-tuned from endpoint metrics.

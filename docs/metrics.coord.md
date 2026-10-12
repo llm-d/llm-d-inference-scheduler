@@ -51,10 +51,10 @@ three: what this page does not list is on EPP's endpoint (see [Metrics](metrics.
 
 ## Labels
 
-The `step` and `upstream` labels carry the same values, but measure different boundaries: a step is a pipeline stage, while an upstream is a single outbound call. They diverge where a stage is not one call: the `encode` step fans out one concurrent sub-request per multimodal entry, so a request with six images records one `step="encode"` observation and six `upstream="encode"` observations.
+The `step` and `upstream` labels carry the same values, but measure different boundaries: a step is a pipeline stage, while an upstream is a single outbound call. They diverge where a stage is not one call: the `encode` step fans out one concurrent sub-request per multimodal entry, so a request with six images records one `step="encode"` observation and six `upstream="encode"` observations. async-broker diverges the other way: it makes many Redis calls per request but counts only the enqueue, so its held-wait poll loop does not inflate the counter.
 
-- **`step`**: A stage of the internal pipeline, observed once per request per stage. Covers local work and all outbound calls made by that stage. The label value is the step's registered `Name()` (see `pipeline.Register`), so its cardinality is bounded by the set of registered pipeline steps. Values in the built-in registry: `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. See [Coordinator Architecture](coordinator_architecture.md).
-- **`upstream`**: A single outbound call, whatever its destination. Values: `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. A step that gains an outbound call gains a value here.
+- **`step`**: A stage of the internal pipeline, observed once per request per stage. Covers local work and all outbound calls made by that stage. The label value is the step's registered `Name()` (see `pipeline.Register`), so its cardinality is bounded by the set of registered pipeline steps. Values in the built-in registry: `async-broker`, `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. See [Coordinator Architecture](coordinator_architecture.md).
+- **`upstream`**: A single outbound call, whatever its destination. Values: `async-broker`, `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. A step that gains an outbound call gains a value here. async-broker names its enqueue call to Redis; its result lookups are not counted.
 - **`path`**: The sequence of disaggregation phases a request actually executed. Values: `decode-only`, `prefill-decode`, `encode-prefill-decode`. `encode-decode` is intentionally unreachable because encode implies prefill.
 
 ## Error classes
@@ -69,6 +69,7 @@ The `error_code` label on `request_error_total` and `step_errors_total` uses fiv
 
 **Key behaviors:**
 - The conditional-decode probe's HTTP 412 (the worker declined to serve it) is handled internally and is **not** an error. It is tracked separately by [`conditional_decode_probes_total`](#conditional_decode_probes_total-counter).
+- An error response that a pipeline step writes to the client itself counts in `request_error_total` and `step_errors_total`. The `async-broker` step does this for its validation 400s (`bad_request`), a failed enqueue (503, `upstream_transport`), the hold deadline (504, `upstream_5xx`), and every error status it relays from a stored result (`upstream_4xx` / `upstream_5xx` by band, including the 499 it writes for a cancelled result). A client that disconnects while the coordinator still holds the request is not counted, on either the enqueue or the hold path.
 - `upstream_4xx`, `upstream_5xx` and `upstream_transport` are recorded for every step that calls out, including `decode` and `conditional-decode`: their reverse proxy captures the upstream status in `ModifyResponse` and transport failures in `ErrorHandler`, and both steps translate a 4xx/5xx or transport error into an `UpstreamStreamedError` before any bytes are forwarded. A transport failure carries no status code, so it classifies as `upstream_transport` instead of by status band. What stays uncountable is a failure that surfaces after streaming has begun, since the 200 and a partial body are already on the wire.
 
 ## Metrics catalog
@@ -144,10 +145,10 @@ Recorded by every step that calls out: render to the renderer service, replace-m
 | Coordinator metric | EPP counterpart | Difference |
 |---|---|---|
 | Request family (`llm_d_coordinator_request_total`, etc.) | `llm_d_epp_*` (same names) | Coordinator counts single client requests at entry; EPP counts every sub-request reaching the gateway. EPP adds flow-control labels (`fairness_id`, `priority`). |
-| `llm_d_coordinator_execution_path_total` | `llm_d_epp_disagg_decision_total` | Coordinator observes the phases that actually ran on the client request; EPP records the routing decision that was made and adds plugin labels. |
+| `llm_d_coordinator_execution_path_total` | `llm_d_epp_disagg_decision_total` | Coordinator observes the phases that actually ran on the client request; EPP records the routing decision that was made and adds plugin labels. The coordinator's `path` and the EPP's `decision_type` take the same values. |
 | `llm_d_coordinator_step_*`, `llm_d_coordinator_upstream_request_*`, `llm_d_coordinator_conditional_decode_probes_total` | None | Unique to coordinator. |
 
-**EPP-only metrics:** Scheduling, flow control, and pool aggregates have no coordinator counterpart. EPP's token counts and TTFT do, but they are per leg: the same prompt reaches EPP on more than one leg, and decode-leg TTFT starts after render, encode, and prefill have finished, so neither describes a client request. Only the coordinator sees a client request as one request. See [Deliberate omissions](#deliberate-omissions) for what it could report and why it does not today.
+**EPP-only metrics:** Scheduling, flow control, and pool aggregates have no coordinator counterpart. EPP's token counts and TTFT do, but they are per request: the same prompt reaches EPP on more than one request, and decode-request TTFT starts after render, encode, and prefill have finished, so neither describes a client request. Only the coordinator sees a client request as one request. See [Deliberate omissions](#deliberate-omissions) for what it could report and why it does not today.
 
 ## Deliberate omissions
 
@@ -159,7 +160,7 @@ The coordinator emits no output or cached token-count metrics. Those values live
 
 The coordinator emits no TTFT metric. Identifying the first token requires parsing the streamed
 response, which the decode step does not do: it proxies bytes straight to the client. EPP measures
-TTFT, but only per leg, since each phase reaches it as a separate request, so its decode-leg
+TTFT, but only per request, since each phase reaches it as a separate request, so its decode-step
 `request_ttft_seconds` starts after render, encode, and prefill have already finished. Neither
 component reports the client's full wait for output.
 

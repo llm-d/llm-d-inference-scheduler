@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,8 +28,10 @@ import (
 	"k8s.io/utils/ptr"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	fwkplugins "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins"
 )
 
 var (
@@ -113,6 +115,57 @@ func TestNewVllmHTTPParser(t *testing.T) {
 	}
 }
 
+func TestVllmHTTPParser_RewritePriority(t *testing.T) {
+	plugin, err := VllmHTTPParserPluginFactory("test", nil, nil)
+	if err != nil {
+		t.Fatalf("VllmHTTPParserPluginFactory() error = %v", err)
+	}
+	parser, ok := plugin.(*VllmHTTPParser)
+	if !ok {
+		t.Fatalf("VllmHTTPParserPluginFactory() = %T, want *VllmHTTPParser", plugin)
+	}
+	payload := fwkrh.PayloadMap{"model": "test", "token_ids": []any{1, 2, 3}}
+
+	got, mutated, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{TargetEndpoint: &fwkdl.EndpointMetadata{
+		Labels: map[string]string{fwkplugins.EngineTypeLabelKey: "vllm"},
+	}}, payload, 2)
+	if err != nil {
+		t.Fatalf("RewritePriority() error = %v", err)
+	}
+	if !mutated {
+		t.Errorf("RewritePriority() mutated = false, want true")
+	}
+	m, ok := got.(fwkrh.PayloadMap)
+	if !ok {
+		t.Fatalf("RewritePriority() payload = %T, want PayloadMap", got)
+	}
+	if gotPriority := m["priority"]; gotPriority != -2 {
+		t.Errorf("priority = %v, want -2", gotPriority)
+	}
+}
+
+func TestVllmHTTPParser_RewritePriorityOverwritesClientPriority(t *testing.T) {
+	parser := NewVllmHTTPParser()
+	payload := fwkrh.PayloadMap{"model": "test", "token_ids": []any{1, 2, 3}, "priority": 100}
+
+	got, mutated, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{TargetEndpoint: &fwkdl.EndpointMetadata{
+		Labels: map[string]string{fwkplugins.EngineTypeLabelKey: "vllm"},
+	}}, payload, 2)
+	if err != nil {
+		t.Fatalf("RewritePriority() error = %v", err)
+	}
+	if !mutated {
+		t.Errorf("RewritePriority() mutated = false, want true")
+	}
+	m, ok := got.(fwkrh.PayloadMap)
+	if !ok {
+		t.Fatalf("RewritePriority() payload = %T, want PayloadMap", got)
+	}
+	if gotPriority := m["priority"]; gotPriority != -2 {
+		t.Errorf("priority = %v, want -2", gotPriority)
+	}
+}
+
 func TestVllmHTTPParser_ParseRequest_Generate(t *testing.T) {
 	parser := NewVllmHTTPParser()
 
@@ -126,6 +179,36 @@ func TestVllmHTTPParser_ParseRequest_Generate(t *testing.T) {
 		{
 			name:    "generate request with token_ids",
 			headers: map[string]string{":path": "/inference/v1/generate"},
+			body: map[string]any{
+				"token_ids": []any{1, 2, 3},
+			},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{
+					TokenIDs: []uint32{1, 2, 3},
+				},
+				Payload: fwkrh.PayloadMap{
+					"token_ids": json.RawMessage(`[1,2,3]`),
+				},
+			},
+		},
+		{
+			name:    "generate request with trailing slash",
+			headers: map[string]string{":path": "/inference/v1/generate/"},
+			body: map[string]any{
+				"token_ids": []any{1, 2, 3},
+			},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{
+					TokenIDs: []uint32{1, 2, 3},
+				},
+				Payload: fwkrh.PayloadMap{
+					"token_ids": json.RawMessage(`[1,2,3]`),
+				},
+			},
+		},
+		{
+			name:    "generate request with trailing slash and query",
+			headers: map[string]string{":path": "/inference/v1/generate/?request_id=123"},
 			body: map[string]any{
 				"token_ids": []any{1, 2, 3},
 			},
@@ -330,15 +413,24 @@ func TestVllmHTTPParser_ParseRequest_GenerateErrorPaths(t *testing.T) {
 func TestVllmHTTPParser_RejectsNonGeneratePaths(t *testing.T) {
 	parser := NewVllmHTTPParser()
 
-	body, _ := json.Marshal(map[string]any{
-		"prompt": "hello world",
-	})
-	_, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": "/v1/completions"})
-	if err == nil {
-		t.Fatal("ParseRequest() expected error for non-generate path, got nil")
-	}
-	if !strings.Contains(err.Error(), "unsupported path") {
-		t.Errorf("expected error to contain 'unsupported path', got: %v", err)
+	body := []byte(`{"token_ids":[1,2,3]}`)
+	for _, path := range []string{
+		"/v1/completions",
+		"/inference/v1/generate/bad",
+		"/inference/v1/generate/bad/",
+	} {
+		t.Run(path, func(t *testing.T) {
+			got, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": path})
+			if err == nil {
+				t.Fatal("ParseRequest() expected error for non-generate path, got nil")
+			}
+			if !strings.Contains(err.Error(), "unsupported path") {
+				t.Errorf("expected error to contain 'unsupported path', got: %v", err)
+			}
+			if got != nil {
+				t.Errorf("ParseRequest() result = %v, want nil", got)
+			}
+		})
 	}
 }
 

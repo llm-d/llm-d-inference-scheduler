@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -29,28 +30,19 @@ import (
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 )
+
+// Mooncake transfer fields
+const requestFieldRemoteBootstrapAddr = "remote_bootstrap_addr"
 
 const mooncakeBootstrapTimeout = 5 * time.Second // set to same value as the other timeout on vllm
 
-const mooncakeDataParallelRankHeader = "X-data-parallel-rank" // to send rank id in header to prefill
-
-func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
+func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, apiType reqcommon.APIType) {
 	s.logger.V(logging.DEBUG).Info("running Mooncake protocol", "url", prefillPodHostPort)
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		if err := errorJSONInvalid(fmt.Errorf("failed to read request body: %w", err), w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
-		}
-		return
-	}
-
-	requestData, err := decodeRequestBody(body)
-	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
-		}
+	_, requestData, ok := s.readJSONBody(r, w)
+	if !ok {
 		return
 	}
 
@@ -78,17 +70,14 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 		"engine_id", engineID)
 
 	// Build prefill request body
-	prefillData := make(map[string]any)
-	for k, v := range requestData {
-		prefillData[k] = v
-	}
-	prefillData[requestFieldKVTransferParams] = map[string]any{
-		requestFieldDoRemotePrefill: false,
-		requestFieldDoRemoteDecode:  true,
-		requestFieldTransferID:      transferID,
+	prefillData := maps.Clone(requestData)
+	prefillData[reqcommon.FieldKVTransferParams] = map[string]any{
+		reqcommon.FieldDoRemotePrefill: false,
+		reqcommon.FieldDoRemoteDecode:  true,
+		requestFieldTransferID:         transferID,
 	}
 	// update fields from original body; return asap.
-	reqcommon.PrimeSingleTokenRequest(prefillData)
+	reqcommon.CapSingleToken(prefillData, apiType)
 
 	prefillBody, err := json.Marshal(prefillData)
 	if err != nil {
@@ -105,16 +94,13 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 	}
 
 	// Build decode request body
-	decodeData := make(map[string]any)
-	for k, v := range requestData {
-		decodeData[k] = v
-	}
-	decodeData[requestFieldKVTransferParams] = map[string]any{
-		requestFieldDoRemotePrefill:     true,
-		requestFieldDoRemoteDecode:      false,
+	decodeData := maps.Clone(requestData)
+	decodeData[reqcommon.FieldKVTransferParams] = map[string]any{
+		reqcommon.FieldDoRemotePrefill:  true,
+		reqcommon.FieldDoRemoteDecode:   false,
 		requestFieldTransferID:          transferID,
 		requestFieldRemoteBootstrapAddr: bootstrapAddr,
-		requestFieldRemoteEngineID:      engineID,
+		reqcommon.FieldRemoteEngineID:   engineID,
 	}
 
 	decodeBody, err := json.Marshal(decodeData)
@@ -129,10 +115,10 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 		trace.Info("Decode request", logging.HTTPBodyKey, string(decodeBody))
 	}
 
-	s.runConcurrentPD(w, r, prefillBody, decodeBody, prefillPodHostPort, KVConnectorMooncake, func(prefillReq, _ *http.Request) {
+	s.runConcurrentPD(w, r, prefillBody, decodeBody, prefillPodHostPort, constants.KVConnectorMooncake, func(prefillReq, _ *http.Request) {
 		// Route prefill to the same DP rank whose engine_id was given to decode, so the
 		// KV it produces lands on the engine decode pulls from. No-op for a single rank.
-		prefillReq.Header.Set(mooncakeDataParallelRankHeader, dpRank)
+		prefillReq.Header.Set(requestHeaderDataParallelRank, dpRank)
 	})
 }
 
@@ -153,7 +139,7 @@ func (s *Server) getMooncakeEngineMap(ctx context.Context, prefillHostPort, boot
 	if err != nil {
 		return nil, fmt.Errorf("failed to query bootstrap endpoint: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 
 	if isHTTPError(resp.StatusCode) {
 		return nil, fmt.Errorf("bootstrap endpoint returned status %d", resp.StatusCode)

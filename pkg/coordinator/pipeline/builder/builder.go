@@ -52,31 +52,41 @@ func validatePipeline(p config.PipelineConfig) error {
 	return fmt.Errorf("pipeline.use_openai_format=false requires a %q step (the tokens-in format sends token IDs that render produces)", steps.RenderStepName)
 }
 
-func mergeConnectorDefaults(params map[string]any, kvConnector, ecConnector string) map[string]any {
+// usesOpenAIFormatParam reports whether stepType reads the use_openai_format
+// parameter. Only encode and prefill resolve their body format from it; decode
+// and conditional-decode derive it directly from the request's original path
+// and reject the key instead of silently ignoring it.
+func usesOpenAIFormatParam(stepType string) bool {
+	return stepType == steps.EncodeStepName || stepType == steps.PrefillStepName
+}
+
+func mergePipelineDefaults(params map[string]any, cfg config.PipelineConfig) map[string]any {
 	out := make(map[string]any, len(params))
 	for k, v := range params {
 		out[k] = v
 	}
-	if _, ok := out[steps.ParamKVConnector]; !ok && kvConnector != "" {
-		out[steps.ParamKVConnector] = kvConnector
+	if _, ok := out[steps.ParamKVConnector]; !ok && cfg.KVConnector != "" {
+		out[steps.ParamKVConnector] = cfg.KVConnector
 	}
-	if _, ok := out[steps.ParamECConnector]; !ok && ecConnector != "" {
-		out[steps.ParamECConnector] = ecConnector
+	if _, ok := out[steps.ParamECConnector]; !ok && cfg.ECConnector != "" {
+		out[steps.ParamECConnector] = cfg.ECConnector
 	}
 	return out
 }
 
-// Build validates cfg.Pipeline and constructs its steps in order.
-func Build(cfg *config.Config, gwClient *gateway.Client) ([]pipeline.Step, error) {
+// Build validates cfg.Pipeline and constructs its pipeline.
+func Build(cfg *config.Config, gwClient *gateway.Client) (*pipeline.Pipeline, error) {
 	if err := validatePipeline(cfg.Pipeline); err != nil {
 		return nil, err
 	}
 
-	var pipelineSteps []pipeline.Step
+	pipelineSteps := make([]pipeline.Step, 0, len(cfg.Pipeline.Steps))
 	for _, stepCfg := range cfg.Pipeline.Steps {
-		params := mergeConnectorDefaults(stepCfg.Params, cfg.Pipeline.KVConnector, cfg.Pipeline.ECConnector)
-		if _, ok := params["use_openai_format"]; !ok {
-			params["use_openai_format"] = cfg.Pipeline.UseOpenAIFormat
+		params := mergePipelineDefaults(stepCfg.Params, cfg.Pipeline)
+		if usesOpenAIFormatParam(stepCfg.Type) {
+			if _, ok := params["use_openai_format"]; !ok {
+				params["use_openai_format"] = cfg.Pipeline.UseOpenAIFormat
+			}
 		}
 		step, err := pipeline.Build(stepCfg.Type, gwClient, params)
 		if err != nil {
@@ -85,5 +95,5 @@ func Build(cfg *config.Config, gwClient *gateway.Client) ([]pipeline.Step, error
 
 		pipelineSteps = append(pipelineSteps, step)
 	}
-	return pipelineSteps, nil
+	return pipeline.NewWithForwardResponseHeaders(pipelineSteps, cfg.Pipeline.ForwardResponseHeaders)
 }

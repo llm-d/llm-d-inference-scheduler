@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,8 +29,12 @@ import (
 	"k8s.io/utils/ptr"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
+	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	fwkplugins "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins"
 )
 
 var (
@@ -101,6 +106,85 @@ func TestNewOpenAIParser(t *testing.T) {
 
 	if diff := cmp.Diff(expectedName, parser.TypedName()); diff != "" {
 		t.Errorf("TypedName() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestOpenAIParser_RewritePriority(t *testing.T) {
+	tests := []struct {
+		name        string
+		ctx         fwkrh.PriorityRewriteContext
+		want        map[string]any
+		wantMutated bool
+		payload     fwkrh.MarshalablePayload
+	}{
+		{
+			name:        "strips client priority and writes resolved priority",
+			payload:     fwkrh.PayloadMap{"model": "test", "priority": 100},
+			want:        map[string]any{"model": "test", "priority": 2},
+			wantMutated: true,
+		},
+		{
+			name:        "writes priority when none supplied",
+			payload:     fwkrh.PayloadMap{"model": "test"},
+			want:        map[string]any{"model": "test", "priority": 2},
+			wantMutated: true,
+		},
+		{
+			name:    "negates priority for vllm target",
+			payload: fwkrh.PayloadMap{"model": "test"},
+			ctx: fwkrh.PriorityRewriteContext{TargetEndpoint: &fwkdl.EndpointMetadata{
+				Labels: map[string]string{fwkplugins.EngineTypeLabelKey: "vllm"},
+			}},
+			want:        map[string]any{"model": "test", "priority": -2},
+			wantMutated: true,
+		},
+		{
+			name:    "ignores legacy GAIE vllm target label",
+			payload: fwkrh.PayloadMap{"model": "test"},
+			ctx: fwkrh.PriorityRewriteContext{TargetEndpoint: &fwkdl.EndpointMetadata{
+				Labels: map[string]string{"inference.networking.k8s.io/engine-type": "vllm"},
+			}},
+			want:        map[string]any{"model": "test", "priority": 2},
+			wantMutated: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, mutated, err := NewOpenAIParser().RewritePriority(tt.ctx, tt.payload, 2)
+			if err != nil {
+				t.Fatalf("RewritePriority() error = %v", err)
+			}
+			if mutated != tt.wantMutated {
+				t.Errorf("RewritePriority() mutated = %v, want %v", mutated, tt.wantMutated)
+			}
+			m, ok := got.(fwkrh.PayloadMap)
+			if !ok {
+				t.Fatalf("RewritePriority() payload = %T, want PayloadMap", got)
+			}
+			if diff := cmp.Diff(tt.want, map[string]any(m)); diff != "" {
+				t.Errorf("RewritePriority() payload mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestOpenAIParserPluginFactory(t *testing.T) {
+	plugin, err := OpenAIParserPluginFactory("test", nil, nil)
+	if err != nil {
+		t.Fatalf("OpenAIParserPluginFactory() error = %v", err)
+	}
+	parser, ok := plugin.(*OpenAIParser)
+	if !ok {
+		t.Fatalf("OpenAIParserPluginFactory() = %T, want *OpenAIParser", plugin)
+	}
+	got, _, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{}, fwkrh.PayloadMap{"model": "test"}, 2)
+	if err != nil {
+		t.Fatalf("RewritePriority() error = %v", err)
+	}
+	m := got.(fwkrh.PayloadMap)
+	if gotPriority := m["priority"]; gotPriority != 2 {
+		t.Errorf("priority = %v, want 2", gotPriority)
 	}
 }
 
@@ -1264,10 +1348,34 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				return
 			}
 
+			path := strings.TrimRight(tt.headers[":path"], "/")
+			if strings.HasSuffix(path, "/render") {
+				if !got.SkipResponseProcessing {
+					t.Fatal("render response must pass through")
+				}
+				if !got.Body.RenderRequest || string(got.Body.RawBody) != string(bodyBytes) || got.Body.Model != tt.body["model"] {
+					t.Fatal("render request must preserve bytes and model routing metadata")
+				}
+				return
+			}
+
 			if got.SkipResponseProcessing != false {
 				t.Errorf("ParseRequest() got.SkipResponseProcessing = %v, want false", got.SkipResponseProcessing)
 			}
 
+			if tt.want.Completions != nil || tt.want.ChatCompletions != nil {
+				tt.want.RawBody = bodyBytes
+				payload, _ := tt.want.Payload.AsMap()
+				for key, value := range payload {
+					raw, err := json.Marshal(value)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if key == promptField || raw[0] == '{' || raw[0] == '[' {
+						payload[key] = json.RawMessage(raw)
+					}
+				}
+			}
 			// Model is extracted from the request body's "model" field.
 			tt.want.Model, _ = tt.body["model"].(string)
 
@@ -1389,7 +1497,7 @@ func TestOpenAIParser_ParseRequest_ImagesEdits(t *testing.T) {
 			if tt.contentType != "" {
 				ct = tt.contentType
 			}
-			headers := map[string]string{":path": tt.path, contentType: ct}
+			headers := map[string]string{":path": tt.path, reqcommon.HeaderContentType: ct}
 			got, err := parser.ParseRequest(context.Background(), body, headers)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseRequest() error = %v, wantErr %v", err, tt.wantErr)
@@ -1481,7 +1589,7 @@ func TestOpenAIParser_RewriteModelNamePreservesTokenInput(t *testing.T) {
 	tests := []struct {
 		name, path, tokenField, body, wantTokens string
 	}{
-		{
+		{ //#nosec G101 -- tokenField names a JSON field, not a credential
 			name:       "nested completions",
 			path:       "/v1/completions",
 			tokenField: "prompt",
@@ -1656,7 +1764,7 @@ func TestOpenAIParser_ParseResponse(t *testing.T) {
 		{
 			name:    "Audio stream chunk",
 			body:    []byte{0x52, 0x49, 0x46, 0x46},
-			headers: map[string]string{contentType: "audio/wav"},
+			headers: map[string]string{reqcommon.HeaderContentType: "audio/wav"},
 			want: &fwkrh.ParsedResponse{
 				Usage: nil,
 			},
@@ -1685,7 +1793,7 @@ func TestOpenAIParser_ParseResponse(t *testing.T) {
 			name: "Octet-stream response with malformed usage headers",
 			body: []byte{0x00, 0x01, 0x02},
 			headers: map[string]string{
-				contentType:                      "application/octet-stream",
+				reqcommon.HeaderContentType:      "application/octet-stream",
 				"x-vllm-omni-input-tokens":       "invalid",
 				"x-vllm-omni-output-tokens":      "-1",
 				"x-vllm-omni-total-tokens":       "3.5",
@@ -1858,7 +1966,7 @@ func TestOpenAIParser_ParseResponse_Streaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{contentType: eventStreamType}, true)
+			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{reqcommon.HeaderContentType: request.MediaTypeEventStream}, true)
 			if err != nil {
 				t.Fatalf("ParseStreamResponse() error = %v", err)
 			}

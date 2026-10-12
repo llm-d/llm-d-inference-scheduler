@@ -18,15 +18,19 @@ package proxy
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 )
 
 var (
@@ -48,17 +52,14 @@ func init() {
 func (s *Server) handleSGLang(w http.ResponseWriter, r *http.Request, prefillPodHostPort string) {
 	s.logger.V(logging.DEBUG).Info("running SGLang protocol", "url", prefillPodHostPort)
 
-	// Make Request
-	requestData, err := s.parseSGLangRequest(r)
-
-	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
-			s.logger.Error(err, "failed to send error response to client")
-		}
+	_, requestData, ok := s.readJSONBody(r, w)
+	if !ok {
 		return
 	}
 
 	roomID := s.generateSGLangRoomID()
+	// SGLang keys its P/D transfer state and log lines by the bootstrap room.
+	trace.SpanFromContext(r.Context()).SetAttributes(semconv.LLMDPDProxyBootstrapRoom(roomID))
 
 	// Inject bootstrap info for both prefill and decode
 	bootstrapInfo := s.addSGLangBootstrapInfo(requestData, prefillPodHostPort, roomID)
@@ -72,22 +73,19 @@ func (s *Server) handleSGLang(w http.ResponseWriter, r *http.Request, prefillPod
 	}
 
 	// Send concurrent prefill and decode requests
-	s.runConcurrentPD(w, r, body, body, prefillPodHostPort, KVConnectorSGLang, nil)
+	s.runConcurrentPD(w, r, body, body, prefillPodHostPort, constants.KVConnectorSGLang, nil)
 }
 
 func (s *Server) addSGLangBootstrapInfo(requestData map[string]interface{}, prefillHostPort string, roomID int64) map[string]interface{} {
-	modifiedRequest := make(map[string]interface{})
-	for k, v := range requestData {
-		modifiedRequest[k] = v
-	}
+	modifiedRequest := maps.Clone(requestData)
 
 	// Generate bootstrap host from prefill host
 	bootstrapHost := extractHost(prefillHostPort)
 
 	// Add bootstrap information
-	modifiedRequest[requestFieldBootstrapHost] = bootstrapHost
-	modifiedRequest[requestFieldBootstrapPort] = sglangBootstrapPort
-	modifiedRequest[requestFieldBootstrapRoom] = roomID
+	modifiedRequest[reqcommon.FieldBootstrapHost] = bootstrapHost
+	modifiedRequest[reqcommon.FieldBootstrapPort] = sglangBootstrapPort
+	modifiedRequest[reqcommon.FieldBootstrapRoom] = roomID
 
 	s.logger.V(logging.TRACE).Info("bootstrap info added",
 		"bootstrap_host", bootstrapHost,
@@ -97,20 +95,6 @@ func (s *Server) addSGLangBootstrapInfo(requestData map[string]interface{}, pref
 	return modifiedRequest
 }
 
-func (s *Server) parseSGLangRequest(r *http.Request) (map[string]interface{}, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read request body: %w", err)
-	}
-
-	requestData, err := decodeRequestBody(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse request body: %w", err)
-	}
-
-	return requestData, nil
-}
-
 func (s *Server) generateSGLangRoomID() int64 {
-	return time.Now().UnixNano() + int64(rand.IntN(1000))
+	return time.Now().UnixNano() + int64(rand.IntN(1000)) //#nosec G404 -- non-crypto use, a room ID disambiguator
 }

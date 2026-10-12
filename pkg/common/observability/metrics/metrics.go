@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +26,20 @@ import (
 const (
 	// LLMDRouterEndpointPickerSubsystem is the subsystem for llm-d router endpoint picker metrics.
 	LLMDRouterEndpointPickerSubsystem = "llm_d_epp"
+)
+
+// Disaggregation path label values, naming the stages a request is split into
+// across pods. The EPP, coordinator, and P/D sidecar label their metrics with
+// these values so dashboards can join the components on them.
+const (
+	// DisaggPathDecodeOnly is a request served without disaggregation.
+	DisaggPathDecodeOnly = "decode-only"
+	// DisaggPathPrefillDecode is a request split into prefill and decode (P/D or EP/D).
+	DisaggPathPrefillDecode = "prefill-decode"
+	// DisaggPathEncodeDecode is a request with remote encode and local prefill and decode (E/PD).
+	DisaggPathEncodeDecode = "encode-decode"
+	// DisaggPathEncodePrefillDecode is a request split into encode, prefill, and decode (E/P/D).
+	DisaggPathEncodePrefillDecode = "encode-prefill-decode"
 )
 
 // HelpMsgWithStability is a helper function to create a help message with stability level.
@@ -57,4 +72,17 @@ var RequestSizeBuckets = []float64{
 var TokenCountBuckets = []float64{
 	1, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384,
 	32768, 65536, 131072, 262144, 524288, 1048576,
+}
+
+// ResponseSizeBuckets is a response-body-size histogram ladder from 16 bytes
+// to 64 MiB. LLM responses span a wider range than request bodies: short
+// error messages (~100 bytes), non-streaming completions (hundreds of bytes
+// to a few KiB), and long streaming responses that accumulate token-by-token
+// (tens of KiB to MiB). The lower floor and tighter mid-range give better
+// resolution than RequestSizeBuckets for the typical response distribution,
+// and the 64 MiB ceiling covers very long streamed completions.
+var ResponseSizeBuckets = []float64{
+	16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768,
+	65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608,
+	16777216, 33554432, 67108864,
 }

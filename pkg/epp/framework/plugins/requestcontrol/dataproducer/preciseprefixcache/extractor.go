@@ -22,6 +22,7 @@ import (
 	"net"
 	"strconv"
 
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -30,10 +31,9 @@ import (
 
 var _ fwkdl.EndpointExtractor = &Producer{}
 
-// Extract processes endpoint lifecycle events emitted by the
-// endpoint-notification-source: add/update installs a per-pod ZMQ KV-events
-// subscriber, delete tears one down. No-op unless per-pod discovery is
-// enabled.
+// Extract subscribes matching endpoints to per-pod KV events when discovery is
+// enabled. Deleted endpoints and endpoints that stop matching lose their
+// subscriber and cached index entries.
 func (p *Producer) Extract(ctx context.Context, event fwkdl.EndpointEvent) error {
 	if !p.kvEventsConfig.DiscoverPods || p.kvEventsConfig.PodDiscoveryConfig == nil {
 		return nil
@@ -46,19 +46,14 @@ func (p *Producer) Extract(ctx context.Context, event fwkdl.EndpointEvent) error
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	endpointKey := meta.ID.String()
 
-	switch event.Type {
-	case fwkdl.EventAddOrUpdate:
-		if err := p.ensureSubscriber(ctx, meta); err != nil {
-			return err
-		}
-		logger.V(logging.DEBUG).Info("Adding subscriber", "endpoint", endpointKey)
-	case fwkdl.EventDelete:
-		p.subscribersManager.RemoveSubscriber(ctx, endpointKey)
-		if meta.Address != "" {
-			if err := p.kvCacheIndexer.KVBlockIndex().Clear(ctx, fmt.Sprintf("%s:%s", meta.Address, meta.Port)); err != nil {
-				logger.Error(err, "Failed to clear index entries for removed endpoint",
-					"endpoint", endpointKey, "address", meta.Address, "port", meta.Port)
-			}
+	matchesSelector := p.podSelector == nil || p.podSelector.Matches(labels.Set(meta.Labels))
+	switch {
+	case event.Type == fwkdl.EventAddOrUpdate && matchesSelector:
+		return p.ensureSubscriber(ctx, meta)
+	case event.Type == fwkdl.EventAddOrUpdate || event.Type == fwkdl.EventDelete:
+		removed := p.subscribersManager.RemoveSubscriber(ctx, endpointKey)
+		if !removed && event.Type == fwkdl.EventAddOrUpdate {
+			return nil
 		}
 		logger.V(logging.DEBUG).Info("Removed KV-events subscriber", "endpoint", endpointKey)
 	}
@@ -79,18 +74,22 @@ func (p *Producer) ensureSubscriber(ctx context.Context, meta *fwkdl.EndpointMet
 	if replayPort := p.kvEventsConfig.PodDiscoveryConfig.EffectiveReplayPort(); replayPort > 0 {
 		replayEndpoint = "tcp://" + net.JoinHostPort(meta.Address, strconv.Itoa(replayPort+meta.GetRankIndex()))
 	}
+	snapshotEndpoint := ""
+	if snapshotPort := p.kvEventsConfig.PodDiscoveryConfig.SnapshotSocketPort; snapshotPort > 0 {
+		snapshotEndpoint = "tcp://" + net.JoinHostPort(meta.Address, strconv.Itoa(snapshotPort+meta.GetRankIndex()))
+	}
 	sourceEndpoint := fmt.Sprintf("%s:%s", meta.Address, meta.Port)
 
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	// subscriberCtx is plugin-lifetime; caller ctx would tear subscribers
 	// down on request completion.
 	if err := p.subscribersManager.EnsureSubscriber(p.subscriberCtx, endpointKey,
-		sourceEndpoint, zmqEndpoint, replayEndpoint, p.kvEventsConfig.TopicFilter, true); err != nil {
+		sourceEndpoint, zmqEndpoint, replayEndpoint, snapshotEndpoint, p.kvEventsConfig.TopicFilter, true); err != nil {
 		logger.Error(err, "Failed to ensure KV-events subscriber for endpoint",
 			"endpoint", endpointKey, "address", meta.Address)
 		return fmt.Errorf("ensure subscriber for %s: %w", endpointKey, err)
 	}
 	logger.V(logging.DEBUG).Info("Ensured KV-events subscriber",
-		"endpoint", endpointKey, "zmq", zmqEndpoint, "replay", replayEndpoint)
+		"endpoint", endpointKey, "zmq", zmqEndpoint, "replay", replayEndpoint, "snapshot", snapshotEndpoint)
 	return nil
 }

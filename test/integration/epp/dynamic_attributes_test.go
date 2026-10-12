@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import (
 
 func TestDynamicAttributes_Concurrency(t *testing.T) {
 	configText := `
-apiVersion: llm-d.ai/v1alpha1
+apiVersion: llm-d.ai/v1
 kind: EndpointPickerConfig
 featureGates:
 - flowControl
@@ -47,10 +47,12 @@ plugins:
     concurrencyMode: requests
     headroom: 0.0
 - type: mock-metrics-source
+- type: core-metrics-extractor
 requestHandler:
   parsers:
   - pluginRef: passthrough-parser
 dataLayer:
+  injectDefaults: false
   sources:
   - pluginRef: mock-metrics-source
 schedulingProfiles:

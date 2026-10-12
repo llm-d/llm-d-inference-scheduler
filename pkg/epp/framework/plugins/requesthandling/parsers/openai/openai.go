@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,9 +31,11 @@ import (
 
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers"
 	parserutil "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/util"
 )
 
@@ -43,6 +46,7 @@ const (
 	responsesAPI       = "responses"
 	chatCompletionsAPI = "chat/completions"
 	completionsAPI     = "completions"
+	promptField        = "prompt"
 	embeddingsAPI      = "embeddings"
 	// imagesGenerationsAPI is the OpenAI-compatible image generation endpoint/
 	imagesGenerationsAPI = "images/generations"
@@ -51,35 +55,20 @@ const (
 	imagesEditsAPI = "images/edits"
 	audioSpeechAPI = "audio/speech"
 
-	streamingRespPrefix = "data: "
-	streamingEndMsg     = "data: [DONE]"
-
-	contentType = "content-type"
-	// The base media type for Server-Sent Events. responseMediaType strips
-	// optional parameters such as "; charset=utf-8".
-	eventStreamType = "text/event-stream"
 	octetStreamType = "application/octet-stream"
-
-	promptTokensField        = "prompt_tokens"
-	inputTokensField         = "input_tokens"
-	completionTokensField    = "completion_tokens"
-	outputTokensField        = "output_tokens"
-	promptTokensDetailsField = "prompt_tokens_details"
-	inputTokensDetailsField  = "input_tokens_details"
-	cachedTokensField        = "cached_tokens"
-	totalTokensField         = "total_tokens"
 
 	// Text to speech api response format:
 	// https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/speech_api/#response-format
-	vllmOmniInputTokensHeader  = "x-vllm-omni-input-tokens"
-	vllmOmniOutputTokensHeader = "x-vllm-omni-output-tokens"
-	vllmOmniTotalTokensHeader  = "x-vllm-omni-total-tokens"
+	vllmOmniInputTokensHeader  = "x-vllm-omni-input-tokens"  //#nosec G101 -- HTTP header name, not a credential
+	vllmOmniOutputTokensHeader = "x-vllm-omni-output-tokens" //#nosec G101 -- HTTP header name, not a credential
+	vllmOmniTotalTokensHeader  = "x-vllm-omni-total-tokens"  //#nosec G101 -- HTTP header name, not a credential
 )
 
 // compile-time type validation
 var (
 	_ fwkrh.Parser            = &OpenAIParser{}
 	_ fwkrh.ModelNameRewriter = &OpenAIParser{}
+	_ fwkrh.PriorityRewriter  = &OpenAIParser{}
 )
 
 // OpenAIParser implements the fwkrh.Parser interface for OpenAI API
@@ -132,7 +121,11 @@ func (p *OpenAIParser) WithName(name string) *OpenAIParser {
 
 // ParseRequest parses the request body and headers and returns a map representation.
 func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
-	apiType := determineAPITypeFromPath(request.GetRequestPath(headers))
+	path := request.GetRequestPath(headers)
+	if request.MatchPathSuffix(path, chatCompletionsAPI+"/render") || request.MatchPathSuffix(path, completionsAPI+"/render") {
+		return parserutil.ParseRenderRequest(body)
+	}
+	apiType := determineAPITypeFromPath(path)
 	if apiType == imagesEditsAPI {
 		return parseImagesEditsRequest(body, headers)
 	}
@@ -141,9 +134,13 @@ func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers ma
 		return nil, fmt.Errorf("error extracting request body: %w", err)
 	}
 
-	rawField := tokenInputField(extractedBody)
 	var bodyMap fwkrh.PayloadMap
-	if rawField == "" {
+	if apiType == chatCompletionsAPI || apiType == completionsAPI {
+		var payload map[string]any
+		payload, err = parserutil.UnmarshalEnvelope(body, promptField)
+		bodyMap = fwkrh.PayloadMap(payload)
+		extractedBody.RawBody = body
+	} else if rawField := tokenInputField(extractedBody); rawField == "" {
 		bodyMap = make(fwkrh.PayloadMap)
 		err = parserutil.Unmarshal(body, &bodyMap)
 	} else {
@@ -177,8 +174,6 @@ func isStreamingRequest(apiType string, bodyMap map[string]any) bool {
 
 func tokenInputField(body *fwkrh.InferenceRequestBody) string {
 	switch {
-	case body.Completions != nil && len(body.Completions.Prompt.TokenIDs) > 0:
-		return "prompt"
 	case body.Embeddings != nil && len(body.Embeddings.Input.TokenIDs) > 0:
 		return "input"
 	default:
@@ -194,6 +189,14 @@ func (p *OpenAIParser) RewriteModelName(payload fwkrh.MarshalablePayload, model 
 	}
 	m["model"] = model
 	return m, nil
+}
+
+// RewritePriority removes any client-supplied priority from the
+// OpenAI-compatible request payload and writes the resolved EPP priority. The
+// director only calls this when priority propagation is enabled; see
+// parsers.RewritePriority for the cross-backend priority semantics.
+func (p *OpenAIParser) RewritePriority(ctx fwkrh.PriorityRewriteContext, payload fwkrh.MarshalablePayload, priority int) (fwkrh.MarshalablePayload, bool, error) {
+	return parsers.RewritePriority(ctx, payload, priority)
 }
 
 // maxOutputTokensForAPI normalizes the per-API output-token cap field into a
@@ -226,7 +229,7 @@ func (p *OpenAIParser) ParseResponse(ctx context.Context, body []byte, headers m
 		// may emit a trailing empty body with the EndOfStream flag set to true.
 		return nil, nil //nolint:nilnil
 	}
-	if mediaType == eventStreamType {
+	if mediaType == request.MediaTypeEventStream {
 		return p.parseStreamResponse(body)
 	}
 
@@ -251,7 +254,7 @@ func (p *OpenAIParser) parseStreamResponse(chunk []byte) (*fwkrh.ParsedResponse,
 func countStreamEvents(chunk []byte) int {
 	count := 0
 	for line := range bytes.SplitSeq(chunk, []byte("\n")) {
-		content, ok := bytes.CutPrefix(line, []byte(streamingRespPrefix))
+		content, ok := bytes.CutPrefix(line, []byte(reqcommon.SSEDataPrefix))
 		if ok && !isStreamTerminator(content) {
 			count++
 		}
@@ -262,11 +265,11 @@ func countStreamEvents(chunk []byte) int {
 // isStreamTerminator reports whether an SSE data payload is the [DONE] terminator, tolerating a
 // trailing \r left by CRLF line splitting.
 func isStreamTerminator(content []byte) bool {
-	return bytes.Equal(bytes.TrimSuffix(content, []byte("\r")), []byte("[DONE]"))
+	return bytes.Equal(bytes.TrimSuffix(content, []byte("\r")), []byte(reqcommon.SSEDoneMarker))
 }
 
 func responseMediaType(headers map[string]string) string {
-	value, ok := headerValue(headers, contentType)
+	value, ok := headerValue(headers, reqcommon.HeaderContentType)
 	if !ok {
 		return ""
 	}
@@ -437,7 +440,7 @@ func extractRequestBody(apiType string, rawBody []byte) (*fwkrh.InferenceRequest
 
 // parseImagesEditsRequest parses a multipart/form-data /v1/images/edits request.
 func parseImagesEditsRequest(body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
-	contentTypeValue, _ := headerValue(headers, contentType)
+	contentTypeValue, _ := headerValue(headers, reqcommon.HeaderContentType)
 	mediaType, params, err := mime.ParseMediaType(contentTypeValue)
 	if err != nil || mediaType != "multipart/form-data" {
 		return nil, errors.New("images edits request must have a multipart/form-data content-type")
@@ -550,7 +553,7 @@ func extractUsage(responseBytes []byte) (*fwkrh.Usage, error) {
 	usage := fwkrh.Usage{}
 
 	// Chat/Completions APIs use prompt_tokens. Responses/Conversations APIs use input_tokens.
-	for _, inputTokens := range []string{promptTokensField, inputTokensField} {
+	for _, inputTokens := range []string{reqcommon.FieldPromptTokens, reqcommon.FieldInputTokens} {
 		if v, ok := responseBody.Usage[inputTokens]; ok && v != nil {
 			usage.PromptTokens = toInt(v)
 			break
@@ -558,7 +561,7 @@ func extractUsage(responseBytes []byte) (*fwkrh.Usage, error) {
 	}
 
 	// Chat/Completions APIs use completion_tokens. Responses/Conversations APIs use output_tokens.
-	for _, outputTokens := range []string{completionTokensField, outputTokensField} {
+	for _, outputTokens := range []string{reqcommon.FieldCompletionTokens, reqcommon.FieldOutputTokens} {
 		if v, ok := responseBody.Usage[outputTokens]; ok && v != nil {
 			usage.CompletionTokens = toInt(v)
 			break
@@ -566,9 +569,9 @@ func extractUsage(responseBytes []byte) (*fwkrh.Usage, error) {
 	}
 
 	// Chat/Completions APIs use prompt_tokens_details. Responses/Conversations APIs use input_tokens_details.
-	for _, details := range []string{promptTokensDetailsField, inputTokensDetailsField} {
+	for _, details := range []string{reqcommon.FieldPromptTokensDetails, reqcommon.FieldInputTokensDetails} {
 		if detailsMap, ok := responseBody.Usage[details].(map[string]any); ok {
-			if cachedTokens, ok := detailsMap[cachedTokensField]; ok {
+			if cachedTokens, ok := detailsMap[reqcommon.FieldCachedTokens]; ok {
 				usage.PromptTokenDetails = &fwkrh.PromptTokenDetails{
 					CachedTokens: toInt(cachedTokens),
 				}
@@ -577,7 +580,7 @@ func extractUsage(responseBytes []byte) (*fwkrh.Usage, error) {
 	}
 
 	// total_tokens field name is consistent across all API types.
-	if v, ok := responseBody.Usage[totalTokensField]; ok && v != nil {
+	if v, ok := responseBody.Usage[reqcommon.FieldTotalTokens]; ok && v != nil {
 		usage.TotalTokens = toInt(v)
 	}
 
@@ -605,7 +608,7 @@ func extractUsage(responseBytes []byte) (*fwkrh.Usage, error) {
 func extractUsageStreaming(responseBytes []byte) *fwkrh.Usage {
 	lines := bytes.SplitSeq(responseBytes, []byte("\n"))
 	for line := range lines {
-		content, ok := bytes.CutPrefix(line, []byte(streamingRespPrefix))
+		content, ok := bytes.CutPrefix(line, []byte(reqcommon.SSEDataPrefix))
 		if !ok {
 			continue
 		}

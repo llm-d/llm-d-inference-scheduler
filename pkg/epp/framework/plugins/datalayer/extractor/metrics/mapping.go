@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -61,6 +62,7 @@ type MappingConfig struct {
 type CustomMetric struct {
 	AttributeKey string
 	Spec         *Spec
+	Optional     bool
 }
 
 type namedSpec struct {
@@ -201,6 +203,7 @@ func parseCustomMetrics(configs []CustomMetric) ([]CustomMetric, []error) {
 		metrics = append(metrics, CustomMetric{
 			AttributeKey: cfg.AttributeKey,
 			Spec:         cfg.Spec,
+			Optional:     cfg.Optional,
 		})
 	}
 	return metrics, errs

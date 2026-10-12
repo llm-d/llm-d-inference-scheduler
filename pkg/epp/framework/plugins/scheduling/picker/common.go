@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -52,7 +53,7 @@ func newLockedRand() *lockedRand {
 	seed := uint64(time.Now().UnixNano())
 
 	return &lockedRand{
-		rand: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)),
+		rand: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)), //#nosec G404 -- endpoint selection, not security-sensitive
 	}
 }
 

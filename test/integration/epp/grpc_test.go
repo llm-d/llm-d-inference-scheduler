@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -35,7 +36,7 @@ import (
 
 const (
 	testConfigWithVllmGRPCParser = `
-apiVersion: inference.networking.x-k8s.io/v1alpha1
+apiVersion: llm-d.ai/v1
 kind: EndpointPickerConfig
 plugins:
   - type: queue-scorer
@@ -44,6 +45,7 @@ plugins:
   - type: lora-affinity-scorer
   - type: vllmgrpc-parser
   - type: mock-metrics-source
+  - type: core-metrics-extractor
 schedulingProfiles:
   - name: default
     plugins:
@@ -55,6 +57,7 @@ requestHandler:
   parsers:
   - pluginRef: vllmgrpc-parser
 dataLayer:
+  injectDefaults: false
   sources:
   - pluginRef: mock-metrics-source
 `
@@ -172,7 +175,7 @@ func TestFullDuplexStreamed_GRPC_KubeInferenceObjectiveRequest(t *testing.T) {
 			requests: integration.ReqHeaderOnly(map[string]string{"content-type": "application/json"}),
 			pods:     nil,
 			wantResponses: ExpectReject(envoyTypePb.StatusCode_InternalServerError,
-				"inference error: Internal - no pods available in datastore"),
+				"no pods available in datastore"),
 		},
 
 		// // --- Subsetting & Metadata ---
@@ -206,7 +209,7 @@ func TestFullDuplexStreamed_GRPC_KubeInferenceObjectiveRequest(t *testing.T) {
 				P(1, 0, 0.1, "foo", modelSQLLoraTarget),
 			},
 			wantResponses: ExpectRejectWithDropReason(envoyTypePb.StatusCode_ServiceUnavailable,
-				"inference error: ServiceUnavailable - failed to find endpoint candidates for serving the request",
+				"failed to find endpoint candidates for serving the request",
 				errcommon.RequestDroppedReasonNoEndpoints),
 		},
 
@@ -405,6 +408,7 @@ func TestFullDuplexStreamed_GRPC_KubeInferenceObjectiveRequest(t *testing.T) {
 				protocmp.SortRepeated(func(a, b *configPb.HeaderValueOption) bool {
 					return a.GetHeader().GetKey() < b.GetHeader().GetKey()
 				}),
+				protocmp.SortRepeated(func(a, b string) bool { return a < b }),
 			); diff != "" {
 				t.Errorf("Response mismatch (-want +got): %v", diff)
 			}

@@ -1,5 +1,6 @@
 /*
 Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,6 +49,12 @@ func (h *errorHandler) Handle(err error) {
 	h.logger.V(logging.DEFAULT).Error(err, "trace error occurred")
 }
 
+// InitTextMapPropagator installs W3C trace context and baggage propagators.
+// Processes call this at startup so extract/inject work when span export is disabled.
+func InitTextMapPropagator() {
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+}
+
 func InitTracing(ctx context.Context, logger logr.Logger, defaultServiceName string) (func(context.Context) error, error) {
 	logger = logger.WithName("trace")
 	loggerWrap := &errorHandler{logger: logger}
@@ -73,10 +80,10 @@ func InitTracing(ctx context.Context, logger logr.Logger, defaultServiceName str
 	opt := []sdktrace.TracerProviderOption{
 		sdktrace.WithSampler(sampler),
 		sdktrace.WithResource(res),
+		sdktrace.WithSpanProcessor(NewRequestAttributionProcessor()),
 	}
 
-	// "none" registers no span processor at all. Spans are still created and
-	// propagated, so instrumented code and context propagation are unaffected.
+	// "none" skips the exporter batcher. The attribution processor above still runs.
 	if exporterType == exporterTypeNone {
 		logger.Info("init OTel trace exporter", "type", exporterType)
 	} else {
@@ -90,7 +97,7 @@ func InitTracing(ctx context.Context, logger logr.Logger, defaultServiceName str
 
 	tracerProvider := sdktrace.NewTracerProvider(opt...)
 	otel.SetTracerProvider(tracerProvider)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	InitTextMapPropagator()
 	otel.SetErrorHandler(loggerWrap)
 
 	return tracerProvider.Shutdown, nil
@@ -373,6 +380,10 @@ const instrumentationName = "llm-d-router"
 // Tracer returns a tracer for the given instrumentation scope, defaulting to
 // "llm-d-router". Build version and commit SHA are attached so every span in a
 // trace carries consistent scope metadata.
+//
+// Spans started from a context carrying request attribution are enriched with the
+// attribution pair by the span processor InitTracing installs. See
+// BeginRequestAttribution.
 func Tracer(scope ...string) trace.Tracer {
 	name := instrumentationName
 	if len(scope) > 0 && scope[0] != "" {

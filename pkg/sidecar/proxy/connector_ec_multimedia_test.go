@@ -29,22 +29,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
 // TestHandleEC_Multimedia asserts that video_url, audio_url, and input_audio
-// items flow through both EC connectors the same way image_url items do.
-// mmTypes in connector_ec_common.go treats video_url / audio_url uniformly
-// with image_url (URL-based, dedup-eligible), while input_audio is inline and
-// never deduplicates. This table exercises those paths against handleECNIXL
-// (threads encoder ec_transfer_params into the prefill body) and
-// handleECSharedStorage (primer only — encoder responses are discarded).
-//
-// Inline audio never deduplicates (see fanoutEncoderPrimerDeduplication note),
-// so two input_audio blocks always produce two encoder calls.
+// items flow through both EC connectors the same way image_url items do. This
+// table exercises those paths against handleECNIXL (threads encoder
+// ec_transfer_params into the prefill body) and handleECSharedStorage (primer
+// only, encoder responses are discarded).
 func TestHandleEC_Multimedia(t *testing.T) {
 	tests := []struct {
 		name         string
-		handler      func(*Server, http.ResponseWriter, *http.Request, string, []string, APIType)
+		handler      func(*Server, http.ResponseWriter, *http.Request, string, []string, reqcommon.APIType)
 		items        []map[string]any
 		wantECParams bool
 		wantECLen    int
@@ -142,17 +139,17 @@ func TestHandleEC_Multimedia(t *testing.T) {
 			srv.logger = log.Log
 
 			var capturedBody []byte
-			srv.handlePDConnector = func(_ http.ResponseWriter, r *http.Request, _ string, _ string, _ APIType) {
+			srv.handlePDConnector = func(_ http.ResponseWriter, r *http.Request, _ string, _ string, _ reqcommon.APIType) {
 				buf, err := io.ReadAll(r.Body)
 				assert.NoError(t, err)
 				capturedBody = buf
 			}
 
 			reqBody, _ := json.Marshal(userMessageRequest(tt.items...))
-			httpReq := httptest.NewRequest(http.MethodPost, ChatCompletionsPath, io.NopCloser(bytes.NewReader(reqBody)))
+			httpReq := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, io.NopCloser(bytes.NewReader(reqBody)))
 			rw := httptest.NewRecorder()
 
-			tt.handler(srv, rw, httpReq, "fake-prefiller:8000", []string{encoderURL.Host}, APITypeChatCompletions)
+			tt.handler(srv, rw, httpReq, "fake-prefiller:8000", []string{encoderURL.Host}, reqcommon.APITypeChatCompletions)
 
 			assert.Equal(t, tt.wantEncCalls, encoderCalls.Load(), "unexpected encoder call count")
 			if !assert.NotNil(t, capturedBody, "handlePDConnector should have been invoked") {
@@ -161,7 +158,7 @@ func TestHandleEC_Multimedia(t *testing.T) {
 			var parsed map[string]any
 			assert.NoError(t, json.Unmarshal(capturedBody, &parsed))
 
-			ec, hasEC := parsed[requestFieldECTransferParams].(map[string]any)
+			ec, hasEC := parsed[reqcommon.FieldECTransferParams].(map[string]any)
 			if tt.wantECParams {
 				assert.True(t, hasEC, "prefill body should carry ec_transfer_params")
 				assert.Len(t, ec, tt.wantECLen, "one entry per distinct multimodal item")
@@ -171,7 +168,7 @@ func TestHandleEC_Multimedia(t *testing.T) {
 					assert.Containsf(t, entry, "peer_host", "ec[%q] should carry transfer metadata", k)
 				}
 			} else {
-				_, present := parsed[requestFieldECTransferParams]
+				_, present := parsed[reqcommon.FieldECTransferParams]
 				assert.False(t, present, "shared_storage primer must not add ec_transfer_params to the prefill body")
 			}
 		})

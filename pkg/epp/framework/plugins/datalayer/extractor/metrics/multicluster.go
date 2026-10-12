@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -100,6 +100,17 @@ func (e *MultiClusterMetricsExtractor) Extract(_ context.Context, in fwkdl.PollI
 		ep.GetAttributes().Put(m.key, attrmetrics.ScalarMetricValue(extractValue(metric)))
 	}
 	return errors.Join(errs...)
+}
+
+var _ sourcemetrics.FamilyReader = &MultiClusterMetricsExtractor{}
+
+// MetricFamilies lists the pool aggregate families.
+func (e *MultiClusterMetricsExtractor) MetricFamilies() []string {
+	names := make([]string, 0, len(e.metrics))
+	for _, m := range e.metrics {
+		names = append(names, m.spec.Name)
+	}
+	return names
 }
 
 var _ fwkplugin.ProducerPlugin = &MultiClusterMetricsExtractor{}
