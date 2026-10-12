@@ -28,8 +28,8 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
@@ -54,7 +54,7 @@ func newChunkedTestSetup(chunkSize int, decodeResponses []string) *chunkedTestIn
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, decodeResponses[reqIdx]) //nolint:errcheck
+		fmt.Fprint(w, decodeResponses[reqIdx])
 		reqIdx++
 	}))
 }
@@ -426,7 +426,7 @@ var _ = Describe("Chunked Decode", func() {
 		It("propagates decode backend error to client", func() {
 			ti := newChunkedTestSetupWithHandler(5, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusBadGateway)
-				fmt.Fprint(w, `{"error":"backend down"}`) //nolint:errcheck
+				fmt.Fprint(w, `{"error":"backend down"}`)
 			}))
 			defer ti.stop()
 
