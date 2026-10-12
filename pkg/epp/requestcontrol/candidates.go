@@ -19,6 +19,7 @@ package requestcontrol
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -141,12 +142,16 @@ func (d *DatastoreEndpointCandidates) Locate(ctx context.Context, requestMetadat
 		}
 		// Extract address from endpoint string.
 		address := epStr
-		if host, _, err := net.SplitHostPort(epStr); err == nil && net.ParseIP(host) != nil {
-			address = host
-		} else if net.ParseIP(epStr) == nil {
-			if idx := strings.LastIndexByte(epStr, ':'); idx >= 0 {
-				address = epStr[:idx]
-			}
+		ipAddress := epStr
+		if host, _, err := net.SplitHostPort(epStr); err == nil {
+			ipAddress = host
+		} else if strings.HasPrefix(epStr, "[") && strings.HasSuffix(epStr, "]") {
+			ipAddress = epStr[1 : len(epStr)-1]
+		}
+		if addr, err := netip.ParseAddr(ipAddress); err == nil {
+			address = addr.String()
+		} else if idx := strings.LastIndexByte(epStr, ':'); idx >= 0 {
+			address = epStr[:idx]
 		}
 		endpoints.Insert(address)
 	}

@@ -350,6 +350,14 @@ func TestDatastoreEndpointCandidates_IPv6Subset(t *testing.T) {
 		{"IPv4 without port", "10.0.0.1", "10.0.0.1", true},
 		{"bracketed IPv6 with port", "2001:db8::1", "[2001:db8::1]:8080", true},
 		{"IPv6 without port", "2001:db8::1", "2001:db8::1", true},
+		{"noncanonical IPv6 with port", "2001:db8::1", "[2001:DB8:0::1]:8080", true},
+		{"noncanonical IPv6 without port", "2001:db8::1", "2001:0db8:0:0:0:0:0:1", true},
+		{"bracketed IPv6 without port", "2001:db8::1", "[2001:db8::1]", true},
+		{"IPv6 zone with port", "fe80::1%eth0", "[FE80:0::1%eth0]:8080", true},
+		{"IPv6 zone without port", "fe80::1%eth0", "fe80::1%eth0", true},
+		{"bracketed IPv6 zone without port", "fe80::1%eth0", "[fe80::1%eth0]", true},
+		{"IPv6 nonnumeric port keeps existing behavior", "2001:db8::1", "[2001:db8::1]:invalid", true},
+		{"IPv6 empty port keeps existing behavior", "2001:db8::1", "[2001:db8::1]:", true},
 		{"IPv6 final hextet stays address", "2001:db8::1:8080", "2001:db8::1:8080", true},
 		{"hostname with port", "worker.example", "worker.example:8080", true},
 		{"hostname without port", "worker.example", "worker.example", true},
@@ -357,6 +365,9 @@ func TestDatastoreEndpointCandidates_IPv6Subset(t *testing.T) {
 		{"empty port keeps existing behavior", "10.0.0.1", "10.0.0.1:", true},
 		{"extra colon stays unmatched", "10.0.0.1", "10.0.0.1:8080:invalid", false},
 		{"bracketed hostname stays unmatched", "worker.example", "[worker.example]:8080", false},
+		{"bracketed bare hostname stays unmatched", "worker.example", "[worker.example]", false},
+		{"missing IPv6 closing bracket stays unmatched", "2001:db8::1", "[2001:db8::1", false},
+		{"missing IPv6 opening bracket stays unmatched", "2001:db8::1", "2001:db8::1]", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
