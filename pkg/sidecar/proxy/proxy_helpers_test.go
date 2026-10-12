@@ -24,6 +24,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 
 	"github.com/go-logr/logr/funcr"
 	. "github.com/onsi/ginkgo/v2" // nolint:revive
@@ -31,6 +32,7 @@ import (
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 )
 
 func postBody(body string) *http.Request {
@@ -88,8 +90,8 @@ var _ = Describe("bodyAsJSON", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		clone := maps.Clone(parsed)
-		Expect(func() { clone[requestFieldKVTransferParams] = map[string]any{} }).ToNot(Panic())
-		Expect(parsed).ToNot(HaveKey(requestFieldKVTransferParams))
+		Expect(func() { clone[reqcommon.FieldKVTransferParams] = map[string]any{} }).ToNot(Panic())
+		Expect(parsed).ToNot(HaveKey(reqcommon.FieldKVTransferParams))
 	})
 })
 
@@ -97,7 +99,7 @@ var _ = Describe("readJSONBody", func() {
 	var proxy *Server
 
 	BeforeEach(func() {
-		proxy = NewProxy(Config{Port: "0", KVConnector: KVConnectorNIXLV2})
+		proxy = NewProxy(Config{Port: "0", KVConnector: constants.KVConnectorNIXLV2})
 	})
 
 	It("reports success and returns the parsed body", func() {
@@ -304,6 +306,24 @@ var _ = Describe("readJSONBody", func() {
 	})
 })
 
+var _ = Describe("createDecoderProxyHandler", func() {
+	It("labels the decoder-unavailable error body as JSON", func() {
+		decoder := httptest.NewServer(http.NotFoundHandler())
+		decoderURL, err := url.Parse(decoder.URL)
+		Expect(err).ToNot(HaveOccurred())
+		decoder.Close()
+
+		proxy := NewProxy(Config{Port: "0", DecoderURL: decoderURL, KVConnector: constants.KVConnectorNIXLV2})
+		w := httptest.NewRecorder()
+
+		proxy.createDecoderProxyHandler(decoderURL, false).ServeHTTP(w, postBody(`{"model":"m"}`))
+
+		resp := w.Result()
+		Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
+		Expect(resp.Header.Get("Content-Type")).To(Equal("application/json"))
+	})
+})
+
 // captureLogs points the proxy logger at the returned slice, keeping entries up
 // to the given verbosity.
 func captureLogs(proxy *Server, verbosity int) *[]string {
@@ -353,8 +373,8 @@ var _ = Describe("decodeRequestBody", func() {
 		parsed, err := decodeRequestBody([]byte(`{"stream":true,"max_tokens":5,"tools":` + tools + `}`))
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(parsed[requestFieldStream]).To(BeTrue())
-		Expect(parsed[requestFieldMaxTokens]).To(BeNumerically("==", 5))
+		Expect(parsed[reqcommon.FieldStream]).To(BeTrue())
+		Expect(parsed[reqcommon.FieldMaxTokens]).To(BeNumerically("==", 5))
 		Expect(parsed["tools"]).To(Equal(json.RawMessage(tools)))
 
 		out, err := json.Marshal(parsed)

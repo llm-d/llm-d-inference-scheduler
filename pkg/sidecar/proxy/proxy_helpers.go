@@ -138,7 +138,7 @@ func (s *Server) startHTTP(ctx context.Context) error {
 		// Stop allowlist validator
 		s.allowlistValidator.Stop()
 
-		ctx, cancelFn := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancelFn := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 		defer cancelFn()
 		if err := server.Shutdown(ctx); err != nil {
 			s.logger.Error(err, "failed to gracefully shutdown")
@@ -173,6 +173,7 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 		case errors.Is(err, syscall.ECONNREFUSED):
 			s.logger.Error(err, "failed to connect to vLLM decoder",
 				"decoderURL", s.config.DecoderURL.String())
+			res.Header().Set("Content-Type", "application/json")
 			res.WriteHeader(http.StatusServiceUnavailable)
 			_, writeError = res.Write(decoderServiceUnavailableResponseJSON)
 
@@ -208,18 +209,18 @@ func bodyAsJSON(r *http.Request) ([]byte, map[string]any, error) {
 // such as tools[].function.parameters that chat templates render into the
 // prompt verbatim.
 var inspectedRequestFields = map[string]struct{}{
-	requestFieldKVTransferParams:     {},
-	requestFieldECTransferParams:     {},
-	requestFieldMaxTokens:            {},
-	requestFieldMaxCompletionTokens:  {},
-	requestFieldMaxOutputTokens:      {},
-	requestFieldMinTokens:            {},
-	requestFieldSamplingParams:       {},
-	requestFieldStream:               {},
-	requestFieldStreamOptions:        {},
-	requestFieldCacheHitThreshold:    {},
-	requestFieldContinueFinalMessage: {},
-	requestFieldAddGenerationPrompt:  {},
+	reqcommon.FieldKVTransferParams:     {},
+	reqcommon.FieldECTransferParams:     {},
+	reqcommon.FieldMaxTokens:            {},
+	reqcommon.FieldMaxCompletionTokens:  {},
+	reqcommon.FieldMaxOutputTokens:      {},
+	reqcommon.FieldMinTokens:            {},
+	reqcommon.FieldSamplingParams:       {},
+	reqcommon.FieldStream:               {},
+	reqcommon.FieldStreamOptions:        {},
+	reqcommon.FieldCacheHitThreshold:    {},
+	reqcommon.FieldContinueFinalMessage: {},
+	reqcommon.FieldAddGenerationPrompt:  {},
 }
 
 // requestMessages returns the request's messages, decoding the array on first

@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,7 @@ import (
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
+	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -177,7 +179,7 @@ func TestECPipelineTokenLimits(t *testing.T) {
 		},
 	}
 
-	for _, connector := range []string{ECExampleConnector, ECConnectorNIXL} {
+	for _, connector := range []string{constants.ECExampleConnector, constants.ECConnectorNIXL} {
 		t.Run(connector, func(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
@@ -194,7 +196,7 @@ func TestECPipelineTokenLimits(t *testing.T) {
 
 					decodeURL, err := url.Parse("http://decoder:8000")
 					require.NoError(t, err)
-					srv := NewProxy(Config{Port: "0", DecoderURL: decodeURL, KVConnector: KVConnectorNIXLV2, ECConnector: connector})
+					srv := NewProxy(Config{Port: "0", DecoderURL: decodeURL, KVConnector: constants.KVConnectorNIXLV2, ECConnector: connector})
 					srv.logger = log.Log
 					srv.allowlistValidator = &AllowlistValidator{}
 					var decodeBody map[string]any
@@ -254,7 +256,7 @@ func TestECPipelineTokenLimits(t *testing.T) {
 }
 
 func TestECPipelineResponsesImage(t *testing.T) {
-	for _, connector := range []string{ECExampleConnector, ECConnectorNIXL} {
+	for _, connector := range []string{constants.ECExampleConnector, constants.ECConnectorNIXL} {
 		t.Run(connector, func(t *testing.T) {
 			var encoderCalls atomic.Int32
 			encoder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +291,7 @@ func TestECPipelineResponsesImage(t *testing.T) {
 			prefill := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var body map[string]any
 				assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-				prefillECParams = body[requestFieldECTransferParams]
+				prefillECParams = body[reqcommon.FieldECTransferParams]
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{"kv_transfer_params":{}}`))
 			}))
@@ -297,7 +299,7 @@ func TestECPipelineResponsesImage(t *testing.T) {
 
 			decodeURL, err := url.Parse("http://decoder:8000")
 			require.NoError(t, err)
-			srv := NewProxy(Config{Port: "0", DecoderURL: decodeURL, KVConnector: KVConnectorNIXLV2, ECConnector: connector})
+			srv := NewProxy(Config{Port: "0", DecoderURL: decodeURL, KVConnector: constants.KVConnectorNIXLV2, ECConnector: connector})
 			srv.logger = log.Log
 			srv.allowlistValidator = &AllowlistValidator{}
 			var decodeCalls atomic.Int32
@@ -322,7 +324,7 @@ func TestECPipelineResponsesImage(t *testing.T) {
 			// ec-nixl connector exists to do: without this the pipeline can
 			// reach every stage in order and still prime nothing the prefiller
 			// can look up. ec-example primes by status alone and merges nothing.
-			if connector == ECConnectorNIXL {
+			if connector == constants.ECConnectorNIXL {
 				assert.Equal(t,
 					map[string]any{"hash-0": map[string]any{"peer_host": "10.0.0.1"}},
 					prefillECParams,
@@ -347,13 +349,15 @@ func TestHandleEC_EncoderErrorStatus(t *testing.T) {
 		name        string
 		encoderCode int
 		wantClient  int
+		truncated   bool
 	}{
-		{"encoder rejects the body", http.StatusBadRequest, http.StatusBadGateway},
-		{"encoder finds the body unprocessable", http.StatusUnprocessableEntity, http.StatusBadGateway},
-		{"encoder does not serve the route", http.StatusNotFound, http.StatusBadGateway},
-		{"encoder is at capacity", http.StatusTooManyRequests, http.StatusBadGateway},
-		{"encoder is unavailable", http.StatusServiceUnavailable, http.StatusBadGateway},
-		{"encoder fails internally", http.StatusInternalServerError, http.StatusBadGateway},
+		{"encoder rejects the body", http.StatusBadRequest, http.StatusBadGateway, false},
+		{"encoder finds the body unprocessable", http.StatusUnprocessableEntity, http.StatusBadGateway, false},
+		{"encoder does not serve the route", http.StatusNotFound, http.StatusBadGateway, false},
+		{"encoder is at capacity", http.StatusTooManyRequests, http.StatusBadGateway, false},
+		{"encoder is unavailable", http.StatusServiceUnavailable, http.StatusBadGateway, false},
+		{"encoder fails internally", http.StatusInternalServerError, http.StatusBadGateway, false},
+		{"encoder response is truncated", http.StatusOK, http.StatusBadGateway, true},
 	}
 
 	for name, handle := range handlers {
@@ -361,6 +365,9 @@ func TestHandleEC_EncoderErrorStatus(t *testing.T) {
 			t.Run(name+"/"+tt.name, func(t *testing.T) {
 				encoder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
+					if tt.truncated {
+						w.Header().Set("Content-Length", "100")
+					}
 					w.WriteHeader(tt.encoderCode)
 					_, _ = w.Write([]byte(`{"error":"nope"}`))
 				}))
@@ -375,10 +382,14 @@ func TestHandleEC_EncoderErrorStatus(t *testing.T) {
 				srv.handlePDConnector = func(http.ResponseWriter, *http.Request, string, string, reqcommon.APIType) {
 					dispatched = true
 				}
+				srv.decoderProxy = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					dispatched = true
+				})
 
 				body, err := json.Marshal(userMessageRequest(imageURLItem("https://example.com/img.jpg")))
 				require.NoError(t, err)
 				req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, bytes.NewReader(body))
+				req = req.WithContext(context.WithValue(req.Context(), http.ServerContextKey, &http.Server{}))
 				rw := httptest.NewRecorder()
 
 				handle(srv, rw, req, "fake-prefiller:8000", []string{encoderURL.Host}, reqcommon.APITypeChatCompletions)
