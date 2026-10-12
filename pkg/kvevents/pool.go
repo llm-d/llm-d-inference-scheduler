@@ -68,21 +68,23 @@ func cacheKindLabel(kind KVCacheSpecKind) string {
 	return string(kind)
 }
 
-func blockStoredEventDigestible(ev *BlockStoredEvent) (bool, string) {
+func blockStoredEventDigestible(ev *BlockStoredEvent, canonicalBlockSize int) (bool, string) {
 	if ev.GroupIdx == nil {
 		return true, ""
+	}
+	if len(ev.Tokens) > 0 {
+		if ev.BlockSize <= 0 {
+			return false, "invalid_block_size"
+		}
+		if len(ev.Tokens)%ev.BlockSize != 0 || len(ev.Tokens)/ev.BlockSize != len(ev.BlockHashes) {
+			return false, "non_dense_block_span"
+		}
 	}
 	if !isPrefixIndexableSpecKind(ev.KVCacheSpecKind) {
 		return false, "unsupported_cache_kind"
 	}
-	if len(ev.Tokens) == 0 {
-		return true, ""
-	}
-	if ev.BlockSize <= 0 {
-		return false, "invalid_block_size"
-	}
-	if len(ev.Tokens)%ev.BlockSize != 0 || len(ev.Tokens)/ev.BlockSize != len(ev.BlockHashes) {
-		return false, "non_dense_block_span"
+	if len(ev.Tokens) > 0 && len(ev.Tokens) < canonicalBlockSize {
+		return false, "incomplete_canonical_block"
 	}
 	return true, ""
 }
@@ -570,24 +572,36 @@ func (p *Pool) processEventBatch(ctx context.Context, batch *EventBatch, podIden
 
 			// Create PodEntry for this specific event's device tier.
 			podEntries := []kvblock.PodEntry{{PodIdentifier: podIdentifier, DeviceTier: deviceTier}}
+			hasExplicitKind := ev.KVCacheSpecKind != ""
 			if ev.GroupIdx != nil {
 				g := kvblock.GroupID(*ev.GroupIdx)
 				if ev.KVCacheSpecKind == "" {
 					if meta, found := p.groupCatalog.Get(podIdentifier, g); found {
 						ev.KVCacheSpecKind = KVCacheSpecKind(meta.Kind)
 					}
-				} else {
+				}
+				podEntries[0].HasGroup = true
+				podEntries[0].GroupIdx = g
+			}
+
+			digestible, reason := blockStoredEventDigestible(ev, p.tokenProcessor.BlockSize())
+			if ev.GroupIdx != nil && len(ev.Tokens) > 0 && ev.KVCacheSpecKind != "" &&
+				(digestible || reason == "unsupported_cache_kind") {
+				g := kvblock.GroupID(*ev.GroupIdx)
+				// A dense engine stream can use a different block size than the
+				// router. Prefer its larger geometry over auxiliary streams.
+				if meta, found := p.groupCatalog.Get(podIdentifier, g); found &&
+					meta.Kind == string(ev.KVCacheSpecKind) && meta.BlockSize > ev.BlockSize {
+					digestible, reason = false, "conflicting_block_size"
+				} else if hasExplicitKind {
 					p.groupCatalog.Learn(podIdentifier, g, kvblock.GroupMetadata{
 						Kind:              string(ev.KVCacheSpecKind),
 						BlockSize:         ev.BlockSize,
 						SlidingWindowSize: ev.KVCacheSpecSlidingWindowSize,
 					})
 				}
-				podEntries[0].HasGroup = true
-				podEntries[0].GroupIdx = g
 			}
-
-			if digestible, reason := blockStoredEventDigestible(ev); !digestible {
+			if !digestible {
 				metrics.KVEventStoresSkipped.WithLabelValues(cacheKindLabel(ev.KVCacheSpecKind), reason).Inc()
 				log.FromContext(ctx).V(logging.TRACE).Info("Skipping KV cache store event",
 					"podIdentifier", podIdentifier,
