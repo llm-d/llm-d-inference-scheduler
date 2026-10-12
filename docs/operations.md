@@ -261,6 +261,10 @@ router:
 
 See `router.epp.autoscaling` in `config/charts/routerlib/values.yaml` for all fields and defaults. Custom metrics can be supplied via `autoscaling.metrics` to replace auto-generated CPU and memory metrics (target percentage fields remain range-validated if defined).
 
+### Standalone Proxy Sidecar Termination
+
+In standalone sidecar mode, the proxy container includes a five-second native `lifecycle.preStop.sleep` hook on Kubernetes 1.30+ with `PodLifecycleSleepAction` enabled. The delay allows Service endpoint removal to propagate before the proxy receives SIGTERM.
+
 ### Standalone Proxy Autoscaling (Service Mode)
 
 In standalone service mode (`router.proxy.mode: service`), the proxy runs as an independent Deployment and Service that can be autoscaled using Kubernetes HorizontalPodAutoscaler (HPA v2). When enabled via `router.proxy.autoscaling.enabled: true`, Helm omits `spec.replicas` on the proxy Deployment and generates an HPA targeting the proxy Deployment.
