@@ -59,7 +59,7 @@ The design enables:
 
 ### Routing Flow
 
-See the upstream [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/scheduling.md) doc for the canonical scheduling model.
+See the upstream [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/scheduling.md) doc for the canonical scheduling model.
 
 #### Request Control
 
@@ -98,7 +98,7 @@ Each scheduling profile runs the following stages. Multiple profiles may run for
 
 The llm-d Endpoint Picker relies on a YAML-based configuration—provided either as a file or an in-line parameter—to determine which lifecycle hooks (plugins) are active.
 
-See the upstream [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/configuration.md) doc for the canonical schema.
+See the upstream [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/configuration.md) doc for the canonical schema.
 
 Specifically, this configuration establishes the following components:
 
@@ -295,7 +295,7 @@ Polling sources share one Collector goroutine per endpoint. The base tick is
 when omitted, the source runs on every base tick. The runtime converts each source's
 interval to base-tick multiples and schedules dispatches accordingly.
 
-See the upstream [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/datalayer.md) doc for the canonical model.
+See the upstream [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/datalayer.md) doc for the canonical model.
 
 ---
 
@@ -391,11 +391,11 @@ Enable chunked decode via the pd-sidecar flag:
 
 ### Canonical llm-d architecture (upstream)
 
-- [Router overview](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/README.md)
-- [Proxy](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/proxy.md)
-- [Endpoint Picker (EPP)](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/README.md)
-- [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/configuration.md)
-- [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/scheduling.md)
-- [Request Handler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/request-handling.md)
-- [Flow Control](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/flow-control.md)
-- [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/datalayer.md)
+- [Router overview](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/README.md)
+- [Proxy](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/proxy.md)
+- [Endpoint Picker (EPP)](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/epp.md)
+- [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/configuration.md)
+- [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/scheduling.md)
+- [Request Handler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/request-handling.md)
+- [Flow Control](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/flow-control.md)
+- [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/datalayer.md)

@@ -51,10 +51,10 @@ three: what this page does not list is on EPP's endpoint (see [Metrics](metrics.
 
 ## Labels
 
-The `step` and `upstream` labels carry the same values, but measure different boundaries: a step is a pipeline stage, while an upstream is a single outbound call. They diverge where a stage is not one call: the `encode` step fans out one concurrent sub-request per multimodal entry, so a request with six images records one `step="encode"` observation and six `upstream="encode"` observations.
+The `step` and `upstream` labels carry the same values, but measure different boundaries: a step is a pipeline stage, while an upstream is a single outbound call. They diverge where a stage is not one call: the `encode` step fans out one concurrent sub-request per multimodal entry, so a request with six images records one `step="encode"` observation and six `upstream="encode"` observations. async-broker diverges the other way: it makes many Redis calls per request but counts only the enqueue, so its held-wait poll loop does not inflate the counter.
 
-- **`step`**: A stage of the internal pipeline, observed once per request per stage. Covers local work and all outbound calls made by that stage. The label value is the step's registered `Name()` (see `pipeline.Register`), so its cardinality is bounded by the set of registered pipeline steps. Values in the built-in registry: `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. See [Coordinator Architecture](coordinator_architecture.md).
-- **`upstream`**: A single outbound call, whatever its destination. Values: `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. A step that gains an outbound call gains a value here.
+- **`step`**: A stage of the internal pipeline, observed once per request per stage. Covers local work and all outbound calls made by that stage. The label value is the step's registered `Name()` (see `pipeline.Register`), so its cardinality is bounded by the set of registered pipeline steps. Values in the built-in registry: `async-broker`, `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. See [Coordinator Architecture](coordinator_architecture.md).
+- **`upstream`**: A single outbound call, whatever its destination. Values: `async-broker`, `render`, `replace-media-urls`, `encode`, `prefill`, `conditional-decode`, `decode`. A step that gains an outbound call gains a value here. async-broker names its enqueue call to Redis; its result lookups are not counted.
 - **`path`**: The sequence of disaggregation phases a request actually executed. Values: `decode-only`, `prefill-decode`, `encode-prefill-decode`. `encode-decode` is intentionally unreachable because encode implies prefill.
 
 ## Error classes
@@ -69,6 +69,7 @@ The `error_code` label on `request_error_total` and `step_errors_total` uses fiv
 
 **Key behaviors:**
 - The conditional-decode probe's HTTP 412 (the worker declined to serve it) is handled internally and is **not** an error. It is tracked separately by [`conditional_decode_probes_total`](#conditional_decode_probes_total-counter).
+- An error response that a pipeline step writes to the client itself counts in `request_error_total` and `step_errors_total`. The `async-broker` step does this for its validation 400s (`bad_request`), a failed enqueue (503, `upstream_transport`), the hold deadline (504, `upstream_5xx`), and every error status it relays from a stored result (`upstream_4xx` / `upstream_5xx` by band, including the 499 it writes for a cancelled result). A client that disconnects while the coordinator still holds the request is not counted, on either the enqueue or the hold path.
 - `upstream_4xx`, `upstream_5xx` and `upstream_transport` are recorded for every step that calls out, including `decode` and `conditional-decode`: their reverse proxy captures the upstream status in `ModifyResponse` and transport failures in `ErrorHandler`, and both steps translate a 4xx/5xx or transport error into an `UpstreamStreamedError` before any bytes are forwarded. A transport failure carries no status code, so it classifies as `upstream_transport` instead of by status band. What stays uncountable is a failure that surfaces after streaming has begun, since the 200 and a partial body are already on the wire.
 
 ## Metrics catalog
