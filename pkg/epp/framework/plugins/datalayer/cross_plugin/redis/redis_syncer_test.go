@@ -375,9 +375,14 @@ func TestGetReturnsLiveLocalBeforeSet(t *testing.T) {
 	server := miniredis.RunT(t)
 	syncer, counter := newTestSyncer(t, server, testReplicaID)
 
-	value := syncer.get(context.Background(), testStateKey, testEndpointID, 4, sumInts)
+	aggregateCalls := 0
+	value := syncer.get(context.Background(), testStateKey, testEndpointID, 4, func(values []any) any {
+		aggregateCalls++
+		return sumInts(values)
+	})
 
 	require.Equal(t, 4, value)
+	require.Zero(t, aggregateCalls)
 	require.Zero(t, counter.count.Load())
 }
 
@@ -402,9 +407,14 @@ func TestExpiredPeerAggregateFallsBackToLiveLocal(t *testing.T) {
 		expiresAt: time.Now().Add(-time.Second),
 	})
 
-	value := syncer.get(context.Background(), testStateKey, testEndpointID, 4, sumInts)
+	aggregateCalls := 0
+	value := syncer.get(context.Background(), testStateKey, testEndpointID, 4, func(values []any) any {
+		aggregateCalls++
+		return sumInts(values)
+	})
 
 	require.Equal(t, 4, value)
+	require.Zero(t, aggregateCalls)
 	_, cached := syncer.cache.Load(hashKey)
 	require.False(t, cached)
 }

@@ -31,10 +31,12 @@ type cloneableInt int
 
 func (v cloneableInt) Clone() fwkdl.Cloneable { return v }
 
-func TestLocalSyncerAggregatesLiveLocalValue(t *testing.T) {
+func TestLocalSyncerReturnsLiveLocalValue(t *testing.T) {
 	syncer := NewLocalSyncer("test", "replica-a")
+	aggregateCalls := 0
 	aggregate := func(values []any) any {
-		return values[0].(cloneableInt) * 2
+		aggregateCalls++
+		return values[0]
 	}
 	local := 21
 	spec := fwkdl.CrossReplicaSpec{
@@ -48,13 +50,15 @@ func TestLocalSyncerAggregatesLiveLocalValue(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, cloneableInt(42), value)
+	assert.Equal(t, cloneableInt(21), value)
+	assert.Zero(t, aggregateCalls)
 
 	local = 22
 	value, ok, err = syncer.Get(context.Background(), spec, "default/backend-0")
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, cloneableInt(44), value)
+	assert.Equal(t, cloneableInt(22), value)
+	assert.Zero(t, aggregateCalls)
 }
 
 func TestLocalSyncerConcurrentStateOperations(t *testing.T) {

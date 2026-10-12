@@ -9,8 +9,7 @@ instances.
 
 ## What It Does
 
-- Reads the contributor's live local endpoint value and applies its aggregation
-  function.
+- Returns the contributor's live local endpoint value.
 - Provides atomic `GetOrSet` coordination within one EPP process.
 - Uses the local hostname to isolate state associated with the EPP replica.
 

@@ -66,7 +66,7 @@ func (s *LocalSyncer) Set(context.Context, fwkdl.CrossReplicaSpec, string) error
 }
 
 func (s *LocalSyncer) Get(_ context.Context, spec fwkdl.CrossReplicaSpec, endpointID string) (any, bool, error) {
-	return spec.Aggregate([]any{spec.Read(endpointID)}), true, nil
+	return spec.Read(endpointID), true, nil
 }
 
 func (s *LocalSyncer) Delete(context.Context, fwkdl.StateKey, string) error {

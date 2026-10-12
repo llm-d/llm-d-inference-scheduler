@@ -269,12 +269,12 @@ func (s *RedisSyncer) get(_ context.Context, key fwkdl.StateKey, endpointID stri
 	hashKey := s.hashKey(key, endpointID)
 	cached, ok := s.cache.Load(hashKey)
 	if !ok {
-		return aggregate([]any{local})
+		return local
 	}
 	entry := cached.(*aggregateCacheEntry)
 	if !entry.expiresAt.After(time.Now()) {
 		s.cache.CompareAndDelete(hashKey, cached)
-		return aggregate([]any{local})
+		return local
 	}
 	return aggregate([]any{local, entry.value})
 }
