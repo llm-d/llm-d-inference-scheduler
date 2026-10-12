@@ -71,9 +71,12 @@ func TestSGLangHTTPParser_RewritePriority_ForwardsParsedBodyIntact(t *testing.T)
 	if err != nil {
 		t.Fatalf("ParseRequest() error = %v", err)
 	}
-	payload, ok := parsed.Body.Payload.(fwkrh.MarshalablePayload)
+	payload, ok := parsed.Body.Payload.(fwkrh.PayloadMap)
 	if !ok {
-		t.Fatalf("Payload type = %T, want a MarshalablePayload", parsed.Body.Payload)
+		t.Fatalf("Payload type = %T, want a PayloadMap", parsed.Body.Payload)
+	}
+	if _, raw := payload["input_ids"].(json.RawMessage); !raw {
+		t.Errorf("input_ids type = %T, want json.RawMessage", payload["input_ids"])
 	}
 	rewritten, mutated, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{}, payload, 2)
 	if err != nil {
@@ -88,6 +91,17 @@ func TestSGLangHTTPParser_RewritePriority_ForwardsParsedBodyIntact(t *testing.T)
 	}
 	if string(got) != want {
 		t.Errorf("forwarded body mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// Fields the parser does not read are SGLang's to validate, so a number that
+// does not fit a float64 is passed through instead of failing the request.
+func TestSGLangHTTPParser_ParseRequest_LeavesUnreadNumbersToSGLang(t *testing.T) {
+	parser := NewSGLangHTTPParser()
+	body := []byte(`{"input_ids":[1,2,3],"sampling_params":{"temperature":1e400}}`)
+
+	if _, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": "/generate"}); err != nil {
+		t.Fatalf("ParseRequest() error = %v, want nil", err)
 	}
 }
 
