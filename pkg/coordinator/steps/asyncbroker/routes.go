@@ -97,7 +97,9 @@ func (s *Step) handleFetch(w http.ResponseWriter, r *http.Request) {
 		// mailbox TTL to the retry grace window. Deleting outright would race
 		// the client's retry of a response lost past the coordinator's write.
 		// DELETE remains the immediate reclaim for tidy clients.
-		if _, err := writeResult(w, res); err == nil {
+		if _, err := writeResult(w, res); err != nil {
+			s.logger.Error(err, "failed to deliver result, retaining mailbox", "id", id)
+		} else {
 			graceCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if grace := s.cfg.fetchGrace(); grace > 0 {
@@ -228,12 +230,12 @@ type openAIErrorBody struct {
 	Code    string `json:"code,omitempty"`
 }
 
+// writeOpenAIError discards the write error: its callers write a final
+// response and keep no state that depends on its delivery.
 func writeOpenAIError(w http.ResponseWriter, status int, errType, code, msg string) {
 	_ = encodeOpenAIError(w, status, errType, code, msg)
 }
 
-// encodeOpenAIError is writeOpenAIError for callers that confirm delivery:
-// it returns the body write error.
 func encodeOpenAIError(w http.ResponseWriter, status int, errType, code, msg string) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -256,7 +258,8 @@ const statusClientClosedRequest = 499
 // CANCELLED -> 499, everything else -> 502, wrapped in the OpenAI error
 // envelope. Returns the pipeline result (ErrPipelineDone, or the error status
 // written) and the body write error, so callers that confirm delivery can act
-// on it.
+// on it. A nil write error does not prove delivery: net/http buffers bodies
+// under 2048 bytes and flushes them after the handler returns.
 func writeResult(w http.ResponseWriter, res *api.ResultMessage) (pipelineResult, writeErr error) {
 	if res.StatusCode > 0 {
 		// The stored result is external data: guard the range rather than

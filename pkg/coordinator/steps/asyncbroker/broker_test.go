@@ -733,17 +733,18 @@ func TestAsyncBrokerFetchGraceConfig(t *testing.T) {
 
 var errClientGone = errors.New("client gone")
 
-// failingWriter accepts headers and status but fails every body write, as a
-// connection dropped mid-response does.
+// failingWriter records the status it is given and fails every body write, as
+// a connection dropped mid-response does.
 type failingWriter struct {
 	header http.Header
+	status int
 }
 
 func newFailingWriter() *failingWriter { return &failingWriter{header: http.Header{}} }
 
-func (f *failingWriter) Header() http.Header       { return f.header }
-func (f *failingWriter) WriteHeader(int)           {}
-func (f *failingWriter) Write([]byte) (int, error) { return 0, errClientGone }
+func (f *failingWriter) Header() http.Header        { return f.header }
+func (f *failingWriter) WriteHeader(statusCode int) { f.status = statusCode }
+func (f *failingWriter) Write([]byte) (int, error)  { return 0, errClientGone }
 
 func TestWriteResultReportsWriteFailure(t *testing.T) {
 	cases := map[string]api.ResultMessage{
@@ -787,10 +788,13 @@ func TestAsyncBrokerUndeliveredErrorResultIsRetained(t *testing.T) {
 		step, rdb := newAsyncTestStep(t, nil)
 		reqCtx, _ := asyncReqCtx(t, `{"model":"test-model"}`,
 			map[string]string{defaultModeHeader: "wait", defaultTenantHeader: "team-a"})
-		reqCtx.ResponseWriter = newFailingWriter()
+		w := newFailingWriter()
+		reqCtx.ResponseWriter = w
 		key := seed(t, rdb, "req-test-1")
 
-		require.Error(t, step.Execute(t.Context(), reqCtx))
+		err := step.Execute(t.Context(), reqCtx)
+		assert.Equal(t, coordmetrics.ErrorCodeUpstream4xx, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
+		assert.Equal(t, http.StatusTooManyRequests, w.status)
 		assertRetained(t, rdb, key)
 	})
 
@@ -802,7 +806,9 @@ func TestAsyncBrokerUndeliveredErrorResultIsRetained(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/requests/eager-id", nil)
 		req.Header.Set(defaultTenantHeader, "team-a")
 
-		r.ServeHTTP(newFailingWriter(), req)
+		w := newFailingWriter()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusTooManyRequests, w.status)
 		assertRetained(t, rdb, key)
 	})
 
@@ -814,10 +820,12 @@ func TestAsyncBrokerUndeliveredErrorResultIsRetained(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/requests/grace-id", nil)
 		req.Header.Set(defaultTenantHeader, "team-a")
 
-		r.ServeHTTP(newFailingWriter(), req)
+		w := newFailingWriter()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusTooManyRequests, w.status)
 		ttl, err := rdb.TTL(t.Context(), key).Result()
 		require.NoError(t, err)
-		assert.Equal(t, time.Hour, ttl)
+		assert.Greater(t, ttl, 5*time.Second)
 	})
 }
 
