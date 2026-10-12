@@ -37,6 +37,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	p2psourceconstants "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/constants"
+	"github.com/llm-d/llm-d-router/pkg/kvcache"
 )
 
 const (
@@ -504,10 +505,6 @@ func (p *Producer) PreRequest(ctx context.Context, request *scheduling.Inference
 	return nil
 }
 
-// cpuDeviceTier is the CachedBlocksByTier key for the CPU tier (device tiers
-// are lowercased by the KV-event pipeline).
-const cpuDeviceTier = "cpu"
-
 // sourceCachedTokens returns the prompt tokens the endpoint can serve a P2P
 // pull from, and its block size. Pulls are served from the source's CPU tier,
 // so with per-tier data only the contiguous CPU-tier prefix counts; producers
@@ -519,7 +516,7 @@ func (p *Producer) sourceCachedTokens(ep scheduling.Endpoint) (tokens, blockSize
 		return 0, 0, false
 	}
 	if byTier := info.CachedBlocksByTier(); byTier != nil {
-		return byTier[cpuDeviceTier] * info.BlockSizeTokens(), info.BlockSizeTokens(), true
+		return byTier[kvcache.CPUTier] * info.BlockSizeTokens(), info.BlockSizeTokens(), true
 	}
 	return info.CachedBlockCount() * info.BlockSizeTokens(), info.BlockSizeTokens(), false
 }

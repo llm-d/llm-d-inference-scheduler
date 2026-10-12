@@ -22,6 +22,9 @@ import "strings"
 // carry no medium are indexed under it.
 const GPUTier = "gpu"
 
+// CPUTier is the tier name of blocks resident in host (CPU) memory.
+const CPUTier = "cpu"
+
 // StorageTier is the tier name of blocks resident in storage.
 const StorageTier = "storage"
 
@@ -47,7 +50,7 @@ type KVCacheBackendConfig struct {
 func DefaultKVCacheBackendConfig() []*KVCacheBackendConfig {
 	return []*KVCacheBackendConfig{
 		{Name: GPUTier, Weight: 1.0},
-		{Name: "cpu", Weight: 0.8},
+		{Name: CPUTier, Weight: 0.8},
 		{Name: FSBackendSharedStorageTier, Weight: 0.4},
 		{Name: StorageTier, Weight: 0.3},
 		{Name: FSBackendObjectStoreTier, Weight: 0.2},

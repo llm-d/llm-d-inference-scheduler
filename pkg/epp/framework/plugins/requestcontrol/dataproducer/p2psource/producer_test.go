@@ -33,6 +33,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	"github.com/llm-d/llm-d-router/pkg/kvcache"
 	"github.com/llm-d/llm-d-router/test/utils"
 )
 
@@ -101,7 +102,7 @@ func TestNew_DefaultsMinCachedTokenDelta(t *testing.T) {
 	req := &scheduling.InferenceRequest{RequestID: "req-new-default"}
 
 	require.NoError(t, p.Produce(ctx, req, []scheduling.Endpoint{
-		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{cpuDeviceTier: 4}),
+		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{kvcache.CPUTier: 4}),
 	}))
 
 	assert.Equal(t, defaultMinCachedTokenDelta, p.minCachedTokenDelta)
@@ -148,7 +149,7 @@ func TestProduce_PublishesReusablePrefixTokens(t *testing.T) {
 			req := &scheduling.InferenceRequest{RequestID: "req-floor-" + tt.name}
 
 			require.NoError(t, p.Produce(ctx, req, []scheduling.Endpoint{
-				tierEndpoint(p, "pod-a", "10.0.0.1", tt.cached, map[string]int{cpuDeviceTier: tt.cached}),
+				tierEndpoint(p, "pod-a", "10.0.0.1", tt.cached, map[string]int{kvcache.CPUTier: tt.cached}),
 			}))
 
 			got, ok := readReusablePrefixTokens(req, "test")
@@ -182,7 +183,7 @@ func TestProduce_CancelledContextDoesNotStoreAttributes(t *testing.T) {
 	req := &scheduling.InferenceRequest{RequestID: "req-cancelled"}
 
 	err := p.Produce(ctx, req, []scheduling.Endpoint{
-		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{cpuDeviceTier: 4}),
+		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{kvcache.CPUTier: 4}),
 	})
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -225,7 +226,7 @@ func TestProduce_ReusablePrefixTokensKeyUsesInstanceName(t *testing.T) {
 	req := &scheduling.InferenceRequest{RequestID: "req-custom-key"}
 
 	require.NoError(t, p.Produce(ctx, req, []scheduling.Endpoint{
-		tierEndpoint(p, "pod-a", "10.0.0.1", 2, map[string]int{cpuDeviceTier: 2}),
+		tierEndpoint(p, "pod-a", "10.0.0.1", 2, map[string]int{kvcache.CPUTier: 2}),
 	}))
 
 	got, ok := readReusablePrefixTokens(req, "custom")
@@ -494,7 +495,7 @@ func tierEndpointWithLoad(p *Producer, name, address string, cachedBlocks, waiti
 		attrprefix.NewPrefixCacheMatchInfo(cachedBlocks, 4, testBlockSize).
 			WithCachedBlockCount(cachedBlocks).
 			WithConfirmedCachedBlockCount(cachedBlocks).
-			WithCachedBlocksByTier(map[string]int{cpuDeviceTier: cachedBlocks}))
+			WithCachedBlocksByTier(map[string]int{kvcache.CPUTier: cachedBlocks}))
 	return e
 }
 
@@ -676,7 +677,7 @@ func TestProduce_GPUOnlySource_NotChosen(t *testing.T) {
 	req := &scheduling.InferenceRequest{RequestID: "req-gpu-only"}
 	eps := []scheduling.Endpoint{
 		tierEndpoint(p, "pod-gpu", "10.0.0.1", 10, map[string]int{"gpu": 10}),
-		tierEndpoint(p, "pod-cpu", "10.0.0.2", 3, map[string]int{"gpu": 3, cpuDeviceTier: 3}),
+		tierEndpoint(p, "pod-cpu", "10.0.0.2", 3, map[string]int{"gpu": 3, kvcache.CPUTier: 3}),
 	}
 	require.NoError(t, p.Produce(ctx, req, eps))
 
@@ -738,7 +739,7 @@ func TestPreRequest_ComputingSideCountsAllTiers(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	p := New("test", Config{MinCachedTokenDelta: 2 * testBlockSize})
 
-	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{cpuDeviceTier: 6})
+	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{kvcache.CPUTier: 6})
 	computing := tierEndpoint(p, "pod-comp", "10.0.0.2", 5, map[string]int{"gpu": 5})
 
 	req := &scheduling.InferenceRequest{RequestID: "req-comp-tiers"}
@@ -753,7 +754,7 @@ func TestPreRequest_TierDataWithoutConfirmedCountUsesCachedCount(t *testing.T) {
 	ctx := utils.NewTestContext(t)
 	p := New("test", Config{MinCachedTokenDelta: 2 * testBlockSize})
 
-	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{cpuDeviceTier: 6})
+	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{kvcache.CPUTier: 6})
 	computing := scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
 		ID:      k8stypes.NamespacedName{Name: "pod-comp"},
 		Address: "10.0.0.2",
@@ -778,7 +779,7 @@ func TestPreRequest_SpeculativeComputingCacheDoesNotSuppressHeader(t *testing.T)
 	ctx := utils.NewTestContext(t)
 	p := New("test", Config{MinCachedTokenDelta: 1})
 
-	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{cpuDeviceTier: 6})
+	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{kvcache.CPUTier: 6})
 	computing := tierEndpointWithConfirmed(p, "pod-comp", "10.0.0.2", 6, 0,
 		map[string]int{attrprefix.SpeculativeTierKey: 6})
 	req := &scheduling.InferenceRequest{RequestID: "req-speculative-computing", Headers: map[string]string{}}
