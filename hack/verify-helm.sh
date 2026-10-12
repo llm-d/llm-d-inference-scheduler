@@ -62,6 +62,7 @@ declare -A test_cases_llm_d_router_gateway
 
 # llm_d_router_gateway Helm Chart test cases
 test_cases_llm_d_router_gateway["basic"]="--set router.modelServers.matchLabels.app=llm-instance-gateway"
+test_cases_llm_d_router_gateway["basic-kubernetes-1.30"]="--kube-version 1.30.0 --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_gateway["gke-provider"]="--set provider.name=gke --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_gateway["multiple-replicas"]="--set router.replicas=3 --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_gateway["latency-predictor"]="--set router.latencyPredictor.enabled=true --set router.modelServers.matchLabels.app=llm-instance-gateway"
@@ -177,6 +178,7 @@ test_cases_llm_d_router_standalone["latency-predictor"]="--set router.latencyPre
 test_cases_llm_d_router_standalone["llm-d-router-gateway"]="--set router.inferencePool.create=true --set router.modelServers.matchLabels.app=llm-instance-gateway"
 test_cases_llm_d_router_standalone["agentgateway"]="--set router.proxy.proxyType=agentgateway --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000'"
 test_cases_llm_d_router_standalone["proxy-service"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.replicas=3"
+test_cases_llm_d_router_standalone["proxy-service-kubernetes-1.30"]="--kube-version 1.30.0 --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service"
 test_cases_llm_d_router_standalone["proxy-autoscaling"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.autoscaling.enabled=true --set router.proxy.autoscaling.minReplicas=2 --set router.proxy.autoscaling.maxReplicas=6 --set router.proxy.autoscaling.targetCPUUtilizationPercentage=70"
 test_cases_llm_d_router_standalone["agentgateway-service"]="--set router.proxy.proxyType=agentgateway --set router.proxy.mode=service --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000'"
 test_cases_llm_d_router_standalone["triton"]="--set router.modelServers.type=triton --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false"
@@ -511,6 +513,47 @@ if ! HELM="${HELM}" bash "${SCRIPT_ROOT}/hack/verify-plugins-config.sh"; then
   echo "Structured plugins configuration validation failed"
   exit 1
 fi
+
+echo "Verifying standalone proxy sidecar preStop delays..."
+proxy_pre_stop=$(printf '          lifecycle:\n            preStop:\n              sleep:\n                seconds: 5')
+for proxy_type in envoy agentgateway; do
+  for kube_version in 1.29.9 1.30.0; do
+    proxy_sidecar_render_output="${TEMP_DIR}/proxy-sidecar-${proxy_type}-${kube_version}.yaml"
+    if ! "${HELM}" template "${SCRIPT_ROOT}/config/charts/llm-d-router-standalone" \
+      --kube-version "${kube_version}" --set router.proxy.mode=sidecar \
+      --set router.proxy.proxyType="${proxy_type}" \
+      --set router.modelServers.matchLabels.app=llm-instance-gateway \
+      --set router.inferencePool.create=false \
+      --set 'router.modelServers.targetPorts[0].number=8000' > "${proxy_sidecar_render_output}"; then
+      echo "Proxy sidecar rendering failed for ${proxy_type} on Kubernetes ${kube_version}"
+      exit 1
+    fi
+    if ! "${KUBECTL_VALIDATE}" "${proxy_sidecar_render_output}" --local-crds "${TEMP_DIR}"; then
+      echo "Proxy sidecar validation failed for ${proxy_type} on Kubernetes ${kube_version}"
+      exit 1
+    fi
+    for container_name in "${proxy_type}-proxy" epp; do
+      container_spec=$(awk -v name="${container_name}" '
+        $0 == "        - name: " name { in_container = 1; next }
+        in_container && /^        - name:/ { exit }
+        in_container { print }
+      ' "${proxy_sidecar_render_output}")
+      if [ -z "${container_spec}" ]; then
+        echo "Container ${container_name} not found in proxy sidecar render"
+        exit 1
+      fi
+      if [ "${kube_version}" == "1.30.0" ]; then
+        if [ "$(grep -A3 -- '^          lifecycle:$' <<< "${container_spec}")" != "${proxy_pre_stop}" ]; then
+          echo "Expected a five-second preStop sleep for ${container_name} on Kubernetes ${kube_version}"
+          exit 1
+        fi
+      elif grep -q -- '^          lifecycle:$' <<< "${container_spec}"; then
+        echo "Unexpected lifecycle hook for ${container_name} on Kubernetes ${kube_version}"
+        exit 1
+      fi
+    done
+  done
+done
 
 echo "Verifying llm-d-router-standalone agentgateway renders plaintext EPP and custom listener ports..."
 agentgateway_render_output="${TEMP_DIR}/llm-d-router-standalone-agentgateway-render.yaml"
