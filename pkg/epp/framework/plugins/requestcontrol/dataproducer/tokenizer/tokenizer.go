@@ -62,10 +62,10 @@ const (
 	tokenizedPromptKeyID = "TokenizedPrompt"
 )
 
-// Backend identifiers reported on the tokenize span.
+// Backend identifiers reported on the tokenize span and returned by Plugin.Backend.
 const (
-	backendVLLM     = "vllm"
-	backendEstimate = "estimate"
+	BackendVLLM     = "vllm"
+	BackendEstimate = "estimate"
 )
 
 // resultSkippedNoTokens marks a tokenize span whose backend returned no tokens,
@@ -314,14 +314,14 @@ func NewPlugin(ctx context.Context, name string, config *tokenizerPluginConfig) 
 			legacyMessages: legacyMessages, legacyResponses: legacyResponses,
 			warmupAuth: vllmWarmupAuthHeader(),
 		}
-		backendName = backendVLLM
+		backendName = BackendVLLM
 		endpointPicker, _ = renderer.endpointPicker.(*discoveredEndpointPicker)
 		if endpointPicker != nil && endpointPicker.config.DiscoverModelLimits {
 			go endpointPicker.watchModelLimits(ctx, renderer.client, config.ModelName)
 		}
 	default:
 		backend = estimateBackend{img: newImageEstimator(config.Estimate), vid: newVideoEstimator(config.Estimate), aud: newAudioEstimator(config.Estimate)}
-		backendName = backendEstimate
+		backendName = BackendEstimate
 	}
 
 	typedName := plugin.TypedName{Type: PluginType, Name: name}
@@ -361,6 +361,11 @@ var (
 // TypedName returns the typed name of the plugin.
 func (p *Plugin) TypedName() plugin.TypedName {
 	return p.typedName
+}
+
+// Backend returns the configured backend identifier (BackendVLLM or BackendEstimate).
+func (p *Plugin) Backend() string {
+	return p.backendName
 }
 
 // Produces returns the data keys this plugin produces.
