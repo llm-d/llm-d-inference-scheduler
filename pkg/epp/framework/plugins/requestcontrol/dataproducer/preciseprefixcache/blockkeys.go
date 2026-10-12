@@ -20,6 +20,8 @@ import (
 	"context"
 	"sort"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/llm-d/llm-d-router/pkg/kvcache"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -27,6 +29,14 @@ import (
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
+)
+
+// Span attributes for multimodal block matching, emitted by Produce (maximum
+// across endpoints) and PreRequest (chosen endpoint) when the request carries
+// MM block attribution.
+const (
+	mmMatchedBlocksKey = attribute.Key("mm.matched_blocks")
+	mmTotalBlocksKey   = attribute.Key("mm.total_blocks")
 )
 
 // kvCacheIndexer is the subset of kvcache.Indexer that the producer relies on.
@@ -154,6 +164,19 @@ func multimodalBlockIndices(features []fwkrh.MultiModalFeature, blockSizeTokens 
 	}
 	sort.Ints(out)
 	return out
+}
+
+// totalMMBlocks counts the request's blocks spanned by any multimodal
+// feature, summed across prompts.
+func totalMMBlocks(request *scheduling.InferenceRequest, blockSizeTokens int) int {
+	if request == nil || request.Body == nil || request.Body.TokenizedRequest == nil {
+		return 0
+	}
+	total := 0
+	for _, prompt := range request.Body.TokenizedRequest.Prompts {
+		total += len(multimodalBlockIndices(prompt.MultiModalFeatures, blockSizeTokens))
+	}
+	return total
 }
 
 // foldCacheSalt appends the cache salt to the first block's extra keys, after

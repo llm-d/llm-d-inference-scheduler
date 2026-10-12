@@ -31,6 +31,7 @@ import (
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	mmobs "github.com/llm-d/llm-d-router/pkg/epp/framework/observability/multimodal"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/prefixmetrics"
 )
 
@@ -102,6 +103,59 @@ func TestPreRequestRecordsPrediction(t *testing.T) {
 	runPrediction(t, p, "repeat", tokens, endpoints, result)
 	assert.Equal(t, float64(len(tokens)), metricSum(t, predictedCachedTokensMetric, name, prefixmetrics.RoleDecode))
 	assert.Equal(t, float64(2*len(tokens)), metricSum(t, promptTokensMetric, name, prefixmetrics.RoleDecode))
+}
+
+// A request carrying multimodal content records its prediction once, under
+// the comma-joined sorted list of the modalities it carries, leaving the
+// text-only series untouched.
+func TestPreRequestRecordsPredictionModality(t *testing.T) {
+	disableMinBlockSizeClamp(t)
+
+	const name = "approx-predicted-modality"
+	p := producerForPrediction(t, name, 2)
+	endpoints, result := endpointAndResult()
+
+	tokens := []uint32{1, 2, 3, 4}
+	body := tokenizedBody(tokens)
+	body.TokenizedRequest.Prompts[0].MultiModalFeatures = []fwkrh.MultiModalFeature{
+		{Modality: fwkrh.ModalityImage, Hash: "img"},
+	}
+	image := string(fwkrh.ModalityImage)
+
+	// sum reads the producer's decode series for one modality label value.
+	sum := func(metricName, modality string) float64 {
+		t.Helper()
+		families, err := ctrlmetrics.Registry.Gather()
+		require.NoError(t, err)
+		for _, family := range families {
+			if family.GetName() != metricName {
+				continue
+			}
+			for _, metric := range family.GetMetric() {
+				labels := map[string]string{}
+				for _, label := range metric.GetLabel() {
+					labels[label.GetName()] = label.GetValue()
+				}
+				if labels["plugin_name"] == name && labels["endpoint_role"] == prefixmetrics.RoleDecode && labels["modality"] == modality {
+					return metric.GetHistogram().GetSampleSum()
+				}
+			}
+		}
+		return 0
+	}
+
+	runPredictionWithBody(t, p, "seed", body, endpoints, result)
+	assert.Equal(t, float64(0), sum(predictedCachedTokensMetric, image))
+	assert.Equal(t, float64(len(tokens)), sum(promptTokensMetric, image))
+
+	runPredictionWithBody(t, p, "repeat", body, endpoints, result)
+	assert.Equal(t, float64(len(tokens)), sum(predictedCachedTokensMetric, image))
+	assert.Equal(t, float64(2*len(tokens)), sum(promptTokensMetric, image))
+
+	assert.Equal(t, float64(0), sum(predictedCachedTokensMetric, mmobs.ModalityNone),
+		"a multimodal request must not record in the text-only series")
+	assert.Equal(t, float64(0), sum(promptTokensMetric, mmobs.ModalityNone),
+		"a multimodal request must not record in the text-only series")
 }
 
 // A prompt whose length is not a multiple of the block size still hashes its

@@ -226,10 +226,10 @@ match data but is not instrumented here. Requests that reach no endpoint are not
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_prefix_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Prompt tokens predicted to hit the chosen endpoint's prefix cache. |
+| `llm_d_epp_prefix_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Prompt tokens predicted to hit the chosen endpoint's prefix cache. |
 | `llm_d_epp_prefix_best_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the endpoints the scheduler selected from. |
 | `llm_d_epp_prefix_best_available_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the request's candidate endpoints before filtering. |
-| `llm_d_epp_prefix_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Prompt tokens the predictions were measured against. |
+| `llm_d_epp_prefix_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Prompt tokens the predictions were measured against. |
 | `llm_d_epp_prefix_mm_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens predicted to hit the chosen endpoint's prefix cache. |
 | `llm_d_epp_prefix_mm_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens the multimodal prediction was measured against. |
 
@@ -240,7 +240,18 @@ the primary profile's endpoint, and `endpoint_role` is `decode`.
 
 The `modality` label holds the modalities the request carries as a comma-joined sorted list (`none`
 for text-only), the same value as the `mm.modality` span attribute. Each request is observed once,
-so summing over `modality` keeps every ratio below exact.
+so summing over `modality` keeps the all-requests ratio exact. Per-modality breakdowns filter the
+label, e.g. `modality=~".*image.*"` covers requests carrying an image.
+
+The modality split applies to the predicted rate only. The delivered pair, `llm_d_epp_request_cached_tokens`
+divided by `llm_d_epp_request_input_tokens`, carries no modality label, so a per-modality predicted
+rate has no delivered counterpart to compare against.
+
+For the `approx-prefix-cache-producer`, the modality series describes the request mix, not
+multimodal hash correlation: that producer hashes token IDs, so on the vLLM render backend two
+requests with different images but the same placeholder tokens still match fully and its image
+series reads high for that reason. The `estimate` backend hashes the asset content into its
+multimodal placeholder tokens, so different images produce different tokens and do not match.
 
 The mm pair covers only requests whose match info carries multimodal attribution, so text-only
 requests never enter it and a zero observation means a multimodal request matched no blocks. Only

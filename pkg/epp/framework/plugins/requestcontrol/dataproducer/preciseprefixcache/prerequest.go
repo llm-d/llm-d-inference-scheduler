@@ -23,14 +23,17 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	mmobs "github.com/llm-d/llm-d-router/pkg/epp/framework/observability/multimodal"
 	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	rcplugins "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/prefixmetrics"
 )
 
@@ -107,7 +110,7 @@ func (p *Producer) matchInfo(endpoint scheduling.Endpoint) (*attrprefix.PrefixCa
 // have chosen and the best any candidate held before filtering, so the reuse a
 // routing decision left behind is separable from the reuse filtering put out of
 // reach.
-func (p *Producer) recordPrediction(request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
+func (p *Producer) recordPrediction(ctx context.Context, request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) {
 	profile, role := prefixmetrics.PredictionTarget(schedulingResult, experimentalPrefillProfile)
 	if profile == nil {
 		return
@@ -146,7 +149,7 @@ func (p *Producer) recordPrediction(request *scheduling.InferenceRequest, schedu
 		BestAvailable: bestAvailable,
 		PromptTokens:  request.Body.TokenizedRequest.TokenCount(),
 	})
-	p.recordMMPrediction(request, role, info)
+	p.recordMMPrediction(ctx, request, role, info)
 }
 
 // recordMMPrediction reports the multimodal prompt tokens the index expects
@@ -156,10 +159,16 @@ func (p *Producer) recordPrediction(request *scheduling.InferenceRequest, schedu
 // multimodal request matched no blocks. The producer counts each feature's
 // tokens inside the matched prefix, so a feature that starts or ends
 // mid-block contributes only the tokens it holds.
-func (p *Producer) recordMMPrediction(request *scheduling.InferenceRequest, role string, info *attrprefix.PrefixCacheMatchInfo) {
+func (p *Producer) recordMMPrediction(ctx context.Context, request *scheduling.InferenceRequest, role string, info *attrprefix.PrefixCacheMatchInfo) {
 	mm := info.MM()
 	if mm == nil {
 		return
+	}
+	if span := trace.SpanFromContext(ctx); span.IsRecording() {
+		span.SetAttributes(
+			mmMatchedBlocksKey.Int(mm.MatchBlocks),
+			mmTotalBlocksKey.Int(totalMMBlocks(request, info.BlockSizeTokens())),
+		)
 	}
 	mmPromptTokens := 0
 	for _, prompt := range request.Body.TokenizedRequest.Prompts {
@@ -242,7 +251,12 @@ func (p *Producer) PreRequest(ctx context.Context,
 	// the speculative-indexing gate.
 	defer p.pluginState.Delete(request.RequestID)
 
-	p.recordPrediction(request, schedulingResult)
+	ctx, span := tracing.Tracer(rcplugins.TracerScope).Start(ctx, "pre_request_precise_prefix_cache",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+
+	p.recordPrediction(ctx, request, schedulingResult)
 
 	if !p.speculativeEnabled {
 		return nil

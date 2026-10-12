@@ -41,8 +41,8 @@ func TestRegisterIsIdempotent(t *testing.T) {
 // A zero prediction is a real observation: the router expected no cache hit,
 // and the request still contributes its prompt tokens to the denominator.
 // Every field lands on its own histogram, and all four carry a sample per
-// call under the call's role so their sums stay divisible by one another.
-// The two maxima are also split by the call's modality.
+// call under the call's role and modality so their sums stay divisible by
+// one another.
 func TestRecordPrediction(t *testing.T) {
 	resetPredictionMetrics()
 	t.Cleanup(resetPredictionMetrics)
@@ -64,14 +64,14 @@ func TestRecordPrediction(t *testing.T) {
 		count  uint64
 		sum    float64
 	}{
-		{"decode selected", predictedCachedTokens, []string{RoleDecode}, 2, 512},
+		{"decode selected", predictedCachedTokens, []string{RoleDecode, mmobs.ModalityNone}, 2, 512},
 		{"decode best predicted", bestPredictedCachedTokens, []string{RoleDecode, mmobs.ModalityNone}, 2, 768},
 		{"decode best available", bestAvailableCachedTokens, []string{RoleDecode, mmobs.ModalityNone}, 2, 896},
-		{"decode prompt", promptTokens, []string{RoleDecode}, 2, 1280},
-		{"prefill selected", predictedCachedTokens, []string{RolePrefill}, 1, 64},
+		{"decode prompt", promptTokens, []string{RoleDecode, mmobs.ModalityNone}, 2, 1280},
+		{"prefill selected", predictedCachedTokens, []string{RolePrefill, "audio,image"}, 1, 64},
 		{"prefill best predicted", bestPredictedCachedTokens, []string{RolePrefill, "audio,image"}, 1, 96},
 		{"prefill best available", bestAvailableCachedTokens, []string{RolePrefill, "audio,image"}, 1, 112},
-		{"prefill prompt", promptTokens, []string{RolePrefill}, 1, 128},
+		{"prefill prompt", promptTokens, []string{RolePrefill, "audio,image"}, 1, 128},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			histogram, err := histogramFor(tc.vec, append([]string{"test-plugin", "test-type"}, tc.labels...)...)
@@ -124,6 +124,40 @@ func TestRecordMMPrediction(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), prompt.GetSampleCount())
 	assert.Equal(t, float64(128), prompt.GetSampleSum())
+}
+
+// A request is observed once, under the comma-joined sorted list of the
+// modalities it carries, so summing over modality keeps the all-requests
+// ratio exact.
+func TestRecordPrediction_ModalitySeries(t *testing.T) {
+	predictedCachedTokens.Reset()
+	promptTokens.Reset()
+	t.Cleanup(func() {
+		predictedCachedTokens.Reset()
+		promptTokens.Reset()
+	})
+
+	RecordPrediction("test-plugin", "test-type", RoleDecode, mmobs.ModalityNone, Prediction{
+		Selected: 512, PromptTokens: 1024,
+	})
+	RecordPrediction("test-plugin", "test-type", RoleDecode, "audio,image", Prediction{
+		Selected: 100, PromptTokens: 200,
+	})
+
+	predicted, err := histogramFor(predictedCachedTokens, "test-plugin", "test-type", RoleDecode, mmobs.ModalityNone)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), predicted.GetSampleCount())
+	assert.Equal(t, float64(512), predicted.GetSampleSum())
+
+	predicted, err = histogramFor(predictedCachedTokens, "test-plugin", "test-type", RoleDecode, "audio,image")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), predicted.GetSampleCount())
+	assert.Equal(t, float64(100), predicted.GetSampleSum())
+
+	prompt, err := histogramFor(promptTokens, "test-plugin", "test-type", RoleDecode, "audio,image")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), prompt.GetSampleCount())
+	assert.Equal(t, float64(200), prompt.GetSampleSum())
 }
 
 // Under P/D the sidecar reports the prefill stage's cached tokens, so the
