@@ -606,7 +606,7 @@ schedulingProfiles:
 				require.True(t, ok)
 				spec := contributor.CrossReplicaState()
 				require.Eventually(t, func() bool {
-					value, found, err := syncer.Get(streamCtx, spec.StateKey, opts.PoolNamespace+"/model-server")
+					value, found, err := syncer.Get(streamCtx, spec, opts.PoolNamespace+"/model-server")
 					load, ok := value.(*attrconcurrency.InFlightLoad)
 					return err == nil && found && ok && load.Requests == 1
 				}, 3*time.Second, opts.RefreshMetricsInterval, "in-flight load was not published before shutdown")
