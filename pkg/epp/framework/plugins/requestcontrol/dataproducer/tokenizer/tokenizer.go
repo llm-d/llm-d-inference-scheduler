@@ -432,8 +432,8 @@ func (p *Plugin) Produce(ctx context.Context, request *scheduling.InferenceReque
 		if request.TargetModel != "" {
 			attrs = append(attrs, semconv.GenAIRequestModel(request.TargetModel))
 		}
-		if request.RequestID != "" {
-			attrs = append(attrs, semconv.GenAIRequestID(request.RequestID))
+		if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+			attrs = append(attrs, semconv.GenAIRequestID(clientRequestID))
 		}
 		span.SetAttributes(attrs...)
 	}
