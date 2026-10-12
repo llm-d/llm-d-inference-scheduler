@@ -225,7 +225,7 @@ check-latest-tags-strict: ## Check ':latest' image tags in YAML (strict; fails o
 
 .PHONY: presubmit
 presubmit: LINT_NEW_ONLY=true
-presubmit: git-branch-check signed-commits-check go-mod-check format lint vulncheck check-latest-tags-strict verify-boilerplate
+presubmit: git-branch-check signed-commits-check go-mod-check format lint lint-security vulncheck check-latest-tags-strict verify-boilerplate
 
 .PHONY: git-branch-check
 git-branch-check:

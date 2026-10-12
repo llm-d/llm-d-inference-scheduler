@@ -114,7 +114,10 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
           govulncheck ./...
 
+      # A failure in an earlier step would otherwise skip gosec, leaving the
+      # SARIF upload below with no file for that commit.
       - name: Run make lint-security
+        if: ${{ !cancelled() }}
         env:
           GO_MOD_CACHE_VOL: ${{ steps.go-cache.outputs.mod }}
           GO_BUILD_CACHE_VOL: ${{ steps.go-cache.outputs.build }}
