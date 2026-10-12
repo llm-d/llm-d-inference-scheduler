@@ -512,6 +512,47 @@ if ! HELM="${HELM}" bash "${SCRIPT_ROOT}/hack/verify-plugins-config.sh"; then
   exit 1
 fi
 
+echo "Verifying standalone proxy sidecar preStop delays..."
+proxy_pre_stop=$(printf '          lifecycle:\n            preStop:\n              sleep:\n                seconds: 5')
+for proxy_type in envoy agentgateway; do
+  for kube_version in 1.29.9 1.30.0; do
+    proxy_sidecar_render_output="${TEMP_DIR}/proxy-sidecar-${proxy_type}-${kube_version}.yaml"
+    if ! "${HELM}" template "${SCRIPT_ROOT}/config/charts/llm-d-router-standalone" \
+      --kube-version "${kube_version}" --set router.proxy.mode=sidecar \
+      --set router.proxy.proxyType="${proxy_type}" \
+      --set router.modelServers.matchLabels.app=llm-instance-gateway \
+      --set router.inferencePool.create=false \
+      --set 'router.modelServers.targetPorts[0].number=8000' > "${proxy_sidecar_render_output}"; then
+      echo "Proxy sidecar rendering failed for ${proxy_type} on Kubernetes ${kube_version}"
+      exit 1
+    fi
+    if ! "${KUBECTL_VALIDATE}" "${proxy_sidecar_render_output}" --local-crds "${TEMP_DIR}"; then
+      echo "Proxy sidecar validation failed for ${proxy_type} on Kubernetes ${kube_version}"
+      exit 1
+    fi
+    for container_name in "${proxy_type}-proxy" epp; do
+      container_spec=$(awk -v name="${container_name}" '
+        $0 == "        - name: " name { in_container = 1; next }
+        in_container && /^        - name:/ { exit }
+        in_container { print }
+      ' "${proxy_sidecar_render_output}")
+      if [ -z "${container_spec}" ]; then
+        echo "Container ${container_name} not found in proxy sidecar render"
+        exit 1
+      fi
+      if [ "${kube_version}" == "1.30.0" ]; then
+        if [ "$(grep -A3 -- '^          lifecycle:$' <<< "${container_spec}")" != "${proxy_pre_stop}" ]; then
+          echo "Expected a five-second preStop sleep for ${container_name} on Kubernetes ${kube_version}"
+          exit 1
+        fi
+      elif grep -q -- '^          lifecycle:$' <<< "${container_spec}"; then
+        echo "Unexpected lifecycle hook for ${container_name} on Kubernetes ${kube_version}"
+        exit 1
+      fi
+    done
+  done
+done
+
 echo "Verifying llm-d-router-standalone agentgateway renders plaintext EPP and custom listener ports..."
 agentgateway_render_output="${TEMP_DIR}/llm-d-router-standalone-agentgateway-render.yaml"
 agentgateway_render_command="${HELM} template ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --set router.proxy.proxyType=agentgateway --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000' --set 'router.extraServicePorts[0].name=http' --set 'router.extraServicePorts[0].port=9000' --set 'router.extraServicePorts[0].protocol=TCP' --set 'router.extraServicePorts[0].targetPort=http' > ${agentgateway_render_output}"
