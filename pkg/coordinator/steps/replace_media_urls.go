@@ -645,9 +645,18 @@ var perModalityDownloadSizeParams = []modalityParam{
 // parsePerModalityDownloadSizes reads the three optional cap params, each
 // validated like max_download_size (positive, at most MaxInt/BytesPerMB).
 // Returns nil when none is set, telling "no override" from "set to zero".
+//
+// A key present with a null value -- the shape a template renders from an unset
+// variable -- is rejected rather than read as absent, which paramInt alone would
+// do: the fallback is the global max_download_size, so a line written to tighten
+// one modality's cap would leave it untightened. Same reasoning as the null
+// allowlist value on parsePerModalityContentTypes.
 func parsePerModalityDownloadSizes(params map[string]any) (map[reqcommon.Modality]int64, error) {
 	var out map[reqcommon.Modality]int64
 	for _, mp := range perModalityDownloadSizeParams {
+		if raw, present := params[mp.param]; present && raw == nil {
+			return nil, fmt.Errorf("%s must be a number, got <nil>", mp.param)
+		}
 		v, ok, err := paramInt(params, mp.param)
 		if err != nil {
 			return nil, err

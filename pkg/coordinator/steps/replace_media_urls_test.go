@@ -2907,6 +2907,28 @@ func TestReplaceMediaURLsStep_RejectsInvalidPerModalityCap(t *testing.T) {
 	}
 }
 
+// Construction fails on a per-modality cap key present with a null value, the
+// shape a template produces from an unset variable. Read as absent it would
+// fall back to the global max_download_size, so a line written to tighten one
+// modality's cap would leave it untightened.
+func TestReplaceMediaURLsStep_RejectsNullPerModalityCap(t *testing.T) {
+	for _, key := range []string{
+		"max_image_download_size",
+		"max_audio_download_size",
+		"max_video_download_size",
+	} {
+		t.Run(key, func(t *testing.T) {
+			_, err := NewReplaceMediaURLsStep(nil, map[string]any{key: nil})
+			if err == nil {
+				t.Fatalf("expected construction error for %s with a null value", key)
+			}
+			if !strings.Contains(err.Error(), key) {
+				t.Errorf("error should name the offending param, got %v", err)
+			}
+		})
+	}
+}
+
 // A narrower audio allowlist ({audio/wav}): audio/wav passes and audio/mpeg,
 // which the default set allows, is rejected.
 func TestReplaceMediaURLsStep_AllowedAudioContentTypes_Overrides(t *testing.T) {
