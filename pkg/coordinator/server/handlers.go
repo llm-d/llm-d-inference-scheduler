@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -112,30 +113,19 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 	body, err = io.ReadAll(io.LimitReader(r.Body, s.maxRequestBodySize*config.BytesPerMB+1))
 	if err != nil {
 		coordmetrics.IncRequestErrorTotal(model, coordmetrics.ErrorCodeBadRequest)
-		http.Error(cw, "failed to read request body", http.StatusBadRequest)
+		rejectInference(serverLog, cw, http.StatusBadRequest, "failed to read request body")
 		return
 	}
 	if int64(len(body)) > s.maxRequestBodySize*config.BytesPerMB {
 		coordmetrics.IncRequestErrorTotal(model, coordmetrics.ErrorCodeBadRequest)
-		http.Error(cw, "request body too large", http.StatusRequestEntityTooLarge)
+		rejectInference(serverLog, cw, http.StatusRequestEntityTooLarge, "request body too large")
 		return
 	}
 
 	parsed, err := decodeRequestBody(body)
 	if err != nil {
 		coordmetrics.IncRequestErrorTotal(model, coordmetrics.ErrorCodeBadRequest)
-		cw.Header().Set(reqcommon.HeaderContentType, reqcommon.ContentTypeJSON)
-		cw.Header().Set("X-Content-Type-Options", "nosniff")
-		cw.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(cw).Encode(map[string]any{
-			"error": map[string]any{
-				"message": "invalid JSON body",
-				"type":    "invalid_request_error",
-				"code":    http.StatusBadRequest,
-			},
-		}); err != nil {
-			log.FromContext(r.Context()).Error(err, "failed to write error response")
-		}
+		rejectInference(serverLog, cw, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	parseDuration = time.Since(parseStart)
@@ -162,7 +152,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		// a fixed list, so echoing it reflects no client-controlled content.
 		if err := reqcommon.RejectStatefulResponsesFields(parsed); err != nil {
 			coordmetrics.IncRequestErrorTotal(model, coordmetrics.ErrorCodeBadRequest)
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			rejectInference(serverLog, cw, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -225,7 +215,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status, msg := classifyPipelineError(err, reqCtx.RequestID)
-		http.Error(cw, msg, status)
+		rejectInference(logger, cw, status, msg)
 	}
 }
 
@@ -303,4 +293,12 @@ func classifyPipelineError(err error, requestID string) (int, string) {
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+// rejectInference answers a rejected inference request with the OpenAI error
+// envelope and logs a failure to write it.
+func rejectInference(logger logr.Logger, w http.ResponseWriter, status int, msg string) {
+	if err := reqcommon.WriteOpenAIError(w, status, msg); err != nil {
+		logger.Error(err, "failed to write error response")
+	}
 }

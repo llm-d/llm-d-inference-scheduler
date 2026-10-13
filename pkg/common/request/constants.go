@@ -46,6 +46,10 @@ const (
 	HeaderContentType = "content-type"
 	// ContentTypeJSON is the media type of JSON bodies.
 	ContentTypeJSON = "application/json"
+	// HeaderContentTypeOptions names the HTTP header that controls MIME sniffing of a body.
+	HeaderContentTypeOptions = "x-content-type-options"
+	// ContentTypeOptionsNoSniff disables MIME sniffing; http.Error sets it on every body it writes.
+	ContentTypeOptionsNoSniff = "nosniff"
 
 	FieldKVTransferParams     = "kv_transfer_params"
 	FieldECTransferParams     = "ec_transfer_params"
