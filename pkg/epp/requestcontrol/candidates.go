@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -290,10 +291,10 @@ func (c *CachedEndpointCandidates) generateCacheKey(reqMetadata map[string]any) 
 		return emptySubsetCacheKey
 	}
 
-	// Optimization: If there's only one endpoint, return it directly to avoid allocation.
+	// A single endpoint does not need copying or sorting.
 	if len(endpointSubsetList) == 1 {
 		if s, ok := endpointSubsetList[0].(string); ok {
-			return s
+			return strconv.Quote(s)
 		}
 	}
 
@@ -302,7 +303,7 @@ func (c *CachedEndpointCandidates) generateCacheKey(reqMetadata map[string]any) 
 	endpoints := make([]string, 0, len(endpointSubsetList))
 	for _, ep := range endpointSubsetList {
 		if s, ok := ep.(string); ok {
-			endpoints = append(endpoints, s)
+			endpoints = append(endpoints, strconv.Quote(s))
 		}
 	}
 
