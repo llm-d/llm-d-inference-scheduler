@@ -230,6 +230,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 
 		finishReason := extractFinishReason(chunkResponse)
 		chunkText := extractChoiceText(firstChoice(chunkResponse))
+		// Accumulated text forms the assistant message for the next chunk.
 		textAccum.WriteString(chunkText)
 
 		if streamingEnabled {
