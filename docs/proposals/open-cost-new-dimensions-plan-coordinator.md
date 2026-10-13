@@ -70,8 +70,18 @@ Decoder required in: `core/pkg/source/decoders.go` (`DecodeInferenceDimensionRes
 `llm_d_coordinator_request_input_tokens_attributed_total` and
 `llm_d_coordinator_request_output_tokens_attributed_total` are **counters**. They
 accumulate the total tokens observed across all requests and increase monotonically.
-OpenCost queries them using the same `increase`-based delta pattern as
-`queryCounterDelta`.
+OpenCost queries them using the same `last_over_time` delta pattern as
+`queryCounterDelta`: `last_over_time` returns the raw counter value at a timestamp, so
+the value at the end of the window minus the value at the start is the exact windowed
+delta.
+
+`increase()` is deliberately **not** used. `increase(m[W] @ end)` is already a windowed
+delta, so subtracting a second `increase` at the start would deduct a spurious extra
+slice of throughput from every window and under-bill. `increase()` also extrapolates to
+the range boundaries and returns fractional values, so the token count it reports cannot
+be reconciled against the raw counter samples. `last_over_time` end-minus-start yields
+exact integer token counts and needs only two instant lookups rather than a
+window-sized range selector.
 
 Whether `user_id` is present as a label on these series depends on the coordinator's
 `prometheus_user_id_label` configuration gate (default: `false`):
@@ -90,24 +100,24 @@ the `sum by` includes `user_id`; when false it is omitted:
 - **End-of-window query** (input tokens, gate **on**):
   ```promql
   sum by (user_id, tenant_id, workload_id, model_name, namespace) (
-    increase(llm_d_coordinator_request_input_tokens_attributed_total[<window>m] @ <end_unix>)
+    last_over_time(llm_d_coordinator_request_input_tokens_attributed_total[<window>m] @ <end_unix>)
   )
   ```
 - **End-of-window query** (input tokens, gate **off**):
   ```promql
   sum by (tenant_id, workload_id, model_name, namespace) (
-    increase(llm_d_coordinator_request_input_tokens_attributed_total[<window>m] @ <end_unix>)
+    last_over_time(llm_d_coordinator_request_input_tokens_attributed_total[<window>m] @ <end_unix>)
   )
   ```
 - **Start-of-window query** (narrow lookback to anchor the delta, same conditional grouping):
   ```promql
   -- gate on:
   sum by (user_id, tenant_id, workload_id, model_name, namespace) (
-    increase(llm_d_coordinator_request_input_tokens_attributed_total[2m] @ <start_unix>)
+    last_over_time(llm_d_coordinator_request_input_tokens_attributed_total[2m] @ <start_unix>)
   )
   -- gate off:
   sum by (tenant_id, workload_id, model_name, namespace) (
-    increase(llm_d_coordinator_request_input_tokens_attributed_total[2m] @ <start_unix>)
+    last_over_time(llm_d_coordinator_request_input_tokens_attributed_total[2m] @ <start_unix>)
   )
   ```
   Delta = end value − start value per key. Negative delta (counter reset) → use end value.
@@ -205,13 +215,35 @@ count against which attribution coverage is measured:
 ```
 
 > [!NOTE]
-> When the `render` step is not in the coordinator pipeline (text-only OpenAI-format
-> requests), `llm_d_coordinator_request_input_tokens` is zero for those requests. In
-> that case the coverage ratio will undercount. The warning threshold is configurable;
-> operators in render-less deployments should lower it or disable it to avoid false
-> alerts. The attributed counter always captures prompt tokens from the decode response
-> body regardless of whether render ran, so attribution coverage is unaffected — only
-> the denominator of the check is smaller.
+> The coordinator records `llm_d_coordinator_request_input_tokens` only when the `render`
+> step executed (`pkg/coordinator/pipeline/pipeline.go` gates
+> `RecordRequestInputTokens` on `executed["render"]`). When `render` is not in the
+> pipeline (text-only OpenAI-format requests), no observation is made, so the value is
+> not zero — it is *not observed*, and the `_sum` series may not exist at all for that
+> `model_name:namespace`. The coverage ratio is then **undefined**, not small, and must
+> not be evaluated: the check must skip any `model_name:namespace` whose
+> `llm_d_coordinator_request_input_tokens_sum` series is absent or has a zero
+> denominator, rather than treating the missing value as zero (which would produce a
+> division by zero or a false "coverage low" warning). In a mixed deployment where only
+> some requests run `render`, the attributed numerator also counts render-less requests
+> (prompt tokens come from the decode response body) while the denominator does not, so
+> the ratio can exceed 1.0; the check only warns on low coverage (`< 0.9`) and does not
+> treat a high ratio as an error. The warning threshold is configurable; operators in
+> render-less deployments should disable the check, since there is no ground-truth
+> denominator to compare against. Attribution itself is unaffected for requests that
+> reach decode.
+
+> [!NOTE]
+> The coordinator increments the attributed counters from the `handleInference` defer,
+> so they include requests that failed after render (for example in encode or prefill),
+> using the same `len(TokenIDs)` source as the un-attributed histogram. Those requests
+> consumed GPU time and are intentionally billed on the input side. In a render-less
+> deployment, a request that fails before decode returns a `usage` object contributes no
+> prompt tokens, because the count is unknown. Output tokens come only from the decode
+> `usage` object, so a truncated stream or client disconnect under-reports output tokens;
+> the per-request structured log marks these requests with `usage_captured: false`. See
+> [Metric and log emission](coordinator-request-attribution-metrics.md#metric-and-log-emission)
+> in the main proposal.
 
 ### 1.6 Exporter (`pkg/inferencecost/exporter.go`)
 
@@ -228,11 +260,56 @@ dimensionCost = prometheus.NewGaugeVec(
 )
 ```
 
-`user_id` is included in the gauge label set regardless of the coordinator's
+`user_id` is part of the gauge's registered label set regardless of the coordinator's
 `prometheus_user_id_label` gate. When the gate is on, it carries the actual user value
 or `"unknown"` (for requests with no `x-llm-d-user-id` header). When the gate is off,
-it carries `""` — the empty string that results when `InferenceDimensionKey.UserID` is
-unpopulated because the attributed counter series had no `user_id` label.
+`InferenceDimensionKey.UserID` is `""` (the attributed counter series had no `user_id`
+label) and the exporter passes `""` as the label value. Prometheus treats an empty label
+value as equivalent to the label being absent, so no `user_id` label is observable on the
+exposed series, and a PromQL selector such as `user_id=""` matches them. The gate-off
+expectation in §1.9 ("`user_id` label absent from emitted series") holds for this reason,
+not because the exporter omits the label.
+
+**Cardinality.** Nothing in OpenCost bounds this gauge itself: `tenant_id` and
+`workload_id` are bounded by `BoundedLabel` only on the coordinator side, and
+`llm_dimension_hourly_cost` re-exposes the cross-product of `model_name`, `namespace`,
+`tenant_id`, `workload_id` and (gate on) `user_id` inside OpenCost's own registry. The
+protections are all upstream:
+
+- The gauge series count is at most the number of distinct label tuples with a token
+  delta in the query window on the attributed counters, because the exporter emits only
+  what `BuildDimensionCosts` joins from `InferenceDimensionResult`. It adds no
+  combinations of its own.
+- The coordinator's per-dimension `BoundedLabel` caps (1 000 distinct values per label,
+  overflow folded to `"other"`) limit distinct values per dimension, **not** the product.
+  The cross-product warning in
+  [coordinator-request-attribution-metrics.md](coordinator-request-attribution-metrics.md#coordinator-metric-labels-aggregate-attribution)
+  therefore applies to this gauge as well, with the same worst case.
+- Leaving `prometheus_user_id_label` off (the default) removes the `user_id` factor
+  from the product.
+
+Operators who enable `user_id`, or who cannot trust the upstream header injection, should
+treat `llm_dimension_hourly_cost` as a high-cardinality metric when sizing OpenCost's
+scrape target and downstream Prometheus.
+
+**Effect of the cap on the bill: `other` versus `unknown`.** The exporter passes the
+coordinator's label values through unchanged, so `tenant_id` and `workload_id` can each
+carry two sentinel values that mean different things:
+
+| Value | Source | Meaning for cost |
+|---|---|---|
+| `unknown` | Header absent or empty (resolved before the cap is consulted) | Cost is unattributed because the upstream did not supply an identity. Recoverable in future periods by fixing header injection. |
+| `other` (`metricsutil.OverflowValue`) | `BoundedLabel` cap full | Cost is pooled across an unbounded number of tenants/workloads and **cannot be split back out**. |
+
+`BoundedLabel` never evicts, so the cap is the first 1 000 distinct values seen since the
+coordinator process started, not the 1 000 most recent. Once it is full, every further
+tenant is billed as `other` until the coordinator restarts, and a restart re-rolls which
+tenants are admitted. A tenant's cost can therefore appear under its own `tenant_id` before
+a restart and under `other` after it. The only signal is the presence of an `other` row;
+operators should treat `other` costs as non-attributable and must not merge them with
+`unknown`. See
+[Effect of the cap on the bill](coordinator-request-attribution-metrics.md#effect-of-the-cap-on-the-bill)
+for the operator guidance.
 
 ### 1.7 Aggregation & API
 
@@ -260,7 +337,7 @@ list the three new supported dimensions: `user_id`, `tenant_id`, `workload_id`.
 | `core/pkg/source/noop.go` | Add | No-op impl for `QueryInferenceDimensionTokens` |
 | `core/pkg/source/record.go` | Add | Recording impl for `QueryInferenceDimensionTokens` |
 | `core/pkg/source/mock.go` | Add | Mock impl with override injection for `QueryInferenceDimensionTokens` |
-| `modules/prometheus-source/pkg/prom/inference_queries.go` | Add | `QueryInferenceDimensionTokens` (counter `increase` delta strategy), `queryDimensionCounterDelta`, decoder, `mergeDimensionDeltas` |
+| `modules/prometheus-source/pkg/prom/inference_queries.go` | Add | `QueryInferenceDimensionTokens` (counter `last_over_time` delta strategy), `queryDimensionCounterDelta`, decoder, `mergeDimensionDeltas` |
 | `modules/collector-source/pkg/collector/metricsquerier.go` | Add | Stub impl (returns empty) for `QueryInferenceDimensionTokens` |
 | `pkg/inferencecost/types.go` | Extend | `UserID/TenantID/WorkloadID` on `InferenceCostProperties`; `AttributionEnabled` on `Config` |
 | `pkg/inferencecost/env.go` | Extend | Reader for `COORDINATOR_REQUEST_ATTRIBUTION_ENABLED` |
@@ -555,7 +632,7 @@ carry all three.
 
 | Decision | Chosen approach | Rationale |
 |---|---|---|
-| **Source metrics** | `llm_d_coordinator_request_input_tokens_attributed_total` + `llm_d_coordinator_request_output_tokens_attributed_total` | The coordinator emits dedicated attributed counters distinct from the un-attributed `request_input_tokens` histogram (render-step only). Being true counters they accumulate total tokens directly — the `queryCounterDelta` (`increase`) pattern applies. |
+| **Source metrics** | `llm_d_coordinator_request_input_tokens_attributed_total` + `llm_d_coordinator_request_output_tokens_attributed_total` | The coordinator emits dedicated attributed counters distinct from the un-attributed `request_input_tokens` histogram (render-step only). Being true counters they accumulate total tokens directly — the `queryCounterDelta` (`last_over_time` end minus start) pattern applies. |
 | **Cost join formula** | `promptTokens × (inputCostPerM / 1M) + completionTokens × (outputCostPerM / 1M)` | Token sums are the cost drivers. Request count is not used — per-token rates differ between input and output. |
 | **Calculator call order** | Calculator runs on model entries first; `buildDimensionCosts` uses the resulting rates | No need to re-run cost split logic per dimension entry. |
 | **`user_id` label semantics** | Conditional on `prometheus_user_id_label` gate (default: off). Gate on: label present, value is `"unknown"` when the header was absent. Gate off: metric registered without the label; `InferenceDimensionKey.UserID` is `""` and per-user breakdown via Prometheus is not meaningful. | The coordinator's Vec label set is fixed at registration time; the gate is the only clean way to omit the label in cardinality-sensitive deployments. Per-user attribution remains available via the structured log regardless of this setting. |
@@ -571,10 +648,10 @@ carry all three.
 A cluster may contain multiple independent llm-d coordinator deployments, each in its
 own namespace with its own coordinator, vLLM pods, and InferencePool. OpenCost is
 deployed once per cluster. Multi-deployment concerns are handled naturally: the attributed
-counters carry a `namespace` label (populated from `COORDINATOR_NAMESPACE` on the
-coordinator pod), and the `model_name:namespace` composite key partitions dimension
-token data per deployment automatically — no manual per-namespace configuration is
-required.
+counters pick up a `namespace` label at scrape time (the same way every other coordinator
+metric, including `llm_d_coordinator_request_input_tokens`, does), and the
+`model_name:namespace` composite key partitions dimension token data per deployment
+automatically — no manual per-namespace configuration is required.
 
 One limitation pre-dates this plan and remains open:
 
