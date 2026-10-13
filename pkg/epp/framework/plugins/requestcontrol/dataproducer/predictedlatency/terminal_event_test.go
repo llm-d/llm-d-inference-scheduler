@@ -73,3 +73,83 @@ func TestPredictedLatency_TerminalCleanupDoesNotAddToken(t *testing.T) {
 		})
 	}
 }
+
+func TestPredictedLatency_TruncatedStreamUsesLastTokenTime(t *testing.T) {
+	for _, cause := range []requestcontrol.TerminationCause{
+		requestcontrol.TerminationCauseClientDisconnect,
+		requestcontrol.TerminationCauseEvicted,
+		requestcontrol.TerminationCauseError,
+	} {
+		t.Run(string(cause), func(t *testing.T) {
+			router := createTestRouter()
+			router.config.StreamingMode = true
+			predictor := new(mockPredictor)
+			router.latencypredictor = predictor
+			endpoint := createTestEndpoint("terminal-pod", 1, 1, 1)
+			request := createTestInferenceRequest("unique-request-id", 100, 50)
+			state := newPredictedLatencyContext(request)
+			router.setPredictedLatencyContextForRequest(request, state)
+			require.NoError(t, router.PreRequest(context.Background(), request, createTestSchedulingResult(endpoint.GetMetadata())))
+
+			state.requestReceivedTimestamp = time.Now().Add(-time.Second)
+			processFirstTokenForLatencyPrediction(context.Background(), predictor, true, router.config.EndpointRoleLabel, state, state.requestReceivedTimestamp.Add(100*time.Millisecond))
+			processTokenForLatencyPrediction(context.Background(), state, state.requestReceivedTimestamp.Add(125*time.Millisecond))
+			processTokenForLatencyPrediction(context.Background(), state, state.requestReceivedTimestamp.Add(150*time.Millisecond))
+			predictor.capturedTrainingEntries = nil
+			router.ResponseBody(context.Background(), request, &requestcontrol.Response{
+				EndOfStream: true, StreamedEvents: 3, TerminationCause: cause,
+			}, endpoint.GetMetadata())
+
+			assert.Equal(t, 3, state.generatedTokenCount)
+			assert.Equal(t, 25.0, state.avgTPOT, "cleanup delay must not inflate observed token latency")
+			require.Len(t, predictor.capturedTrainingEntries, 1)
+			assert.Equal(t, 25.0, predictor.capturedTrainingEntries[0].ActualTPOT)
+			_, err := router.getPredictedLatencyContextForRequest(request)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestPredictedLatency_NonStreamingTerminalTraining(t *testing.T) {
+	for _, cause := range []requestcontrol.TerminationCause{
+		requestcontrol.TerminationCauseClientDisconnect,
+		requestcontrol.TerminationCauseEvicted,
+		requestcontrol.TerminationCauseError,
+		requestcontrol.TerminationCauseNatural,
+		"",
+	} {
+		name := string(cause)
+		if name == "" {
+			name = "unspecified"
+		}
+		t.Run(name, func(t *testing.T) {
+			router := createTestRouter()
+			router.config.StreamingMode = false
+			predictor := new(mockPredictor)
+			router.latencypredictor = predictor
+			endpoint := createTestEndpoint("terminal-pod", 1, 1, 1)
+			request := createTestInferenceRequest("unique-request-id", 100, 50)
+			state := newPredictedLatencyContext(request)
+			router.setPredictedLatencyContextForRequest(request, state)
+			require.NoError(t, router.PreRequest(context.Background(), request, createTestSchedulingResult(endpoint.GetMetadata())))
+			state.requestReceivedTimestamp = time.Now().Add(-time.Second)
+
+			router.ResponseBody(context.Background(), request, &requestcontrol.Response{
+				EndOfStream: true, TerminationCause: cause,
+			}, endpoint.GetMetadata())
+
+			if cause == requestcontrol.TerminationCauseNatural || cause == "" {
+				assert.Positive(t, state.ttft)
+				assert.Equal(t, 1, state.generatedTokenCount)
+				require.Len(t, predictor.capturedTrainingEntries, 1)
+				assert.Positive(t, predictor.capturedTrainingEntries[0].ActualTTFT)
+			} else {
+				assert.Zero(t, state.ttft, "an aborted response supplies no latency sample")
+				assert.Zero(t, state.generatedTokenCount)
+				assert.Empty(t, predictor.capturedTrainingEntries)
+			}
+			_, err := router.getPredictedLatencyContextForRequest(request)
+			require.Error(t, err)
+		})
+	}
+}

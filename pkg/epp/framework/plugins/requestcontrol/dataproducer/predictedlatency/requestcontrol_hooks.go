@@ -163,7 +163,7 @@ func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *fwksched.
 	}
 
 	if response.EndOfStream {
-		if !pl.config.StreamingMode {
+		if !pl.config.StreamingMode && !completionOnly {
 			processFirstTokenForLatencyPrediction(ctx, pl.latencypredictor, pl.config.StreamingMode, pl.config.EndpointRoleLabel, predictedLatencyCtx, now)
 		}
 
@@ -178,7 +178,7 @@ func (pl *PredictedLatency) ResponseBody(ctx context.Context, request *fwksched.
 		}
 
 		if predictedLatencyCtx.ttft > 0 && predictedLatencyCtx.generatedTokenCount > 1 {
-			e2eMs := float64(now.Sub(predictedLatencyCtx.requestReceivedTimestamp).Milliseconds())
+			e2eMs := float64(predictedLatencyCtx.lastTokenTimestamp.Sub(predictedLatencyCtx.requestReceivedTimestamp).Milliseconds())
 			predictedLatencyCtx.avgTPOT = (e2eMs - predictedLatencyCtx.ttft) / float64(predictedLatencyCtx.generatedTokenCount-1)
 		}
 
