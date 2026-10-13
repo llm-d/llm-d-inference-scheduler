@@ -92,7 +92,7 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 	s.injectUUIDs(reqCtx, logger)
 
 	switch format {
-	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses, reqcommon.APITypeVLLMGenerate:
+	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses, reqcommon.APITypeMessages, reqcommon.APITypeVLLMGenerate:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
 	case reqcommon.APITypeCompletions:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
@@ -114,12 +114,18 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 // reqCtx.OriginalPath, so the wire shape to walk is whatever the client sent.
 // resolveFormat's answer instead reflects the encode/prefill wire-format
 // setting, which can differ from the client's own shape.
+//
+// A Messages image block has no uuid field: vLLM's Anthropic conversion drops
+// one, so the worker hashes the image itself and decode stamps nothing.
 func (s *DecodeStep) injectUUIDs(reqCtx *pipeline.RequestContext, logger logr.Logger) {
 	// Without entries there is nothing to stamp, and the prompt items stay raw.
 	if len(reqCtx.MultimodalEntries) == 0 {
 		return
 	}
 	apiType := reqcommon.DetectAPIType(reqCtx.OriginalPath)
+	if apiType == reqcommon.APITypeMessages {
+		return
+	}
 	if items, ok := promptItems(reqCtx.Body, apiType); ok {
 		injectMediaPartUUIDs(items, apiType, reqCtx.MultimodalEntries, logger)
 		setPromptItems(reqCtx.Body, apiType, items)
