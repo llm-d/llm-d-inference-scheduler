@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,7 +103,7 @@ func (s *DecodeStep) executeForceStreamIncremental(ctx context.Context, logger l
 // clears the write deadline for the slow-client drain.
 func streamForcedResponse(logger logr.Logger, reqCtx *pipeline.RequestContext, body io.Reader, shape sseShape) error {
 	em := newIncrementalEmitter(reqCtx.ResponseWriter, shape, reqCtx.Model)
-	em.clearWriteDeadline()
+	em.clearWriteDeadline(logger)
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, forceStreamScanStartBytes), forceStreamMaxFrameBytes)
@@ -158,10 +159,13 @@ func newIncrementalEmitter(w http.ResponseWriter, shape sseShape, model string) 
 }
 
 // clearWriteDeadline disables the server write timeout for this response so a
-// slow client does not cut the drain short. Writers that do not support it
-// (the test recorder) report ErrNotSupported, which is ignored.
-func (e *incrementalEmitter) clearWriteDeadline() {
-	_ = e.rc.SetWriteDeadline(time.Time{})
+// slow client does not cut the drain short. A writer that does not support it
+// (the test recorder) reports http.ErrNotSupported, which is expected and
+// ignored; any other failure is logged rather than discarded.
+func (e *incrementalEmitter) clearWriteDeadline(logger logr.Logger) {
+	if err := e.rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		logger.V(logutil.DEFAULT).Info("could not clear write deadline", "error", err)
+	}
 }
 
 // add folds one frame: it captures envelope and trailing fields and writes any
