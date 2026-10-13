@@ -4,7 +4,7 @@ go 1.27.2
 
 require (
 	cloud.google.com/go/aiplatform v1.124.0
-	github.com/alicebob/miniredis/v2 v2.38.0
+	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dgraph-io/ristretto/v2 v2.4.2
 	github.com/dustin/go-humanize v1.0.1
@@ -22,8 +22,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jellydator/ttlcache/v3 v3.4.1
-	github.com/llm-d/llm-d-async/api v0.9.1
-	github.com/llm-d/llm-d-async/producer v0.9.1
+	github.com/llm-d/llm-d-async/api v0.11.0
+	github.com/llm-d/llm-d-async/producer v0.11.0
 	github.com/onsi/ginkgo/v2 v2.31.0
 	github.com/onsi/gomega v1.42.1
 	github.com/openai/openai-go v1.12.0
