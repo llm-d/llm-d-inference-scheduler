@@ -14,7 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package proxy
+// Package usage reads and rewrites the OpenAI-compatible token usage block of
+// an inference response.
+package usage
 
 import (
 	"bytes"
@@ -47,14 +49,14 @@ type cachedTokensUsageRewriter struct {
 // skips more content frames.
 var usageKey = []byte(`"` + reqcommon.FieldUsage + `"`)
 
-func newCachedTokensResponseWriter(
-	w http.ResponseWriter, cachedTokens int, streaming bool,
-) http.ResponseWriter {
-	writer, _ := newCachedTokensResponseWriterWithFinalize(w, cachedTokens, streaming)
-	return writer
-}
-
-func newCachedTokensResponseWriterWithFinalize(
+// NewCachedTokensResponseWriter wraps w so that every usage block it carries
+// reports cachedTokens at usage.prompt_tokens_details.cached_tokens. streaming
+// selects SSE line-by-line rewriting over whole-document rewriting; it comes
+// from the request, since the upstream content type is not yet known.
+//
+// The returned function must be called once the response is complete: both
+// modes buffer an incomplete tail, which it flushes.
+func NewCachedTokensResponseWriter(
 	w http.ResponseWriter, cachedTokens int, streaming bool,
 ) (http.ResponseWriter, func() error) {
 	rewriter := &cachedTokensUsageRewriter{
@@ -209,24 +211,22 @@ func (r *cachedTokensUsageRewriter) flushJSONBuffer(next httpsnoop.WriteFunc) er
 	return err
 }
 
-func extractCachedTokens(response map[string]any) (int, bool) {
-	usage, ok := response[reqcommon.FieldUsage].(map[string]any)
-	if !ok {
-		return 0, false
-	}
-	return cachedTokensFromUsage(usage)
-}
-
-func cachedTokensFromUsage(usage map[string]any) (int, bool) {
+// CachedTokens reads usage.prompt_tokens_details.cached_tokens out of a
+// response's usage block, which callers pass as the decoded value of the
+// response's "usage" field. It reports false when the block is absent or
+// carries no cached-token count; vLLM sends prompt_tokens_details as null
+// when the count is zero, so callers that need a number treat that as zero.
+func CachedTokens(block any) (int, bool) {
 	// Only the documented OpenAI-compatible field is used as the source of truth.
-	details, ok := usage[reqcommon.FieldPromptTokensDetails].(map[string]any)
+	fields, ok := block.(map[string]any)
 	if !ok {
 		return 0, false
 	}
-	if cachedTokens, ok := intValue(details[reqcommon.FieldCachedTokens]); ok {
-		return cachedTokens, true
+	details, ok := fields[reqcommon.FieldPromptTokensDetails].(map[string]any)
+	if !ok {
+		return 0, false
 	}
-	return 0, false
+	return intValue(details[reqcommon.FieldCachedTokens])
 }
 
 func intValue(value any) (int, bool) {

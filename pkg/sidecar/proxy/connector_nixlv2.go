@@ -38,6 +38,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/usage"
 	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 	"github.com/llm-d/llm-d-router/pkg/sidecar/metrics"
 )
@@ -273,7 +274,7 @@ retryLoop:
 	if !ok {
 		s.logger.Info("warning: missing 'kv_transfer_params' field in prefiller response")
 	}
-	pCachedTokens, hasPCachedTokens := extractCachedTokens(prefillerResponse)
+	pCachedTokens, hasPCachedTokens := usage.CachedTokens(prefillerResponse[reqcommon.FieldUsage])
 	if !hasPCachedTokens {
 		// vLLM returns prompt_tokens_details as null when cached_tokens is 0,
 		// so treat a missing prefiller cached_tokens value as zero.
@@ -406,7 +407,7 @@ retryLoop:
 		trace.Info("sending request to decoder", logging.HTTPBodyKey, string(dbody))
 	}
 	statusWriter, decodeStatus := captureResponseStatus(w)
-	decodeWriter, finalizeDecodeWriter := newCachedTokensResponseWriterWithFinalize(statusWriter, pCachedTokens, streamingEnabled)
+	decodeWriter, finalizeDecodeWriter := usage.NewCachedTokensResponseWriter(statusWriter, pCachedTokens, streamingEnabled)
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
 	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeWriter, dreq)

@@ -27,6 +27,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/usage"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/ec"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/kv"
@@ -120,6 +121,11 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		logger.Info("prefill returned no kv_transfer_params; decode will recompute the prompt",
 			"kvConnector", s.kv.Name(), "path", path)
 	}
+	// A prefill response without a count reports zero hits, not an unknown
+	// number of them (see usage.CachedTokens).
+	cachedTokens, _ := usage.CachedTokens(prefillResp.Usage)
+	reqCtx.PrefillCachedTokens = &cachedTokens
+
 	reqCtx.CaptureResponseHeaders(resp.Header)
 
 	logger.V(logutil.DEFAULT).Info("complete")
@@ -191,4 +197,7 @@ type prefillResponse struct {
 	// KVTransferParams is decoded as any (not map[string]any) so a non-object
 	// value does not fail the decode; coerceParamsMap coerces it.
 	KVTransferParams any `json:"kv_transfer_params"`
+	// Usage is decoded as any for the same reason, and is read by
+	// usage.CachedTokens.
+	Usage any `json:"usage"`
 }

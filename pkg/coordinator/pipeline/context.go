@@ -177,6 +177,15 @@ type RequestContext struct {
 	// decode step. Populated by PrefillStep from the prefill response; consumed
 	// by the KV connector when building the decode request.
 	KVTransferParams map[string]any
+	// PrefillCachedTokens is the prefill worker's reported
+	// usage.prompt_tokens_details.cached_tokens. The decode step substitutes it
+	// into the usage block it streams to the client: a decode worker counts the
+	// KV blocks transferred from prefill as its own prompt-cache hits, so its
+	// own count describes the handoff rather than the prompt cache. Populated by
+	// PrefillStep from every prefill response, and zero when that response
+	// carries no count, which is how vLLM reports zero. nil means prefill did
+	// not run and the decode worker's count reaches the client unchanged.
+	PrefillCachedTokens *int
 	// PeerTopology carries the prefill endpoint's encoded topology from the
 	// prefill response to the decode request, for topology-affinity-filter
 	// and topology-affinity-scorer running in the decode EPP's profile.
