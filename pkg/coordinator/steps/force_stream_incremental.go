@@ -206,7 +206,7 @@ func (e *incrementalEmitter) captureMeta(frame map[string]any) {
 		}
 	}
 	if e.model == "" {
-		if v, ok := frame["model"].(string); ok {
+		if v, ok := frame[reqcommon.FieldModel].(string); ok {
 			e.model = v
 		}
 	}
@@ -229,7 +229,7 @@ func (e *incrementalEmitter) captureMeta(frame map[string]any) {
 	if e.shape == sseShapeChat && e.role == "" {
 		if c0 := firstChoice(frame); c0 != nil {
 			if delta, ok := c0["delta"].(map[string]any); ok {
-				if role, ok := delta["role"].(string); ok {
+				if role, ok := delta[reqcommon.FieldRole].(string); ok {
 					e.role = role
 				}
 			}
@@ -246,7 +246,7 @@ func (e *incrementalEmitter) frameContent(frame map[string]any) (string, bool) {
 	switch e.shape {
 	case sseShapeChat:
 		if delta, ok := c0["delta"].(map[string]any); ok {
-			if content, ok := delta["content"].(string); ok {
+			if content, ok := delta[reqcommon.FieldContent].(string); ok {
 				return content, true
 			}
 		}
@@ -332,9 +332,9 @@ func (e *incrementalEmitter) prefix() []byte {
 			role = roleAssistant
 		}
 		roleJSON, _ := json.Marshal(role)
-		b.WriteString(`"choices":[{"index":0,"logprobs":null,"message":{"role":`)
+		b.WriteString(`"choices":[{"index":0,"logprobs":null,"message":{"` + reqcommon.FieldRole + `":`)
 		b.Write(roleJSON)
-		b.WriteString(`,"content":"`)
+		b.WriteString(`,"` + reqcommon.FieldContent + `":"`)
 	} else {
 		b.WriteString(`"choices":[{"index":0,"logprobs":null,"text":"`)
 	}
@@ -374,7 +374,7 @@ func (e *incrementalEmitter) writeEnvelopeFields(b *bytes.Buffer) {
 		appendField(b, "id", e.id)
 	}
 	if e.model != "" {
-		appendField(b, "model", e.model)
+		appendField(b, reqcommon.FieldModel, e.model)
 	}
 	if e.systemFingerprint != "" {
 		appendField(b, "system_fingerprint", e.systemFingerprint)

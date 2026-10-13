@@ -223,7 +223,7 @@ func (r *sseReassembler) captureMeta(frame map[string]any) {
 		}
 	}
 	if r.model == "" {
-		if model, ok := frame["model"].(string); ok {
+		if model, ok := frame[reqcommon.FieldModel].(string); ok {
 			r.model = model
 		}
 	}
@@ -285,10 +285,10 @@ func (r *sseReassembler) foldChoice(choice map[string]any) {
 	switch r.shape {
 	case sseShapeChat:
 		if delta, ok := choice["delta"].(map[string]any); ok {
-			if role, ok := delta["role"].(string); ok && role != "" {
+			if role, ok := delta[reqcommon.FieldRole].(string); ok && role != "" {
 				acc.role = role
 			}
-			if content, ok := delta["content"].(string); ok {
+			if content, ok := delta[reqcommon.FieldContent].(string); ok {
 				acc.content.WriteString(content)
 				r.contentBytes += int64(len(content))
 			}
@@ -421,7 +421,7 @@ func (r *sseReassembler) writeEnvelope(out map[string]any) {
 		out["id"] = r.id
 	}
 	if r.model != "" {
-		out["model"] = r.model
+		out[reqcommon.FieldModel] = r.model
 	}
 	if r.systemFingerprint != "" {
 		out["system_fingerprint"] = r.systemFingerprint
