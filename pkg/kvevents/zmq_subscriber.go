@@ -289,9 +289,7 @@ func (z *zmqSubscriber) runSubscriber(ctx context.Context) {
 			if !rebuilt {
 				// Without a base the pod is indexed from live events alone,
 				// as it is with neither endpoint set.
-				if z.snapshotEndpoint != "" {
-					z.addTask(ctx, topic, seq, payload)
-				}
+				z.addTask(ctx, topic, seq, payload)
 				continue
 			}
 		}
