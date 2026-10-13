@@ -115,6 +115,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestattributereporter"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/agentidentity"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/outlenbucket"
+	respondermodels "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/responder/models"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/responsereceived/topologystamp"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/screener/disaggregatedsetrollout"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/screener/endpointpin"
@@ -543,6 +544,7 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 
 	serverRunner := runserver.NewExtProcServerRunner(opts, *gknn, controllerCfg, ds, director,
 		r.parserRegistry, eppConfig.SaturationDetector, priorityBandControlPlane)
+	serverRunner.Responders = r.requestControlConfig.Responders()
 	if requestEvictor != nil {
 		serverRunner.EvictChannelLookup = requestEvictor.EvictionRegistry()
 	}
@@ -675,6 +677,7 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(srcmodels.ModelsDataSourceType, fwkplugin.StabilityStable, srcmodels.ModelDataSourceFactory)
 	fwkplugin.Register(attrmodels.ModelsExtractorType, fwkplugin.StabilityStable, extmodels.ModelServerExtractorFactory)
 	// Alpha
+	fwkplugin.Register(respondermodels.ModelsResponderType, fwkplugin.StabilityAlpha, respondermodels.Factory)
 	fwkplugin.Register(labelproducer.LabelProducerType, fwkplugin.StabilityAlpha, labelproducer.Factory)
 	fwkplugin.Register(attrtopology.TopologyExtractorType, fwkplugin.StabilityAlpha, exttopology.Factory)
 
@@ -1267,6 +1270,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 	// nil control plane: file-discovery mode has no InferenceObjective reconciler to drive one.
 	serverRunner := runserver.NewExtProcServerRunner(opts, gknn, runserver.NewControllerConfig(false),
 		ds, director, r.parserRegistry, eppConfig.SaturationDetector, nil)
+	serverRunner.Responders = r.requestControlConfig.Responders()
 	if requestEvictor != nil {
 		serverRunner.EvictChannelLookup = requestEvictor.EvictionRegistry()
 	}
