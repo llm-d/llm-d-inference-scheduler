@@ -332,7 +332,8 @@ The plugin fails at startup (before `Start` returns an error) if:
 - The file cannot be opened.
 - The file exceeds 1 MiB.
 - The YAML/JSON cannot be parsed.
-- Any endpoint has an invalid `address` or `port`.
+- Any endpoint has an invalid `address` or `port`, no `name`, or the same `name` and `namespace` as
+  an earlier endpoint.
 
 ### Kubernetes-only features that do not run in file discovery mode
 

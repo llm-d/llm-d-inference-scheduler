@@ -36,19 +36,15 @@ import (
 
 // Content-block types read by the estimate backend.
 const (
-	blockTypeText       = "text"
-	blockTypeImage      = "image"
-	blockTypeImageURL   = "image_url"
-	blockTypeThinking   = "thinking"
-	blockTypeToolUse    = "tool_use"
-	blockTypeToolResult = "tool_result"
+	blockTypeText     = "text"
+	blockTypeImageURL = "image_url"
+	blockTypeThinking = "thinking"
+	blockTypeToolUse  = "tool_use"
 )
 
 const (
 	// Per-request billing hashes must not defeat prefix caching.
 	anthropicBillingHeaderPrefix = "x-anthropic-billing-header"
-	// The base64 image fallback matches vLLM's Anthropic conversion.
-	defaultImageMediaType = "image/jpeg"
 )
 
 func anthropicSystemText(ac fwkrh.AnthropicContent) string {
@@ -84,7 +80,7 @@ func anthropicToolResultContent(b fwkrh.AnthropicContentBlock) (string, []tokeni
 		switch item.Type {
 		case blockTypeText:
 			parts = append(parts, item.Text)
-		case blockTypeImage:
+		case reqcommon.BlockTypeImage:
 			imageBlocks = appendImageBlock(imageBlocks, item.Source)
 		}
 	}
@@ -95,17 +91,7 @@ func anthropicImageToURL(src *fwkrh.AnthropicImageSource) string {
 	if src == nil {
 		return ""
 	}
-	if src.Type == "url" || src.URL != "" {
-		return src.URL
-	}
-	if src.Data == "" {
-		return ""
-	}
-	mediaType := src.MediaType
-	if mediaType == "" {
-		mediaType = defaultImageMediaType
-	}
-	return "data:" + mediaType + ";base64," + src.Data
+	return reqcommon.AnthropicImageURL(src.Type, src.URL, src.Data, src.MediaType)
 }
 
 // estimateBackend packs request bytes into pseudo-tokens with no real tokenizer.
@@ -307,14 +293,16 @@ func (b estimateBackend) chatCompletionsBytes(chat *fwkrh.ChatCompletionsRequest
 }
 
 // appendChatMessage flattens a single chat-completions message into the byte
-// stream, recording multimodal placeholders on aligned boundaries.
+// stream, recording multimodal placeholders on aligned boundaries. Assistant
+// tool_calls follow the content, matching tool_use blocks in messagesBytes and
+// function_call items in appendResponsesItem.
 func (b estimateBackend) appendChatMessage(out []byte, features []fwkrh.MultiModalFeature, msg fwkrh.Message, meta mmMetadata) ([]byte, []fwkrh.MultiModalFeature) {
 	if msg.Role != "" {
 		out = append(out, []byte(msg.Role)...)
 	}
 	if msg.Content.Raw != "" {
 		out = append(out, []byte(msg.Content.Raw)...)
-		return out, features
+		return appendChatToolCalls(out, msg.ToolCalls), features
 	}
 	for _, block := range msg.Content.Structured {
 		switch block.Type {
@@ -332,7 +320,36 @@ func (b estimateBackend) appendChatMessage(out []byte, features []fwkrh.MultiMod
 			out, features = appendMMAsset(out, features, reqcommon.ModalityAudio, data, b.aud.placeholderCount(block.InputAudio.Data, meta.audio))
 		}
 	}
-	return out, features
+	return appendChatToolCalls(out, msg.ToolCalls), features
+}
+
+// appendChatToolCalls flattens an assistant message's tool_calls: the function
+// name and its arguments. Arguments are a JSON string on the wire; an object is
+// accepted too and contributes its JSON encoding. A call of any other shape
+// contributes nothing.
+func appendChatToolCalls(out []byte, toolCalls []any) []byte {
+	for _, call := range toolCalls {
+		c, ok := call.(map[string]any)
+		if !ok {
+			continue
+		}
+		fn, ok := c["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, ok := fn["name"].(string); ok {
+			out = append(out, []byte(name)...)
+		}
+		switch args := fn["arguments"].(type) {
+		case string:
+			out = append(out, []byte(args)...)
+		case map[string]any:
+			if raw, err := json.Marshal(args); err == nil {
+				out = append(out, raw...)
+			}
+		}
+	}
+	return out
 }
 
 // messagesBytes flattens an Anthropic /v1/messages request into pseudo-token
@@ -360,7 +377,7 @@ func (b estimateBackend) messagesBytes(req *fwkrh.MessagesRequest) ([]byte, []fw
 			switch block.Type {
 			case blockTypeText:
 				out = append(out, []byte(block.Text)...)
-			case blockTypeImage:
+			case reqcommon.BlockTypeImage:
 				if content, count := b.img.placeholderForAnthropicImage(block.Source); content != "" {
 					out, features = appendMMAsset(out, features, reqcommon.ModalityImage, content, count)
 				}
@@ -370,7 +387,7 @@ func (b estimateBackend) messagesBytes(req *fwkrh.MessagesRequest) ([]byte, []fw
 				out = append(out, []byte(block.ID)...)
 				out = append(out, []byte(block.Name)...)
 				out = append(out, block.Input...)
-			case blockTypeToolResult:
+			case reqcommon.BlockTypeToolResult:
 				text, imageBlocks := anthropicToolResultContent(block)
 				out = append(out, []byte(text)...)
 				for _, img := range imageBlocks {

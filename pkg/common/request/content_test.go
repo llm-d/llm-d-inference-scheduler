@@ -25,6 +25,31 @@ import (
 	"testing"
 )
 
+func TestAnthropicImageURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		sourceType string
+		rawURL     string
+		data       string
+		mediaType  string
+		want       string
+	}{
+		{name: "url source", sourceType: "url", rawURL: "https://example.com/a.png", want: "https://example.com/a.png"},
+		{name: "bare url", rawURL: "https://example.com/bare.png", want: "https://example.com/bare.png"},
+		{name: "base64 with media type", sourceType: "base64", data: "aaaa", mediaType: "image/png", want: "data:image/png;base64,aaaa"},
+		{name: "base64 without media type", sourceType: "base64", data: "cccc", want: "data:image/jpeg;base64,cccc"},
+		{name: "empty source", sourceType: "base64", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AnthropicImageURL(tt.sourceType, tt.rawURL, tt.data, tt.mediaType)
+			if got != tt.want {
+				t.Fatalf("AnthropicImageURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // Base64DecodedLen must be exact, not an estimate: the coordinator bounds an
 // inline media payload with it, so a size read one byte high would reject a
 // payload of exactly the configured cap. Padding is what makes it exact, so

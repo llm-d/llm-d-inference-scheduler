@@ -135,3 +135,14 @@ const (
 	PartTypeInputFile          = "input_file"
 	PartTypeComputerScreenshot = "computer_screenshot"
 )
+
+// Anthropic Messages block types. The estimate tokenizer and the sidecar
+// encoder fan-out both read these.
+const (
+	BlockTypeImage      = "image"
+	BlockTypeToolResult = "tool_result"
+)
+
+// DefaultImageMediaType is vLLM's fallback when an Anthropic base64 image
+// source omits media_type.
+const DefaultImageMediaType = "image/jpeg"

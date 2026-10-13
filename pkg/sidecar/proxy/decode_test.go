@@ -324,6 +324,42 @@ var _ = Describe("Chunked Decode", func() {
 		Entry("streaming", true),
 	)
 
+	DescribeTable("forwards requests for several choices unchanged",
+		func(streaming bool) {
+			raw := fmt.Sprintf(`{"messages":[{"role":"user","content":"Hi"}],"max_tokens":20,"n":2,"stream":%t}`, streaming)
+			backendBody := `{"choices":[` +
+				`{"index":0,"message":{"role":"assistant","content":"first"},"finish_reason":"stop"},` +
+				`{"index":1,"message":{"role":"assistant","content":"second"},"finish_reason":"stop"}],` +
+				`"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}`
+			contentType := "application/json"
+			if streaming {
+				contentType = "text/event-stream"
+				backendBody = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first\"},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: {\"choices\":[{\"index\":1,\"delta\":{\"content\":\"second\"},\"finish_reason\":\"stop\"}]}\n\n" +
+					reqcommon.SSEDone + "\n\n"
+			}
+			server := NewProxy(Config{DecodeChunkSize: 5})
+			server.logger = logr.Discard()
+			calls := 0
+			server.decoderProxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				body, err := io.ReadAll(r.Body)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(string(body)).To(Equal(raw))
+				w.Header().Set("Content-Type", contentType)
+				_, err = io.WriteString(w, backendBody)
+				Expect(err).ToNot(HaveOccurred())
+			})
+			response := httptest.NewRecorder()
+			server.runChunkedDecode(response, httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(raw)))
+			Expect(calls).To(Equal(1))
+			Expect(response.Code).To(Equal(http.StatusOK))
+			Expect(response.Body.String()).To(Equal(backendBody))
+		},
+		Entry("non-streaming", false),
+		Entry("streaming", true),
+	)
+
 	Describe("non-streaming", func() {
 
 		It("falls back to regular decode when budget fits in one chunk", func() {
