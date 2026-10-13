@@ -50,7 +50,7 @@ spec:
             path: /health
             port: 8082
           periodSeconds: 5
-          failureThreshold: 1
+          failureThreshold: 5
           timeoutSeconds: 1
         resources:
           limits:
