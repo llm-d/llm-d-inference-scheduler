@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"strconv"
 
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
@@ -44,10 +45,6 @@ var AttributeKey = plugin.NewDataKey("outlen-bucket", "")
 const (
 	// PluginType is the plugin type name used in the EPP config.
 	PluginType = "outlen-bucket"
-
-	// toolChoiceNamed is the normalized value returned when tool_choice forces a specific
-	// function call ({"type":"function","function":{"name":...}}); used as a SHORT signal.
-	toolChoiceNamed = "named"
 
 	// longBudgetThresholdTokens is the thinking_budget above which a request is
 	// classified LONG even when enable_thinking is not explicitly set.
@@ -184,14 +181,14 @@ func classifyOutlen(in classifyInput) Bucket {
 	// --- SHORT pushers (must be high-precision) ---
 
 	// Forced tool call -> short tool-call JSON.
-	if in.toolChoice == "required" || in.toolChoice == toolChoiceNamed {
+	if in.toolChoice == string(toolcalling.ToolChoiceRequired) || in.toolChoice == string(toolcalling.ToolChoiceNamed) {
 		return Short
 	}
 	// Tools without thinking -> short tool-call JSON (measured p50 = 41 tokens, 100% precision).
 	// Guard: enable_thinking must be explicitly false or absent (Nemotron ARC-AGI proves
 	// has_tools alone is NOT a SHORT signal under thinking); and tool_choice="none" vetoes it
 	// (tools are advertised but the model is told not to call them, so the SHORT premise fails).
-	if in.hasTools && !thinking && in.toolChoice != "none" {
+	if in.hasTools && !thinking && in.toolChoice != string(toolcalling.ToolChoiceNone) {
 		return Short
 	}
 	// Continuing/completing a partially-written assistant turn -> short by construction.
@@ -288,11 +285,11 @@ func toolChoiceKind(v any) string {
 		return t
 	case map[string]any:
 		// A specific tool is forced -> a short tool-call JSON response.
-		return toolChoiceNamed
+		return string(toolcalling.ToolChoiceNamed)
 	case json.RawMessage:
 		// UnmarshalEnvelope stores objects as json.RawMessage; object = named tool.
 		if len(t) > 0 && t[0] == '{' {
-			return toolChoiceNamed
+			return string(toolcalling.ToolChoiceNamed)
 		}
 		var s string
 		if err := json.Unmarshal(t, &s); err == nil {
