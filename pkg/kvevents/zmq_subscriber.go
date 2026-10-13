@@ -183,7 +183,9 @@ func (z *zmqSubscriber) runSubscriber(ctx context.Context) {
 	}
 
 	// Rebuild the index from buffered events without waiting for live traffic.
-	if z.replayEndpoint != "" && !z.hasLastSeq && z.canAttemptReplay() {
+	// A snapshot takes precedence; it needs a live frame's topic, so the first
+	// frame loads it and falls back to the replay.
+	if z.replayEndpoint != "" && z.snapshotEndpoint == "" && !z.hasLastSeq && z.canAttemptReplay() {
 		logger.Info("Requesting proactive replay on connect",
 			"endpoint", z.endpoint, "replayEndpoint", z.replayEndpoint)
 		z.requestReplay(ctx, 0)
