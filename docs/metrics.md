@@ -15,7 +15,7 @@ The router deployment has three metric sources:
 |---|---|---|
 | EPP / router pod | EPP metrics, plugin metrics, and KV-cache metrics | EPP `/metrics`, default port `9090` |
 | Model server / engine pods | vLLM or other engine metrics | Each model server's `/metrics` |
-| P/D sidecar | MoRI-IO metrics only | HTTP `/metrics`, disabled by default |
+| P/D sidecar | Disaggregation request, stage latency, and stage error metrics; MoRI-IO metrics | Sidecar `/metrics` on `--metrics-port`, disabled by default |
 
 The EPP sends HTTP or HTTPS requests directly to each model server endpoint, per the
 `metrics-data-source` plugin's `scheme` parameter (default `http`).
@@ -28,7 +28,7 @@ The tables in this document show complete metric names.
 |---|---|---|
 | EPP / router pod | `llm_d_epp_` | EPP request and latency, in-flight load, pool, scheduler, plugin, data layer, flow control, disaggregation, ext_proc, prefix indexer, multimodal, fairness, predicted latency, model rewrite, and KV-cache metrics. |
 | Model server / engine | Engine-specific | Metrics exposed by the model server implementation. |
-| P/D sidecar | `moriio_dns_` | MoRI-IO peer DNS re-resolution metrics. |
+| P/D sidecar | `llm_d_disagg_sidecar_`, `moriio_dns_` | Disaggregation request, stage latency, and stage error metrics; MoRI-IO peer DNS re-resolution metrics. |
 
 The model server and sidecar metrics use separate registries and prefixes. See [Deprecated series](#deprecated-series)
 for the legacy EPP names that remain available.
@@ -70,15 +70,22 @@ endpoint's `/metrics` path (configurable) and parses the response. The `core-met
 selects configured values and stores them on the endpoint for scorers. These are model server
 metrics, not EPP metrics. The raw engine metrics remain available at the model server endpoint.
 
-### P/D sidecar: MoRI-IO metrics
+### P/D sidecar
 
-The P/D sidecar currently exposes only the `moriio_dns_*` MoRI-IO metrics, and only when
-`--metrics-port` or the backward-compatible `MORIIO_METRICS_ADDR` environment variable is set. The
-endpoint serves plain HTTP unless `--metrics-cert-dir` is set; see
-[MoRI-IO DNS re-resolution](#mori-io-dns-re-resolution) for the enablement and TLS settings.
+The sidecar serves its controller-runtime registry at `/metrics` on a dedicated port, separate from
+the data-plane proxy port, so the model server's own `/metrics` stays reachable through the proxy.
+This registry is separate from the router pod's EPP registry and contains the
+[P/D sidecar request and stage](#pd-sidecar-request-and-stage-metrics) and
+[MoRI-IO DNS re-resolution](#mori-io-dns-re-resolution) metrics.
 
-This endpoint belongs to the sidecar process;
-its controller-runtime registry is separate from the router pod's EPP registry.
+The endpoint is disabled by default. Pass `--metrics-port` (e.g. `--metrics-port=9090`) to the
+sidecar to enable it; `0` (the default) disables it. The `MORIIO_METRICS_ADDR` env var
+(e.g. `:9090`) is a backward-compatible fallback, consulted only when `--metrics-port` is unset.
+
+The endpoint serves plain HTTP by default. Pass `--metrics-cert-dir` with a directory containing
+`tls.crt` and `tls.key` to serve it over TLS instead. Missing or invalid files stop the sidecar; the
+metrics listener does not fall back to HTTP. The metrics TLS setting is independent of
+`--secure-serving` and `--cert-path`, which apply to the sidecar data-plane listener.
 
 ## Metrics catalog
 
@@ -711,25 +718,26 @@ use the labels shown below.
 | `llm_d_epp_kv_cache_events_pool_queue_depth` | Gauge | - | Messages queued across event-pool workers. |
 | `llm_d_epp_kv_cache_events_pool_capacity` | Gauge | - | Event-pool worker capacity. |
 
+### P/D sidecar request and stage metrics
+
+Emitted by the sidecar proxy on its `/metrics` endpoint; see [P/D sidecar](#pd-sidecar) for
+enablement and TLS.
+
+| Full metric name | Type | Labels | Notes |
+|---|---|---|---|
+| `llm_d_disagg_sidecar_requests_total` | Counter | `api_type` | Requests on the intercepted inference API paths. `api_type` is `chat_completions`, `completions`, `messages`, `responses`, `vllm_generate`, or `sglang_generate`. |
+| `llm_d_disagg_sidecar_disagg_requests_total` | Counter | `disagg_type` | Requests routed through disaggregation. `disagg_type` is `prefill-decode`, `encode-decode`, or `encode-prefill-decode`. |
+| `llm_d_disagg_sidecar_encode_duration_seconds` | Histogram | - | Encode stage latency. |
+| `llm_d_disagg_sidecar_prefill_duration_seconds` | Histogram | - | Prefill stage latency. |
+| `llm_d_disagg_sidecar_decode_duration_seconds` | Histogram | - | Decode stage latency. Not sampled when prefill returns an error status, since decode is then not run or its output is discarded. |
+| `llm_d_disagg_sidecar_request_errors_total` | Counter | `stage` | Stage errors. `stage` is `encode`, `prefill`, or `decode`. |
+
 ### MoRI-IO DNS re-resolution
 
 Emitted by the sidecar proxy when MoRI-IO peer host specs are DNS names that are re-resolved on the
 request path (see the
-[MoRI-IO feature guide](../pkg/sidecar/proxy/MORIIO_README.md)). The collectors are registered on
-the sidecar process's controller-runtime registry. That registry is separate from the router pod's
-EPP registry. These metrics are unlabeled.
-
-Unlike the EPP `/metrics` endpoint, the sidecar does not serve metrics by
-default. Pass `--metrics-port` (e.g. `--metrics-port=9090`) to the sidecar to
-expose these counters at `/metrics` on that port; `0` (the default) disables it.
-The `MORIIO_METRICS_ADDR` env var (e.g. `:9090`) is a backward-compatible
-fallback, consulted only when `--metrics-port` is unset.
-
-The endpoint serves plain HTTP by default. Pass `--metrics-cert-dir` with a
-directory containing `tls.crt` and `tls.key` to serve it over TLS instead.
-Missing or invalid files stop the sidecar; the metrics listener does not fall
-back to HTTP. The metrics TLS setting is independent of `--secure-serving` and
-`--cert-path`, which apply to the sidecar data-plane listener.
+[MoRI-IO feature guide](../pkg/sidecar/proxy/MORIIO_README.md)). These metrics are unlabeled and are
+served on the sidecar `/metrics` endpoint; see [P/D sidecar](#pd-sidecar) for enablement and TLS.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|

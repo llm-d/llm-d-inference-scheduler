@@ -60,6 +60,13 @@
           startupProbe:
           {{- toYaml . | nindent 12 }}
         {{- end }}
+        {{- if semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version }}
+          # Give endpoint removal time to propagate before SIGTERM.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+        {{- end }}
         {{- with $proxy.securityContext }}
           securityContext:
           {{- toYaml . | nindent 12 }}
