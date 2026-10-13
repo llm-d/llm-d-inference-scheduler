@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
@@ -168,7 +169,7 @@ func TestEstimateBackend_ChatImageFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityImage, f.Modality)
+	assert.Equal(t, reqcommon.ModalityImage, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(pngBase64DataURL), 16), f.Hash)
 	assert.Greater(t, f.Length, 1, "image length must be > 1 (placeholder weighting)")
 	assert.GreaterOrEqual(t, f.Offset, 0)
@@ -200,7 +201,7 @@ func TestEstimateBackend_ResponsesImageFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityImage, f.Modality)
+	assert.Equal(t, reqcommon.ModalityImage, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(pngBase64DataURL), 16), f.Hash)
 }
 
@@ -287,11 +288,11 @@ func TestEstimateBackend_ChatModalityLabels(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		block fwkrh.ContentBlock
-		want  fwkrh.Modality
+		want  reqcommon.Modality
 	}{
-		{"image", fwkrh.ContentBlock{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/a.png"}}, fwkrh.ModalityImage},
-		{"audio", fwkrh.ContentBlock{Type: "input_audio", InputAudio: fwkrh.AudioBlock{Data: "AAAA", Format: "wav"}}, fwkrh.ModalityAudio},
-		{"video", fwkrh.ContentBlock{Type: "video_url", VideoURL: fwkrh.VideoBlock{URL: "https://example.com/clip.mp4"}}, fwkrh.ModalityVideo},
+		{"image", fwkrh.ContentBlock{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/a.png"}}, reqcommon.ModalityImage},
+		{"audio", fwkrh.ContentBlock{Type: "input_audio", InputAudio: fwkrh.AudioBlock{Data: "AAAA", Format: "wav"}}, reqcommon.ModalityAudio},
+		{"video", fwkrh.ContentBlock{Type: "video_url", VideoURL: fwkrh.VideoBlock{URL: "https://example.com/clip.mp4"}}, reqcommon.ModalityVideo},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tp, err := estimateBackend{}.produce(context.Background(), chat(tc.block))
@@ -679,7 +680,7 @@ func TestEstimateBackend_ChatAudioFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityAudio, f.Modality)
+	assert.Equal(t, reqcommon.ModalityAudio, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(url), 16), f.Hash)
 	assert.Greater(t, f.Length, 1, "audio length must be > 1 (placeholder weighting)")
 	assert.GreaterOrEqual(t, f.Offset, 0)
@@ -1018,7 +1019,7 @@ func TestEstimateBackend_MessagesImageFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityImage, f.Modality)
+	assert.Equal(t, reqcommon.ModalityImage, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(pngBase64Raw), 16), f.Hash, "base64 source must hash by its raw payload")
 	assert.Greater(t, f.Length, 1, "image length must be > 1 (placeholder weighting)")
 	assert.GreaterOrEqual(t, f.Offset, 0)
