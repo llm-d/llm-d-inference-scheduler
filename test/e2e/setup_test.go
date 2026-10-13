@@ -47,13 +47,6 @@ func standaloneConfig() standalone.Config {
 	}
 }
 
-// vllmExtraArgs renders flags as one YAML list continuation, so a multi-flag
-// ${VLLM_EXTRA_ARGS_*} substitution lands as separate args rather than one
-// argv element. The indentation matches the manifests' args list.
-func vllmExtraArgs(flags ...string) string {
-	return strings.Join(flags, "\n        - ")
-}
-
 func createModelServersFromKustomize(kustomizeDir string, extra map[string]string) []string {
 	nsName := getNamespace()
 	subs := map[string]string{
@@ -120,7 +113,7 @@ func createModelServersDecodeDP(replicas int) []string {
 		// component passes --render-url, and a worker carrying that URL without
 		// the flag tokenizes through the shared renderer, which serves kvModelName
 		// and answers 404 for this spec's model.
-		"${VLLM_EXTRA_ARGS_D}": vllmExtraArgs("--mode=echo", "--force-dummy-tokenizer"),
+		"${VLLM_EXTRA_ARGS_D}": testutils.VLLMExtraArgs("--mode=echo", "--force-dummy-tokenizer"),
 	})
 }
 
