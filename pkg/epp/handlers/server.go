@@ -20,6 +20,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/datalayer"
@@ -249,6 +251,34 @@ func (r *RequestContext) apiType() reqcommon.APIType {
 	return reqcommon.DetectAPIType(fwkrequest.GetRequestPath(headers))
 }
 
+func toolCallingAPIForPath(path string) (reqcommon.APIType, bool) {
+	path, _, _ = strings.Cut(path, "?")
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	for _, apiType := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages, reqcommon.APITypeResponses} {
+		// Keep the slash boundary while allowing provider-specific prefixes.
+		suffix := strings.TrimPrefix(apiType.Path(), "/v1")
+		if strings.HasSuffix(path, suffix) {
+			return apiType, true
+		}
+	}
+	return 0, false
+}
+
+func compareEPPToolCallingSnapshotToBody(surface reqcommon.APIType, inbound toolcalling.RequestSnapshot, inboundBody, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
+	if bytes.Equal(inboundBody, outboundBody) || inbound.CanSkipCapture(outboundBody) {
+		return toolcalling.CompareRequests(inbound, inbound)
+	}
+	outbound, err := toolcalling.CaptureRequestJSON(surface, outboundBody)
+	if err != nil {
+		return nil, err
+	}
+	statuses, err := toolcalling.CompareRequests(inbound, outbound)
+	if err != nil {
+		return nil, err
+	}
+	return statuses, nil
+}
+
 // extractTraceContext returns ctx augmented with the upstream trace context
 // carried in the incoming ext_proc gRPC metadata and Envoy request headers (e.g.
 // the traceparent set by the client or the Gateway), using the globally configured
@@ -368,6 +398,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	buf := s.bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer func() {
+		buf.Reset()
 		// Return to pool if capacity is within limits.
 		if buf.Cap() <= s.maxPoolBufferSize || s.maxPoolBufferSize == 0 {
 			s.bufferPool.Put(buf)
@@ -515,23 +546,54 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			if v.RequestBody.EndOfStream {
 				loggerTrace.Info("decoding")
 				reqCtx.Request.Metadata = envoy.ExtractMetadataValues(req)
+				// Keep the buffer intact through comparison. RawBody is a copy
+				// so parser and Director edits cannot change the baseline.
+				inboundBody := buf.Bytes()
 				reqCtx.Request.RawBody = make([]byte, buf.Len())
-				copy(reqCtx.Request.RawBody, buf.Bytes())
+				copy(reqCtx.Request.RawBody, inboundBody)
 
 				// Body stream complete. Capture raw size for flow control.
 				reqCtx.RequestSize = buf.Len()
-				buf.Reset()
 
 				parser, resolveErr := s.getOrResolveParser(reqCtx)
 				if resolveErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: resolveErr.Error()}
 					break
 				}
+				apiType, hasToolCallingAPI := toolCallingAPIForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
 				before := time.Now()
 				parseResult, parseErr := parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				metrics.RecordPluginProcessingLatency(fwkrh.RequestParsingExtensionPoint, parser.TypedName().Type, parser.TypedName().Name, time.Since(before))
+				var inboundToolSnapshot toolcalling.RequestSnapshot
+				hasInboundToolSnapshot := false
+				if hasToolCallingAPI {
+					if parseErr == nil && parseResult.JSONValidated {
+						inboundToolSnapshot, err = toolcalling.CaptureValidatedRequestJSON(apiType, inboundBody)
+					} else {
+						inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiType, inboundBody)
+					}
+					if err != nil {
+						// A malformed body has no trustworthy field snapshot. The
+						// request parser controls the client error response.
+						hasToolCallingAPI = false
+					} else {
+						hasInboundToolSnapshot = true
+					}
+				}
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
+					if hasInboundToolSnapshot {
+						var statuses []toolcalling.FieldStatus
+						var fieldErr *fwkrh.RequestFieldError
+						if errors.As(parseErr, &fieldErr) {
+							field, _, _ := strings.Cut(fieldErr.Field, ".")
+							statuses = toolcalling.RejectedFieldStatuses(inboundToolSnapshot, toolcalling.Field(field))
+						}
+						metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
+						if span != nil {
+							span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
+						}
+					}
 					break
 				}
 
@@ -539,8 +601,23 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				// The Director may resolve agent identity after this request span opened.
 				tracing.AttributeRequest(ctx, span)
 				if err != nil {
+					if hasInboundToolSnapshot && span != nil {
+						span.SetAttributes(inboundToolSnapshot.SpanAttributes(nil)...)
+					}
 					break
 				}
+
+				if hasToolCallingAPI && hasInboundToolSnapshot {
+					statuses, compareErr := compareEPPToolCallingSnapshotToBody(apiType, inboundToolSnapshot, inboundBody, reqCtx.Request.RawBody)
+					if compareErr != nil {
+						logger.Error(compareErr, "Error comparing tool-calling request fields")
+					}
+					metrics.RecordToolCallingFieldStatuses(toolcalling.ComponentEPP, toolcalling.DirectionRequest, statuses)
+					if span != nil {
+						span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
+					}
+				}
+				buf.Reset()
 
 				// After scheduling, look up the eviction channel for eviction support.
 				// Setting evictCh from nil to a real channel dynamically enables the
@@ -640,11 +717,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		// Handle the err and fire an immediate response.
 		if err != nil {
 			recordRequestProcessing()
-			if logger.V(logutil.DEBUG).Enabled() {
-				logger.V(logutil.DEBUG).Error(err, "Failed to process request", "request", req)
-			} else {
-				logger.Error(err, "Failed to process request")
-			}
+			logger.Error(err, "Failed to process request")
 			resp, err := errcommon.BuildErrResponse(err, reqCtx.apiType())
 			if err != nil {
 				return err
