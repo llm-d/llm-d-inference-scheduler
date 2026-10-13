@@ -237,6 +237,16 @@ func TestCaptureRequestJSON_MalformedBody(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCaptureValidatedRequestJSONRequiresObject(t *testing.T) {
+	for _, body := range []string{`null`, `[]`, `42`, `"text"`} {
+		require.True(t, json.Valid([]byte(body)))
+		_, err := CaptureValidatedRequestJSON(reqcommon.APITypeChatCompletions, []byte(body))
+		require.Error(t, err)
+	}
+	_, err := CaptureValidatedRequestJSON(reqcommon.APITypeChatCompletions, nil)
+	require.Error(t, err)
+}
+
 func TestCaptureRequestJSONRejectsTrailingData(t *testing.T) {
 	for _, body := range []string{`{"tools":[]} {}`, `{"tools":[]} 1`, `{"tools":[]} invalid`, "\f{}", "{}\u0085", "\u00a0{}"} {
 		_, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(body))
@@ -318,6 +328,9 @@ func FuzzCaptureRequestJSON(f *testing.F) {
 				continue
 			}
 			require.NoError(t, err)
+			validated, err := CaptureValidatedRequestJSON(api, body)
+			require.NoError(t, err)
+			require.Equal(t, got, validated)
 			decoder := json.NewDecoder(bytes.NewReader(body))
 			decoder.UseNumber()
 			var decoded map[string]any
@@ -338,14 +351,22 @@ func FuzzCaptureRequestJSON(f *testing.F) {
 func BenchmarkCaptureRequestJSONNonTool(b *testing.B) {
 	for _, size := range []int{1024, 64 * 1024, 1024 * 1024} {
 		body := []byte(`{"messages":[{"content":"` + strings.Repeat("x", size) + `"}]}`)
-		b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				if _, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, body); err != nil {
-					b.Fatal(err)
+		for _, capture := range []struct {
+			name string
+			fn   func(reqcommon.APIType, []byte) (RequestSnapshot, error)
+		}{
+			{name: "checked", fn: CaptureRequestJSON},
+			{name: "validated", fn: CaptureValidatedRequestJSON},
+		} {
+			b.Run(fmt.Sprintf("%d_bytes/%s", size, capture.name), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					if _, err := capture.fn(reqcommon.APITypeChatCompletions, body); err != nil {
+						b.Fatal(err)
+					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -436,6 +457,9 @@ func TestCaptureRequestJSONMatchesDecodedCapture(t *testing.T) {
 				require.NoError(t, err)
 				got, err := CaptureRequestJSON(api, []byte(body))
 				require.NoError(t, err)
+				validated, err := CaptureValidatedRequestJSON(api, []byte(body))
+				require.NoError(t, err)
+				require.Equal(t, got, validated)
 				require.Equal(t, want.Summary(), got.Summary())
 				statuses, err := CompareRequests(want, got)
 				require.NoError(t, err)
@@ -624,6 +648,8 @@ func TestCaptureRequestRejectsUnsupportedAPIs(t *testing.T) {
 			_, err := captureRequest(apiType, map[string]any{"tools": []any{}})
 			require.Error(t, err)
 			_, err = CaptureRequestJSON(apiType, []byte(`{"tools":[]}`))
+			require.Error(t, err)
+			_, err = CaptureValidatedRequestJSON(apiType, []byte(`{"tools":[]}`))
 			require.Error(t, err)
 		})
 	}

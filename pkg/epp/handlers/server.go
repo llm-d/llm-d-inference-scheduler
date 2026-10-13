@@ -561,10 +561,17 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					break
 				}
 				apiType, hasToolCallingAPI := toolCallingAPIForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
+				before := time.Now()
+				parseResult, parseErr := parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
+				metrics.RecordPluginProcessingLatency(fwkrh.RequestParsingExtensionPoint, parser.TypedName().Type, parser.TypedName().Name, time.Since(before))
 				var inboundToolSnapshot toolcalling.RequestSnapshot
 				hasInboundToolSnapshot := false
 				if hasToolCallingAPI {
-					inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiType, reqCtx.Request.RawBody)
+					if parseErr == nil && parseResult.JSONValidated {
+						inboundToolSnapshot, err = toolcalling.CaptureValidatedRequestJSON(apiType, inboundBody)
+					} else {
+						inboundToolSnapshot, err = toolcalling.CaptureRequestJSON(apiType, inboundBody)
+					}
 					if err != nil {
 						// A malformed body has no trustworthy field snapshot. The
 						// request parser controls the client error response.
@@ -573,9 +580,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 						hasInboundToolSnapshot = true
 					}
 				}
-				before := time.Now()
-				parseResult, parseErr := parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
-				metrics.RecordPluginProcessingLatency(fwkrh.RequestParsingExtensionPoint, parser.TypedName().Type, parser.TypedName().Name, time.Since(before))
 				if parseErr != nil {
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: parseErr.Error()}
 					if hasInboundToolSnapshot {

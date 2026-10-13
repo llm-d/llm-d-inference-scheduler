@@ -103,6 +103,9 @@ type Claims struct {
 type ParseResult struct {
 	// Body contains the parsed inference request body.
 	Body *InferenceRequestBody
+	// JSONValidated reports that the original input bytes passed JSON syntax validation.
+	// Parsers accepting unvalidated or non-JSON input must leave it false.
+	JSONValidated bool
 	// SkipResponseProcessing indicates whether to skip EPP stream interception for this request.
 	// When set to true, the request will still go through the scheduling director
 	// (allowing routing decisions, profiles, and admission control to run),

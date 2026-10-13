@@ -108,7 +108,7 @@ func (p *AnthropicParser) ParseRequest(_ context.Context, body []byte, headers m
 	// through, so only the envelope is read: Messages stays nil, while the model
 	// still resolves and rewrites.
 	if countTokens {
-		return &fwkrh.ParseResult{Body: result, SkipResponseProcessing: true}, nil
+		return &fwkrh.ParseResult{Body: result, JSONValidated: true, SkipResponseProcessing: true}, nil
 	}
 
 	var messagesReq fwkrh.MessagesRequest
@@ -127,7 +127,7 @@ func (p *AnthropicParser) ParseRequest(_ context.Context, body []byte, headers m
 		result.Stream = true
 	}
 
-	return &fwkrh.ParseResult{Body: result, SkipResponseProcessing: false}, nil
+	return &fwkrh.ParseResult{Body: result, JSONValidated: true, SkipResponseProcessing: false}, nil
 }
 
 // RewriteModelName writes the resolved model into the request payload map.

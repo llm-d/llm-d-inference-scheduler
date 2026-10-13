@@ -115,12 +115,22 @@ type RequestSnapshot struct {
 
 // CaptureRequestJSON decodes only supported fields in a JSON request object.
 func CaptureRequestJSON(surface reqcommon.APIType, body []byte) (RequestSnapshot, error) {
+	return captureRequestJSON(surface, body, false)
+}
+
+// CaptureValidatedRequestJSON captures fields without repeating JSON validation.
+// The caller must have validated the complete, unchanged body as JSON.
+func CaptureValidatedRequestJSON(surface reqcommon.APIType, body []byte) (RequestSnapshot, error) {
+	return captureRequestJSON(surface, body, true)
+}
+
+func captureRequestJSON(surface reqcommon.APIType, body []byte, validated bool) (RequestSnapshot, error) {
 	fields, err := fieldsForSurface(surface)
 	if err != nil {
 		return RequestSnapshot{}, err
 	}
 	trimmed := bytes.TrimSpace(body)
-	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(body) {
+	if len(trimmed) == 0 || trimmed[0] != '{' || (!validated && !json.Valid(body)) {
 		return RequestSnapshot{}, errors.New("decode request body: expected valid JSON object")
 	}
 	captured, err := captureJSONFields(fields, trimmed)

@@ -52,6 +52,7 @@ import (
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/anthropic"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/openai"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/passthrough"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
 )
@@ -807,6 +808,32 @@ func (d *requestIntegrityDirector) HandleRequest(_ context.Context, reqCtx *Requ
 	return reqCtx, d.err
 }
 
+func TestRequestParserJSONValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		parser fwkrh.Parser
+		path   string
+		body   string
+		want   bool
+	}{
+		{name: "chat", parser: openai.NewOpenAIParser(), path: reqcommon.PathChatCompletions, body: `{"messages":[{"role":"user","content":"hello"}]}`, want: true},
+		{name: "Responses", parser: openai.NewOpenAIParser(), path: reqcommon.PathResponses, body: `{"input":"hello"}`, want: true},
+		{name: "Messages", parser: anthropic.NewAnthropicParser(), path: reqcommon.PathMessages, body: `{"messages":[{"role":"user","content":"hello"}]}`, want: true},
+		{name: "passthrough", parser: passthrough.NewPassthroughParser(), path: reqcommon.PathChatCompletions, body: `{"tools":[`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(tt.body)
+			result, err := tt.parser.ParseRequest(context.Background(), body, map[string]string{":path": tt.path})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, result.JSONValidated)
+			require.Equal(t, tt.body, string(body), "parser must preserve the original bytes")
+			if result.JSONValidated {
+				require.True(t, json.Valid(body))
+			}
+		})
+	}
+}
+
 func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 	const (
 		chatBody      = `{"model":"m","messages":[{"role":"user","content":"private_prompt_content"}],"tools":[{"type":"function","function":{"name":"private_tool_name","parameters":{"type":"object","description":"private_schema_content"}}}],"tool_choice":"required","parallel_tool_calls":true,"response_format":{"type":"json_object"}}`
@@ -819,6 +846,7 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 		body                  string
 		outbound              string
 		inPlace               bool
+		parser                fwkrh.Parser
 		directorErr           error
 		wantErrorStatus       envoyTypePb.StatusCode
 		wantErrorMessage      string
@@ -1035,6 +1063,24 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			body: plainBody, wantDirector: true,
 		},
 		{
+			name: "passthrough malformed JSON has no guessed statuses", path: reqcommon.PathChatCompletions,
+			body: `{"tools":[`, parser: passthrough.NewPassthroughParser(), wantDirector: true,
+		},
+		{
+			name: "passthrough trailing JSON has no guessed statuses", path: reqcommon.PathChatCompletions,
+			body: `{"tools":[]} {}`, parser: passthrough.NewPassthroughParser(), wantDirector: true,
+		},
+		{
+			name: "passthrough null has no tool fields", path: reqcommon.PathChatCompletions,
+			body: `null`, parser: passthrough.NewPassthroughParser(), wantDirector: true,
+		},
+		{
+			name: "passthrough valid JSON preserves tool fields", path: reqcommon.PathChatCompletions,
+			body: chatBody, parser: passthrough.NewPassthroughParser(), wantDirector: true,
+			wantSurface: "chat_completions", wantChoice: "required", wantToolBucket: "1",
+			wantFields: map[string]string{"tools": "preserved", "tool_choice": "preserved", "parallel_tool_calls": "preserved", "response_format": "preserved"},
+		},
+		{
 			name: "nested tool fields are not request fields", path: reqcommon.PathChatCompletions,
 			body: `{"model":"m","messages":[{"role":"user","content":"hello","tools":[],"tool_choice":"required"}]}`, wantDirector: true,
 		},
@@ -1081,7 +1127,11 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 					}}},
 				},
 			}
-			registry := NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}, logr.Discard())
+			parsers := []fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}
+			if tt.parser != nil {
+				parsers = []fwkrh.Parser{tt.parser}
+			}
+			registry := NewParserRegistry(parsers, logr.Discard())
 			server := NewStreamingServer(nil, director, registry, 0)
 			server.bufferPool.New = func() any { return requestBuffer }
 			require.NoError(t, server.Process(srv))
