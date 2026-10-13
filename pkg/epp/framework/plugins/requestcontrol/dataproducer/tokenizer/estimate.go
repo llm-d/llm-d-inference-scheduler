@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 )
@@ -320,15 +321,15 @@ func (b estimateBackend) appendChatMessage(out []byte, features []fwkrh.MultiMod
 		case blockTypeText:
 			out = append(out, []byte(block.Text)...)
 		case "image_url":
-			out, features = appendMMAsset(out, features, fwkrh.ModalityImage, block.ImageURL.URL, b.img.placeholderCount(block.ImageURL.URL))
+			out, features = appendMMAsset(out, features, reqcommon.ModalityImage, block.ImageURL.URL, b.img.placeholderCount(block.ImageURL.URL))
 		case "video_url":
-			out, features = appendMMAsset(out, features, fwkrh.ModalityVideo, block.VideoURL.URL, b.vid.placeholderCount(meta.video))
+			out, features = appendMMAsset(out, features, reqcommon.ModalityVideo, block.VideoURL.URL, b.vid.placeholderCount(meta.video))
 		case "audio_url":
 			// A clip carried by URL has no payload to read a duration from.
-			out, features = appendMMAsset(out, features, fwkrh.ModalityAudio, block.AudioURL.URL, b.aud.placeholderCount("", meta.audio))
+			out, features = appendMMAsset(out, features, reqcommon.ModalityAudio, block.AudioURL.URL, b.aud.placeholderCount("", meta.audio))
 		case "input_audio":
 			data := block.InputAudio.Data + block.InputAudio.Format
-			out, features = appendMMAsset(out, features, fwkrh.ModalityAudio, data, b.aud.placeholderCount(block.InputAudio.Data, meta.audio))
+			out, features = appendMMAsset(out, features, reqcommon.ModalityAudio, data, b.aud.placeholderCount(block.InputAudio.Data, meta.audio))
 		}
 	}
 	return out, features
@@ -361,7 +362,7 @@ func (b estimateBackend) messagesBytes(req *fwkrh.MessagesRequest) ([]byte, []fw
 				out = append(out, []byte(block.Text)...)
 			case blockTypeImage:
 				if content, count := b.img.placeholderForAnthropicImage(block.Source); content != "" {
-					out, features = appendMMAsset(out, features, fwkrh.ModalityImage, content, count)
+					out, features = appendMMAsset(out, features, reqcommon.ModalityImage, content, count)
 				}
 			case blockTypeThinking:
 				out = append(out, []byte(block.Thinking)...)
@@ -374,7 +375,7 @@ func (b estimateBackend) messagesBytes(req *fwkrh.MessagesRequest) ([]byte, []fw
 				out = append(out, []byte(text)...)
 				for _, img := range imageBlocks {
 					url := img.ImageURL.URL
-					out, features = appendMMAsset(out, features, fwkrh.ModalityImage, url, b.img.placeholderCount(url))
+					out, features = appendMMAsset(out, features, reqcommon.ModalityImage, url, b.img.placeholderCount(url))
 				}
 			}
 		}
@@ -518,7 +519,7 @@ func (b estimateBackend) appendResponsesContentPart(out []byte, features []fwkrh
 		}
 	case "input_image":
 		if url, ok := p["image_url"].(string); ok && url != "" {
-			out, features = appendMMAsset(out, features, fwkrh.ModalityImage, url, b.img.placeholderCount(url))
+			out, features = appendMMAsset(out, features, reqcommon.ModalityImage, url, b.img.placeholderCount(url))
 		}
 	}
 	return out, features
@@ -527,7 +528,7 @@ func (b estimateBackend) appendResponsesContentPart(out []byte, features []fwkrh
 // appendMMAsset aligns out to a token boundary, appends count placeholder
 // pseudo-tokens derived from a stable content hash, and records the matching
 // feature under modality so labels agree with the vllm backend.
-func appendMMAsset(out []byte, features []fwkrh.MultiModalFeature, modality fwkrh.Modality, content string, count int) ([]byte, []fwkrh.MultiModalFeature) {
+func appendMMAsset(out []byte, features []fwkrh.MultiModalFeature, modality reqcommon.Modality, content string, count int) ([]byte, []fwkrh.MultiModalFeature) {
 	out = align(out)
 	offset := len(out) / fwkrh.BytesPerToken
 

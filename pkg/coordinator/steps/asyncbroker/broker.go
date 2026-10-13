@@ -403,7 +403,9 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 		}
 		if err == nil && state == asyncStateReady {
 			pipelineResult, writeErr := writeResult(w, res)
-			if writeErr == nil {
+			if writeErr != nil {
+				logger.Error(writeErr, "failed to deliver result, retaining mailbox", "id", id)
+			} else {
 				// Delivery confirmed on the held connection, the result's only
 				// consumer: reclaim the mailbox now instead of letting it sit
 				// out the full result TTL. On write failure the key stays, as
@@ -444,10 +446,10 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 				}
 				if err == nil && state == asyncStateReady {
 					pipelineResult, writeErr := writeResult(w, res)
-					if writeErr == nil {
-						if err := s.rdb.Del(finalCtx, resultKey(tenant, id)).Err(); err != nil {
-							logger.Error(err, "failed to delete delivered result", "id", id)
-						}
+					if writeErr != nil {
+						logger.Error(writeErr, "failed to deliver result, retaining mailbox", "id", id)
+					} else if err := s.rdb.Del(finalCtx, resultKey(tenant, id)).Err(); err != nil {
+						logger.Error(err, "failed to delete delivered result", "id", id)
 					}
 					return pipelineResult
 				}

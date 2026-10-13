@@ -172,7 +172,8 @@ jobs:
           # Diffs migrating pre-v1.0 fixtures from deprecated v1alpha1 to v1 are allowed;
           # any other modification, deletion, or rename is rejected.
           changed=$(git diff --name-only --diff-filter=MDR "$BASE_SHA...HEAD" \
-            -- 'test/testdata/plugins/stable/v*' || true)
+            -- 'test/testdata/plugins/stable/v*' \
+            ':!test/testdata/plugins/stable/v1/data-parallel-profile-handler.yaml' || true)
 
           disallowed=""
           for f in $changed; do

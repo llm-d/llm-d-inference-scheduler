@@ -563,6 +563,10 @@ func (z *zmqSubscriber) requestReplay(ctx context.Context, startSeq uint64) bool
 				terminalErr = fmt.Errorf("malformed replay frame with %d frames", len(frames))
 				break
 			}
+			// A bounded buffer may no longer contain the start of a cold stream.
+			if startSeq == 0 && replayed == 0 {
+				expectedSeq = seq
+			}
 			if seq != expectedSeq {
 				terminalErr = fmt.Errorf("incomplete replay: expected sequence %d, got %d", expectedSeq, seq)
 				break
