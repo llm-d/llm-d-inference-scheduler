@@ -155,7 +155,13 @@ func (b renderBackend) produce(ctx context.Context, body *fwkrh.InferenceRequest
 			TokenIDs:           tokenIDs,
 			MultiModalFeatures: convertMMFeaturesToUpstream(mmFeatures),
 		}}}, nil
-	case body.Generate != nil && len(body.Generate.TokenIDs) > 0:
+	case body.Generate != nil && len(body.Generate.TokenIDs) == 0:
+		tokenIDs, _, err := b.tk.Render(ctx, fwkrh.PayloadMap{"model": b.modelName, "prompt": body.Generate.Text})
+		if err != nil {
+			return nil, fmt.Errorf("tokenization failed: %w", err)
+		}
+		return fwkrh.NewTokenizedRequest(tokenIDs), nil
+	case body.Generate != nil:
 		return &fwkrh.TokenizedRequest{Prompts: []fwkrh.PromptTokens{{
 			TokenIDs:           body.Generate.TokenIDs,
 			MultiModalFeatures: convertMMFeaturesToUpstream(body.Generate.Features),
