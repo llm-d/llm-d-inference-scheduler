@@ -448,11 +448,14 @@ State produced by one phase and consumed by a later one is carried on the
 | `prefill` | `KVTransferParams` (from the response body), `PrefillCachedTokens` (from its `usage` block) | decode |
 
 A decode worker counts the KV blocks transferred from prefill as prompt-cache hits
-of its own, so the `usage.prompt_tokens_details.cached_tokens` it reports describes
-the handoff rather than the prompt cache. The `decode` step substitutes the prefill
-worker's count into the usage block it streams to the client, in the single JSON
-document or in the SSE usage frame, so a disaggregated request reports the cache hits
-a single-worker request would. The rewriting lives in
+of its own, so the cached-token count it reports describes the handoff rather than
+the prompt cache. The `decode` step substitutes the prefill worker's count into the
+usage block it streams to the client, in the single JSON document or in the SSE usage
+frame, so a disaggregated request reports the cache hits a single-worker request
+would. The count is written to the field the route documents:
+`prompt_tokens_details`, or `input_tokens_details` on the Responses routes. Where no
+prefill measurement applies, the decode worker's own count reaches the client
+unchanged; `PrefillCachedTokens` documents those cases. The rewriting lives in
 [pkg/common/usage](../pkg/common/usage) and is shared with the routing sidecar.
 
 ## Coordinator vs. the llm-d-router sidecar model
