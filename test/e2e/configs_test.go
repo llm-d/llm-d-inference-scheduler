@@ -300,7 +300,7 @@ kind: EndpointPickerConfig
 plugins:
 - type: decode-filter
 - type: max-score-picker
-- type: data-parallel-profile-handler
+- type: single-profile-handler
 schedulingProfiles:
 - name: default
   plugins:
