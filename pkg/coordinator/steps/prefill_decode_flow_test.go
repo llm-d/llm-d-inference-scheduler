@@ -352,12 +352,22 @@ func TestCachedTokens_KeepsTheWorkerCountWithoutAPrefillMeasurement(t *testing.T
 	tests := []struct {
 		name        string
 		prefillBody map[string]any
+		connector   string
 		runPrefill  bool
 	}{
 		{name: "no prefill step"},
 		{
 			name:        "prefill response without a usage block",
 			prefillBody: map[string]any{"kv_transfer_params": map[string]any{"block_id": "block-1"}},
+			connector:   kv.NIXL,
+			runPrefill:  true,
+		},
+		{
+			// No blocks moved, so decode recomputes the prompt and nothing
+			// inflates the count it reports.
+			name:        "kv-nixl handoff that produced no transfer params",
+			prefillBody: map[string]any{"usage": usageBlock(11)},
+			connector:   kv.NIXL,
 			runPrefill:  true,
 		},
 	}
@@ -377,7 +387,7 @@ func TestCachedTokens_KeepsTheWorkerCountWithoutAPrefillMeasurement(t *testing.T
 			reqCtx := cachedTokensRequestContext(false)
 
 			if test.runPrefill {
-				prefillStep, _ := NewPrefillStep(gwClient, map[string]any{ParamKVConnector: kv.NIXL})
+				prefillStep, _ := NewPrefillStep(gwClient, map[string]any{ParamKVConnector: test.connector})
 				if err := prefillStep.Execute(context.Background(), reqCtx); err != nil {
 					t.Fatalf("prefill failed: %v", err)
 				}
@@ -397,6 +407,44 @@ func TestCachedTokens_KeepsTheWorkerCountWithoutAPrefillMeasurement(t *testing.T
 				t.Errorf("client cached_tokens = %d, want the decode worker's %d", got, decodeCachedTokens)
 			}
 		})
+	}
+}
+
+// kv-shared-storage transfers through the filesystem and returns no wire
+// fields, so empty kv_transfer_params is its normal successful handoff and the
+// prefill worker's count still describes the prompt.
+func TestCachedTokens_SharedStorageWithoutTransferParamsStillRewrites(t *testing.T) {
+	const (
+		prefillCachedTokens = 11
+		decodeCachedTokens  = 500
+	)
+
+	gwServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
+			_ = json.NewEncoder(w).Encode(map[string]any{"usage": usageBlock(prefillCachedTokens)})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"usage": usageBlock(decodeCachedTokens)})
+	}))
+	defer gwServer.Close()
+
+	gwClient := gateway.New(config.GatewayConfig{Address: gwServer.URL})
+	reqCtx := cachedTokensRequestContext(false)
+
+	prefillStep, _ := NewPrefillStep(gwClient, map[string]any{ParamKVConnector: kv.SharedStorage})
+	if err := prefillStep.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("prefill failed: %v", err)
+	}
+
+	decodeStep, _ := NewDecodeStep(gwClient, map[string]any{ParamKVConnector: kv.SharedStorage})
+	recorder := httptest.NewRecorder()
+	reqCtx.ResponseWriter = recorder
+	if err := decodeStep.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if got := clientCachedTokens(t, recorder.Body.String()); got != prefillCachedTokens {
+		t.Errorf("client cached_tokens = %d, want the prefill worker's %d", got, prefillCachedTokens)
 	}
 }
 

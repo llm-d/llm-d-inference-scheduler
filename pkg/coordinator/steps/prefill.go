@@ -113,19 +113,23 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	}
 
 	reqCtx.KVTransferParams = coerceParamsMap(logger, prefillResp.KVTransferParams, "kv_transfer_params")
-	if len(reqCtx.KVTransferParams) == 0 && s.kv.Name() == kv.NIXL {
-		// kv-nixl always requests a remote-decode handoff, so missing
-		// kv_transfer_params means decode will recompute the whole prompt.
-		// Older engines (< v0.29.0) silently drop top-level transfer params
-		// on this route, which is the most common cause.
+	// kv-nixl always requests a remote-decode handoff, so missing
+	// kv_transfer_params means decode will recompute the whole prompt. Older
+	// engines (< v0.29.0) silently drop top-level transfer params on this route,
+	// which is the most common cause. Empty params are not a failure for the
+	// other connectors: kv-shared-storage carries no wire fields at all.
+	decodeRecomputesPrompt := len(reqCtx.KVTransferParams) == 0 && s.kv.Name() == kv.NIXL
+	if decodeRecomputesPrompt {
 		logger.Info("prefill returned no kv_transfer_params; decode will recompute the prompt",
 			"kvConnector", s.kv.Name(), "path", path)
 	}
-	if prefillResp.Usage != nil {
-		// A usage block without a count reports zero hits: vLLM sends the
-		// details object as null when nothing hit the prompt cache. A response
-		// with no usage block at all measured nothing, so the field stays unset
-		// and the decode worker's own count reaches the client.
+	// A usage block without a count reports zero hits: vLLM sends the details
+	// object as null when nothing hit the prompt cache. The field stays unset
+	// when the prefill response measured nothing, and when decode recomputes the
+	// prompt, since no transferred blocks then inflate the count decode reports
+	// and its own measurement is the one that describes the answer the client
+	// receives. In both cases the decode worker's count reaches the client.
+	if prefillResp.Usage != nil && !decodeRecomputesPrompt {
 		cachedTokens, _ := usage.CachedTokens(prefillResp.Usage)
 		reqCtx.PrefillCachedTokens = &cachedTokens
 	}
