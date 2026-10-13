@@ -31,6 +31,8 @@ on:
         required: true
         type: string
 
+# Write scopes are for the github.token fallback below: enqueuePullRequest is a merge
+# action, which requires contents: write.
 permissions:
   contents: write
   pull-requests: write
@@ -78,6 +80,10 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
+      # Reuses the llm-d-router-release-notes App, which already has Contents and Pull
+      # requests write (it pushes branches and opens the release-notes PRs). An App token
+      # is needed so the merge_group required checks run: events caused by github.token
+      # do not trigger workflows.
       - name: Generate GitHub App token
         id: app-token
         if: ${{ secrets.RELEASE_NOTES_APP_ID != '' && secrets.RELEASE_NOTES_APP_PRIVATE_KEY != '' }}

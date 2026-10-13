@@ -7,6 +7,9 @@ const {
   hasApprovalCommand,
 } = require('./pr-needs-rebase.cjs');
 
+// Checked here rather than only in pr-hold-gate.yml: `needs-rebase` and `re-approve`
+// are applied by `PR Needs Rebase` with github.token, and those label events do not
+// trigger other workflows, so a required check keyed on them would stay green.
 const BLOCKING_LABELS = [
   'hold',
   'do-not-merge/hold',
