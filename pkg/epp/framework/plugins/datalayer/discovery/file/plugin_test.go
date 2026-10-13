@@ -258,6 +258,41 @@ endpoints:
 	assert.ErrorContains(t, err, "invalid port")
 }
 
+func TestStart_MissingName(t *testing.T) {
+	path := writeTemp(t, `
+endpoints:
+  - address: "10.0.0.1"
+    port: "8000"
+`)
+	notifier := &recordingNotifier{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := newFD(path, false).Start(ctx, notifier)
+	assert.ErrorContains(t, err, "name is required")
+	assert.Empty(t, notifier.upserted)
+}
+
+func TestStart_DuplicateName(t *testing.T) {
+	path := writeTemp(t, `
+endpoints:
+  - name: ep1
+    address: "10.0.0.1"
+    port: "8000"
+  - name: ep1
+    address: "10.0.0.2"
+    port: "8000"
+`)
+	notifier := &recordingNotifier{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := newFD(path, false).Start(ctx, notifier)
+	assert.ErrorContains(t, err, "duplicate name")
+	require.Len(t, notifier.upserted, 1)
+	assert.Equal(t, "10.0.0.1", notifier.upserted[0].Address)
+}
+
 func TestStart_FileTooLarge(t *testing.T) {
 	content := strings.Repeat("x", maxEndpointsFileSize+1)
 	path := writeTemp(t, content)
