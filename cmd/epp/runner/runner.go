@@ -72,6 +72,7 @@ import (
 	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
 	attrsession "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/session"
 	attrtopology "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/topology"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/cross_plugin/redis"
 	discoveryfile "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/discovery/file"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/discovery/k8speer"
 	extdcgm "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/dcgm"
@@ -668,6 +669,10 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(labelproducer.LabelProducerType, fwkplugin.StabilityAlpha, labelproducer.Factory)
 	fwkplugin.Register(attrtopology.TopologyExtractorType, fwkplugin.StabilityAlpha, exttopology.Factory)
 
+	// cross-replica syncers
+	// Alpha
+	fwkplugin.Register(redis.RedisSyncerType, fwkplugin.StabilityAlpha, redis.RedisSyncerFactory)
+
 	// data layer DCGM source/extractor
 	// Alpha
 	fwkplugin.Register(srcdcgm.DCGMDataSourceType, fwkplugin.StabilityAlpha, srcdcgm.DCGMDataSourceFactory)
@@ -875,6 +880,13 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	// the config but not yet satisfied by an existing producer.
 	if err := datalayer.CreateMissingDataProducers(ctx, fwkplugin.DefaultProducerRegistry, fwkplugin.Registry, handle); err != nil {
 		return nil, fmt.Errorf("failed to create missing data producers - %w", err)
+	}
+
+	// Runs after auto-defaults so an absent token-producer (now materialized as
+	// the estimate backend) is caught; the check is independent of factory
+	// instantiation order. See #1471.
+	if err := preciseproducer.ValidateTokenProducer(handle); err != nil {
+		return nil, fmt.Errorf("invalid configuration - %w", err)
 	}
 
 	// Add requestControl plugins
