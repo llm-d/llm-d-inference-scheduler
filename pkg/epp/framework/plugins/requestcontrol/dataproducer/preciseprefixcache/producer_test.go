@@ -31,6 +31,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
@@ -556,7 +557,7 @@ func TestProduce_MMMatchUsesCachedBlocksNotWeightedScore(t *testing.T) {
 				Prompts: []fwkrh.PromptTokens{{
 					TokenIDs: tokens,
 					MultiModalFeatures: []fwkrh.MultiModalFeature{
-						{Modality: fwkrh.ModalityImage, Hash: "img", Offset: 48, Length: 16},
+						{Modality: reqcommon.ModalityImage, Hash: "img", Offset: 48, Length: 16},
 					},
 				}},
 			},
@@ -616,8 +617,8 @@ func TestProduce_MMMatchTokensCountPerFeature(t *testing.T) {
 				Prompts: []fwkrh.PromptTokens{{
 					TokenIDs: tokens,
 					MultiModalFeatures: []fwkrh.MultiModalFeature{
-						{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 2, Length: 20},
-						{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 32, Length: 20},
+						{Modality: reqcommon.ModalityImage, Hash: "img-a", Offset: 2, Length: 20},
+						{Modality: reqcommon.ModalityImage, Hash: "img-b", Offset: 32, Length: 20},
 					},
 				}},
 			},
@@ -709,8 +710,8 @@ func TestProduce_MultiPromptMMAttributionSumsPerPrompt(t *testing.T) {
 		Body: &fwkrh.InferenceRequestBody{
 			TokenizedRequest: &fwkrh.TokenizedRequest{
 				Prompts: []fwkrh.PromptTokens{
-					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
-					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 32, Length: 16}}},
+					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
+					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-b", Offset: 32, Length: 16}}},
 					{TokenIDs: promptC},
 				},
 			},
@@ -799,8 +800,8 @@ func TestProduce_MultiPromptMMTokensSumPerPrompt(t *testing.T) {
 		Body: &fwkrh.InferenceRequestBody{
 			TokenizedRequest: &fwkrh.TokenizedRequest{
 				Prompts: []fwkrh.PromptTokens{
-					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
-					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 0, Length: 16}}},
+					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
+					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-b", Offset: 0, Length: 16}}},
 				},
 			},
 		},
@@ -844,7 +845,7 @@ func TestProduce_PassesMMExtraFeatures(t *testing.T) {
 			TokenizedRequest: &fwkrh.TokenizedRequest{
 				Prompts: []fwkrh.PromptTokens{{
 					TokenIDs:           tokens,
-					MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
+					MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
 				}},
 			},
 		},
@@ -876,7 +877,7 @@ func TestProduce_FoldsCacheSalt(t *testing.T) {
 		},
 		{
 			name: "salt appended after mm hash",
-			mm:   []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
+			mm:   []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
 			want: []kvblock.MMHash{{Hash: "abc"}, {Hash: "s3cr3t"}},
 		},
 	}

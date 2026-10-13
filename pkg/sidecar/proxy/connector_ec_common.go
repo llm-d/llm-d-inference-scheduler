@@ -38,15 +38,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Multimodal content types that need encoder processing.
-var mmTypes = map[string]bool{
-	reqcommon.PartTypeImageURL:   true,
-	reqcommon.PartTypeAudioURL:   true,
-	reqcommon.PartTypeVideoURL:   true,
-	reqcommon.PartTypeInputAudio: true,
-	reqcommon.PartTypeInputImage: true,
-}
-
 // requestInput returns the request's Responses input items. A bare JSON string
 // (a single text turn), an explicit null and an absent field all yield a nil
 // slice and no error. Nothing writes a decoded slice back under input, so the
@@ -143,29 +134,25 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 				continue
 			}
 
-			// vLLM's chat-completions parser primes input_image and image_url
-			// through the same map, so an input_image on a chat request is
-			// extracted. A chat part type on a Responses request fails the model
-			// server's input validation, so the request never reaches a worker
-			// and priming it would only fail the fanout first.
-			switch partType {
-			case reqcommon.PartTypeInputImage:
-				if url := reqcommon.MediaPartURL(partMap); url == "" {
-					logger.V(logging.DEBUG).Info("skipping input_image with no fetchable URL")
-					droppedParts++
-					continue
-				}
-			case reqcommon.PartTypeImageURL, reqcommon.PartTypeAudioURL, reqcommon.PartTypeVideoURL, reqcommon.PartTypeInputAudio:
-				if apiType == reqcommon.APITypeResponses {
-					logger.V(logging.DEBUG).Info("skipping content part the Responses input union does not define", "type", partType, "apiType", apiType)
-					droppedParts++
-					continue
-				}
+			// reqcommon.PartModality's rule, shared with the coordinator steps
+			// so the two cannot disagree about which parts exist. A part naming
+			// no media is not counted as a drop: every text and tool part lands
+			// here, so counting them would fire droppedParts on ordinary traffic.
+			if _, isMedia := reqcommon.PartModality(partType); !isMedia {
+				continue
 			}
 
-			if mmTypes[partType] {
-				items = append(items, partMap)
+			// An input_image carries its media behind a URL only, so one without
+			// a readable URL has nothing to prime an encoder with. Specific to
+			// it: an input_audio holds its bytes inline and reports no URL, so a
+			// general check would drop audio the encoder can be primed with.
+			if partType == reqcommon.PartTypeInputImage && reqcommon.MediaPartURL(partMap) == "" {
+				logger.V(logging.DEBUG).Info("skipping input_image with no fetchable URL")
+				droppedParts++
+				continue
 			}
+
+			items = append(items, partMap)
 		}
 	}
 
