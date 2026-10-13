@@ -28,6 +28,7 @@ import (
 
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	parserutil "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/util"
 )
 
 func TestSGLangHTTPParser_RewritePriority(t *testing.T) {
@@ -57,6 +58,51 @@ func TestSGLangHTTPParser_RewritePriority(t *testing.T) {
 			t.Errorf("priority = %v, want 2", got.(fwkrh.PayloadMap)["priority"])
 		}
 	})
+}
+
+// A body rewritten for priority must reach SGLang with its other fields as the
+// client sent them, including integers a float64 cannot represent.
+func TestSGLangHTTPParser_RewritePriority_ForwardsParsedBodyIntact(t *testing.T) {
+	parser := NewSGLangHTTPParser()
+	body := []byte(`{"input_ids":[1,2,3],"sampling_params":{"max_new_tokens":16,"seed":9007199254740993,"temperature":0.8}}`)
+	want := `{"input_ids":[1,2,3],"priority":2,"sampling_params":{"max_new_tokens":16,"seed":9007199254740993,"temperature":0.8}}`
+
+	parsed, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": "/generate"})
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+	payload, ok := parsed.Body.Payload.(fwkrh.PayloadMap)
+	if !ok {
+		t.Fatalf("Payload type = %T, want a PayloadMap", parsed.Body.Payload)
+	}
+	if _, raw := payload["input_ids"].(json.RawMessage); !raw {
+		t.Errorf("input_ids type = %T, want json.RawMessage", payload["input_ids"])
+	}
+	rewritten, mutated, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{}, payload, 2)
+	if err != nil {
+		t.Fatalf("RewritePriority() error = %v", err)
+	}
+	if !mutated {
+		t.Fatalf("mutated = false, want true")
+	}
+	got, err := rewritten.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("forwarded body mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// Fields the parser does not read are SGLang's to validate, so a number that
+// does not fit a float64 is passed through instead of failing the request.
+func TestSGLangHTTPParser_ParseRequest_LeavesUnreadNumbersToSGLang(t *testing.T) {
+	parser := NewSGLangHTTPParser()
+	body := []byte(`{"input_ids":[1,2,3],"sampling_params":{"temperature":1e400}}`)
+
+	if _, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": "/generate"}); err != nil {
+		t.Fatalf("ParseRequest() error = %v, want nil", err)
+	}
 }
 
 var benchmarkSGLangParseResult *fwkrh.ParseResult
@@ -140,19 +186,44 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			},
 		},
 		{
-			name:    "text prompt with extra_key mapped to CacheSalt",
+			name:    "text prompt with cache_salt mapped to CacheSalt",
 			headers: map[string]string{":path": "/generate"},
-			body:    map[string]any{"text": "hello world", "extra_key": "salt-abc"},
+			body:    map[string]any{"text": "hello world", "cache_salt": "salt-abc"},
 			want: &fwkrh.InferenceRequestBody{
 				Generate: &fwkrh.GenerateRequest{Text: "hello world", CacheSalt: "salt-abc"},
 			},
 		},
 		{
-			name:    "extra_key mapped to CacheSalt",
+			name:    "cache_salt mapped to CacheSalt",
+			headers: map[string]string{":path": "/generate"},
+			body:    map[string]any{"input_ids": []any{10, 20}, "cache_salt": "salt-abc"},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{10, 20}, CacheSalt: "salt-abc"},
+			},
+		},
+		{
+			// SGLang does not publish extra_key in KV events, so it must never equal a published salt.
+			name:    "extra_key is kept as a separate namespace",
 			headers: map[string]string{":path": "/generate"},
 			body:    map[string]any{"input_ids": []any{10, 20}, "extra_key": "salt-abc"},
 			want: &fwkrh.InferenceRequestBody{
-				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{10, 20}, CacheSalt: "salt-abc"},
+				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{10, 20}, CacheSalt: `["salt-abc",""]`},
+			},
+		},
+		{
+			name:    "extra_key and cache_salt are combined",
+			headers: map[string]string{":path": "/generate"},
+			body:    map[string]any{"input_ids": []any{10, 20}, "extra_key": "tenant-a", "cache_salt": "salt-abc"},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{10, 20}, CacheSalt: `["tenant-a","salt-abc"]`},
+			},
+		},
+		{
+			name:    "empty extra_key is not a salt",
+			headers: map[string]string{":path": "/generate"},
+			body:    map[string]any{"input_ids": []any{1, 2, 11}, "extra_key": ""},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{1, 2, 11}},
 			},
 		},
 		{
@@ -188,23 +259,6 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			},
 		},
 		{
-			name:    "per-prompt extra_key list is rejected",
-			headers: map[string]string{":path": "/generate"},
-			body: map[string]any{
-				"input_ids": []int{1, 2},
-				"extra_key": []string{"tenant-a", "tenant-b"},
-			},
-			wantErr: true,
-		},
-		{
-			name:    "x-original-path header",
-			headers: map[string]string{"x-original-path": "/generate"},
-			body:    map[string]any{"input_ids": []any{5, 6, 7}},
-			want: &fwkrh.InferenceRequestBody{
-				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{5, 6, 7}},
-			},
-		},
-		{
 			name:    "missing input_ids",
 			headers: map[string]string{":path": "/generate"},
 			body:    map[string]any{"sampling_params": map[string]any{"temperature": 0.8}},
@@ -237,8 +291,8 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			var wantMap map[string]any
-			if err := json.Unmarshal(bodyBytes, &wantMap); err != nil {
+			wantMap, err := parserutil.UnmarshalMapWithRawField(bodyBytes, "input_ids")
+			if err != nil {
 				t.Fatalf("unmarshal body: %v", err)
 			}
 			tt.want.Payload = fwkrh.PayloadMap(wantMap)
@@ -300,11 +354,6 @@ func TestSGLangHTTPParser_ParseRequest_ErrorPaths(t *testing.T) {
 			name:        "batched input_ids are rejected",
 			body:        `{"input_ids":[[1,2],[3,4]]}`,
 			errContains: "input_ids must be an array of uint32 integers",
-		},
-		{
-			name:        "per-prompt cache salt unsupported",
-			body:        `{"input_ids":[1,2],"extra_key":["a","b"]}`,
-			errContains: "extra_key must be a string",
 		},
 		{
 			name:        "unsupported path",

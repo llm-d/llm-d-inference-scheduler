@@ -33,6 +33,7 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers"
+	parserutil "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/util"
 )
 
 const (
@@ -91,6 +92,7 @@ func (p *SGLangHTTPParser) Claims() fwkrh.Claims {
 // sgLangGenerateWire is the subset of /generate fields this parser reads.
 type sgLangGenerateWire struct {
 	InputIDs       json.RawMessage `json:"input_ids"`
+	CacheSalt      json.RawMessage `json:"cache_salt"`
 	Text           json.RawMessage `json:"text"`
 	ExtraKey       json.RawMessage `json:"extra_key"`
 	SamplingParams json.RawMessage `json:"sampling_params"`
@@ -125,9 +127,23 @@ func (p *SGLangHTTPParser) parseGenerateRequest(rawBody []byte) (*fwkrh.ParseRes
 		return nil, errors.New("invalid generate request: input_ids or text must be provided")
 	}
 
-	cacheSalt, err := parseCacheSalt(wire.ExtraKey)
+	cacheSalt, err := parseCacheSalt("cache_salt", wire.CacheSalt)
 	if err != nil {
 		return nil, fmt.Errorf("unsupported generate request: %w", err)
+	}
+	extraKey, err := parseCacheSalt("extra_key", wire.ExtraKey)
+	if err != nil {
+		return nil, fmt.Errorf("unsupported generate request: %w", err)
+	}
+	// SGLang partitions its cache on (extra_key, cache_salt) but publishes only
+	// cache_salt in KV events. Encoding the pair keeps extra_key requests from
+	// matching blocks indexed under a bare cache_salt.
+	if extraKey != "" {
+		pair, err := json.Marshal([]string{extraKey, cacheSalt})
+		if err != nil {
+			return nil, fmt.Errorf("invalid generate request: %w", err)
+		}
+		cacheSalt = string(pair)
 	}
 
 	var tokenIDs []uint32
@@ -145,9 +161,10 @@ func (p *SGLangHTTPParser) parseGenerateRequest(rawBody []byte) (*fwkrh.ParseRes
 	}
 
 	// Keep the full body as a map so priority can be injected; when nothing is
-	// mutated, repackage still forwards the original bytes unchanged.
-	bodyMap := make(map[string]any)
-	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
+	// mutated, repackage still forwards the original bytes unchanged. input_ids
+	// stays raw because decoding it into []any allocates per token.
+	bodyMap, err := parserutil.UnmarshalMapWithRawField(rawBody, "input_ids")
+	if err != nil {
 		return nil, fmt.Errorf("invalid generate request: %w", err)
 	}
 
@@ -175,13 +192,13 @@ func hasJSONValue(data json.RawMessage) bool {
 	return len(data) > 0 && strings.TrimSpace(string(data)) != "null"
 }
 
-func parseCacheSalt(data json.RawMessage) (string, error) {
+func parseCacheSalt(field string, data json.RawMessage) (string, error) {
 	if !hasJSONValue(data) {
 		return "", nil
 	}
 	var value string
 	if err := json.Unmarshal(data, &value); err != nil {
-		return "", errors.New("extra_key must be a string")
+		return "", fmt.Errorf("%s must be a string", field)
 	}
 	return value, nil
 }
