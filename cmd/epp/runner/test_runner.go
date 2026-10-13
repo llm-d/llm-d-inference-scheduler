@@ -64,7 +64,7 @@ func NewTestRunnerSetup(ctx context.Context, cfg *rest.Config, opts *runserver.O
 		},
 	}
 
-	manager, ds, err := runner.setup(ctx, cfg, opts, managerOverrides)
+	manager, ds, err := runner.setup(ctx, runner.servingCtx, cfg, opts, managerOverrides)
 	if err != nil {
 		runner.stopServing()
 		return runner, manager, ds, err
