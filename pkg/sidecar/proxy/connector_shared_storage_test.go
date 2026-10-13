@@ -370,3 +370,23 @@ func TestCacheThresholdStopReason(t *testing.T) {
 	data := "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"cache_threshold\"}}\n\n"
 	require.True(t, s.checkBufferedResponseForCacheThreshold(data))
 }
+
+func TestCacheThresholdFinishReasonScansEveryChoice(t *testing.T) {
+	s := &Server{}
+	require.False(t, s.hasCacheThresholdFinishReason(map[string]any{
+		"choices": []any{
+			map[string]any{"finish_reason": "stop"},
+		},
+	}))
+	require.True(t, s.hasCacheThresholdFinishReason(map[string]any{
+		"choices": []any{
+			map[string]any{"finish_reason": "stop"},
+			map[string]any{"finish_reason": "cache_threshold"},
+		},
+	}))
+	require.True(t, s.hasCacheThresholdFinishReason(map[string]any{
+		"choices": []any{
+			map[string]any{"finish_reason": "cache_threshold"},
+		},
+	}))
+}
