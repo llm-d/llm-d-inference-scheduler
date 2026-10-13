@@ -197,6 +197,13 @@ func (s *ReplaceMediaURLsStep) Execute(ctx context.Context, reqCtx *pipeline.Req
 		if err != nil {
 			return err
 		}
+		// The refs alias parts inside items, which promptItems may have decoded
+		// out of a json.RawMessage; store the slice back so the rewrites below
+		// land in the body. Skipped when nothing will be rewritten, which leaves
+		// the field raw and its key order intact.
+		if len(refs) > 0 {
+			setPromptItems(reqCtx.Body, apiType, items)
+		}
 	}
 
 	// boundMediaType folds audio and video into MediaTypeOther, so count the

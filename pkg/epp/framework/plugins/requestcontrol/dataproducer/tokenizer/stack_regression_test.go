@@ -59,7 +59,7 @@ func TestSuppliedTokensReachScheduling(t *testing.T) {
 	}{
 		{
 			name: "sglang", path: "/generate", salt: "tenant-a", parser: sglanghttp.NewSGLangHTTPParser(),
-			body: []byte(`{"input_ids":[1,2,3],"extra_key":"tenant-a","sampling_params":{"max_new_tokens":1}}`),
+			body: []byte(`{"input_ids":[1,2,3],"cache_salt":"tenant-a","sampling_params":{"max_new_tokens":1}}`),
 		},
 		{
 			name: "vllm HTTP", path: "/inference/v1/generate", salt: "tenant-a", parser: vllmhttp.NewVllmHTTPParser(),
@@ -71,7 +71,7 @@ func TestSuppliedTokensReachScheduling(t *testing.T) {
 			body: framed, features: features,
 		},
 	} {
-		for _, backend := range []string{backendVLLM, backendEstimate} {
+		for _, backend := range []string{BackendVLLM, BackendEstimate} {
 			t.Run(tc.name+"/"+backend, func(t *testing.T) {
 				parsed, err := tc.parser.ParseRequest(context.Background(), tc.body, map[string]string{":path": tc.path})
 				require.NoError(t, err)
@@ -79,9 +79,9 @@ func TestSuppliedTokensReachScheduling(t *testing.T) {
 				require.NoError(t, err)
 				existing := parsed.Body.TokenizedRequest
 				p := newTestPlugin(&mockTokenizer{})
-				if backend == backendEstimate {
+				if backend == BackendEstimate {
 					p.backend = estimateBackend{}
-					p.backendName = backendEstimate
+					p.backendName = BackendEstimate
 				}
 				req := &scheduling.InferenceRequest{Body: parsed.Body}
 				require.NoError(t, p.Produce(context.Background(), req, nil))

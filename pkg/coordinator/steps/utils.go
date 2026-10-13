@@ -153,22 +153,52 @@ func resolveFormat(useOpenAIFormat bool, path string) reqcommon.APIType {
 	return reqcommon.APITypeVLLMGenerate
 }
 
+// promptItemsField returns the body field an API carries its prompt items in:
+// messages for chat completions, input for Responses. ok is false for an API
+// that carries no item array.
+func promptItemsField(apiType reqcommon.APIType) (string, bool) {
+	switch apiType {
+	case reqcommon.APITypeChatCompletions:
+		return reqcommon.FieldMessages, true
+	case reqcommon.APITypeResponses:
+		return reqcommon.FieldInput, true
+	default:
+		return "", false
+	}
+}
+
 // promptItems returns the array an API carries its prompt items in: a
 // chat-completions messages array, or a Responses input array. ok is false for
 // an API that carries no item array, and for a body whose field is absent or
 // holds something other than an array.
+//
+// The server keeps the field as a json.RawMessage so its key order survives
+// re-marshaling. A step that edits the returned items stores them back with
+// setPromptItems so the edit is forwarded.
 func promptItems(body map[string]any, apiType reqcommon.APIType) ([]any, bool) {
-	var field string
-	switch apiType {
-	case reqcommon.APITypeChatCompletions:
-		field = reqcommon.FieldMessages
-	case reqcommon.APITypeResponses:
-		field = reqcommon.FieldInput
+	field, ok := promptItemsField(apiType)
+	if !ok {
+		return nil, false
+	}
+	switch v := body[field].(type) {
+	case []any:
+		return v, true
+	case json.RawMessage:
+		var items []any
+		if err := json.Unmarshal(v, &items); err != nil {
+			return nil, false
+		}
+		return items, items != nil
 	default:
 		return nil, false
 	}
-	items, ok := body[field].([]any)
-	return items, ok
+}
+
+// setPromptItems stores items under the field promptItems reads them from.
+func setPromptItems(body map[string]any, apiType reqcommon.APIType, items []any) {
+	if field, ok := promptItemsField(apiType); ok {
+		body[field] = items
+	}
 }
 
 // mediaPart is a media content part together with the modality it names and the
