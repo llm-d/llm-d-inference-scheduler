@@ -51,13 +51,17 @@ jobs:
         uses: actions/checkout@v7
 
       # A missing cache is fine. Lychee then checks every link.
+      - id: cache-key
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
       - name: Restore lychee cache
+        id: lychee-cache
         uses: actions/cache/restore@v6
         with:
           path: .lycheecache
-          key: lychee-${{ github.sha }}
+          key: lychee-${{ hashFiles('.lychee.toml') }}-${{ steps.cache-key.outputs.date }}
           restore-keys: |
-            lychee-
+            lychee-${{ hashFiles('.lychee.toml') }}-
 
       - name: Run lychee link checker
         uses: lycheeverse/lychee-action@v2.9.0
