@@ -22,8 +22,9 @@ exclude_path = [
 # spurious timeouts on otherwise-reachable links.
 timeout = 60
 
-# Retry settings. Lychee retries connection errors, timeouts, and 5xx responses
-# with exponential backoff. Worst-case per dead link with these values:
+# Retry settings. Lychee 0.24.2 retries timeouts, 5xx responses, and
+# connection reset or abort errors with exponential backoff. Worst-case per
+# dead link with these values:
 #   timeout * (max_retries + 1) + retry_wait_time * (2^max_retries - 1)
 #   = 60 * 5 + 5 * 15 = 375s.
 # Lychee runs link checks concurrently (default 128 parallel), so total
