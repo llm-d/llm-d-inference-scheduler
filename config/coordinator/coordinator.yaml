@@ -337,8 +337,9 @@ pipeline:
       #   carry different fields). Shapes that must buffer reserve from the
       #   budget below and fall back to the pass-through when it is full.
       #   force_stream: true
-      #   force_stream_buffer_size caps the total bytes concurrent buffered
-      #   forced requests hold at once (human-readable, default 1GiB).
+      #   force_stream_buffer_size caps the wire bytes concurrent buffered forced
+      #   requests may reserve at once (human-readable, default 1GiB). Peak heap
+      #   runs higher, so this is not an RSS cap.
       #   force_stream_buffer_size: 1GiB
       #   force_stream_max_request_size caps the bytes one forced request may
       #   reserve (human-readable, default 256KiB, capped to the buffer size).
