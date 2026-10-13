@@ -28,6 +28,8 @@ It also relies on endpoint metric `MaxActiveModels` to determine remaining adapt
 
 `MaxActiveModels` is `0` until the model server has reported `max_lora`. vLLM only publishes `vllm:lora_requests_info` after its first engine step, so an endpoint that has not served a request yet reports nothing. The scorer treats that as unknown capacity and scores it `0.8`, the same as an endpoint with a free slot. Scoring it `0.0` would keep requests away from it, and it would never report.
 
+A model server that never reports `max_lora` at all, for example a frontend that omits the label, keeps scoring `0.8` for adapters it is not running. The scorer cannot tell when such an endpoint is full.
+
 ## Configuration
 
 This scorer currently has no runtime parameters.
