@@ -134,14 +134,14 @@ func (r *vllmHTTPRenderer) observeRender(ctx context.Context, path string, timeo
 		return
 	}
 	result, reason := classifyRenderError(err)
-	renderDurationSeconds.WithLabelValues(PluginType, r.pluginName, backendVLLM, result).Observe(elapsed.Seconds())
+	renderDurationSeconds.WithLabelValues(PluginType, r.pluginName, BackendVLLM, result).Observe(elapsed.Seconds())
 	if reason == "" {
 		return
 	}
-	renderFailuresTotal.WithLabelValues(PluginType, r.pluginName, backendVLLM, reason).Inc()
+	renderFailuresTotal.WithLabelValues(PluginType, r.pluginName, BackendVLLM, reason).Inc()
 	r.failureLog.Do(func() {
 		log.FromContext(ctx).Error(err, "token-producer render call failed",
-			"backend", backendVLLM, "path", path, "reason", reason,
+			"backend", BackendVLLM, "path", path, "reason", reason,
 			"elapsed", elapsed.String(), "timeout", timeout.String())
 	})
 }
