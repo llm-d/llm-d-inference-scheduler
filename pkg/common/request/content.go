@@ -47,6 +47,23 @@ func MediaPartURLRef(part map[string]any) (url string, set func(string)) {
 	return "", nil
 }
 
+// AnthropicImageURL returns the image URL vLLM builds from an Anthropic image
+// source. A url source, or any source that already carries a URL, is that URL.
+// Any other source with data becomes a data URL, and an empty media type falls
+// back to DefaultImageMediaType.
+func AnthropicImageURL(sourceType, rawURL, data, mediaType string) string {
+	if sourceType == "url" || rawURL != "" {
+		return rawURL
+	}
+	if data == "" {
+		return ""
+	}
+	if mediaType == "" {
+		mediaType = DefaultImageMediaType
+	}
+	return "data:" + mediaType + ";base64," + data
+}
+
 // MediaPartURL returns the URL a media content part references, or "" when
 // there is none to fetch.
 func MediaPartURL(part map[string]any) string {
