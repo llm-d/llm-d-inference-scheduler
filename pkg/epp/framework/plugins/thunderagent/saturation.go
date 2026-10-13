@@ -71,7 +71,7 @@ func (a *ThunderAgent) Saturation(ctx context.Context, endpoints []datalayer.End
 	}
 	m.mu.Unlock()
 	for _, id := range prefillPods {
-		log.FromContext(ctx).V(logutil.DEFAULT).Info("thunder-agent does not support prefill/decode disaggregation: prefill pods enter its ledger", "pod", id)
+		log.FromContext(ctx).V(logutil.DEFAULT).Info("thunder-agent does not support prefill/decode disaggregation: prefill pods enter its session manager", "pod", id)
 	}
 	return 0.0
 }
