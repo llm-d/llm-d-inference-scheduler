@@ -386,6 +386,33 @@ var _ = Describe("addP2PPullToPrefill", func() {
 		Expect(p2p[reqcommon.FieldRemoteHost]).To(Equal("10.0.6.107"))
 		Expect(p2p[reqcommon.FieldRemotePort]).To(Equal(7780))
 	})
+
+	It("skips the pull when equivalent IPv6 spellings name the same endpoint", func() {
+		s := &Server{
+			dpBasePort: 8000,
+			config:     Config{P2PConnectorPort: 7777, DataParallelSize: 8},
+		}
+		params := map[string]any{}
+
+		s.addP2PPullToPrefill(params, "[2001:0db8:0:0:0:0:0:1]:8003", "[2001:db8::1]:8003")
+
+		Expect(params).NotTo(HaveKey(requestFieldRemoteKVSource))
+	})
+
+	It("injects across ranks for the same IPv6 host on a different port", func() {
+		s := &Server{
+			dpBasePort: 8000,
+			config:     Config{P2PConnectorPort: 7777, DataParallelSize: 8},
+		}
+		params := map[string]any{}
+
+		s.addP2PPullToPrefill(params, "[2001:db8::1]:8003", "[2001:db8::1]:8007")
+
+		p2p, ok := params[requestFieldRemoteKVSource].(map[string]any)
+		Expect(ok).To(BeTrue())
+		Expect(p2p[reqcommon.FieldRemoteHost]).To(Equal("2001:db8::1"))
+		Expect(p2p[reqcommon.FieldRemotePort]).To(Equal(7780))
+	})
 })
 
 var _ = DescribeTable("normalizeEndpoint",
@@ -396,6 +423,10 @@ var _ = DescribeTable("normalizeEndpoint",
 	Entry("http scheme stripped", "http://10.0.6.107:8003", "10.0.6.107:8003"),
 	Entry("https scheme stripped", "https://10.0.6.107:8003", "10.0.6.107:8003"),
 	Entry("IPv6 literal canonicalized", "[::1]:8003", "[::1]:8003"),
+	Entry("expanded IPv6 canonicalized", "[2001:0db8:0:0:0:0:0:1]:8003", "[2001:db8::1]:8003"),
+	Entry("uppercase IPv6 hex canonicalized", "[2001:DB8::1]:8003", "[2001:db8::1]:8003"),
+	Entry("IPv6 zone preserved", "[fe80::1%eth0]:8003", "[fe80::1%eth0]:8003"),
+	Entry("hostname left unchanged", "example.com:8003", "example.com:8003"),
 	Entry("portless value returned as-is", "10.0.6.107", "10.0.6.107"),
 	Entry("portless URL reduced to host", "http://10.0.6.107", "10.0.6.107"),
 )

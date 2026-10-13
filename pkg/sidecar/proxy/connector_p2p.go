@@ -21,6 +21,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -262,8 +263,10 @@ func (s *Server) addP2PPullToPrefill(prefillKVParams map[string]any, kvCacheSour
 // Scheme-qualified values (any scheme, not only http) are parsed as URLs
 // and reduced to their host:port; bare values are treated as host:port
 // directly. Both forms are re-joined through the net package so IPv6
-// literals compare consistently; values without a parseable port are
-// returned scheme-stripped, matching extractHost's fallback.
+// literals compare consistently, and an IP host is canonicalized through
+// net/netip so equivalent spellings compare equal. Hostnames are left
+// unchanged; values without a parseable port are returned scheme-stripped,
+// matching extractHost's fallback.
 func normalizeEndpoint(s string) string {
 	hostport := s
 	if scheme, rest, ok := strings.Cut(s, "://"); ok && scheme != "" {
@@ -276,6 +279,9 @@ func normalizeEndpoint(s string) string {
 	host, port, err := net.SplitHostPort(hostport)
 	if err != nil {
 		return hostport
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		host = addr.String()
 	}
 	return net.JoinHostPort(host, port)
 }
