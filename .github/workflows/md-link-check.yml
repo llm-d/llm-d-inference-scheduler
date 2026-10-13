@@ -72,8 +72,8 @@ jobs:
       # Save the cache so later runs send fewer requests and finish faster.
       # This also runs when the check fails, so links that passed are still saved.
       - name: Save lychee cache
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.lychee-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .lycheecache
-          key: lychee-${{ github.sha }}
+          key: lychee-${{ hashFiles('.lychee.toml') }}-${{ steps.cache-key.outputs.date }}
