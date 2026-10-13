@@ -756,6 +756,15 @@ func TestZMQSubscriber_DropsPostGapEventsDuringReplayCooldown(t *testing.T) {
 	require.Error(t, err, "event past an unrecovered gap must not reach the index")
 }
 
+func TestZMQSubscriber_UnavailableReplayIndexesLiveEvents(t *testing.T) {
+	h := newReplayHarness(t, nil, true)
+	h.send(t, 5, buildDistinctBlockStoredPayload(t, 100))
+	h.send(t, 6, buildDistinctBlockStoredPayload(t, 200))
+	require.Eventually(t, func() bool { return h.indexed(100) && h.indexed(200) },
+		5*time.Second, 50*time.Millisecond, "live frames must be indexed while the replay is unavailable")
+	assert.Equal(t, int32(1), h.buffer.requests.Load(), "the replay is retried only after the cooldown")
+}
+
 func TestZMQSubscriber_SequenceResetClearsAndRebuildsPod(t *testing.T) {
 	h := newReplayHarness(t, nil, false)
 	h.send(t, 0, buildDistinctBlockStoredPayload(t, 100))
