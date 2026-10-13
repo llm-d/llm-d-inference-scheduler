@@ -248,6 +248,7 @@ type mockRequestHeaderPlugin struct {
 	name           string
 	attributeKey   fwkplugin.DataKey
 	attributeValue string
+	modifyFn       func(*fwksched.InferenceRequest)
 }
 
 func (m *mockRequestHeaderPlugin) TypedName() fwkplugin.TypedName {
@@ -255,6 +256,9 @@ func (m *mockRequestHeaderPlugin) TypedName() fwkplugin.TypedName {
 }
 
 func (m *mockRequestHeaderPlugin) RequestHeader(_ context.Context, request *fwksched.InferenceRequest) error {
+	if m.modifyFn != nil {
+		m.modifyFn(request)
+	}
 	request.PutAttribute(m.attributeKey, m.attributeValue)
 	return nil
 }
