@@ -75,7 +75,8 @@ func newForceStreamStep(t *testing.T, serverURL, bufferSize string) (*DecodeStep
 	gwClient := gateway.New(config.GatewayConfig{Address: serverURL})
 	// Pin the per-request cap to the whole budget so these tests exercise budget
 	// and ceiling behavior with a single request free to reserve all of it; the
-	// default cap (a quarter of the budget) is covered separately.
+	// default cap (a fixed 256KiB, clamped to the budget only when smaller) is
+	// covered separately.
 	step, err := NewDecodeStep(gwClient, map[string]any{
 		ParamForceStream:               true,
 		ParamForceStreamBufferSize:     bufferSize,
@@ -893,7 +894,7 @@ func TestForceStream_CeilingAbort(t *testing.T) {
 
 // TestForceStream_MalformedFrame_BufferedPath verifies that an unreadable 200
 // stream on the buffered path falls back to the pass-through rather than failing:
-// the forced (stream:true) attempt gets unparseable SSE, so nothing reaches the
+// the forced (stream:true) attempt gets unparsable SSE, so nothing reaches the
 // client and the request is re-sent non-forced, which the pod serves normally.
 // Generate takes the buffered path. The outcome is counted fallback_unreadable.
 func TestForceStream_MalformedFrame_BufferedPath(t *testing.T) {
