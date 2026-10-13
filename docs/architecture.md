@@ -363,8 +363,11 @@ Enable chunked decode via the pd-sidecar flag:
 | `--decode-chunk-size` | `0` (disabled) | Token budget per chunk. Set to a positive integer to enable chunked decode. For best performance use a multiple of the KV cache block size. |
 
 > [!NOTE]
-> If the request's `max_tokens` / `max_completion_tokens` is less than or equal to `--decode-chunk-size`,
-> the sidecar falls back to a single regular decode call without chunking.
+> The sidecar falls back to a single regular decode call without chunking in either of these cases:
+>
+> - the request's `max_tokens` / `max_completion_tokens` is less than or equal to `--decode-chunk-size`.
+> - the request sets `echo: true`, because the decoder would echo the accumulated assistant text on
+>   every chunk.
 
 ---
 
