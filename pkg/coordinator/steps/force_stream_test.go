@@ -743,8 +743,10 @@ func TestForceStream_UpstreamError_ForwardsVerbatim(t *testing.T) {
 			require.Equal(t, status, result.StatusCode)
 			respBody, _ := io.ReadAll(result.Body)
 			require.Equal(t, `{"error":"boom"}`, string(respBody), "upstream error body must forward verbatim")
-			// A written error must not be double-counted as a forced success.
+			// A written error must not be double-counted as a forced success; it is
+			// attributed to the upstream-error outcome instead.
 			require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+			require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorUpstream), 1e-9)
 			require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9)
 		})
 	}
@@ -778,7 +780,77 @@ func TestForceStream_TransportError(t *testing.T) {
 		"a transport failure writes nothing, so it must return a plain error for a clean 502")
 
 	require.Equal(t, 0, recorder.Body.Len(), "nothing may be written to the client on a transport failure")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorTransport), 1e-9)
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9)
+}
+
+// TestForceStream_Buffered_UpstreamError covers the buffered path's upstream-error
+// accounting: a generate request (n=1 generate takes the buffered path) whose
+// upstream returns a 5xx is forwarded verbatim and counted as error_upstream.
+func TestForceStream_Buffered_UpstreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"boom"}`))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-gen-err",
+		OriginalPath:     reqcommon.PathVLLMGenerate,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"token_ids":       []any{1},
+			"sampling_params": map[string]any{"max_tokens": 8},
+		},
+		ResponseWriter: recorder,
+	}
+
+	err := step.Execute(context.Background(), reqCtx)
+	var streamed *pipeline.UpstreamStreamedError
+	require.True(t, errors.As(err, &streamed), "an upstream error with a written body reports UpstreamStreamedError")
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Result().StatusCode)
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorUpstream), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after an upstream error")
+}
+
+// TestForceStream_Buffered_TransportError covers the buffered path's transport
+// accounting: a generate request whose upstream never responds is counted as
+// error_transport, with nothing written and the reservation released.
+func TestForceStream_Buffered_TransportError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	serverURL := server.URL
+	server.Close()
+
+	step, reg := newForceStreamStep(t, serverURL, "1GiB")
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-gen-transport",
+		OriginalPath:     reqcommon.PathVLLMGenerate,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"token_ids":       []any{1},
+			"sampling_params": map[string]any{"max_tokens": 8},
+		},
+		ResponseWriter: recorder,
+	}
+
+	err := step.Execute(context.Background(), reqCtx)
+	require.Error(t, err)
+	var streamed *pipeline.UpstreamStreamedError
+	require.False(t, errors.As(err, &streamed), "a transport failure writes nothing, so it is a plain error")
+	require.Equal(t, 0, recorder.Body.Len(), "nothing may be written on a transport failure")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorTransport), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after a transport error")
 }
 
 func TestForceStream_CeilingAbort(t *testing.T) {
@@ -819,12 +891,30 @@ func TestForceStream_CeilingAbort(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation must be released after an abort")
 }
 
-// TestForceStream_MalformedFrame_BufferedPath verifies that an unparsable SSE
-// frame on the buffered path aborts cleanly: nothing is buffered to the client, a
-// plain error surfaces for a 5xx, and no forced outcome is recorded. Generate
-// takes the buffered path, where the whole reply is read before any write.
+// TestForceStream_MalformedFrame_BufferedPath verifies that an unreadable 200
+// stream on the buffered path falls back to the pass-through rather than failing:
+// the forced (stream:true) attempt gets unparseable SSE, so nothing reaches the
+// client and the request is re-sent non-forced, which the pod serves normally.
+// Generate takes the buffered path. The outcome is counted fallback_unreadable.
 func TestForceStream_MalformedFrame_BufferedPath(t *testing.T) {
-	server := sseServer(t, []string{`not-json`}, nil)
+	passthroughReply := `{"request_id":"g","choices":[{"index":0,"token_ids":[1,2,3]}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			fmt.Fprint(w, "data: not-json\n\n")
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
 	defer server.Close()
 
 	step, reg := newForceStreamStep(t, server.URL, "1GiB")
@@ -844,15 +934,16 @@ func TestForceStream_MalformedFrame_BufferedPath(t *testing.T) {
 		ResponseWriter: recorder,
 	}
 
-	err := step.Execute(context.Background(), reqCtx)
-	require.Error(t, err, "a malformed frame on the buffered path must surface before any write")
-	var streamed *pipeline.UpstreamStreamedError
-	require.False(t, errors.As(err, &streamed), "nothing was written, so it is a plain error for a clean 5xx")
-	require.NotErrorIs(t, err, errForceStreamCeiling, "a parse failure is not a ceiling abort")
-
-	require.Equal(t, 0, recorder.Body.Len(), "nothing may be written to the client on a parse failure")
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "an unreadable stream must fall back, not error")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client gets the pass-through reply, not a 5xx")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnreadable), 1e-9)
 	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
-	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation must be released after an abort")
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorUpstream), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
 }
 
 // TestForceStream_Responses_OversizedFrame_FallsBack covers the regression where

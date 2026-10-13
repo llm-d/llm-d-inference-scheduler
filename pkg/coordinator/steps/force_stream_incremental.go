@@ -76,15 +76,25 @@ func (s *DecodeStep) executeForceStreamIncremental(ctx context.Context, logger l
 	resp, err := s.gwClient.Post(ctx, reqCtx.OriginalPath, bodyBytes, headers)
 	call.Done()
 	if err != nil {
+		coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultErrorTransport)
 		return fmt.Errorf("%s: force-stream request: %w", DecodeStepName, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
+		coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultErrorUpstream)
 		return forwardUpstreamError(reqCtx, resp)
 	}
 
-	return streamForcedResponse(logger, reqCtx, resp.Body, shape)
+	// streamForcedResponse counts forced once the reply is committed (including a
+	// post-commit truncation); a non-nil return is a pre-commit failure reading the
+	// upstream stream, so nothing reached the client. Log the detail; decode records
+	// fallback_unreadable and runs the pass-through.
+	if err := streamForcedResponse(logger, reqCtx, resp.Body, shape); err != nil {
+		logger.Error(err, "force-stream fell back: upstream stream unreadable")
+		return errForceStreamUnreadable
+	}
+	return nil
 }
 
 // streamForcedResponse scans the forced upstream stream and writes the reply
@@ -282,12 +292,16 @@ func (e *incrementalEmitter) finish(logger logr.Logger) error {
 	if err := e.ensureStarted(); err != nil {
 		return e.failOrTruncate(logger, err)
 	}
+	// The response is committed, so the request is served, like the buffered path,
+	// which counts forced even when the final client write fails. Count it before
+	// the suffix write so a disconnect there stays a forced outcome, not an
+	// unattributed candidate.
+	coordmetrics.IncForceStreamTotal(e.reqModel, coordmetrics.ForceStreamResultForced)
 	if _, err := e.w.Write(e.suffix()); err != nil {
 		logger.Error(err, "force-stream client write incomplete")
 		return nil
 	}
 	_ = e.rc.Flush()
-	coordmetrics.IncForceStreamTotal(e.reqModel, coordmetrics.ForceStreamResultForced)
 	logger.V(logutil.DEFAULT).Info("force-stream complete (incremental)")
 	return nil
 }
@@ -300,6 +314,9 @@ func (e *incrementalEmitter) failOrTruncate(logger logr.Logger, err error) error
 	if !e.started {
 		return fmt.Errorf("%s: %w", DecodeStepName, err)
 	}
+	// Committed before the fault, so the reply was served (truncated); count it
+	// forced like the buffered path rather than leaving the candidate unattributed.
+	coordmetrics.IncForceStreamTotal(e.reqModel, coordmetrics.ForceStreamResultForced)
 	logger.Error(err, "force-stream truncated after commit")
 	return nil
 }

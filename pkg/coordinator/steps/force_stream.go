@@ -91,6 +91,13 @@ var errForceStreamCeiling = errors.New("force-stream: buffered response exceeded
 // pass-through rather than failing a reply the pod returned intact.
 var errForceStreamOversize = errors.New("force-stream: responses reply exceeded its reserved budget; falling back to pass-through")
 
+// errForceStreamUnreadable marks a forced request whose upstream returned 200 but
+// a stream the coordinator could not parse or read before any bytes reached the
+// client. The non-forced pass-through may serve it from a different pod code path,
+// so the decode step falls back to it rather than failing. The underlying parse or
+// read error is logged where this is returned, so the fallback stays diagnosable.
+var errForceStreamUnreadable = errors.New("force-stream: upstream stream unreadable; falling back to pass-through")
+
 // sseDataPrefix and sseDoneMarker delimit the SSE frames the upstream streams.
 // Each data line carries one JSON object; the stream ends with data: [DONE].
 // sseDataPrefix is intentionally the bare "data:" without the trailing space
@@ -229,20 +236,31 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 	if err != nil {
 		// No response headers arrived, so nothing is on the wire; a plain error
 		// lets the server answer a clean 502.
+		coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultErrorTransport)
 		return fmt.Errorf("%s: force-stream request: %w", DecodeStepName, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
+		coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultErrorUpstream)
 		return forwardUpstreamError(reqCtx, resp)
 	}
 
 	n := reqcommon.OutputChoiceCount(reqCtx.Body, reqcommon.DetectAPIType(reqCtx.OriginalPath))
 	reassembler := newSSEReassembler(shape, n)
 	if err := scanForcedResponse(resp.Body, reassembler, reserved); err != nil {
-		if errors.Is(err, errForceStreamCeiling) {
+		switch {
+		case errors.Is(err, errForceStreamCeiling):
 			coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultErrorCeiling)
 			logger.Error(err, "force-stream aborted", "reservedBytes", reserved)
+		case errors.Is(err, errForceStreamOversize):
+			// decode records fallback_oversize and runs the pass-through.
+		default:
+			// The upstream returned 200 but an unreadable stream (bad JSON or an
+			// interrupted read) before anything reached the client. Log the detail;
+			// decode records fallback_unreadable and runs the pass-through.
+			logger.Error(err, "force-stream fell back: upstream stream unreadable")
+			return errForceStreamUnreadable
 		}
 		return fmt.Errorf("%s: %w", DecodeStepName, err)
 	}

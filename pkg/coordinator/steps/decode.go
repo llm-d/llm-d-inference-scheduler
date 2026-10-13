@@ -93,19 +93,20 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 			case forceStreamLossy(shape, reqCtx.Body):
 				coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackUnsupported)
 			case canStreamIncrementally(shape, reqCtx):
-				return s.executeForceStreamIncremental(ctx, logger, reqCtx, shape)
+				if err := s.executeForceStreamIncremental(ctx, logger, reqCtx, shape); !recordForceStreamFallback(reqCtx.Model, err) {
+					return err
+				}
+				// Fell back with nothing written; continue to the pass-through below.
 			default:
 				reserved, ok := s.estimateReservation(reqCtx)
 				switch {
 				case !ok:
 					coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackUnbounded)
 				case s.budget.tryReserve(reserved):
-					if err := s.executeForceStream(ctx, logger, reqCtx, shape, reserved); !errors.Is(err, errForceStreamOversize) {
+					if err := s.executeForceStream(ctx, logger, reqCtx, shape, reserved); !recordForceStreamFallback(reqCtx.Model, err) {
 						return err
 					}
-					// The Responses completed frame did not fit the reservation and
-					// nothing was written, so fall through to the pass-through below.
-					coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackOversize)
+					// Fell back with nothing written; continue to the pass-through below.
 				default:
 					coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackBudget)
 				}
@@ -122,6 +123,23 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 
 	out := serveDecode(logger, s.gwClient.Transport(), reqCtx.ResponseWriter, proxyReq, coordmetrics.UpstreamDecode, nil)
 	return out.streamedError(DecodeStepName)
+}
+
+// recordForceStreamFallback reports whether a force-stream attempt fell back to
+// the pass-through, recording the matching outcome when it did. A fallback leaves
+// the client uncommitted, so the caller continues to the pass-through; nil (a
+// forced success) and every other error are not fallbacks, so the caller returns
+// them directly.
+func recordForceStreamFallback(modelName string, err error) bool {
+	switch {
+	case errors.Is(err, errForceStreamOversize):
+		coordmetrics.IncForceStreamTotal(modelName, coordmetrics.ForceStreamResultFallbackOversize)
+	case errors.Is(err, errForceStreamUnreadable):
+		coordmetrics.IncForceStreamTotal(modelName, coordmetrics.ForceStreamResultFallbackUnreadable)
+	default:
+		return false
+	}
+	return true
 }
 
 // prepareDecodeBody mutates reqCtx.Body in place rather than on a clone (unlike

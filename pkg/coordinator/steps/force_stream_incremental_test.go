@@ -19,7 +19,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -192,21 +192,43 @@ func TestForceStreamIncremental_NoTokenLimit_StillForced(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "the incremental path reserves no budget")
 }
 
-// TestForceStreamIncremental_CleanErrorBeforeCommit verifies that a fault before
-// the first content byte surfaces as a plain error (so the server can answer a
-// clean 5xx) and writes nothing to the client.
-func TestForceStreamIncremental_CleanErrorBeforeCommit(t *testing.T) {
-	server := sseServer(t, []string{`not-json`}, nil)
+// TestForceStreamIncremental_UnreadableStream_FallsBack verifies that an
+// unreadable stream before the first content byte falls back to the pass-through
+// rather than failing: nothing reached the client, so the request is re-sent
+// non-forced and the pod serves it. The outcome is counted fallback_unreadable.
+func TestForceStreamIncremental_UnreadableStream_FallsBack(t *testing.T) {
+	passthroughReply := `{"id":"c","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			fmt.Fprint(w, "data: not-json\n\n")
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
 	defer server.Close()
 
-	step, _ := newForceStreamStep(t, server.URL, "1GiB")
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
 	recorder := httptest.NewRecorder()
 
-	err := step.Execute(context.Background(), chatIncrementalReqCtx(recorder))
-	require.Error(t, err, "a fault before any write must surface for a clean 5xx")
-	var streamed *pipeline.UpstreamStreamedError
-	require.False(t, errors.As(err, &streamed), "nothing was written, so it is a plain error")
-	require.Equal(t, 0, recorder.Body.Len(), "nothing may be written before the first content frame")
+	require.NoError(t, step.Execute(context.Background(), chatIncrementalReqCtx(recorder)),
+		"a pre-commit unreadable stream must fall back, not error")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client gets the pass-through reply, not a 5xx")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnreadable), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
 }
 
 // TestForceStreamIncremental_TruncatesAfterCommit verifies the accepted trade:
@@ -220,7 +242,7 @@ func TestForceStreamIncremental_TruncatesAfterCommit(t *testing.T) {
 	server := sseServer(t, frames, nil)
 	defer server.Close()
 
-	step, _ := newForceStreamStep(t, server.URL, "1GiB")
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
 	recorder := httptest.NewRecorder()
 
 	require.NoError(t, step.Execute(context.Background(), chatIncrementalReqCtx(recorder)),
@@ -228,4 +250,6 @@ func TestForceStreamIncremental_TruncatesAfterCommit(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Result().StatusCode)
 	require.Contains(t, recorder.Body.String(), "partial", "the committed partial body reaches the client")
 	require.False(t, json.Valid(recorder.Body.Bytes()), "the truncated body is not complete JSON")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9,
+		"a reply truncated after commit is still counted forced, matching the buffered path")
 }

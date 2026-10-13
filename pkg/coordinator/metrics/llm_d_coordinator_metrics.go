@@ -175,7 +175,8 @@ var (
 // non-streaming reply. The gauge tracks bytes reserved against the shared
 // buffer budget by the shapes that buffer the whole reply, so an operator can
 // see how close concurrent forced requests run to the limit; the counter
-// attributes each candidate request to the path it took.
+// attributes each candidate request that reached the upstream call to its
+// outcome, so it sums to candidate volume.
 var (
 	forceStreamBufferedBytes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -190,7 +191,7 @@ var (
 		prometheus.CounterOpts{
 			Subsystem: LLMDRouterCoordinatorSubsystem,
 			Name:      "force_stream_total",
-			Help:      metricsutil.HelpMsgWithStability("Total number of force-stream candidate requests by model and outcome: forced (reassembled from a streamed upstream), fallback_budget (budget full), fallback_unbounded (no output token limit to reserve, or an estimate past the per-request cap), fallback_unsupported (chat/text reply may carry fields the reassembler drops), fallback_oversize (Responses completed frame larger than the reservation), or error_ceiling (aborted for exceeding its reserved budget). The fallback outcomes take the non-forced pass-through.", compbasemetrics.ALPHA),
+			Help:      metricsutil.HelpMsgWithStability("Total number of force-stream candidate requests by model and outcome: forced (reassembled from a streamed upstream, including one truncated after commit), fallback_budget (budget full), fallback_unbounded (no output token limit to reserve, or an estimate past the per-request cap), fallback_unsupported (chat/text reply may carry fields the reassembler drops), fallback_oversize (Responses completed frame larger than the reservation), fallback_unreadable (upstream 200 but a stream it could not parse), error_ceiling (aborted for exceeding its reserved budget), error_upstream (upstream 4xx/5xx forwarded to the client), or error_transport (no upstream response). The fallback outcomes take the non-forced pass-through; the error outcomes are also classified generically by step_errors_total.", compbasemetrics.ALPHA),
 		},
 		withLabel(modelLabel, "result"),
 	)
