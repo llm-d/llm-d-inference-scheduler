@@ -22,15 +22,16 @@ exclude_path = [
 # spurious timeouts on otherwise-reachable links.
 timeout = 60
 
-# Retry settings. Lychee 0.24.2 retries timeouts, 5xx responses, and
-# connection reset or abort errors with exponential backoff. Worst-case per
+# Retry settings. Lychee 0.24.2 (GHA 2.9.0) retries timeouts and connection reset or
+# abort errors with exponential backoff. It does not retry 5xx responses,
+# so those fail on the first response
+# (https://github.com/lycheeverse/lychee/issues/2319). Worst-case per
 # dead link with these values:
 #   timeout * (max_retries + 1) + retry_wait_time * (2^max_retries - 1)
 #   = 60 * 5 + 5 * 15 = 375s.
 # Lychee runs link checks concurrently (default 128 parallel), so total
 # wall-clock is bounded by the slowest single link, not the sum across
-# all links. Four retries allow transient upstream 5xx responses to clear
-# without accepting those responses as valid links.
+# all links. Four retries give slow hosts more time to recover.
 max_retries = 4
 retry_wait_time = 5
 
