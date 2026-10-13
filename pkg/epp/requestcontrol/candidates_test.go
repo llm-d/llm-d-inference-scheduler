@@ -293,6 +293,64 @@ func TestCachedEndpointCandidates_CacheIsolation_MalformedVsDefault(t *testing.T
 	assert.Equal(t, 2, mockDelegate.callCount())
 }
 
+func TestCachedEndpointCandidates_CacheKeyCollisions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		first  map[string]any
+		second map[string]any
+	}{
+		{
+			name:   "default marker",
+			first:  nil,
+			second: makeMetadataWithSubset([]any{"__default__"}),
+		},
+		{
+			name:   "empty marker",
+			first:  makeMetadataWithSubset([]any{}),
+			second: makeMetadataWithSubset([]any{"__explicit_empty__"}),
+		},
+		{
+			name:   "separator in single endpoint",
+			first:  makeMetadataWithSubset([]any{"10.0.0.1:80", "10.0.0.2:80"}),
+			second: makeMetadataWithSubset([]any{"10.0.0.1:80|10.0.0.2:80"}),
+		},
+		{
+			name:   "separator in multiple endpoints",
+			first:  makeMetadataWithSubset([]any{"10.0.0.1:80", "10.0.0.2:80", "10.0.0.3:80"}),
+			second: makeMetadataWithSubset([]any{"10.0.0.1:80|10.0.0.2:80", "10.0.0.3:80"}),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, inputs := range [][2]map[string]any{{tc.first, tc.second}, {tc.second, tc.first}} {
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				delegate := &mockEndpointCandidates{}
+				cached := NewCachedEndpointCandidates(ctx, delegate, time.Minute)
+				cached.Locate(ctx, inputs[0])
+				cached.Locate(ctx, inputs[1])
+				assert.Equal(t, 2, delegate.callCount(), "Distinct subsets must not share cached results")
+			}
+		})
+	}
+}
+
+func TestCachedEndpointCandidates_DefaultMarkerDoesNotReturnAllPods(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	delegate := NewDatastoreEndpointCandidates(&mockDatastore{
+		pods: []fwkdl.Endpoint{makeMockEndpoint("pod-a", "10.0.0.1")},
+	})
+	cached := NewCachedEndpointCandidates(ctx, delegate, time.Minute)
+	require.Len(t, cached.Locate(ctx, nil), 1)
+	assert.Empty(t, cached.Locate(ctx, makeMetadataWithSubset([]any{"__default__"})))
+	assert.Len(t, cached.Locate(ctx, nil), 1)
+}
+
 // --- Helpers & Mocks ---
 
 // mockEndpointCandidates implements contracts.EndpointCandidates.
