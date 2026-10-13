@@ -308,7 +308,10 @@ func TestExtractMMItems(t *testing.T) {
 			wantURLs: []string{"https://example.com/real.jpg", "https://example.com/second.jpg"},
 		},
 		{
-			name: "responses image_url part is not extracted",
+			// PartModality's answer does not depend on the API, so a chat
+			// part type on a Responses request is primed like any other. The
+			// model server's own input validation is what rejects the request.
+			name: "responses image_url part is extracted",
 			request: map[string]any{
 				"input": []any{
 					map[string]any{
@@ -323,10 +326,11 @@ func TestExtractMMItems(t *testing.T) {
 				},
 			},
 			apiType:  reqcommon.APITypeResponses,
-			expected: 0,
+			expected: 1,
+			wantURLs: []string{"https://example.com/image.jpg"},
 		},
 		{
-			name: "responses audio_url and video_url parts are not extracted",
+			name: "responses audio_url and video_url parts are extracted",
 			request: map[string]any{
 				"input": []any{
 					map[string]any{
@@ -345,10 +349,10 @@ func TestExtractMMItems(t *testing.T) {
 				},
 			},
 			apiType:  reqcommon.APITypeResponses,
-			expected: 0,
+			expected: 2,
 		},
 		{
-			name: "responses input_image alongside a stray image_url part",
+			name: "responses input_image alongside a chat image_url part",
 			request: map[string]any{
 				"input": []any{
 					map[string]any{
@@ -367,14 +371,11 @@ func TestExtractMMItems(t *testing.T) {
 				},
 			},
 			apiType:  reqcommon.APITypeResponses,
-			expected: 1,
-			wantURLs: []string{"https://example.com/real.jpg"},
+			expected: 2,
+			wantURLs: []string{"https://example.com/stray.jpg", "https://example.com/real.jpg"},
 		},
 		{
-			// The Responses input content union is input_text / input_image /
-			// input_file, so priming an input_audio part against PathResponses
-			// would fail the fanout for the whole request.
-			name: "responses input_audio part is not extracted",
+			name: "responses input_audio part is extracted",
 			request: map[string]any{
 				"input": []any{
 					map[string]any{
@@ -389,7 +390,7 @@ func TestExtractMMItems(t *testing.T) {
 				},
 			},
 			apiType:  reqcommon.APITypeResponses,
-			expected: 0,
+			expected: 1,
 		},
 		// A function_call_output carries its parts under output, and vLLM forwards
 		// that array as a tool message's content, so an image there reaches the
@@ -515,24 +516,28 @@ func TestExtractMMItemsDropsAreLogged(t *testing.T) {
 			apiType: reqcommon.APITypeChatCompletions,
 		},
 		{
-			name:          "responses request carrying a chat image_url part",
+			// Not a drop either: PartModality names a chat part type on any
+			// API, so this is primed rather than skipped.
+			name:          "responses request carrying a chat image_url part stays quiet",
 			request:       map[string]any{"input": []any{userContent(map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/img.jpg"}})}},
 			apiType:       reqcommon.APITypeResponses,
-			wantPartDrops: 1,
+			wantExtracted: 1,
 		},
 		{
-			// Two drops beside one survivor: the smallest input that tells a
+			// Two drops beside two survivors: the smallest input that tells a
 			// real count apart from one hardcoded to 1, and a real surviving
-			// total apart from 0.
+			// total apart from 0. An input_image with no fetchable URL is the
+			// only part-drop reason left, so both drops are that shape.
 			name: "every drop is counted alongside what survived",
 			request: map[string]any{"input": []any{userContent(
 				inputImageItem("https://example.com/keep.jpg"),
 				map[string]any{"type": "input_image", "detail": "high"},
-				map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/drop.jpg"}},
+				map[string]any{"type": "input_image", "detail": "low"},
+				map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/also-kept.jpg"}},
 			)}},
 			apiType:       reqcommon.APITypeResponses,
 			wantPartDrops: 2,
-			wantExtracted: 1,
+			wantExtracted: 2,
 		},
 		{
 			name:          "a responses input item that does not decode as an object is counted",
