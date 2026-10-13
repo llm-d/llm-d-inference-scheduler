@@ -1026,13 +1026,24 @@ func TestZMQSubscriber_SnapshotSequenceResetReloadsPod(t *testing.T) {
 	assert.Equal(t, int32(2), server.requests.Load())
 }
 
+func TestZMQSubscriber_SnapshotPreferredOverReplay(t *testing.T) {
+	h, server := newSnapshotReplayHarness(t,
+		[]replayMessage{{seq: 0, payload: buildDistinctBlockStoredPayload(t, 300)}},
+		5, buildDistinctBlockStoredPayload(t, 100))
+	h.send(t, 5, buildEventBatchPayload(t))
+	require.Eventually(t, func() bool { return h.indexed(100) }, 5*time.Second, 50*time.Millisecond,
+		"the snapshot must load on the first live frame")
+	assert.False(t, h.indexed(300), "the replay must not run when the snapshot loads")
+	assert.Equal(t, int32(1), server.requests.Load())
+	assert.Equal(t, int32(0), h.buffer.requests.Load())
+}
+
 func TestZMQSubscriber_FailedSnapshotFallsBackToReplay(t *testing.T) {
 	h, server := newSnapshotReplayHarness(t,
 		[]replayMessage{{seq: 0, payload: buildDistinctBlockStoredPayload(t, 100)}}, -2)
-	require.Eventually(t, func() bool { return h.indexed(100) }, 5*time.Second, 50*time.Millisecond,
-		"proactive replay expected")
 	h.send(t, 1, buildDistinctBlockStoredPayload(t, 200))
-	require.Eventually(t, func() bool { return h.indexed(200) }, 5*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return h.indexed(100) && h.indexed(200) },
+		5*time.Second, 50*time.Millisecond, "an unavailable snapshot must fall back to a full replay")
 	oldRequestKey, err := h.index.GetRequestKey(h.ctx, kvblock.BlockHash(100))
 	require.NoError(t, err)
 
@@ -1043,7 +1054,7 @@ func TestZMQSubscriber_FailedSnapshotFallsBackToReplay(t *testing.T) {
 		oldHits, lookupErr := h.index.Lookup(h.ctx, []kvblock.BlockHash{oldRequestKey}, nil)
 		return lookupErr == nil && len(oldHits[oldRequestKey]) == 0 && h.indexed(300)
 	}, 5*time.Second, 50*time.Millisecond, "a failed snapshot must fall back to a full replay")
-	assert.Equal(t, int32(1), server.requests.Load())
+	assert.Equal(t, int32(2), server.requests.Load())
 	assert.Equal(t, int32(2), h.buffer.requests.Load())
 }
 
