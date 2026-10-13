@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
@@ -112,7 +113,7 @@ func TestMessagesRenderMode(t *testing.T) {
 					CacheSalt: "tenant-a",
 					Prompts: []fwkrh.PromptTokens{{
 						TokenIDs:           []uint32{1, 2, 3},
-						MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "hash", Offset: 1, Length: 2}},
+						MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "hash", Offset: 1, Length: 2}},
 					}},
 				}, req.Body.TokenizedRequest)
 				require.Equal(t, fwkrh.RawPayload(raw), req.Body.WirePayload())

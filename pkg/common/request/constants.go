@@ -122,9 +122,10 @@ const (
 // string with its options as siblings.
 //
 // The Responses input content union is input_text / input_image / input_file, so
-// a Responses request carrying one of the others is refused by the model
-// server. FieldFileID on an input_image, input_file or
-// computer_screenshot names a Files API upload the serving engine has to fetch.
+// a Responses request carrying one of the others is refused by the model server.
+// PartModality does not pre-empt that: it answers by part type alone, so such a
+// part is still collected and primed. FieldFileID on an input_image, input_file
+// or computer_screenshot names a Files API upload the serving engine must fetch.
 const (
 	PartTypeImageURL           = "image_url"
 	PartTypeAudioURL           = "audio_url"
