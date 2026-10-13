@@ -33,6 +33,7 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers"
+	parserutil "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/util"
 )
 
 const (
@@ -160,9 +161,10 @@ func (p *SGLangHTTPParser) parseGenerateRequest(rawBody []byte) (*fwkrh.ParseRes
 	}
 
 	// Keep the full body as a map so priority can be injected; when nothing is
-	// mutated, repackage still forwards the original bytes unchanged.
-	bodyMap := make(map[string]any)
-	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
+	// mutated, repackage still forwards the original bytes unchanged. input_ids
+	// stays raw because decoding it into []any allocates per token.
+	bodyMap, err := parserutil.UnmarshalMapWithRawField(rawBody, "input_ids")
+	if err != nil {
 		return nil, fmt.Errorf("invalid generate request: %w", err)
 	}
 
