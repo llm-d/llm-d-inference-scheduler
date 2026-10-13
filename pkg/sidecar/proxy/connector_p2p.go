@@ -21,6 +21,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -276,6 +277,9 @@ func normalizeEndpoint(s string) string {
 	host, port, err := net.SplitHostPort(hostport)
 	if err != nil {
 		return hostport
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		host = addr.String()
 	}
 	return net.JoinHostPort(host, port)
 }

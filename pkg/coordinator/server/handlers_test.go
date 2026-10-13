@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -266,11 +267,11 @@ func TestHandleInference_ResponsesAcceptsStatelessRequest(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if seenBody["store"] != true {
-		t.Errorf("expected store to pass through, got %v", seenBody["store"])
+	if got, _ := seenBody["store"].(json.RawMessage); string(got) != "true" {
+		t.Errorf("expected store to pass through, got %s", got)
 	}
-	if seenBody["input"] != "hi" {
-		t.Errorf("expected unrelated fields to survive, got input=%v", seenBody["input"])
+	if got, _ := seenBody["input"].(json.RawMessage); string(got) != `"hi"` {
+		t.Errorf("expected unrelated fields to survive, got input=%s", got)
 	}
 }
 
@@ -300,6 +301,53 @@ func TestHandleInference_ResponsesRejectionScopedToPath(t *testing.T) {
 		if _, ok := seenBody[field]; !ok {
 			t.Errorf("expected %q to survive on a non-responses path", field)
 		}
+	}
+}
+
+func TestHandleInference_BodyKeepsNestedKeyOrder(t *testing.T) {
+	// Steps build every upstream request by marshaling reqCtx.Body. Top-level
+	// keys are sorted here so the whole body must round-trip byte-for-byte.
+	body := `{"messages":[{"role":"user","content":"Hi"}],"model":"m",` +
+		`"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{"zebra":{},"apple":{},"mango":{}}}}}]}`
+	var forwarded []byte
+	step := stubStep{name: "capture", fn: func(_ context.Context, rc *pipeline.RequestContext) error {
+		var err error
+		forwarded, err = json.Marshal(rc.Body)
+		return err
+	}}
+	srv, err := New(config.ServerConfig{}, pipeline.New([]pipeline.Step{step}), gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.handleInference(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if string(forwarded) != body {
+		t.Fatalf("forwarded body changed:\n got: %s\nwant: %s", forwarded, body)
+	}
+}
+
+func TestDecodeRequestBody(t *testing.T) {
+	tools := `[{"type":"function","function":{"parameters":{"properties":{"b":{},"a":{}}}}}]`
+	parsed, err := decodeRequestBody([]byte(`{"model":"m","stream":true,"prompt":"hi","token_ids":[1],` +
+		`"sampling_params":{"max_tokens":5},"features":{},"tools":` + tools + `}`))
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{
+		"model":           "m",
+		"stream":          true,
+		"prompt":          "hi",
+		"token_ids":       []any{1.0},
+		"sampling_params": map[string]any{"max_tokens": 5.0},
+		"features":        map[string]any{},
+		"tools":           json.RawMessage(tools),
+	}, parsed)
+
+	for _, body := range []string{`[1,2]`, `null`, `"text"`} {
+		_, err := decodeRequestBody([]byte(body))
+		require.Error(t, err, "body %s", body)
 	}
 }
 
@@ -563,6 +611,46 @@ func TestHandleInference_StreamedUpstreamErrorClassifiedAndNotOverwritten(t *tes
 		promtestutil.ToFloat64(mustCounter(t, reg, "llm_d_coordinator_request_error_total", map[string]string{"model_name": "m", "error_code": coordmetrics.ErrorCodeUpstream5xx})),
 		1e-9, "streamed upstream 5xx must classify as upstream_5xx in request_error_total",
 	)
+}
+
+func TestHandleInference_StepWrittenErrorClassifiedAndNotOverwritten(t *testing.T) {
+	reg := newMetricsRegistry(t)
+
+	const stepBody = `{"error":{"message":"unknown mode"}}`
+	step := stubStep{name: "async-broker", fn: func(_ context.Context, rc *pipeline.RequestContext) error {
+		rc.ResponseWriter.WriteHeader(http.StatusBadRequest)
+		_, _ = rc.ResponseWriter.Write([]byte(stepBody))
+		return &pipeline.ResponseWrittenError{Step: "async-broker", StatusCode: http.StatusBadRequest, Cause: pipeline.ErrBadRequest}
+	}}
+	p := pipeline.New([]pipeline.Step{step})
+	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(nil, stubGatewayURL))
+	require.NoError(t, err)
+
+	rec := postInference(t, srv)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "step status must survive: no http.Error overwrite")
+	require.Equal(t, stepBody, rec.Body.String(), "step body must survive: no http.Error overwrite")
+
+	require.InDelta(t, 1.0,
+		promtestutil.ToFloat64(mustCounter(t, reg, "llm_d_coordinator_request_error_total", map[string]string{"model_name": "m", "error_code": coordmetrics.ErrorCodeBadRequest})),
+		1e-9,
+	)
+}
+
+func TestHandleInference_PipelineDoneRecordsNoError(t *testing.T) {
+	reg := newMetricsRegistry(t)
+
+	step := stubStep{name: "async-broker", fn: func(_ context.Context, rc *pipeline.RequestContext) error {
+		rc.ResponseWriter.WriteHeader(http.StatusAccepted)
+		return pipeline.ErrPipelineDone
+	}}
+	p := pipeline.New([]pipeline.Step{step})
+	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(nil, stubGatewayURL))
+	require.NoError(t, err)
+
+	rec := postInference(t, srv)
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	require.Zero(t, seriesCount(t, reg, "llm_d_coordinator_request_error_total"))
+	require.Zero(t, seriesCount(t, reg, "llm_d_coordinator_step_errors_total"))
 }
 
 func TestHandleInference_PipelinePanicRecordsErrorAndPropagates(t *testing.T) {
