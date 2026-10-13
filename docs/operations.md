@@ -39,7 +39,7 @@ The EPP's scaling behavior and effectiveness are highly dependent on the configu
 
 - **Active-Passive Mode**: Traffic routes to primary EPP replica(s) serving Envoy external processing (`ext-proc`) requests while standby replicas remain available for failover.
   - **Sizing Impact**: Scaling standby replicas (or total replica count under single-leader election) does **not** increase the overall EPP throughput capacity or impact resource sizing, as only the active primary replica(s) handle requests.
-  - **Failover Trade-off**: [Priority Routing](#priority-routing) (standalone service mode) and [GKE Preferred Backends](#gke-preferred-backends-gateway-mode) are recommended over lease-based leader election because they keep standby EPP pods warm and synced; see [Leader Election and Fail-Open](#leader-election-and-fail-open) for switchover timing and fail-open behavior details.
+  - **Failover Trade-off**: [Priority Routing](#priority-routing-standalone-service-mode) and [GKE Preferred Backends](#gke-preferred-backends-gateway-mode) are recommended over lease-based leader election because they keep standby EPP pods warm and synced; see [Leader Election and Fail-Open](#leader-election-and-fail-open) for switchover timing and fail-open behavior details.
 - **Active-Active Mode**: Multiple EPP replicas actively share and load-balance incoming requests, providing **near-linear throughput scaling**:
 
   | Replicas | Scaling Factor |
@@ -168,8 +168,9 @@ The router supports multiple High Availability (HA) modes:
 
 1. **Fully Active-Active**: Multiple EPP replicas run concurrently and share load across all instances. Suitable when scheduling algorithms and plugins do not require unified state across pods or there is a synchronization mechanism in place; see [Active-Active Mode](#active-active-mode).
 2. **Active-Passive**: Traffic routes to a single primary replica set while standby replicas remain available for failover.
-   - **Priority Routing / Preferred Backends (Recommended)**: Keeps warm, state-synced standby EPP pods in a secondary tier for fast failover without lease expiration delays—available as [Priority Routing](#priority-routing) in standalone service mode (`router.proxy.mode: service`) and [GKE Preferred Backends](#gke-preferred-backends-gateway-mode) in GKE Gateway mode (`provider.gke.preferredBackends.enabled: true`).
-   - **Leader Election with Fail-Open**: Uses Kubernetes `coordination.k8s.io/Lease` coordination so only the elected leader serves inference extension requests while standby pods remain out of rotation until acquiring the lease; see [Leader Election and Fail-Open](#leader-election-and-fail-open) for switchover timing and fail-open behavior.
+   - **Priority Routing (Standalone Service Mode, Recommended)**: Uses Envoy Priority Routing and local outlier detection to route traffic to primary EPP pods and shift to warm standby pods on connection failure; see [Priority Routing (Standalone Service Mode)](#priority-routing-standalone-service-mode).
+   - **GKE Preferred Backends (Gateway Mode, Recommended on GKE)**: Uses GKE `GCPBackendPolicy` (`PREFERRED` and `DEFAULT` tiers) and `HealthCheckPolicy` for warm-standby failover and rate/capacity spillover; see [GKE Preferred Backends (Gateway Mode)](#gke-preferred-backends-gateway-mode).
+   - **Leader Election with Fail-Open**: Uses Kubernetes `coordination.k8s.io/Lease` coordination so only the elected leader serves inference extension requests while standby pods remain out of rotation until acquiring the lease; see [Leader Election and Fail-Open](#leader-election-and-fail-open).
 
 ### Active-Active Mode
 
@@ -185,7 +186,7 @@ router:
 
 See [Scaling Modes (Active-Active vs. Active-Passive)](#scaling-modes-active-active-vs-active-passive) for throughput scaling factors, flow control scope, and plugin compatibility requirements.
 
-### Priority Routing
+### Priority Routing (Standalone Service Mode)
 
 Priority Routing is the recommended Active-Passive configuration in standalone service mode (`router.proxy.mode: service`). When priority routing is enabled (`router.proxy.priorityRouting.enabled: true`), the router suppresses leader election so all EPP replicas stay warm and synced, and uses [Envoy Priority Routing](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/priority) to organize EPP endpoints into distinct priority tiers:
 * **Priority 0 (Primary / Active)**: Handles 100% of steady-state scheduling traffic.
@@ -199,7 +200,7 @@ Priority Routing is the recommended Active-Passive configuration in standalone s
 4. **Graceful Pod Termination**: EPP pods include a native `lifecycle.preStop.sleep` hook (5 seconds) during planned deletion or rollout on Kubernetes 1.30+ with `PodLifecycleSleepAction` enabled. This gives Envoy active health checks time to detect pod shutdown and redirect new traffic to standby endpoints before SIGTERM, allowing in-flight gRPC streams to drain.
 5. **Safe Failback**: When a replacement primary pod is rescheduled, the health check `healthy_threshold` requires consecutive passing health probes before Envoy restores traffic to Priority 0, ensuring the new EPP pod has finished syncing model server state and inference pools.
 
-#### Helm Configuration (Standalone Service Mode)
+#### Helm Configuration
 
 ```yaml
 router:
@@ -211,10 +212,12 @@ router:
       standbyReplicas: 1
 ```
 
-#### Tuning Parameters
-
 | Parameter | Default | Description |
 |---|---|---|
+| `router.proxy.mode` | `sidecar` | Must be set to `service` to enable Priority Routing. |
+| `router.proxy.priorityRouting.enabled` | `false` | Enable Envoy Priority Routing for the `ext_proc` cluster. |
+| `router.proxy.priorityRouting.primaryReplicas` | `1` | Number of active EPP pod ordinals in Priority 0. |
+| `router.proxy.priorityRouting.standbyReplicas` | `1` | Number of warm standby EPP pod ordinals in Priority 1. |
 | `router.proxy.priorityRouting.healthyPanicThreshold` | `10.0` | Threshold percentage to prevent panic routing during primary ejection. |
 | `router.proxy.priorityRouting.dnsRefreshRate` | `5s` | DNS resolution refresh rate for headless EPP endpoints. |
 | `router.proxy.priorityRouting.connectTimeout` | `0.250s` | Connection timeout to detect unreachable primary pods. |
@@ -224,12 +227,17 @@ router:
 | `router.proxy.healthCheckHealthyThreshold` | `2` | Number of passing probes required before admitting recreated pods. |
 | `router.epp.terminationGracePeriodSeconds` | `130` | Grace period (seconds) before SIGKILL on pod teardown. |
 
-#### GKE Preferred Backends (Gateway Mode)
+### GKE Preferred Backends (Gateway Mode)
 
-In GKE Gateway mode (`llm-d-router-gateway`), `provider.gke.preferredBackends.enabled: true` deploys EPP as a `StatefulSet` (with leader election disabled so all replicas stay warm) and creates per-ordinal `ClusterIP` Services with zonal NEGs (`cloud.google.com/neg`), `GCPBackendPolicy`, and `HealthCheckPolicy` resources:
-- **Priority Tiers**: Primary active pod ordinals (`preferredReplicas`) are pinned to `backendPreference: PREFERRED`, and warm standby pod ordinals (`defaultReplicas`) are pinned to `backendPreference: DEFAULT`. The `InferencePool` anchors `endpointPickerRef` to the standby Service (`<release>-epp-backup`) while primary zonal NEGs are attached to the GKE `BackendService`.
-- **Rate and Capacity Spillover**: When incoming traffic exceeds `capacityScalerPercent` of `maxRatePerEndpoint` (`balancingMode: RATE`), GKE's managed Envoy data plane spills excess burst traffic over to the `DEFAULT` standby tier immediately in memory without dropping connections.
-- **Health-Check Failover**: When a primary pod fails or drains, Cloud Load Balancing gRPC health checks on port 9003 mark the primary NEG unhealthy and shift traffic to warm `DEFAULT` standby pods (completing within a `~3s` health-prober window in single-primary `1P1S` drain benchmarks, or with zero dropped requests when `preferredReplicas >= 2`).
+In GKE Gateway mode (`llm-d-router-gateway`), `provider.gke.preferredBackends.enabled: true` is the recommended Active-Passive configuration. It deploys EPP as a `StatefulSet` (with leader election disabled so all replicas stay warm) and creates per-ordinal `ClusterIP` Services with zonal NEGs (`cloud.google.com/neg`), `GCPBackendPolicy`, and `HealthCheckPolicy` resources.
+
+#### Architecture and Failover Mechanics
+
+1. **Priority Tiers and NEG Attachment**: Primary active pod ordinals (`preferredReplicas`) are pinned to `backendPreference: PREFERRED`, and warm standby pod ordinals (`defaultReplicas`) are pinned to `backendPreference: DEFAULT`. The `InferencePool` anchors `endpointPickerRef` to the standby Service (`<release>-epp-backup`) while primary zonal NEGs are attached to the GKE `BackendService`.
+2. **Rate and Capacity Spillover**: When incoming traffic exceeds `capacityScalerPercent` of `maxRatePerEndpoint` (`balancingMode: RATE`), GKE's managed Envoy data plane spills excess burst traffic over to the `DEFAULT` standby tier immediately in memory without dropping connections.
+3. **Health-Check Failover**: When a primary pod fails or drains, Cloud Load Balancing gRPC health checks on port 9003 mark the primary NEG unhealthy and shift traffic to warm `DEFAULT` standby pods (completing within a `~3s` health-prober window in single-primary `1P1S` drain benchmarks, or with zero dropped requests when `preferredReplicas >= 2`).
+
+#### Helm Configuration
 
 ```yaml
 provider:
@@ -244,15 +252,29 @@ provider:
       capacityScalerPercent: 100
 ```
 
+| Parameter | Default | Description |
+|---|---|---|
+| `provider.name` | `none` | Must be set to `gke` to enable GKE Gateway resources. |
+| `provider.gke.preferredBackends.enabled` | `false` | Enable Preferred Backends high availability routing for GKE. |
+| `provider.gke.preferredBackends.preferredReplicas` | `1` | Replica count for primary active pod ordinals pinned to the `PREFERRED` tier. |
+| `provider.gke.preferredBackends.defaultReplicas` | `1` | Replica count for warm standby pod ordinals pinned to the `DEFAULT` tier. |
+| `provider.gke.preferredBackends.balancingMode` | `RATE` | Load balancing calculation mode (`RATE`, `UTILIZATION`, or `CONNECTION`). |
+| `provider.gke.preferredBackends.maxRatePerEndpoint` | `100` | Maximum requests per second per primary pod instance before spilling over to standby tiers. |
+| `provider.gke.preferredBackends.capacityScalerPercent` | `100` | Effective capacity ceiling percentage (`0` to `100`) before spillover. |
+
 ### Leader Election and Fail-Open
 
-In multi-replica deployments without priority routing or GKE preferred backends, the router coordinates active-passive replicas using Kubernetes lease-based leader election:
+In multi-replica deployments without priority routing or GKE preferred backends, the router coordinates active-passive replicas using Kubernetes lease-based leader election.
+
+#### Architecture and Failover Mechanics
 
 - **Leader Coordination**: EPP replicas contend for a `coordination.k8s.io/Lease`. The `--ha-enable-leader-election` flag enables leader election in EPP (automatically injected by Helm when `router.epp.replicas > 1` unless priority routing, GKE preferred backends, or autoscaling is enabled). The elected leader responds to active gRPC extension requests on Port 9002, while standby replicas do not serve external processing traffic until acquiring the lease. See [Active-Active Mode](#active-active-mode) to disable leader election for concurrent active-active replicas.
 - **Fail-Open Behavior (Gateway vs. Standalone)**:
   - **Gateway Mode (`llm-d-router-gateway`)**: With `router.inferencePool.failureMode: FailOpen` (the default), the Gateway bypasses an unreachable EPP during a leader transition and routes requests directly to healthy model-server backends in the `InferencePool` to preserve request availability.
   - **Standalone Mode (`llm-d-router-standalone`)**: Setting `router.proxy.failOpen: true` (the default in `service` mode) sets `failure_mode_allow: true` on Envoy's `ext_proc` filter so requests proceed past the filter when EPP is unreachable. However, the default standalone route forwards to `original_destination_cluster` (`type: ORIGINAL_DST`), which selects the upstream endpoint from the `x-gateway-destination-endpoint` header populated by EPP. When EPP is unavailable, `failure_mode_allow` alone does not provide a fallback model-server route.
-- **Switchover Disadvantage (10-30s EPP Unavailability Window)**: When the active leader fails, Kubernetes lease expiration (`--ha-lease-duration`, default `15s`), standby readiness probe transition, and Service endpoint propagation take **10 to 30 seconds** before a standby replica begins serving traffic. During this window, EPP is unavailable: in Gateway mode with `FailOpen`, **routing is purely unoptimized** (requests bypass KV-cache affinity, prefix-cache scoring, load-aware scheduling, and flow control), and in standalone mode without an EPP-supplied destination header, requests cannot be routed to a model server. Use [Priority Routing](#priority-routing) or [GKE Preferred Backends](#gke-preferred-backends-gateway-mode) as the recommended Active-Passive setup.
+- **Switchover Disadvantage (10-30s EPP Unavailability Window)**: When the active leader fails, Kubernetes lease expiration (`--ha-lease-duration`, default `15s`), standby readiness probe transition, and Service endpoint propagation take **10 to 30 seconds** before a standby replica begins serving traffic. During this window, EPP is unavailable: in Gateway mode with `FailOpen`, **routing is purely unoptimized** (requests bypass KV-cache affinity, prefix-cache scoring, load-aware scheduling, and flow control), and in standalone mode without an EPP-supplied destination header, requests cannot be routed to a model server. Use [Priority Routing](#priority-routing-standalone-service-mode) or [GKE Preferred Backends](#gke-preferred-backends-gateway-mode) as the recommended Active-Passive setup.
+
+#### Helm Configuration
 
 ```yaml
 router:
@@ -263,6 +285,13 @@ router:
   inferencePool:
     failureMode: FailOpen
 ```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `router.epp.replicas` | `1` | Number of EPP replicas (1 active leader and `replicas - 1` standbys). |
+| `router.epp.flags.ha-enable-leader-election` | `true` (when `replicas > 1`) | Enable Kubernetes Lease leader election across EPP replicas. |
+| `router.inferencePool.failureMode` | `FailOpen` | Gateway `InferencePool` failure policy when EPP is unreachable (`FailOpen` or `FailClose`). |
+| `router.proxy.failOpen` | `true` (`service`) / `false` (`sidecar`) | Sets `failure_mode_allow` on the standalone Envoy `ext_proc` filter. |
 
 ### Horizontal Pod Autoscaling (HPA)
 
