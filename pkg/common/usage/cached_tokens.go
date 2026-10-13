@@ -211,22 +211,36 @@ func (r *cachedTokensUsageRewriter) flushJSONBuffer(next httpsnoop.WriteFunc) er
 	return err
 }
 
-// CachedTokens reads usage.prompt_tokens_details.cached_tokens out of a
-// response's usage block, which callers pass as the decoded value of the
-// response's "usage" field. It reports false when the block is absent or
-// carries no cached-token count; vLLM sends prompt_tokens_details as null
-// when the count is zero, so callers that need a number treat that as zero.
+// CachedTokens reads the cached-token count out of a response's usage block,
+// which callers pass as the decoded value of the response's "usage" field. It
+// reports false when the block is absent or carries no count; vLLM sends the
+// details object as null when the count is zero, so callers that need a number
+// treat that as zero.
 func CachedTokens(block any) (int, bool) {
-	// Only the documented OpenAI-compatible field is used as the source of truth.
 	fields, ok := block.(map[string]any)
 	if !ok {
 		return 0, false
 	}
-	details, ok := fields[reqcommon.FieldPromptTokensDetails].(map[string]any)
+	details, ok := tokenDetails(fields)
 	if !ok {
 		return 0, false
 	}
 	return intValue(details[reqcommon.FieldCachedTokens])
+}
+
+// tokenDetails returns the object a usage block carries its cached-token count
+// in. Responses and Conversations report input_tokens_details, the chat,
+// completions, and generate routes report prompt_tokens_details; a block
+// carrying both is read as Responses, which is also how the EPP's openai parser
+// resolves it. Only the documented OpenAI-compatible fields are used as the
+// source of truth.
+func tokenDetails(block map[string]any) (map[string]any, bool) {
+	for _, field := range []string{reqcommon.FieldInputTokensDetails, reqcommon.FieldPromptTokensDetails} {
+		if details, ok := block[field].(map[string]any); ok {
+			return details, true
+		}
+	}
+	return nil, false
 }
 
 func intValue(value any) (int, bool) {
@@ -327,20 +341,26 @@ func replaceCachedTokensSSELine(line []byte, cachedTokens int) ([]byte, bool) {
 }
 
 func setCachedTokens(response map[string]any, cachedTokens int) bool {
-	usage, ok := response[reqcommon.FieldUsage].(map[string]any)
+	block, ok := response[reqcommon.FieldUsage].(map[string]any)
 	if !ok {
 		return false
 	}
-	changed := false
-	details, ok := usage[reqcommon.FieldPromptTokensDetails].(map[string]any)
+	details, ok := tokenDetails(block)
 	if !ok {
-		// Some decoder chunks omit details entirely; create the standard field.
-		usage[reqcommon.FieldPromptTokensDetails] = map[string]any{reqcommon.FieldCachedTokens: cachedTokens}
+		// Some decoder chunks report prompt_tokens with the details object
+		// omitted or null; create the field those routes document. A block
+		// carrying neither details object nor prompt_tokens follows another
+		// schema (the Messages API reports cache_read_input_tokens) and is left
+		// alone rather than given a field it does not define.
+		if _, documented := block[reqcommon.FieldPromptTokens]; !documented {
+			return false
+		}
+		block[reqcommon.FieldPromptTokensDetails] = map[string]any{reqcommon.FieldCachedTokens: cachedTokens}
 		return true
 	}
 	if current, ok := intValue(details[reqcommon.FieldCachedTokens]); !ok || current != cachedTokens {
 		details[reqcommon.FieldCachedTokens] = cachedTokens
-		changed = true
+		return true
 	}
-	return changed
+	return false
 }

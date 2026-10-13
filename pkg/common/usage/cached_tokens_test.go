@@ -90,6 +90,20 @@ func TestReplaceCachedTokens(t *testing.T) {
 			want: `{"usage":{"prompt_tokens":64,"prompt_tokens_details":{"cached_tokens":7}}}`,
 		},
 		{
+			// Responses reports input_tokens_details; the prompt_tokens_details
+			// the other routes use must not be added alongside it.
+			name: "responses usage",
+			body: `{"usage":{"input_tokens":64,"input_tokens_details":{"cached_tokens":500},"total_tokens":68}}`,
+			want: `{"usage":{"input_tokens":64,"input_tokens_details":{"cached_tokens":7},"total_tokens":68}}`,
+		},
+		{
+			// The Messages API carries its own cache counts and defines neither
+			// details object, so the block is left as it came.
+			name: "messages usage",
+			body: `{"usage":{"cache_read_input_tokens":500,"input_tokens":64,"output_tokens":4}}`,
+			want: `{"usage":{"cache_read_input_tokens":500,"input_tokens":64,"output_tokens":4}}`,
+		},
+		{
 			name: "streamed usage frame",
 			body: "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"prompt_tokens_details\":{\"cached_tokens\":49}}}\n\ndata: [DONE]\n",
 			want: "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":64,\"prompt_tokens_details\":{\"cached_tokens\":7}}}\n\ndata: [DONE]\n",
@@ -174,6 +188,22 @@ func TestCachedTokens(t *testing.T) {
 			block:  map[string]any{"prompt_tokens_details": map[string]any{"cached_tokens": float64(49)}},
 			want:   49,
 			wantOK: true,
+		},
+		{
+			name:   "responses cached tokens",
+			block:  map[string]any{"input_tokens_details": map[string]any{"cached_tokens": float64(49)}},
+			want:   49,
+			wantOK: true,
+		},
+		{
+			name:   "both details objects",
+			block:  map[string]any{"input_tokens_details": map[string]any{"cached_tokens": float64(49)}, "prompt_tokens_details": map[string]any{"cached_tokens": float64(7)}},
+			want:   49,
+			wantOK: true,
+		},
+		{
+			name:  "messages cache counts",
+			block: map[string]any{"cache_read_input_tokens": float64(49), "input_tokens": float64(64)},
 		},
 	}
 

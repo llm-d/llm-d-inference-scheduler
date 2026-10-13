@@ -445,8 +445,7 @@ State produced by one phase and consumed by a later one is carried on the
 | :---- | :---- | :---- |
 | `render` | `TokenIDs`, multimodal hashes/placeholders | encode, prefill, decode (EPP uses token IDs for prefix matching) |
 | `encode` | `ECTransferParams` (merged per `mm_hash`) | prefill |
-| `prefill` | `KVTransferParams` (from the prefill response body) | decode |
-| `prefill` | `PrefillCachedTokens` (from the prefill response `usage` block) | decode |
+| `prefill` | `KVTransferParams` (from the response body), `PrefillCachedTokens` (from its `usage` block) | decode |
 
 A decode worker counts the KV blocks transferred from prefill as prompt-cache hits
 of its own, so the `usage.prompt_tokens_details.cached_tokens` it reports describes

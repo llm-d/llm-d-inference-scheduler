@@ -275,11 +275,6 @@ retryLoop:
 		s.logger.Info("warning: missing 'kv_transfer_params' field in prefiller response")
 	}
 	pCachedTokens, hasPCachedTokens := usage.CachedTokens(prefillerResponse[reqcommon.FieldUsage])
-	if !hasPCachedTokens {
-		// vLLM returns prompt_tokens_details as null when cached_tokens is 0,
-		// so treat a missing prefiller cached_tokens value as zero.
-		pCachedTokens = 0
-	}
 
 	s.logger.V(logging.TRACE).Info("received prefiller response",
 		reqcommon.FieldKVTransferParams, pKVTransferParams,

@@ -273,27 +273,32 @@ func TestCachedTokens_FlowFromPrefillToDecode(t *testing.T) {
 
 	tests := []struct {
 		name   string
+		path   string
 		stream bool
 	}{
-		{name: "non-streaming"},
-		{name: "streaming", stream: true},
+		{name: "non-streaming", path: reqcommon.PathChatCompletions},
+		{name: "streaming", path: reqcommon.PathChatCompletions, stream: true},
+		// Responses reports its counts under input_tokens_details.
+		{name: "responses", path: reqcommon.PathResponses},
+		{name: "responses streaming", path: reqcommon.PathResponses, stream: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			responses := test.path == reqcommon.PathResponses
 			gwServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.Header.Get(reqcommon.EPPProfileHeaderKey) {
 				case gateway.PhasePrefill:
 					_ = json.NewEncoder(w).Encode(map[string]any{
 						"kv_transfer_params": map[string]any{"block_id": "block-1"},
-						"usage":              usageBlock(prefillCachedTokens),
+						"usage":              usageBlockFor(responses, prefillCachedTokens),
 					})
 				case gateway.PhaseDecode:
 					if test.stream {
-						writeUsageSSE(t, w, decodeCachedTokens)
+						writeUsageSSE(t, w, usageBlockFor(responses, decodeCachedTokens))
 						return
 					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"usage": usageBlock(decodeCachedTokens)})
+					_ = json.NewEncoder(w).Encode(map[string]any{"usage": usageBlockFor(responses, decodeCachedTokens)})
 				default:
 					http.Error(w, "not found", http.StatusNotFound)
 				}
@@ -302,13 +307,17 @@ func TestCachedTokens_FlowFromPrefillToDecode(t *testing.T) {
 
 			gwClient := gateway.New(config.GatewayConfig{Address: gwServer.URL})
 			reqCtx := cachedTokensRequestContext(test.stream)
+			reqCtx.OriginalPath = test.path
 
 			prefillStep, _ := NewPrefillStep(gwClient, map[string]any{ParamKVConnector: kv.NIXL})
 			if err := prefillStep.Execute(context.Background(), reqCtx); err != nil {
 				t.Fatalf("prefill failed: %v", err)
 			}
-			if reqCtx.PrefillCachedTokens == nil || *reqCtx.PrefillCachedTokens != prefillCachedTokens {
-				t.Fatalf("prefill cached tokens = %v, want %d", reqCtx.PrefillCachedTokens, prefillCachedTokens)
+			switch got := reqCtx.PrefillCachedTokens; {
+			case got == nil:
+				t.Fatalf("prefill reported no cached-token count, want %d", prefillCachedTokens)
+			case *got != prefillCachedTokens:
+				t.Fatalf("prefill cached tokens = %d, want %d", *got, prefillCachedTokens)
 			}
 
 			decodeStep, _ := NewDecodeStep(gwClient, map[string]any{ParamKVConnector: kv.NIXL})
@@ -321,6 +330,10 @@ func TestCachedTokens_FlowFromPrefillToDecode(t *testing.T) {
 			if got := clientCachedTokens(t, recorder.Body.String()); got != prefillCachedTokens {
 				t.Errorf("client cached_tokens = %d, want the prefill worker's %d", got, prefillCachedTokens)
 			}
+			// The rewrite must stay inside the schema the route reports in.
+			if responses && strings.Contains(recorder.Body.String(), reqcommon.FieldPromptTokensDetails) {
+				t.Errorf("responses body carries %s: %s", reqcommon.FieldPromptTokensDetails, recorder.Body.String())
+			}
 			if test.stream && !strings.Contains(recorder.Body.String(), reqcommon.SSEDoneMarker) {
 				t.Errorf("rewritten stream dropped the done marker: %s", recorder.Body.String())
 			}
@@ -328,28 +341,62 @@ func TestCachedTokens_FlowFromPrefillToDecode(t *testing.T) {
 	}
 }
 
-// Without a prefill phase there is nothing to correct, and the decode worker's
-// own count is the one the client must see.
-func TestCachedTokens_DecodeOnlyKeepsTheWorkerCount(t *testing.T) {
+// With nothing measured on the prefill side, the decode worker's own count is
+// the only one there is, and the client must see it rather than a fabricated
+// zero. A prefill response carrying no usage block at all is what the tokens-in
+// configuration produces: with use_openai_format false, prefill answers on
+// /inference/v1/generate while decode answers on the client's own route.
+func TestCachedTokens_KeepsTheWorkerCountWithoutAPrefillMeasurement(t *testing.T) {
 	const decodeCachedTokens = 500
 
-	gwServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"usage": usageBlock(decodeCachedTokens)})
-	}))
-	defer gwServer.Close()
-
-	gwClient := gateway.New(config.GatewayConfig{Address: gwServer.URL})
-	decodeStep, _ := NewDecodeStep(gwClient, map[string]any{ParamKVConnector: kv.NIXL})
-
-	reqCtx := cachedTokensRequestContext(false)
-	recorder := httptest.NewRecorder()
-	reqCtx.ResponseWriter = recorder
-	if err := decodeStep.Execute(context.Background(), reqCtx); err != nil {
-		t.Fatalf("decode failed: %v", err)
+	tests := []struct {
+		name        string
+		prefillBody map[string]any
+		runPrefill  bool
+	}{
+		{name: "no prefill step"},
+		{
+			name:        "prefill response without a usage block",
+			prefillBody: map[string]any{"kv_transfer_params": map[string]any{"block_id": "block-1"}},
+			runPrefill:  true,
+		},
 	}
 
-	if got := clientCachedTokens(t, recorder.Body.String()); got != decodeCachedTokens {
-		t.Errorf("client cached_tokens = %d, want the decode worker's %d", got, decodeCachedTokens)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gwServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
+					_ = json.NewEncoder(w).Encode(test.prefillBody)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"usage": usageBlock(decodeCachedTokens)})
+			}))
+			defer gwServer.Close()
+
+			gwClient := gateway.New(config.GatewayConfig{Address: gwServer.URL})
+			reqCtx := cachedTokensRequestContext(false)
+
+			if test.runPrefill {
+				prefillStep, _ := NewPrefillStep(gwClient, map[string]any{ParamKVConnector: kv.NIXL})
+				if err := prefillStep.Execute(context.Background(), reqCtx); err != nil {
+					t.Fatalf("prefill failed: %v", err)
+				}
+				if reqCtx.PrefillCachedTokens != nil {
+					t.Errorf("prefill claimed a count of %d from a response that reported none", *reqCtx.PrefillCachedTokens)
+				}
+			}
+
+			decodeStep, _ := NewDecodeStep(gwClient, map[string]any{ParamKVConnector: kv.NIXL})
+			recorder := httptest.NewRecorder()
+			reqCtx.ResponseWriter = recorder
+			if err := decodeStep.Execute(context.Background(), reqCtx); err != nil {
+				t.Fatalf("decode failed: %v", err)
+			}
+
+			if got := clientCachedTokens(t, recorder.Body.String()); got != decodeCachedTokens {
+				t.Errorf("client cached_tokens = %d, want the decode worker's %d", got, decodeCachedTokens)
+			}
+		})
 	}
 }
 
@@ -370,19 +417,31 @@ func cachedTokensRequestContext(stream bool) *pipeline.RequestContext {
 
 func usageBlock(cachedTokens int) map[string]any {
 	return map[string]any{
-		"prompt_tokens":         64,
-		"prompt_tokens_details": map[string]any{"cached_tokens": cachedTokens},
+		reqcommon.FieldPromptTokens:        64,
+		reqcommon.FieldPromptTokensDetails: map[string]any{reqcommon.FieldCachedTokens: cachedTokens},
+	}
+}
+
+// usageBlockFor returns the usage block the route reports in: Responses counts
+// input tokens with details under input_tokens_details.
+func usageBlockFor(responses bool, cachedTokens int) map[string]any {
+	if !responses {
+		return usageBlock(cachedTokens)
+	}
+	return map[string]any{
+		reqcommon.FieldInputTokens:        64,
+		reqcommon.FieldInputTokensDetails: map[string]any{reqcommon.FieldCachedTokens: cachedTokens},
 	}
 }
 
 // writeUsageSSE sends a content frame, the usage frame, and the done marker, the
 // shape vLLM streams for stream_options.include_usage.
-func writeUsageSSE(t *testing.T, w http.ResponseWriter, cachedTokens int) {
+func writeUsageSSE(t *testing.T, w http.ResponseWriter, block map[string]any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "text/event-stream")
 	frames := []map[string]any{
 		{"choices": []any{map[string]any{"delta": map[string]any{"content": "hi"}}}},
-		{"choices": []any{}, "usage": usageBlock(cachedTokens)},
+		{"choices": []any{}, "usage": block},
 	}
 	for _, frame := range frames {
 		encoded, err := json.Marshal(frame)

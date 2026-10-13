@@ -121,10 +121,14 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		logger.Info("prefill returned no kv_transfer_params; decode will recompute the prompt",
 			"kvConnector", s.kv.Name(), "path", path)
 	}
-	// A prefill response without a count reports zero hits, not an unknown
-	// number of them (see usage.CachedTokens).
-	cachedTokens, _ := usage.CachedTokens(prefillResp.Usage)
-	reqCtx.PrefillCachedTokens = &cachedTokens
+	if prefillResp.Usage != nil {
+		// A usage block without a count reports zero hits: vLLM sends the
+		// details object as null when nothing hit the prompt cache. A response
+		// with no usage block at all measured nothing, so the field stays unset
+		// and the decode worker's own count reaches the client.
+		cachedTokens, _ := usage.CachedTokens(prefillResp.Usage)
+		reqCtx.PrefillCachedTokens = &cachedTokens
+	}
 
 	reqCtx.CaptureResponseHeaders(resp.Header)
 
