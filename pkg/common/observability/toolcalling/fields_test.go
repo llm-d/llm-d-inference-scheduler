@@ -247,6 +247,41 @@ func TestCaptureValidatedRequestJSONRequiresObject(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRequestSnapshotCanSkipCapture(t *testing.T) {
+	for _, api := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages, reqcommon.APITypeResponses} {
+		t.Run(api.String(), func(t *testing.T) {
+			empty, err := CaptureRequestJSON(api, []byte(`{}`))
+			require.NoError(t, err)
+			plain := []byte(`{"model":"other","messages":[{"content":"hello"}]}`)
+			require.True(t, empty.CanSkipCapture(plain))
+			allocations := testing.AllocsPerRun(20, func() { empty.CanSkipCapture(plain) })
+			require.Zero(t, allocations, "absence check must not allocate")
+			for _, body := range []string{
+				`{"messages":[{"content":"tools tool_choice"}]}`,
+				`{"messages":[{"tools":[]}]}`,
+				`{"messages":[{"content":"\u0061"}]}`,
+				`{"to\u006fls":[]}`,
+			} {
+				require.False(t, empty.CanSkipCapture([]byte(body)), body)
+			}
+			for _, field := range mustFieldsForSurface(t, api) {
+				for _, value := range []string{`null`, `[]`} {
+					body := []byte(`{"` + string(field) + `":` + value + `}`)
+					require.False(t, empty.CanSkipCapture(body), string(body))
+					snapshot, err := CaptureRequestJSON(api, body)
+					require.NoError(t, err)
+					require.False(t, snapshot.CanSkipCapture([]byte(`{}`)), "present fields must still be compared")
+				}
+			}
+			if api != reqcommon.APITypeChatCompletions {
+				require.True(t, empty.CanSkipCapture([]byte(`{"response_format":null}`)), "ignore unsupported fields")
+			}
+		})
+	}
+	unsupported := RequestSnapshot{surface: reqcommon.APIType(-1)}
+	require.False(t, unsupported.CanSkipCapture([]byte(`{}`)))
+}
+
 func TestCaptureRequestJSONRejectsTrailingData(t *testing.T) {
 	for _, body := range []string{`{"tools":[]} {}`, `{"tools":[]} 1`, `{"tools":[]} invalid`, "\f{}", "{}\u0085", "\u00a0{}"} {
 		_, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(body))
@@ -331,6 +366,10 @@ func FuzzCaptureRequestJSON(f *testing.F) {
 			validated, err := CaptureValidatedRequestJSON(api, body)
 			require.NoError(t, err)
 			require.Equal(t, got, validated)
+			empty := RequestSnapshot{surface: api}
+			if empty.CanSkipCapture(body) {
+				require.Empty(t, got.fields, "fast absence check must not miss a supported field")
+			}
 			decoder := json.NewDecoder(bytes.NewReader(body))
 			decoder.UseNumber()
 			var decoded map[string]any

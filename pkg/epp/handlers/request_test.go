@@ -710,6 +710,7 @@ func BenchmarkCompareEPPToolCallingSnapshotToBody(b *testing.B) {
 	for _, size := range []int{1024, 64 * 1024, 1024 * 1024} {
 		plain := []byte(`{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("x", size) + `"}]}`)
 		toolBody := append(bytes.Clone(plain[:len(plain)-1]), []byte(`,"tools":[{"type":"function","function":{"name":"private","parameters":{"type":"object"}}}],"tool_choice":"auto"}`)...)
+		rewrittenPlain := bytes.Replace(plain, []byte(`"model":"m"`), []byte(`"model":"other"`), 1)
 		for _, tt := range []struct {
 			name     string
 			inbound  []byte
@@ -718,6 +719,9 @@ func BenchmarkCompareEPPToolCallingSnapshotToBody(b *testing.B) {
 			{name: "unchanged_tool", inbound: toolBody, outbound: bytes.Clone(toolBody)},
 			{name: "changed_tool", inbound: toolBody, outbound: bytes.Replace(toolBody, []byte(`"auto"`), []byte(`"none"`), 1)},
 			{name: "unchanged_non_tool", inbound: plain, outbound: bytes.Clone(plain)},
+			{name: "rewritten_non_tool", inbound: plain, outbound: rewrittenPlain},
+			{name: "rewritten_prompt_field_words", inbound: plain, outbound: bytes.Replace(rewrittenPlain, []byte(`"content":"`), []byte(`"content":"tools tool_choice `), 1)},
+			{name: "rewritten_escaped_prompt", inbound: plain, outbound: bytes.Replace(rewrittenPlain, []byte(`"content":"`), []byte(`"content":"\u0061`), 1)},
 		} {
 			b.Run(tt.name+"/"+strconv.Itoa(size), func(b *testing.B) {
 				snapshot, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, tt.inbound)
@@ -873,6 +877,12 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 		{
 			name: "introduced tool fields", path: reqcommon.PathChatCompletions,
 			body: plainBody, outbound: chatBody,
+			wantDirector: true, wantSurface: "chat_completions", wantToolCallingAbsent: true,
+			wantFields: map[string]string{"tools": "changed", "tool_choice": "changed", "parallel_tool_calls": "changed", "response_format": "changed"},
+		},
+		{
+			name: "introduced escaped tool fields", path: reqcommon.PathChatCompletions,
+			body: plainBody, outbound: strings.ReplaceAll(strings.ReplaceAll(chatBody, `"tools"`, `"to\u006fls"`), `"tool_choice"`, `"tool\u005fchoice"`),
 			wantDirector: true, wantSurface: "chat_completions", wantToolCallingAbsent: true,
 			wantFields: map[string]string{"tools": "changed", "tool_choice": "changed", "parallel_tool_calls": "changed", "response_format": "changed"},
 		},
@@ -1061,6 +1071,14 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 		{
 			name: "non-tool request", path: reqcommon.PathChatCompletions,
 			body: plainBody, wantDirector: true,
+		},
+		{
+			name: "plain model rewrite emits no tool telemetry", path: reqcommon.PathChatCompletions,
+			body: plainBody, outbound: strings.Replace(plainBody, `"model":"m"`, `"model":"other"`, 1), wantDirector: true,
+		},
+		{
+			name: "plain priority rewrite emits no tool telemetry", path: reqcommon.PathChatCompletions,
+			body: plainBody, outbound: strings.Replace(plainBody, `"model":"m"`, `"model":"m","priority":1`, 1), wantDirector: true,
 		},
 		{
 			name: "passthrough malformed JSON has no guessed statuses", path: reqcommon.PathChatCompletions,

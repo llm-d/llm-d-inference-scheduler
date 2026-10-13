@@ -113,6 +113,25 @@ type RequestSnapshot struct {
 	summary RequestSummary
 }
 
+// CanSkipCapture reports whether no supported fields need comparison.
+// The snapshot must be empty, and body must contain no field names or JSON escapes.
+// It does not validate JSON syntax.
+func (snapshot RequestSnapshot) CanSkipCapture(body []byte) bool {
+	if len(snapshot.fields) != 0 || bytes.IndexByte(body, '\\') >= 0 {
+		return false
+	}
+	fields, err := fieldsForSurface(snapshot.surface)
+	if err != nil {
+		return false
+	}
+	for _, field := range fields {
+		if bytes.Contains(body, []byte(field)) {
+			return false
+		}
+	}
+	return true
+}
+
 // CaptureRequestJSON decodes only supported fields in a JSON request object.
 func CaptureRequestJSON(surface reqcommon.APIType, body []byte) (RequestSnapshot, error) {
 	return captureRequestJSON(surface, body, false)
@@ -432,14 +451,21 @@ func hasObservedFieldStatus(statuses []FieldStatus) bool {
 	return false
 }
 
+var (
+	chatCompletionsFields = []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls, FieldResponseFormat}
+	responsesFields       = []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls}
+	messagesFields        = []Field{FieldTools, FieldToolChoice}
+)
+
+// fieldsForSurface returns shared slices that callers must not modify.
 func fieldsForSurface(surface reqcommon.APIType) ([]Field, error) {
 	switch surface {
 	case reqcommon.APITypeChatCompletions:
-		return []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls, FieldResponseFormat}, nil
+		return chatCompletionsFields, nil
 	case reqcommon.APITypeResponses:
-		return []Field{FieldTools, FieldToolChoice, FieldParallelToolCalls}, nil
+		return responsesFields, nil
 	case reqcommon.APITypeMessages:
-		return []Field{FieldTools, FieldToolChoice}, nil
+		return messagesFields, nil
 	default:
 		return nil, fmt.Errorf("unsupported tool-calling API surface %q", surface)
 	}

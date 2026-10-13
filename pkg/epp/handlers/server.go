@@ -265,7 +265,7 @@ func toolCallingAPIForPath(path string) (reqcommon.APIType, bool) {
 }
 
 func compareEPPToolCallingSnapshotToBody(surface reqcommon.APIType, inbound toolcalling.RequestSnapshot, inboundBody, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
-	if bytes.Equal(inboundBody, outboundBody) {
+	if bytes.Equal(inboundBody, outboundBody) || inbound.CanSkipCapture(outboundBody) {
 		return toolcalling.CompareRequests(inbound, inbound)
 	}
 	outbound, err := toolcalling.CaptureRequestJSON(surface, outboundBody)
