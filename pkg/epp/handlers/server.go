@@ -398,6 +398,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	buf := s.bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer func() {
+		buf.Reset()
 		// Return to pool if capacity is within limits.
 		if buf.Cap() <= s.maxPoolBufferSize || s.maxPoolBufferSize == 0 {
 			s.bufferPool.Put(buf)
@@ -545,16 +546,14 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			if v.RequestBody.EndOfStream {
 				loggerTrace.Info("decoding")
 				reqCtx.Request.Metadata = envoy.ExtractMetadataValues(req)
-				// Reset does not overwrite the buffer's bytes, and RawBody is a
-				// separate copy. This baseline stays unchanged until processing
-				// finishes and the next body chunk can write to the buffer.
+				// Keep the buffer intact through comparison. RawBody is a copy
+				// so parser and Director edits cannot change the baseline.
 				inboundBody := buf.Bytes()
 				reqCtx.Request.RawBody = make([]byte, buf.Len())
 				copy(reqCtx.Request.RawBody, inboundBody)
 
 				// Body stream complete. Capture raw size for flow control.
 				reqCtx.RequestSize = buf.Len()
-				buf.Reset()
 
 				parser, resolveErr := s.getOrResolveParser(reqCtx)
 				if resolveErr != nil {
@@ -614,6 +613,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 						span.SetAttributes(inboundToolSnapshot.SpanAttributes(statuses)...)
 					}
 				}
+				buf.Reset()
 
 				// After scheduling, look up the eviction channel for eviction support.
 				// Setting evictCh from nil to a real channel dynamically enables the

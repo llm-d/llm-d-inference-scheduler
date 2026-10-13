@@ -784,10 +784,11 @@ func statusForField(t *testing.T, statuses []toolcalling.FieldStatus, field tool
 
 type requestIntegrityDirector struct {
 	mockDirector
-	outbound string
-	inPlace  bool
-	err      error
-	called   bool
+	outbound           string
+	inPlace            bool
+	err                error
+	called             bool
+	checkInboundBuffer func()
 }
 
 func (d *requestIntegrityDirector) HandleRequest(_ context.Context, reqCtx *RequestContext, _ *fwkrh.InferenceRequestBody) (*RequestContext, error) {
@@ -799,6 +800,9 @@ func (d *requestIntegrityDirector) HandleRequest(_ context.Context, reqCtx *Requ
 			reqCtx.Request.RawBody = []byte(d.outbound)
 		}
 		reqCtx.RequestSize = len(d.outbound)
+	}
+	if d.checkInboundBuffer != nil {
+		d.checkInboundBuffer()
 	}
 	return reqCtx, d.err
 }
@@ -1057,18 +1061,31 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 			if tt.inPlace {
 				require.Len(t, tt.outbound, len(tt.body))
 			}
-			director := &requestIntegrityDirector{outbound: tt.outbound, inPlace: tt.inPlace, err: tt.directorErr}
+			requestBuffer := new(bytes.Buffer)
+			director := &requestIntegrityDirector{
+				outbound: tt.outbound, inPlace: tt.inPlace, err: tt.directorErr,
+				checkInboundBuffer: func() {
+					require.Equal(t, tt.body, requestBuffer.String(), "inbound buffer must remain intact through Director processing")
+				},
+			}
+			bodySplit := len(tt.body) / 2
 			srv := &scriptedProcessServer{
 				ctx: context.Background(),
 				reqs: []*extProcPb.ProcessingRequest{
 					newRequestHeaders(map[string]string{":path": tt.path, "traceparent": upstreamTraceparent}),
 					{Request: &extProcPb.ProcessingRequest_RequestBody{RequestBody: &extProcPb.HttpBody{
-						Body: []byte(tt.body), EndOfStream: true,
+						Body: []byte(tt.body[:bodySplit]),
+					}}},
+					{Request: &extProcPb.ProcessingRequest_RequestBody{RequestBody: &extProcPb.HttpBody{
+						Body: []byte(tt.body[bodySplit:]), EndOfStream: true,
 					}}},
 				},
 			}
 			registry := NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}, logr.Discard())
-			require.NoError(t, NewStreamingServer(nil, director, registry, 0).Process(srv))
+			server := NewStreamingServer(nil, director, registry, 0)
+			server.bufferPool.New = func() any { return requestBuffer }
+			require.NoError(t, server.Process(srv))
+			require.Zero(t, requestBuffer.Len(), "request buffer must be reset on success and failure")
 			require.Equal(t, tt.wantDirector, director.called)
 			if tt.wantErrorStatus != 0 {
 				require.Len(t, srv.sentResponses, 1)
