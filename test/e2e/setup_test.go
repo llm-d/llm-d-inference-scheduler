@@ -17,7 +17,6 @@ limitations under the License.
 package e2e
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -64,11 +63,12 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${EPP_NAME}":                eppName,
 		"${NAMESPACE}":               nsName,
 		"${HF_TOKEN}":                os.Getenv("HF_TOKEN"),
-		"${VLLM_EXTRA_ARGS_E}":       "--force-dummy-tokenizer",
-		"${VLLM_EXTRA_ARGS_P}":       "--force-dummy-tokenizer",
-		"${VLLM_EXTRA_ARGS_D}":       "--force-dummy-tokenizer",
-		"${VLLM_RENDER_URL}":         fmt.Sprintf("http://vllm-render.%s.svc.cluster.local:%s", baseNsName, vllmRenderPort),
-		"${VLLM_RENDER_PORT}":        vllmRenderPort,
+		"${VLLM_EXTRA_ARGS_E}":       "",
+		"${VLLM_EXTRA_ARGS_P}":       "",
+		"${VLLM_EXTRA_ARGS_D}":       "",
+		// keep empty to force dummy tokenizer
+		"${VLLM_RENDER_URL}":  "",
+		"${VLLM_RENDER_PORT}": vllmRenderPort,
 	}
 	for k, v := range extra {
 		subs[k] = v
@@ -136,11 +136,7 @@ func createModelServersDecodeDP(replicas int) []string {
 		"${VLLM_REPLICA_COUNT_D}":    strconv.Itoa(replicas),
 		"${VLLM_DATA_PARALLEL_SIZE}": "2",
 		"${DECODE_ROLE}":             "decode",
-		// --force-dummy-tokenizer has to survive this override. The decode
-		// component passes --render-url, and a worker carrying that URL without
-		// the flag tokenizes through the shared renderer, which serves kvModelName
-		// and answers 404 for this spec's model.
-		"${VLLM_EXTRA_ARGS_D}": testutils.VLLMExtraArgs("--mode=echo", "--force-dummy-tokenizer"),
+		"${VLLM_EXTRA_ARGS_D}":       testutils.VLLMExtraArgs("--mode=echo"),
 	})
 }
 
