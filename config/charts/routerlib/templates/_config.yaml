@@ -149,7 +149,7 @@ data:
   {{- $_ := set $files $filename $config }}
   {{- $files | toYaml | nindent 2 }}
 {{- else }}
-{{ $data }}
+{{- $data }}
 {{- end }}
 ---
 {{- $proxy := include "llm-d-router.proxy" . | fromYaml | default dict }}
