@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/google/uuid"
@@ -205,6 +206,151 @@ func TestHandleInference_NullBodyMapsTo400(t *testing.T) {
 	newTestServer(nil).handleInference(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for null body, got %d", rec.Code)
+	}
+}
+
+func TestHandleInference_InvalidJSONReturnsOpenAIError(t *testing.T) {
+	for _, path := range []string{
+		reqcommon.PathChatCompletions,
+		reqcommon.PathCompletions,
+		reqcommon.PathResponses,
+		reqcommon.PathVLLMGenerate,
+	} {
+		t.Run(path, func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				body string
+			}{
+				{name: "empty", body: ""},
+				{name: "truncated", body: `{"model":"m","messages":[`},
+				{name: "unescaped quotes", body: `{"model":"m","messages":[{"role":"user","content":"say "hello""}]}`},
+				{name: "null", body: "null"},
+				{name: "array", body: "[]"},
+				{name: "string", body: `"hello"`},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					reached := false
+					p := pipeline.New([]pipeline.Step{stubStep{name: "stub", fn: func(_ context.Context, _ *pipeline.RequestContext) error {
+						reached = true
+						return nil
+					}}})
+					srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
+					require.NoError(t, err)
+
+					req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(tc.body))
+					req.Header.Set(reqcommon.HeaderContentType, reqcommon.ContentTypeJSON)
+					rec := httptest.NewRecorder()
+					srv.httpServer.Handler.ServeHTTP(rec, req)
+
+					require.Equal(t, http.StatusBadRequest, rec.Code)
+					require.False(t, reached, "invalid request must not reach the pipeline")
+					require.Equal(t, reqcommon.ContentTypeJSON, rec.Header().Get(reqcommon.HeaderContentType))
+					require.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+					require.JSONEq(t, `{"error":{"message":"invalid JSON body","type":"invalid_request_error","code":400}}`, rec.Body.String())
+				})
+			}
+		})
+	}
+}
+
+// TestHandleInference_RejectionsUseOpenAIEnvelope covers every rejection the
+// handler writes itself: the body read failure, the size cap, the Responses
+// stateful-field check and the pipeline error path share the envelope the
+// invalid-JSON rejection uses, with the error type the EPP carries for the
+// same status.
+func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
+	type rejection struct {
+		name       string
+		cfg        config.ServerConfig
+		stepErr    error
+		path       string
+		body       io.Reader
+		wantStatus int
+		wantType   string
+		wantMsg    string
+	}
+	cases := []rejection{
+		{
+			name:       "body read failure",
+			path:       reqcommon.PathChatCompletions,
+			body:       iotest.ErrReader(errors.New("connection reset")),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantMsg:    "failed to read request body",
+		},
+		{
+			name:       "body too large",
+			cfg:        config.ServerConfig{MaxRequestBodySize: 1},
+			path:       reqcommon.PathChatCompletions,
+			body:       strings.NewReader(`{"model":"m","pad":"` + strings.Repeat("x", int(config.BytesPerMB)) + `"}`),
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantType:   "invalid_request_error",
+			wantMsg:    "request body too large",
+		},
+		{
+			name:       "stateful responses field",
+			path:       reqcommon.PathResponses,
+			body:       strings.NewReader(`{"model":"m","input":"hi","previous_response_id":"resp_1"}`),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantMsg:    reqcommon.RejectStatefulResponsesFields(map[string]any{"previous_response_id": "resp_1"}).Error(),
+		},
+		{
+			name:       "pipeline client error",
+			stepErr:    fmt.Errorf("render: prompt must be a string: %w", pipeline.ErrBadRequest),
+			path:       reqcommon.PathChatCompletions,
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "upstream 4xx forwarded",
+			stepErr:    fmt.Errorf("wrapped: %w", &pipeline.UpstreamError{Step: "render", StatusCode: http.StatusUnprocessableEntity, Body: "bad tokens"}),
+			path:       reqcommon.PathChatCompletions,
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "unclassified pipeline error",
+			stepErr:    errors.New("prefill: connect: connection refused"),
+			path:       reqcommon.PathChatCompletions,
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusBadGateway,
+			wantType:   "server_error",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := pipeline.New([]pipeline.Step{stubStep{name: "stub", err: tc.stepErr}})
+			srv, err := New(tc.cfg, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, tc.path, tc.body)
+			req.Header.Set(reqcommon.HeaderContentType, reqcommon.ContentTypeJSON)
+			rec := httptest.NewRecorder()
+			srv.httpServer.Handler.ServeHTTP(rec, req)
+
+			require.Equal(t, tc.wantStatus, rec.Code)
+			require.Contains(t, rec.Header().Get(reqcommon.HeaderContentType), reqcommon.ContentTypeJSON)
+			require.Equal(t, reqcommon.ContentTypeOptionsNoSniff, rec.Header().Get(reqcommon.HeaderContentTypeOptions))
+
+			var envelope struct {
+				Error struct {
+					Message string `json:"message"`
+					Type    string `json:"type"`
+					Code    int    `json:"code"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope), rec.Body.String())
+			require.Equal(t, tc.wantStatus, envelope.Error.Code)
+			require.Equal(t, tc.wantType, envelope.Error.Type)
+			if tc.wantMsg != "" {
+				require.Equal(t, tc.wantMsg, envelope.Error.Message)
+			} else {
+				require.NotEmpty(t, envelope.Error.Message)
+			}
+		})
 	}
 }
 
