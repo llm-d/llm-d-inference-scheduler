@@ -947,6 +947,115 @@ func TestForceStream_MalformedFrame_BufferedPath(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
 }
 
+// TestScanForcedResponse_TerminalMarker checks the buffered path's completeness
+// gate: a stream is complete only if it carried the [DONE] marker or a shape
+// terminal (a Responses terminal event, or a finish_reason on another shape). A
+// clean EOF with neither is a truncation that must fall back, not a 200. The
+// Responses case guards the stream that closes on its terminal event with no
+// [DONE] line.
+func TestScanForcedResponse_TerminalMarker(t *testing.T) {
+	tests := []struct {
+		name      string
+		shape     sseShape
+		stream    string
+		truncated bool
+	}{
+		{
+			name:   "chat with done",
+			shape:  sseShapeChat,
+			stream: `data: {"id":"c","choices":[{"index":0,"delta":{"content":"hi"}}]}` + "\n\n" + "data: [DONE]\n\n",
+		},
+		{
+			name:   "chat finish without done",
+			shape:  sseShapeChat,
+			stream: `data: {"id":"c","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}` + "\n\n",
+		},
+		{
+			name:      "chat truncated",
+			shape:     sseShapeChat,
+			stream:    `data: {"id":"c","choices":[{"index":0,"delta":{"content":"hi"}}]}` + "\n\n",
+			truncated: true,
+		},
+		{
+			name:   "responses completed without done",
+			shape:  sseShapeResponses,
+			stream: `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n" + `data: {"type":"response.completed","response":{"id":"r","status":"completed"}}` + "\n\n",
+		},
+		{
+			name:      "responses truncated",
+			shape:     sseShapeResponses,
+			stream:    `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n",
+			truncated: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newSSEReassembler(tc.shape, 1)
+			err := scanForcedResponse(strings.NewReader(tc.stream), r, 1<<20)
+			if tc.truncated {
+				require.ErrorIs(t, err, errForceStreamTruncated)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestForceStream_Truncated_BufferedPath_FallsBack covers the buffered path's
+// completeness gate end to end: a forced stream cut off (clean EOF) before [DONE]
+// and before a finish_reason reassembles into a complete-looking reply, so it
+// falls back to the pass-through instead of returning a truncated 200. Generate
+// takes the buffered path. The outcome is counted fallback_unreadable.
+func TestForceStream_Truncated_BufferedPath_FallsBack(t *testing.T) {
+	passthroughReply := `{"request_id":"g","choices":[{"index":0,"token_ids":[1,2,3]}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			// One content frame with no finish_reason, then the stream closes with no
+			// [DONE] line.
+			fmt.Fprint(w, "data: {\"request_id\":\"g\",\"choices\":[{\"index\":0,\"token_ids\":[1]}]}\n\n")
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-truncated",
+		OriginalPath:     reqcommon.PathVLLMGenerate,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"token_ids":       []any{1},
+			"sampling_params": map[string]any{"max_tokens": 8},
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "a truncated stream must fall back, not error")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client gets the pass-through reply, not a 5xx")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnreadable), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
+}
+
 // TestForceStream_Responses_OversizedFrame_FallsBack covers the regression where
 // a Responses response.completed frame echoes request fields the reservation does
 // not price (tools, instructions, schema), so the frame can exceed the reservation

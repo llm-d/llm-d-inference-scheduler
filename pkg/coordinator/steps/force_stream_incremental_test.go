@@ -253,3 +253,77 @@ func TestForceStreamIncremental_TruncatesAfterCommit(t *testing.T) {
 	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9,
 		"a reply truncated after commit is still counted forced, matching the buffered path")
 }
+
+// TestForceStreamIncremental_TruncatedBeforeContent_FallsBack covers a forced
+// stream that ends with a clean EOF before any content byte and before [DONE] or a
+// finish_reason: nothing is committed, so it falls back to the pass-through rather
+// than finishing a reply that was cut short. Counted fallback_unreadable.
+func TestForceStreamIncremental_TruncatedBeforeContent_FallsBack(t *testing.T) {
+	passthroughReply := `{"id":"c","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			// A role-only frame carries no content, so nothing commits; the stream
+			// then closes with no [DONE] and no finish_reason.
+			fmt.Fprint(w, "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n")
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+
+	require.NoError(t, step.Execute(context.Background(), chatIncrementalReqCtx(recorder)),
+		"a truncation before the first content byte must fall back, not error")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client gets the pass-through reply, not a 5xx")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnreadable), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+}
+
+// TestForceStreamIncremental_TruncatedAfterContent_Truncates covers a forced
+// stream cut after content is flushed but before [DONE] or a finish_reason: the
+// reply is already committed, so the connection is truncated with no clean suffix
+// rather than finished as if complete. Counted forced, matching the buffered path.
+func TestForceStreamIncremental_TruncatedAfterContent_Truncates(t *testing.T) {
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		// Content is flushed, then the stream closes with no [DONE] and no
+		// finish_reason.
+		fmt.Fprint(w, "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"partial\"}}]}\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+
+	require.NoError(t, step.Execute(context.Background(), chatIncrementalReqCtx(recorder)),
+		"a truncation after commit is reported as handled, not an error")
+	require.Equal(t, http.StatusOK, recorder.Result().StatusCode)
+	require.Contains(t, recorder.Body.String(), "partial", "the committed partial body reaches the client")
+	require.False(t, json.Valid(recorder.Body.Bytes()), "the truncated body is not complete JSON")
+	require.Equal(t, []any{true}, streams, "no pass-through: the reply was already committed")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+}

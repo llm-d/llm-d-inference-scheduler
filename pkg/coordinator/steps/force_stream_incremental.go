@@ -107,12 +107,14 @@ func streamForcedResponse(logger logr.Logger, reqCtx *pipeline.RequestContext, b
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, forceStreamScanStartBytes), forceStreamMaxFrameBytes)
+	sawDone := false
 	for scanner.Scan() {
 		payload, ok := ssePayload(scanner.Bytes())
 		if !ok {
 			continue
 		}
 		if bytes.Equal(payload, sseDoneMarker) {
+			sawDone = true
 			break
 		}
 		var frame map[string]any
@@ -125,6 +127,13 @@ func streamForcedResponse(logger logr.Logger, reqCtx *pipeline.RequestContext, b
 	}
 	if err := scanner.Err(); err != nil {
 		return em.failOrTruncate(logger, fmt.Errorf("force-stream: read upstream: %w", err))
+	}
+	// A clean EOF with neither the [DONE] marker nor a finish_reason means the
+	// upstream was cut mid-reply. finish() would write a well-formed suffix over a
+	// truncated body, so truncate instead: fall back while still uncommitted, or end
+	// the connection without a clean suffix once the reply is already on the wire.
+	if !sawDone && !em.hasFinish {
+		return em.failOrTruncate(logger, errForceStreamTruncated)
 	}
 	return em.finish(logger)
 }

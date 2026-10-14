@@ -98,6 +98,14 @@ var errForceStreamOversize = errors.New("force-stream: responses reply exceeded 
 // read error is logged where this is returned, so the fallback stays diagnosable.
 var errForceStreamUnreadable = errors.New("force-stream: upstream stream unreadable; falling back to pass-through")
 
+// errForceStreamTruncated marks a forced stream that ended with a clean EOF before
+// any terminal marker: no data: [DONE] line and no shape terminal (a Responses
+// terminal event or a choice finish_reason). The reassembly would look complete
+// but omit the cut-off tail, so the buffered path falls back to the pass-through
+// and the incremental path truncates the committed connection rather than writing
+// a clean suffix. It is handled like errForceStreamUnreadable.
+var errForceStreamTruncated = errors.New("force-stream: upstream stream ended before a terminal marker")
+
 // sseDataPrefix and sseDoneMarker delimit the SSE frames the upstream streams.
 // Each data line carries one JSON object; the stream ends with data: [DONE].
 // sseDataPrefix is intentionally the bare "data:" without the trailing space
@@ -256,10 +264,11 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 		case errors.Is(err, errForceStreamOversize):
 			// decode records fallback_oversize and runs the pass-through.
 		default:
-			// The upstream returned 200 but an unreadable stream (bad JSON or an
-			// interrupted read) before anything reached the client. Log the detail;
-			// decode records fallback_unreadable and runs the pass-through.
-			logger.Error(err, "force-stream fell back: upstream stream unreadable")
+			// The upstream returned 200 but no complete reply reached the client: an
+			// unreadable stream (bad JSON, interrupted read) or one cut off before a
+			// terminal marker. Log the detail; decode records fallback_unreadable and
+			// runs the pass-through.
+			logger.Error(err, "force-stream fell back: incomplete upstream stream")
 			return errForceStreamUnreadable
 		}
 		return fmt.Errorf("%s: %w", DecodeStepName, err)
@@ -373,12 +382,14 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64
 	scanner := bufio.NewScanner(r)
 	frameCap := maxFrameBytes(reassembler.shape, reserved)
 	scanner.Buffer(make([]byte, 0, initialScanBuf(frameCap)), frameCap)
+	sawDone := false
 	for scanner.Scan() {
 		payload, ok := ssePayload(scanner.Bytes())
 		if !ok {
 			continue
 		}
 		if bytes.Equal(payload, sseDoneMarker) {
+			sawDone = true
 			break
 		}
 		var frame map[string]any
@@ -404,6 +415,12 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64
 			return errForceStreamCeiling
 		}
 		return fmt.Errorf("force-stream: read upstream: %w", err)
+	}
+	// A clean EOF with neither the [DONE] marker nor a shape terminal means the
+	// upstream was cut mid-reply; the reassembly would look complete but omit the
+	// tail, so fall back rather than return a truncated reply as a 200.
+	if !sawDone && !reassembler.terminated() {
+		return errForceStreamTruncated
 	}
 	return nil
 }

@@ -414,6 +414,23 @@ func (r *sseReassembler) responsesTerminalMissing() bool {
 	return r.shape == sseShapeResponses && r.responseObject == nil
 }
 
+// terminated reports whether a frame signalled the end of generation: a Responses
+// terminal event (captured as responseObject) or, for the other shapes, a
+// finish_reason on any choice. The scan loop pairs it with the data: [DONE] marker
+// to tell a complete stream from one cut off before its end, since the Responses
+// stream may close on its terminal event without a [DONE] line.
+func (r *sseReassembler) terminated() bool {
+	if r.shape == sseShapeResponses {
+		return r.responseObject != nil
+	}
+	for _, c := range r.choices {
+		if c.hasFinish {
+			return true
+		}
+	}
+	return false
+}
+
 // writeEnvelope sets the top-level reply fields for the shape. The chat and text
 // shapes share the OpenAI envelope (id, model, object, ...). The generate shape
 // instead carries request_id, prompt_logprobs, and kv_transfer_params, and no
