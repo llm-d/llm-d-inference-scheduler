@@ -83,10 +83,10 @@ const (
 // nothing was written to the client when this is returned.
 var errForceStreamCeiling = errors.New("force-stream: buffered response exceeded its reserved budget")
 
-// errForceStreamOversize marks a Responses forced reply whose response.completed
-// frame did not fit the reservation. The reservation prices generated tokens, not
-// the request-derived fields (tools, instructions, schema, metadata) the completed
-// frame echoes, so the shortfall is a coordinator estimate miss, not a pod fault.
+// errForceStreamOversize marks a Responses forced reply whose terminal frame did
+// not fit the reservation. The reservation prices generated tokens, not the
+// request-derived fields (tools, instructions, schema, metadata) a terminal frame
+// echoes, so the shortfall is a coordinator estimate miss, not a pod fault.
 // Nothing has reached the client, so the decode step falls back to the
 // pass-through rather than failing a reply the pod returned intact.
 var errForceStreamOversize = errors.New("force-stream: responses reply exceeded its reserved budget; falling back to pass-through")
@@ -329,7 +329,7 @@ func forceStreamBody(src map[string]any, shape sseShape) map[string]any {
 
 	// Only the chat and text shapes return a usage block, and only when asked, so
 	// request one for them. The Responses API has no stream_options (usage arrives
-	// in response.completed), and the generate reply carries no usage block.
+	// in the terminal response event), and the generate reply carries no usage block.
 	if shape == sseShapeChat || shape == sseShapeText {
 		opts := map[string]any{}
 		if existing, ok := body[reqcommon.FieldStreamOptions].(map[string]any); ok {
@@ -345,7 +345,7 @@ func forceStreamBody(src map[string]any, shape sseShape) map[string]any {
 // within the request's reservation (the bytes the budget accounts for). The
 // per-token chunk shapes also keep the small-frame guard: their frames are small,
 // so a frame near the reservation or 1 MiB is malformed. The Responses shape
-// delivers its whole reply in one response.completed frame, so its only bound is
+// delivers its whole reply in one terminal frame, so its only bound is
 // the reservation.
 func maxFrameBytes(shape sseShape, reserved int64) int {
 	if shape != sseShapeResponses && reserved > forceStreamMaxFrameBytes {
@@ -412,6 +412,9 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64
 // non-streaming JSON response. A marshal failure returns a plain error before
 // any write, so the server answers a clean 502.
 func writeForcedResponse(logger logr.Logger, reqCtx *pipeline.RequestContext, reassembler *sseReassembler) error {
+	if reassembler.responsesTerminalMissing() {
+		logger.V(logutil.DEFAULT).Info("force-stream responses stream ended without a terminal event; reporting status incomplete", "model", reqCtx.Model)
+	}
 	payload, err := json.Marshal(reassembler.result())
 	if err != nil {
 		return fmt.Errorf("%s: force-stream marshal response: %w", DecodeStepName, err)

@@ -189,17 +189,55 @@ func TestSSEReassemble_Responses(t *testing.T) {
 	require.Equal(t, want, r.result())
 }
 
-// Without a response.completed event, a minimal response object is assembled
-// from the accumulated deltas so the client still gets a well-formed reply.
+// A terminal event other than response.completed (response.incomplete on a
+// truncated generation, response.failed on an error) carries its own status and,
+// on failure, an error block. The reassembler emits that object verbatim rather
+// than synthesizing a completed reply, so the client sees the real outcome.
+func TestSSEReassemble_ResponsesTerminalStates(t *testing.T) {
+	tests := []struct {
+		name  string
+		event string
+		resp  string
+	}{
+		{
+			name:  "incomplete",
+			event: responseEventIncomplete,
+			resp:  `{"id":"resp-1","object":"response","model":"m","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hel"}]}],"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`,
+		},
+		{
+			name:  "failed",
+			event: responseEventFailed,
+			resp:  `{"id":"resp-1","object":"response","model":"m","status":"failed","error":{"code":"server_error","message":"boom"}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newSSEReassembler(sseShapeResponses, 0)
+			r.add(frame(t, `{"type":"response.created","response":{"id":"resp-1","model":"m","status":"in_progress"}}`))
+			r.add(frame(t, `{"type":"response.output_text.delta","delta":"Hel"}`))
+			r.add(frame(t, `{"type":"`+tc.event+`","response":`+tc.resp+`}`))
+
+			var want map[string]any
+			require.NoError(t, json.Unmarshal([]byte(tc.resp), &want))
+			require.Equal(t, want, r.result())
+		})
+	}
+}
+
+// Without any terminal event, a minimal response object is assembled from the
+// accumulated deltas so the collected text still reaches the client, but it is
+// marked status incomplete because the stream never confirmed completion.
 func TestSSEReassemble_ResponsesNoCompleted(t *testing.T) {
 	r := newSSEReassembler(sseShapeResponses, 0)
 	r.add(frame(t, `{"type":"response.created","response":{"id":"resp-2","model":"m","status":"in_progress"}}`))
 	r.add(frame(t, `{"type":"response.output_text.delta","delta":"hi"}`))
 
+	require.True(t, r.responsesTerminalMissing())
+
 	got := r.result()
 	require.Equal(t, "resp-2", got["id"])
 	require.Equal(t, "m", got["model"])
-	require.Equal(t, statusCompleted, got["status"])
+	require.Equal(t, statusIncomplete, got["status"])
 
 	output := got["output"].([]any)
 	require.Len(t, output, 1)

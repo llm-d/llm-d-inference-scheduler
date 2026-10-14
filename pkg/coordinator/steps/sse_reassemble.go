@@ -52,11 +52,14 @@ const (
 
 // Responses API streaming event types (the data-line "type" value) and the
 // field names a Responses reply carries that have no shared constant.
-// response.output_text.delta streams the generated text; response.completed
-// carries the terminal response object (full output array and usage).
+// response.output_text.delta streams the generated text; the terminal events
+// (response.completed, response.incomplete, response.failed) each carry the
+// final response object with its own status, usage, and (on failure) error.
 const (
 	responseEventOutputTextDelta = "response.output_text.delta"
 	responseEventCompleted       = "response.completed"
+	responseEventIncomplete      = "response.incomplete"
+	responseEventFailed          = "response.failed"
 	fieldResponse                = "response"
 	fieldDelta                   = "delta"
 	fieldStatus                  = "status"
@@ -64,7 +67,7 @@ const (
 	fieldText                    = "text"
 	itemTypeMessage              = "message"
 	partTypeOutputText           = "output_text"
-	statusCompleted              = "completed"
+	statusIncomplete             = "incomplete"
 )
 
 // shapeForAPIType maps the API a request used to the reassembly shape its stream
@@ -130,8 +133,9 @@ type sseReassembler struct {
 
 	usage map[string]any
 
-	// responseObject is the terminal response object captured from the Responses
-	// shape's response.completed event, emitted verbatim as the reply.
+	// responseObject is the terminal response object captured from a terminal
+	// Responses event (completed, incomplete, or failed), emitted verbatim as the
+	// reply so its status, usage, and error reach the client unchanged.
 	responseObject map[string]any
 
 	contentBytes int64
@@ -162,10 +166,11 @@ func (r *sseReassembler) add(frame map[string]any) {
 }
 
 // addResponses folds one Responses API event, keyed by its data-line type.
-// Text deltas accumulate for the per-request ceiling and for the no-completed
-// fallback reply; response.completed captures the terminal response object the
-// reply is built from. Other events (response.created, response.in_progress)
-// seed id and model for the fallback.
+// Text deltas accumulate for the per-request ceiling and for the no-terminal
+// fallback reply; a terminal event (completed, incomplete, or failed) captures
+// its response object, carrying the real status, usage, and error so a truncated
+// or failed generation is not reported as completed. Other events
+// (response.created, response.in_progress) seed id and model for the fallback.
 func (r *sseReassembler) addResponses(frame map[string]any) {
 	switch frame[reqcommon.FieldType] {
 	case responseEventOutputTextDelta:
@@ -173,11 +178,11 @@ func (r *sseReassembler) addResponses(frame map[string]any) {
 			r.choice(0).content.WriteString(delta)
 			r.contentBytes += int64(len(delta))
 		}
-	case responseEventCompleted:
+	case responseEventCompleted, responseEventIncomplete, responseEventFailed:
 		if resp, ok := frame[fieldResponse].(map[string]any); ok {
 			r.responseObject = resp
-			// The accumulated deltas fed only the ceiling and the no-completed
-			// fallback; the completed object supersedes them, so release them
+			// The accumulated deltas fed only the ceiling and the no-terminal
+			// fallback; the terminal object supersedes them, so release them
 			// rather than hold the content twice.
 			r.choices = map[int]*sseChoice{}
 			r.order = nil
@@ -366,11 +371,12 @@ func (r *sseReassembler) result() map[string]any {
 	return out
 }
 
-// responsesResult returns the Responses reply. response.completed carries the
-// terminal response object the pod would have returned non-streaming, so it is
-// emitted verbatim. When no completed event arrived, a minimal response object
-// is assembled from the accumulated output_text deltas so the client still gets
-// a well-formed reply rather than nothing.
+// responsesResult returns the Responses reply. A terminal event (completed,
+// incomplete, or failed) carries the response object the pod would have returned
+// non-streaming, so it is emitted verbatim. When no terminal event arrived, a
+// minimal response object is assembled from the accumulated output_text deltas and
+// marked status incomplete: the collected text still reaches the client, but the
+// stream never confirmed completion, so it is not reported as completed.
 func (r *sseReassembler) responsesResult() map[string]any {
 	if r.responseObject != nil {
 		return r.responseObject
@@ -381,7 +387,7 @@ func (r *sseReassembler) responsesResult() map[string]any {
 		content = c.content.String()
 	}
 	out := map[string]any{
-		fieldStatus: statusCompleted,
+		fieldStatus: statusIncomplete,
 		reqcommon.FieldOutput: []any{
 			map[string]any{
 				reqcommon.FieldType: itemTypeMessage,
@@ -399,6 +405,13 @@ func (r *sseReassembler) responsesResult() map[string]any {
 		out[reqcommon.FieldModel] = r.model
 	}
 	return out
+}
+
+// responsesTerminalMissing reports a Responses stream that ended with no terminal
+// event. The reply was synthesized from the deltas and marked incomplete, so its
+// completion is unconfirmed; the caller logs it to keep the gap diagnosable.
+func (r *sseReassembler) responsesTerminalMissing() bool {
+	return r.shape == sseShapeResponses && r.responseObject == nil
 }
 
 // writeEnvelope sets the top-level reply fields for the shape. The chat and text
