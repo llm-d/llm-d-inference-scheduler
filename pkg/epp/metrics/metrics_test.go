@@ -1094,7 +1094,7 @@ func TestFlowControlQueueDurationMetric(t *testing.T) {
 	}
 
 	for _, rec := range records {
-		RecordFlowControlRequestQueueDuration(rec.fairnessID, rec.priority, rec.outcome, pool, model, target, rec.duration)
+		RecordFlowControlRequestQueueDuration(context.Background(), rec.fairnessID, rec.priority, rec.outcome, pool, model, target, rec.duration)
 	}
 
 	testCases := []struct {
