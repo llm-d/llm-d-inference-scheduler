@@ -1,5 +1,16 @@
 {{- define "llm-d-router.crossReplica.passwordEnv" -}}EPP_REDIS_PASSWORD{{- end -}}
 
+{{/* Plugin dependencies are resolved by EPP, including custom plugin types. */}}
+{{- define "llm-d-router.crossReplica.notes" -}}
+{{- if (.Values.router.epp.crossReplica | default dict).enabled }}
+WARNING: Redis configuration alone does not enable shared in-flight load.
+The unmodified default and optimized-baseline profiles do not consume in-flight load.
+Select payload-agnostic.yaml or configure a consumer such as active-request-scorer
+in the scheduling profile. Keep syncCrossReplicaState enabled on its
+inflight-load-producer. Approximate prefix-cache state remains local.
+{{- end -}}
+{{- end -}}
+
 {{/* Augment the selected config without changing its scheduling profile. */}}
 {{- define "llm-d-router.crossReplica.config" -}}
 {{- $root := .root -}}

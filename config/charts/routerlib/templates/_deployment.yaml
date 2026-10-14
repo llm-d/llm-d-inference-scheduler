@@ -376,7 +376,7 @@ spec:
     {{- with .Values.router.epp.deploymentStrategy }}
     {{- toYaml . | nindent 4 }}
     {{- else }}
-    {{- if or $autoscaling.enabled (eq (.Values.router.epp.haMode | default "") "all-active") (.Values.router.epp.crossReplica | default dict).enabled }}
+    {{- if eq (include "llm-d-router.epp.allActive" .) "true" }}
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0

@@ -1,6 +1,6 @@
 {{- define "llm-d-epp.leader-election-rbac" -}}
 {{- $eppFlags := include "llm-d-router.epp.flags" . | fromYaml -}}
-{{- if regexMatch "^(1|t|T|true|TRUE|True)$" (toString (index $eppFlags "ha-enable-leader-election")) }}
+{{- if index $eppFlags "ha-enable-leader-election" }}
 ---
 kind: Role
 apiVersion: rbac.authorization.k8s.io/v1

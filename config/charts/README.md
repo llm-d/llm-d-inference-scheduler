@@ -149,14 +149,20 @@ In standalone Envoy service mode, active-active configuration creates a separate
 and balances requests across them, including replicas discovered after scale-up.
 The chart enables EPP's gRPC health service for Envoy's active health checks;
 `router.epp.flags.health-checking` cannot be set to `false` in this mode.
+An upgrade of an existing standalone Envoy service release with multiple replicas
+and leader election disabled, or with autoscaling enabled, fails if
+`health-checking: false` is set. Remove that flag or set it to `true` before upgrading.
 The EPP ClusterIP Service is retained so enabling discovery can upgrade an
 existing release without changing its immutable Service address. This discovery
 path applies to Envoy; Agentgateway uses the EPP ClusterIP Service.
 
 The example selects `active-request-scorer` through `payload-agnostic.yaml` so
-routing consumes shared in-flight load. Enabling synchronization preserves the
-scheduling profile; it does not replace the default approximate prefix scorer.
-The `inflight-load-producer` participates unless `syncCrossReplicaState` is false.
+routing consumes shared in-flight load. The unmodified default and
+optimized-baseline profiles do not consume in-flight load, so enabling Redis
+with either profile does not publish or use shared load. Select a consumer such
+as `active-request-scorer` in the scheduling profile to activate the
+`inflight-load-producer`, and keep its `syncCrossReplicaState` enabled. The chart
+preserves the selected profile and prints this prerequisite in the Helm notes.
 
 Automatic configuration supports `llm-d.ai/v1` built-in, structured
 `pluginsConfig`, and selected raw `pluginsCustomConfig` files. Only the selected

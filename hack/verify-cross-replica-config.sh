@@ -58,6 +58,23 @@ for chart in llm-d-router-gateway llm-d-router-standalone; do
   render --set router.epp.replicas=3 --set router.epp.crossReplica.enabled=false
   diff -u "${TEMP_DIR}/baseline.yaml" "${output}"
 
+  render --set router.epp.replicas=3 --set router.epp.haMode=all-active
+  cp "${output}" "${TEMP_DIR}/all-active.yaml"
+  for value in 0 f F false FALSE False; do
+    render --set router.epp.replicas=3 --set-string "router.epp.flags.ha-enable-leader-election=${value}"
+    diff -u "${TEMP_DIR}/all-active.yaml" "${output}"
+    render --set router.epp.replicas=1 --set-string "router.epp.flags.ha-enable-leader-election=${value}"
+    assert_yaml "${deployment}" '.spec.strategy.type == "Recreate"'
+  done
+  for value in 1 t T true TRUE True; do
+    render --set router.epp.replicas=3 --set-string "router.epp.flags.ha-enable-leader-election=${value}"
+    diff -u "${TEMP_DIR}/baseline.yaml" "${output}"
+    assert_rejected 'requires active-active' --set router.epp.autoscaling.enabled=true --set-string "router.epp.flags.ha-enable-leader-election=${value}"
+  done
+  assert_rejected 'ha-enable-leader-election must be a boolean' --set-string router.epp.flags.ha-enable-leader-election=invalid
+  render --set router.epp.replicas=3 --set router.epp.flags.ha-enable-leader-election=false --set router.epp.deploymentStrategy.type=Recreate
+  assert_yaml "${deployment}" '.spec.strategy.type == "Recreate"'
+
   sync=(--set router.epp.crossReplica.enabled=true
         --set router.epp.crossReplica.redis.address=redis.example:6379
         --set router.epp.replicas=3)
@@ -67,6 +84,22 @@ for chart in llm-d-router-gateway llm-d-router-standalone; do
   assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "sync-test-epp") | .data."default-plugins.yaml" | from_yaml | .plugins[] | select(.type == "redis-syncer") | (.parameters | sort_keys(..) | to_json) == ({"address": "redis.example:6379", "coordinationTTL": "180s", "db": 0, "stateTTL": "2s"} | sort_keys(..) | to_json)'
   "${YQ}" -N 'select(.metadata.name == "sync-test-epp-leader-election" or .metadata.name == "sync-test-epp-leader-election-binding" or .kind == "StatefulSet" or .kind == "Secret")' "${output}" > "${TEMP_DIR}/unexpected.yaml"
   test ! -s "${TEMP_DIR}/unexpected.yaml"
+
+  # Helm cannot resolve the dependencies of custom EPP plugins.
+  for values_file in "" "${SCRIPT_ROOT}/test/perf/config/router-configs/optimized-baseline.yaml"; do
+    values=(--set router.epp.pluginsConfigFile=default-plugins.yaml)
+    if [[ -n ${values_file} ]]; then values=(-f "${values_file}"); fi
+    "${HELM}" install sync-test "${chart_path}" --dry-run=client --kubeconfig /dev/null \
+      "${args[@]}" "${values[@]}" "${sync[@]}" > "${TEMP_DIR}/notes.txt"
+    grep -Fq 'WARNING: Redis configuration alone does not enable shared in-flight load.' "${TEMP_DIR}/notes.txt"
+    grep -Fq 'default and optimized-baseline profiles do not consume in-flight load' "${TEMP_DIR}/notes.txt"
+  done
+  "${HELM}" install sync-test "${chart_path}" --dry-run=client --kubeconfig /dev/null \
+    "${args[@]}" > "${TEMP_DIR}/notes.txt"
+  if grep -Fq 'WARNING: Redis configuration alone' "${TEMP_DIR}/notes.txt"; then
+    echo 'Cross-replica warning emitted with synchronization disabled' >&2
+    exit 1
+  fi
 
   render "${sync[@]}" --set router.epp.autoscaling.enabled=true --set router.epp.autoscaling.minReplicas=2 --set router.epp.autoscaling.maxReplicas=7
   assert_yaml "${deployment}" 'has("spec") and (.spec | has("replicas") | not)'
@@ -149,14 +182,17 @@ args=(--set router.modelServers.matchLabels.app=llm-instance-gateway
 render --set router.epp.replicas=3
 "${YQ}" -o=json 'select(.kind == "Service" and .metadata.name == "sync-test-epp") | .spec' "${output}" > "${TEMP_DIR}/service-before.json"
 
-for mode in redis all-active flag autoscaling; do
+for mode in redis redis-single all-active all-active-single flag autoscaling; do
   case "${mode}" in
     redis) mode_args=("${sync[@]}") ;;
+    redis-single) mode_args=("${sync[@]}" --set router.epp.replicas=1) ;;
     all-active) mode_args=(--set router.epp.replicas=3 --set router.epp.haMode=all-active) ;;
+    all-active-single) mode_args=(--set router.epp.replicas=1 --set router.epp.haMode=all-active) ;;
     flag) mode_args=(--set router.epp.replicas=3 --set router.epp.flags.ha-enable-leader-election=false) ;;
     autoscaling) mode_args=(--set router.epp.autoscaling.enabled=true) ;;
   esac
   render "${mode_args[@]}"
+  assert_yaml "${deployment}" '.spec.strategy.type == "RollingUpdate" and .spec.strategy.rollingUpdate.maxUnavailable == 0'
   assert_yaml "${deployment}" '.spec.template.spec.containers[] | select(.name == "epp") | .args | contains(["--health-checking=true"])'
   assert_yaml "${output}" 'select(.kind == "Service" and .metadata.name == "sync-test-epp-discovery") | (.spec.clusterIP == "None" and .spec.publishNotReadyAddresses != true and .spec.selector."llm-d-router-standalone" == "sync-test-epp" and .spec.ports[0].port == 9002)'
   assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | (.type == "STRICT_DNS" and .connect_timeout == "1s" and .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp-discovery.default.svc.cluster.local")'
@@ -172,11 +208,13 @@ assert_rejected 'health-checking must be a boolean' "${sync[@]}" --set-string ro
 render "${sync[@]}" --namespace routing --set router.clusterDomain=example.internal
 assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp-discovery.routing.svc.example.internal"'
 
-for mode in default leader flag sidecar disabled priority gke agentgateway; do
+for mode in default leader flag single single-flag-off sidecar disabled priority gke agentgateway; do
   case "${mode}" in
     default) mode_args=(--set router.epp.replicas=3) ;;
     leader) mode_args=(--set router.epp.haMode=leader-elected) ;;
     flag) mode_args=(--set router.epp.flags.ha-enable-leader-election=true) ;;
+    single) mode_args=(--set router.epp.replicas=1 --set router.epp.flags.health-checking=false) ;;
+    single-flag-off) mode_args=(--set router.epp.replicas=1 --set-string router.epp.flags.ha-enable-leader-election=False --set router.epp.flags.health-checking=false) ;;
     sidecar) mode_args=("${sync[@]}" --set router.proxy.mode=sidecar) ;;
     disabled) mode_args=("${sync[@]}" --set router.proxy.mode=sidecar --set router.proxy.enabled=false) ;;
     priority) mode_args=(--set router.proxy.priorityRouting.enabled=true) ;;
@@ -186,7 +224,7 @@ for mode in default leader flag sidecar disabled priority gke agentgateway; do
   render "${mode_args[@]}"
   "${YQ}" eval-all -e '[select(.kind == "Service" and .metadata.name == "sync-test-epp-discovery")] | length == 0' "${output}" > /dev/null
   case "${mode}" in
-    default|leader|flag|gke)
+    default|leader|flag|single|single-flag-off|gke)
       assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | (.connect_timeout == "86400s" and .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp.default.svc.cluster.local")'
       ;;
     priority)

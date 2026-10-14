@@ -124,9 +124,7 @@ llm-d-router-proxy: {{ include "llm-d-router.proxyName" . }}
 {{- $proxy := .Values.router.proxy | default dict -}}
 {{- $gkePB := include "llm-d-router.gkePreferredBackends" . | fromYaml | default dict -}}
 {{- if and $proxy.enabled (eq (include "llm-d-router.proxyType" .) "envoy") (eq (include "llm-d-router.proxyMode" .) "service") (ne (include "llm-d-router.priorityRouting.enabled" .) "true") (not $gkePB.enabled) -}}
-  {{- $flags := include "llm-d-router.epp.flags" . | fromYaml -}}
-  {{- $autoscaling := .Values.router.epp.autoscaling | default dict -}}
-  {{- if and (or (hasKey $flags "ha-enable-leader-election") $autoscaling.enabled) (not (regexMatch "^(1|t|T|true|TRUE|True)$" (toString (index $flags "ha-enable-leader-election")))) -}}
+  {{- if eq (include "llm-d-router.epp.allActive" .) "true" -}}
     {{- printf "%s-discovery" (include "llm-d-router.name" .) -}}
   {{- end -}}
 {{- end -}}
@@ -518,8 +516,8 @@ Helper to check if priorityRouting is enabled across chart contexts.
   {{- if $gkePB.enabled }}
     {{- fail "EPP autoscaling (.Values.router.epp.autoscaling.enabled=true) is not supported when GKE preferredBackends is enabled" }}
   {{- end }}
-  {{- $eppFlags := .Values.router.epp.flags | default dict -}}
-  {{- if regexMatch "^(1|t|T|true|TRUE|True)$" (toString (index $eppFlags "ha-enable-leader-election")) }}
+  {{- $eppFlags := include "llm-d-router.epp.flags" . | fromYaml -}}
+  {{- if index $eppFlags "ha-enable-leader-election" }}
     {{- fail "EPP autoscaling requires active-active replicas: router.epp.flags.ha-enable-leader-election cannot be true when router.epp.autoscaling.enabled=true" }}
   {{- end }}
   {{- $minReplicas := 1 }}

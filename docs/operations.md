@@ -206,15 +206,25 @@ The router supports multiple High Availability (HA) modes:
 
 ### Active-Active Mode
 
-To run multiple EPP replicas concurrently in Active-Active mode, set `router.epp.flags.ha-enable-leader-election: false`:
+To run multiple EPP replicas concurrently with shared in-flight load, configure
+active-active mode and the Redis syncer:
 
 ```yaml
 router:
   epp:
     replicas: 3
-    flags:
-      ha-enable-leader-election: false
+    haMode: all-active
+    pluginsConfigFile: payload-agnostic.yaml
+    crossReplica:
+      enabled: true
+      redis:
+        address: redis.example:6379
 ```
+
+For Redis provisioning and authentication requirements, see
+[Sharing in-flight load with Redis](#sharing-in-flight-load-with-redis-alpha).
+For active-active operation without synchronization, omit `crossReplica` and
+choose plugins compatible with local state.
 
 See [Scaling Modes (Active-Active vs. Active-Passive)](#scaling-modes-active-active-vs-active-passive) for throughput scaling factors, flow control scope, and plugin compatibility requirements.
 
