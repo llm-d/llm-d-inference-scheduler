@@ -156,8 +156,8 @@ func (p *crossReplicaPublisher) publishBatch(ctx context.Context, syncer fwkdl.C
 				return
 			}
 			p.publishFailureLog.Do(func() {
-				for _, err := range failures {
-					logger.Error(err, "cross-replica batch publish failed", "key", spec.StateKey, "failedEndpoints", len(failures))
+				for endpointID, err := range failures {
+					logger.Error(err, "cross-replica batch publish failed", "key", spec.StateKey, "endpoint", endpointID, "failedEndpoints", len(failures))
 					break
 				}
 			})

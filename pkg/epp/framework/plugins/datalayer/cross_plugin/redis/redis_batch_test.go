@@ -31,6 +31,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	miniredisserver "github.com/alicebob/miniredis/v2/server"
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
@@ -95,8 +96,8 @@ func TestSetBatchMatchesSetAcrossChunks(t *testing.T) {
 	var mu sync.Mutex
 	var sizes []int
 	batch.client.AddHook(batchPipelineHook{run: func(ctx context.Context, cmds []goredis.Cmder, next goredis.ProcessPipelineHook) error {
-		require.Equal(t, "multi", cmds[0].Name())
-		require.Equal(t, "exec", cmds[len(cmds)-1].Name())
+		assert.Equal(t, "multi", cmds[0].Name())
+		assert.Equal(t, "exec", cmds[len(cmds)-1].Name())
 		mu.Lock()
 		sizes = append(sizes, (len(cmds)-2)/4)
 		mu.Unlock()
@@ -179,7 +180,7 @@ func TestSetBatchChunkFailuresKeepCaches(t *testing.T) {
 				returned = next(ctx, cmds)
 				if mode == "unattributed" {
 					for _, cmd := range cmds {
-						require.NoError(t, cmd.Err())
+						assert.NoError(t, cmd.Err())
 					}
 					returned = goredis.ErrCrossSlot
 				}
@@ -255,9 +256,9 @@ func TestSetBatchRetriedWriteKeepsCaches(t *testing.T) {
 	}
 	client.AddHook(batchPipelineHook{run: func(ctx context.Context, cmds []goredis.Cmder, next goredis.ProcessPipelineHook) error {
 		err := next(ctx, cmds)
-		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 		for _, cmd := range cmds[1 : len(cmds)-1] {
-			require.NoError(t, cmd.Err())
+			assert.NoError(t, cmd.Err())
 		}
 		return err
 	}})
@@ -359,7 +360,7 @@ func TestSetBatchAllEncodeFailures(t *testing.T) {
 	spec := batchIntSpec()
 	spec.Read = func(string) fwkdl.Cloneable { return nil }
 	syncer.client.AddHook(batchPipelineHook{run: func(context.Context, []goredis.Cmder, goredis.ProcessPipelineHook) error {
-		t.Fatal("no encodable endpoints should send a pipeline")
+		t.Error("no encodable endpoints should send a pipeline")
 		return errors.New("unexpected pipeline")
 	}})
 	ids := batchEndpointIDs(101)
