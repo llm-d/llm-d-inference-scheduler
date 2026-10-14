@@ -111,11 +111,11 @@ var errForceStreamTruncated = errors.New("force-stream: upstream stream ended be
 
 // sseDataPrefix and sseDoneMarker delimit the SSE frames the upstream streams.
 // Each data line carries one JSON object; the stream ends with data: [DONE].
-// sseDataPrefix is intentionally the bare "data:" without the trailing space
-// reqcommon.SSEDataPrefix carries, since ssePayload trims surrounding space and
-// so matches both framings.
+// sseDataPrefix drops the trailing space reqcommon.SSEDataPrefix carries so it
+// matches both "data:" and "data: " framings (ssePayload trims the remainder); it
+// is derived from the shared constant so the two cannot diverge.
 var (
-	sseDataPrefix = []byte("data:")
+	sseDataPrefix = bytes.TrimRight([]byte(reqcommon.SSEDataPrefix), " ")
 	sseDoneMarker = []byte(reqcommon.SSEDoneMarker)
 )
 

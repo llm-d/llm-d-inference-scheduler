@@ -167,6 +167,51 @@ func TestForceStream_ParamsOptional(t *testing.T) {
 	require.Equal(t, int64(256<<10), ds.budget.perRequestMax, "the default per-request cap is 256KiB")
 }
 
+// TestForceStream_ClientRequestedStreaming_Skipped verifies the !reqCtx.Stream
+// guard: a client that already asked for streaming is never force-streamed. The
+// request takes the normal pass-through, so the client receives the upstream SSE
+// verbatim and no force-stream outcome is recorded.
+func TestForceStream_ClientRequestedStreaming_Skipped(t *testing.T) {
+	frames := []string{
+		`{"id":"c","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`,
+		`{"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	}
+	server := sseServer(t, frames, nil)
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-streaming",
+		OriginalPath:     reqcommon.PathChatCompletions,
+		Model:            "llama-3",
+		Stream:           true,
+		KVTransferParams: map[string]any{},
+		Body:             map[string]any{"model": "llama-3", "stream": true},
+		ResponseWriter:   recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx))
+
+	httpResult := recorder.Result()
+	require.Equal(t, "text/event-stream", httpResult.Header.Get("Content-Type"),
+		"a streaming client gets the upstream SSE verbatim, not a reassembled JSON reply")
+	body, _ := io.ReadAll(httpResult.Body)
+	require.Contains(t, string(body), "[DONE]", "the raw SSE stream is passed through")
+
+	// None of the force-stream outcomes fire: the request never entered the branch.
+	for _, rv := range []string{
+		coordmetrics.ForceStreamResultForced,
+		coordmetrics.ForceStreamResultFallbackBudget,
+		coordmetrics.ForceStreamResultFallbackUnbounded,
+		coordmetrics.ForceStreamResultFallbackUnsupported,
+		coordmetrics.ForceStreamResultFallbackUnreadable,
+	} {
+		require.InDelta(t, 0.0, forceStreamCount(t, reg, rv), 1e-9, "no force-stream outcome for a streaming client: %s", rv)
+	}
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9)
+}
+
 // TestForceStream_BudgetConfigErrors verifies that a malformed buffer-size or
 // per-request-size value fails config load rather than running a silent default.
 func TestForceStream_BudgetConfigErrors(t *testing.T) {

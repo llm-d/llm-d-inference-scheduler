@@ -196,6 +196,11 @@ func TestSSEReassemble_Responses(t *testing.T) {
 	r.add(frame(t, `{"type":"response.output_text.delta","delta":" world"}`))
 	r.add(frame(t, `{"type":"response.completed","response":`+completed+`}`))
 
+	// The completed object supersedes the accumulated deltas, so the choice
+	// accumulators are released rather than held alongside it.
+	require.Empty(t, r.choices)
+	require.Empty(t, r.order)
+
 	// Only the generated text is charged to the ceiling, not the envelope.
 	require.EqualValues(t, len("Hello world"), r.bufferedBytes())
 
