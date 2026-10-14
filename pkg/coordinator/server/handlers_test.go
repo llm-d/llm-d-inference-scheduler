@@ -1076,5 +1076,6 @@ func TestInferenceRoute(t *testing.T) {
 	require.Equal(t, coordmetrics.RouteChatCompletions, inferenceRoute(reqcommon.PathChatCompletions))
 	require.Equal(t, coordmetrics.RouteCompletions, inferenceRoute(reqcommon.PathCompletions))
 	require.Equal(t, coordmetrics.RouteGenerate, inferenceRoute(reqcommon.PathVLLMGenerate))
+	require.Equal(t, coordmetrics.RouteMessages, inferenceRoute(reqcommon.PathMessages))
 	require.Equal(t, coordmetrics.RouteUnknown, inferenceRoute("/other"))
 }

@@ -228,6 +228,8 @@ func inferenceRoute(path string) string {
 		return coordmetrics.RouteCompletions
 	case reqcommon.PathVLLMGenerate, reqcommon.PathSGLangGenerate:
 		return coordmetrics.RouteGenerate
+	case reqcommon.PathMessages:
+		return coordmetrics.RouteMessages
 	default:
 		return coordmetrics.RouteUnknown
 	}

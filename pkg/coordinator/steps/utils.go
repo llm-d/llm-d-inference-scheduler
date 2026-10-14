@@ -223,14 +223,17 @@ type mediaPart struct {
 // part carries usable media: replace-media-urls rejects an unusable one as it
 // builds the entries (see collectMediaRefs), so filtering here would shift every
 // later part of its modality onto another part's hash. Which types count is
-// reqcommon.PartModality's rule, the same on chat completions and Responses. A
-// Messages request names media with Anthropic image blocks only, the one type
-// vLLM's Anthropic conversion loads. Beyond that, apiType selects the item label
-// and which arrays an item holds.
+// reqcommon.PartModality's rule, the same on chat completions and Responses, and
+// reqcommon.MessagesBlockModality's on a Messages request. Beyond that, apiType
+// selects the item label and which arrays an item holds.
 func collectMediaParts(items []any, apiType reqcommon.APIType) []mediaPart {
 	itemLabel := "message"
 	if apiType == reqcommon.APITypeResponses {
 		itemLabel = "input item"
+	}
+	modalityOf := reqcommon.PartModality
+	if apiType == reqcommon.APITypeMessages {
+		modalityOf = reqcommon.MessagesBlockModality
 	}
 
 	var parts []mediaPart
@@ -246,10 +249,7 @@ func collectMediaParts(items []any, apiType reqcommon.APIType) []mediaPart {
 					continue
 				}
 				partType, _ := partMap[reqcommon.FieldType].(string)
-				modality, ok := reqcommon.PartModality(partType)
-				if apiType == reqcommon.APITypeMessages {
-					modality, ok = reqcommon.ModalityImage, partType == reqcommon.BlockTypeImage
-				}
+				modality, ok := modalityOf(partType)
 				if !ok {
 					continue
 				}

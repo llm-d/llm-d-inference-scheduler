@@ -206,7 +206,10 @@ var messagesEncoderPassthroughFields = []string{FieldModel}
 //
 // Responses and Messages bodies are built for their own API; anything else is
 // treated as chat completions. part is forwarded unreshaped: it already has the
-// shape of the API the caller posts the body under.
+// shape of the API the caller posts the body under. A Messages body is also a
+// valid chat-completions body, and the sidecar relies on that: it posts one at
+// /v1/chat/completions, with the image reshaped to image_url, so the encoder
+// hashes the image as a /v1/messages prefiller does.
 func NewEncoderPrimingBody(clientBody map[string]any, part map[string]any, apiType APIType) map[string]any {
 	if apiType != APITypeResponses && apiType != APITypeMessages {
 		apiType = APITypeChatCompletions

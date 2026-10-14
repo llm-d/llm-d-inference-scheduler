@@ -140,11 +140,14 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 				// so reshape before the part is forwarded as-is. ItemPartArrays
 				// returns only the arrays vLLM loads images from: a turn's
 				// content and, on a user turn, each tool_result's content one
-				// level deep. A chat part type fails /v1/messages input
+				// level deep. Which blocks name media is
+				// reqcommon.MessagesBlockModality's rule, shared with the
+				// coordinator steps. A chat part type fails /v1/messages input
 				// validation, so that request never reaches a worker.
-				_, isMedia := reqcommon.PartModality(partType)
+				_, isBlockMedia := reqcommon.MessagesBlockModality(partType)
+				_, isChatMedia := reqcommon.PartModality(partType)
 				switch {
-				case partType == reqcommon.BlockTypeImage:
+				case isBlockMedia:
 					converted, ok := anthropicImagePart(partMap)
 					if !ok {
 						logger.V(logging.DEBUG).Info("skipping anthropic image the encoder cannot be primed with")
@@ -152,7 +155,7 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 						continue
 					}
 					items = append(items, converted)
-				case isMedia:
+				case isChatMedia:
 					logger.V(logging.DEBUG).Info("skipping content part the Messages API does not define", "type", partType, "apiType", apiType)
 					droppedParts++
 				}
@@ -274,6 +277,8 @@ func (s *Server) fanoutEncoder(
 				}
 			}()
 
+			// A Messages request gets NewEncoderPrimingBody's Messages body at
+			// the chat path; see its doc for why that holds.
 			encoderRequest := reqcommon.NewEncoderPrimingBody(originalRequest, mmItem, apiType)
 
 			body, err := json.Marshal(encoderRequest)

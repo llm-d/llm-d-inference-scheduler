@@ -813,6 +813,62 @@ func TestFanoutEncoderPath(t *testing.T) {
 	}
 }
 
+// TestFanoutEncoderMessagesPrimingBody pins the encoder request for a Messages
+// request: the image block reshaped to image_url in a chat-completions body at
+// /v1/chat/completions, carrying only the model from the client body. The
+// prefiller serves the client's request at /v1/messages, which accepts no
+// kwargs field, so a forwarded mm_processor_kwargs would prime the encoder
+// under a hash the prefiller never computes.
+func TestFanoutEncoderMessagesPrimingBody(t *testing.T) {
+	var mu sync.Mutex
+	var gotPath string
+	var gotBody map[string]any
+	encoderBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		gotPath, gotBody = r.URL.Path, body
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer encoderBackend.Close()
+
+	encoderURL, err := url.Parse(encoderBackend.URL)
+	require.NoError(t, err)
+	srv := NewProxy(Config{Port: "0", DecoderURL: encoderURL})
+	srv.logger = log.Log
+
+	messages, err := json.Marshal([]any{
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image", "source": map[string]any{"type": "url", "url": "https://example.com/image.jpg"}},
+		}},
+	})
+	require.NoError(t, err)
+	request := map[string]any{
+		"model":               "m",
+		"max_tokens":          64,
+		"mm_processor_kwargs": map[string]any{"num_crops": 4},
+		"messages":            json.RawMessage(messages),
+	}
+
+	_, err = srv.fanoutEncoderPrimer(context.Background(), request, []string{encoderURL.Host}, "test-req-id", reqcommon.APITypeMessages)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, reqcommon.PathChatCompletions, gotPath)
+	assert.Equal(t, map[string]any{
+		"model":      "m",
+		"max_tokens": float64(1),
+		"stream":     false,
+		"messages": []any{map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/image.jpg"}},
+		}}},
+	}, gotBody)
+}
+
 // TestFanoutEncoderPrimerOnePerPart pins one encoder request per extracted
 // content part. Repeated content is primed repeatedly: collapsing it would mean
 // deciding which parts share a multimodal hash, and a wrong call there drops a
