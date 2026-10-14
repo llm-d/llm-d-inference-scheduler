@@ -24,6 +24,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/k8s"
@@ -49,7 +50,7 @@ func standaloneConfig() standalone.Config {
 	}
 }
 
-func createModelServersFromKustomize(kustomizeDir string, extra map[string]string) []string {
+func createModelServersFromKustomize(kustomizeDir string, extra map[string]string, edits ...func(*unstructured.Unstructured)) []string {
 	nsName := getNamespace()
 	subs := map[string]string{
 		"${MODEL_NAME}":              simModelName,
@@ -80,6 +81,11 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 	manifests = manifest.RemoveEmptyArgs(manifests)
 	objects, err := manifest.DecodeCaseObjects([]byte(strings.Join(manifests, "\n---\n")), nsName)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	for _, obj := range objects {
+		for _, edit := range edits {
+			edit(obj)
+		}
+	}
 	resources := &lifecycle.CaseResources{Client: testConfig.K8sClient}
 	lifecycle.DeferCaseCleanup(testConfig, keepClusterOnFailure, resources, nsName, nil)
 	gomega.Expect(resources.Create(testConfig.Context, objects)).To(gomega.Succeed())
@@ -95,6 +101,25 @@ func createModelServersDecode(replicas int) []string {
 	return createModelServersFromKustomize(epdDeploymentDir, map[string]string{
 		"${KV_CACHE_ENABLED}":     "false",
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(replicas),
+	})
+}
+
+const modelLabel = "llm-d.ai/model"
+
+// createModelServerVersion gives each version its own Deployment name and selector
+// so that versions in the same pool do not share Pods.
+func createModelServerVersion(modelName string) {
+	createModelServersFromKustomize(epdDeploymentDir, map[string]string{
+		"${MODEL_NAME}":           modelName,
+		"${VLLM_REPLICA_COUNT_D}": "1",
+	}, func(obj *unstructured.Unstructured) {
+		if obj.GetKind() != "Deployment" {
+			return
+		}
+		obj.SetName(obj.GetName() + "-" + modelName)
+		for _, labels := range [][]string{{"spec", "selector", "matchLabels"}, {"spec", "template", "metadata", "labels"}} {
+			gomega.Expect(unstructured.SetNestedField(obj.Object, modelName, append(labels, modelLabel)...)).To(gomega.Succeed())
+		}
 	})
 }
 

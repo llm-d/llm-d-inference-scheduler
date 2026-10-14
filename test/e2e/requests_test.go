@@ -30,6 +30,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
 
+	infextv1a2 "github.com/llm-d/llm-d-router/apix/v1alpha2"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/k8s"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/metrics"
@@ -192,6 +193,44 @@ func tryCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 	}
 	ns, pod, _ := extractInferenceHeaders(httpResp)
 	return ns, pod, nil
+}
+
+// By Hoeffding's inequality, in a batch of rolloutBatchSize independent selections at
+// fixed weights, a target's share strays more than rolloutTolerance from
+// weight/totalWeight with probability at most
+// 2*exp(-2*rolloutBatchSize*rolloutTolerance^2), about 3e-8.
+const (
+	rolloutBatchSize = 400
+	rolloutTolerance = 0.15
+)
+
+// expectRolloutSplit checks the share of completions that each target's Pods serve.
+// podModels maps a Pod name to the model it serves. Batches are retried because the
+// EPP observes a rewrite update asynchronously.
+func expectRolloutSplit(podModels map[string]string, targets []infextv1a2.TargetModel) {
+	var totalWeight int32
+	weights := make([]string, len(targets))
+	for i, target := range targets {
+		totalWeight += *target.Weight
+		weights[i] = fmt.Sprintf("%s=%d", target.ModelRewrite, *target.Weight)
+	}
+	ginkgo.By("Sending completions until the split matches " + strings.Join(weights, ", "))
+
+	gomega.Eventually(func(g gomega.Gomega) {
+		served := map[string]int{}
+		for range rolloutBatchSize {
+			_, pod, err := tryCompletion(simplePrompt, simModelName)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			served[podModels[pod]]++
+		}
+		g.Expect(served).To(gomega.HaveLen(len(targets)), "served by model: %v", served)
+		for _, target := range targets {
+			g.Expect(served).To(gomega.HaveKey(target.ModelRewrite), "served by model: %v", served)
+			share := float64(served[target.ModelRewrite]) / rolloutBatchSize
+			want := float64(*target.Weight) / float64(totalWeight)
+			g.Expect(share).To(gomega.BeNumerically("~", want, rolloutTolerance), "served by model: %v", served)
+		}
+	}, testConfig.ReadyTimeout, testConfig.Interval).Should(gomega.Succeed())
 }
 
 func runChatCompletion(prompt, modelName string) (string, string, string) {
