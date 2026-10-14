@@ -227,6 +227,10 @@ func inferenceRoute(path string) string {
 		return coordmetrics.RouteChatCompletions
 	case reqcommon.PathCompletions:
 		return coordmetrics.RouteCompletions
+	case reqcommon.PathResponses:
+		return coordmetrics.RouteResponses
+	case reqcommon.PathMessages:
+		return coordmetrics.RouteMessages
 	case reqcommon.PathVLLMGenerate, reqcommon.PathSGLangGenerate:
 		return coordmetrics.RouteGenerate
 	default:
