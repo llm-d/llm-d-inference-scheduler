@@ -57,7 +57,11 @@ const (
 	// Requests are multipart/form-data.
 	imagesEditsAPI = "images/edits"
 	// videosAPI is the OpenAI-compatible vLLM-Omni asynchronous video generation
-	// endpoint. Requests are multipart/form-data.
+	// endpoint. Requests are multipart/form-data. Status and content requests
+	// (GET /v1/videos/{id} and /v1/videos/{id}/content) have no body, so they are
+	// routed to a random endpoint. With more than one replica, a poll can reach a
+	// pod that does not hold the job, so the pool needs a single replica or
+	// session affinity.
 	videosAPI = "videos"
 	// videosSyncAPI is the vLLM-Omni synchronous video generation endpoint, which
 	// takes the same form as videosAPI and returns raw video bytes.

@@ -633,9 +633,8 @@ func derefFloat(v *float64) string {
 // VideoGenerationRequest represents the OpenAI-compatible vLLM-Omni
 // /v1/videos and /v1/videos/sync request body. Both endpoints are served by the
 // same handler and accept multipart/form-data, so they share this shape.
-// Field bounds mirror the pinned backend contract; omitted fields stay nil
-// rather than defaulting to zero, except NumOutputsPerPrompt, which the backend
-// always fills with 1.
+// Omitted fields stay nil rather than defaulting to zero, except
+// NumOutputsPerPrompt, which the backend always fills with 1.
 type VideoGenerationRequest struct {
 	// Prompt is the text description of the desired video. Required.
 	Prompt string `json:"prompt"`
@@ -643,8 +642,7 @@ type VideoGenerationRequest struct {
 	NegativePrompt string `json:"negative_prompt,omitempty"`
 	// Size is the requested output size as "WIDTHxHEIGHT" (e.g. "1280x720").
 	Size string `json:"size,omitempty"`
-	// Width and Height are the output dimensions in pixels. The backend requires
-	// at least 1 when either is set.
+	// Width and Height are the output dimensions in pixels.
 	Width  *int64 `json:"width,omitempty"`
 	Height *int64 `json:"height,omitempty"`
 	// NumFrames is the number of frames to generate. Nil means the backend
@@ -654,11 +652,10 @@ type VideoGenerationRequest struct {
 	FPS *float64 `json:"fps,omitempty"`
 	// Seconds is the requested clip duration in seconds, as a string of digits.
 	Seconds string `json:"seconds,omitempty"`
-	// NumInferenceSteps is the number of diffusion steps, bounded by the backend
-	// to 1..200. Nil means the model default.
+	// NumInferenceSteps is the number of diffusion steps. Nil means the model default.
 	NumInferenceSteps *int64 `json:"num_inference_steps,omitempty"`
-	// NumOutputsPerPrompt is the number of videos to generate, bounded by the
-	// backend to 1..10. The backend form always supplies it, defaulting to 1.
+	// NumOutputsPerPrompt is the number of videos to generate. The backend form
+	// always supplies it, defaulting to 1.
 	NumOutputsPerPrompt *int64 `json:"num_outputs_per_prompt,omitempty"`
 	// Seed is the random seed for reproducibility.
 	Seed *int64 `json:"seed,omitempty"`
