@@ -46,9 +46,12 @@ const (
 	defaultStateTTL        = 2 * time.Second
 	defaultCoordinationTTL = 180 * time.Second
 	minimumTTL             = time.Millisecond
+	batchSize              = 100
+	batchConcurrency       = 8
 )
 
 var _ fwkdl.CrossReplicaSyncer = (*RedisSyncer)(nil)
+var _ fwkdl.CrossReplicaBatchSyncer = (*RedisSyncer)(nil)
 
 type redisConfig struct {
 	Address         string `json:"address"`
@@ -229,6 +232,16 @@ func (s *RedisSyncer) set(ctx context.Context, key fwkdl.StateKey, endpointID st
 	if err != nil {
 		return fmt.Errorf("redis-syncer: hgetall: %w", err)
 	}
+	peerCount := s.cachePeerAggregate(ctx, hashKey, value, raw, aggregate, now)
+
+	if v := logger.V(logutil.DEBUG); v.Enabled() {
+		v.Info("redis-syncer: Set", "key", string(key), "endpoint", endpointID, "replica", s.replicaID, "numReplicas", peerCount+1)
+	}
+	return nil
+}
+
+func (s *RedisSyncer) cachePeerAggregate(ctx context.Context, hashKey string, value any, raw map[string]string, aggregate func([]any) any, now time.Time) int {
+	logger := ctrl.LoggerFrom(ctx)
 	remoteValues := make([]any, 0, len(raw))
 	for _, field := range slices.Sorted(maps.Keys(raw)) {
 		if field == s.replicaID {
@@ -254,14 +267,119 @@ func (s *RedisSyncer) set(ctx context.Context, key fwkdl.StateKey, endpointID st
 		})
 	}
 
-	if v := logger.V(logutil.DEBUG); v.Enabled() {
-		v.Info("redis-syncer: Set", "key", string(key), "endpoint", endpointID, "replica", s.replicaID, "numReplicas", len(remoteValues)+1)
-	}
-	return nil
+	return len(remoteValues)
 }
 
 func (s *RedisSyncer) Set(ctx context.Context, spec fwkdl.CrossReplicaSpec, endpointID string) error {
 	return s.set(ctx, spec.StateKey, endpointID, spec.Read(endpointID), spec.Aggregate)
+}
+
+func (s *RedisSyncer) SetBatch(ctx context.Context, spec fwkdl.CrossReplicaSpec, endpointIDs []string) map[string]error {
+	failures := make(map[string]error)
+	slots := make(chan struct{}, batchConcurrency)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	remaining := endpointIDs
+dispatch:
+	for start := 0; start < len(endpointIDs); start += batchSize {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			break dispatch
+		}
+		end := min(start+batchSize, len(endpointIDs))
+		chunk := endpointIDs[start:end]
+		remaining = endpointIDs[end:]
+		wg.Go(func() {
+			defer func() { <-slots }()
+			errs := s.setBatchChunk(ctx, spec, chunk)
+			mu.Lock()
+			maps.Copy(failures, errs)
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		for _, endpointID := range remaining {
+			failures[endpointID] = err
+		}
+	}
+	return failures
+}
+
+func (s *RedisSyncer) setBatchChunk(ctx context.Context, spec fwkdl.CrossReplicaSpec, chunk []string) map[string]error {
+	failures := make(map[string]error)
+	if err := ctx.Err(); err != nil {
+		for _, endpointID := range chunk {
+			failures[endpointID] = err
+		}
+		return failures
+	}
+	logger := ctrl.LoggerFrom(ctx)
+
+	pipe := s.client.TxPipeline()
+	type publication struct {
+		endpointID string
+		value      any
+		commands   []goredis.Cmder
+		result     *goredis.MapStringStringCmd
+	}
+	publications := make([]publication, 0, len(chunk))
+	for _, endpointID := range chunk {
+		value := spec.Read(endpointID)
+		data, err := encodeValue(value)
+		if err != nil {
+			failures[endpointID] = fmt.Errorf("redis-syncer: encode: %w", err)
+			continue
+		}
+		hashKey := s.hashKey(spec.StateKey, endpointID)
+		hset := pipe.HSet(ctx, hashKey, s.replicaID, data)
+		hpexpire := pipe.HPExpire(ctx, hashKey, s.stateTTL, s.replicaID)
+		pexpire := pipe.PExpire(ctx, hashKey, s.stateTTL)
+		result := pipe.HGetAll(ctx, hashKey)
+		publications = append(publications, publication{
+			endpointID: endpointID, value: value,
+			commands: []goredis.Cmder{hset, hpexpire, pexpire, result}, result: result,
+		})
+	}
+	if len(publications) == 0 {
+		return failures
+	}
+	now := time.Now()
+	commands, execErr := pipe.Exec(ctx)
+	chunkErr := execErr
+	var redisErr goredis.Error
+	if execErr != nil && errors.As(execErr, &redisErr) && !goredis.HasErrorPrefix(execErr, "EXECABORT") {
+		for _, cmd := range commands {
+			if errors.Is(cmd.Err(), execErr) {
+				chunkErr = nil
+				break
+			}
+		}
+	}
+	for _, publication := range publications {
+		err := chunkErr
+		if err == nil {
+			for _, cmd := range publication.commands {
+				if cmd.Err() != nil {
+					err = cmd.Err()
+					break
+				}
+			}
+		}
+		if err != nil {
+			failures[publication.endpointID] = fmt.Errorf("redis-syncer: set and get aggregate; Redis 7.4 or newer with HPEXPIRE is required: %w", err)
+			continue
+		}
+		peerCount := s.cachePeerAggregate(ctx, s.hashKey(spec.StateKey, publication.endpointID), publication.value, publication.result.Val(), spec.Aggregate, now)
+		if v := logger.V(logutil.DEBUG); v.Enabled() {
+			v.Info("redis-syncer: Set", "key", string(spec.StateKey), "endpoint", publication.endpointID, "replica", s.replicaID, "numReplicas", peerCount+1)
+		}
+	}
+	return failures
 }
 
 // get combines the live local value with the peer aggregate prepared by set.

@@ -51,6 +51,10 @@ type CrossReplicaSyncer interface {
 	GetOrSet(ctx context.Context, key StateKey, id string, candidate any) (actual any, existed bool, err error)
 }
 
+type CrossReplicaBatchSyncer interface {
+	SetBatch(ctx context.Context, spec CrossReplicaSpec, endpointIDs []string) map[string]error
+}
+
 // CrossReplicaContributor is an opt-in interface for endpoint extractors that
 // want their installed attributes to reflect cross-replica aggregate state.
 // The plugin's Extract method is unchanged; the runtime detects this interface
