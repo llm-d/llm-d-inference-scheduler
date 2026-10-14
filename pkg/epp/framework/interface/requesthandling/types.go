@@ -881,20 +881,24 @@ type AnthropicContent struct {
 	Structured []AnthropicContentBlock
 }
 
+// UnmarshalJSON accepts either a string or an array of content blocks. The first
+// byte selects the format, as in Content.UnmarshalJSON. A malformed block returns
+// its own decode error unwrapped, so nested content does not repeat a prefix.
 func (ac *AnthropicContent) UnmarshalJSON(data []byte) error {
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		ac.Raw = str
-		return nil
-	}
-
-	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(data, &blocks); err == nil {
+	if trimmed := bytes.TrimLeft(data, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
+		var blocks []AnthropicContentBlock
+		if err := json.Unmarshal(data, &blocks); err != nil {
+			return err
+		}
 		ac.Structured = blocks
 		return nil
 	}
-
-	return errors.New("anthropic content: must be a string or an array of content blocks")
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return errors.New("anthropic content: must be a string or an array of content blocks")
+	}
+	ac.Raw = str
+	return nil
 }
 
 func (ac AnthropicContent) MarshalJSON() ([]byte, error) {
@@ -926,8 +930,10 @@ func (ac AnthropicContent) textLen() int {
 type AnthropicContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
-	// image source fields (base64 or URL)
-	Source *AnthropicImageSource `json:"source,omitempty"`
+	// Source keeps raw JSON bytes because its shape depends on Type: an object
+	// for image and document blocks, a URL string for search_result blocks.
+	// Read an image block's source with ImageSource.
+	Source json.RawMessage `json:"source,omitempty"`
 	// tool_use fields (assistant messages): the model's request to call a tool.
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
@@ -944,4 +950,19 @@ type AnthropicImageSource struct {
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
 	URL       string `json:"url,omitempty"`
+}
+
+// ImageSource decodes the source of an image block. It returns nil for other
+// block types, and for an image block whose source is absent or is not an
+// image-source object. Each call decodes Source again, which can hold megabytes
+// of base64, so call it once per block rather than inside a loop.
+func (b AnthropicContentBlock) ImageSource() *AnthropicImageSource {
+	if b.Type != "image" {
+		return nil
+	}
+	var src *AnthropicImageSource
+	if err := json.Unmarshal(b.Source, &src); err != nil {
+		return nil
+	}
+	return src
 }

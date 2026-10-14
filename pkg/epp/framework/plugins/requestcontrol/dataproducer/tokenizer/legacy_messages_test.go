@@ -859,7 +859,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
 						{Type: "text", Text: "Describe this"},
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"})},
 					},
 				}},
 			},
@@ -878,7 +878,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
 						{Type: "text", Text: "Describe this"},
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "url", URL: "https://example.com/img.jpg"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "url", URL: "https://example.com/img.jpg"})},
 					},
 				}},
 			},
@@ -896,7 +896,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 			messages: []fwkrh.AnthropicMessage{
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64", Data: "abc123"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64", Data: "abc123"})},
 					},
 				}},
 			},
@@ -914,7 +914,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
 						{Type: "text", Text: "Describe this"},
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64"})},
 					},
 				}},
 			},
@@ -1079,7 +1079,7 @@ func TestLegacyMessagesToRenderChatRequest_ToolResult(t *testing.T) {
 						Structured: []fwkrh.AnthropicContentBlock{
 							{Type: "text", Text: "stdout line 1"},
 							{Type: "text", Text: "stdout line 2"},
-							{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc"}},
+							{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc"})},
 						},
 					}},
 					{Type: "text", Text: "What do you see?"},

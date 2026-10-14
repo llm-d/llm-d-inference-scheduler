@@ -68,6 +68,16 @@ func newTestPlugin(tok tokenizer) *Plugin {
 	}
 }
 
+// imageSource encodes src as the raw source of an Anthropic image block, so
+// fixtures stay typed and their JSON is always valid.
+func imageSource(src fwkrh.AnthropicImageSource) json.RawMessage {
+	raw, err := json.Marshal(src)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
 func TestProduceTimeout(t *testing.T) {
 	ctx := context.Background()
 
