@@ -34,6 +34,11 @@ render() {
   "${YQ}" 'select(.kind == "Deployment" and .metadata.name == "sync-test-epp")' "${output}" > "${deployment}"
 }
 
+render_notes() {
+  "${HELM}" template sync-test "${notes_chart}" --show-only templates/test-notes.yaml \
+    "${args[@]}" "$@" | "${YQ}" -r '.data.notes' > "${TEMP_DIR}/notes.txt"
+}
+
 assert_rejected() {
   local message=$1
   shift
@@ -85,17 +90,32 @@ for chart in llm-d-router-gateway llm-d-router-standalone; do
   "${YQ}" -N 'select(.metadata.name == "sync-test-epp-leader-election" or .metadata.name == "sync-test-epp-leader-election-binding" or .kind == "StatefulSet" or .kind == "Secret")' "${output}" > "${TEMP_DIR}/unexpected.yaml"
   test ! -s "${TEMP_DIR}/unexpected.yaml"
 
+  # Helm template omits NOTES.txt; render it through a temporary ConfigMap.
+  notes_chart="${TEMP_DIR}/${chart}-notes"
+  cp -R "${chart_path}" "${notes_chart}"
+  {
+    printf '{{- define "test.notes" -}}\n'
+    cat "${chart_path}/templates/NOTES.txt"
+    cat <<'EOF'
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-notes
+data:
+  notes: {{ include "test.notes" . | quote }}
+EOF
+  } > "${notes_chart}/templates/test-notes.yaml"
+
   # Helm cannot resolve the dependencies of custom EPP plugins.
   for values_file in "" "${SCRIPT_ROOT}/test/perf/config/router-configs/optimized-baseline.yaml"; do
     values=(--set router.epp.pluginsConfigFile=default-plugins.yaml)
     if [[ -n ${values_file} ]]; then values=(-f "${values_file}"); fi
-    "${HELM}" install sync-test "${chart_path}" --dry-run=client --kubeconfig /dev/null \
-      "${args[@]}" "${values[@]}" "${sync[@]}" > "${TEMP_DIR}/notes.txt"
+    render_notes "${values[@]}" "${sync[@]}"
     grep -Fq 'WARNING: Redis configuration alone does not enable shared in-flight load.' "${TEMP_DIR}/notes.txt"
     grep -Fq 'default and optimized-baseline profiles do not consume in-flight load' "${TEMP_DIR}/notes.txt"
   done
-  "${HELM}" install sync-test "${chart_path}" --dry-run=client --kubeconfig /dev/null \
-    "${args[@]}" > "${TEMP_DIR}/notes.txt"
+  render_notes
   if grep -Fq 'WARNING: Redis configuration alone' "${TEMP_DIR}/notes.txt"; then
     echo 'Cross-replica warning emitted with synchronization disabled' >&2
     exit 1
