@@ -1378,12 +1378,18 @@ converts each request to a chat completion and accepts `kv_transfer_params` and
 | Output cap | `max_tokens`, `max_completion_tokens` | `max_tokens` |
 | Render endpoint | `/v1/chat/completions/render` | `/v1/messages/render` |
 | Image `uuid` on decode | stamped | none |
+| Coordinator error envelope | `{"error": {"message": ..., "type": ..., "code": ...}}` | `{"type": "error", "error": {"type": ..., "message": ...}}` |
 
 The images follow vLLM's Anthropic conversion, since render pairs its hashes
 with images by position: within a user turn, the images in its `tool_result`
 blocks come first, in order, then the turn's own image blocks. A system turn
 keeps only its text, and an assistant turn's `tool_result` becomes text, so
 neither carries an image.
+
+The coordinator rejects no block type itself. vLLM's Anthropic endpoint
+defines no `document` block, so a request that carries one fails validation at
+the first stage that sends the client's messages to vLLM (render, when the
+pipeline has it), and the coordinator answers 400.
 
 Per stage:
 

@@ -354,6 +354,99 @@ func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
 	}
 }
 
+// TestHandleInference_MessagesRejectionsUseAnthropicEnvelope covers the
+// rejections the handler writes for /v1/messages. An Anthropic client reads
+// the error type and message from the Anthropic envelope, which carries no
+// code field.
+func TestHandleInference_MessagesRejectionsUseAnthropicEnvelope(t *testing.T) {
+	cases := []struct {
+		name       string
+		cfg        config.ServerConfig
+		stepErr    error
+		body       io.Reader
+		wantStatus int
+		wantType   string
+		wantMsg    string
+	}{
+		{
+			name:       "invalid JSON",
+			body:       strings.NewReader(`{bad`),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantMsg:    "invalid JSON body",
+		},
+		{
+			name:       "body read failure",
+			body:       iotest.ErrReader(errors.New("connection reset")),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantMsg:    "failed to read request body",
+		},
+		{
+			name:       "body too large",
+			cfg:        config.ServerConfig{MaxRequestBodySize: 1},
+			body:       strings.NewReader(`{"model":"m","pad":"` + strings.Repeat("x", int(config.BytesPerMB)) + `"}`),
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantType:   "request_too_large",
+			wantMsg:    "request body too large",
+		},
+		{
+			name:       "pipeline client error",
+			stepErr:    fmt.Errorf("replace-media-urls: image part carries no fetchable URL: %w", pipeline.ErrBadRequest),
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "upstream 4xx forwarded",
+			stepErr:    fmt.Errorf("wrapped: %w", &pipeline.UpstreamError{Step: "render", StatusCode: http.StatusUnprocessableEntity, Body: "bad block"}),
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "unclassified pipeline error",
+			stepErr:    errors.New("prefill: connect: connection refused"),
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusBadGateway,
+			wantType:   "api_error",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := pipeline.New([]pipeline.Step{stubStep{name: "stub", err: tc.stepErr}})
+			srv, err := New(tc.cfg, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, reqcommon.PathMessages, tc.body)
+			req.Header.Set(reqcommon.HeaderContentType, reqcommon.ContentTypeJSON)
+			rec := httptest.NewRecorder()
+			srv.httpServer.Handler.ServeHTTP(rec, req)
+
+			require.Equal(t, tc.wantStatus, rec.Code)
+			require.Contains(t, rec.Header().Get(reqcommon.HeaderContentType), reqcommon.ContentTypeJSON)
+			require.Equal(t, reqcommon.ContentTypeOptionsNoSniff, rec.Header().Get(reqcommon.HeaderContentTypeOptions))
+			require.NotContains(t, rec.Body.String(), `"code"`)
+
+			var envelope struct {
+				Type  string `json:"type"`
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope), rec.Body.String())
+			require.Equal(t, "error", envelope.Type)
+			require.Equal(t, tc.wantType, envelope.Error.Type)
+			if tc.wantMsg != "" {
+				require.Equal(t, tc.wantMsg, envelope.Error.Message)
+			} else {
+				require.NotEmpty(t, envelope.Error.Message)
+			}
+		})
+	}
+}
+
 func TestHandleInference_ResponsesRejectsStatefulFields(t *testing.T) {
 	// Locks in that the handler refuses a Responses request depending on state
 	// it does not keep, before the pipeline sees the body; see

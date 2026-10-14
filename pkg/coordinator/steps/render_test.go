@@ -462,32 +462,24 @@ func TestRenderStep_CompletionsTokenArray_SkipsRender(t *testing.T) {
 }
 
 func TestRenderStep_OtherAPIs_SkipRender(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-		body map[string]any
-	}{
-		{name: "sglang generate", path: reqcommon.PathSGLangGenerate, body: map[string]any{"model": "test", "text": "hello"}},
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Errorf("render service should not be called for %s", reqcommon.PathSGLangGenerate)
+	}))
+	defer server.Close()
+
+	step, _ := NewRenderStep(nil, map[string]any{})
+	step.(*RenderStep).SetServiceAddress(server.URL)
+
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathSGLangGenerate,
+		Body:         map[string]any{"model": "test", "text": "hello"},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Errorf("render service should not be called for %s", tt.path)
-			}))
-			defer server.Close()
 
-			step, _ := NewRenderStep(nil, map[string]any{})
-			step.(*RenderStep).SetServiceAddress(server.URL)
-
-			reqCtx := &pipeline.RequestContext{OriginalPath: tt.path, Body: tt.body}
-
-			if err := step.Execute(context.Background(), reqCtx); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(reqCtx.TokenIDs) != 0 {
-				t.Fatalf("expected no token_ids, got %v", reqCtx.TokenIDs)
-			}
-		})
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(reqCtx.TokenIDs) != 0 {
+		t.Fatalf("expected no token_ids, got %v", reqCtx.TokenIDs)
 	}
 }
 

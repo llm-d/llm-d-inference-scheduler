@@ -605,27 +605,23 @@ func TestDecodeStep_GenerateFormat_ToplevelKV(t *testing.T) {
 	}
 }
 
-// TestDecodeStep_UnreachableFormat_ReturnsError verifies that request paths
-// for formats prepareDecodeBody's switch does not handle explicitly
-// (APITypeSGLangGenerate) fail through its default case, reporting an error
+// TestDecodeStep_UnreachableFormat_ReturnsError verifies that a request path
+// for a format prepareDecodeBody's switch does not handle explicitly
+// (APITypeSGLangGenerate) fails through its default case, reporting an error
 // instead of sending an unprepared body upstream.
 func TestDecodeStep_UnreachableFormat_ReturnsError(t *testing.T) {
-	for _, path := range []string{reqcommon.PathSGLangGenerate} {
-		t.Run(path, func(t *testing.T) {
-			step, err := NewDecodeStep(gateway.New(config.GatewayConfig{}), map[string]any{ParamKVConnector: kv.NIXL})
-			if err != nil {
-				t.Fatal(err)
-			}
+	step, err := NewDecodeStep(gateway.New(config.GatewayConfig{}), map[string]any{ParamKVConnector: kv.NIXL})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-			reqCtx := &pipeline.RequestContext{
-				OriginalPath:     path,
-				Body:             map[string]any{"model": testModelName},
-				KVTransferParams: map[string]any{"block_id": "block-1"},
-			}
-			if err := step.(*DecodeStep).prepareDecodeBody(context.Background(), reqCtx); err == nil {
-				t.Fatal("expected an error for an unreachable request format")
-			}
-		})
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath:     reqcommon.PathSGLangGenerate,
+		Body:             map[string]any{"model": testModelName},
+		KVTransferParams: map[string]any{"block_id": "block-1"},
+	}
+	if err := step.(*DecodeStep).prepareDecodeBody(context.Background(), reqCtx); err == nil {
+		t.Fatal("expected an error for an unreachable request format")
 	}
 }
 

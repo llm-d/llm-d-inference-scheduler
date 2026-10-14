@@ -3,7 +3,7 @@
 The coordinator is a Go service that accepts inference requests and drives them through
 a configurable pipeline of steps. It currently supports the OpenAI-compatible API
 (`/v1/chat/completions`, `/v1/completions`, `/v1/responses`) and the Anthropic
-Messages API (`/v1/messages`), and the entry layer is
+Messages API (`/v1/messages`). The entry layer is
 designed to be extended to other inference protocols. Each step performs one unit of
 work (download media, tokenize, encode, prefill, decode). The pre-processing steps call
 side services directly (media download, and the render service for tokenization); the

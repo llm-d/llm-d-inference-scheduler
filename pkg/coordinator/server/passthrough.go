@@ -91,9 +91,8 @@ func (h *passthroughHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The passthrough proxies request bodies verbatim and never parses them,
 	// so it cannot detect stream:true without defeating that design. Clear
-	// the write deadline unconditionally: a streaming response (the stated
-	// motivator, a request with stream:true) would otherwise be cut
-	// by WriteTimeout mid-stream. The trade-off is that non-streaming
+	// the write deadline unconditionally: a streaming response would otherwise
+	// be cut by WriteTimeout mid-stream. The trade-off is that non-streaming
 	// passthrough responses lose the slow-client guard; the gateway and
 	// server IdleTimeout still bound stalled connections.
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
