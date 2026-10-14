@@ -59,7 +59,7 @@ func (s *Server) dispatchDecode(w http.ResponseWriter, r *http.Request, body map
 		s.runChunkedDecodeFromMap(w, r, body, raw, toolFields)
 		return
 	}
-	toolFields.compareDispatchedForSpan(raw, trace.SpanFromContext(r.Context()))
+	toolFields.compareValidatedDispatchedForSpan(raw, trace.SpanFromContext(r.Context()))
 	s.decoderProxy.ServeHTTP(w, r)
 }
 
@@ -98,7 +98,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		}()
 	}
 	compareChunk := func(raw []byte) {
-		statuses, err := toolFields.compareDispatched(raw)
+		statuses, err := toolFields.compareValidatedDispatched(raw)
 		if chunkFields != nil && err == nil {
 			chunkFields.mergeStatuses(statuses)
 		}

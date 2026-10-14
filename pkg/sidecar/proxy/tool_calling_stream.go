@@ -17,6 +17,7 @@ limitations under the License.
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -77,7 +78,7 @@ func (b *toolCallingPassthroughBody) Read(p []byte) (int, error) {
 	if !ok {
 		return n, err
 	}
-	snapshot, captureErr := toolcalling.CaptureRequestJSON(stream.api, raw)
+	snapshot, captureErr := toolcalling.CaptureValidatedRequestJSON(stream.api, raw)
 	if captureErr != nil {
 		return n, err
 	}
@@ -151,11 +152,41 @@ func (s *toolCallingJSONStream) fail() {
 }
 
 func (s *toolCallingJSONStream) feed(data []byte) {
-	for _, b := range data {
+	for len(data) > 0 {
 		if s.invalid {
 			return
 		}
-		s.consume(b)
+		// Ordinary string bytes preserve parser state and can be copied together.
+		if s.mode == 's' && (s.key == nil || s.keyTooBig) {
+			if !s.escaped && s.unicode == 0 {
+				i := 0
+				if len(data) >= 2048 {
+					i = bytes.IndexAny(data, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"+
+						"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\"\\")
+					if i < 0 {
+						i = len(data)
+					}
+				} else {
+					for i < len(data) && data[i] >= 0x20 && data[i] != '"' && data[i] != '\\' {
+						i++
+					}
+				}
+				if s.capture != nil {
+					s.capture = append(s.capture, data[:i]...)
+				}
+				data = data[i:]
+				if len(data) == 0 {
+					return
+				}
+			}
+			if s.capture != nil {
+				s.capture = append(s.capture, data[0])
+			}
+			s.consumeString(data[0])
+		} else {
+			s.consume(data[0])
+		}
+		data = data[1:]
 	}
 }
 

@@ -53,7 +53,7 @@ func (s *Server) handleSharedStorage(w http.ResponseWriter, r *http.Request, pre
 		attemptWriter, attemptStatus := captureResponseStatus(w)
 		attemptReturned := false
 		defer recordDecodeAbort(&attemptReturned, attemptStart)
-		_, _ = toolFields.compareDispatched(original)
+		_, _ = toolFields.compareValidatedDispatched(original)
 		needsPrefill, err := s.tryDecode(attemptWriter, decodeReq, body)
 		attemptReturned = true
 		// An attempt that falls back to prefill is not sampled; the decode after
@@ -96,7 +96,7 @@ func (s *Server) handleSharedStorage(w http.ResponseWriter, r *http.Request, pre
 	decodeWriter, decodeStatus := captureResponseStatus(w)
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
-	_, _ = toolFields.compareDispatched(decodeRequestBody)
+	_, _ = toolFields.compareValidatedDispatched(decodeRequestBody)
 	s.decoderProxy.ServeHTTP(decodeWriter, decodeReq)
 	decodeReturned = true
 	metrics.RecordDecodeDuration(time.Since(decodeStart))
@@ -316,7 +316,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 	s.logger.V(logging.DEBUG).Info("sending prefill request", "to", prefillPodHostPort)
 	pw := &bufferedResponseWriter{}
 	prefillStart := time.Now()
-	_, _ = toolFields.compareDispatched(pbody)
+	_, _ = toolFields.compareValidatedDispatched(pbody)
 	prefillHandler.ServeHTTP(pw, preq)
 	metrics.RecordPrefillDuration(time.Since(prefillStart))
 

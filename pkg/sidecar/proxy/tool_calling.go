@@ -43,12 +43,20 @@ type toolCallingRequest struct {
 
 // Capture errors disable observation; callers must preserve routing behavior.
 func captureToolCallingRequest(apiType reqcommon.APIType, body []byte) (*toolCallingRequest, error) {
+	return captureToolCallingRequestBody(apiType, body, false)
+}
+
+func captureToolCallingRequestBody(apiType reqcommon.APIType, body []byte, validated bool) (*toolCallingRequest, error) {
 	switch apiType {
 	case reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages:
 	default:
 		return nil, fmt.Errorf("unsupported tool-calling API type %s", apiType)
 	}
-	original, err := toolcalling.CaptureRequestJSON(apiType, body)
+	capture := toolcalling.CaptureRequestJSON
+	if validated {
+		capture = toolcalling.CaptureValidatedRequestJSON
+	}
+	original, err := capture(apiType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +69,8 @@ func captureInferenceToolCallingRequest(r *http.Request, apiType reqcommon.APITy
 	var captured *toolCallingRequest
 	if !ok {
 		var err error
-		captured, err = captureToolCallingRequest(apiType, body)
+		// Inference callers supply unchanged bytes from readJSONBody or json.Marshal.
+		captured, err = captureToolCallingRequestBody(apiType, body, true)
 		if err != nil {
 			return nil, err
 		}
@@ -96,12 +105,29 @@ func (r *toolCallingRequest) report(ctx context.Context) {
 // Returned statuses describe this dispatch; the aggregate deduplicates retries
 // and decode chunks by keeping the worst outcome for each observed field.
 func (r *toolCallingRequest) compareDispatched(body []byte) ([]toolcalling.FieldStatus, error) {
+	return r.compareDispatchedBody(body, false)
+}
+
+// compareValidatedDispatched requires an unchanged body from readJSONBody or json.Marshal.
+func (r *toolCallingRequest) compareValidatedDispatched(body []byte) ([]toolcalling.FieldStatus, error) {
+	return r.compareDispatchedBody(body, true)
+}
+
+func (r *toolCallingRequest) compareDispatchedBody(body []byte, validated bool) ([]toolcalling.FieldStatus, error) {
 	if r == nil {
 		return nil, nil
 	}
-	after, err := toolcalling.CaptureRequestJSON(r.surface, body)
+	capture := toolcalling.CaptureRequestJSON
+	if validated {
+		capture = toolcalling.CaptureValidatedRequestJSON
+	}
+	after, err := capture(r.surface, body)
 	if err != nil {
 		return nil, err
+	}
+	// Empty captures would only allocate unobserved outcomes.
+	if r.original.CanSkipCapture(nil) && after.CanSkipCapture(nil) {
+		return nil, nil
 	}
 	statuses, err := toolcalling.CompareRequests(r.original, after)
 	if err != nil {
@@ -114,6 +140,14 @@ func (r *toolCallingRequest) compareDispatched(body []byte) ([]toolcalling.Field
 // Stage spans describe their dispatch; request metrics keep the worst outcome.
 func (r *toolCallingRequest) compareDispatchedForSpan(body []byte, span trace.Span) {
 	statuses, err := r.compareDispatched(body)
+	if r != nil && err == nil && span.IsRecording() {
+		span.SetAttributes(r.original.SpanAttributes(statuses)...)
+	}
+}
+
+// compareValidatedDispatchedForSpan requires an unchanged body from readJSONBody or json.Marshal.
+func (r *toolCallingRequest) compareValidatedDispatchedForSpan(body []byte, span trace.Span) {
+	statuses, err := r.compareValidatedDispatched(body)
 	if r != nil && err == nil && span.IsRecording() {
 		span.SetAttributes(r.original.SpanAttributes(statuses)...)
 	}

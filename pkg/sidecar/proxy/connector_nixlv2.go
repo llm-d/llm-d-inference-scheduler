@@ -205,7 +205,7 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	// under load. Retrying the same host avoids expensive local prefill on
 	// decode. Non-transient errors (500/501) fail immediately.
 	// Every attempt uses the same serialized body, so compare it once.
-	toolFields.compareDispatchedForSpan(pbody, prefillSpan)
+	toolFields.compareValidatedDispatchedForSpan(pbody, prefillSpan)
 	var pw *bufferedResponseWriter
 retryLoop:
 	for attempt := 0; ; attempt++ {
@@ -430,7 +430,7 @@ retryLoop:
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
 	dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(decodeWriter, dreq, func() {
-		toolFields.compareDispatchedForSpan(dbody, decodeSpan)
+		toolFields.compareValidatedDispatchedForSpan(dbody, decodeSpan)
 	})
 	decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDataParallel(dataParallelUsed))
 
@@ -693,7 +693,7 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 	// KV wait aborts immediately.
 	var prefillResp *bufferedResponseWriter
 	prefillDone := make(chan struct{})
-	toolFields.compareDispatchedForSpan(pbody, prefillSpan)
+	toolFields.compareValidatedDispatchedForSpan(pbody, prefillSpan)
 	prefillStartedAt := time.Now()
 	go func() {
 		defer close(prefillDone)
@@ -755,12 +755,12 @@ func (s *Server) runNIXLProtocolV2WriteParallel(
 		}()
 		// The request goroutine reads the aggregate only after decodeDone closes.
 		dataParallelUsed := s.forwardDataParallel && s.dataParallelHandler(dcw, dreq, func() {
-			toolFields.compareDispatchedForSpan(dbody, decodeSpan)
+			toolFields.compareValidatedDispatchedForSpan(dbody, decodeSpan)
 		})
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDataParallel(dataParallelUsed))
 		if !dataParallelUsed {
 			decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeTarget(s.config.DecoderURL.Host))
-			toolFields.compareDispatchedForSpan(dbody, decodeSpan)
+			toolFields.compareValidatedDispatchedForSpan(dbody, decodeSpan)
 			s.decoderProxy.ServeHTTP(dcw, dreq)
 		}
 		decodeSpan.SetAttributes(semconv.LLMDPDProxyDecodeDurationMs(float64(time.Since(decodeStartedAt).Milliseconds())))

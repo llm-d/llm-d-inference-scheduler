@@ -367,9 +367,9 @@ func (s *Server) runPDPipeline(
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
 	if !s.forwardDataParallel || !s.dataParallelHandler(decodeWriter, pdRequest, func() {
-		_, _ = toolFields.compareDispatched(modifiedBody)
+		_, _ = toolFields.compareValidatedDispatched(modifiedBody)
 	}) {
-		_, _ = toolFields.compareDispatched(modifiedBody)
+		_, _ = toolFields.compareValidatedDispatched(modifiedBody)
 		s.decoderProxy.ServeHTTP(decodeWriter, pdRequest)
 	}
 	decodeReturned = true

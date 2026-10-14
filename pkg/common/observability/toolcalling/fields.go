@@ -169,10 +169,7 @@ func captureRequestJSON(surface reqcommon.APIType, body []byte, validated bool) 
 			}
 			switch field {
 			case FieldTools:
-				var tools []json.RawMessage
-				if json.Unmarshal(raw, &tools) == nil && len(tools) > 0 {
-					snapshot.summary.ToolCountBucket = bucketToolCount(len(tools))
-				}
+				snapshot.summary.ToolCountBucket = toolCountBucketJSON(raw)
 			case FieldToolChoice:
 				decoder := json.NewDecoder(bytes.NewReader(raw))
 				decoder.UseNumber()
@@ -262,6 +259,26 @@ func jsonValueEnd(body []byte) int {
 		}
 	}
 	return bytes.IndexAny(body, ",}] \t\r\n")
+}
+
+// The field value comes from a validated JSON body.
+func toolCountBucketJSON(raw []byte) ToolCountBucket {
+	if len(raw) == 0 || raw[0] != '[' {
+		return ""
+	}
+	rest := bytes.TrimLeft(raw[1:], " \t\r\n")
+	count := 0
+	for rest[0] != ']' {
+		count++
+		if count == 11 {
+			return ToolCountBucketElevenPlus
+		}
+		rest = bytes.TrimLeft(rest[jsonValueEnd(rest):], " \t\r\n")
+		if rest[0] == ',' {
+			rest = bytes.TrimLeft(rest[1:], " \t\r\n")
+		}
+	}
+	return bucketToolCount(count)
 }
 
 // CompareRequests compares every supported field for the common API surface.
