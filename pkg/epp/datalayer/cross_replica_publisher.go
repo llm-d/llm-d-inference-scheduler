@@ -120,11 +120,50 @@ func (p *crossReplicaPublisher) run(ctx context.Context) {
 }
 
 func (p *crossReplicaPublisher) publishAll(ctx context.Context) {
-	for _, endpointID := range p.endpointSnapshot() {
+	snapshot := p.endpointSnapshot()
+	if syncer, ok := p.syncer.(fwkdl.CrossReplicaBatchSyncer); ok {
+		dispatchCtx, cancel := context.WithTimeout(ctx, p.publishTimeout)
+		defer cancel()
+		p.publishBatch(dispatchCtx, syncer, snapshot)
+		return
+	}
+	for _, endpointID := range snapshot {
 		dispatchCtx, cancel := context.WithTimeout(ctx, p.publishTimeout)
 		p.publish(dispatchCtx, endpointID)
 		cancel()
 	}
+}
+
+func (p *crossReplicaPublisher) publishBatch(ctx context.Context, syncer fwkdl.CrossReplicaBatchSyncer, snapshot []types.NamespacedName) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	endpointIDs := make([]string, 0, len(snapshot))
+	for _, key := range snapshot {
+		if p.endpoints.Has(key) {
+			endpointIDs = append(endpointIDs, key.String())
+		}
+	}
+	if len(endpointIDs) == 0 {
+		return
+	}
+	logger := log.FromContext(ctx)
+	var wg sync.WaitGroup
+	for _, c := range p.contributors {
+		spec := c.CrossReplicaState()
+		wg.Go(func() {
+			failures := syncer.SetBatch(ctx, spec, endpointIDs)
+			if len(failures) == 0 {
+				return
+			}
+			p.publishFailureLog.Do(func() {
+				for _, err := range failures {
+					logger.Error(err, "cross-replica batch publish failed", "key", spec.StateKey, "failedEndpoints", len(failures))
+					break
+				}
+			})
+		})
+	}
+	wg.Wait()
 }
 
 func (p *crossReplicaPublisher) endpointSnapshot() []types.NamespacedName {
