@@ -111,11 +111,24 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	// front so every sub-request carries its own coordinate into partsByMod.
 	localIdx := modalityLocalIndexes(reqCtx.MultimodalEntries)
 
+	// Build every sub-request before sending any. A body that cannot be built
+	// means entries and parts are out of line, so the whole request is wrong:
+	// fail without sending the encoders requests whose results would be
+	// discarded.
+	bodies := make([][]byte, len(reqCtx.MultimodalEntries))
+	for i, entry := range reqCtx.MultimodalEntries {
+		body, err := s.buildSubRequest(logger.WithValues("index", i), reqCtx, i, entry, localIdx[i], format, partsByMod)
+		if err != nil {
+			return err
+		}
+		bodies[i] = body
+	}
+
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(s.maxParallel)
 	for i := range reqCtx.MultimodalEntries {
 		g.Go(func() error {
-			result, headers, err := s.executeOne(gCtx, logger, reqCtx, i, reqCtx.MultimodalEntries[i], localIdx[i], format, partsByMod)
+			result, headers, err := s.executeOne(gCtx, logger, reqCtx, i, bodies[i], format)
 			results[i] = result
 			responseHeaders[i] = headers
 			return err
@@ -137,8 +150,8 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	return nil
 }
 
-func (s *EncodeStep) executeOne(
-	ctx context.Context,
+// buildSubRequest builds and marshals one fanout sub-request body.
+func (s *EncodeStep) buildSubRequest(
 	logger logr.Logger,
 	reqCtx *pipeline.RequestContext,
 	index int,
@@ -146,9 +159,7 @@ func (s *EncodeStep) executeOne(
 	localIdx int,
 	format reqcommon.APIType,
 	partsByMod map[reqcommon.Modality][]mediaPart,
-) (map[string]any, http.Header, error) {
-	logger = logger.WithValues("index", index)
-
+) ([]byte, error) {
 	body, err := s.buildEncodeBody(reqCtx, entry, localIdx, format, partsByMod)
 	if err != nil {
 		// Every failure here is a coordinator bug rather than a bad request:
@@ -160,14 +171,26 @@ func (s *EncodeStep) executeOne(
 		logger.Error(err, "encode fanout build body",
 			"modality", entry.Modality,
 			"local_index", localIdx)
-		return nil, nil, err
+		return nil, err
 	}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		err = fmt.Errorf("encode[%d]: marshal: %w", index, err)
 		logger.Error(err, "encode fanout marshal")
-		return nil, nil, err
+		return nil, err
 	}
+	return bodyBytes, nil
+}
+
+func (s *EncodeStep) executeOne(
+	ctx context.Context,
+	logger logr.Logger,
+	reqCtx *pipeline.RequestContext,
+	index int,
+	bodyBytes []byte,
+	format reqcommon.APIType,
+) (map[string]any, http.Header, error) {
+	logger = logger.WithValues("index", index)
 
 	path := format.Path()
 	logger.V(logutil.DEFAULT).Info("sending sub-request", "path", path)
