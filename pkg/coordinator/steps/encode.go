@@ -111,14 +111,22 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	// front so every sub-request carries its own coordinate into partsByMod.
 	localIdx := modalityLocalIndexes(reqCtx.MultimodalEntries)
 
-	// Build every sub-request before sending any. A body that cannot be built
-	// means entries and parts are out of line, so the whole request is wrong:
-	// fail without sending the encoders requests whose results would be
-	// discarded.
-	bodies := make([][]byte, len(reqCtx.MultimodalEntries))
+	// Pair every entry with its part before sending any sub-request: building
+	// inside the fanout let a sibling's response error win the errgroup race.
+	// Bodies stay unmarshaled until sent; each references a media part already
+	// in reqCtx.Body, so holding all of them adds no copy of the media bytes.
+	bodies := make([]map[string]any, len(reqCtx.MultimodalEntries))
 	for i, entry := range reqCtx.MultimodalEntries {
-		body, err := s.buildSubRequest(logger.WithValues("index", i), reqCtx, i, entry, localIdx[i], format, partsByMod)
+		body, err := s.buildEncodeBody(reqCtx, entry, localIdx[i], format, partsByMod)
 		if err != nil {
+			// Every failure here is a coordinator bug rather than a bad request:
+			// either entries and parts got out of line upstream, or a format
+			// reached this fan-out that should never carry media. Fail rather than
+			// send the encoder a request known to be wrong; the wrapped err says
+			// which it was.
+			err = fmt.Errorf("encode[%d]: %w", i, err)
+			logger.Error(err, "encode fanout build body",
+				"index", i, "modality", entry.Modality, "local_index", localIdx[i])
 			return err
 		}
 		bodies[i] = body
@@ -150,47 +158,22 @@ func (s *EncodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	return nil
 }
 
-// buildSubRequest builds and marshals one fanout sub-request body.
-func (s *EncodeStep) buildSubRequest(
-	logger logr.Logger,
-	reqCtx *pipeline.RequestContext,
-	index int,
-	entry pipeline.MultimodalEntry,
-	localIdx int,
-	format reqcommon.APIType,
-	partsByMod map[reqcommon.Modality][]mediaPart,
-) ([]byte, error) {
-	body, err := s.buildEncodeBody(reqCtx, entry, localIdx, format, partsByMod)
-	if err != nil {
-		// Every failure here is a coordinator bug rather than a bad request:
-		// either entries and parts got out of line upstream, or a format
-		// reached this fan-out that should never carry media. Fail rather than
-		// send the encoder a request known to be wrong; the wrapped err says
-		// which it was.
-		err = fmt.Errorf("encode[%d]: %w", index, err)
-		logger.Error(err, "encode fanout build body",
-			"modality", entry.Modality,
-			"local_index", localIdx)
-		return nil, err
-	}
-	bodyBytes, err := json.Marshal(body)
-	if err != nil {
-		err = fmt.Errorf("encode[%d]: marshal: %w", index, err)
-		logger.Error(err, "encode fanout marshal")
-		return nil, err
-	}
-	return bodyBytes, nil
-}
-
 func (s *EncodeStep) executeOne(
 	ctx context.Context,
 	logger logr.Logger,
 	reqCtx *pipeline.RequestContext,
 	index int,
-	bodyBytes []byte,
+	body map[string]any,
 	format reqcommon.APIType,
 ) (map[string]any, http.Header, error) {
 	logger = logger.WithValues("index", index)
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		err = fmt.Errorf("encode[%d]: marshal: %w", index, err)
+		logger.Error(err, "encode fanout marshal")
+		return nil, nil, err
+	}
 
 	path := format.Path()
 	logger.V(logutil.DEFAULT).Info("sending sub-request", "path", path)
