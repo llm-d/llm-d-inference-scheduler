@@ -126,7 +126,7 @@
           {{- $grpcHealthPort := .Values.router.epp.grpcHealthPort | default 9003 }}
               - --grpc-health-port
               - "{{ $grpcHealthPort }}"
-          {{- if $isPriorityRouting }}
+          {{- if or $isPriorityRouting (include "llm-d-router.proxy.discoveryServiceName" .) }}
               - --health-checking=true
           {{- end }}
               # Pass additional flags via the router.epp.flags field in values.yaml.

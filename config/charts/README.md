@@ -144,6 +144,15 @@ The chart appends `redis-syncer` to the selected EPP config and sets
 `--allow-experimental-plugins=true`, and defaults to a rolling update with zero
 unavailable replicas. Fixed `replicas` and `autoscaling` are both supported.
 
+In standalone Envoy service mode, active-active configuration creates a separate
+`<release>-epp-discovery` headless Service. Envoy resolves Ready EPP pod addresses
+and balances requests across them, including replicas discovered after scale-up.
+The chart enables EPP's gRPC health service for Envoy's active health checks;
+`router.epp.flags.health-checking` cannot be set to `false` in this mode.
+The EPP ClusterIP Service is retained so enabling discovery can upgrade an
+existing release without changing its immutable Service address. This discovery
+path applies to Envoy; Agentgateway uses the EPP ClusterIP Service.
+
 The example selects `active-request-scorer` through `payload-agnostic.yaml` so
 routing consumes shared in-flight load. Enabling synchronization preserves the
 scheduling profile; it does not replace the default approximate prefix scorer.

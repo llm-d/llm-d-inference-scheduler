@@ -140,3 +140,64 @@ for chart in llm-d-router-gateway llm-d-router-standalone; do
   fi
   echo "Cross-replica configuration checks passed for ${chart}."
 done
+
+echo "Verifying active-active Envoy endpoint discovery..."
+chart_path="${SCRIPT_ROOT}/config/charts/llm-d-router-standalone"
+args=(--set router.modelServers.matchLabels.app=llm-instance-gateway
+      --set router.inferencePool.create=false --set router.proxy.mode=service)
+
+render --set router.epp.replicas=3
+"${YQ}" -o=json 'select(.kind == "Service" and .metadata.name == "sync-test-epp") | .spec' "${output}" > "${TEMP_DIR}/service-before.json"
+
+for mode in redis all-active flag autoscaling; do
+  case "${mode}" in
+    redis) mode_args=("${sync[@]}") ;;
+    all-active) mode_args=(--set router.epp.replicas=3 --set router.epp.haMode=all-active) ;;
+    flag) mode_args=(--set router.epp.replicas=3 --set router.epp.flags.ha-enable-leader-election=false) ;;
+    autoscaling) mode_args=(--set router.epp.autoscaling.enabled=true) ;;
+  esac
+  render "${mode_args[@]}"
+  assert_yaml "${deployment}" '.spec.template.spec.containers[] | select(.name == "epp") | .args | contains(["--health-checking=true"])'
+  assert_yaml "${output}" 'select(.kind == "Service" and .metadata.name == "sync-test-epp-discovery") | (.spec.clusterIP == "None" and .spec.publishNotReadyAddresses != true and .spec.selector."llm-d-router-standalone" == "sync-test-epp" and .spec.ports[0].port == 9002)'
+  assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | (.type == "STRICT_DNS" and .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp-discovery.default.svc.cluster.local")'
+  "${YQ}" -o=json 'select(.kind == "Service" and .metadata.name == "sync-test-epp") | .spec' "${output}" > "${TEMP_DIR}/service-after.json"
+  diff -u "${TEMP_DIR}/service-before.json" "${TEMP_DIR}/service-after.json"
+done
+
+render "${sync[@]}" --set router.epp.flags.health-checking=true
+assert_yaml "${deployment}" '.spec.template.spec.containers[] | select(.name == "epp") | .args | contains(["--health-checking=true"])'
+assert_rejected 'active-active Envoy discovery requires' "${sync[@]}" --set router.epp.flags.health-checking=false
+assert_rejected 'health-checking must be a boolean' "${sync[@]}" --set-string router.epp.flags.health-checking=false
+
+render "${sync[@]}" --namespace routing --set router.clusterDomain=example.internal
+assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp-discovery.routing.svc.example.internal"'
+
+for mode in default leader flag sidecar disabled priority gke agentgateway; do
+  case "${mode}" in
+    default) mode_args=(--set router.epp.replicas=3) ;;
+    leader) mode_args=(--set router.epp.haMode=leader-elected) ;;
+    flag) mode_args=(--set router.epp.flags.ha-enable-leader-election=true) ;;
+    sidecar) mode_args=("${sync[@]}" --set router.proxy.mode=sidecar) ;;
+    disabled) mode_args=("${sync[@]}" --set router.proxy.mode=sidecar --set router.proxy.enabled=false) ;;
+    priority) mode_args=(--set router.proxy.priorityRouting.enabled=true) ;;
+    gke) mode_args=(--set provider.name=gke --set provider.gke.preferredBackends.enabled=true --set router.epp.flags.ha-enable-leader-election=false) ;;
+    agentgateway) mode_args=("${sync[@]}" --set router.proxy.proxyType=agentgateway) ;;
+  esac
+  render "${mode_args[@]}"
+  "${YQ}" eval-all -e '[select(.kind == "Service" and .metadata.name == "sync-test-epp-discovery")] | length == 0' "${output}" > /dev/null
+  case "${mode}" in
+    default|leader|flag|gke)
+      assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp.default.svc.cluster.local"'
+      ;;
+    priority)
+      assert_yaml "${output}" 'select(.kind == "Service" and .metadata.name == "sync-test-epp-headless") | (.spec.clusterIP == "None" and .spec.publishNotReadyAddresses == true)'
+      ;;
+    sidecar)
+      assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "127.0.0.1"'
+      ;;
+    agentgateway)
+      assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "agentgateway") | .data."config.yaml" | contains("sync-test-epp.default.svc.cluster.local:9002")'
+      ;;
+  esac
+done
+echo "Active-active Envoy endpoint discovery checks passed."

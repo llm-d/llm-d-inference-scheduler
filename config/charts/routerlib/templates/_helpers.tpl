@@ -119,14 +119,28 @@ from the EPP selector so the proxy and EPP pods are never co-selected.
 llm-d-router-proxy: {{ include "llm-d-router.proxyName" . }}
 {{- end -}}
 
+{{/* Headless Service for active-active Envoy endpoint discovery. */}}
+{{- define "llm-d-router.proxy.discoveryServiceName" -}}
+{{- $proxy := .Values.router.proxy | default dict -}}
+{{- $gkePB := include "llm-d-router.gkePreferredBackends" . | fromYaml | default dict -}}
+{{- if and $proxy.enabled (eq (include "llm-d-router.proxyType" .) "envoy") (eq (include "llm-d-router.proxyMode" .) "service") (ne (include "llm-d-router.priorityRouting.enabled" .) "true") (not $gkePB.enabled) -}}
+  {{- $flags := include "llm-d-router.epp.flags" . | fromYaml -}}
+  {{- $autoscaling := .Values.router.epp.autoscaling | default dict -}}
+  {{- if and (or (hasKey $flags "ha-enable-leader-election") $autoscaling.enabled) (not (regexMatch "^(1|t|T|true|TRUE|True)$" (toString (index $flags "ha-enable-leader-election")))) -}}
+    {{- printf "%s-discovery" (include "llm-d-router.name" .) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/*
 ext_proc upstream host the proxy uses to reach EPP. Loopback in sidecar mode;
-the EPP Service FQDN in service mode.
+the discovery or EPP Service FQDN in service mode.
 */}}
 {{- define "llm-d-router.proxy.extProcHost" -}}
 {{- if eq (include "llm-d-router.proxyMode" .) "service" -}}
 {{- $domain := .Values.router.clusterDomain | default "cluster.local" -}}
-{{- printf "%s.%s.svc.%s" (include "llm-d-router.name" .) .Release.Namespace $domain -}}
+{{- $serviceName := include "llm-d-router.proxy.discoveryServiceName" . | default (include "llm-d-router.name" .) -}}
+{{- printf "%s.%s.svc.%s" $serviceName .Release.Namespace $domain -}}
 {{- else -}}
 127.0.0.1
 {{- end -}}
@@ -553,13 +567,17 @@ Helper to check if priorityRouting is enabled across chart contexts.
 {{- fail "priorityRouting is only supported when proxy mode is set to 'service' (router.proxy.mode=service)" -}}
 {{- end -}}
 {{- $eppFlags := .Values.router.epp.flags | default dict -}}
-{{- if and $isPriorityRouting (hasKey $eppFlags "health-checking") -}}
+{{- if and (or $isPriorityRouting (include "llm-d-router.proxy.discoveryServiceName" .)) (hasKey $eppFlags "health-checking") -}}
 {{- $healthChecking := index $eppFlags "health-checking" -}}
 {{- if not (kindIs "bool" $healthChecking) -}}
 {{- fail (printf ".Values.router.epp.flags.health-checking must be a boolean, got %q" (toString $healthChecking)) -}}
 {{- end -}}
 {{- if not $healthChecking -}}
+{{- if $isPriorityRouting -}}
 {{- fail "priorityRouting requires EPP's gRPC health service on port 9002 (router.epp.flags.health-checking cannot be false when priorityRouting.enabled=true)" -}}
+{{- else -}}
+{{- fail "active-active Envoy discovery requires EPP's gRPC health service (router.epp.flags.health-checking cannot be false)" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
