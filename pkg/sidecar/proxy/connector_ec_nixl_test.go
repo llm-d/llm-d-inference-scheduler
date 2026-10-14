@@ -26,6 +26,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -162,7 +163,7 @@ func TestFanoutEncoderCollectPrimesEachItem(t *testing.T) {
 				mu.Unlock()
 
 				resp, err := json.Marshal(map[string]any{
-					requestFieldECTransferParams: map[string]any{
+					reqcommon.FieldECTransferParams: map[string]any{
 						partKey(t, part): map[string]any{"peer_host": "10.0.0.1"},
 					},
 				})
@@ -332,7 +333,7 @@ func TestHandleECEPDThreadsParamsToPrefill(t *testing.T) {
 	var parsed map[string]any
 	assert.NoError(t, json.Unmarshal(capturedBody, &parsed))
 
-	ec, ok := parsed[requestFieldECTransferParams].(map[string]any)
+	ec, ok := parsed[reqcommon.FieldECTransferParams].(map[string]any)
 	assert.True(t, ok, "prefill body should carry ec_transfer_params as an object")
 	assert.Len(t, ec, 2, "one entry per distinct hash from the encoder responses")
 	for k, v := range ec {
@@ -341,10 +342,81 @@ func TestHandleECEPDThreadsParamsToPrefill(t *testing.T) {
 		assert.Containsf(t, entry, "peer_host", "ec[%q] should carry transfer metadata", k)
 	}
 
-	threshold, ok := parsed[requestFieldCacheHitThreshold]
+	threshold, ok := parsed[reqcommon.FieldCacheHitThreshold]
 	assert.True(t, ok, "cache_hit_threshold should be set")
 	// JSON numbers unmarshal to float64.
 	assert.Equal(t, float64(0), threshold, "cache_hit_threshold should be 0")
+}
+
+// TestHandleECNIXLPrimesAnthropicImages covers a /v1/messages body whose
+// images are Anthropic image blocks, including one nested in tool_result.
+// The encoder speaks chat completions, so those blocks have to arrive as
+// image_url parts, and the prefill body still has to carry ec_transfer_params.
+func TestHandleECNIXLPrimesAnthropicImages(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	encoderBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		mu.Lock()
+		bodies = append(bodies, string(buf))
+		i := len(bodies) - 1
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{
+			"choices": [{"message": {"content": ""}}],
+			"ec_transfer_params": {"hash-%d": {"peer_host": "10.0.0.%d"}}
+		}`, i, i)
+	}))
+	defer encoderBackend.Close()
+
+	encoderURL, err := url.Parse(encoderBackend.URL)
+	assert.NoError(t, err)
+	srv := NewProxy(Config{Port: "0", DecoderURL: encoderURL})
+	srv.logger = log.Log
+
+	var capturedBody []byte
+	srv.handlePDConnector = func(_ http.ResponseWriter, r *http.Request, _ string, _ string, _ reqcommon.APIType) {
+		buf, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		capturedBody = buf
+	}
+
+	messages, err := json.Marshal([]any{
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image", "source": map[string]any{"type": "url", "url": "https://example.com/a.png"}},
+			map[string]any{"type": "tool_result", "tool_use_id": "toolu_1", "content": []any{
+				map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": "aaaa"}},
+			}},
+		}},
+	})
+	assert.NoError(t, err)
+	reqBody, err := json.Marshal(map[string]any{"messages": json.RawMessage(messages)})
+	assert.NoError(t, err)
+
+	httpReq := httptest.NewRequest(http.MethodPost, reqcommon.PathMessages, io.NopCloser(bytes.NewReader(reqBody)))
+	srv.handleECNIXL(httptest.NewRecorder(), httpReq, "fake-prefiller:8000", []string{encoderURL.Host}, reqcommon.APITypeMessages)
+
+	mu.Lock()
+	got := append([]string(nil), bodies...)
+	mu.Unlock()
+	assert.Len(t, got, 2)
+	assert.Contains(t, strings.Join(got, "\n"), "https://example.com/a.png")
+	assert.Contains(t, strings.Join(got, "\n"), "data:image/png;base64,aaaa")
+	for _, body := range got {
+		assert.Contains(t, body, `"type":"image_url"`)
+		assert.NotContains(t, body, `"source"`)
+	}
+
+	if !assert.NotNil(t, capturedBody, "handlePDConnector should have been invoked") {
+		return
+	}
+	var parsed map[string]any
+	assert.NoError(t, json.Unmarshal(capturedBody, &parsed))
+	ec, ok := parsed[reqcommon.FieldECTransferParams].(map[string]any)
+	assert.True(t, ok, "prefill body should carry ec_transfer_params")
+	assert.Len(t, ec, 2)
 }
 
 // TestHandleECEPDAllMissingDoesNotAddField verifies the all-missing
@@ -388,10 +460,10 @@ func TestHandleECEPDAllMissingDoesNotAddField(t *testing.T) {
 	var parsed map[string]any
 	assert.NoError(t, json.Unmarshal(capturedBody, &parsed))
 
-	_, ok := parsed[requestFieldECTransferParams]
+	_, ok := parsed[reqcommon.FieldECTransferParams]
 	assert.False(t, ok, "prefill body must NOT carry ec_transfer_params when all encoder responses lacked it")
 
-	threshold, ok := parsed[requestFieldCacheHitThreshold]
+	threshold, ok := parsed[reqcommon.FieldCacheHitThreshold]
 	assert.True(t, ok, "cache_hit_threshold should still be set even when ec params are absent")
 	assert.Equal(t, float64(0), threshold)
 }
@@ -450,7 +522,7 @@ func TestHandleECEPDPartiallyPopulated(t *testing.T) {
 	var parsed map[string]any
 	assert.NoError(t, json.Unmarshal(capturedBody, &parsed))
 
-	ec, ok := parsed[requestFieldECTransferParams].(map[string]any)
+	ec, ok := parsed[reqcommon.FieldECTransferParams].(map[string]any)
 	assert.True(t, ok, "prefill body should carry ec_transfer_params (at least one item populated)")
 	assert.Len(t, ec, 1, "only item 0 contributes a hash key; item 1 has no ec_transfer_params")
 	entry, ok := ec["hash-0"].(map[string]any)
@@ -687,9 +759,9 @@ func TestHandleECNIXLEmptyEncodeEndPoints(t *testing.T) {
 	}
 	var parsed map[string]any
 	assert.NoError(t, json.Unmarshal(capturedBody, &parsed))
-	_, hasEC := parsed[requestFieldECTransferParams]
+	_, hasEC := parsed[reqcommon.FieldECTransferParams]
 	assert.False(t, hasEC, "ec_transfer_params must not be set when no encoders were called")
-	threshold, ok := parsed[requestFieldCacheHitThreshold]
+	threshold, ok := parsed[reqcommon.FieldCacheHitThreshold]
 	assert.True(t, ok, "cache_hit_threshold must be set")
 	assert.Equal(t, float64(0), threshold)
 }
@@ -738,9 +810,9 @@ func TestHandleECNIXLTextOnlyRequest(t *testing.T) {
 	}
 	var parsed map[string]any
 	assert.NoError(t, json.Unmarshal(capturedBody, &parsed))
-	_, hasEC := parsed[requestFieldECTransferParams]
+	_, hasEC := parsed[reqcommon.FieldECTransferParams]
 	assert.False(t, hasEC, "ec_transfer_params must not be set for a text-only request")
-	threshold, ok := parsed[requestFieldCacheHitThreshold]
+	threshold, ok := parsed[reqcommon.FieldCacheHitThreshold]
 	assert.True(t, ok, "cache_hit_threshold must be set")
 	assert.Equal(t, float64(0), threshold)
 }
@@ -795,9 +867,9 @@ func TestHandleECNIXLDecoderDirect(t *testing.T) {
 	}
 	var parsed map[string]any
 	assert.NoError(t, json.Unmarshal(decoderBody, &parsed))
-	_, hasEC := parsed[requestFieldECTransferParams]
+	_, hasEC := parsed[reqcommon.FieldECTransferParams]
 	assert.True(t, hasEC, "decoder-direct request should carry ec_transfer_params from encoder")
-	threshold, ok := parsed[requestFieldCacheHitThreshold]
+	threshold, ok := parsed[reqcommon.FieldCacheHitThreshold]
 	assert.True(t, ok, "cache_hit_threshold must be set")
 	assert.Equal(t, float64(0), threshold)
 }

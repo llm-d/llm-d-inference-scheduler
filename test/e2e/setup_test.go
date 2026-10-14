@@ -25,8 +25,10 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/llm-d/llm-d-router/pkg/sidecar/proxy"
-	"github.com/llm-d/llm-d-router/test/e2e/utils"
+	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/k8s"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/lifecycle"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/manifest"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/standalone"
 	testutils "github.com/llm-d/llm-d-router/test/utils"
 )
@@ -71,21 +73,21 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		subs[k] = v
 	}
 
-	manifests := utils.RunKustomize(kustomizeDir)
-	manifests = utils.SubstituteMany(manifests, subs)
+	manifests := manifest.RunKustomize(kustomizeDir)
+	manifests = manifest.SubstituteMany(manifests, subs)
 	// Remove labels with empty values (produced when ${DECODE_ROLE} is empty)
-	manifests = utils.RemoveEmptyLabels(manifests)
-	manifests = utils.RemoveEmptyArgs(manifests)
-	objects, err := utils.DecodeCaseObjects([]byte(strings.Join(manifests, "\n---\n")), nsName)
+	manifests = manifest.RemoveEmptyLabels(manifests)
+	manifests = manifest.RemoveEmptyArgs(manifests)
+	objects, err := manifest.DecodeCaseObjects([]byte(strings.Join(manifests, "\n---\n")), nsName)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	resources := &utils.CaseResources{Client: testConfig.K8sClient}
-	utils.DeferCaseCleanup(testConfig, keepClusterOnFailure, resources, nsName, nil)
+	resources := &lifecycle.CaseResources{Client: testConfig.K8sClient}
+	lifecycle.DeferCaseCleanup(testConfig, keepClusterOnFailure, resources, nsName, nil)
 	gomega.Expect(resources.Create(testConfig.Context, objects)).To(gomega.Succeed())
 	names := make([]string, len(objects))
 	for i, obj := range objects {
 		names[i] = obj.GetKind() + "/" + obj.GetName()
 	}
-	utils.PodsInDeploymentsReady(testConfig, nsName, names)
+	k8s.PodsInDeploymentsReady(testConfig, nsName, names)
 	return names
 }
 
@@ -109,7 +111,11 @@ func createModelServersDecodeDP(replicas int) []string {
 		"${VLLM_REPLICA_COUNT_D}":    strconv.Itoa(replicas),
 		"${VLLM_DATA_PARALLEL_SIZE}": "2",
 		"${DECODE_ROLE}":             "decode",
-		"${VLLM_EXTRA_ARGS_D}":       "--mode=echo",
+		// --force-dummy-tokenizer has to survive this override. The decode
+		// component passes --render-url, and a worker carrying that URL without
+		// the flag tokenizes through the shared renderer, which serves kvModelName
+		// and answers 404 for this spec's model.
+		"${VLLM_EXTRA_ARGS_D}": testutils.VLLMExtraArgs("--mode=echo", "--force-dummy-tokenizer"),
 	})
 }
 
@@ -123,21 +129,21 @@ func createModelServersPDWithConnector(prefillReplicas, decodeReplicas int, conn
 }
 
 func createModelServersPDNixlV2(prefillReplicas, decodeReplicas int) []string {
-	return createModelServersPDWithConnector(prefillReplicas, decodeReplicas, proxy.KVConnectorNIXLV2)
+	return createModelServersPDWithConnector(prefillReplicas, decodeReplicas, constants.KVConnectorNIXLV2)
 }
 
 func createModelServersPDSharedStorage(decodeReplicas int) {
-	createModelServersPDWithConnector(1, decodeReplicas, proxy.KVConnectorSharedStorage)
+	createModelServersPDWithConnector(1, decodeReplicas, constants.KVConnectorSharedStorage)
 }
 
 func createModelServersPDMooncake(decodeReplicas int) {
-	createModelServersPDWithConnector(1, decodeReplicas, proxy.KVConnectorMooncake)
+	createModelServersPDWithConnector(1, decodeReplicas, constants.KVConnectorMooncake)
 }
 
 // createModelServersEpDDisagg creates model server resources for E/PD (encode + prefill/decode) testing.
 func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
 	return createModelServersFromKustomize(ePdDisaggDir, map[string]string{
-		"${EC_CONNECTOR_TYPE}":    proxy.ECExampleConnector,
+		"${EC_CONNECTOR_TYPE}":    constants.ECExampleConnector,
 		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
 	})
@@ -146,8 +152,8 @@ func createModelServersEpDDisagg(encodeReplicas, decodeReplicas int) []string {
 // createModelServersEPDDisagg creates model server resources for E/P/D (encode/prefill/decode) testing.
 func createModelServersEPDDisagg(encodeReplicas, prefillReplicas, decodeReplicas int) {
 	createModelServersFromKustomize(ePDDisaggDir, map[string]string{
-		"${KV_CONNECTOR_TYPE}":    proxy.KVConnectorSharedStorage,
-		"${EC_CONNECTOR_TYPE}":    proxy.ECExampleConnector,
+		"${KV_CONNECTOR_TYPE}":    constants.KVConnectorSharedStorage,
+		"${EC_CONNECTOR_TYPE}":    constants.ECExampleConnector,
 		"${VLLM_REPLICA_COUNT_E}": strconv.Itoa(encodeReplicas),
 		"${VLLM_REPLICA_COUNT_P}": strconv.Itoa(prefillReplicas),
 		"${VLLM_REPLICA_COUNT_D}": strconv.Itoa(decodeReplicas),
@@ -179,14 +185,14 @@ func createModelServersEPDUnified(replicas int) []string {
 }
 
 func createRender(nsName string) []string {
-	renderYamls := utils.SubstituteMany(testutils.ReadYaml(renderManifest),
+	renderYamls := manifest.SubstituteMany(testutils.ReadYaml(renderManifest),
 		map[string]string{
 			"${MODEL_NAME}":        kvModelName,
 			"${VLLM_RENDER_IMAGE}": vllmRenderImage,
 			"${VLLM_RENDER_PORT}":  vllmRenderPort,
 		})
 	objects := testutils.CreateObjsFromYaml(testConfig, renderYamls, nsName)
-	utils.PodsInDeploymentsReady(testConfig, nsName, objects)
+	k8s.PodsInDeploymentsReady(testConfig, nsName, objects)
 	return objects
 }
 
@@ -196,12 +202,12 @@ func testWrapper(test func()) func() {
 	return func() {
 		ginkgo.BeforeAll(func() {
 			nsName := getNamespace()
-			createdNameSpace := setupNameSpace()
+			createdNameSpace := testutils.SetupNamespace(testConfig, nsName)
 			ginkgo.DeferCleanup(func() {
 				if ginkgo.CurrentSpecReport().Failed() && keepClusterOnFailure {
 					testutils.DumpPodsAndLogs(testConfig, nsName)
 				} else if createdNameSpace {
-					deleteNameSpace(nsName)
+					testutils.DeleteNamespace(testConfig, nsName)
 				}
 			})
 		})

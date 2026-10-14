@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
@@ -35,8 +36,9 @@ import (
 )
 
 type mockTokenizer struct {
-	renderFunc     func(payload fwkrh.RequestPayload) ([][]uint32, [][]tokenizerTypes.Offset, error)
-	renderChatFunc func(payload fwkrh.RequestPayload) ([]uint32, *tokenization.MultiModalFeatures, error)
+	renderFunc          func(payload fwkrh.RequestPayload) ([][]uint32, [][]tokenizerTypes.Offset, error)
+	renderChatFunc      func(payload fwkrh.RequestPayload) ([]uint32, *tokenization.MultiModalFeatures, error)
+	renderResponsesFunc func(payload fwkrh.RequestPayload) ([]uint32, *tokenization.MultiModalFeatures, error)
 }
 
 func (m *mockTokenizer) Render(_ context.Context, payload fwkrh.RequestPayload) ([][]uint32, [][]tokenizerTypes.Offset, error) {
@@ -51,11 +53,18 @@ func (m *mockTokenizer) RenderMessages(ctx context.Context, payload fwkrh.Reques
 	return m.RenderChat(ctx, payload)
 }
 
+func (m *mockTokenizer) RenderResponses(ctx context.Context, payload fwkrh.RequestPayload) ([]uint32, *tokenization.MultiModalFeatures, error) {
+	if m.renderResponsesFunc != nil {
+		return m.renderResponsesFunc(payload)
+	}
+	return m.RenderChat(ctx, payload)
+}
+
 func newTestPlugin(tok tokenizer) *Plugin {
 	return &Plugin{
 		typedName:   plugin.TypedName{Type: PluginType, Name: "test"},
 		backend:     renderBackend{tk: tok},
-		backendName: backendVLLM,
+		backendName: BackendVLLM,
 	}
 }
 
@@ -178,7 +187,7 @@ func TestProduce_PopulatesTokenizedRequest(t *testing.T) {
 	assert.Equal(t, "hash-a", req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures[0].Hash)
 	assert.Equal(t, 20, req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures[1].Offset)
 	assert.Equal(t, "hash-b", req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures[1].Hash)
-	assert.Equal(t, fwkrh.ModalityImage, req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures[0].Modality)
+	assert.Equal(t, reqcommon.ModalityImage, req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures[0].Modality)
 }
 
 func TestProduce_SkipsWhenAlreadyPopulated(t *testing.T) {
@@ -324,8 +333,8 @@ func TestProduce_GenerateFlattensFeatures(t *testing.T) {
 	assert.Equal(t, tokenIDs, req.Body.TokenizedRequest.Prompts[0].TokenIDs)
 	assert.Equal(t,
 		[]fwkrh.MultiModalFeature{
-			{Modality: fwkrh.ModalityImage, Hash: "abc123hash", Offset: 1, Length: 3},
-			{Modality: fwkrh.ModalityImage, Hash: "def456hash", Offset: 4, Length: 3},
+			{Modality: reqcommon.ModalityImage, Hash: "abc123hash", Offset: 1, Length: 3},
+			{Modality: reqcommon.ModalityImage, Hash: "def456hash", Offset: 4, Length: 3},
 		},
 		req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures,
 	)

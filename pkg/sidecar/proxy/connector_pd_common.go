@@ -31,6 +31,14 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/sidecar/metrics"
 )
 
+const (
+	// requestHeaderDataParallelRank pins a request to a specific vLLM
+	// data-parallel rank, set on both requests of a disagg pair (see pickDPRank).
+	requestHeaderDataParallelRank = "x-data-parallel-rank"
+
+	requestFieldTransferID = "transfer_id"
+)
+
 // runConcurrentPD fires the prefill and decode requests of a concurrent-dispatch
 // P/D protocol (Mooncake, SGLang) in parallel: prefill runs in a goroutine
 // and its response is discarded (only status and duration are recorded on
@@ -47,10 +55,15 @@ func (s *Server) runConcurrentPD(
 	prepareRequests func(prefillReq, decodeReq *http.Request),
 ) {
 	tracer := tracing.Tracer(tracerScope)
-	ctx := r.Context()
+	ctx, cancelDecode := context.WithCancel(r.Context())
+	defer cancelDecode()
 
 	// WithoutCancel for prefill so it isn't aborted when the decode response finishes first.
-	prefillReq := cloneRequestWithBody(context.WithoutCancel(ctx), r, prefillBody)
+	prefillCtx, cancelPrefill := context.WithCancel(context.WithoutCancel(ctx))
+	// Client disconnect aborts prefill too. Stop on return: net/http also cancels
+	// r.Context() once the handler finishes, which must not abort prefill.
+	defer context.AfterFunc(r.Context(), cancelPrefill)()
+	prefillReq := cloneRequestWithBody(prefillCtx, r, prefillBody)
 	decodeReq := cloneRequestWithBody(ctx, r, decodeBody)
 	if prepareRequests != nil {
 		prepareRequests(prefillReq, decodeReq)
@@ -79,6 +92,7 @@ func (s *Server) runConcurrentPD(
 	}
 
 	go func() {
+		defer cancelPrefill()
 		defer prefillSpan.End()
 		defer func() {
 			if rec := recover(); rec != nil && rec != http.ErrAbortHandler {
@@ -96,6 +110,7 @@ func (s *Server) runConcurrentPD(
 		if isHTTPError(pw.statusCode) {
 			metrics.RecordError(metrics.StagePrefill)
 			prefillSpan.SetStatus(codes.Error, "prefill request failed")
+			cancelDecode()
 		}
 		s.logger.V(logging.DEBUG).Info("concurrent-dispatch prefill request completed", "connector", connector, "status", pw.statusCode)
 	}()

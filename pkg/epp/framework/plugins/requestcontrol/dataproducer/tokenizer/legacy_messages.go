@@ -29,6 +29,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	tokenizerTypes "github.com/llm-d/llm-d-router/pkg/kvcache/tokenization/types"
 )
@@ -179,14 +180,14 @@ func appendAnthropicMessage(conversation []tokenizerTypes.Conversation, m fwkrh.
 			if b.Text != "" {
 				contentBlocks = append(contentBlocks, tokenizerTypes.ContentBlock{Type: blockTypeText, Text: b.Text})
 			}
-		case blockTypeImage:
+		case reqcommon.BlockTypeImage:
 			contentBlocks = appendImageBlock(contentBlocks, b.Source)
 		case blockTypeThinking:
 			reasoning.WriteString(b.Thinking)
 		case "redacted_thinking":
 		case blockTypeToolUse:
 			toolCalls = append(toolCalls, anthropicToolCall(b))
-		case blockTypeToolResult:
+		case reqcommon.BlockTypeToolResult:
 			if m.Role == "user" {
 				conversation = appendAnthropicToolResult(conversation, b)
 			} else {
@@ -473,7 +474,7 @@ func writeJSONString(sb *strings.Builder, s string) {
 		case r < 0x20 || r == 0x7f:
 			fmt.Fprintf(sb, `\u%04x`, r)
 		case r < utf8.RuneSelf:
-			sb.WriteByte(byte(r)) //nolint:gosec // G115: r < utf8.RuneSelf guards the conversion above
+			sb.WriteByte(byte(r)) //#nosec G115 -- r < utf8.RuneSelf guards the conversion above
 		case r > 0xFFFF:
 			r1, r2 := utf16.EncodeRune(r)
 			fmt.Fprintf(sb, `\u%04x\u%04x`, r1, r2)

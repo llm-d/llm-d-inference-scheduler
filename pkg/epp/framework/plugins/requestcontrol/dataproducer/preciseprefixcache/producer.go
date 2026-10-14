@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/kvcache"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-router/pkg/kvevents"
@@ -74,7 +75,7 @@ var (
 type subscriberManager interface {
 	EnsureSubscriber(
 		ctx context.Context,
-		podIdentifier, sourceEndpoint, endpoint, replayEndpoint, topicFilter string,
+		podIdentifier, sourceEndpoint, endpoint, replayEndpoint, snapshotEndpoint, topicFilter string,
 		remoteSocket bool,
 	) error
 	RemoveSubscriber(ctx context.Context, podIdentifier string) bool
@@ -135,12 +136,44 @@ func PluginFactory(name string, rawParameters *json.Decoder, handle plugin.Handl
 	if parameters.IndexerConfig == nil {
 		return nil, errors.New("indexerConfig is required")
 	}
+
 	p, err := New(handle.Context(), name, parameters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %s plugin: %w", PluginType, err)
 	}
 
 	return p, nil
+}
+
+// ValidateTokenProducer verifies that when a precise-prefix-cache-producer is
+// configured, a token-producer with the vllm render backend is present in the
+// handle. The estimate backend emits byte-packed pseudo-tokens, which would
+// silently corrupt the KV-block hashes this producer feeds to the indexer.
+//
+// This runs at the runner level after CreateMissingDataProducers, not inside the
+// factory: factory instantiation order is decided by the plugin DAG's
+// topological sort (which seeds from a map and so varies per process start), not
+// by the plugins-list order, so a factory-time check cannot rely on the
+// token-producer being constructed first. By the time this runs, every plugin --
+// explicit and auto-defaulted (an absent token-producer is auto-created as the
+// estimate backend) -- is in the handle, so the check is order-independent. See #1471.
+func ValidateTokenProducer(handle plugin.Handle) error {
+	hasPrecise := false
+	for _, p := range handle.GetAllPlugins() {
+		if p.TypedName().Type == PluginType {
+			hasPrecise = true
+			break
+		}
+	}
+	if !hasPrecise {
+		return nil
+	}
+
+	tp, ok := handle.Plugin(tokenproducer.PluginType).(*tokenproducer.Plugin)
+	if !ok || tp.Backend() != tokenproducer.BackendVLLM {
+		return fmt.Errorf("%s requires a %s plugin with a vllm backend", PluginType, tokenproducer.PluginType)
+	}
+	return nil
 }
 
 // New constructs a precise-prefix-cache-producer. The instance name becomes
@@ -190,7 +223,7 @@ func New(ctx context.Context, name string, config PluginConfig) (*Producer, erro
 	subscribersManager := kvevents.NewSubscriberManager(pool)
 	if config.KVEventsConfig.ZMQEndpoint != "" {
 		if err := subscribersManager.EnsureSubscriber(ctx, "local-subscriber", "",
-			config.KVEventsConfig.ZMQEndpoint, "", config.KVEventsConfig.TopicFilter, false); err != nil {
+			config.KVEventsConfig.ZMQEndpoint, "", "", config.KVEventsConfig.TopicFilter, false); err != nil {
 			return nil, fmt.Errorf("failed to create local subscriber for global socket mode: %w", err)
 		}
 	}
@@ -319,12 +352,12 @@ func (p *Producer) Produce(ctx context.Context,
 		if request.TargetModel != "" {
 			span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 		}
-		if request.RequestID != "" {
-			span.SetAttributes(semconv.GenAIRequestID(request.RequestID))
+		if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+			span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
 		}
 	}
 
-	perPromptKeys, mmBlockIndices, err := computeBlockKeys(ctx, p.kvCacheIndexer, request, p.blockSizeTokens)
+	perPromptKeys, perPromptMMContent, err := computeBlockKeys(ctx, p.kvCacheIndexer, request, p.blockSizeTokens)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to compute block keys: %w", err)
@@ -334,28 +367,48 @@ func (p *Producer) Produce(ctx context.Context,
 		return nil
 	}
 
-	return p.produceFromBlockKeys(ctx, span, request, endpoints, perPromptKeys, mmBlockIndices)
+	return p.produceFromBlockKeys(ctx, span, request, endpoints, perPromptKeys, perPromptMMContent)
 }
 
+// produceFromBlockKeys matches the per-prompt block keys against the index and
+// publishes per-endpoint PrefixCacheMatchInfo. perPromptKeys and
+// perPromptMMContent are computeBlockKeys' aligned return values.
 func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 	request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint,
-	perPromptKeys [][]kvblock.BlockHash, mmBlockIndices []int,
+	perPromptKeys [][]kvblock.BlockHash, perPromptMMContent []*mmPromptContent,
 ) error {
 	logger := log.FromContext(ctx).WithName(p.typedName.String())
 	endpointSet := extractEndpointSet(endpoints)
 
 	// A multi-prompt request scores as the sum of its prompts' matches. The
 	// first prompt's result is the aggregate, so single-prompt requests copy
-	// nothing.
+	// nothing. MM block indices and feature spans are prompt-relative while
+	// the pod match aggregates across prompts, so each prompt's content is
+	// counted against that prompt's match length and the counts summed per
+	// pod.
 	var matches map[string]kvcache.PodMatch
+	var mmMatches map[string]int
+	var mmTokens map[string]int
+	mmTracked := false
 	totalBlocks := 0
-	for _, blockKeys := range perPromptKeys {
+	for i, blockKeys := range perPromptKeys {
 		promptMatches, err := p.kvCacheIndexer.MatchBlockKeys(ctx, blockKeys, endpointSet)
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			return fmt.Errorf("failed to match block keys: %w", err)
 		}
 		totalBlocks += len(blockKeys)
+		if mm := perPromptMMContent[i]; mm != nil {
+			mmTracked = true
+			if mmMatches == nil {
+				mmMatches = map[string]int{}
+				mmTokens = map[string]int{}
+			}
+			for pod, m := range promptMatches {
+				mmMatches[pod] += countMMMatchedBlocks(mm.blockIndices, m.MatchedBlocks)
+				mmTokens[pod] += countMMMatchedTokens(mm.features, m.MatchedBlocks, p.blockSizeTokens)
+			}
+		}
 		if matches == nil {
 			matches = promptMatches
 			continue
@@ -366,6 +419,7 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 	}
 
 	maxMatch := 0
+	maxMMMatch := 0
 	results := make([]endpointResult, 0, len(endpoints))
 	for _, ep := range endpoints {
 		if err := ctx.Err(); err != nil {
@@ -375,7 +429,11 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 		if md == nil {
 			continue
 		}
-		match := matches[fmt.Sprintf("%s:%s", md.Address, md.Port)]
+		podKey := fmt.Sprintf("%s:%s", md.Address, md.Port)
+		match := matches[podKey]
+		if mmTracked {
+			maxMMMatch = max(maxMMMatch, mmMatches[podKey])
+		}
 		if match.BlocksByTier == nil {
 			match.BlocksByTier = map[string]int{} // no match: consumers still read a map
 		}
@@ -387,14 +445,24 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 			WithCachedBlockCount(match.MatchedBlocks).
 			WithConfirmedCachedBlockCount(match.ConfirmedBlocks).
 			WithCachedBlocksByTier(match.BlocksByTier)
-		if len(mmBlockIndices) > 0 {
-			info.WithMM(attrprefix.MMMatchInfo{MatchBlocks: countMMMatchedBlocks(mmBlockIndices, match.MatchedBlocks)})
+		if mmTracked {
+			info.WithMM(attrprefix.MMMatchInfo{
+				MatchBlocks: mmMatches[podKey],
+				MatchTokens: mmTokens[podKey],
+			})
 		}
 		results = append(results, endpointResult{endpoint: ep, info: info})
 	}
 	if err := p.publishEndpointResults(ctx, results); err != nil {
 		return err
 	}
+
+	bestAvailable := 0
+	for _, result := range results {
+		bestAvailable = max(bestAvailable, predictedCachedTokens(result.info))
+	}
+	p.pluginState.Write(request.RequestID, bestAvailableStateKey,
+		&bestAvailableState{cachedTokens: bestAvailable})
 
 	if p.speculativeEnabled {
 		p.pluginState.Write(request.RequestID, blockKeysStateKey,
@@ -405,6 +473,16 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 		semconv.LLMDEPPProducerTotalBlocks(totalBlocks),
 		semconv.LLMDEPPProducerMaxMatchBlocks(maxMatch),
 	)
+	// The total is request-wide, matching the mm pair's denominator: a
+	// prompt shorter than one block produces no keys and cannot match,
+	// but its MM content still counts toward the request's total. The
+	// IsRecording guard skips the feature walk on the tracing-disabled path.
+	if mmTracked && span.IsRecording() {
+		span.SetAttributes(
+			mmMatchedBlocksKey.Int(maxMMMatch),
+			mmTotalBlocksKey.Int(totalMMBlocks(request, p.blockSizeTokens)),
+		)
+	}
 
 	if v := logger.V(logging.TRACE); v.Enabled() {
 		v.Info("Produce completed", "blockKeys", totalBlocks, "matches", matches)

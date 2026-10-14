@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"strings"
 	"testing"
@@ -29,6 +30,8 @@ import (
 	"k8s.io/utils/ptr"
 	v1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
@@ -137,12 +140,12 @@ func TestOpenAIParser_RewritePriority(t *testing.T) {
 			wantMutated: true,
 		},
 		{
-			name:    "negates priority for legacy vllm target label",
+			name:    "ignores legacy GAIE vllm target label",
 			payload: fwkrh.PayloadMap{"model": "test"},
 			ctx: fwkrh.PriorityRewriteContext{TargetEndpoint: &fwkdl.EndpointMetadata{
 				Labels: map[string]string{"inference.networking.k8s.io/engine-type": "vllm"},
 			}},
-			want:        map[string]any{"model": "test", "priority": -2},
+			want:        map[string]any{"model": "test", "priority": 2},
 			wantMutated: true,
 		},
 	}
@@ -1495,7 +1498,7 @@ func TestOpenAIParser_ParseRequest_ImagesEdits(t *testing.T) {
 			if tt.contentType != "" {
 				ct = tt.contentType
 			}
-			headers := map[string]string{":path": tt.path, contentType: ct}
+			headers := map[string]string{":path": tt.path, reqcommon.HeaderContentType: ct}
 			got, err := parser.ParseRequest(context.Background(), body, headers)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseRequest() error = %v, wantErr %v", err, tt.wantErr)
@@ -1539,6 +1542,39 @@ func TestOpenAIParser_ParseRequestPreservesJSONError(t *testing.T) {
 	}
 	if got, want := err.Error(), "error extracting request body: invalid completions request: must have prompt field"; got != want {
 		t.Fatalf("ParseRequest() error = %q, want %q", got, want)
+	}
+}
+
+func TestOpenAIParser_RequestFieldErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		body      string
+		wantField string
+	}{
+		{name: "tools type", body: `{"messages":[{"role":"user","content":"hello"}],"tools":{}}`, wantField: "tools"},
+		{name: "message role type", body: `{"messages":[{"role":123}],"tools":[]}`, wantField: "messages"},
+		{name: "missing messages", body: `{"tools":[]}`},
+		{name: "malformed JSON", body: `{"tools":[`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewOpenAIParser().ParseRequest(context.Background(), []byte(tt.body), map[string]string{":path": reqcommon.PathChatCompletions})
+			if err == nil {
+				t.Fatal("expected parser failure")
+			}
+			var fieldErr *fwkrh.RequestFieldError
+			if got := errors.As(err, &fieldErr); got != (tt.wantField != "") {
+				t.Fatalf("field error present = %v, want %v", got, tt.wantField != "")
+			}
+			if tt.wantField != "" {
+				field, _, _ := strings.Cut(fieldErr.Field, ".")
+				if field != tt.wantField {
+					t.Fatalf("field = %q, want %q", field, tt.wantField)
+				}
+				if !errors.Is(err, fieldErr.Err) {
+					t.Fatal("field error must preserve the original client error")
+				}
+			}
+		})
 	}
 }
 
@@ -1587,7 +1623,7 @@ func TestOpenAIParser_RewriteModelNamePreservesTokenInput(t *testing.T) {
 	tests := []struct {
 		name, path, tokenField, body, wantTokens string
 	}{
-		{ //nolint:gosec // G101: tokenField names a JSON field, not a credential
+		{ //#nosec G101 -- tokenField names a JSON field, not a credential
 			name:       "nested completions",
 			path:       "/v1/completions",
 			tokenField: "prompt",
@@ -1762,7 +1798,7 @@ func TestOpenAIParser_ParseResponse(t *testing.T) {
 		{
 			name:    "Audio stream chunk",
 			body:    []byte{0x52, 0x49, 0x46, 0x46},
-			headers: map[string]string{contentType: "audio/wav"},
+			headers: map[string]string{reqcommon.HeaderContentType: "audio/wav"},
 			want: &fwkrh.ParsedResponse{
 				Usage: nil,
 			},
@@ -1791,7 +1827,7 @@ func TestOpenAIParser_ParseResponse(t *testing.T) {
 			name: "Octet-stream response with malformed usage headers",
 			body: []byte{0x00, 0x01, 0x02},
 			headers: map[string]string{
-				contentType:                      "application/octet-stream",
+				reqcommon.HeaderContentType:      "application/octet-stream",
 				"x-vllm-omni-input-tokens":       "invalid",
 				"x-vllm-omni-output-tokens":      "-1",
 				"x-vllm-omni-total-tokens":       "3.5",
@@ -1964,7 +2000,7 @@ func TestOpenAIParser_ParseResponse_Streaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{contentType: eventStreamType}, true)
+			got, err := parser.ParseResponse(context.Background(), tt.chunk, map[string]string{reqcommon.HeaderContentType: request.MediaTypeEventStream}, true)
 			if err != nil {
 				t.Fatalf("ParseStreamResponse() error = %v", err)
 			}

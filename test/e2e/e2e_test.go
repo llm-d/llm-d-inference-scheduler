@@ -23,8 +23,9 @@ import (
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/profilehandler/disagg"
-	"github.com/llm-d/llm-d-router/test/e2e/utils"
+	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/k8s"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/metrics"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/standalone"
 )
 
@@ -49,6 +50,15 @@ const (
 
 	simplePrompt = "Hello my name is Andrew, I have a doctorate in Rocket Science, and I like interplanetary space exploration"
 	extraPrompt  = "Why is the sky sometimes blue and sometimes red close to sunset?"
+
+	// echoOutputTokens is the shared cap for the request bodies whose own output
+	// limit would otherwise sit below their prompt length. The decode simulator
+	// runs in echo mode, which returns the prompt as the response and rejects
+	// such a request. Bodies that set no limit, and bodies whose limit already
+	// clears their prompt, keep what they have. One value above every prompt in
+	// the suite keeps the cap off each spec's critical path; echo stops at the
+	// prompt, so a generous cap does not lengthen any response.
+	echoOutputTokens = 512
 
 	// testImageURL and testImageURL2 are architecture diagrams stored in docs/images/ and served via GitHub raw content.
 	testImageURL  = "https://vllm-public-assets.s3.us-west-2.amazonaws.com/multimodal_asset/cat_snow.jpg"
@@ -176,7 +186,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 
 			metricsURL := fmt.Sprintf("http://localhost:%d/metrics", getMetricsPort())
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
@@ -211,11 +221,11 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
 
 			// Metrics Validation
-			labelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypePrefillDecode, simModelName)
-			labelFilter2 := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeDecodeOnly, simModelName)
+			labelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathPrefillDecode, simModelName)
+			labelFilter2 := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathDecodeOnly, simModelName)
 			gomega.Eventually(func(g gomega.Gomega) {
-				g.Expect(utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter)).To(gomega.Equal(4))
-				g.Expect(utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter2)).To(gomega.Equal(2))
+				g.Expect(metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter)).To(gomega.Equal(4))
+				g.Expect(metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter2)).To(gomega.Equal(2))
 			}, testConfig.ReadyTimeout, testConfig.Interval).Should(gomega.Succeed())
 		})
 	}))
@@ -236,7 +246,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 				standalone.Create(standaloneConfig(), config, 1, 8000)
 				nsName := getNamespace()
 
-				prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+				prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
@@ -270,7 +280,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 				standalone.Create(standaloneConfig(), config, 1, 8000)
 				nsName := getNamespace()
 
-				prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+				prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
@@ -303,12 +313,12 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 				standalone.Create(standaloneConfig(), config, 1, 8000)
 				nsName := getNamespace()
 
-				prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+				prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
 				// Get prefill request count BEFORE the test
-				prefillCountBefore := utils.GetPodRequestCount(testConfig, nsName, prefillPods[0])
+				prefillCountBefore := metrics.GetPodRequestCount(testConfig, nsName, prefillPods[0])
 				ginkgo.By(fmt.Sprintf("Prefill request count before decode-first test: %d", prefillCountBefore))
 
 				// Test decode-first success: cache_hit_threshold is set, but simulator returns "stop"
@@ -325,7 +335,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 				gomega.Expect(finishReason).ShouldNot(gomega.Equal("cache_threshold"))
 
 				// Get prefill request count AFTER the test
-				prefillCountAfter := utils.GetPodRequestCount(testConfig, nsName, prefillPods[0])
+				prefillCountAfter := metrics.GetPodRequestCount(testConfig, nsName, prefillPods[0])
 				ginkgo.By(fmt.Sprintf("Prefill request count after decode-first test: %d", prefillCountAfter))
 
 				// VERIFY: Prefill pod should NOT have processed any new requests
@@ -347,12 +357,12 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 				standalone.Create(standaloneConfig(), config, 1, 8000)
 				nsName := getNamespace()
 
-				prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+				prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 				gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 				gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
 				// Get prefill request count BEFORE the test
-				prefillCountBefore := utils.GetPodRequestCount(testConfig, nsName, prefillPods[0])
+				prefillCountBefore := metrics.GetPodRequestCount(testConfig, nsName, prefillPods[0])
 				ginkgo.By(fmt.Sprintf("Prefill request count before P/D fallback test: %d", prefillCountBefore))
 
 				// Test decode-first fallback: cache_hit_threshold is set AND X-Cache-Threshold header
@@ -371,7 +381,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 				gomega.Expect(finishReason).Should(gomega.Equal("cache_threshold"))
 
 				// Get prefill request count AFTER the test
-				prefillCountAfter := utils.GetPodRequestCount(testConfig, nsName, prefillPods[0])
+				prefillCountAfter := metrics.GetPodRequestCount(testConfig, nsName, prefillPods[0])
 				ginkgo.By(fmt.Sprintf("Prefill request count after P/D fallback test: %d", prefillCountAfter))
 
 				// VERIFY: Prefill pod SHOULD have processed 2 new requests (1 regular + 1 streaming)
@@ -393,7 +403,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			standalone.Create(standaloneConfig(), pdConfig, 1, 8000)
 			nsName := getNamespace()
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
@@ -414,7 +424,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			standalone.Create(standaloneConfig(), pdConfig, 1, 8000)
 			nsName := getNamespace()
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
@@ -439,7 +449,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 
 			metricsURL := fmt.Sprintf("http://localhost:%d/metrics", getMetricsPort())
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
 
@@ -474,11 +484,11 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			gomega.Expect(podHdr).Should(gomega.Equal(podHdrChat))
 
 			// Metrics Validation
-			labelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypePrefillDecode, simModelName)
-			labelFilter2 := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeDecodeOnly, simModelName)
+			labelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathPrefillDecode, simModelName)
+			labelFilter2 := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathDecodeOnly, simModelName)
 			gomega.Eventually(func(g gomega.Gomega) {
-				g.Expect(utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter)).To(gomega.Equal(4))
-				g.Expect(utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter2)).To(gomega.Equal(2))
+				g.Expect(metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter)).To(gomega.Equal(4))
+				g.Expect(metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter2)).To(gomega.Equal(2))
 			}, testConfig.ReadyTimeout, testConfig.Interval).Should(gomega.Succeed())
 		})
 	}))
@@ -490,7 +500,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			standalone.Create(standaloneConfig(), decodeOnlyConfig, 1, 8000)
 			nsName := getNamespace()
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
@@ -515,8 +525,8 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 
 			metricsURL := fmt.Sprintf("http://localhost:%d/metrics", getMetricsPort())
 
-			encodePods := utils.GetPodNames(testConfig, encodeSelector, nsName)
-			prefillDecodePods := utils.GetPodNames(testConfig, prefillDecodeSelector, nsName)
+			encodePods := k8s.GetPodNames(testConfig, encodeSelector, nsName)
+			prefillDecodePods := k8s.GetPodNames(testConfig, prefillDecodeSelector, nsName)
 			gomega.Expect(encodePods).Should(gomega.HaveLen(encodeReplicas))
 			gomega.Expect(prefillDecodePods).Should(gomega.HaveLen(decodeReplicas))
 
@@ -564,12 +574,12 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(prefillDecodePods))
 
 			// Metrics: text + image_embeds requests recorded as decode-only (encode skipped)
-			decodeOnlyFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeDecodeOnly, simModelName)
+			decodeOnlyFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathDecodeOnly, simModelName)
 			// Metrics: encode-decode decisions recorded, one per entry in mmRequests.
-			labelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeEncodeDecode, simModelName)
+			labelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathEncodeDecode, simModelName)
 			gomega.Eventually(func(g gomega.Gomega) {
-				g.Expect(utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", decodeOnlyFilter)).To(gomega.Equal(2))
-				g.Expect(utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter)).To(gomega.Equal(len(mmRequests)))
+				g.Expect(metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", decodeOnlyFilter)).To(gomega.Equal(2))
+				g.Expect(metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", labelFilter)).To(gomega.Equal(len(mmRequests)))
 			}, testConfig.ReadyTimeout, testConfig.Interval).Should(gomega.Succeed())
 		})
 	}))
@@ -586,9 +596,9 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 
 			metricsURL := fmt.Sprintf("http://localhost:%d/metrics", getMetricsPort())
 
-			encodePods := utils.GetPodNames(testConfig, encodeSelector, nsName)
-			prefillPods := utils.GetPodNames(testConfig, prefillSelector, nsName)
-			decodePods := utils.GetPodNames(testConfig, decodeSelector, nsName)
+			encodePods := k8s.GetPodNames(testConfig, encodeSelector, nsName)
+			prefillPods := k8s.GetPodNames(testConfig, prefillSelector, nsName)
+			decodePods := k8s.GetPodNames(testConfig, decodeSelector, nsName)
 			gomega.Expect(encodePods).Should(gomega.HaveLen(encodeReplicas))
 			gomega.Expect(prefillPods).Should(gomega.HaveLen(prefillReplicas))
 			gomega.Expect(decodePods).Should(gomega.HaveLen(decodeReplicas))
@@ -625,11 +635,11 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			gomega.Expect(podHdr).Should(gomega.BeElementOf(decodePods))
 
 			// Metrics: text + image_embeds requests recorded as decode-only or prefill-decode (encode skipped)
-			pdLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypePrefillDecode, simModelName)
-			doLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeDecodeOnly, simModelName)
+			pdLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathPrefillDecode, simModelName)
+			doLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathDecodeOnly, simModelName)
 			gomega.Eventually(func(g gomega.Gomega) {
-				pdCount := utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", pdLabelFilter)
-				doCount := utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", doLabelFilter)
+				pdCount := metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", pdLabelFilter)
+				doCount := metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", doLabelFilter)
 				g.Expect(pdCount + doCount).To(gomega.Equal(2))
 			}, testConfig.ReadyTimeout, testConfig.Interval).Should(gomega.Succeed())
 
@@ -638,10 +648,10 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			// in mmRequests contributes one encode-prefill-decode or encode-decode
 			// decision (encode-decode when the prefix cache hits on the second
 			// same-image request).
-			// epdLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeEncodePrefillDecode, simModelName)
-			// edLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeEncodeDecode, simModelName)
-			// epdCount := utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", epdLabelFilter)
-			// edCount := utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", edLabelFilter)
+			// epdLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathEncodePrefillDecode, simModelName)
+			// edLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathEncodeDecode, simModelName)
+			// epdCount := metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", epdLabelFilter)
+			// edCount := metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", edLabelFilter)
 			// gomega.Expect(epdCount + edCount).Should(gomega.Equal(len(mmRequests)))
 		})
 	}))
@@ -660,7 +670,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 
 			metricsURL := fmt.Sprintf("http://localhost:%d/metrics", getMetricsPort())
 
-			epdPods := utils.GetPodNames(testConfig, epdSingleSelector, nsName)
+			epdPods := k8s.GetPodNames(testConfig, epdSingleSelector, nsName)
 			gomega.Expect(epdPods).Should(gomega.HaveLen(replicas))
 
 			// Text completion: encode skipped, routes to decode profile -> single deployment
@@ -674,11 +684,11 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			gomega.Expect(podHdr).Should(gomega.Equal(epdPods[0]))
 
 			// Metrics: text requests recorded as decode-only or prefill-decode (encode skipped)
-			pdLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypePrefillDecode, simModelName)
-			doLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, disagg.DecisionTypeDecodeOnly, simModelName)
+			pdLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathPrefillDecode, simModelName)
+			doLabelFilter := fmt.Sprintf(`decision_type=%q,model_name="%s"`, metricsutil.DisaggPathDecodeOnly, simModelName)
 			gomega.Eventually(func(g gomega.Gomega) {
-				pdCount := utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", pdLabelFilter)
-				doCount := utils.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", doLabelFilter)
+				pdCount := metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", pdLabelFilter)
+				doCount := metrics.GetCounterMetric(metricsURL, "llm_d_epp_disagg_decision_total", doLabelFilter)
 				g.Expect(pdCount + doCount).To(gomega.Equal(2))
 			}, testConfig.ReadyTimeout, testConfig.Interval).Should(gomega.Succeed())
 
@@ -715,7 +725,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			standalone.Create(standaloneConfig(), kvConfig(), 1, 8000)
 			nsName := getNamespace()
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
@@ -733,7 +743,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			standalone.Create(standaloneConfig(), kvExternalTokenizerConfig(), 1, 8000)
 			nsName := getNamespace()
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
@@ -763,7 +773,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			standalone.Create(standaloneConfig(), scaleConfig, 1, 8000)
 			nsName := getNamespace()
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
@@ -774,9 +784,9 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 				gomega.Expect(podHdr).Should(gomega.Equal(decodePods[0]))
 			}
 
-			utils.ScaleDeployment(testConfig, nsName, modelServers, 1)
+			k8s.ScaleDeployment(testConfig, nsName, modelServers, 1)
 
-			scaledUpPrefillPods, scaledUpDecodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			scaledUpPrefillPods, scaledUpDecodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(scaledUpPrefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(scaledUpDecodePods).Should(gomega.HaveLen(2))
 
@@ -792,9 +802,9 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			}
 			gomega.Expect(scaledPodHdr).ShouldNot(gomega.Equal(podHdr))
 
-			utils.ScaleDeployment(testConfig, nsName, modelServers, -1)
+			k8s.ScaleDeployment(testConfig, nsName, modelServers, -1)
 
-			scaledDownPrefillPods, scaledDownDecodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			scaledDownPrefillPods, scaledDownDecodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(scaledDownPrefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(scaledDownDecodePods).Should(gomega.HaveLen(1))
 			gomega.Expect(scaledDownDecodePods[0]).Should(gomega.BeElementOf(scaledUpDecodePods))
@@ -815,7 +825,7 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			standalone.Create(standaloneConfig(), dataParallelConfig, 1, 8000, 8001)
 			nsName := getNamespace()
 
-			prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+			prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 			gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 			gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 

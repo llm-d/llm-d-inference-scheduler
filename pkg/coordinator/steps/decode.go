@@ -20,8 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -51,11 +51,7 @@ func NewDecodeStep(gwClient *gateway.Client, params map[string]any) (pipeline.St
 	if err := rejectUseOpenAIFormatOverride(DecodeStepName, params); err != nil {
 		return nil, err
 	}
-	kvName, err := paramString(params, ParamKVConnector)
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	kvConn, err := kv.Build(kvName)
+	kvConn, err := buildKVConnector(params)
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
@@ -78,16 +74,8 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 		return err
 	}
 
-	transport := instrumentedTransport(s.gwClient.Transport(), coordmetrics.UpstreamDecode)
-	proxy, out := newDecodeProxy(logger, transport, nil)
-	proxy.ServeHTTP(reqCtx.ResponseWriter, proxyReq)
-	if out.TransportErr != nil {
-		return &pipeline.UpstreamStreamedError{Step: DecodeStepName, Cause: out.TransportErr}
-	}
-	if out.Status >= http.StatusBadRequest {
-		return &pipeline.UpstreamStreamedError{Step: DecodeStepName, StatusCode: out.Status}
-	}
-	return nil
+	out := serveDecode(logger, s.gwClient.Transport(), reqCtx.ResponseWriter, proxyReq, coordmetrics.UpstreamDecode, nil)
+	return out.streamedError(DecodeStepName)
 }
 
 // prepareDecodeBody mutates reqCtx.Body in place rather than on a clone (unlike
@@ -97,13 +85,14 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 // maps.Clone would still share. This is sound only while the pipeline runs steps
 // sequentially; if it ever goes concurrent, decode must copy like the others.
 func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.RequestContext) error {
+	logger := log.FromContext(ctx).WithName(DecodeStepName)
 	format := reqcommon.DetectAPIType(reqCtx.OriginalPath)
 
 	kvParams := s.kv.PrepareDecodeKVParams(ctx, reqCtx)
-	s.injectUUIDs(reqCtx)
+	s.injectUUIDs(reqCtx, logger)
 
 	switch format {
-	case reqcommon.APITypeChatCompletions, reqcommon.APITypeVLLMGenerate:
+	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses, reqcommon.APITypeVLLMGenerate:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
 	case reqcommon.APITypeCompletions:
 		reqCtx.Body[reqcommon.FieldKVTransferParams] = kvParams
@@ -118,34 +107,71 @@ func (s *DecodeStep) prepareDecodeBody(ctx context.Context, reqCtx *pipeline.Req
 	return nil
 }
 
-func (s *DecodeStep) injectUUIDs(reqCtx *pipeline.RequestContext) {
-	messages, ok := reqCtx.Body["messages"].([]any)
-	if !ok {
+// injectUUIDs tags each media content part with the uuid the decode backend
+// uses for prefix-cache keying.
+//
+// It keys on DetectAPIType(reqCtx.OriginalPath): decode proxies reqCtx.Body to
+// reqCtx.OriginalPath, so the wire shape to walk is whatever the client sent.
+// resolveFormat's answer instead reflects the encode/prefill wire-format
+// setting, which can differ from the client's own shape.
+func (s *DecodeStep) injectUUIDs(reqCtx *pipeline.RequestContext, logger logr.Logger) {
+	// Without entries there is nothing to stamp, and the prompt items stay raw.
+	if len(reqCtx.MultimodalEntries) == 0 {
 		return
 	}
+	apiType := reqcommon.DetectAPIType(reqCtx.OriginalPath)
+	if items, ok := promptItems(reqCtx.Body, apiType); ok {
+		injectMediaPartUUIDs(items, apiType, reqCtx.MultimodalEntries, logger)
+		setPromptItems(reqCtx.Body, apiType, items)
+	}
+}
 
-	hashIdx := 0
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]any)
-		if !ok {
+// injectMediaPartUUIDs stamps each media content part with the hash of its
+// corresponding multimodal entry, pairing the two by position within a modality.
+// A surplus part is left unstamped, so the worker hashes the media itself rather
+// than reading an entry primed under another part's hash; a surplus entry has no
+// part to stamp. Neither is fatal; the branches below record what each costs.
+func injectMediaPartUUIDs(items []any, apiType reqcommon.APIType, entries []pipeline.MultimodalEntry, logger logr.Logger) {
+	// Grouped in entry order, so the walk below indexes by the per-modality
+	// position: O(1) per part after an O(n) build.
+	hashesByMod := make(map[reqcommon.Modality][]string)
+	for _, entry := range entries {
+		hashesByMod[entry.Modality] = append(hashesByMod[entry.Modality], entry.Hash)
+	}
+
+	modCounter := make(map[reqcommon.Modality]int)
+	for _, media := range collectMediaParts(items, apiType) {
+		localIdx := modCounter[media.modality]
+		modCounter[media.modality]++
+		hashes := hashesByMod[media.modality]
+		if localIdx < len(hashes) {
+			media.part["uuid"] = hashes[localIdx]
 			continue
 		}
-		content, ok := msgMap["content"].([]any)
-		if !ok {
-			continue
-		}
-		for _, part := range content {
-			partMap, ok := part.(map[string]any)
-			if !ok {
-				continue
-			}
-			if partMap["type"] != "image_url" {
-				continue
-			}
-			if hashIdx < len(reqCtx.MultimodalEntries) {
-				partMap["uuid"] = reqCtx.MultimodalEntries[hashIdx].Hash
-				hashIdx++
-			}
+		// A miss means entries and parts got out of line upstream (see
+		// collectMediaParts). The request is still answered, but the worker
+		// hashes and re-processes that media itself -- at the caps
+		// coordinator.yaml suggests, up to 200 MB of video, redoing the encode
+		// work the EPD split exists to do once elsewhere.
+		logger.V(logutil.DEBUG).Info("no MultimodalEntry for media part",
+			"location", media.location,
+			"modality", media.modality,
+			"local_index", localIdx,
+			"modality_entry_count", len(hashes))
+	}
+
+	// The walk above iterates parts, so it can only see a surplus part; the
+	// other direction needs its own pass, and is the worse of the two. A
+	// surplus entry's hash still reaches the prefiller, since
+	// PreparePrefillECParams flattens every encode response into
+	// ec_transfer_params, so the prefill body describes an EC buffer no part of
+	// the decode body names by uuid.
+	for mod, hashes := range hashesByMod {
+		if partCount := modCounter[mod]; partCount < len(hashes) {
+			logger.V(logutil.DEBUG).Info("MultimodalEntry with no media part",
+				"modality", mod,
+				"part_count", partCount,
+				"modality_entry_count", len(hashes))
 		}
 	}
 }

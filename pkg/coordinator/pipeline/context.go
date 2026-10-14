@@ -22,6 +22,7 @@ import (
 	"time"
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 )
 
 var hopByHopHeaders = map[string]bool{
@@ -35,13 +36,29 @@ var hopByHopHeaders = map[string]bool{
 	"upgrade":             true,
 }
 
+// internalForwardingHeaders are set only by the coordinator; a client copy is
+// dropped, and so is a value of forward_response_headers under these names.
+// EPP routes on epp-profile and x-llm-d-pin-host-port.
 var internalForwardingHeaders = map[string]bool{
-	"epp-profile":                         true,
+	reqcommon.EPPProfileHeaderKey:         true,
 	reqcommon.RevisionDecisionIDHeaderKey: true,
+	reqcommon.PeerTopologyHeaderKey:       true,
+	routing.EndpointPinHeader:             true,
 }
 
 func isForwardableHeader(name string) bool {
 	return !hopByHopHeaders[name] && !internalForwardingHeaders[name] && name != "content-length" && name != "host" && name != "content-type"
+}
+
+// StripInternalHeaders removes headers the coordinator alone injects into
+// requests it forwards (e.g. x-peer-topology, copied from the prefill
+// response onto the decode request). Call this on a client request's headers
+// as soon as they are received, so a client-supplied value is never mistaken
+// for one the coordinator generated itself.
+func StripInternalHeaders(headers http.Header) {
+	for key := range internalForwardingHeaders {
+		headers.Del(key)
+	}
 }
 
 // ForwardedHeaders returns original request headers suitable for forwarding
@@ -116,6 +133,9 @@ func (rc *RequestContext) CaptureResponseHeaders(responses ...http.Header) {
 }
 
 // RequestContext carries all state for a single request through the pipeline.
+//
+// OriginalBody is never re-marshalled from Body, so a step reading it after
+// another step has mutated Body sees the payload as the client sent it.
 type RequestContext struct {
 	RequestID          string
 	RevisionDecisionID string
@@ -126,10 +146,24 @@ type RequestContext struct {
 	Model              string
 	Stream             bool
 
+	// Route is the bounded route label (coordmetrics.Route*) for the inbound
+	// URL path. Set by the server handler so the pipeline can slice metrics
+	// by route without duplicating the path-to-route mapping. Empty is
+	// normalized to RouteUnknown by boundRoute at record time.
+	Route string
+
 	// ParseDuration is the time the server spent reading and JSON-parsing the
 	// request body before the pipeline ran. Execute reports it as the first
 	// entry in the step-timing summary.
 	ParseDuration time.Duration
+	// StepDuration is the sum of per-step wall times recorded by Execute.
+	// The handler subtracts ParseDuration and StepDuration from end-to-end
+	// latency to observe orchestration_overhead_seconds.
+	StepDuration time.Duration
+	// EncodeFanout is the number of Encode subrequests this request produced.
+	// EncodeStep sets it once fan-out size is known; 0 means Encode did not
+	// run, was skipped, or found no multimodal entries.
+	EncodeFanout int
 
 	TokenIDs          []int
 	MultimodalEntries []MultimodalEntry
@@ -142,7 +176,15 @@ type RequestContext struct {
 	// KVTransferParams carries the prefill pod's KV-cache transfer hints to the
 	// decode step. Populated by PrefillStep from the prefill response; consumed
 	// by the KV connector when building the decode request.
-	KVTransferParams       map[string]any
+	KVTransferParams map[string]any
+	// PeerTopology carries the prefill endpoint's encoded topology from the
+	// prefill response to the decode request, for topology-affinity-filter
+	// and topology-affinity-scorer running in the decode EPP's profile.
+	// Populated by PrefillStep from the x-peer-topology response header;
+	// forwarded onto the decode request by newDecodeProxyRequest. Empty when
+	// the prefill EPP's config has no topology-stamp-handler.
+	PeerTopology string
+
 	forwardResponseHeaders map[string]struct{}
 	downstreamHeaders      map[string]string
 
@@ -150,22 +192,26 @@ type RequestContext struct {
 	ResponseWriter http.ResponseWriter
 }
 
-// MultimodalEntry describes one downloaded multimodal item (e.g. an image) and
-// where it sits in the tokenized prompt. Index is its position in the request's
-// multimodal list. Base64Data and ContentType come from the media download;
-// Hash, KwargsData, and MMMetadata are filled in by the render step; Placeholder
-// marks the span of placeholder tokens the encode step replaces.
+// MultimodalEntry describes one multimodal item in the request and where it
+// sits in the tokenized prompt. Modality comes from reqcommon.PartModality for
+// a request that carries content parts, and from the feature-map key for a
+// token-in one. Hash and KwargsData are filled in by the render step;
+// Placeholder marks the span of placeholder tokens the encode step replaces.
+// The bytes stay in the request body (data URI or input_audio.data) rather than
+// on the entry, so a large audio or video payload is not duplicated on reqCtx.
 //
 // KwargsData is the full MultiModalKwargsItem blob (encoder tensors plus
 // metadata). MMMetadata is the sibling metadata-only blob from render
 // (placeholder_metadata_fields and keep_on_cpu fields such as image_grid_thw),
 // without encoder inputs like pixel_values. Prefill may send MMMetadata with
 // ec_transfer_params instead of KwargsData.
+//
+// An entry's position in this slice means nothing on its own: steps pair an
+// entry with its content part by counting entries of the same Modality. See
+// steps.collectMediaParts for the invariant that keeps the two lined up.
 type MultimodalEntry struct {
-	Index       int
+	Modality    reqcommon.Modality
 	Hash        string
-	Base64Data  string
-	ContentType string
 	KwargsData  string
 	MMMetadata  string
 	Placeholder PlaceholderRange

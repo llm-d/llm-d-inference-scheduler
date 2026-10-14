@@ -29,8 +29,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
-	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 )
 
 // setupSpanRecorder installs an in-memory recorder as the process tracer
@@ -131,8 +131,8 @@ func TestExecute_PipelineSpanAttributes(t *testing.T) {
 	if got := attrValue(t, span, semconv.LLMDCoordinatorPipelineStepCountKey).AsInt64(); got != 2 {
 		t.Errorf("step_count = %d, want 2", got)
 	}
-	if got := attrValue(t, span, semconv.LLMDCoordinatorPipelineExecutionPathKey).AsString(); got != coordmetrics.PathPrefillDecode {
-		t.Errorf("execution_path = %q, want %q", got, coordmetrics.PathPrefillDecode)
+	if got := attrValue(t, span, semconv.LLMDCoordinatorPipelineExecutionPathKey).AsString(); got != metricsutil.DisaggPathPrefillDecode {
+		t.Errorf("execution_path = %q, want %q", got, metricsutil.DisaggPathPrefillDecode)
 	}
 }
 
@@ -155,6 +155,25 @@ func TestExecute_FailureMarksStepAndPipelineSpans(t *testing.T) {
 	}
 	if got := spanNamed(t, recorder, pipelineSpanName).Status().Code; got != codes.Error {
 		t.Errorf("pipeline span status = %v, want %v", got, codes.Error)
+	}
+}
+
+func TestExecute_ResponseWrittenErrorMarksStepAndPipelineSpans(t *testing.T) {
+	recorder := setupSpanRecorder(t)
+	steps := []Step{
+		&mockStep{name: "async-broker", fn: func(_ context.Context, _ *RequestContext) error {
+			return &ResponseWrittenError{Step: "async-broker", StatusCode: http.StatusBadRequest, Cause: ErrBadRequest}
+		}},
+	}
+
+	if err := New(steps).Execute(context.Background(), &RequestContext{Model: "m"}); err == nil {
+		t.Fatal("expected error")
+	}
+
+	for _, name := range []string{"async-broker", pipelineSpanName} {
+		if got := spanNamed(t, recorder, name).Status().Code; got != codes.Error {
+			t.Errorf("span %q status = %v, want %v", name, got, codes.Error)
+		}
 	}
 }
 

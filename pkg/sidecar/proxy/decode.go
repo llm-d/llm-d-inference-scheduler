@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
@@ -39,16 +39,11 @@ const (
 	// finishReasonLength is the finish reason when max_tokens was reached.
 	finishReasonLength = "length"
 
-	sseDataPrefix = "data: "
-	sseDone       = "data: [DONE]"
+	requestFieldN = "n"
 
-	responseFieldUsage            = "usage"
-	responseFieldCompletionTokens = "completion_tokens"
-	responseFieldPromptTokens     = "prompt_tokens"
-	responseFieldTotalTokens      = "total_tokens"
-	responseFieldMessage          = "message"
-	responseFieldIndex            = "index"
-	responseFieldDelta            = "delta"
+	responseFieldMessage = "message"
+	responseFieldIndex   = "index"
+	responseFieldDelta   = "delta"
 
 	roleAssistant = "assistant"
 )
@@ -88,7 +83,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 	)
 	defer span.End()
 
-	streamingEnabled, _ := body[requestFieldStream].(bool)
+	streamingEnabled, _ := body[reqcommon.FieldStream].(bool)
 	originalMaxTokens := resolveMaxTokens(body)
 
 	span.SetAttributes(
@@ -96,12 +91,51 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		semconv.LLMDPDProxyChunkedDecodeStreaming(streamingEnabled),
 	)
 
+	// The decoder echoes the final assistant message, which under chunking is the text of all earlier chunks.
+	if echo, _ := body[reqcommon.FieldEcho].(bool); echo {
+		s.logger.V(logging.DEBUG).Info("chunked decode: echo enabled, using regular decode")
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+
+	// Each chunk continues the first choice's text for every choice, and the budget counts the tokens of all choices.
+	if n, ok := toInt(body[requestFieldN]); ok && n > 1 {
+		s.logger.V(logging.DEBUG).Info("chunked decode: several choices requested, using regular decode", "n", n)
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+
 	// If the token budget fits within a single chunk, skip chunking entirely.
 	if originalMaxTokens > 0 && originalMaxTokens <= s.config.DecodeChunkSize {
 		s.logger.V(logging.DEBUG).Info("chunked decode: token budget <= chunk size, using regular decode",
 			"maxTokens", originalMaxTokens, "chunkSize", s.config.DecodeChunkSize)
 		s.decoderProxy.ServeHTTP(w, r)
 		return
+	}
+
+	messages, err := requestMessages(body)
+	if err != nil {
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+	finalMessage := map[string]json.RawMessage{reqcommon.FieldRole: json.RawMessage(`"` + roleAssistant + `"`)}
+	prefix := ""
+	if continueFinal, _ := body[reqcommon.FieldContinueFinalMessage].(bool); continueFinal {
+		var role string
+		finalMessage = nil
+		// Only an assistant message can carry the accumulated text; any other final message is sent as is.
+		if len(messages) == 0 || json.Unmarshal(messages[len(messages)-1], &finalMessage) != nil ||
+			json.Unmarshal(finalMessage[reqcommon.FieldRole], &role) != nil || role != roleAssistant {
+			s.decoderProxy.ServeHTTP(w, r)
+			return
+		}
+		content := finalMessage[reqcommon.FieldContent]
+		// Content parts arrays and null have no string to extend.
+		if len(content) == 0 || content[0] != '"' || json.Unmarshal(content, &prefix) != nil {
+			s.decoderProxy.ServeHTTP(w, r)
+			return
+		}
+		messages = messages[:len(messages)-1]
 	}
 
 	if streamingEnabled {
@@ -124,7 +158,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 	for {
 		if ctx.Err() != nil {
 			if streamingEnabled && chunkIndex > 0 {
-				fmt.Fprintf(w, "%s\n\n", sseDone)
+				fmt.Fprintf(w, "%s\n\n", reqcommon.SSEDone)
 				if flusher, ok := w.(http.Flusher); ok {
 					flusher.Flush()
 				}
@@ -144,17 +178,27 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		}
 
 		chunkReq := maps.Clone(body)
-		chunkReq[requestFieldMaxTokens] = chunkBudget
-		chunkReq[requestFieldMaxCompletionTokens] = chunkBudget
-		chunkReq[requestFieldStream] = false
-		delete(chunkReq, requestFieldStreamOptions)
+		chunkReq[reqcommon.FieldMaxTokens] = chunkBudget
+		chunkReq[reqcommon.FieldMaxCompletionTokens] = chunkBudget
+		chunkReq[reqcommon.FieldStream] = false
+		delete(chunkReq, reqcommon.FieldStreamOptions)
 
 		// From the second chunk onward: remove KV transfer params and instruct
 		// to continue the last assistant message rather than start a new one.
 		if chunkIndex > 0 {
-			delete(chunkReq, requestFieldKVTransferParams)
-			chunkReq[requestFieldContinueFinalMessage] = true
-			chunkReq[requestFieldAddGenerationPrompt] = false
+			delete(chunkReq, reqcommon.FieldKVTransferParams)
+			chunkReq[reqcommon.FieldContinueFinalMessage] = true
+			chunkReq[reqcommon.FieldAddGenerationPrompt] = false
+			content, _ := json.Marshal(prefix + textAccum.String())
+			finalMessage[reqcommon.FieldContent] = content
+			message, err := json.Marshal(finalMessage)
+			if err != nil {
+				if writeErr := errorInternalServerError(err, w); writeErr != nil {
+					s.logger.Error(writeErr, "failed to send error response to client")
+				}
+				return
+			}
+			chunkReq[reqcommon.FieldMessages] = append(slices.Clone(messages), message)
 		}
 
 		chunkBody, err := json.Marshal(chunkReq)
@@ -202,6 +246,8 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 
 		finishReason := extractFinishReason(chunkResponse)
 		chunkText := extractChoiceText(firstChoice(chunkResponse))
+		// Accumulated text forms the assistant message for the next chunk.
+		textAccum.WriteString(chunkText)
 
 		if streamingEnabled {
 			if err := emitSSEChunk(w, chunkResponse); err != nil {
@@ -211,8 +257,6 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
-		} else {
-			textAccum.WriteString(chunkText)
 		}
 
 		if finishReason != "" && finishReason != finishReasonLength {
@@ -229,10 +273,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 			break
 		}
 
-		// Append the generated text to the request so the next chunk continues
-		// from where this one left off.
 		s.logger.V(logging.TRACE).Info("chunked decode: appending chunk text to request", "chunkText", chunkText)
-		appendChunkToRequest(s.logger, body, chunkText)
 	}
 
 	span.SetAttributes(
@@ -243,9 +284,9 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 
 	// Corrected cumulative usage: prompt_tokens from first chunk, completion_tokens summed.
 	cumulativeUsage := map[string]any{
-		responseFieldPromptTokens:     originalPromptTokens,
-		responseFieldCompletionTokens: totalTokens,
-		responseFieldTotalTokens:      originalPromptTokens + totalTokens,
+		reqcommon.FieldPromptTokens:     originalPromptTokens,
+		reqcommon.FieldCompletionTokens: totalTokens,
+		reqcommon.FieldTotalTokens:      originalPromptTokens + totalTokens,
 	}
 
 	if streamingEnabled {
@@ -253,14 +294,14 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		// Individual chunk events have usage stripped by emitSSEChunk.
 		if lastResponse != nil {
 			usageEvent := map[string]any{
-				responseFieldUsage:   cumulativeUsage,
+				reqcommon.FieldUsage: cumulativeUsage,
 				responseFieldChoices: []any{},
 			}
 			if data, err := json.Marshal(usageEvent); err == nil {
-				fmt.Fprintf(w, "%s%s\n\n", sseDataPrefix, data)
+				fmt.Fprintf(w, "%s%s\n\n", reqcommon.SSEDataPrefix, data)
 			}
 		}
-		fmt.Fprintf(w, "%s\n\n", sseDone)
+		fmt.Fprintf(w, "%s\n\n", reqcommon.SSEDone)
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
@@ -276,7 +317,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	lastResponse[responseFieldUsage] = cumulativeUsage
+	lastResponse[reqcommon.FieldUsage] = cumulativeUsage
 
 	if choices, ok := lastResponse[responseFieldChoices].([]any); ok && len(choices) > 0 {
 		choice := maps.Clone(choices[0].(map[string]any))
@@ -306,7 +347,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 // Prefers max_completion_tokens (OpenAI v1) over max_tokens (legacy).
 // Returns -1 when neither field is set (no explicit limit).
 func resolveMaxTokens(req map[string]any) int {
-	for _, field := range []string{requestFieldMaxCompletionTokens, requestFieldMaxTokens} {
+	for _, field := range []string{reqcommon.FieldMaxCompletionTokens, reqcommon.FieldMaxTokens} {
 		if v, ok := req[field]; ok {
 			if n, ok := toInt(v); ok && n > 0 {
 				return n
@@ -330,8 +371,8 @@ func remainingTokens(budget, used int) int {
 
 // countTokensInResponse returns completion_tokens from the usage field, or 0.
 func countTokensInResponse(response map[string]any) int {
-	if usage, ok := response[responseFieldUsage].(map[string]any); ok {
-		if n, ok := toInt(usage[responseFieldCompletionTokens]); ok {
+	if usage, ok := response[reqcommon.FieldUsage].(map[string]any); ok {
+		if n, ok := toInt(usage[reqcommon.FieldCompletionTokens]); ok {
 			return n
 		}
 	}
@@ -340,8 +381,8 @@ func countTokensInResponse(response map[string]any) int {
 
 // extractPromptTokens returns prompt_tokens from the usage field, or 0.
 func extractPromptTokens(response map[string]any) int {
-	if usage, ok := response[responseFieldUsage].(map[string]any); ok {
-		if n, ok := toInt(usage[responseFieldPromptTokens]); ok {
+	if usage, ok := response[reqcommon.FieldUsage].(map[string]any); ok {
+		if n, ok := toInt(usage[reqcommon.FieldPromptTokens]); ok {
 			return n
 		}
 	}
@@ -385,13 +426,13 @@ func emitSSEChunk(w http.ResponseWriter, chunkResponse map[string]any) error {
 		streamChunk[responseFieldChoices] = streamChoices
 	}
 
-	delete(streamChunk, responseFieldUsage)
+	delete(streamChunk, reqcommon.FieldUsage)
 
 	data, err := json.Marshal(streamChunk)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "%s%s\n\n", sseDataPrefix, data)
+	_, err = fmt.Fprintf(w, "%s%s\n\n", reqcommon.SSEDataPrefix, data)
 	return err
 }
 
@@ -413,29 +454,6 @@ func extractChoiceText(choice map[string]any) string {
 		}
 	}
 	return ""
-}
-
-// appendChunkToRequest appends the generated text from a chunk to the request
-// so the next chunk continues from where this one left off. The messages the
-// client sent are appended to as raw bytes, keeping their key order intact
-// across chunks.
-func appendChunkToRequest(logger logr.Logger, req map[string]any, text string) {
-	if text == "" {
-		return
-	}
-	messages, err := requestMessages(req)
-	if err != nil {
-		logger.V(logging.DEBUG).Info("chunked decode: cannot read request messages", "error", err)
-	}
-	chunk, err := json.Marshal(map[string]any{
-		reqcommon.FieldRole:    roleAssistant,
-		reqcommon.FieldContent: text,
-	})
-	if err != nil {
-		logger.V(logging.DEBUG).Info("chunked decode: cannot encode chunk text", "error", err)
-		return
-	}
-	req[reqcommon.FieldMessages] = append(messages, chunk)
 }
 
 // toInt converts a JSON number value (float64, int, or json.Number) to int.

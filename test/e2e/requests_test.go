@@ -31,7 +31,9 @@ import (
 	"github.com/openai/openai-go/packages/param"
 
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
-	"github.com/llm-d/llm-d-router/test/e2e/utils"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/k8s"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/metrics"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/response"
 )
 
 func newOpenAIClient() *openai.Client {
@@ -48,7 +50,7 @@ func extractInferenceHeaders(httpResp *http.Response) (string, string, string) {
 func generateAndCheckLoad(count int) {
 	nsName := getNamespace()
 	for range count {
-		prefillPods, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
+		prefillPods, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 		gomega.Expect(prefillPods).Should(gomega.BeEmpty())
 		gomega.Expect(decodePods).Should(gomega.HaveLen(1))
 
@@ -143,7 +145,7 @@ func runCompletion(prompt string, theModel openai.CompletionNewParamsModel) (str
 // name the model server recognizes on its own, so a 200 response with the rewritten model
 // echoed back proves EPP actually rewrote the body rather than passing it through.
 func runCompletionWithModelRewrite(prompt, incomingModel, targetModel string) string {
-	body := fmt.Sprintf(`{"model":%q,"prompt":%q,"max_tokens":10}`, incomingModel, prompt)
+	body := fmt.Sprintf(`{"model":%q,"prompt":%q,"max_tokens":%d}`, incomingModel, prompt, echoOutputTokens)
 	headers := map[string]string{}
 	if targetModel != "" {
 		headers[metadata.ModelNameRewriteKey] = targetModel
@@ -369,10 +371,10 @@ func runStreamingChatCompletion(prompt string) (string, string) {
 // Returns namespace header, pod header, and the finish reason from the response.
 func runCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, forceCacheThresholdFinishReason bool) (string, string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Completion Request with cache_hit_threshold=%v, forceCacheThreshold=%v", cacheHitThreshold, forceCacheThresholdFinishReason))
-	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"cache_hit_threshold":%v}`, simModelName, prompt, cacheHitThreshold)
+	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":%d,"cache_hit_threshold":%v}`, simModelName, prompt, echoOutputTokens, cacheHitThreshold)
 	extraHeaders := cacheThresholdHeaders(forceCacheThresholdFinishReason)
 	ns, pod, respBody := doPost("/v1/completions", body, extraHeaders)
-	finishReason := utils.ExtractFinishReason(string(respBody))
+	finishReason := response.ExtractFinishReason(string(respBody))
 	ginkgo.By(fmt.Sprintf("Completion Response: ns=%s, pod=%s, finish_reason=%s", ns, pod, finishReason))
 	return ns, pod, finishReason
 }
@@ -380,10 +382,10 @@ func runCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, f
 // runStreamingCompletionWithCacheThreshold sends a streaming completion request with cache_hit_threshold.
 func runStreamingCompletionWithCacheThreshold(prompt string, cacheHitThreshold float64, forceCacheThresholdFinishReason bool) (string, string, string) {
 	ginkgo.By(fmt.Sprintf("Sending Streaming Completion Request with cache_hit_threshold=%v, forceCacheThreshold=%v", cacheHitThreshold, forceCacheThresholdFinishReason))
-	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":10,"stream":true,"cache_hit_threshold":%v}`, simModelName, prompt, cacheHitThreshold)
+	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","max_tokens":%d,"stream":true,"cache_hit_threshold":%v}`, simModelName, prompt, echoOutputTokens, cacheHitThreshold)
 	extraHeaders := cacheThresholdHeaders(forceCacheThresholdFinishReason)
 	ns, pod, respBody := doPost("/v1/completions", body, extraHeaders)
-	finishReason := utils.ExtractFinishReasonFromStreaming(string(respBody))
+	finishReason := response.ExtractFinishReasonFromStreaming(string(respBody))
 	ginkgo.By(fmt.Sprintf("Streaming Completion Response: ns=%s, pod=%s, finish_reason=%s", ns, pod, finishReason))
 	return ns, pod, finishReason
 }
@@ -407,7 +409,7 @@ func verifyMetrics(infPoolName string, numTargetPorts int) {
 
 	metricsURL := fmt.Sprintf("http://localhost:%d/metrics", getMetricsPort())
 
-	_, decodePods := utils.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, getNamespace())
+	_, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, getNamespace())
 
 	// Define the metrics we expect to see
 	preset := []string{ //nolint:prealloc
@@ -445,7 +447,7 @@ func verifyMetrics(infPoolName string, numTargetPorts int) {
 	}
 
 	gomega.Eventually(func(g gomega.Gomega) {
-		theMetrics := utils.GetMetrics(metricsURL)
+		theMetrics := metrics.GetMetrics(metricsURL)
 		g.Expect(theMetrics).ShouldNot(gomega.BeEmpty())
 		metricsAsString := strings.Join(theMetrics, "\n")
 		for _, metric := range expectedMetrics {

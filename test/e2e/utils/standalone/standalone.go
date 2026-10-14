@@ -40,7 +40,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	"github.com/llm-d/llm-d-router/test/e2e/utils"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/lifecycle"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/manifest"
+	"github.com/llm-d/llm-d-router/test/e2e/utils/metrics"
 	testutils "github.com/llm-d/llm-d-router/test/utils"
 )
 
@@ -87,9 +89,9 @@ func Create(cfg Config, plugins string, replicas int, targetPorts ...int32) *Rou
 	access, err := runtime.DefaultUnstructuredConverter.ToUnstructured(router.accessService(cfg.Namespace, cfg.HTTPPort, cfg.MetricsPort))
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	router.objects = append(router.objects, &unstructured.Unstructured{Object: access})
-	resources := &utils.CaseResources{Client: cfg.TestConfig.K8sClient}
+	resources := &lifecycle.CaseResources{Client: cfg.TestConfig.K8sClient}
 	var stopForward func()
-	utils.DeferCaseCleanup(cfg.TestConfig, cfg.KeepOnFailure, resources, cfg.Namespace, func() {
+	lifecycle.DeferCaseCleanup(cfg.TestConfig, cfg.KeepOnFailure, resources, cfg.Namespace, func() {
 		if stopForward != nil {
 			stopForward()
 		}
@@ -119,7 +121,7 @@ func (r *Router) WaitForRouting() {
 		body, err := io.ReadAll(resp.Body)
 		return err == nil && (resp.StatusCode == http.StatusOK || len(body) > 0)
 	}, r.cfg.TestConfig.ReadyTimeout, time.Second).Should(gomega.BeTrue())
-	utils.WaitForEPPToDiscoverPods(r.cfg.TestConfig, r.cfg.MetricsPort, r.PoolName)
+	metrics.WaitForEPPToDiscoverPods(r.cfg.TestConfig, r.cfg.MetricsPort, r.PoolName)
 }
 
 func renderRouter(ctx context.Context, cfg Config, plugins string, replicas int, targetPorts []int32) (*Router, error) {
@@ -143,7 +145,7 @@ func renderRouter(ctx context.Context, cfg Config, plugins string, replicas int,
 	if err != nil {
 		return nil, err
 	}
-	//nolint:gosec // G204: fixed helm executable; release name, chart path and namespace are test-controlled config, without a shell
+	//#nosec G204 -- fixed helm executable; release name, chart path and namespace are test-controlled config, without a shell
 	command := exec.CommandContext(ctx, "helm", "template", cfg.ReleaseName, chartPath,
 		"--namespace", cfg.Namespace, "-f", valuesPath, "-f", "-")
 	command.Stdin = bytes.NewReader(values)
@@ -153,7 +155,7 @@ func renderRouter(ctx context.Context, cfg Config, plugins string, replicas int,
 	if err != nil {
 		return nil, fmt.Errorf("render standalone chart: %w: %s", err, stderr.String())
 	}
-	objects, err := utils.DecodeCaseObjects(output, cfg.Namespace)
+	objects, err := manifest.DecodeCaseObjects(output, cfg.Namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -207,8 +209,8 @@ func (r *Router) accessService(namespace string, httpPort, metricsPort int) *cor
 		Spec: corev1.ServiceSpec{
 			Type: corev1.ServiceTypeNodePort, Selector: r.Selector,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: 8081, TargetPort: intstr.FromInt32(8081), NodePort: int32(httpPort)},       //nolint:gosec // G115: test-controlled port, always small
-				{Name: "metrics", Port: 9090, TargetPort: intstr.FromInt32(9090), NodePort: int32(metricsPort)}, //nolint:gosec // G115: test-controlled port, always small
+				{Name: "http", Port: 8081, TargetPort: intstr.FromInt32(8081), NodePort: int32(httpPort)},       //#nosec G115 -- test-controlled port, always small
+				{Name: "metrics", Port: 9090, TargetPort: intstr.FromInt32(9090), NodePort: int32(metricsPort)}, //#nosec G115 -- test-controlled port, always small
 			},
 		},
 	}
@@ -333,7 +335,7 @@ func startPortForward(cfg Config, selector map[string]string) func() {
 	ctx, cancel := context.WithCancel(cfg.TestConfig.Context)
 	done := make(chan struct{})
 	forward := &routerPortForward{start: func(ctx context.Context, pod *corev1.Pod) (*forwardProcess, error) {
-		// #nosec G204 -- Fixed kubectl executable; API Pod names, integer ports and test settings are separate argv, without a shell.
+		//#nosec G204 -- Fixed kubectl executable; API Pod names, integer ports and test settings are separate argv, without a shell.
 		command := exec.CommandContext(ctx, "kubectl", "port-forward", "pod/"+pod.Name,
 			fmt.Sprintf("%d:8081", cfg.HTTPPort), fmt.Sprintf("%d:9090", cfg.MetricsPort),
 			"--context="+cfg.K8sContext, "--namespace="+cfg.Namespace, "--address=127.0.0.1")

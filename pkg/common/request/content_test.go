@@ -17,12 +17,64 @@ limitations under the License.
 package request
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"maps"
 	"reflect"
 	"slices"
 	"testing"
 )
+
+func TestAnthropicImageURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		sourceType string
+		rawURL     string
+		data       string
+		mediaType  string
+		want       string
+	}{
+		{name: "url source", sourceType: "url", rawURL: "https://example.com/a.png", want: "https://example.com/a.png"},
+		{name: "bare url", rawURL: "https://example.com/bare.png", want: "https://example.com/bare.png"},
+		{name: "base64 with media type", sourceType: "base64", data: "aaaa", mediaType: "image/png", want: "data:image/png;base64,aaaa"},
+		{name: "base64 without media type", sourceType: "base64", data: "cccc", want: "data:image/jpeg;base64,cccc"},
+		{name: "empty source", sourceType: "base64", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AnthropicImageURL(tt.sourceType, tt.rawURL, tt.data, tt.mediaType)
+			if got != tt.want {
+				t.Fatalf("AnthropicImageURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Base64DecodedLen must be exact, not an estimate: the coordinator bounds an
+// inline media payload with it, so a size read one byte high would reject a
+// payload of exactly the configured cap. Padding is what makes it exact, so
+// every residue of 3 is covered.
+func TestBase64DecodedLen(t *testing.T) {
+	for n := 0; n < 300; n++ {
+		b64 := base64.StdEncoding.EncodeToString(make([]byte, n))
+		if got := Base64DecodedLen(b64); got != n {
+			t.Fatalf("Base64DecodedLen of %d encoded bytes = %d, want %d", n, got, n)
+		}
+	}
+	// The sizes a cap actually takes: 1 MiB and 10 MiB are both 1 mod 3, the
+	// residue that left the old encoded-length bound 2 bytes slack.
+	for _, n := range []int{1023, 1024, 1 << 20, 10 << 20} {
+		b64 := base64.StdEncoding.EncodeToString(make([]byte, n))
+		if got := Base64DecodedLen(b64); got != n {
+			t.Fatalf("Base64DecodedLen of %d encoded bytes = %d, want %d", n, got, n)
+		}
+	}
+	// A payload with no data is zero rather than negative, and an unpadded one
+	// is measured as the characters it carries.
+	if got := Base64DecodedLen("===="); got != 0 {
+		t.Errorf("all-padding payload = %d, want 0", got)
+	}
+}
 
 func TestMediaPartURL(t *testing.T) {
 	tests := []struct {
@@ -238,4 +290,79 @@ func TestNewEncoderPrimingBody(t *testing.T) {
 			t.Errorf("mm_processor_kwargs = %#v, want %#v", roundTripped["mm_processor_kwargs"], want)
 		}
 	})
+}
+
+func TestItemPartArrays(t *testing.T) {
+	tests := []struct {
+		name    string
+		item    map[string]any
+		apiType APIType
+		want    []PartArray
+	}{
+		{
+			name:    "chat message content",
+			item:    map[string]any{"role": "user", "content": []any{"a"}},
+			apiType: APITypeChatCompletions,
+			want:    []PartArray{{Field: FieldContent, Parts: []any{"a"}}},
+		},
+		{
+			name:    "responses input item content",
+			item:    map[string]any{"role": "user", "content": []any{"a"}},
+			apiType: APITypeResponses,
+			want:    []PartArray{{Field: FieldContent, Parts: []any{"a"}}},
+		},
+		{
+			// vLLM forwards a function_call_output's output as a tool message's
+			// content, so media in it reaches the model and has to be walked.
+			name:    "responses function_call_output output",
+			item:    map[string]any{"type": "function_call_output", "output": []any{"a"}},
+			apiType: APITypeResponses,
+			want:    []PartArray{{Field: FieldOutput, Parts: []any{"a"}}},
+		},
+		{
+			name:    "content precedes output",
+			item:    map[string]any{"content": []any{"a"}, "output": []any{"b"}},
+			apiType: APITypeResponses,
+			want: []PartArray{
+				{Field: FieldContent, Parts: []any{"a"}},
+				{Field: FieldOutput, Parts: []any{"b"}},
+			},
+		},
+		{
+			// Chat completions defines no output, so walking one would collect a
+			// part the client never sent.
+			name:    "chat output is not walked",
+			item:    map[string]any{"content": []any{"a"}, "output": []any{"b"}},
+			apiType: APITypeChatCompletions,
+			want:    []PartArray{{Field: FieldContent, Parts: []any{"a"}}},
+		},
+		{
+			// A computer_call_output's output is an object, not an array.
+			name:    "non-array output is skipped",
+			item:    map[string]any{"type": "computer_call_output", "output": map[string]any{"type": "computer_screenshot"}},
+			apiType: APITypeResponses,
+			want:    nil,
+		},
+		{
+			name:    "non-array content is skipped",
+			item:    map[string]any{"role": "user", "content": "plain text"},
+			apiType: APITypeChatCompletions,
+			want:    nil,
+		},
+		{
+			name:    "item with neither field",
+			item:    map[string]any{"role": "user"},
+			apiType: APITypeResponses,
+			want:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ItemPartArrays(tt.item, tt.apiType)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ItemPartArrays() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
 }

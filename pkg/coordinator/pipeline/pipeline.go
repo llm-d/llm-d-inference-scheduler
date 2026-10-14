@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
@@ -81,6 +82,23 @@ func (e *UpstreamStreamedError) Error() string {
 }
 
 func (e *UpstreamStreamedError) Unwrap() error { return e.Cause }
+
+// ResponseWrittenError signals that a step answered the client itself with
+// the error status StatusCode. StatusCode is informational and appears only in
+// Error(); classification comes from Cause (ErrBadRequest, an UpstreamError,
+// or an internal error). Callers must classify this for request_error_total /
+// step_errors_total but must not write another response body.
+type ResponseWrittenError struct {
+	Step       string
+	StatusCode int
+	Cause      error
+}
+
+func (e *ResponseWrittenError) Error() string {
+	return fmt.Sprintf("answered client with HTTP %d: %v", e.StatusCode, e.Cause)
+}
+
+func (e *ResponseWrittenError) Unwrap() error { return e.Cause }
 
 // Pipeline orchestrates the sequential execution of steps.
 type Pipeline struct {
@@ -183,6 +201,7 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 		if executed["render"] {
 			coordmetrics.RecordRequestInputTokens(reqCtx.Model, len(reqCtx.TokenIDs))
 		}
+		coordmetrics.RecordEncodeSubrequests(reqCtx.Route, reqCtx.EncodeFanout)
 	}()
 
 	for idx, step := range p.steps {
@@ -238,6 +257,7 @@ func (p *Pipeline) runStep(
 		d := time.Since(start)
 		coordmetrics.RecordStepDuration(name, d)
 		coordmetrics.DecStepRunning(name)
+		reqCtx.StepDuration += d
 		timings[idx] = stepTiming{name: name, duration: d}
 		if r := recover(); r != nil {
 			coordmetrics.IncStepErrorTotal(name, coordmetrics.ErrorCodeInternal)
@@ -272,11 +292,11 @@ func classifyExecutionPath(executed map[string]bool) (string, bool) {
 	}
 	switch {
 	case executed["encode"] && executed["prefill"]:
-		return coordmetrics.PathEncodePrefillDecode, true
+		return metricsutil.DisaggPathEncodePrefillDecode, true
 	case executed["prefill"]:
-		return coordmetrics.PathPrefillDecode, true
+		return metricsutil.DisaggPathPrefillDecode, true
 	default:
-		return coordmetrics.PathDecodeOnly, true
+		return metricsutil.DisaggPathDecodeOnly, true
 	}
 }
 

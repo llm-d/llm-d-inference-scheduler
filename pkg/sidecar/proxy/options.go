@@ -37,6 +37,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
+	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 	"sigs.k8s.io/yaml"
 )
 
@@ -56,7 +57,6 @@ const (
 	// Flags
 	port                      = "port"
 	modelServerPort           = "model-server-port"
-	vllmPort                  = "vllm-port"
 	dataParallelSize          = "data-parallel-size"
 	kvConnector               = "kv-connector"
 	ecConnector               = "ec-connector"
@@ -92,7 +92,7 @@ const (
 
 	// Defaults
 	defaultPort                  = "8000"
-	defaultVLLMPort              = "8200"
+	defaultModelServerPort       = "8200"
 	defaultDataParallelSize      = 1
 	defaultMooncakeBootstrapPort = 8998
 	defaultP2PConnectorPort      = 7777
@@ -114,7 +114,6 @@ const (
 type yamlConfiguration struct {
 	Port                    int      `json:"port,omitempty"`
 	ModelServerPort         int      `json:"model-server-port,omitempty"`
-	VLLMPort                int      `json:"vllm-port,omitempty"`
 	MooncakeBootstrapPort   int      `json:"mooncake-bootstrap-port,omitempty"`
 	P2PConnectorPort        int      `json:"p2p-connector-port,omitempty"`
 	DataParallelSize        int      `json:"data-parallel-size,omitempty"`
@@ -152,8 +151,6 @@ type Options struct {
 
 	// modelServerPort is the port the model server (vLLM, SGLang, etc.) is listening on; used to compute Config.DecoderURL in Complete().
 	modelServerPort string
-	// vllmPort is the deprecated alias for modelServerPort; migrated in Complete().
-	vllmPort string
 	// enableTLS is the list of stages to enable TLS for; used to compute Config.UseTLSFor* in Complete().
 	enableTLS []string
 	// tlsInsecureSkipVerify is the list of stages to skip TLS verification for; used to compute Config.InsecureSkipVerifyFor* in Complete().
@@ -172,17 +169,17 @@ type Options struct {
 var (
 	// supportedKVConnectors defines all valid P/D KV connector types
 	supportedKVConnectors = map[string]struct{}{
-		KVConnectorNIXLV2:        {},
-		KVConnectorSharedStorage: {},
-		KVConnectorSGLang:        {},
-		KVConnectorMooncake:      {},
-		KVConnectorOffloading:    {},
+		constants.KVConnectorNIXLV2:        {},
+		constants.KVConnectorSharedStorage: {},
+		constants.KVConnectorSGLang:        {},
+		constants.KVConnectorMooncake:      {},
+		constants.KVConnectorOffloading:    {},
 	}
 
 	// supportedECConnectors defines all valid E/P EC connector types
 	supportedECConnectors = map[string]struct{}{
-		ECExampleConnector: {},
-		ECConnectorNIXL:    {},
+		constants.ECExampleConnector: {},
+		constants.ECConnectorNIXL:    {},
 	}
 
 	// supportedTLSStages defines all valid stages for TLS configuration
@@ -192,8 +189,8 @@ var (
 		encodeStage:  {},
 	}
 
-	supportedKVConnectorNamesStr = strings.Join([]string{KVConnectorNIXLV2, KVConnectorSharedStorage, KVConnectorSGLang, KVConnectorMooncake, KVConnectorOffloading}, ", ")
-	supportedECConnectorNamesStr = strings.Join([]string{ECExampleConnector, ECConnectorNIXL}, ", ")
+	supportedKVConnectorNamesStr = strings.Join([]string{constants.KVConnectorNIXLV2, constants.KVConnectorSharedStorage, constants.KVConnectorSGLang, constants.KVConnectorMooncake, constants.KVConnectorOffloading}, ", ")
+	supportedECConnectorNamesStr = strings.Join([]string{constants.ECExampleConnector, constants.ECConnectorNIXL}, ", ")
 
 	supportedTLSStageNamesStr = strings.Join([]string{prefillStage, decodeStage, encodeStage}, ", ")
 )
@@ -222,7 +219,7 @@ func NewOptions() *Options {
 	return &Options{
 		Config: Config{
 			Port:                    defaultPort,
-			KVConnector:             KVConnectorNIXLV2,
+			KVConnector:             constants.KVConnectorNIXLV2,
 			DataParallelSize:        defaultDataParallelSize,
 			SecureServing:           true,
 			EnablePrefillerSampling: enablePrefillerSampling,
@@ -252,8 +249,8 @@ func NewOptions() *Options {
 			MoRIIODPSizeLocal: 0,
 			MoRIIODecodeHosts: nil,
 		},
-		vllmPort:      defaultVLLMPort,
-		inferencePool: os.Getenv(envInferencePool),
+		modelServerPort: defaultModelServerPort,
+		inferencePool:   os.Getenv(envInferencePool),
 	}
 }
 
@@ -270,9 +267,7 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.AddGoFlagSet(goFlagSet)
 	fs.StringVar(&opts.Port, port, opts.Port, "the port the sidecar is listening on")
 	fs.StringVar(&opts.modelServerPort, modelServerPort, opts.modelServerPort,
-		fmt.Sprintf("the port the model server is listening on (default %s)", defaultVLLMPort))
-	fs.StringVar(&opts.vllmPort, vllmPort, opts.vllmPort, "the port the model server is listening on")
-	_ = fs.MarkDeprecated(vllmPort, "use --model-server-port instead; --vllm-port will be removed after the deprecation period")
+		fmt.Sprintf("the port the model server is listening on (default %s)", defaultModelServerPort))
 	fs.IntVar(&opts.DataParallelSize, dataParallelSize, opts.DataParallelSize, "the model server's data-parallel size")
 	fs.StringVar(&opts.KVConnector, kvConnector, opts.KVConnector,
 		"the KV protocol between prefiller and decoder. Supported: "+supportedKVConnectorNamesStr)
@@ -290,7 +285,9 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&opts.CertPath, certPath, opts.CertPath, "Directory with tls.crt and tls.key for secure serving. Empty generates a self-signed certificate, which is only suitable for testing.")
 	fs.BoolVar(&opts.EnableSSRFProtection, enableSSRFProtection, opts.EnableSSRFProtection, "enable SSRF protection using InferencePool allowlisting")
 	fs.BoolVar(&opts.EnablePrefillerSampling, enablePrefillerSampling, opts.EnablePrefillerSampling, "if true, the target prefill instance will be selected randomly from among the provided prefill host values")
-	fs.StringVar(&opts.PoolGroup, poolGroup, opts.PoolGroup, "group of the InferencePool this Endpoint Picker is associated with.")
+	fs.StringVar(&opts.PoolGroup, poolGroup, opts.PoolGroup,
+		"Kubernetes resource group of the InferencePool this sidecar is associated with. "+
+			"Only `inference.networking.k8s.io` is currently supported.")
 	fs.IntVar(&opts.DecodeChunkSize, decodeChunkSize, opts.DecodeChunkSize, "enables chunked decode mode when > 0; value is the token budget per chunk. For best performance should be a multiple of the block size.")
 	fs.BoolVar(&opts.Tracing, tracingFlag, opts.Tracing, "Enable OpenTelemetry tracing")
 	fs.IntVar(&opts.MetricsPort, metricsPort, opts.MetricsPort, "Port for the Prometheus /metrics endpoint (exposes the moriio_dns_* and llm_d_disagg_sidecar_* counters). 0 (the default) disables it. Takes precedence over the MORIIO_METRICS_ADDR env var.")
@@ -393,9 +390,6 @@ func parseCipherSuites(names []string) ([]uint16, error) {
 	for _, cipherSuite := range tls.CipherSuites() {
 		byName[cipherSuite.Name] = cipherSuite.ID
 	}
-	for _, cipherSuite := range tls.InsecureCipherSuites() {
-		byName[cipherSuite.Name] = cipherSuite.ID
-	}
 
 	values := make([]uint16, 0, len(names))
 	for _, name := range names {
@@ -419,13 +413,6 @@ func parseCipherSuites(names []string) ([]uint16, error) {
 func (opts *Options) Complete() error {
 	if err := opts.extractYAMLConfiguration(); err != nil {
 		return err
-	}
-
-	// Resolve the effective model server port with flag-over-config precedence:
-	//   --model-server-port flag > --vllm-port flag > model-server-port YAML > vllm-port YAML > default.
-	// The deprecated --vllm-port flag must still override a YAML model-server-port.
-	if (opts.isFlagSet(vllmPort) && !opts.isFlagSet(modelServerPort)) || opts.modelServerPort == "" {
-		opts.modelServerPort = opts.vllmPort
 	}
 
 	// Parse inferencePool field (namespace/name or just name) into Config.
@@ -659,9 +646,6 @@ func (opts *Options) Validate() error {
 	}
 
 	portFlagName := "--" + modelServerPort
-	if opts.isFlagSet(vllmPort) && !opts.isFlagSet(modelServerPort) {
-		portFlagName = "--" + vllmPort
-	}
 	msPort, err := strconv.Atoi(opts.modelServerPort)
 	if err != nil {
 		return fmt.Errorf("%s must be a valid integer, got %q", portFlagName, opts.modelServerPort)
@@ -732,8 +716,8 @@ func (opts *Options) Validate() error {
 	// --enable-p2p-pull composes the OffloadingConnector P2P tier alongside NIXL
 	// via MultiConnector; it is only meaningful with the NIXLv2 PD connector.
 	// offloading already provides the tier natively and needs no flag.
-	if opts.EnableP2PPull && opts.KVConnector != KVConnectorNIXLV2 {
-		return fmt.Errorf("--enable-p2p-pull requires --kv-connector=%s (got %q)", KVConnectorNIXLV2, opts.KVConnector)
+	if opts.EnableP2PPull && opts.KVConnector != constants.KVConnectorNIXLV2 {
+		return fmt.Errorf("--enable-p2p-pull requires --kv-connector=%s (got %q)", constants.KVConnectorNIXLV2, opts.KVConnector)
 	}
 
 	// Validate SSRF protection requirements
@@ -814,12 +798,8 @@ func (opts *Options) mergeYAMLConfiguration(cfg yamlConfiguration) {
 	if cfg.Port != 0 && !opts.isFlagSet(port) {
 		opts.Port = strconv.Itoa(cfg.Port)
 	}
-	// If both keys may be present, Complete() resolves precedence: modelServerPort wins.
 	if cfg.ModelServerPort != 0 && !opts.isFlagSet(modelServerPort) {
 		opts.modelServerPort = strconv.Itoa(cfg.ModelServerPort)
-	}
-	if cfg.VLLMPort != 0 && !opts.isFlagSet(vllmPort) {
-		opts.vllmPort = strconv.Itoa(cfg.VLLMPort)
 	}
 	if cfg.MooncakeBootstrapPort != 0 && !opts.isFlagSet(mooncakeBootstrapPortFlag) {
 		opts.MooncakeBootstrapPort = cfg.MooncakeBootstrapPort

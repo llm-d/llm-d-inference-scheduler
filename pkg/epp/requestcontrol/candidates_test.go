@@ -274,6 +274,83 @@ func TestCachedEndpointCandidates_CacheIsolation_EmptyVsDefault(t *testing.T) {
 	assert.Equal(t, 2, mockDelegate.callCount(), "Empty subset should not hit the default cache key")
 }
 
+func TestCachedEndpointCandidates_CacheIsolation_MalformedVsDefault(t *testing.T) {
+	t.Parallel()
+
+	ep := makeMockEndpoint("p1", "1.1.1.1")
+	mockDelegate := &mockEndpointCandidates{}
+	cached := NewCachedEndpointCandidates(context.Background(), mockDelegate, time.Minute)
+
+	// The delegate drops non-string entries, so a single malformed entry resolves to no endpoints.
+	_ = cached.Locate(context.Background(), makeMetadataWithSubset([]any{42}))
+
+	mockDelegate.mu.Lock()
+	mockDelegate.result = []fwkdl.Endpoint{ep}
+	mockDelegate.mu.Unlock()
+
+	res := cached.Locate(context.Background(), nil)
+	assert.Equal(t, []fwkdl.Endpoint{ep}, res, "A malformed subset must not populate the default cache key")
+	assert.Equal(t, 2, mockDelegate.callCount())
+}
+
+func TestCachedEndpointCandidates_CacheKeyCollisions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		first  map[string]any
+		second map[string]any
+	}{
+		{
+			name:   "default marker",
+			first:  nil,
+			second: makeMetadataWithSubset([]any{"__default__"}),
+		},
+		{
+			name:   "empty marker",
+			first:  makeMetadataWithSubset([]any{}),
+			second: makeMetadataWithSubset([]any{"__explicit_empty__"}),
+		},
+		{
+			name:   "separator in single endpoint",
+			first:  makeMetadataWithSubset([]any{"10.0.0.1:80", "10.0.0.2:80"}),
+			second: makeMetadataWithSubset([]any{"10.0.0.1:80|10.0.0.2:80"}),
+		},
+		{
+			name:   "separator in multiple endpoints",
+			first:  makeMetadataWithSubset([]any{"10.0.0.1:80", "10.0.0.2:80", "10.0.0.3:80"}),
+			second: makeMetadataWithSubset([]any{"10.0.0.1:80|10.0.0.2:80", "10.0.0.3:80"}),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, inputs := range [][2]map[string]any{{tc.first, tc.second}, {tc.second, tc.first}} {
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				delegate := &mockEndpointCandidates{}
+				cached := NewCachedEndpointCandidates(ctx, delegate, time.Minute)
+				cached.Locate(ctx, inputs[0])
+				cached.Locate(ctx, inputs[1])
+				assert.Equal(t, 2, delegate.callCount(), "Distinct subsets must not share cached results")
+			}
+		})
+	}
+}
+
+func TestCachedEndpointCandidates_DefaultMarkerDoesNotReturnAllPods(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	delegate := NewDatastoreEndpointCandidates(&mockDatastore{
+		pods: []fwkdl.Endpoint{makeMockEndpoint("pod-a", "10.0.0.1")},
+	})
+	cached := NewCachedEndpointCandidates(ctx, delegate, time.Minute)
+	require.Len(t, cached.Locate(ctx, nil), 1)
+	assert.Empty(t, cached.Locate(ctx, makeMetadataWithSubset([]any{"__default__"})))
+	assert.Len(t, cached.Locate(ctx, nil), 1)
+}
+
 // --- Helpers & Mocks ---
 
 // mockEndpointCandidates implements contracts.EndpointCandidates.
@@ -315,5 +392,57 @@ func makeMetadataWithSubset(endpoints []any) map[string]any {
 		metadata.SubsetFilterNamespace: map[string]any{
 			metadata.SubsetFilterKey: endpoints,
 		},
+	}
+}
+
+func TestDatastoreEndpointCandidates_IPv6Subset(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		ip        string
+		subset    string
+		wantMatch bool
+	}{
+		{"IPv4 with port", "10.0.0.1", "10.0.0.1:8080", true},
+		{"IPv4 without port", "10.0.0.1", "10.0.0.1", true},
+		{"bracketed IPv6 with port", "2001:db8::1", "[2001:db8::1]:8080", true},
+		{"IPv6 without port", "2001:db8::1", "2001:db8::1", true},
+		{"noncanonical IPv6 with port", "2001:db8::1", "[2001:DB8:0::1]:8080", true},
+		{"noncanonical IPv6 without port", "2001:db8::1", "2001:0db8:0:0:0:0:0:1", true},
+		{"bracketed IPv6 without port", "2001:db8::1", "[2001:db8::1]", true},
+		{"IPv6 zone with port", "fe80::1%eth0", "[FE80:0::1%eth0]:8080", true},
+		{"IPv6 zone without port", "fe80::1%eth0", "fe80::1%eth0", true},
+		{"bracketed IPv6 zone without port", "fe80::1%eth0", "[fe80::1%eth0]", true},
+		{"IPv6 nonnumeric port keeps existing behavior", "2001:db8::1", "[2001:db8::1]:invalid", true},
+		{"IPv6 empty port keeps existing behavior", "2001:db8::1", "[2001:db8::1]:", true},
+		{"IPv6 final hextet stays address", "2001:db8::1:8080", "2001:db8::1:8080", true},
+		{"hostname with port", "worker.example", "worker.example:8080", true},
+		{"hostname without port", "worker.example", "worker.example", true},
+		{"nonnumeric port keeps existing behavior", "10.0.0.1", "10.0.0.1:invalid", true},
+		{"empty port keeps existing behavior", "10.0.0.1", "10.0.0.1:", true},
+		{"extra colon stays unmatched", "10.0.0.1", "10.0.0.1:8080:invalid", false},
+		{"bracketed hostname stays unmatched", "worker.example", "[worker.example]:8080", false},
+		{"bracketed bare hostname stays unmatched", "worker.example", "[worker.example]", false},
+		{"missing IPv6 closing bracket stays unmatched", "2001:db8::1", "[2001:db8::1", false},
+		{"missing IPv6 opening bracket stays unmatched", "2001:db8::1", "2001:db8::1]", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ep := makeMockEndpoint("target", tc.ip)
+			other := makeMockEndpoint("other", "10.0.0.99")
+			candidates := NewDatastoreEndpointCandidates(&mockDatastore{pods: []fwkdl.Endpoint{ep, other}})
+			got := candidates.Locate(context.Background(), makeMetadataWithSubset([]any{tc.subset}))
+			if !tc.wantMatch {
+				if len(got) != 0 {
+					t.Fatalf("subset %q should remain unmatched, got %v", tc.subset, got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].GetMetadata().GetIPAddress() != tc.ip {
+				t.Fatalf("subset %q should retain exactly endpoint %q, got %v", tc.subset, tc.ip, got)
+			}
+		})
 	}
 }
