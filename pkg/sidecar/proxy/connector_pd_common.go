@@ -39,6 +39,10 @@ const (
 	requestFieldTransferID = "transfer_id"
 )
 
+// concurrentPrefillGrace limits how long prefill may continue after a
+// successful decode returns. A variable so tests can shorten it.
+var concurrentPrefillGrace = 30 * time.Second
+
 // runConcurrentPD fires the prefill and decode requests of a concurrent-dispatch
 // P/D protocol (Mooncake, SGLang) in parallel: prefill runs in a goroutine
 // and its response is discarded (only status and duration are recorded on
@@ -102,16 +106,17 @@ func (s *Server) runConcurrentPD(
 		pw := &bufferedResponseWriter{}
 		prefillHandler.ServeHTTP(pw, prefillReq)
 		prefillDuration := time.Since(prefillStart)
-		metrics.RecordPrefillDuration(prefillDuration)
 		prefillSpan.SetAttributes(
 			semconv.LLMDPDProxyPrefillStatusCode(pw.statusCode),
 			semconv.LLMDPDProxyPrefillDurationMs(float64(prefillDuration.Milliseconds())),
 		)
-		if isHTTPError(pw.statusCode) {
+		// A prefill the sidecar cancelled is not a prefill error.
+		if isHTTPError(pw.statusCode) && prefillCtx.Err() == nil {
 			metrics.RecordError(metrics.StagePrefill)
 			prefillSpan.SetStatus(codes.Error, "prefill request failed")
 			cancelDecode()
 		}
+		metrics.RecordPrefillDuration(prefillDuration)
 		s.logger.V(logging.DEBUG).Info("concurrent-dispatch prefill request completed", "connector", connector, "status", pw.statusCode)
 	}()
 
@@ -131,6 +136,26 @@ func (s *Server) runConcurrentPD(
 	decodeWriter, decodeStatus := captureResponseStatus(w)
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
+	defer func() {
+		if prefillCtx.Err() != nil {
+			return
+		}
+		// The request is over once decode has failed; a prefill still running
+		// would compute KV nobody consumes.
+		if !decodeReturned || decodeStatus.failed() {
+			cancelPrefill()
+			return
+		}
+		// Prefill has no deadline of its own; one that never responds would
+		// hold the goroutine and connection indefinitely.
+		// Not awaited: the client's response must not wait on the prefill response.
+		graceTimer := time.AfterFunc(concurrentPrefillGrace, func() {
+			s.logger.Error(nil, "concurrent-dispatch prefill did not complete within the grace period after decode; cancelled",
+				"connector", connector)
+			cancelPrefill()
+		})
+		context.AfterFunc(prefillCtx, func() { graceTimer.Stop() })
+	}()
 	s.decoderProxy.ServeHTTP(decodeWriter, decodeReq)
 	decodeReturned = true
 
