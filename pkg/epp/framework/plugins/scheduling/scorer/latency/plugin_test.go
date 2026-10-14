@@ -235,6 +235,14 @@ func TestScoreConstantHeadroomPreservesDisabledWeights(t *testing.T) {
 					name: "TTFT enabled", ttftWeight: 0.8, tpotWeight: 0.2,
 					ttft: [2]float64{10, 30}, tpot: [2]float64{5, 5},
 				},
+				{
+					name: "TPOT positive below normalized precision", ttftWeight: 1e308, tpotWeight: 1e-308,
+					ttft: [2]float64{10, 10}, tpot: [2]float64{5, 20},
+				},
+				{
+					name: "TTFT positive below normalized precision", ttftWeight: 1e-308, tpotWeight: 1e308,
+					ttft: [2]float64{10, 30}, tpot: [2]float64{5, 5},
+				},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					cfg := DefaultConfig
@@ -253,6 +261,13 @@ func TestScoreConstantHeadroomPreservesDisabledWeights(t *testing.T) {
 					if equal != tc.wantEqual {
 						t.Fatalf("scores = (%v, %v), want equal = %v",
 							scores[endpoints[0]], scores[endpoints[1]], tc.wantEqual)
+					}
+					if !tc.wantEqual {
+						wantFirstHigher := strategy == StrategyLeast
+						if (scores[endpoints[0]] > scores[endpoints[1]]) != wantFirstHigher {
+							t.Fatalf("scores = (%v, %v), want first higher = %v",
+								scores[endpoints[0]], scores[endpoints[1]], wantFirstHigher)
+						}
 					}
 				})
 			}

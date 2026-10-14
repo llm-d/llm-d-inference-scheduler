@@ -284,9 +284,9 @@ func (s *Plugin) scoreBucket(ctx context.Context, data []epData, scores map[fwks
 	// Range-based weight re-normalization.
 	// If one dimension has zero range, use the other dimension only when
 	// its configured weight is positive.
-	if ttftRange <= eps && tpotRange > eps && beta > 0 {
+	if ttftRange <= eps && tpotRange > eps && s.config.TPOTWeight > 0 {
 		alpha, beta = 0.0, 1.0
-	} else if tpotRange <= eps && ttftRange > eps && alpha > 0 {
+	} else if tpotRange <= eps && ttftRange > eps && s.config.TTFTWeight > 0 {
 		alpha, beta = 1.0, 0.0
 	}
 
