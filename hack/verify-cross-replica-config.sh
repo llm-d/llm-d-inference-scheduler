@@ -159,7 +159,7 @@ for mode in redis all-active flag autoscaling; do
   render "${mode_args[@]}"
   assert_yaml "${deployment}" '.spec.template.spec.containers[] | select(.name == "epp") | .args | contains(["--health-checking=true"])'
   assert_yaml "${output}" 'select(.kind == "Service" and .metadata.name == "sync-test-epp-discovery") | (.spec.clusterIP == "None" and .spec.publishNotReadyAddresses != true and .spec.selector."llm-d-router-standalone" == "sync-test-epp" and .spec.ports[0].port == 9002)'
-  assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | (.type == "STRICT_DNS" and .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp-discovery.default.svc.cluster.local")'
+  assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | (.type == "STRICT_DNS" and .connect_timeout == "1s" and .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp-discovery.default.svc.cluster.local")'
   "${YQ}" -o=json 'select(.kind == "Service" and .metadata.name == "sync-test-epp") | .spec' "${output}" > "${TEMP_DIR}/service-after.json"
   diff -u "${TEMP_DIR}/service-before.json" "${TEMP_DIR}/service-after.json"
 done
@@ -187,7 +187,7 @@ for mode in default leader flag sidecar disabled priority gke agentgateway; do
   "${YQ}" eval-all -e '[select(.kind == "Service" and .metadata.name == "sync-test-epp-discovery")] | length == 0' "${output}" > /dev/null
   case "${mode}" in
     default|leader|flag|gke)
-      assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp.default.svc.cluster.local"'
+      assert_yaml "${output}" 'select(.kind == "ConfigMap" and .metadata.name == "envoy") | .data."envoy.yaml" | from_yaml | .static_resources.clusters[] | select(.name == "ext_proc") | (.connect_timeout == "86400s" and .load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address.address == "sync-test-epp.default.svc.cluster.local")'
       ;;
     priority)
       assert_yaml "${output}" 'select(.kind == "Service" and .metadata.name == "sync-test-epp-headless") | (.spec.clusterIP == "None" and .spec.publishNotReadyAddresses == true)'
