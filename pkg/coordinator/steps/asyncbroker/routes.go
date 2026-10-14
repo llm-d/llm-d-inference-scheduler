@@ -30,6 +30,7 @@ import (
 	"github.com/llm-d/llm-d-async/api"
 	"github.com/redis/go-redis/v9"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
@@ -268,11 +269,11 @@ func writeResult(w http.ResponseWriter, res *api.ResultMessage) (pipelineResult,
 			return upstreamFailure(http.StatusBadGateway), encodeOpenAIError(w, http.StatusBadGateway, "api_error", "MALFORMED_RESULT",
 				fmt.Sprintf("stored result carries invalid status code %d", res.StatusCode))
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(reqcommon.HeaderContentType, reqcommon.ContentTypeJSON)
 		// The upstream body is written verbatim without re-encoding; block
 		// MIME-sniffing so a client cannot reinterpret it as HTML and run
 		// script content it may contain.
-		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set(reqcommon.HeaderContentTypeOptions, reqcommon.ContentTypeOptionsNoSniff)
 		w.WriteHeader(res.StatusCode)
 		_, writeErr = w.Write([]byte(res.Payload)) //#nosec G705 -- served as application/json with nosniff
 		if res.StatusCode >= http.StatusBadRequest {

@@ -19,6 +19,7 @@ package metrics
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -150,4 +151,129 @@ func TestObserveWithTraceExemplar_NoSpanStillObserves(t *testing.T) {
 	var m dto.Metric
 	require.NoError(t, h.(prometheus.Metric).Write(&m))
 	require.Equal(t, uint64(1), m.Histogram.GetSampleCount(), "the observation itself must still be recorded")
+}
+
+// latencyRecorder records one observation through a latency recorder and names
+// the series it lands on.
+type latencyRecorder struct {
+	name   string
+	record func(ctx context.Context)
+	vec    *prometheus.HistogramVec
+	labels []string
+}
+
+func latencyRecorders() []latencyRecorder {
+	received := time.Now()
+	firstToken := received.Add(50 * time.Millisecond)
+	complete := received.Add(250 * time.Millisecond)
+	return []latencyRecorder{
+		{
+			name: "ttft",
+			record: func(ctx context.Context) {
+				RecordRequestTTFT(ctx, "m", "t", "f", "1", true, received, firstToken)
+			},
+			vec:    llmdRequestTTFT,
+			labels: []string{"m", "t", "f", "1", "true"},
+		},
+		{
+			name: "tpot",
+			record: func(ctx context.Context) {
+				RecordRequestTPOT(ctx, "m", "t", "f", "1", true, received, firstToken, complete, 5)
+			},
+			vec:    llmdRequestTPOT,
+			labels: []string{"m", "t", "f", "1"},
+		},
+		{
+			name: "itl",
+			record: func(ctx context.Context) {
+				RecordInterTokenLatency(ctx, "m", "t", "f", "1", 0.02)
+			},
+			vec:    llmdInterTokenLatency,
+			labels: []string{"m", "t", "f", "1"},
+		},
+		{
+			name: "ntpot",
+			record: func(ctx context.Context) {
+				RecordNormalizedTimePerOutputToken(ctx, "m", "t", "f", "1", received, complete, 5)
+			},
+			vec:    llmdNormalizedTimePerOutputToken,
+			labels: []string{"m", "t", "f", "1"},
+		},
+		{
+			name: "scheduler",
+			record: func(ctx context.Context) {
+				RecordSchedulerE2ELatency(ctx, 3*time.Millisecond)
+			},
+			vec: llmdSchedulerE2ELatency,
+		},
+	}
+}
+
+// bucketExemplars returns the exemplars on a histogram's buckets.
+func bucketExemplars(h *dto.Histogram) []*dto.Exemplar {
+	var found []*dto.Exemplar
+	for _, bucket := range h.GetBucket() {
+		if bucket.Exemplar != nil {
+			found = append(found, bucket.Exemplar)
+		}
+	}
+	return found
+}
+
+func TestLatencyRecordersAttachTraceExemplars(t *testing.T) {
+	for _, r := range latencyRecorders() {
+		t.Run(r.name+"/sampled", func(t *testing.T) {
+			Reset()
+			ctx, span := ctxWithRecordingSpan(t)
+			defer span.End()
+			r.record(ctx)
+
+			h, err := getHistogramVecLabelValues(t, r.vec, r.labels...)
+			require.NoError(t, err)
+			exemplars := bucketExemplars(h)
+			require.Len(t, exemplars, 1)
+			require.Equal(t, span.SpanContext().TraceID().String(), exemplarLabels(exemplars[0])[exemplarTraceIDLabel])
+		})
+
+		t.Run(r.name+"/unsampled", func(t *testing.T) {
+			Reset()
+			r.record(ctxWithSpan(t, false))
+
+			h, err := getHistogramVecLabelValues(t, r.vec, r.labels...)
+			require.NoError(t, err)
+			require.Empty(t, bucketExemplars(h))
+			require.Equal(t, uint64(1), h.GetSampleCount())
+		})
+	}
+}
+
+// BenchmarkRecordInterTokenLatency measures the exemplar cost on the ITL path,
+// which records once per streaming chunk.
+func BenchmarkRecordInterTokenLatency(b *testing.B) {
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	b.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	sampledCtx, span := tp.Tracer("exemplar-bench").Start(context.Background(), "request")
+	defer span.End()
+
+	unsampledCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{1},
+		SpanID:  trace.SpanID{1},
+	}))
+
+	for _, bc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"no-span", context.Background()},
+		{"unsampled", unsampledCtx},
+		{"sampled", sampledCtx},
+	} {
+		b.Run(bc.name, func(b *testing.B) {
+			Reset()
+			b.ReportAllocs()
+			for b.Loop() {
+				RecordInterTokenLatency(bc.ctx, "m", "t", "f", "1", 0.02)
+			}
+		})
+	}
 }
