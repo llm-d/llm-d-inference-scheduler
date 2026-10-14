@@ -200,6 +200,23 @@ Latency Predictor Sidecar Containers
 {{- end }}
 {{- end }}
 
+{{/*
+Scheduling for the service-mode predictor pods. Each key falls back to the
+matching router.epp key when empty, which places the pods where the sidecar
+containers run.
+*/}}
+{{- define "llm-d-router.latencyPredictor.scheduling" -}}
+{{- $lp := .Values.router.latencyPredictor -}}
+{{- with ($lp.affinity | default .Values.router.epp.affinity) }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with ($lp.tolerations | default .Values.router.epp.tolerations) }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
 {{- define "llm-d-router.latencyPredictor.trainingVolume" }}
 - name: training-server-storage
   emptyDir:

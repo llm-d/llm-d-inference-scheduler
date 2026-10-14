@@ -228,6 +228,10 @@ latencyPredictor:
   # mode. The images declare no user and run as root unless runAsUser is set.
   # In sidecar mode router.epp.podSecurityContext applies instead.
   podSecurityContext: {}
+  # Affinity and tolerations for the training and prediction pods in service
+  # mode. Empty uses router.epp.affinity and router.epp.tolerations.
+  affinity: {}
+  tolerations: []
   # Training Server Configuration
   trainingServer:
     securityContext: {}

@@ -148,6 +148,25 @@ for key in "${!test_cases_llm_d_router_gateway[@]}"; do
   echo "Test case ${key} passed validation."
 done
 
+echo "Verifying latency predictor service mode keeps EPP config checksum and scheduling..."
+lp_service_args="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.latencyPredictor.enabled=true --set router.latencyPredictor.mode=service"
+epp_checksum() {
+  ${HELM} template lp ${SCRIPT_ROOT}/config/charts/llm-d-router-gateway ${lp_service_args} "$@" \
+    | awk '/^kind: Deployment/{d=1} /^---/{d=0} d && /^  name: lp-epp$/{e=1} e && /checksum\/config:/{print $2; exit}'
+}
+lp_base_checksum=$(epp_checksum)
+if [ -z "${lp_base_checksum}" ] || [ "${lp_base_checksum}" != "$(epp_checksum --set router.latencyPredictor.predictionServers.config.UVICORN_WORKERS=4)" ]; then
+  echo "Latency predictor service mode: a prediction-server-only config change altered the EPP config checksum"
+  exit 1
+fi
+lp_tolerations_render="${TEMP_DIR}/latency-predictor-service-tolerations.yaml"
+${HELM} template lp ${SCRIPT_ROOT}/config/charts/llm-d-router-gateway ${lp_service_args} \
+  --set 'router.epp.tolerations[0].key=dedicated' --set 'router.epp.tolerations[0].operator=Exists' > "${lp_tolerations_render}"
+if [ "$(grep -c -- '- key: dedicated' "${lp_tolerations_render}")" -ne 3 ]; then
+  echo "Latency predictor service mode: predictor Deployments did not inherit router.epp.tolerations"
+  exit 1
+fi
+
 echo "Verifying GKE Gateway monitoring defaults to Prometheus Operator..."
 gke_monitoring_render_output="${TEMP_DIR}/llm-d-router-gateway-gke-monitoring-render.yaml"
 gke_monitoring_render_command="${HELM} template gke-monitoring ${SCRIPT_ROOT}/config/charts/llm-d-router-gateway --set provider.name=gke --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.monitoring.prometheus.enabled=true --set router.monitoring.prometheus.auth.enabled=false > ${gke_monitoring_render_output}"

@@ -1,4 +1,8 @@
 {{- define "llm-d-epp.config" -}}
+{{ include "llm-d-epp.router-config" . }}{{ include "llm-d-epp.latency-predictor-config" . }}
+{{- end -}}
+
+{{- define "llm-d-epp.router-config" -}}
 {{- $pluginsConfig := .Values.router.epp.pluginsConfig | default dict }}
 {{- if not (kindIs "map" $pluginsConfig) }}
 {{- fail "router.epp.pluginsConfig must be a map" }}
@@ -143,6 +147,14 @@ data:
   {{- include "llm-d-router.proxyConfigMapData" . | nindent 2 }}
 {{- end }}
 ---
+{{- end -}}
+
+{{/*
+Latency predictor ConfigMaps. Kept apart from llm-d-epp.router-config so the
+EPP pod checksum can leave them out when the predictors run as their own
+Deployments.
+*/}}
+{{- define "llm-d-epp.latency-predictor-config" -}}
 {{- if .Values.router.latencyPredictor.enabled }}
 apiVersion: v1
 kind: ConfigMap

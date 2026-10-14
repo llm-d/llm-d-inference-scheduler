@@ -532,6 +532,8 @@ Runs a latency training server and one or more prediction servers that feed a la
 | `router.latencyPredictor.enabled` | Enable latency-based routing (requires extra Borg/training setup). | `false` |
 | `router.latencyPredictor.mode` | `sidecar` runs the servers in the EPP pod; `service` runs them as their own Deployments and Services. | `sidecar` |
 | `router.latencyPredictor.podSecurityContext` | Pod-level `securityContext` for the training and prediction pods in `service` mode. | `{}` |
+| `router.latencyPredictor.affinity` | Affinity for the training and prediction pods in `service` mode. Empty uses `router.epp.affinity`. | `{}` |
+| `router.latencyPredictor.tolerations` | Tolerations for the training and prediction pods in `service` mode. Empty uses `router.epp.tolerations`. | `[]` |
 | `router.latencyPredictor.trainingServer.image` | Latency training server image configuration. | |
 | `router.latencyPredictor.predictionServers.image` | Latency prediction server image configuration. | |
 | `router.latencyPredictor.predictionServers.count` | Number of prediction servers: containers in the EPP pod in `sidecar` mode, pods in `service` mode. | `1` |
