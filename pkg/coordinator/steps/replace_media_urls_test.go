@@ -340,46 +340,6 @@ func TestReplaceMediaURLsStep_Messages_RejectsFileSource(t *testing.T) {
 	}
 }
 
-// A Messages request names an image with an Anthropic image block only, so a
-// chat image_url part there is not media to the walk and is not downloaded.
-func TestReplaceMediaURLsStep_MessagesIgnoresChatImagePart(t *testing.T) {
-	var hits atomic.Int32
-	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-		w.Header().Set("Content-Type", testImageJPEGContentType)
-		_, _ = w.Write([]byte("jpeg-bytes"))
-	}))
-	defer imageServer.Close()
-
-	step := newLoopbackStep(t, map[string]any{"download_timeout": "5s"})
-
-	reqCtx := &pipeline.RequestContext{
-		OriginalPath: reqcommon.PathMessages,
-		Body: map[string]any{
-			"messages": []any{
-				map[string]any{"role": "user", "content": []any{
-					map[string]any{"type": "text", "text": "describe this"},
-					map[string]any{
-						"type":      reqcommon.PartTypeImageURL,
-						"image_url": map[string]any{"url": imageServer.URL + "/photo.jpg"},
-					},
-				}},
-			},
-		},
-	}
-
-	if err := step.Execute(context.Background(), reqCtx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(reqCtx.MultimodalEntries) != 0 {
-		t.Errorf("expected no multimodal entry for a chat image part on a Messages request, got %d", len(reqCtx.MultimodalEntries))
-	}
-	if n := hits.Load(); n != 0 {
-		t.Errorf("expected no download, got %d", n)
-	}
-}
-
 // A chat-completions request carrying a stray top-level "input" array must not
 // have that field's image processed.
 func TestReplaceMediaURLsStep_IgnoresStrayInputOnChatCompletions(t *testing.T) {

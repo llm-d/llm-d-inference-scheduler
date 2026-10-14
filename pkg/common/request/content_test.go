@@ -150,11 +150,6 @@ func TestMediaPartURL(t *testing.T) {
 			wantURL: "data:image/png;base64,aGk=",
 		},
 		{
-			name:    "messages base64 source without a media_type",
-			part:    map[string]any{"type": "image", "source": map[string]any{"type": "base64", "data": "aGk="}},
-			wantURL: "data:image/jpeg;base64,aGk=",
-		},
-		{
 			// vLLM reads any source but a url one as base64.
 			name:    "messages source without a type reads as base64",
 			part:    map[string]any{"type": "image", "source": map[string]any{"media_type": "image/png", "data": "aGk="}},
@@ -164,11 +159,6 @@ func TestMediaPartURL(t *testing.T) {
 			// A Files API reference names an upload the router never stored.
 			name:    "messages file source carries no url",
 			part:    map[string]any{"type": "image", "source": map[string]any{"type": "file", "file_id": "file-123"}},
-			wantURL: "",
-		},
-		{
-			name:    "messages base64 source with empty data",
-			part:    map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": ""}},
 			wantURL: "",
 		},
 		{

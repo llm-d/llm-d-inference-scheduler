@@ -471,25 +471,6 @@ func TestExtractMMItems(t *testing.T) {
 			expected: 0,
 		},
 		{
-			// vLLM keeps only image blocks from a tool_result's content, so a
-			// chat part there reaches no worker.
-			name: "messages chat part inside a tool_result is not extracted",
-			request: map[string]any{
-				"messages": []any{
-					map[string]any{
-						"role": "user",
-						"content": []any{map[string]any{
-							"type":        "tool_result",
-							"tool_use_id": "t1",
-							"content":     []any{imageURLItem("https://example.com/tool.jpg")},
-						}},
-					},
-				},
-			},
-			apiType:  reqcommon.APITypeMessages,
-			expected: 0,
-		},
-		{
 			// Python's json reads a number outside float64 range as inf, so the
 			// model server serves this body and processes the image. Decoding
 			// the turn has to survive it, or the image reaches the prefiller

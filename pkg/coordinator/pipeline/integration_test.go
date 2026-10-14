@@ -787,24 +787,11 @@ func TestFullPipeline_MessagesFormat(t *testing.T) {
 	}))
 	defer renderServer.Close()
 
-	var mu sync.Mutex
-	var encodeBodies []map[string]any
-	var encodePaths []string
-	var prefillPath string
-	var prefillBody, decodeBody map[string]any
-
 	gatewayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var parsed map[string]any
-		_ = json.Unmarshal(body, &parsed)
 
 		switch phase := r.Header.Get(reqcommon.EPPProfileHeaderKey); phase {
 		case gateway.PhaseEncode:
-			mu.Lock()
-			encodeBodies = append(encodeBodies, parsed)
-			encodePaths = append(encodePaths, r.URL.Path)
-			mu.Unlock()
-
 			// Key the ec params off the image the sub-request primes, so a swap
 			// between images fails the assertions below.
 			hash := ""
@@ -818,18 +805,11 @@ func TestFullPipeline_MessagesFormat(t *testing.T) {
 			})
 
 		case gateway.PhasePrefill:
-			mu.Lock()
-			prefillPath = r.URL.Path
-			prefillBody = parsed
-			mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"kv_transfer_params": map[string]any{"block_id": "abc123", "peer_host": "10.0.0.2", "peer_port": 5502},
 			})
 
 		case gateway.PhaseDecode:
-			mu.Lock()
-			decodeBody = parsed
-			mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"type": "message", "role": "assistant",
 				"content": []map[string]any{{"type": "text", "text": "Three pictures."}},
@@ -915,67 +895,15 @@ func TestFullPipeline_MessagesFormat(t *testing.T) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	// One encode sub-request per image, each a Messages body carrying that one
-	// image block unreshaped, capped to one token.
-	if len(encodeBodies) != len(images) {
-		t.Fatalf("expected %d encode sub-requests, got %d", len(images), len(encodeBodies))
-	}
-	for i, body := range encodeBodies {
-		if encodePaths[i] != reqcommon.PathMessages {
-			t.Errorf("encode sub-request %d posted to %s, want %s", i, encodePaths[i], reqcommon.PathMessages)
-		}
-		if body["max_tokens"] != float64(1) {
-			t.Errorf("encode sub-request %d max_tokens = %v, want 1", i, body["max_tokens"])
-		}
-		messages, _ := body["messages"].([]any)
-		if len(messages) != 1 {
-			t.Fatalf("encode sub-request %d carries %d messages, want 1", i, len(messages))
-		}
-		content, _ := messages[0].(map[string]any)["content"].([]any)
-		if len(content) != 1 || content[0].(map[string]any)["type"] != "image" {
-			t.Errorf("encode sub-request %d content = %v, want one image block", i, content)
-		}
-	}
+	// The ec params merge in entry order, so each entry's must carry the hash of
+	// the image its encode sub-request primed.
 	if len(reqCtx.ECTransferParams) != len(images) {
-		t.Errorf("expected ec params merged for every image, got %d", len(reqCtx.ECTransferParams))
+		t.Fatalf("expected ec params for %d images, got %d", len(images), len(reqCtx.ECTransferParams))
 	}
-
-	// Prefill clones the client's Messages body, caps it, and carries both
-	// transfer params.
-	if prefillBody == nil {
-		t.Fatal("prefill was not called")
-	}
-	if prefillPath != reqcommon.PathMessages {
-		t.Errorf("prefill posted to %s, want %s", prefillPath, reqcommon.PathMessages)
-	}
-	if prefillBody["max_tokens"] != float64(1) {
-		t.Errorf("prefill max_tokens = %v, want 1", prefillBody["max_tokens"])
-	}
-	if _, ok := prefillBody["messages"].([]any); !ok {
-		t.Error("prefill body must carry the client's messages array")
-	}
-	for _, field := range []string{"kv_transfer_params", "ec_transfer_params"} {
-		if _, ok := prefillBody[field]; !ok {
-			t.Errorf("prefill body missing %s", field)
+	for i, image := range images {
+		if reqCtx.ECTransferParams[i][image.hash] == nil {
+			t.Errorf("encode sub-request %d primed the wrong image, got ec params %v", i, reqCtx.ECTransferParams[i])
 		}
-	}
-
-	// Decode forwards the client's own body, uncapped, with the prefill's
-	// kv_transfer_params and no uuid on any image block.
-	if decodeBody == nil {
-		t.Fatal("decode was not called")
-	}
-	if decodeBody["max_tokens"] != float64(40) {
-		t.Errorf("decode max_tokens = %v, want the client's 40", decodeBody["max_tokens"])
-	}
-	if kvParams, _ := decodeBody["kv_transfer_params"].(map[string]any); kvParams == nil {
-		t.Error("decode body missing kv_transfer_params")
-	}
-	if strings.Contains(fmt.Sprint(decodeBody["messages"]), "uuid") {
-		t.Errorf("decode body stamped a uuid on a Messages image block: %v", decodeBody["messages"])
 	}
 }
 

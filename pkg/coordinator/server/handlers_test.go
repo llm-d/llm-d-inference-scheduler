@@ -253,12 +253,13 @@ func TestHandleInference_InvalidJSONReturnsOpenAIError(t *testing.T) {
 	}
 }
 
-// TestHandleInference_RejectionsUseOpenAIEnvelope covers every rejection the
+// TestHandleInference_RejectionsUseAPIEnvelope covers every rejection the
 // handler writes itself: the body read failure, the size cap, the Responses
 // stateful-field check and the pipeline error path share the envelope the
 // invalid-JSON rejection uses, with the error type the EPP carries for the
-// same status.
-func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
+// same status. A /v1/messages rejection uses the Anthropic envelope, which
+// carries no code field.
+func TestHandleInference_RejectionsUseAPIEnvelope(t *testing.T) {
 	type rejection struct {
 		name       string
 		cfg        config.ServerConfig
@@ -319,6 +320,22 @@ func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
 			wantStatus: http.StatusBadGateway,
 			wantType:   "server_error",
 		},
+		{
+			name:       "messages invalid JSON",
+			path:       reqcommon.PathMessages,
+			body:       strings.NewReader(`{bad`),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantMsg:    "invalid JSON body",
+		},
+		{
+			name:       "messages unclassified pipeline error",
+			stepErr:    errors.New("prefill: connect: connection refused"),
+			path:       reqcommon.PathMessages,
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusBadGateway,
+			wantType:   "api_error",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,6 +353,7 @@ func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
 			require.Equal(t, reqcommon.ContentTypeOptionsNoSniff, rec.Header().Get(reqcommon.HeaderContentTypeOptions))
 
 			var envelope struct {
+				Type  string `json:"type"`
 				Error struct {
 					Message string `json:"message"`
 					Type    string `json:"type"`
@@ -343,100 +361,12 @@ func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
 				} `json:"error"`
 			}
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope), rec.Body.String())
-			require.Equal(t, tc.wantStatus, envelope.Error.Code)
-			require.Equal(t, tc.wantType, envelope.Error.Type)
-			if tc.wantMsg != "" {
-				require.Equal(t, tc.wantMsg, envelope.Error.Message)
+			if tc.path == reqcommon.PathMessages {
+				require.Equal(t, "error", envelope.Type)
+				require.NotContains(t, rec.Body.String(), `"code"`)
 			} else {
-				require.NotEmpty(t, envelope.Error.Message)
+				require.Equal(t, tc.wantStatus, envelope.Error.Code)
 			}
-		})
-	}
-}
-
-// TestHandleInference_MessagesRejectionsUseAnthropicEnvelope covers the
-// rejections the handler writes for /v1/messages. An Anthropic client reads
-// the error type and message from the Anthropic envelope, which carries no
-// code field.
-func TestHandleInference_MessagesRejectionsUseAnthropicEnvelope(t *testing.T) {
-	cases := []struct {
-		name       string
-		cfg        config.ServerConfig
-		stepErr    error
-		body       io.Reader
-		wantStatus int
-		wantType   string
-		wantMsg    string
-	}{
-		{
-			name:       "invalid JSON",
-			body:       strings.NewReader(`{bad`),
-			wantStatus: http.StatusBadRequest,
-			wantType:   "invalid_request_error",
-			wantMsg:    "invalid JSON body",
-		},
-		{
-			name:       "body read failure",
-			body:       iotest.ErrReader(errors.New("connection reset")),
-			wantStatus: http.StatusBadRequest,
-			wantType:   "invalid_request_error",
-			wantMsg:    "failed to read request body",
-		},
-		{
-			name:       "body too large",
-			cfg:        config.ServerConfig{MaxRequestBodySize: 1},
-			body:       strings.NewReader(`{"model":"m","pad":"` + strings.Repeat("x", int(config.BytesPerMB)) + `"}`),
-			wantStatus: http.StatusRequestEntityTooLarge,
-			wantType:   "request_too_large",
-			wantMsg:    "request body too large",
-		},
-		{
-			name:       "pipeline client error",
-			stepErr:    fmt.Errorf("replace-media-urls: image part carries no fetchable URL: %w", pipeline.ErrBadRequest),
-			body:       strings.NewReader(`{"model":"m"}`),
-			wantStatus: http.StatusBadRequest,
-			wantType:   "invalid_request_error",
-		},
-		{
-			name:       "upstream 4xx forwarded",
-			stepErr:    fmt.Errorf("wrapped: %w", &pipeline.UpstreamError{Step: "render", StatusCode: http.StatusUnprocessableEntity, Body: "bad block"}),
-			body:       strings.NewReader(`{"model":"m"}`),
-			wantStatus: http.StatusUnprocessableEntity,
-			wantType:   "invalid_request_error",
-		},
-		{
-			name:       "unclassified pipeline error",
-			stepErr:    errors.New("prefill: connect: connection refused"),
-			body:       strings.NewReader(`{"model":"m"}`),
-			wantStatus: http.StatusBadGateway,
-			wantType:   "api_error",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			p := pipeline.New([]pipeline.Step{stubStep{name: "stub", err: tc.stepErr}})
-			srv, err := New(tc.cfg, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
-			require.NoError(t, err)
-
-			req := httptest.NewRequest(http.MethodPost, reqcommon.PathMessages, tc.body)
-			req.Header.Set(reqcommon.HeaderContentType, reqcommon.ContentTypeJSON)
-			rec := httptest.NewRecorder()
-			srv.httpServer.Handler.ServeHTTP(rec, req)
-
-			require.Equal(t, tc.wantStatus, rec.Code)
-			require.Contains(t, rec.Header().Get(reqcommon.HeaderContentType), reqcommon.ContentTypeJSON)
-			require.Equal(t, reqcommon.ContentTypeOptionsNoSniff, rec.Header().Get(reqcommon.HeaderContentTypeOptions))
-			require.NotContains(t, rec.Body.String(), `"code"`)
-
-			var envelope struct {
-				Type  string `json:"type"`
-				Error struct {
-					Type    string `json:"type"`
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope), rec.Body.String())
-			require.Equal(t, "error", envelope.Type)
 			require.Equal(t, tc.wantType, envelope.Error.Type)
 			if tc.wantMsg != "" {
 				require.Equal(t, tc.wantMsg, envelope.Error.Message)

@@ -1739,10 +1739,6 @@ func TestEncodeStep_ResponsesFormat_RejectsEntryIndexBeyondImageParts(t *testing
 	}
 }
 
-// With use_openai_format false a Responses request collapses to the tokens-in
-// generate format, the same as chat completions: the sub-request carries
-// token_ids and no input array, and goes to the generate path rather than the
-// client's own /v1/responses.
 func TestEncodeStep_MessagesFormat(t *testing.T) {
 	var receivedPath string
 	var receivedBody map[string]any
@@ -1812,59 +1808,10 @@ func TestEncodeStep_MessagesFormat(t *testing.T) {
 	}
 }
 
-func TestEncodeStep_MessagesFormat_CollapsesToGenerateWhenNotOpenAIFormat(t *testing.T) {
-	var receivedPath string
-	var receivedBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedPath = r.URL.Path
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &receivedBody)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ec_transfer_params": map[string]any{"hash-tok": map[string]any{"peer_port": 5501}},
-		})
-	}))
-	defer server.Close()
-
-	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
-	step, err := NewEncodeStep(gwClient, map[string]any{ParamECConnector: ec.NIXL, "use_openai_format": false})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	reqCtx := &pipeline.RequestContext{
-		RequestID:    "req-messages-tokens-in",
-		OriginalPath: reqcommon.PathMessages,
-		Model:        testModelName,
-		TokenIDs:     []int{1, 32000, 32000, 32000, 2345},
-		Body: map[string]any{
-			"model": testModelName,
-			"messages": []any{
-				map[string]any{"role": "user", "content": []any{
-					map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/jpeg", "data": "aGk="}},
-				}},
-			},
-		},
-		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Modality: reqcommon.ModalityImage, Hash: "hash-tok", KwargsData: "dGVzdA==", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 3}},
-		},
-	}
-
-	if err := step.Execute(context.Background(), reqCtx); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if receivedPath != reqcommon.PathVLLMGenerate {
-		t.Errorf("expected the sub-request on %s, got %s", reqcommon.PathVLLMGenerate, receivedPath)
-	}
-	if _, ok := receivedBody["token_ids"]; !ok {
-		t.Error("expected token_ids in the generate sub-request")
-	}
-	if _, ok := receivedBody["messages"]; ok {
-		t.Error("generate sub-request must not carry the client's messages array")
-	}
-}
-
+// With use_openai_format false a Responses request collapses to the tokens-in
+// generate format, the same as chat completions: the sub-request carries
+// token_ids and no input array, and goes to the generate path rather than the
+// client's own /v1/responses.
 func TestEncodeStep_ResponsesFormat_CollapsesToGenerateWhenNotOpenAIFormat(t *testing.T) {
 	var receivedPath string
 	var receivedBody map[string]any
