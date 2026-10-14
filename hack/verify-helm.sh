@@ -110,10 +110,18 @@ for key in "${!test_cases_llm_d_router_gateway[@]}"; do
 
   if [ "${key}" == "latency-predictor-service" ]; then
     epp_yaml="${output_dir}/llm-d-router-gateway/templates/epp.yaml"
-    if ! grep -q "name: release-name-latency-prediction" "${epp_yaml}" || ! grep -q "name: release-name-latency-training" "${epp_yaml}"; then
-      echo "Validation failed: latency predictor Deployments not found in rendered output for test: ${key}"
-      exit 1
-    fi
+    for resource in Deployment/release-name-latency-training Service/release-name-latency-training \
+                    Deployment/release-name-latency-prediction Service/release-name-latency-prediction; do
+      # Match kind and metadata.name inside the same YAML document.
+      if ! awk -v kind="${resource%%/*}" -v name="${resource#*/}" '
+        /^---/ { if (k && n) found = 1; k = 0; n = 0; next }
+        $0 == "kind: " kind { k = 1 }
+        $0 == "  name: " name { n = 1 }
+        END { if (k && n) found = 1; exit !found }' "${epp_yaml}"; then
+        echo "Validation failed: ${resource} not found in rendered output for test: ${key}"
+        exit 1
+      fi
+    done
     if ! grep -q 'value: "http://release-name-latency-prediction.default.svc.cluster.local:8001"' "${epp_yaml}"; then
       echo "Validation failed: EPP PREDICTION_SERVER_URL does not point at the prediction Service for test: ${key}"
       exit 1

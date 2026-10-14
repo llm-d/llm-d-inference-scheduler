@@ -523,7 +523,7 @@ Runs a latency training server and one or more prediction servers that feed a la
 `router.latencyPredictor.mode` selects where the servers run:
 
 *   `sidecar`: the training server and `predictionServers.count` prediction containers run inside the EPP pod and EPP reaches them over loopback.
-*   `service`: the training server runs as a single-replica Deployment and the prediction servers as a Deployment with `predictionServers.count` replicas, each behind a ClusterIP Service. EPP reaches them through the Service FQDNs, so the prediction pods scale independently of the EPP pod and the Service spreads EPP connections across them.
+*   `service`: the training server runs as a single-replica Deployment and the prediction servers as a Deployment with `predictionServers.count` replicas. Each Deployment has one ClusterIP Service, so all prediction replicas share a single Service. EPP reaches them through the two Service FQDNs, so the prediction pods scale independently of the EPP pod and the Service spreads EPP connections across them.
 
 #### Latency Predictor Parameters
 
