@@ -188,8 +188,9 @@
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-        {{- if .Values.router.epp.crossReplica.enabled }}
-        {{- with .Values.router.epp.crossReplica.redis.passwordSecretRef }}
+        {{- $crossReplica := .Values.router.epp.crossReplica | default dict }}
+        {{- if $crossReplica.enabled }}
+        {{- with ($crossReplica.redis | default dict).passwordSecretRef }}
             - name: {{ include "llm-d-router.crossReplica.passwordEnv" $ }}
               valueFrom:
                 secretKeyRef:
@@ -375,7 +376,7 @@ spec:
     {{- with .Values.router.epp.deploymentStrategy }}
     {{- toYaml . | nindent 4 }}
     {{- else }}
-    {{- if or $autoscaling.enabled (eq (.Values.router.epp.haMode | default "") "all-active") .Values.router.epp.crossReplica.enabled }}
+    {{- if or $autoscaling.enabled (eq (.Values.router.epp.haMode | default "") "all-active") (.Values.router.epp.crossReplica | default dict).enabled }}
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0

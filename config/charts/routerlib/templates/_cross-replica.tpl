@@ -4,8 +4,8 @@
 {{- define "llm-d-router.crossReplica.config" -}}
 {{- $root := .root -}}
 {{- $config := .config -}}
-{{- $crossReplica := $root.Values.router.epp.crossReplica -}}
-{{- $redis := $crossReplica.redis -}}
+{{- $crossReplica := $root.Values.router.epp.crossReplica | default dict -}}
+{{- $redis := $crossReplica.redis | default dict -}}
 {{- if or (ne $config.apiVersion "llm-d.ai/v1") (ne $config.kind "EndpointPickerConfig") -}}
   {{- fail "router.epp.crossReplica.enabled requires an llm-d.ai/v1 EndpointPickerConfig" -}}
 {{- end -}}

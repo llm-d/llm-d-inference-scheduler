@@ -139,7 +139,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
 {{- $data := include "llm-d-epp.plugins-config-data" . }}
-{{- if .Values.router.epp.crossReplica.enabled }}
+{{- if (.Values.router.epp.crossReplica | default dict).enabled }}
   {{- $files := printf "%s\n" $data | fromYaml }}
   {{- $filename := .Values.router.epp.pluginsConfigFile | default "default-plugins.yaml" }}
   {{- if not (hasKey $files $filename) }}
