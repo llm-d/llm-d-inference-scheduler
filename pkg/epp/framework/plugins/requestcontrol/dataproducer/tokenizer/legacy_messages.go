@@ -181,7 +181,7 @@ func appendAnthropicMessage(conversation []tokenizerTypes.Conversation, m fwkrh.
 				contentBlocks = append(contentBlocks, tokenizerTypes.ContentBlock{Type: blockTypeText, Text: b.Text})
 			}
 		case reqcommon.BlockTypeImage:
-			contentBlocks = appendImageBlock(contentBlocks, b.Source)
+			contentBlocks = appendImageBlock(contentBlocks, b.ImageSource())
 		case blockTypeThinking:
 			reasoning.WriteString(b.Thinking)
 		case "redacted_thinking":

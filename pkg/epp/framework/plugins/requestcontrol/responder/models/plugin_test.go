@@ -49,6 +49,14 @@ func (responderEndpointFactory) UpdateEndpoint(_ context.Context, _ fwkdl.Endpoi
 
 func (responderEndpointFactory) ReleaseEndpoint(_ fwkdl.Endpoint) {}
 
+type nilMetadataEndpoint struct {
+	fwkdl.Endpoint
+}
+
+func (e *nilMetadataEndpoint) GetMetadata() *fwkdl.EndpointMetadata {
+	return nil
+}
+
 // endpointWithModels builds a scraped endpoint carrying the given models as its collected attribute.
 func endpointWithModels(models ...attrmodels.ModelData) fwkdl.Endpoint {
 	ep := fwkdl.NewEndpoint(nil, nil)
@@ -62,6 +70,12 @@ func endpointWithIDAndModels(id string, models ...attrmodels.ModelData) fwkdl.En
 	ep := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{ID: types.NamespacedName{Name: id}}, nil)
 	ep.GetAttributes().Put(attrmodels.ModelsAttributeKey, attrmodels.ModelDataCollection(models))
 	return ep
+}
+
+func endpointWithNilMetadata(models ...attrmodels.ModelData) fwkdl.Endpoint {
+	ep := fwkdl.NewEndpoint(nil, nil)
+	ep.GetAttributes().Put(attrmodels.ModelsAttributeKey, attrmodels.ModelDataCollection(models))
+	return &nilMetadataEndpoint{Endpoint: ep}
 }
 
 func TestModelsResponderConcurrentWithPodChurn(t *testing.T) {
@@ -307,6 +321,20 @@ func TestAggregate_NoEndpoints(t *testing.T) {
 
 	assert.Equal(t, 0, gotCollected)
 	assert.Nil(t, body)
+}
+
+func TestAggregate_SkipsNilEndpointsAndHandlesNilMetadata(t *testing.T) {
+	t.Parallel()
+
+	var nilEndpoint fwkdl.Endpoint
+	body, gotCollected, err := aggregate([]fwkdl.Endpoint{
+		nilEndpoint,
+		endpointWithNilMetadata(attrmodels.ModelData{ID: "model"}),
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, gotCollected)
+	assert.Equal(t, []string{"model"}, modelIDs(unmarshalModelResponse(t, body).Data))
 }
 
 func TestAggregate_NotScrapedYet(t *testing.T) {

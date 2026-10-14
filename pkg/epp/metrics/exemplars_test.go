@@ -206,6 +206,14 @@ func latencyRecorders() []latencyRecorder {
 			},
 			vec: llmdSchedulerE2ELatency,
 		},
+		{
+			name: "flow_control_queue",
+			record: func(ctx context.Context) {
+				RecordFlowControlRequestQueueDuration(ctx, "f", "1", "Dispatched", "pool", "m", "t", 20*time.Millisecond)
+			},
+			vec:    llmdFlowControlRequestQueueDuration,
+			labels: []string{"f", "1", "Dispatched", "pool", "m", "t"},
+		},
 	}
 }
 

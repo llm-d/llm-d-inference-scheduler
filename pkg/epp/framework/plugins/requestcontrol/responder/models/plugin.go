@@ -210,9 +210,14 @@ func (p *Responder) Respond(ctx context.Context, request *fwkrc.RequestLine, end
 // collected yet" from a genuinely empty result.
 func aggregate(endpoints []fwkdl.Endpoint) (json.RawMessage, int, error) {
 	// Sort endpoints first so the same endpoint's copy of a duplicated model ID always wins.
-	ordered := slices.Clone(endpoints)
+	ordered := slices.DeleteFunc(slices.Clone(endpoints), func(ep fwkdl.Endpoint) bool {
+		return ep == nil
+	})
 	slices.SortFunc(ordered, func(a, b fwkdl.Endpoint) int {
-		return strings.Compare(a.GetMetadata().ID.String(), b.GetMetadata().ID.String())
+		return strings.Compare(
+			a.GetMetadata().GetNamespacedName().String(),
+			b.GetMetadata().GetNamespacedName().String(),
+		)
 	})
 
 	seen := make(map[string]struct{})

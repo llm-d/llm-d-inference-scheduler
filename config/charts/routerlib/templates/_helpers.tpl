@@ -545,6 +545,7 @@ Helper to check if priorityRouting is enabled across chart contexts.
 {{- include "llm-d-router.validations.epp.resources" . }}
 {{- include "llm-d-router.validations.epp.inferenceObjectives" . }}
 {{- include "llm-d-router.validations.epp.tokenizer" . }}
+{{- include "llm-d-router.validations.epp.latencyPredictor" . }}
 {{- include "llm-d-router.validations.epp.preferredBackends" . }}
 {{- include "llm-d-router.validations.epp.autoscaling" . }}
 {{- $isPriorityRouting := eq (include "llm-d-router.priorityRouting.enabled" .) "true" -}}
@@ -577,6 +578,16 @@ Tokenizer validations: require modelName and valid flavor for the render sidecar
 {{- fail (printf ".Values.router.tokenizer.flavor must be one of [python, rust], got %q" (dig "flavor" "" $tokenizer)) }}
 {{- end }}
 {{- end }}
+{{- end -}}
+
+{{/*
+Latency predictor validations
+*/}}
+{{- define "llm-d-router.validations.epp.latencyPredictor" -}}
+{{- $mode := include "llm-d-router.latencyPredictor.mode" . -}}
+{{- if not (or (eq $mode "sidecar") (eq $mode "service")) -}}
+{{- fail (printf ".Values.router.latencyPredictor.mode must be one of [sidecar, service], got %q" $mode) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -617,10 +628,16 @@ The EPP parses its plugin configuration once at startup and never re-reads the
 mounted file, so a helm upgrade that touches only a ConfigMap has to change the
 pod template or the running pod keeps its old configuration. Hash the whole
 config partial rather than one ConfigMap: it renders the plugins, proxy and
-latency-predictor ConfigMaps, and all of them are mounted into this pod.
+latency-predictor ConfigMaps. In service mode the latency-predictor ConfigMaps
+belong to the predictor Deployments, so they are left out and a
+predictor-only change does not restart EPP.
 */}}
 {{- define "llm-d-epp.podAnnotations" -}}
+{{- if eq (include "llm-d-router.latencyPredictor.mode" .) "service" -}}
+checksum/config: {{ include "llm-d-epp.router-config" . | sha256sum }}
+{{- else -}}
 checksum/config: {{ include "llm-d-epp.config" . | sha256sum }}
+{{- end }}
 {{- with .Values.router.epp.podAnnotations }}
 {{- toYaml . | nindent 0 }}
 {{- end }}

@@ -217,6 +217,21 @@ modelServers:
 
 latencyPredictor:
   enabled: false
+  # Deployment mode. `sidecar` runs the training and prediction servers as
+  # containers in the EPP pod. `service` runs the training server as a
+  # single-replica Deployment and the prediction servers as a Deployment with
+  # `predictionServers.count` replicas. Each Deployment has one Service, so all
+  # prediction replicas share a single Service, and EPP points at the two
+  # Service URLs.
+  mode: sidecar
+  # Pod-level securityContext for the training and prediction pods in service
+  # mode. The images declare no user and run as root unless runAsUser is set.
+  # In sidecar mode router.epp.podSecurityContext applies instead.
+  podSecurityContext: {}
+  # Affinity and tolerations for the training and prediction pods in service
+  # mode. Empty uses router.epp.affinity and router.epp.tolerations.
+  affinity: {}
+  tolerations: []
   # Training Server Configuration
   trainingServer:
     securityContext: {}
@@ -261,7 +276,11 @@ latencyPredictor:
 
   # Prediction Server Configuration
   predictionServers:
+    # Number of prediction servers: containers in the EPP pod in sidecar mode,
+    # pods in the prediction Deployment in service mode.
     count: 1
+    # Listen port of the first prediction server. Sidecar containers take
+    # consecutive ports from here; service mode uses only this port.
     startPort: 8001
     securityContext: {}
     image:

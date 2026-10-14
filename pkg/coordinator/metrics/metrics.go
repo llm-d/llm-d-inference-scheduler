@@ -81,8 +81,9 @@ const (
 const (
 	RouteChatCompletions = "chat_completions"
 	RouteCompletions     = "completions"
-	RouteGenerate        = "generate"
+	RouteResponses       = "responses"
 	RouteMessages        = "messages"
+	RouteGenerate        = "generate"
 	RouteUnknown         = "unknown"
 )
 
