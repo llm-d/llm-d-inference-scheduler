@@ -1056,6 +1056,64 @@ func TestForceStream_Truncated_BufferedPath_FallsBack(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
 }
 
+// TestForceStream_SeveredConnection_BufferedPath_FallsBack covers the read-error
+// branch, distinct from a JSON parse error: the forced upstream sends a valid frame
+// then severs the connection (a chunked body with no terminating chunk and no
+// [DONE]), so the scanner returns a read-upstream error. Nothing reached the
+// client, so the request falls back to the pass-through. Counted fallback_unreadable.
+func TestForceStream_SeveredConnection_BufferedPath_FallsBack(t *testing.T) {
+	passthroughReply := `{"request_id":"g","choices":[{"index":0,"token_ids":[1,2,3]}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			hj, ok := w.(http.Hijacker)
+			require.True(t, ok, "the test server must support hijacking")
+			conn, buf, err := hj.Hijack()
+			require.NoError(t, err)
+			defer conn.Close()
+			// One complete chunk, then close with no terminating chunk, so the
+			// client's chunked read fails mid-stream rather than ending cleanly.
+			_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+			f := "data: {\"request_id\":\"g\",\"choices\":[{\"index\":0,\"token_ids\":[1]}]}\n\n"
+			fmt.Fprintf(buf, "%x\r\n%s\r\n", len(f), f)
+			_ = buf.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-severed",
+		OriginalPath:     reqcommon.PathVLLMGenerate,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"token_ids":       []any{1},
+			"sampling_params": map[string]any{"max_tokens": 8},
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "a severed connection must fall back, not error")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client gets the pass-through reply, not a 5xx")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnreadable), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
+}
+
 // TestForceStream_Responses_OversizedFrame_FallsBack covers the regression where
 // a Responses response.completed frame echoes request fields the reservation does
 // not price (tools, instructions, schema), so the frame can exceed the reservation

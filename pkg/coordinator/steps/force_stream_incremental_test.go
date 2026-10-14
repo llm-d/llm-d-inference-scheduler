@@ -327,3 +327,49 @@ func TestForceStreamIncremental_TruncatedAfterContent_Truncates(t *testing.T) {
 	require.Equal(t, []any{true}, streams, "no pass-through: the reply was already committed")
 	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
 }
+
+// TestForceStreamIncremental_SeveredConnection_FallsBack covers the read-error
+// branch, distinct from a JSON parse error: the forced upstream sends a role-only
+// frame (no content, so nothing commits) then severs the connection (a chunked body
+// with no terminating chunk and no [DONE]), so the scanner returns a read-upstream
+// error before the first content byte. The request falls back to the pass-through.
+func TestForceStreamIncremental_SeveredConnection_FallsBack(t *testing.T) {
+	passthroughReply := `{"id":"c","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			hj, ok := w.(http.Hijacker)
+			require.True(t, ok, "the test server must support hijacking")
+			conn, buf, err := hj.Hijack()
+			require.NoError(t, err)
+			defer conn.Close()
+			// A role-only frame commits nothing; close with no terminating chunk so
+			// the client's chunked read fails before any content byte is flushed.
+			_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+			f := "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+			fmt.Fprintf(buf, "%x\r\n%s\r\n", len(f), f)
+			_ = buf.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+
+	require.NoError(t, step.Execute(context.Background(), chatIncrementalReqCtx(recorder)),
+		"a severed connection before the first content byte must fall back, not error")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client gets the pass-through reply, not a 5xx")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnreadable), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+}

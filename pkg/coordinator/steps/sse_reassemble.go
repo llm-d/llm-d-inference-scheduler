@@ -275,14 +275,15 @@ func (r *sseReassembler) choice(index int) *sseChoice {
 
 // foldChoice appends one streamed choice fragment to its accumulator. The index
 // defaults to 0 so a single-choice stream that omits it still folds into one
-// choice. An index at or beyond the declared n is dropped, so an upstream
-// returning more choices than reserved cannot grow memory past the reservation.
+// choice. An index that is negative or at or beyond the declared n is dropped, so
+// an upstream returning out-of-range or surplus choices cannot grow the choice map
+// past the reservation.
 func (r *sseReassembler) foldChoice(choice map[string]any) {
 	index := 0
 	if n, ok := numField(choice["index"]); ok {
 		index = n
 	}
-	if r.maxChoices > 0 && index >= r.maxChoices {
+	if index < 0 || (r.maxChoices > 0 && index >= r.maxChoices) {
 		return
 	}
 	acc := r.choice(index)

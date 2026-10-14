@@ -168,6 +168,21 @@ func TestSSEReassemble_DropsChoicesBeyondN(t *testing.T) {
 	require.EqualValues(t, len("keep"), r.bufferedBytes())
 }
 
+// TestSSEReassemble_DropsNegativeChoiceIndex verifies a choice with a negative
+// index is ignored rather than creating a map entry, so a misbehaving upstream
+// cannot grow the choice map with out-of-range indices.
+func TestSSEReassemble_DropsNegativeChoiceIndex(t *testing.T) {
+	r := newSSEReassembler(sseShapeText, 1)
+	r.add(frame(t, `{"choices":[{"index":-1,"text":"drop"},{"index":0,"text":"keep"}]}`))
+
+	require.Len(t, r.choices, 1, "the negative-index choice must not create an entry")
+	choices := r.result()["choices"].([]any)
+	require.Len(t, choices, 1)
+	require.EqualValues(t, 0, choices[0].(map[string]any)["index"])
+	require.Equal(t, "keep", choices[0].(map[string]any)["text"])
+	require.EqualValues(t, len("keep"), r.bufferedBytes())
+}
+
 // The Responses stream is typed events; response.completed carries the terminal
 // response object, which the reassembler emits verbatim. The deltas before it
 // drive only the per-request ceiling, so the reply is exactly the object the pod

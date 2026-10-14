@@ -55,12 +55,15 @@ const defaultForceStreamBufferSize = "1GiB"
 const defaultForceStreamMaxRequestBytes int64 = 256 << 10
 
 const (
-	// forceStreamBytesPerToken bounds the decoded UTF-8 bytes one output token
-	// contributes. A token's text spans a few code points and UTF-8 uses at
-	// most four bytes per code point, so this is an upper bound with margin, not
-	// an average. The per-request reservation and ceiling derive from it, so a
-	// response that honors its token limit is never aborted; an upstream that
-	// ignores the limit and streams without bound still trips the ceiling.
+	// forceStreamBytesPerToken is the per-token byte unit the reservation and the
+	// ceiling both derive from, so a response that honors its token limit is never
+	// aborted and an upstream that ignores it still trips the ceiling. It bounds the
+	// two encodings a token can take. As text it spans a few code points at up to
+	// four UTF-8 bytes each, so 16 is an upper bound with margin. As a generate-shape
+	// token id it bounds the id's JSON encoding (decimal digits and a separator),
+	// which stays under 16 bytes for any realistic vocabulary. Because the
+	// reservation uses this same unit, the generate ceiling trips at the token limit
+	// regardless of the exact per-id width.
 	forceStreamBytesPerToken = 16
 	// forceStreamPerChoiceOverheadBytes covers one choice's JSON envelope (its
 	// index, finish_reason, and message or text keys) so a request asking for
