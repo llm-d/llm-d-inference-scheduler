@@ -144,7 +144,7 @@ type datastore struct {
 	// readers between mutations share one rebuild instead of each re-ranging pods.
 	podsVersion atomic.Uint64
 	// snapshotMu guards podsSnapshot and snapshotVersion.
-	snapshotMu      sync.Mutex
+	snapshotMu      sync.RWMutex
 	snapshotVersion uint64
 	podsSnapshot    []fwkdl.Endpoint
 	// needsResync forces the next PoolSet to run podResyncAll even when the pool is unchanged.
@@ -294,8 +294,9 @@ func (ds *datastore) ModelRewriteGetAll() []*v1alpha2.InferenceModelRewrite {
 // TODO: add a flag for callers to specify the staleness threshold for metrics.
 // ref: https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/1046#discussion_r2246351694
 func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoint {
-	res := []fwkdl.Endpoint{}
-	for _, ep := range ds.podsSnapshotCurrent() {
+	snapshot := ds.podsSnapshotCurrent()
+	res := make([]fwkdl.Endpoint, 0, len(snapshot))
+	for _, ep := range snapshot {
 		if predicate(ep) {
 			res = append(res, ep)
 		}
@@ -307,10 +308,17 @@ func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoi
 // ds.pods only when a mutation has happened since the last rebuild. The returned
 // slice is shared with concurrent callers and must not be modified.
 func (ds *datastore) podsSnapshotCurrent() []fwkdl.Endpoint {
-	version := ds.podsVersion.Load()
+	ds.snapshotMu.RLock()
+	if ds.snapshotVersion == ds.podsVersion.Load() {
+		snapshot := ds.podsSnapshot
+		ds.snapshotMu.RUnlock()
+		return snapshot
+	}
+	ds.snapshotMu.RUnlock()
 
 	ds.snapshotMu.Lock()
 	defer ds.snapshotMu.Unlock()
+	version := ds.podsVersion.Load()
 	if ds.snapshotVersion == version {
 		return ds.podsSnapshot
 	}
