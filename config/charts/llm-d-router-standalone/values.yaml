@@ -199,6 +199,19 @@ router:
                                           idle_timeout: 86400s
                                           upgrade_configs:
                                             - upgrade_type: websocket
+                                        # Internal routing and screening headers (pkg/epp/util/request/headers.go).
+                                        # EPP removes client values on the scheduled route; this route skips EPP. The
+                                        # P/D sidecar connects to the worker addresses they carry. Removed here rather
+                                        # than before ext_proc because EPP screeners read x-llm-d-pin-host-port.
+                                        request_headers_to_remove:
+                                          - x-llm-d-prefiller-host-port
+                                          - x-prefiller-host-port
+                                          - x-llm-d-encoder-hosts-ports
+                                          - x-encoder-hosts-ports
+                                          - x-data-parallel-host-port
+                                          - x-llm-d-kv-cache-source-host-port
+                                          - x-kv-cache-source-host-port
+                                          - x-llm-d-pin-host-port
                                         typed_per_filter_config:
                                           envoy.filters.http.ext_proc:
                                             "@type": type.googleapis.com/envoy.config.route.v3.FilterConfig
