@@ -687,6 +687,54 @@ if ! grep -q -- 'llm-d-router-proxy: proxy-svc-proxy' "${proxy_service_render_ou
   echo "Proxy service mode did not render the dedicated proxy selector label"
   exit 1
 fi
+# Fail-open (the service-mode default) adds a fallback route to the model servers
+# for requests EPP did not schedule, via a headless Service selecting the pool.
+if ! grep -q -- 'cluster: inference_pool_fallback' "${proxy_service_render_output}"; then
+  echo "Proxy service mode with fail-open did not render the fallback route"
+  exit 1
+fi
+if ! grep -q -- 'present_match: true' "${proxy_service_render_output}"; then
+  echo "Proxy service mode with fail-open did not gate original_destination_cluster on the destination header"
+  exit 1
+fi
+if ! grep -q -- 'address: proxy-svc-epp-model-servers.proxy-ns.svc.cluster.local' "${proxy_service_render_output}"; then
+  echo "Proxy service mode with fail-open did not point the fallback cluster at the model-server Service FQDN"
+  exit 1
+fi
+fallback_service=$(awk '/^kind: Service$/{svc=1} /^---/{svc=0} svc' "${proxy_service_render_output}" | grep -A12 -- 'name: proxy-svc-epp-model-servers$' || true)
+if ! grep -q -- 'clusterIP: None' <<<"${fallback_service}" || ! grep -q -- 'app: llm-instance-gateway' <<<"${fallback_service}" || ! grep -q -- 'port: 8000' <<<"${fallback_service}"; then
+  echo "Proxy service mode with fail-open did not render the headless model-server Service"
+  exit 1
+fi
+# Only EPP may set the destination header; client-supplied values are removed before routing.
+if ! grep -q -- 'remove: x-gateway-destination-endpoint' "${proxy_service_render_output}"; then
+  echo "Proxy service mode did not strip client-supplied x-gateway-destination-endpoint headers"
+  exit 1
+fi
+
+echo "Verifying llm-d-router-standalone fail-open fallback follows router.proxy.failOpen and targetPorts..."
+fail_closed_render_output="${TEMP_DIR}/llm-d-router-standalone-proxy-fail-closed-render.yaml"
+${HELM} template proxy-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace proxy-ns --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.failOpen=false > "${fail_closed_render_output}"
+if grep -q -- 'inference_pool_fallback\|proxy-svc-epp-model-servers' "${fail_closed_render_output}"; then
+  echo "Fail-open fallback rendered with router.proxy.failOpen=false"
+  exit 1
+fi
+if ! grep -q -- 'remove: x-gateway-destination-endpoint' "${fail_closed_render_output}"; then
+  echo "Destination header strip missing with router.proxy.failOpen=false"
+  exit 1
+fi
+fallback_port_render_output="${TEMP_DIR}/llm-d-router-standalone-proxy-fallback-port-render.yaml"
+${HELM} template proxy-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace proxy-ns --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8200' --set 'router.modelServers.targetPorts[1].number=8201' > "${fallback_port_render_output}"
+if ! grep -q -- 'port_value: 8200' "${fallback_port_render_output}" || ! grep -q -- 'targetPort: 8200' "${fallback_port_render_output}"; then
+  echo "Fail-open fallback did not use the first router.modelServers.targetPorts entry"
+  exit 1
+fi
+agentgateway_fallback_output="${TEMP_DIR}/llm-d-router-standalone-agentgateway-fallback-render.yaml"
+${HELM} template ag-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace ag-ns --set router.proxy.proxyType=agentgateway --set router.proxy.mode=service --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000' > "${agentgateway_fallback_output}"
+if grep -q -- 'ag-svc-epp-model-servers' "${agentgateway_fallback_output}"; then
+  echo "Envoy fail-open fallback Service unexpectedly rendered for agentgateway"
+  exit 1
+fi
 
 echo "Verifying llm-d-router-standalone agentgateway in service mode reaches EPP over the Service..."
 agentgateway_service_mode_output="${TEMP_DIR}/llm-d-router-standalone-agentgateway-service-render.yaml"

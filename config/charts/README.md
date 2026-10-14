@@ -659,7 +659,7 @@ Configures EPP to run with a proxy (Envoy proxy or Agentgateway proxy) that inte
 | `router.proxy.autoscaling.targetMemoryUtilizationPercentage` | Target average memory utilization percentage across proxy pods (1-100). | `""` |
 | `router.proxy.autoscaling.behavior` | Scaling behavior policies for proxy HPA scale-up and scale-down. | `{}` |
 | `router.proxy.autoscaling.metrics` | Custom HPA v2 metrics override for the proxy; replaces auto-generated CPU and memory metrics. Target percentage fields remain range-validated if defined. | `[]` |
-| `router.proxy.failOpen` | Whether the proxy passes traffic through (fail-open) when EPP is unreachable. Applies to `proxyType=envoy` only; Agentgateway exposes no fail-open setting and rejects requests (fails closed) when EPP is unreachable. | `true` |
+| `router.proxy.failOpen` | Whether the proxy passes traffic through (fail-open) when EPP is unreachable. Requests EPP did not schedule are load-balanced across the model servers through a headless Service (`<release>-epp-model-servers`) selecting `router.modelServers.matchLabels` on the first `router.modelServers.targetPorts` entry, without endpoint picking. Applies to `proxyType=envoy` only; Agentgateway exposes no fail-open setting and rejects requests (fails closed) when EPP is unreachable. | `true` |
 | `router.proxy.name` | Name of the sidecar container. | `""` |
 | `router.proxy.image` | Sidecar container image. | `""` |
 | `router.proxy.imagePullPolicy` | Sidecar container image pull policy. | `IfNotPresent` |
