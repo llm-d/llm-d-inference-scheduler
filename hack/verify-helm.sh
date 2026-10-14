@@ -687,6 +687,96 @@ if ! grep -q -- 'llm-d-router-proxy: proxy-svc-proxy' "${proxy_service_render_ou
   echo "Proxy service mode did not render the dedicated proxy selector label"
   exit 1
 fi
+# Fail-open (the service-mode default) adds a fallback route to the model servers
+# for requests EPP did not schedule, via a headless Service selecting the pool.
+if ! grep -q -- 'cluster: inference_pool_fallback' "${proxy_service_render_output}"; then
+  echo "Proxy service mode with fail-open did not render the fallback route"
+  exit 1
+fi
+if ! grep -q -- 'present_match: true' "${proxy_service_render_output}"; then
+  echo "Proxy service mode with fail-open did not gate original_destination_cluster on the destination header"
+  exit 1
+fi
+if ! grep -q -- 'address: proxy-svc-epp-model-servers.proxy-ns.svc.cluster.local' "${proxy_service_render_output}"; then
+  echo "Proxy service mode with fail-open did not point the fallback cluster at the model-server Service FQDN"
+  exit 1
+fi
+fallback_service=$(awk '/^kind: Service$/{svc=1} /^---/{svc=0} svc' "${proxy_service_render_output}" | grep -A12 -- 'name: proxy-svc-epp-model-servers$' || true)
+if ! grep -q -- 'clusterIP: None' <<<"${fallback_service}" || ! grep -q -- 'app: llm-instance-gateway' <<<"${fallback_service}" || ! grep -q -- 'port: 8000' <<<"${fallback_service}"; then
+  echo "Proxy service mode with fail-open did not render the headless model-server Service"
+  exit 1
+fi
+# Only EPP may set the destination header; client-supplied values are removed before routing.
+if ! grep -q -- 'remove: x-gateway-destination-endpoint' "${proxy_service_render_output}"; then
+  echo "Proxy service mode did not strip client-supplied x-gateway-destination-endpoint headers"
+  exit 1
+fi
+# The fallback route skips EPP, so it removes the client routing and screening headers EPP would remove.
+fallback_route=$(grep -A30 -- 'cluster: inference_pool_fallback$' "${proxy_service_render_output}" | head -30)
+for header in x-llm-d-prefiller-host-port x-prefiller-host-port x-llm-d-encoder-hosts-ports x-encoder-hosts-ports \
+  x-data-parallel-host-port x-llm-d-kv-cache-source-host-port x-kv-cache-source-host-port x-llm-d-pin-host-port; do
+  if ! grep -q -- "- ${header}$" <<<"${fallback_route}"; then
+    echo "Fail-open fallback route does not remove client-supplied ${header}"
+    exit 1
+  fi
+done
+
+echo "Verifying llm-d-router-standalone fail-open fallback follows router.proxy.failOpen and targetPorts..."
+fail_closed_render_output="${TEMP_DIR}/llm-d-router-standalone-proxy-fail-closed-render.yaml"
+${HELM} template proxy-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace proxy-ns --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.failOpen=false > "${fail_closed_render_output}"
+if grep -q -- 'inference_pool_fallback\|proxy-svc-epp-model-servers' "${fail_closed_render_output}"; then
+  echo "Fail-open fallback rendered with router.proxy.failOpen=false"
+  exit 1
+fi
+if ! grep -q -- 'remove: x-gateway-destination-endpoint' "${fail_closed_render_output}"; then
+  echo "Destination header strip missing with router.proxy.failOpen=false"
+  exit 1
+fi
+fallback_port_render_output="${TEMP_DIR}/llm-d-router-standalone-proxy-fallback-port-render.yaml"
+${HELM} template proxy-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace proxy-ns --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8200' --set 'router.modelServers.targetPorts[1].number=8201' > "${fallback_port_render_output}"
+if ! grep -q -- 'port_value: 8200' "${fallback_port_render_output}" || ! grep -q -- 'targetPort: 8200' "${fallback_port_render_output}"; then
+  echo "Fail-open fallback did not use the first router.modelServers.targetPorts entry"
+  exit 1
+fi
+agentgateway_fallback_output="${TEMP_DIR}/llm-d-router-standalone-agentgateway-fallback-render.yaml"
+${HELM} template ag-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace ag-ns --set router.proxy.proxyType=agentgateway --set router.proxy.mode=service --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000' > "${agentgateway_fallback_output}"
+if grep -q -- 'ag-svc-epp-model-servers' "${agentgateway_fallback_output}"; then
+  echo "Envoy fail-open fallback Service unexpectedly rendered for agentgateway"
+  exit 1
+fi
+# Sidecar mode defaults to fail-open too, so it gets the fallback route and Service.
+fallback_sidecar_output="${TEMP_DIR}/llm-d-router-standalone-fallback-sidecar-render.yaml"
+${HELM} template proxy-sc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace proxy-ns --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=sidecar > "${fallback_sidecar_output}"
+if ! grep -q -- 'cluster: inference_pool_fallback' "${fallback_sidecar_output}" || ! grep -q -- 'name: proxy-sc-epp-model-servers$' "${fallback_sidecar_output}"; then
+  echo "Sidecar mode with default fail-open did not render the fallback route and Service"
+  exit 1
+fi
+# The fallback Service selects every pool label, and the cluster FQDN follows router.clusterDomain.
+fallback_selector_output="${TEMP_DIR}/llm-d-router-standalone-fallback-selector-render.yaml"
+${HELM} template proxy-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace proxy-ns --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.modelServers.matchLabels.tier=decode --set router.inferencePool.create=false --set router.clusterDomain=example.internal > "${fallback_selector_output}"
+fallback_selector=$(awk '/^kind: Service$/{svc=1} /^---/{svc=0} svc' "${fallback_selector_output}" | grep -A12 -- 'name: proxy-svc-epp-model-servers$' || true)
+if ! grep -q -- 'app: llm-instance-gateway' <<<"${fallback_selector}" || ! grep -q -- 'tier: decode' <<<"${fallback_selector}"; then
+  echo "Fail-open fallback Service did not select every router.modelServers.matchLabels entry"
+  exit 1
+fi
+if ! grep -q -- 'address: proxy-svc-epp-model-servers.proxy-ns.svc.example.internal' "${fallback_selector_output}"; then
+  echo "Fail-open fallback cluster did not use router.clusterDomain"
+  exit 1
+fi
+# Priority routing keeps the fallback: it applies when every EPP replica is unreachable.
+fallback_priority_output="${TEMP_DIR}/llm-d-router-standalone-fallback-priority-render.yaml"
+${HELM} template proxy-svc ${SCRIPT_ROOT}/config/charts/llm-d-router-standalone --namespace proxy-ns --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.priorityRouting.enabled=true --set router.epp.replicas=2 > "${fallback_priority_output}"
+if ! grep -q -- 'cluster: inference_pool_fallback' "${fallback_priority_output}"; then
+  echo "Priority routing did not render the fail-open fallback route"
+  exit 1
+fi
+# The gateway chart has no standalone proxy, so it renders neither the fallback nor the header strip.
+fallback_gateway_output="${TEMP_DIR}/llm-d-router-gateway-fallback-render.yaml"
+${HELM} template gw ${SCRIPT_ROOT}/config/charts/llm-d-router-gateway --namespace gw-ns --set router.modelServers.matchLabels.app=llm-instance-gateway > "${fallback_gateway_output}"
+if grep -q -- 'inference_pool_fallback\|gw-epp-model-servers\|early_header_mutation' "${fallback_gateway_output}"; then
+  echo "Gateway chart unexpectedly rendered the standalone fail-open fallback"
+  exit 1
+fi
 
 echo "Verifying llm-d-router-standalone agentgateway in service mode reaches EPP over the Service..."
 agentgateway_service_mode_output="${TEMP_DIR}/llm-d-router-standalone-agentgateway-service-render.yaml"

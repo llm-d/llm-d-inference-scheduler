@@ -162,6 +162,39 @@ false
 {{- end -}}
 
 {{/*
+Whether the standalone Envoy proxy renders a fallback route to the model
+servers. With fail-open on, ext_proc is skipped when EPP is unreachable, so
+nothing sets the destination header that original_destination_cluster routes
+on; the fallback route sends those requests to the pool through a headless
+Service instead.
+*/}}
+{{- define "llm-d-router.proxy.failOpenFallback.enabled" -}}
+{{- $proxy := include "llm-d-router.proxy" . | fromYaml | default dict -}}
+{{- if and (hasPrefix "llm-d-router-standalone" .Chart.Name) $proxy.enabled (eq (include "llm-d-router.proxyType" .) "envoy") (eq (include "llm-d-router.proxy.failOpen" .) "true") -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{/*
+Name of the headless Service that selects the model-server pods for the
+fail-open fallback route.
+*/}}
+{{- define "llm-d-router.proxy.fallbackServiceName" -}}
+{{- printf "%s-model-servers" (include "llm-d-router.name" .) -}}
+{{- end -}}
+
+{{/*
+Model-server port the fail-open fallback route sends requests to: the first
+entry of router.modelServers.targetPorts.
+*/}}
+{{- define "llm-d-router.proxy.fallbackPort" -}}
+{{- $ports := .Values.router.modelServers.targetPorts | default (list (dict "number" 8000)) -}}
+{{- (first $ports).number -}}
+{{- end -}}
+
+{{/*
 Return "true" if EPP is configured with secure (TLS) serving, "false" if
 router.epp.flags.secure-serving is explicitly set to false. Defaults to true
 so that the Envoy ext_proc cluster uses TLS by default.
