@@ -21,6 +21,7 @@ import (
 	compbasemetrics "k8s.io/component-base/metrics"
 
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 )
 
 const (
@@ -249,7 +250,7 @@ var (
 			Name:      "scheduler_e2e_duration_seconds",
 			Help:      metricsutil.HelpMsgWithStability("End-to-end scheduling latency distribution in seconds.", compbasemetrics.ALPHA),
 			Buckets: []float64{
-				0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1,
+				0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1,
 			},
 		},
 		[]string{},
@@ -570,6 +571,21 @@ var (
 		},
 		[]string{"source_type", "extractor_type"},
 	)
+)
+
+// --- Tool-calling request field integrity metric ---
+var llmdToolCallingFieldStatusTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Subsystem: LLMDRouterEndpointPickerSubsystem,
+		Name:      "tool_calling_field_status_total",
+		Help:      metricsutil.HelpMsgWithStability("Tool-calling request field outcomes by component, direction, field, and status.", compbasemetrics.ALPHA),
+	},
+	[]string{
+		toolcalling.MetricLabelComponent,
+		toolcalling.MetricLabelDirection,
+		toolcalling.MetricLabelField,
+		toolcalling.MetricLabelStatus,
+	},
 )
 
 var (

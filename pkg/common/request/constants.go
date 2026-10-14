@@ -46,6 +46,10 @@ const (
 	HeaderContentType = "content-type"
 	// ContentTypeJSON is the media type of JSON bodies.
 	ContentTypeJSON = "application/json"
+	// HeaderContentTypeOptions names the HTTP header that controls MIME sniffing of a body.
+	HeaderContentTypeOptions = "x-content-type-options"
+	// ContentTypeOptionsNoSniff disables MIME sniffing; http.Error sets it on every body it writes.
+	ContentTypeOptionsNoSniff = "nosniff"
 
 	FieldKVTransferParams     = "kv_transfer_params"
 	FieldECTransferParams     = "ec_transfer_params"
@@ -55,6 +59,7 @@ const (
 	FieldMinTokens            = "min_tokens"
 	FieldStream               = "stream"
 	FieldStreamOptions        = "stream_options"
+	FieldEcho                 = "echo"
 	FieldSamplingParams       = "sampling_params"
 	FieldDoRemotePrefill      = "do_remote_prefill"
 	FieldDoRemoteDecode       = "do_remote_decode"
@@ -121,9 +126,10 @@ const (
 // string with its options as siblings.
 //
 // The Responses input content union is input_text / input_image / input_file, so
-// a Responses request carrying one of the others is refused by the model
-// server. FieldFileID on an input_image, input_file or
-// computer_screenshot names a Files API upload the serving engine has to fetch.
+// a Responses request carrying one of the others is refused by the model server.
+// PartModality does not pre-empt that: it answers by part type alone, so such a
+// part is still collected and primed. FieldFileID on an input_image, input_file
+// or computer_screenshot names a Files API upload the serving engine must fetch.
 const (
 	PartTypeImageURL           = "image_url"
 	PartTypeAudioURL           = "audio_url"
@@ -133,3 +139,14 @@ const (
 	PartTypeInputFile          = "input_file"
 	PartTypeComputerScreenshot = "computer_screenshot"
 )
+
+// Anthropic Messages block types. The estimate tokenizer and the sidecar
+// encoder fan-out both read these.
+const (
+	BlockTypeImage      = "image"
+	BlockTypeToolResult = "tool_result"
+)
+
+// DefaultImageMediaType is vLLM's fallback when an Anthropic base64 image
+// source omits media_type.
+const DefaultImageMediaType = "image/jpeg"

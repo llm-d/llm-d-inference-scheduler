@@ -18,8 +18,9 @@ datastore on each change.
 ## How It Works
 
 - **Initial load.** On `Start`, the file is read once. Each entry is
-  validated (address must be a parseable IP, port must be in `[1, 65535]`)
-  and applied via `notifier.Upsert`. Per-entry validation errors are logged
+  validated (name must be set and unique within its namespace, address must
+  be a parseable IP, port must be in `[1, 65535]`) and applied via
+  `notifier.Upsert`. Per-entry validation errors are logged
   and the entry is skipped; file-level problems (open, parse, size > 1 MiB)
   abort startup.
 - **Reload (optional).** When `watchFile: true`, fsnotify Write / Create /

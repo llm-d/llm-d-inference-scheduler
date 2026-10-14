@@ -119,7 +119,7 @@ func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool
 	s.decoderProxy.ServeHTTP(dw, r)
 
 	if isHTTPError(dw.statusCode) {
-
+		maps.Copy(w.Header(), dw.headers)
 		w.WriteHeader(dw.statusCode)
 		if dw.buffer.Len() > 0 {
 			WriteAll(w, dw.buffer.Bytes())
@@ -234,18 +234,31 @@ func (s *Server) tryDecodeStreaming(w *responseWriterWithBuffer, r *http.Request
 
 // hasCacheThresholdFinishReason checks if a parsed response contains cache_threshold finish reason.
 func (s *Server) hasCacheThresholdFinishReason(response map[string]any) bool {
+	if stop, ok := response["stop_reason"].(string); ok && stop == finishReasonCacheThreshold {
+		return true
+	}
+	if delta, ok := response["delta"].(map[string]any); ok {
+		if stop, ok := delta["stop_reason"].(string); ok && stop == finishReasonCacheThreshold {
+			return true
+		}
+	}
+
 	choices, ok := response[responseFieldChoices].([]any)
 	if !ok || len(choices) == 0 {
 		return false
 	}
 
-	choice, ok := choices[0].(map[string]any)
-	if !ok {
-		return false
+	for _, raw := range choices {
+		choice, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		finishReason, ok := choice[responseFieldFinishReason].(string)
+		if ok && finishReason == finishReasonCacheThreshold {
+			return true
+		}
 	}
-
-	finishReason, ok := choice[responseFieldFinishReason].(string)
-	return ok && finishReason == finishReasonCacheThreshold
+	return false
 }
 
 // checkBufferedResponseForCacheThreshold checks the buffered SSE response for cache_threshold finish reason.
@@ -305,6 +318,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 	if isHTTPError(pw.statusCode) {
 		metrics.RecordError(metrics.StagePrefill)
 		s.logger.Error(nil, "prefill request failed", "code", pw.statusCode)
+		maps.Copy(w.Header(), pw.headers)
 		w.WriteHeader(pw.statusCode)
 		if pw.buffer.Len() > 0 {
 			WriteAll(w, pw.buffer.Bytes())
