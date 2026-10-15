@@ -352,6 +352,27 @@ func TestResponsesDuringEjectionAreIgnored(t *testing.T) {
 		"failures during the ejection do not count toward the next one")
 }
 
+func TestSuccessDuringEjectionKeepsBackoff(t *testing.T) {
+	f, clock := newTestFilter(t, parameters{EjectionDuration: durationPtr(time.Minute)})
+	candidates := []fwksched.Endpoint{endpoint("a", nil), endpoint("b", nil)}
+	eject := func() {
+		for range 5 {
+			respond(f, "b", "502")
+		}
+	}
+	eject()
+	respond(f, "b", "200")
+	clock.advance(time.Minute)
+	require.Equal(t, []string{"a", "b"}, names(f.Filter(context.Background(), nil, candidates)))
+
+	eject()
+	clock.advance(time.Minute)
+	assert.Equal(t, []string{"a"}, names(f.Filter(context.Background(), nil, candidates)),
+		"a success during the ejection does not reset the backoff")
+	clock.advance(time.Minute)
+	assert.Equal(t, []string{"a", "b"}, names(f.Filter(context.Background(), nil, candidates)))
+}
+
 func TestResponseStatusHeader(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -124,14 +124,14 @@ func (t *tracker) observeResponse(logger logr.Logger, id fwkdl.ID, failed bool, 
 	defer t.mu.Unlock()
 
 	st := t.state(id)
+	// Responses to requests scheduled before the ejection neither extend it
+	// nor change the failure count and backoff of the next one.
+	if st.ejected() {
+		return
+	}
 	if !failed {
 		st.responseFailures = 0
 		st.ejections = 0
-		return
-	}
-	// Responses to requests scheduled before the ejection neither extend it
-	// nor count toward the next one.
-	if st.ejected() {
 		return
 	}
 	st.responseFailures++

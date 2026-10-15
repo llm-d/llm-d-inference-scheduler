@@ -88,11 +88,6 @@ func (fds *MetricsDataSource) Dispatch(_ context.Context, ep fwkdl.Endpoint) err
 	return nil
 }
 
-// Produces declares the PollStatus the datalayer collector records for this source.
-func (fds *MetricsDataSource) Produces() map[plugin.DataKey]any {
-	return map[plugin.DataKey]any{fwkdl.PollStatusDataKey(fds.typedName.Name): &fwkdl.PollStatus{}}
-}
-
 // AppendExtractor is a no-op: this mock sets endpoint metrics directly in
 // Dispatch instead of running extractors.
 func (fds *MetricsDataSource) AppendExtractor(_ plugin.Plugin) error { return nil }
