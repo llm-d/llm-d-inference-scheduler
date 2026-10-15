@@ -437,6 +437,46 @@ func TestCollectorPollStatusIgnoresSkippedTicks(t *testing.T) {
 	assert.Equal(t, int64(3), atomic.LoadInt64(&src.CallCount))
 }
 
+// blockingSource is a PollingDispatcher whose poll blocks until its context
+// ends and then fails with the context's error.
+type blockingSource struct {
+	started chan struct{}
+}
+
+func (s *blockingSource) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: "blocking-type", Name: "blocking"}
+}
+func (s *blockingSource) Dispatch(ctx context.Context, _ fwkdl.Endpoint) error {
+	close(s.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (s *blockingSource) AppendExtractor(_ fwkplugin.Plugin) error { return nil }
+func (s *blockingSource) Interval() time.Duration                  { return 0 }
+
+// TestCollectorStopDuringPollRecordsNothing confirms a poll cut short by Stop
+// is neither recorded on the endpoint nor counted as a poll error.
+func TestCollectorStopDuringPollRecordsNothing(t *testing.T) {
+	src := &blockingSource{started: make(chan struct{})}
+	ep := defaultEndpoint()
+	pollErrorsBefore := testutil.ToFloat64(metrics.LlmdDataLayerPollErrorsTotal.WithLabelValues("blocking-type"))
+	c := NewCollector()
+	ticker := mocks.NewTicker()
+	require.NoError(t, c.Start(context.Background(), ticker, ep, []fwkdl.PollingDispatcher{src}))
+
+	ticker.Tick()
+	select {
+	case <-src.started:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not start")
+	}
+	c.Stop()
+
+	_, ok := fwkdl.ReadAttribute[*fwkdl.PollStatus](ep.GetAttributes(), fwkdl.PollStatusDataKey("blocking"))
+	assert.False(t, ok)
+	assert.Equal(t, pollErrorsBefore, testutil.ToFloat64(metrics.LlmdDataLayerPollErrorsTotal.WithLabelValues("blocking-type")))
+}
+
 // TestCollectorRapidStartStopRaceFree simulates the Runtime's pattern of
 // ReleaseEndpoint immediately followed by NewEndpoint for the same key.
 // Stop returns asynchronously, so a fresh Collector's goroutine may briefly

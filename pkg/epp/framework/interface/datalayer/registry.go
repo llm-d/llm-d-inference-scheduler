@@ -25,8 +25,8 @@ import (
 
 // Registry holds the set of data keys the framework knows how to write and
 // read, paired with the reflect.Type of their declared values. It is built
-// once at framework startup by walking every registered ProducerPlugin's
-// Produces() declaration, then used to validate:
+// once at framework startup by walking every registered plugin's
+// ProducedKeys, then used to validate:
 //
 //   - that every producer declares a single, consistent type for each key
 //     it produces (catches two plugins claiming the same DataKey with
@@ -81,7 +81,7 @@ func (r *Registry) Keys() []string {
 }
 
 // BuildRegistry walks the given plugins and returns a registry populated from
-// every ProducerPlugin's Produces() map. Two producers that declare the same
+// every plugin's ProducedKeys. Two producers that declare the same
 // DataKey with different reflect.Types is a configuration error; the same
 // type (e.g. two producers both declaring *Topology for a topology key)
 // passes because DataKey.String() already namespaces by producer.
@@ -94,11 +94,7 @@ func (r *Registry) Keys() []string {
 func BuildRegistry(plugins []plugin.Plugin) (*Registry, error) {
 	r := NewRegistry()
 	for _, p := range plugins {
-		prod, ok := p.(plugin.ProducerPlugin)
-		if !ok {
-			continue
-		}
-		for dk, val := range prod.Produces() {
+		for dk, val := range ProducedKeys(p) {
 			declared := typeOfProduced(val)
 			existing, found := r.types[dk.String()]
 			if found {
