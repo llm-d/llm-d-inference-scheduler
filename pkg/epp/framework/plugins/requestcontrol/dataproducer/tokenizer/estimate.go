@@ -71,12 +71,13 @@ func appendImageBlock(blocks []tokenizerTypes.ContentBlock, src *fwkrh.Anthropic
 }
 
 func anthropicToolResultContent(b fwkrh.AnthropicContentBlock) (string, []tokenizerTypes.ContentBlock) {
-	if b.Content.Raw != "" {
-		return b.Content.Raw, nil
+	content := b.ToolResultContent()
+	if content.Raw != "" {
+		return content.Raw, nil
 	}
 	var parts []string
 	var imageBlocks []tokenizerTypes.ContentBlock
-	for _, item := range b.Content.Structured {
+	for _, item := range content.Structured {
 		switch item.Type {
 		case blockTypeText:
 			parts = append(parts, item.Text)
