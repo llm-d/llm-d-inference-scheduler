@@ -37,9 +37,12 @@ VLLM_SIMULATOR_TAG ?= v1.0.0
 VLLM_SIMULATOR_TAG_BASE ?= $(IMAGE_REGISTRY)/$(VLLM_SIMULATOR_IMAGE_NAME)
 export VLLM_IMAGE ?= $(VLLM_SIMULATOR_TAG_BASE):$(VLLM_SIMULATOR_TAG)
 
-# CPU-only vLLM image that exposes `vllm launch render` for the token-producer
-# plugin's HTTP backend.
-export VLLM_RENDER_IMAGE ?= vllm/vllm-openai-cpu:v0.21.0
+# Renderer for the token-producer plugin's HTTP backend. The simulator serves
+# every /render route the plugin calls, so it doubles as the renderer and the
+# e2e suites load one image instead of two. Override to render against real
+# vLLM, which tokenizes with the model's own tokenizer rather than a simulated
+# one.
+export VLLM_RENDER_IMAGE ?= $(VLLM_IMAGE)
 export VLLM_RENDER_PORT ?= 8082
 export VLLM_RENDER_URL ?= http://vllm-render:$(VLLM_RENDER_PORT)
 
