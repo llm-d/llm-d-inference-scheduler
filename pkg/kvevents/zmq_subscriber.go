@@ -183,7 +183,9 @@ func (z *zmqSubscriber) runSubscriber(ctx context.Context) {
 	}
 
 	// Rebuild the index from buffered events without waiting for live traffic.
-	if z.replayEndpoint != "" && !z.hasLastSeq && z.canAttemptReplay() {
+	// A snapshot takes precedence; it needs a live frame's topic, so the first
+	// frame loads it and falls back to the replay.
+	if z.replayEndpoint != "" && z.snapshotEndpoint == "" && !z.hasLastSeq && z.canAttemptReplay() {
 		logger.Info("Requesting proactive replay on connect",
 			"endpoint", z.endpoint, "replayEndpoint", z.replayEndpoint)
 		z.requestReplay(ctx, 0)
@@ -289,9 +291,7 @@ func (z *zmqSubscriber) runSubscriber(ctx context.Context) {
 			if !rebuilt {
 				// Without a base the pod is indexed from live events alone,
 				// as it is with neither endpoint set.
-				if z.snapshotEndpoint != "" {
-					z.addTask(ctx, topic, seq, payload)
-				}
+				z.addTask(ctx, topic, seq, payload)
 				continue
 			}
 		}
@@ -562,6 +562,10 @@ func (z *zmqSubscriber) requestReplay(ctx context.Context, startSeq uint64) bool
 			if !ok {
 				terminalErr = fmt.Errorf("malformed replay frame with %d frames", len(frames))
 				break
+			}
+			// A bounded buffer may no longer contain the start of a cold stream.
+			if startSeq == 0 && replayed == 0 {
+				expectedSeq = seq
 			}
 			if seq != expectedSeq {
 				terminalErr = fmt.Errorf("incomplete replay: expected sequence %d, got %d", expectedSeq, seq)

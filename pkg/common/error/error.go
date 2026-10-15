@@ -90,17 +90,6 @@ func CanonicalCode(err error) string {
 	return Unknown
 }
 
-// openAIErrorResponse is the error envelope of the OpenAI-compatible APIs.
-type openAIErrorResponse struct {
-	Error openAIError `json:"error"`
-}
-
-type openAIError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    int    `json:"code"`
-}
-
 // anthropicErrorResponse is the error envelope of the Anthropic Messages API.
 type anthropicErrorResponse struct {
 	Type  string         `json:"type"`
@@ -113,29 +102,29 @@ type anthropicError struct {
 }
 
 // wireCode is how a canonical code appears on the wire: the HTTP status and the
-// error type of each API's envelope.
+// error type of the Anthropic envelope. The OpenAI envelope derives its type
+// from the status through reqcommon.OpenAIErrorType.
 type wireCode struct {
 	httpCode  envoyTypePb.StatusCode
-	openAI    string
 	anthropic string
 }
 
 var wireCodes = map[string]wireCode{
-	BadRequest:         {envoyTypePb.StatusCode_BadRequest, "invalid_request_error", "invalid_request_error"},
-	Unauthorized:       {envoyTypePb.StatusCode_Unauthorized, "authentication_error", "authentication_error"},
-	Forbidden:          {envoyTypePb.StatusCode_Forbidden, "permission_error", "permission_error"},
-	NotFound:           {envoyTypePb.StatusCode_NotFound, "not_found_error", "not_found_error"},
-	PreconditionFailed: {envoyTypePb.StatusCode_PreconditionFailed, "invalid_request_error", "invalid_request_error"},
-	ResourceExhausted:  {envoyTypePb.StatusCode_TooManyRequests, "rate_limit_error", "rate_limit_error"},
-	Internal:           {envoyTypePb.StatusCode_InternalServerError, "server_error", "api_error"},
-	ServiceUnavailable: {envoyTypePb.StatusCode_ServiceUnavailable, "server_error", "overloaded_error"},
+	BadRequest:         {envoyTypePb.StatusCode_BadRequest, "invalid_request_error"},
+	Unauthorized:       {envoyTypePb.StatusCode_Unauthorized, "authentication_error"},
+	Forbidden:          {envoyTypePb.StatusCode_Forbidden, "permission_error"},
+	NotFound:           {envoyTypePb.StatusCode_NotFound, "not_found_error"},
+	PreconditionFailed: {envoyTypePb.StatusCode_PreconditionFailed, "invalid_request_error"},
+	ResourceExhausted:  {envoyTypePb.StatusCode_TooManyRequests, "rate_limit_error"},
+	Internal:           {envoyTypePb.StatusCode_InternalServerError, "api_error"},
+	ServiceUnavailable: {envoyTypePb.StatusCode_ServiceUnavailable, "overloaded_error"},
 }
 
 // errorBody serializes the error in the envelope of the API the request was sent to.
 // Messages quote request fragments, so HTML characters are written verbatim.
 func errorBody(apiType reqcommon.APIType, e Error, code wireCode) ([]byte, error) {
-	var envelope any = openAIErrorResponse{
-		Error: openAIError{Message: e.Msg, Type: code.openAI, Code: int(code.httpCode)},
+	var envelope any = reqcommon.OpenAIErrorResponse{
+		Error: reqcommon.OpenAIError{Message: e.Msg, Type: reqcommon.OpenAIErrorType(int(code.httpCode)), Code: int(code.httpCode)},
 	}
 	if apiType == reqcommon.APITypeMessages {
 		envelope = anthropicErrorResponse{

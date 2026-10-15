@@ -47,8 +47,6 @@ const (
 	ParamForceStreamMaxRequestSize = "force_stream_max_request_size"
 )
 
-const ModalityImage = "image"
-
 func buildKVConnector(params map[string]any) (kv.Connector, error) {
 	name, err := paramString(params, ParamKVConnector)
 	if err != nil {

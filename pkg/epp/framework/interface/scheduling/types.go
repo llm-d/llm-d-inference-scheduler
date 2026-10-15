@@ -30,10 +30,6 @@ import (
 
 const nilString = "<nil>"
 
-type Modality = fwkrh.Modality
-
-const ModalityImage = fwkrh.ModalityImage
-
 type TokenizedRequest = fwkrh.TokenizedRequest
 
 type MultiModalFeature = fwkrh.MultiModalFeature

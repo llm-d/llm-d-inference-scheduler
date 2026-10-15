@@ -39,6 +39,8 @@ const (
 	// finishReasonLength is the finish reason when max_tokens was reached.
 	finishReasonLength = "length"
 
+	requestFieldN = "n"
+
 	responseFieldMessage = "message"
 	responseFieldIndex   = "index"
 	responseFieldDelta   = "delta"
@@ -88,6 +90,20 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		semconv.LLMDPDProxyChunkedDecodeChunkSize(s.config.DecodeChunkSize),
 		semconv.LLMDPDProxyChunkedDecodeStreaming(streamingEnabled),
 	)
+
+	// The decoder echoes the final assistant message, which under chunking is the text of all earlier chunks.
+	if echo, _ := body[reqcommon.FieldEcho].(bool); echo {
+		s.logger.V(logging.DEBUG).Info("chunked decode: echo enabled, using regular decode")
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+
+	// Each chunk continues the first choice's text for every choice, and the budget counts the tokens of all choices.
+	if n, ok := toInt(body[requestFieldN]); ok && n > 1 {
+		s.logger.V(logging.DEBUG).Info("chunked decode: several choices requested, using regular decode", "n", n)
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
 
 	// If the token budget fits within a single chunk, skip chunking entirely.
 	if originalMaxTokens > 0 && originalMaxTokens <= s.config.DecodeChunkSize {
