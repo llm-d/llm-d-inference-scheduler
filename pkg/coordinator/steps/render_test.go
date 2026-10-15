@@ -386,6 +386,52 @@ func TestRenderStep_Responses_CallsRender(t *testing.T) {
 	}
 }
 
+func TestRenderStep_Messages_CallsRender(t *testing.T) {
+	var receivedBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != reqcommon.PathMessages+"/render" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&receivedBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token_ids": []int{1, 32000, 32000, 2345},
+			"features": map[string]any{
+				"mm_hashes":       map[reqcommon.Modality][]string{reqcommon.ModalityImage: {"vllm-hash-a"}},
+				"mm_placeholders": map[reqcommon.Modality][]any{reqcommon.ModalityImage: {map[string]any{"offset": 1, "length": 2}}},
+				"kwargs_data":     map[reqcommon.Modality][]string{reqcommon.ModalityImage: {"dGVuc29yLWE="}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	step, _ := NewRenderStep(nil, map[string]any{})
+	step.(*RenderStep).SetServiceAddress(server.URL)
+
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathMessages,
+		Body: map[string]any{"model": "test", "max_tokens": 10, "messages": []any{
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": "aGk="}},
+			}},
+		}},
+		MultimodalEntries: []pipeline.MultimodalEntry{{Modality: reqcommon.ModalityImage}},
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedBody["max_tokens"] != float64(10) {
+		t.Fatalf("expected the client's Messages body forwarded to render, got %v", receivedBody)
+	}
+	if len(reqCtx.TokenIDs) != 4 {
+		t.Fatalf("expected 4 token_ids, got %d", len(reqCtx.TokenIDs))
+	}
+	got := reqCtx.MultimodalEntries[0]
+	if got.Hash != "vllm-hash-a" || got.KwargsData != "dGVuc29yLWE=" || got.Placeholder.Offset != 1 || got.Placeholder.Length != 2 {
+		t.Fatalf("unexpected multimodal entry: %+v", got)
+	}
+}
+
 func TestRenderStep_CompletionsTokenArray_SkipsRender(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatal("render service should not be called for token array prompt")
@@ -416,32 +462,24 @@ func TestRenderStep_CompletionsTokenArray_SkipsRender(t *testing.T) {
 }
 
 func TestRenderStep_OtherAPIs_SkipRender(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-		body map[string]any
-	}{
-		{name: "messages", path: reqcommon.PathMessages, body: map[string]any{"model": "test", "max_tokens": 10}},
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Errorf("render service should not be called for %s", reqcommon.PathSGLangGenerate)
+	}))
+	defer server.Close()
+
+	step, _ := NewRenderStep(nil, map[string]any{})
+	step.(*RenderStep).SetServiceAddress(server.URL)
+
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathSGLangGenerate,
+		Body:         map[string]any{"model": "test", "text": "hello"},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Errorf("render service should not be called for %s", tt.path)
-			}))
-			defer server.Close()
 
-			step, _ := NewRenderStep(nil, map[string]any{})
-			step.(*RenderStep).SetServiceAddress(server.URL)
-
-			reqCtx := &pipeline.RequestContext{OriginalPath: tt.path, Body: tt.body}
-
-			if err := step.Execute(context.Background(), reqCtx); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(reqCtx.TokenIDs) != 0 {
-				t.Fatalf("expected no token_ids, got %v", reqCtx.TokenIDs)
-			}
-		})
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(reqCtx.TokenIDs) != 0 {
+		t.Fatalf("expected no token_ids, got %v", reqCtx.TokenIDs)
 	}
 }
 
