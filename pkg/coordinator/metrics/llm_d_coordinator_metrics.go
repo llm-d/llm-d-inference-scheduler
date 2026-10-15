@@ -175,8 +175,8 @@ var (
 // non-streaming reply. The gauge tracks bytes reserved against the shared
 // buffer budget by the shapes that buffer the whole reply, so an operator can
 // see how close concurrent forced requests run to the limit; the counter
-// attributes each candidate request that reached the upstream call to its
-// outcome, so it sums to candidate volume.
+// attributes each candidate request to its outcome, so it sums to candidate
+// volume.
 var (
 	forceStreamBufferedBytes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

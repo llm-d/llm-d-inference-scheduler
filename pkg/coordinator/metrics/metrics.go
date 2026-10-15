@@ -76,31 +76,12 @@ const (
 	ProbeResultTransportError = "transport_error"
 )
 
-// Result label values for force_stream_total, one per candidate outcome. Every
-// candidate that reaches the upstream call lands on exactly one of these, so the
-// counter sums to candidate volume. Forced is a request the coordinator streamed
-// from the upstream and reassembled into one non-streaming reply, including one
-// whose delivery was truncated by a client disconnect after the response was
-// committed. FallbackBudget could have been forced but found the buffer budget
-// full. FallbackUnbounded is a buffered-shape request that cannot be reserved: it
-// declares no output token limit, or the limit it declares would reserve more than
-// the per-request cap allows. FallbackUnsupported is a chat or text request whose
-// reply may carry fields the reassembler drops (tool or function calls, logprobs,
-// reasoning content). FallbackOversize is a Responses request whose completed frame
-// did not fit the reservation (which prices generated tokens, not the request
-// fields the frame echoes); it falls back rather than failing a reply the pod
-// returned intact. FallbackUnreadable is a forced request whose upstream returned
-// 200 but a stream the coordinator could not parse or read before any bytes reached
-// the client; it falls back to the pass-through (a fresh non-forced request the pod
-// may serve from a different code path) rather than failing a reply, and logs the
-// parse or read error so the fallback stays diagnosable. ErrorCeiling is a forced
-// request whose reassembled response exceeded its reserved budget and was aborted
-// before any bytes reached the client. ErrorUpstream is a forced request whose
-// upstream returned a 4xx/5xx status, forwarded to the client verbatim.
-// ErrorTransport is a forced request that got no upstream response at all
-// (connection or transport failure). The error outcomes are also classified
-// generically by step_errors_total; the values here add the force-stream-specific
-// view. The five fallback outcomes take the non-forced pass-through.
+// Result label values for force_stream_total, one per candidate outcome: every
+// force-stream candidate lands on exactly one, so the counter sums to candidate
+// volume. The forced outcome is a reassembled reply; each fallback_* outcome takes
+// the non-forced pass-through; each error_* outcome is also classified by
+// step_errors_total. The metric's Help string is the canonical description of what
+// each value means.
 const (
 	ForceStreamResultForced              = "forced"
 	ForceStreamResultFallbackBudget      = "fallback_budget"

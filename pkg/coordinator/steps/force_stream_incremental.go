@@ -173,7 +173,7 @@ func newIncrementalEmitter(w http.ResponseWriter, shape sseShape, model string) 
 // ignored; any other failure is logged rather than discarded.
 func (e *incrementalEmitter) clearWriteDeadline(logger logr.Logger) {
 	if err := e.rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		logger.V(logutil.DEFAULT).Info("could not clear write deadline", "error", err)
+		logger.Error(err, "could not clear write deadline")
 	}
 }
 

@@ -306,6 +306,13 @@ func TestOutputTokenLimit(t *testing.T) {
 			wantOK:  true,
 		},
 		{
+			name:    "chat completions prefers max_completion_tokens over max_tokens",
+			apiType: APITypeChatCompletions,
+			body:    map[string]any{"max_tokens": float64(16), "max_completion_tokens": float64(4000)},
+			want:    4000,
+			wantOK:  true,
+		},
+		{
 			name:    "completions reads max_tokens",
 			apiType: APITypeCompletions,
 			body:    map[string]any{"max_tokens": float64(256)},

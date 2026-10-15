@@ -72,9 +72,10 @@ const (
 	// forceStreamBaseOverheadBytes covers the top-level envelope shared by every
 	// reply: id, model, created, object, and the usage block.
 	forceStreamBaseOverheadBytes = 2 << 10
-	// forceStreamMaxFrameBytes caps one SSE line. Streaming chunks are small
-	// (one token delta), so this bounds a single malformed or oversized frame
-	// rather than a whole response.
+	// forceStreamMaxFrameBytes caps one SSE line on the incremental scanner and is
+	// the upper bound for the buffered chunk shapes, whose per-request reservation is
+	// usually smaller and binds first. Streaming chunks are small (one token delta),
+	// so this rejects a single malformed or oversized frame rather than a whole reply.
 	forceStreamMaxFrameBytes = 1 << 20
 	// forceStreamScanStartBytes is the SSE scanner's initial buffer size; it
 	// grows as needed toward the per-request frame cap.
@@ -144,6 +145,9 @@ func parseForceStreamBudget(params map[string]any) (*forceStreamBudget, error) {
 		return nil, fmt.Errorf("%s: %q exceeds the maximum budget", ParamForceStreamBufferSize, sizeStr)
 	}
 	budgetMax := int64(size)
+	if budgetMax <= forceStreamBaseOverheadBytes {
+		return nil, fmt.Errorf("%s: %q does not exceed the %d-byte reply-envelope overhead, so no request could buffer output", ParamForceStreamBufferSize, sizeStr, forceStreamBaseOverheadBytes)
+	}
 
 	perRequest, err := parseForceStreamPerRequest(params, budgetMax)
 	if err != nil {
@@ -156,8 +160,10 @@ func parseForceStreamBudget(params map[string]any) (*forceStreamBudget, error) {
 // per-request reservation cap. Unset defaults to defaultForceStreamMaxRequestBytes
 // (capped to the shared budget when that is smaller), so one request cannot claim
 // a large share of the budget without the operator opting in. An explicit value
-// must be in (0, max]: a cap above the shared budget could never bind, so it fails
-// config load rather than clamping silently.
+// must leave room for output above the reply envelope and must not exceed the
+// shared budget: a cap at or below the envelope overhead would force-stream
+// nothing, and one above the budget could never bind, so either fails config load
+// rather than silently degrading.
 func parseForceStreamPerRequest(params map[string]any, budgetMax int64) (int64, error) {
 	sizeStr, err := paramString(params, ParamForceStreamMaxRequestSize)
 	if err != nil {
@@ -182,6 +188,9 @@ func parseForceStreamPerRequest(params map[string]any, budgetMax int64) (int64, 
 	perRequest := int64(size)
 	if perRequest > budgetMax {
 		return 0, fmt.Errorf("%s: %q exceeds %s", ParamForceStreamMaxRequestSize, sizeStr, ParamForceStreamBufferSize)
+	}
+	if perRequest <= forceStreamBaseOverheadBytes {
+		return 0, fmt.Errorf("%s: %q does not exceed the %d-byte reply-envelope overhead, so no output could be buffered", ParamForceStreamMaxRequestSize, sizeStr, forceStreamBaseOverheadBytes)
 	}
 	return perRequest, nil
 }
@@ -354,17 +363,22 @@ func forceStreamBody(src map[string]any, shape sseShape) map[string]any {
 	return body
 }
 
-// maxFrameBytes bounds a single SSE line, holding the scanner's transient buffer
-// within the request's reservation (the bytes the budget accounts for). The
-// per-token chunk shapes also keep the small-frame guard: their frames are small,
-// so a frame near the reservation or 1 MiB is malformed. The Responses shape
-// delivers its whole reply in one terminal frame, so its only bound is
-// the reservation.
+// maxFrameBytes bounds a single SSE line within the request's reservation. For the
+// chunk shapes the cap is the smaller of the reservation and forceStreamMaxFrameBytes,
+// so a frame larger than the reservation is rejected whether or not it reaches 1 MiB;
+// with the default per-request cap the reservation stays under 1 MiB and binds first.
+// The Responses shape delivers its whole reply in one terminal frame, so its only
+// bound is the reservation. The result is clamped to int so a reservation above the
+// platform int width cannot wrap negative when it sizes the scanner buffer.
 func maxFrameBytes(shape sseShape, reserved int64) int {
-	if shape != sseShapeResponses && reserved > forceStreamMaxFrameBytes {
-		return forceStreamMaxFrameBytes
+	frameCap := reserved
+	if shape != sseShapeResponses && frameCap > forceStreamMaxFrameBytes {
+		frameCap = forceStreamMaxFrameBytes
 	}
-	return int(reserved)
+	if frameCap > math.MaxInt {
+		frameCap = math.MaxInt
+	}
+	return int(frameCap)
 }
 
 // initialScanBuf sizes the scanner's starting buffer so the effective maximum
