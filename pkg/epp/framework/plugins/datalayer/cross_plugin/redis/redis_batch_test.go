@@ -104,7 +104,7 @@ func TestSetBatchMatchesSetAcrossChunks(t *testing.T) {
 		return next(ctx, cmds)
 	}})
 	before := time.Now()
-	require.Empty(t, batch.SetBatch(context.Background(), spec, ids))
+	require.Empty(t, batch.SetBatch(context.Background(), spec, ids, time.Second))
 	require.ElementsMatch(t, []int{100, 100, 5}, sizes)
 	require.Equal(t, original, ids)
 	for i, id := range ids {
@@ -120,7 +120,7 @@ func TestSetBatchMatchesSetAcrossChunks(t *testing.T) {
 		require.Equal(t, want.(*aggregateCacheEntry).value, got.(*aggregateCacheEntry).value)
 		require.False(t, got.(*aggregateCacheEntry).expiresAt.Before(before.Add(testStateTTL)))
 	}
-	require.Empty(t, batch.SetBatch(context.Background(), spec, nil))
+	require.Empty(t, batch.SetBatch(context.Background(), spec, nil, time.Second))
 	require.Len(t, sizes, 3)
 }
 
@@ -140,7 +140,7 @@ func TestSetBatchEndpointFailures(t *testing.T) {
 	for _, id := range ids {
 		syncer.cache.Store(syncer.hashKey(spec.StateKey, id), old)
 	}
-	failures := syncer.SetBatch(context.Background(), spec, ids)
+	failures := syncer.SetBatch(context.Background(), spec, ids, time.Second)
 	require.Len(t, failures, 2)
 	require.ErrorContains(t, failures[ids[0]], "encode")
 	require.ErrorContains(t, failures[ids[1]], "WRONGTYPE")
@@ -186,7 +186,7 @@ func TestSetBatchChunkFailuresKeepCaches(t *testing.T) {
 				}
 				return returned
 			}})
-			failures := syncer.SetBatch(context.Background(), batchIntSpec(), ids)
+			failures := syncer.SetBatch(context.Background(), batchIntSpec(), ids, time.Second)
 			require.Len(t, failures, len(ids))
 			require.Error(t, returned)
 			if mode == "execabort" {
@@ -263,7 +263,7 @@ func TestSetBatchRetriedWriteKeepsCaches(t *testing.T) {
 		return err
 	}})
 	armed.Store(true)
-	failures := syncer.SetBatch(context.Background(), batchIntSpec(), ids)
+	failures := syncer.SetBatch(context.Background(), batchIntSpec(), ids, time.Second)
 	require.Len(t, failures, len(ids))
 	require.Eventually(t, func() bool { return execs.Load() == 2 }, time.Second, time.Millisecond)
 	for _, id := range ids {
@@ -294,7 +294,7 @@ func TestSetBatchReportsUnattemptedAfterDeadline(t *testing.T) {
 		}
 		return ctx.Err()
 	}})
-	failures := syncer.SetBatch(ctx, batchIntSpec(), ids)
+	failures := syncer.SetBatch(ctx, batchIntSpec(), ids, time.Second)
 	require.Equal(t, int64(batchConcurrency), calls.Load())
 	require.Len(t, failures, len(ids)-batchSize)
 	for _, id := range ids[:batchSize] {
@@ -305,16 +305,39 @@ func TestSetBatchReportsUnattemptedAfterDeadline(t *testing.T) {
 		require.False(t, server.Exists(syncer.hashKey(testStateKey, id)))
 	}
 	calls.Store(0)
-	failures = syncer.SetBatch(ctx, batchIntSpec(), ids)
+	failures = syncer.SetBatch(ctx, batchIntSpec(), ids, time.Second)
 	require.Len(t, failures, len(ids))
 	require.Zero(t, calls.Load())
+}
+
+func TestSetBatchChunkTimeoutFailsOnlySlowChunks(t *testing.T) {
+	server := miniredis.RunT(t)
+	syncer, _ := newTestSyncer(t, server, testReplicaID)
+	ids := batchEndpointIDs(batchConcurrency*batchSize + 5)
+	// Stall every chunk except the tail: the tail can only publish if its own
+	// chunk gets a fresh timeout after waiting for a slot.
+	syncer.client.AddHook(batchPipelineHook{run: func(ctx context.Context, cmds []goredis.Cmder, next goredis.ProcessPipelineHook) error {
+		if cmds[1].Args()[1] != syncer.hashKey(testStateKey, ids[batchConcurrency*batchSize]) {
+			time.Sleep(500 * time.Millisecond)
+		}
+		return next(ctx, cmds)
+	}})
+	failures := syncer.SetBatch(context.Background(), batchIntSpec(), ids, 200*time.Millisecond)
+	require.Len(t, failures, batchConcurrency*batchSize)
+	for _, id := range ids[:batchConcurrency*batchSize] {
+		require.ErrorIs(t, failures[id], context.DeadlineExceeded)
+	}
+	for _, id := range ids[batchConcurrency*batchSize:] {
+		require.NotContains(t, failures, id)
+		require.True(t, server.Exists(syncer.hashKey(testStateKey, id)))
+	}
 }
 
 func TestSetBatchAppliesFieldAndKeyTTLs(t *testing.T) {
 	server := miniredis.RunT(t)
 	syncer, _ := newTestSyncer(t, server, testReplicaID)
 	ids := batchEndpointIDs(101)
-	require.Empty(t, syncer.SetBatch(context.Background(), batchIntSpec(), ids))
+	require.Empty(t, syncer.SetBatch(context.Background(), batchIntSpec(), ids, time.Second))
 	for _, id := range ids {
 		key := syncer.hashKey(testStateKey, id)
 		require.Equal(t, testStateTTL, server.TTL(key))
@@ -339,7 +362,7 @@ func TestSetBatchConcurrentContributors(t *testing.T) {
 		wg.Go(func() {
 			spec := batchIntSpec()
 			spec.StateKey = key
-			failures <- syncer.SetBatch(context.Background(), spec, ids)
+			failures <- syncer.SetBatch(context.Background(), spec, ids, time.Second)
 		})
 	}
 	wg.Wait()
@@ -364,7 +387,7 @@ func TestSetBatchAllEncodeFailures(t *testing.T) {
 		return errors.New("unexpected pipeline")
 	}})
 	ids := batchEndpointIDs(101)
-	require.Len(t, syncer.SetBatch(context.Background(), spec, ids), len(ids))
+	require.Len(t, syncer.SetBatch(context.Background(), spec, ids, time.Second), len(ids))
 }
 
 func TestSetBatchConcurrentChunksPreserveEndpointResults(t *testing.T) {
@@ -389,7 +412,7 @@ func TestSetBatchConcurrentChunksPreserveEndpointResults(t *testing.T) {
 	}
 	server.Del(syncer.hashKey(spec.StateKey, ids[104]))
 	require.NoError(t, server.Set(syncer.hashKey(spec.StateKey, ids[104]), "wrong-type"))
-	failures := syncer.SetBatch(context.Background(), spec, ids)
+	failures := syncer.SetBatch(context.Background(), spec, ids, time.Second)
 	require.Len(t, failures, 2)
 	require.ErrorContains(t, failures[ids[0]], "encode")
 	require.ErrorContains(t, failures[ids[104]], "WRONGTYPE")
@@ -427,7 +450,7 @@ func TestSetBatchConcurrentChunksBoundWorkAfterCancellation(t *testing.T) {
 		syncer.cache.Store(syncer.hashKey(spec.StateKey, id), old)
 	}
 	done := make(chan map[string]error, 1)
-	go func() { done <- syncer.SetBatch(ctx, spec, ids) }()
+	go func() { done <- syncer.SetBatch(ctx, spec, ids, time.Second) }()
 	for range batchConcurrency {
 		select {
 		case <-started:

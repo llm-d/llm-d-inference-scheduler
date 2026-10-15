@@ -18,6 +18,7 @@ package datalayer
 
 import (
 	"context"
+	"time"
 
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 )
@@ -53,17 +54,20 @@ type CrossReplicaSyncer interface {
 
 // CrossReplicaBatchSyncer is an optional interface for a CrossReplicaSyncer
 // that publishes many endpoints in one call. When the syncer implements it,
-// the publisher calls SetBatch once per contributor per cycle in place of Set,
-// and ctx carries the deadline for the whole cycle.
+// the publisher calls SetBatch once per contributor per cycle in place of Set.
+// The publisher does not hold its endpoint lock during the call; endpoints
+// removed while it runs are deleted afterwards.
 type CrossReplicaBatchSyncer interface {
 	// SetBatch publishes the live local value for each endpoint in endpointIDs
-	// and refreshes the peer aggregates used by Get. It returns an error for each
-	// endpoint that was not published, including endpoints left unattempted when
-	// ctx ends, and must return promptly when ctx ends. A nil or empty map means
-	// every endpoint was published. Calls for different specs can run
-	// concurrently with the same endpointIDs, so implementations must not modify
-	// it.
-	SetBatch(ctx context.Context, spec CrossReplicaSpec, endpointIDs []string) map[string]error
+	// and refreshes the peer aggregates used by Get. timeout is positive and
+	// bounds each unit of work the implementation sends, such as one
+	// transaction. It returns an error for each endpoint that was not
+	// published, including endpoints left unattempted when ctx ends, and must
+	// return promptly when ctx ends. A nil
+	// or empty map means every endpoint was published. Calls for different specs
+	// can run concurrently with the same endpointIDs, so implementations must
+	// not modify it.
+	SetBatch(ctx context.Context, spec CrossReplicaSpec, endpointIDs []string, timeout time.Duration) map[string]error
 }
 
 // CrossReplicaContributor is an opt-in interface for endpoint extractors that

@@ -274,7 +274,7 @@ func (s *RedisSyncer) Set(ctx context.Context, spec fwkdl.CrossReplicaSpec, endp
 	return s.set(ctx, spec.StateKey, endpointID, spec.Read(endpointID), spec.Aggregate)
 }
 
-func (s *RedisSyncer) SetBatch(ctx context.Context, spec fwkdl.CrossReplicaSpec, endpointIDs []string) map[string]error {
+func (s *RedisSyncer) SetBatch(ctx context.Context, spec fwkdl.CrossReplicaSpec, endpointIDs []string, timeout time.Duration) map[string]error {
 	failures := make(map[string]error)
 	slots := make(chan struct{}, batchConcurrency)
 	var mu sync.Mutex
@@ -295,7 +295,9 @@ dispatch:
 		remaining = endpointIDs[end:]
 		wg.Go(func() {
 			defer func() { <-slots }()
-			errs := s.setBatchChunk(ctx, spec, chunk)
+			chunkCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			errs := s.setBatchChunk(chunkCtx, spec, chunk)
 			mu.Lock()
 			maps.Copy(failures, errs)
 			mu.Unlock()
@@ -350,24 +352,18 @@ func (s *RedisSyncer) setBatchChunk(ctx context.Context, spec fwkdl.CrossReplica
 	}
 	now := time.Now()
 	commands, execErr := pipe.Exec(ctx)
-	chunkErr := execErr
-	var redisErr goredis.Error
-	if execErr != nil && errors.As(execErr, &redisErr) && !goredis.HasErrorPrefix(execErr, "EXECABORT") {
-		for _, cmd := range commands {
-			if errors.Is(cmd.Err(), execErr) {
-				chunkErr = nil
-				break
-			}
+	if execFailedWholeChunk(execErr, commands) {
+		for _, publication := range publications {
+			failures[publication.endpointID] = fmt.Errorf("redis-syncer: set and get aggregate; Redis 7.4 or newer with HPEXPIRE is required: %w", execErr)
 		}
+		return failures
 	}
 	for _, publication := range publications {
-		err := chunkErr
-		if err == nil {
-			for _, cmd := range publication.commands {
-				if cmd.Err() != nil {
-					err = cmd.Err()
-					break
-				}
+		var err error
+		for _, cmd := range publication.commands {
+			if cmd.Err() != nil {
+				err = cmd.Err()
+				break
 			}
 		}
 		if err != nil {
@@ -380,6 +376,26 @@ func (s *RedisSyncer) setBatchChunk(ctx context.Context, spec fwkdl.CrossReplica
 		}
 	}
 	return failures
+}
+
+// execFailedWholeChunk reports whether a TxPipeline Exec error means every
+// command in the transaction failed. go-redis returns the first command error
+// from Exec: when that error is a Redis error attached to one command (for
+// example WRONGTYPE on one key), the other commands still ran and only that
+// endpoint failed. EXECABORT, transport errors, context errors, and Redis
+// errors attached to no command mean the transaction did not run or its
+// outcome is unknown, so the whole chunk fails and caches stay.
+func execFailedWholeChunk(execErr error, cmds []goredis.Cmder) bool {
+	if execErr == nil {
+		return false
+	}
+	var redisErr goredis.Error
+	if !errors.As(execErr, &redisErr) || goredis.HasErrorPrefix(execErr, "EXECABORT") {
+		return true
+	}
+	return !slices.ContainsFunc(cmds, func(cmd goredis.Cmder) bool {
+		return errors.Is(cmd.Err(), execErr)
+	})
 }
 
 // get combines the live local value with the peer aggregate prepared by set.
