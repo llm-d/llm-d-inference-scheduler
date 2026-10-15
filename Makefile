@@ -356,8 +356,8 @@ verify-boilerplate: ## Check that .go and .sh files carry a copyright notice.
 ##@ Helm
 
 .PHONY: verify-helm-charts
-verify-helm-charts: helm-install kubectl-validate ## Render and validate Helm charts.
-	HELM="$(HELM)" KUBECTL_VALIDATE="$(KUBECTL_VALIDATE)" hack/verify-helm.sh $(MODE)
+verify-helm-charts: helm-install kubectl-validate yq ## Render and validate Helm charts.
+	HELM="$(HELM)" YQ="$(YQ)" KUBECTL_VALIDATE="$(KUBECTL_VALIDATE)" hack/verify-helm.sh $(MODE)
 
 .PHONY: helm-push
 helm-push: yq helm-install ## Package and push a specified Helm chart. Usage: make helm-push CHART=<chart_name>

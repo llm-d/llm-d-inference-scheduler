@@ -109,14 +109,81 @@ Core settings for the Endpoint Picker Proxy (EPP) container and pod, including s
 > **High Availability (HA) Modes**:
 > When EPP is scaled (`router.epp.replicas > 1`):
 > *   **Active-Passive Mode (Default)**: The chart automatically enables the `--ha-enable-leader-election` flag. Only one leader replica active-routes traffic, coordinates lease status, and maintains absolute routing state, while other replicas act as warm standbys.
-> *   **Active-Active Mode**: You can explicitly disable leader-election by passing `ha-enable-leader-election: false` under `router.epp.flags`. In this mode, all replicas process traffic concurrently.
->     *   *Warning*: In active-active mode, you **must only use active-active compatible plugins**—specifically plugins that pull real-time metrics/state dynamically from the backend model servers (such as the precise prefix cache, queue, and KV-cache utilization scorers). Avoid plugins that rely on local in-memory routing state, as this state is not synchronized across replicas.
+> *   **Active-Active Mode**: Set `router.epp.haMode: all-active` to disable leader election and let all replicas process traffic. Setting `router.epp.crossReplica.enabled: true` also selects this mode. The existing `router.epp.flags.ha-enable-leader-election: false` setting remains supported.
+>     *   **Plugin compatibility**: Stateless plugins and plugins that read backend metrics can run independently. The optional Redis syncer shares in-flight load between replicas. Approximate prefix-cache state remains local, so this option does not make approximate prefix routing consistent across replicas.
 >
 > Setting `router.epp.flags.ha-enable-leader-election: true` also enables leader
 > election for a single replica. The chart grants the EPP ServiceAccount the
 > namespace-scoped lease permissions required by this flag.
 
-##### Multi-replica EPP and Helm `--wait`
+#### Active-active with Redis synchronization (Alpha)
+
+Choose this option when EPP throughput needs to scale across replicas and routing
+uses in-flight load. Provision **Redis 7.4 or newer separately** and create any
+password Secret in the release namespace. The chart does not deploy Redis;
+whether to offer an optional Redis subchart is an open question. The syncer uses
+unencrypted TCP and optional password authentication for the default Redis user;
+Redis services requiring TLS or an ACL username are unsupported.
+
+```yaml
+router:
+  epp:
+    replicas: 3
+    pluginsConfigFile: payload-agnostic.yaml
+    crossReplica:
+      enabled: true
+      redis:
+        address: redis.example:6379
+        passwordSecretRef:
+          name: redis-auth
+          key: password
+```
+
+The chart appends `redis-syncer` to the selected EPP config and sets
+`dataLayer.crossReplica`. It passes `--ha-enable-leader-election=false` and
+`--allow-experimental-plugins=true`, and defaults to a rolling update with zero
+unavailable replicas. Fixed `replicas` and `autoscaling` are both supported.
+
+In standalone Envoy service mode, active-active configuration creates a separate
+`<release>-epp-discovery` headless Service. Envoy resolves Ready EPP pod addresses
+and balances requests across them, including replicas discovered after scale-up.
+The chart enables EPP's gRPC health service for Envoy's active health checks;
+`router.epp.flags.health-checking` cannot be set to `false` in this mode.
+An upgrade of an existing standalone Envoy service release with multiple replicas
+and leader election disabled, or with autoscaling enabled, fails if
+`health-checking: false` is set. Remove that flag or set it to `true` before upgrading.
+The EPP ClusterIP Service is retained so enabling discovery can upgrade an
+existing release without changing its immutable Service address. This discovery
+path applies to Envoy; Agentgateway uses the EPP ClusterIP Service.
+
+The example selects `active-request-scorer` through `payload-agnostic.yaml` so
+routing consumes shared in-flight load. The unmodified default and
+optimized-baseline profiles do not consume in-flight load, so enabling Redis
+with either profile does not publish or use shared load. Select a consumer such
+as `active-request-scorer` in the scheduling profile to activate the
+`inflight-load-producer`, and keep its `syncCrossReplicaState` enabled. The chart
+preserves the selected profile and prints this prerequisite in the Helm notes.
+
+Automatic configuration supports `llm-d.ai/v1` built-in, structured
+`pluginsConfig`, and selected raw `pluginsCustomConfig` files. Only the selected
+file receives synchronization settings. An existing `redis-syncer` plugin or
+`dataLayer.crossReplica` section conflicts with this option. To manage these
+manually, leave `crossReplica.enabled` false, select `haMode: all-active`, and
+configure the plugin and experimental flag yourself.
+
+`passwordSecretRef` exposes the Secret key as `EPP_REDIS_PASSWORD` and sets the
+plugin's `passwordEnv`. Omit the reference for Redis without authentication.
+Plaintext `redis.password` values are rejected. The Secret must already exist;
+its value is never placed in the ConfigMap. Restart EPP pods after changing an
+environment-based password. Manual plugin configurations can use `passwordFile`
+with `router.epp.volumes` and `router.epp.volumeMounts` instead.
+
+Load sharing is eventually consistent and does not provide an atomic
+cluster-wide admission quota. See [Scaling Modes](../../docs/operations.md#scaling-modes-active-active-vs-active-passive)
+for state coverage and [Redis Syncer](../../pkg/epp/framework/plugins/datalayer/cross_plugin/redis/README.md)
+for timing and failure behavior.
+
+#### Multi-replica EPP and Helm `--wait`
 
 In active-passive mode only the elected leader passes its readiness probe; standby
 replicas answer the `readiness` gRPC service with `NOT_SERVING` on purpose, so they
@@ -184,7 +251,16 @@ kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
 | :--- | :--- | :--- |
 | `router.epp.parsers` | List of request parser types for EPP. Options: `[openai-parser, anthropic-parser, vllmgrpc-parser, vllmhttp-parser, passthrough-parser]`. Empty for auto-selection. | `[]` |
 | `router.epp.replicas` | Number of EPP replicas. Set > 1 to enable multi-replica EPP. Ignored when `router.epp.autoscaling.enabled` is `true`. | `1` |
-| `router.epp.deploymentStrategy` | Overrides the EPP Deployment's `spec.strategy`. Defaults to `RollingUpdate` with `maxUnavailable: 0` and `maxSurge: 1` when autoscaling is enabled; otherwise defaults to `{type: Recreate}`. See [Multi-replica EPP and Helm `--wait`](#multi-replica-epp-and-helm---wait). | `{type: Recreate}` |
+| `router.epp.haMode` | `leader-elected` or `all-active`. Empty preserves automatic election for fixed replicas > 1, except when cross-replica sync is enabled. Explicit modes must agree with the leader-election flag and cannot be combined with priority routing or GKE preferred backends. | `""` |
+| `router.epp.crossReplica.enabled` | Configure the Alpha Redis syncer, select all-active mode, and allow experimental plugins. | `false` |
+| `router.epp.crossReplica.syncInterval` | Endpoint publication tick interval. A full publication cycle can take longer. | `200ms` |
+| `router.epp.crossReplica.publishTimeout` | Timeout shared by contributors for one endpoint publication or deletion. Must be positive. | `1s` |
+| `router.epp.crossReplica.redis.address` | External Redis `host:port`; required when synchronization is enabled. | `""` |
+| `router.epp.crossReplica.redis.db` | Redis database number. Use a separate database or server for unrelated routing pools. | `0` |
+| `router.epp.crossReplica.redis.stateTTL` | Endpoint state and cached peer aggregate expiration. Must exceed the observed successful per-endpoint refresh interval with margin for Redis latency; minimum `1ms`. | `2s` |
+| `router.epp.crossReplica.redis.coordinationTTL` | Request-level coordination value expiration; minimum `1ms`. | `180s` |
+| `router.epp.crossReplica.redis.passwordSecretRef` | Existing Secret reference with `name` and `key`, exposed through the plugin's `passwordEnv`. | `{}` |
+| `router.epp.deploymentStrategy` | Overrides the EPP Deployment's `spec.strategy`. Defaults to `RollingUpdate` with `maxUnavailable: 0` and `maxSurge: 1` for `haMode: all-active`, cross-replica sync, or autoscaling; otherwise `{type: Recreate}`. See [Multi-replica EPP and Helm `--wait`](#multi-replica-epp-and-helm---wait). | Mode-dependent |
 | `router.epp.autoscaling.enabled` | Enable Horizontal Pod Autoscaler (HPA v2) for the EPP Deployment. Requires active-active mode (`router.epp.flags.ha-enable-leader-election` must not be `true`). See [Horizontal Pod Autoscaling (HPA)](../../docs/operations.md#horizontal-pod-autoscaling-hpa). | `false` |
 | `router.epp.autoscaling.minReplicas` | Minimum number of EPP replicas for the HPA. | `1` |
 | `router.epp.autoscaling.maxReplicas` | Maximum number of EPP replicas for the HPA. Must be greater than or equal to `minReplicas`. | `5` |

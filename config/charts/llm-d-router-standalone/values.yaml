@@ -334,6 +334,10 @@ router:
                       max_ejection_percent: 50
                       # Hold ejection for 30s to allow replacement pod startup and avoid flapping.
                       base_ejection_time: 30s
+                    {{- else if include "llm-d-router.proxy.discoveryServiceName" . }}
+                    # Fail fast on EPP pod IPs that are gone but not yet removed by DNS refresh or health checks.
+                    connect_timeout: 1s
+                    lb_policy: {{ .Values.router.proxy.lbPolicy | default "LEAST_REQUEST" }}
                     {{- else }}
                     connect_timeout: 86400s
                     lb_policy: {{ .Values.router.proxy.lbPolicy | default "LEAST_REQUEST" }}

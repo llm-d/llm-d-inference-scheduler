@@ -8,6 +8,26 @@ imagePullSecrets: []
 
 epp:
   replicas: 1
+  # Empty preserves automatic leader election for fixed replica counts > 1.
+  # Explicit modes: leader-elected or all-active.
+  haMode: ""
+
+  # Alpha: share in-flight load between active EPP replicas using external Redis 7.4+.
+  # Enabling this selects all-active mode and allows experimental plugins.
+  crossReplica:
+    enabled: false
+    syncInterval: 200ms
+    publishTimeout: 1s
+    redis:
+      address: ""
+      db: 0
+      stateTTL: 2s
+      coordinationTTL: 180s
+      # Existing Secret in the release namespace, exposed through passwordEnv.
+      # passwordSecretRef:
+      #   name: redis-auth
+      #   key: password
+      passwordSecretRef: {}
 
   # Pod-level securityContext, inherited by every container in the EPP pod. The
   # latency predictor images declare no user and run as root unless runAsUser is
@@ -16,8 +36,8 @@ epp:
   # Container-level securityContext for the EPP container.
   securityContext: {}
 
-  # Overrides the EPP Deployment's spec.strategy. Unset means `type: Recreate`,
-  # which is the recommended default for the stateful single-active-replica pattern.
+  # Overrides the EPP Deployment's spec.strategy. All-active mode and autoscaling
+  # default to RollingUpdate (maxUnavailable: 0, maxSurge: 1); otherwise Recreate.
   #
   # With replicas > 1 the chart enables leader election, and standby replicas stay
   # NotReady by design, so a `Recreate` Deployment never reports Available=True and
@@ -331,4 +351,3 @@ latencyPredictor:
     LATENCY_MAX_SAMPLE_SIZE: "10000"
     LATENCY_MAX_CONCURRENT_DISPATCHES: "36"
     LATENCY_COALESCE_WINDOW_MS: "1"
-
