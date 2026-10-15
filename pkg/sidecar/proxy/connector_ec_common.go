@@ -38,15 +38,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Multimodal content types that need encoder processing.
-var mmTypes = map[string]bool{
-	reqcommon.PartTypeImageURL:   true,
-	reqcommon.PartTypeAudioURL:   true,
-	reqcommon.PartTypeVideoURL:   true,
-	reqcommon.PartTypeInputAudio: true,
-	reqcommon.PartTypeInputImage: true,
-}
-
 // requestInput returns the request's Responses input items. A bare JSON string
 // (a single text turn), an explicit null and an absent field all yield a nil
 // slice and no error. Nothing writes a decoded slice back under input, so the
@@ -132,7 +123,8 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 	// messages entry and a Responses input item land here, so the line names
 	// neither field and carries apiType instead.
 	droppedTurns := 0
-	collect := func(parts []any) {
+	var collect func(parts []any, role string, inToolResult bool)
+	collect = func(parts []any, role string, inToolResult bool) {
 		for _, part := range parts {
 			partMap, ok := part.(map[string]any)
 			if !ok {
@@ -143,29 +135,60 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 				continue
 			}
 
-			// vLLM's chat-completions parser primes input_image and image_url
-			// through the same map, so an input_image on a chat request is
-			// extracted. A chat part type on a Responses request fails the model
-			// server's input validation, so the request never reaches a worker
-			// and priming it would only fail the fanout first.
-			switch partType {
-			case reqcommon.PartTypeInputImage:
-				if url := reqcommon.MediaPartURL(partMap); url == "" {
-					logger.V(logging.DEBUG).Info("skipping input_image with no fetchable URL")
+			if apiType == reqcommon.APITypeMessages {
+				// Anthropic image blocks are not a chat part. The encoder is
+				// posted at /v1/chat/completions, which only primes image_url,
+				// so reshape before the part is forwarded as-is. vLLM loads
+				// tool_result images only on user turns and only one level
+				// deep, and keeps nothing but text on system turns, so
+				// priming the rest buys an encoder call for an image the
+				// model never sees. A chat part type fails /v1/messages
+				// input validation, so that request never reaches a worker.
+				_, isMedia := reqcommon.PartModality(partType)
+				switch {
+				case partType == reqcommon.BlockTypeToolResult:
+					if role == "user" && !inToolResult {
+						if nested, ok := partMap[reqcommon.FieldContent].([]any); ok {
+							collect(nested, role, true)
+						}
+					}
+				case partType == reqcommon.BlockTypeImage:
+					if role == "system" {
+						continue
+					}
+					converted, ok := anthropicImagePart(partMap)
+					if !ok {
+						logger.V(logging.DEBUG).Info("skipping anthropic image the encoder cannot be primed with")
+						droppedParts++
+						continue
+					}
+					items = append(items, converted)
+				case !inToolResult && isMedia:
+					logger.V(logging.DEBUG).Info("skipping content part the Messages API does not define", "type", partType, "apiType", apiType)
 					droppedParts++
-					continue
 				}
-			case reqcommon.PartTypeImageURL, reqcommon.PartTypeAudioURL, reqcommon.PartTypeVideoURL, reqcommon.PartTypeInputAudio:
-				if apiType == reqcommon.APITypeResponses {
-					logger.V(logging.DEBUG).Info("skipping content part the Responses input union does not define", "type", partType, "apiType", apiType)
-					droppedParts++
-					continue
-				}
+				continue
 			}
 
-			if mmTypes[partType] {
-				items = append(items, partMap)
+			// reqcommon.PartModality's rule, shared with the coordinator steps
+			// so the two cannot disagree about which parts exist. A part naming
+			// no media is not counted as a drop: every text and tool part lands
+			// here, so counting them would fire droppedParts on ordinary traffic.
+			if _, isMedia := reqcommon.PartModality(partType); !isMedia {
+				continue
 			}
+
+			// An input_image carries its media behind a URL only, so one without
+			// a readable URL has nothing to prime an encoder with. Specific to
+			// it: an input_audio holds its bytes inline and reports no URL, so a
+			// general check would drop audio the encoder can be primed with.
+			if partType == reqcommon.PartTypeInputImage && reqcommon.MediaPartURL(partMap) == "" {
+				logger.V(logging.DEBUG).Info("skipping input_image with no fetchable URL")
+				droppedParts++
+				continue
+			}
+
+			items = append(items, partMap)
 		}
 	}
 
@@ -182,8 +205,9 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 			droppedTurns++
 			continue
 		}
+		role, _ := turn[reqcommon.FieldRole].(string)
 		for _, array := range reqcommon.ItemPartArrays(turn, apiType) {
-			collect(array.Parts)
+			collect(array.Parts, role, false)
 		}
 	}
 
@@ -203,6 +227,27 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 // extraction logs with requestID.
 func (s *Server) mmItemsForFanout(originalRequest map[string]any, requestID string, apiType reqcommon.APIType) []map[string]any {
 	return extractMMItems(s.logger.WithValues("requestID", requestID), originalRequest, apiType)
+}
+
+// anthropicImagePart turns a Messages API image block into the image_url
+// part the chat-completions encoder primes.
+func anthropicImagePart(part map[string]any) (map[string]any, bool) {
+	source, ok := part["source"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	sourceType, _ := source["type"].(string)
+	rawURL, _ := source["url"].(string)
+	data, _ := source["data"].(string)
+	mediaType, _ := source["media_type"].(string)
+	imageURL := reqcommon.AnthropicImageURL(sourceType, rawURL, data, mediaType)
+	if imageURL == "" {
+		return nil, false
+	}
+	return map[string]any{
+		"type":      reqcommon.PartTypeImageURL,
+		"image_url": map[string]any{"url": imageURL},
+	}, true
 }
 
 // fanoutEncoder fans out one encoder request per item, in parallel, with

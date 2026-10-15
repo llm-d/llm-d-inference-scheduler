@@ -47,11 +47,44 @@ func MediaPartURLRef(part map[string]any) (url string, set func(string)) {
 	return "", nil
 }
 
+// AnthropicImageURL returns the image URL vLLM builds from an Anthropic image
+// source. A url source, or any source that already carries a URL, is that URL.
+// Any other source with data becomes a data URL, and an empty media type falls
+// back to DefaultImageMediaType.
+func AnthropicImageURL(sourceType, rawURL, data, mediaType string) string {
+	if sourceType == "url" || rawURL != "" {
+		return rawURL
+	}
+	if data == "" {
+		return ""
+	}
+	if mediaType == "" {
+		mediaType = DefaultImageMediaType
+	}
+	return "data:" + mediaType + ";base64," + data
+}
+
 // MediaPartURL returns the URL a media content part references, or "" when
 // there is none to fetch.
 func MediaPartURL(part map[string]any) string {
 	url, _ := MediaPartURLRef(part)
 	return url
+}
+
+// Base64DecodedLen returns the number of bytes a standard base64 payload
+// decodes to, without decoding it, so a caller can bound an inline media
+// payload while it is still a string and never allocate an oversized one.
+//
+// Exact for a padded payload. Two cases read long: a line-wrapped payload
+// counts its newlines (about 1% high), and a malformed one is measured rather
+// than refused, since this reports a length and the serving engine is what
+// validates the encoding.
+func Base64DecodedLen(rawB64 string) int {
+	n := len(rawB64)
+	for n > 0 && rawB64[n-1] == '=' {
+		n--
+	}
+	return n * 3 / 4
 }
 
 // PartArray is one content part array of a message or input item, named by the
@@ -71,12 +104,12 @@ type PartArray struct {
 // part type a media walk collects. A chat-completions message defines no
 // output, so walking one there would collect a part the client never sent.
 //
-// What callers share is this array-selection rule, not the parts they keep from
-// it: the sidecar's encoder fan-out primes every modality and drops a part with
-// no fetchable URL, while the coordinator steps keep one image type and drop
-// nothing, since they pair parts with multimodal entries by position. A caller
-// that selected arrays for itself could disagree about which parts exist at
-// all, which is the one thing none of them may do.
+// Callers share this rule, and PartModality for which parts in an array name
+// media -- together the whole of "which parts exist", the one thing none of them
+// may disagree about. What they still decide for themselves is what to do with a
+// part they skip: the sidecar's fan-out logs and counts one it cannot prime,
+// while the coordinator steps keep every part that names a modality, since
+// dropping one would shift their positional pairing.
 //
 // Parts aliases the item it came from. A coordinator step writes a uuid or a
 // rewritten URL through it; the sidecar decodes its own copy, where a write

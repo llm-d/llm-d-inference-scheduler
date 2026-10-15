@@ -13,14 +13,14 @@ However, it is relatively new and may contain bugs. The `/v1/chat/completions` f
 - [Stage 1: replace-media-urls](#stage-1-replace-media-urls)
 - [Stage 2: render](#stage-2-render)
 - [Stage 3: conditional-decode](#stage-3-conditional-decode)
-- [Stage 4: encode (fan-out, one per image)](#stage-4-encode-fan-out-one-per-image)
+- [Stage 4: encode (fan-out, one per media entry)](#stage-4-encode-fan-out-one-per-media-entry)
 - [Stage 5: prefill](#stage-5-prefill)
 - [Stage 6: decode](#stage-6-decode)
 - [x-llm-d-epp-profile Header and Routing](#x-llm-d-epp-profile-header-and-routing)
 - [Request Format Configuration](#request-format-configuration)
 - [Completions Requests (/v1/completions)](#completions-requests-v1completions)
 - [Responses Requests (/v1/responses)](#responses-requests-v1responses)
-- [Text-Only Requests (no images)](#text-only-requests-no-images-v1chatcompletions)
+- [Text-Only Requests (no media)](#text-only-requests-no-media-v1chatcompletions)
 - [Generate Requests (/inference/v1/generate)](#generate-requests-inferencev1generate)
 - [Questions](#questions)
 
@@ -40,11 +40,11 @@ Client Request (/v1/chat/completions, /v1/responses, /v1/completions, or /infere
     |        YES --> skip replace-media-urls, go to [render]
     |
     v
-[replace-media-urls] - Fan-out downloads images, converts to base64 data URIs
+[replace-media-urls] - Fan-out downloads media (image, audio, video), converts to base64 data URIs
     |                    (skipped for /v1/completions and for /v1/chat/completions or
-    |                    /v1/responses without media URLs)
+    |                    /v1/responses without media parts)
     v
-[render] - Tokenizes prompt, produces token_ids and per-image metadata
+[render] - Tokenizes prompt, produces token_ids and per-modality media metadata
     |         (skipped for /v1/completions with token array prompt)
     v
 [conditional-decode] - Attempts decode with token_ids;
@@ -55,7 +55,7 @@ Client Request (/v1/chat/completions, /v1/responses, /v1/completions, or /infere
     |--- /inference/v1/generate --> skip encode (prefill encodes inline from kwargs_data), go to [prefill]
     |
     v
-[encode] - Fan-out: one request per image, runs ViT encoder
+[encode] - Fan-out: one request per media entry, runs the encoder
     |
     v
 [prefill] - Single request with encoder outputs; full token sequence too, in the generate format
@@ -70,9 +70,11 @@ All requests from the coordinator to workers include the `x-llm-d-epp-profile` H
 
 ## Stage 1: replace-media-urls
 
-Downloads external image URLs and replaces them with inline data URIs in the request body.
+Downloads external `image_url`, `audio_url`, and `video_url` references and replaces them with inline data URIs in the request body. Inline `input_audio` parts already carry their bytes and are validated and size-checked in place.
 
 **Skipped for `/v1/completions` requests** (completions cannot contain multimedia content).
+
+The worked examples below use images throughout; audio and video take the same path, with `audio_url` / `video_url` / `input_audio` parts and `audio` / `video` keys wherever an example shows `image`.
 
 ### Input
 
@@ -129,15 +131,31 @@ encode the wrong image.
 
 ### Output (mutates RequestContext)
 
-- `reqCtx.Body["messages"]` (or `reqCtx.Body["input"]` for `/v1/responses`) - image URLs replaced with `data:<mime>;base64,<data>` URIs
-- `reqCtx.MultimodalEntries` - populated with one entry per image:
+- `reqCtx.Body["messages"]` (or `reqCtx.Body["input"]` for `/v1/responses`) - media URLs replaced with `data:<mime>;base64,<data>` URIs
+- `reqCtx.MultimodalEntries` - one entry per media part, tagged with the modality it came from:
 
 ```go
 []MultimodalEntry{
-    {Index: 0, Base64Data: "<base64>", ContentType: "image/jpeg"},
-    {Index: 1, Base64Data: "<base64>", ContentType: "image/png"},
+    {Modality: "image"},
+    {Modality: "image"},
 }
 ```
+
+A request mixing modalities seeds one entry per part in request-walker order, so a body carrying an image, then audio, then another image yields:
+
+```go
+[]MultimodalEntry{
+    {Modality: "image"},
+    {Modality: "audio"},
+    {Modality: "image"},
+}
+```
+
+This step sets `Modality` only; [render](#stage-2-render) fills in `Hash`, `KwargsData`, and `Placeholder`.
+
+The entry does **not** carry the media bytes. They stay on the request body -- in the `data:` URI this step wrote, or in `input_audio.data` where the client put them -- so a large payload is not duplicated on `reqCtx`.
+
+An entry's absolute position in the slice carries no meaning on its own: every step pairs an entry with its content part by counting entries of the same `Modality`, so the `i`-th `audio` entry pairs with the `i`-th audio part.
 
 ---
 
@@ -264,25 +282,27 @@ Wire-size example (the test payload above, single 200×300 JPG against Qwen3-VL-
 | `features.kwargs_data["image"][0]`        | 1,147,128 bytes (base64)   |
 | **Total response size**                   | ~1.15 MB                   |
 
-For text-only chat completions (no `image_url` parts), `features.mm_hashes.image`, `features.mm_placeholders.image`, and `features.kwargs_data.image` are empty arrays.
+For text-only chat completions (no media parts), `features.mm_hashes.image`, `features.mm_placeholders.image`, and `features.kwargs_data.image` are empty arrays. A request carrying audio or video gets the same three maps keyed by `audio` / `video` instead of (or alongside) `image`.
 
 #### Output (mutates RequestContext)
 
 For the single-image example above:
 
 - `reqCtx.TokenIDs` = the full 84-element token sequence from the response
-- `reqCtx.MultimodalEntries` enriched per image:
+- `reqCtx.MultimodalEntries` enriched from `features` (the example's single entry has `Modality: "image"`, set by stage 1 and left untouched here):
   - `entries[0].Hash = "2b622017706939546ca39ffbc7b610fe1fcbd4f9154d33b4ef13aaf5860c473e"`
   - `entries[0].KwargsData = "<base64-encoded-msgpack blob, ~1.1 MB>"`
   - `entries[0].Placeholder = {Offset: 8, Length: 70}`
 
-For a multi-image request the slices line up positionally:
+For a multi-entry request the coordinator walks `reqCtx.MultimodalEntries` in order, reading each entry's slot from the response maps for its own modality at a per-modality position counter. Writing `m` for `entries[i].Modality` and `k` for the number of earlier entries with that same modality:
 
-- `entries[i].Hash = features.mm_hashes.image[i]`
-- `entries[i].KwargsData = features.kwargs_data.image[i]`
-- `entries[i].Placeholder = features.mm_placeholders.image[i]`
+- `entries[i].Hash = features.mm_hashes[m][k]`
+- `entries[i].KwargsData = features.kwargs_data[m][k]`
+- `entries[i].Placeholder = features.mm_placeholders[m][k]`
 
-The coordinator validates that `mm_hashes.image`, `mm_placeholders.image`, and `kwargs_data.image` all have length `len(reqCtx.MultimodalEntries)`; a mismatch fails the request.
+For an image-only request `k == i`, so this is the same positional pairing as `features.mm_hashes.image[i]`.
+
+The coordinator validates that the per-modality lengths of `mm_hashes`, `mm_placeholders`, and `kwargs_data` each **sum** to `len(reqCtx.MultimodalEntries)`, and that every entry finds an element at its per-modality position. Either failure fails the request, so a response with the right total split across the wrong modalities is rejected rather than silently mispaired.
 
 ---
 
@@ -379,7 +399,7 @@ The client request body (tokens-in format):
 #### Output (mutates RequestContext)
 
 - `reqCtx.TokenIDs` = the `token_ids` array from the body
-- `reqCtx.MultimodalEntries` = one entry per image, populated from `features` (`Hash`, `Placeholder`, `KwargsData`), same layout as the chat-completions path
+- `reqCtx.MultimodalEntries` = one entry per item named in `features.mm_hashes`, populated from `features` (`Modality`, `Hash`, `Placeholder`, `KwargsData`). `mm_hashes` decides which modalities the request describes: one that only `mm_placeholders` or `kwargs_data` names is a client error, not a skipped key. There is no request walker on this path, so entries are grouped by modality in sorted order (`audio`, `image`, `video`) and by index within each -- which still satisfies the per-modality pairing
 - `reqCtx.Body` is left as-is; downstream stages read it directly
 
 ---
@@ -537,9 +557,9 @@ Like chat completions, the body is sent unchanged:
 
 ---
 
-## Stage 4: encode (fan-out, one per image)
+## Stage 4: encode (fan-out, one per media entry)
 
-Sends one encode request per multimodal entry. Each request contains only the BOS token plus placeholder tokens for that specific image. The encoder runs ViT and stores the result in the EC (Embedding Cache).
+Sends one encode request per multimodal entry, whatever its modality. Each carries only the BOS token plus that entry's placeholder tokens, with `mm_hashes` and `kwargs_data` keyed under the entry's own modality. On the chat-completions path it also carries the one matching content part, located by counting parts of that modality. The encoder runs and stores the result in the EC (Embedding Cache).
 
 **Skipped for `/v1/completions` requests** (completions cannot contain multimedia content).
 
@@ -548,7 +568,7 @@ Two request formats are supported (see [Request Format Configuration](#request-f
 **Common notes:**
 - `token_ids[0]` is always BOS (first token from render output)
 - The placeholder token ID is extracted from `reqCtx.TokenIDs[entry.Placeholder.Offset]` (model-specific, opaque)
-- `mm_placeholders` offset is always 1 in encode requests (right after BOS, since each request has only one image)
+- `mm_placeholders` offset is always 1 in encode requests (right after BOS, since each request has only one media entry)
 
 ---
 
@@ -1230,6 +1250,7 @@ treated as chat completions. The differences:
 | Text part | `{"type": "text", "text": ...}` | `{"type": "input_text", "text": ...}` |
 | Image part | `{"type": "image_url", "image_url": {"url": ...}}` | `{"type": "input_image", "image_url": "..."}` |
 | Image detail | nested in `image_url` | `detail`, a sibling of `image_url` |
+| Audio / video parts | `audio_url`, `video_url`, `input_audio` | none; see below |
 | Part arrays walked | `content` | `content`, and `output` on a `function_call_output` |
 | Output cap | `max_tokens`, `max_completion_tokens` | `max_output_tokens` |
 | Render endpoint | `/v1/chat/completions/render` | `/v1/responses/render` |
@@ -1240,9 +1261,17 @@ which holds them under `output`. Every stage walks both arrays, since vLLM
 forwards the `output` array as a tool message's content, so an image in it
 reaches the model like any other part.
 
+The Responses input content union is `input_text` / `input_image` / `input_file`,
+so a Responses request carrying `image_url`, `audio_url`, `video_url` or
+`input_audio` is refused by the model server. The pipeline does not pre-empt
+that: `reqcommon.PartModality` answers by part type alone, so those parts are
+collected, downloaded and primed on either API. That rule has one
+implementation, `pkg/common/request/modality.go`, which every coordinator and
+sidecar stage calls rather than carrying its own copy.
+
 Per stage:
 
-1. **replace-media-urls**: walks `input` for `input_image` parts and inlines each URL as a data URI (see [Stage 1](#stage-1-replace-media-urls))
+1. **replace-media-urls**: walks `input` for media parts and inlines each URL as a data URI; a request the model server accepts carries `input_image` (see [Stage 1](#stage-1-replace-media-urls))
 2. **render**: posts to `/v1/responses/render`; same response shape as chat completions (see [2.D](#2d-v1responsesrender))
 3. **conditional-decode**: forwards the body unchanged to `/v1/responses`
 4. **encode**: one `/v1/responses` sub-request per image, each carrying a single `input_image` part (see [Option C](#option-c-v1responses))
@@ -1269,9 +1298,9 @@ do (see [Request Format Configuration](#request-format-configuration)).
 
 ---
 
-## Text-Only Requests (no images, /v1/chat/completions)
+## Text-Only Requests (no media, /v1/chat/completions)
 
-When a `/v1/chat/completions` request contains no `image_url` parts:
+When a `/v1/chat/completions` request contains no media parts (`image_url`, `audio_url`, `video_url`, or `input_audio`):
 - `replace-media-urls`: no-op (no downloads, no multimodal entries)
 - `render`: always runs -- tokenizes the prompt and returns `token_ids` (features will be empty)
 - `encode`: skipped (`MultimodalEntries` is empty)

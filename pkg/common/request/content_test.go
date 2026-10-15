@@ -17,12 +17,64 @@ limitations under the License.
 package request
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"maps"
 	"reflect"
 	"slices"
 	"testing"
 )
+
+func TestAnthropicImageURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		sourceType string
+		rawURL     string
+		data       string
+		mediaType  string
+		want       string
+	}{
+		{name: "url source", sourceType: "url", rawURL: "https://example.com/a.png", want: "https://example.com/a.png"},
+		{name: "bare url", rawURL: "https://example.com/bare.png", want: "https://example.com/bare.png"},
+		{name: "base64 with media type", sourceType: "base64", data: "aaaa", mediaType: "image/png", want: "data:image/png;base64,aaaa"},
+		{name: "base64 without media type", sourceType: "base64", data: "cccc", want: "data:image/jpeg;base64,cccc"},
+		{name: "empty source", sourceType: "base64", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AnthropicImageURL(tt.sourceType, tt.rawURL, tt.data, tt.mediaType)
+			if got != tt.want {
+				t.Fatalf("AnthropicImageURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Base64DecodedLen must be exact, not an estimate: the coordinator bounds an
+// inline media payload with it, so a size read one byte high would reject a
+// payload of exactly the configured cap. Padding is what makes it exact, so
+// every residue of 3 is covered.
+func TestBase64DecodedLen(t *testing.T) {
+	for n := 0; n < 300; n++ {
+		b64 := base64.StdEncoding.EncodeToString(make([]byte, n))
+		if got := Base64DecodedLen(b64); got != n {
+			t.Fatalf("Base64DecodedLen of %d encoded bytes = %d, want %d", n, got, n)
+		}
+	}
+	// The sizes a cap actually takes: 1 MiB and 10 MiB are both 1 mod 3, the
+	// residue that left the old encoded-length bound 2 bytes slack.
+	for _, n := range []int{1023, 1024, 1 << 20, 10 << 20} {
+		b64 := base64.StdEncoding.EncodeToString(make([]byte, n))
+		if got := Base64DecodedLen(b64); got != n {
+			t.Fatalf("Base64DecodedLen of %d encoded bytes = %d, want %d", n, got, n)
+		}
+	}
+	// A payload with no data is zero rather than negative, and an unpadded one
+	// is measured as the characters it carries.
+	if got := Base64DecodedLen("===="); got != 0 {
+		t.Errorf("all-padding payload = %d, want 0", got)
+	}
+}
 
 func TestMediaPartURL(t *testing.T) {
 	tests := []struct {

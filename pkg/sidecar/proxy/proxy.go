@@ -404,7 +404,12 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	// The server logs this so it appears once: every data parallel rank starts the shared validator.
-	if !s.allowlistValidator.enabled {
+	if s.allowlistValidator.enabled {
+		defer s.allowlistValidator.Stop()
+		if err := s.allowlistValidator.Start(ctx); err != nil {
+			return err
+		}
+	} else {
 		s.logger.Info("warning: SSRF protection is disabled; targets taken from the request are not checked against the InferencePool",
 			"flag", "--"+enableSSRFProtection,
 			"headers", routing.HeaderNames(routing.PrefillEndpointHeader, routing.EncoderEndpointsHeader),
@@ -546,7 +551,14 @@ func (s *Server) createRoutes() *http.ServeMux {
 	// DetectAPIType owns the path-to-API mapping; deriving it here keeps the
 	// served routes from drifting away from it.
 	for _, path := range []string{reqcommon.PathChatCompletions, reqcommon.PathCompletions, reqcommon.PathMessages, reqcommon.PathResponses, reqcommon.PathVLLMGenerate, reqcommon.PathSGLangGenerate} {
-		mux.HandleFunc("POST "+path, s.disaggregatedPrefillHandler(reqcommon.DetectAPIType(path)))
+		handler := s.disaggregatedPrefillHandler(reqcommon.DetectAPIType(path))
+		mux.HandleFunc("POST "+path, handler)
+		mux.HandleFunc("POST "+path+"/{$}", func(w http.ResponseWriter, r *http.Request) {
+			r = r.Clone(r.Context())
+			r.URL.Path = path
+			r.URL.RawPath = ""
+			handler(w, r)
+		})
 	}
 
 	s.decoderProxy = s.createDecoderProxyHandler(s.config.DecoderURL, s.config.InsecureSkipVerifyForDecoder)

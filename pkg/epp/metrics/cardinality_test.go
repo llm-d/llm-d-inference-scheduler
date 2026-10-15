@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -162,7 +163,7 @@ func TestQueueDurationBoundsModelLabels(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 		m := fmt.Sprintf("model-%d", i)
-		RecordFlowControlRequestQueueDuration("tenant", "0", "Dispatched", "pool", m, m, time.Millisecond)
+		RecordFlowControlRequestQueueDuration(context.Background(), "tenant", "0", "Dispatched", "pool", m, m, time.Millisecond)
 	}
 
 	require.Equal(t, testCap+1, promtestutil.CollectAndCount(llmdFlowControlRequestQueueDuration),
