@@ -648,7 +648,7 @@ func TestHandleInference_OverlongRequestIDIsRejected(t *testing.T) {
 }
 
 func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
-	// x-peer-topology and epp-profile are headers the coordinator alone injects
+	// x-llm-d-peer-topology and epp-profile are headers the coordinator alone injects
 	// (copied from the prefill response, or set to select a profile); a
 	// client-supplied value must never survive into OriginalHeaders, since a
 	// later step trusts it as coordinator-generated.
@@ -669,7 +669,7 @@ func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
 		t.Fatal("pipeline step did not run")
 	}
 	if got := step.captured.OriginalHeaders.Get(reqcommon.PeerTopologyHeaderKey); got != "" {
-		t.Fatalf("client-supplied x-peer-topology must be stripped, got %q", got)
+		t.Fatalf("client-supplied x-llm-d-peer-topology must be stripped, got %q", got)
 	}
 	if got := step.captured.OriginalHeaders.Get(reqcommon.EPPProfileHeaderKey); got != "" {
 		t.Fatalf("client-supplied epp-profile must be stripped, got %q", got)

@@ -35,7 +35,7 @@ const (
 	// from the prefill EPP's response, through the coordinator, to the decode
 	// EPP's request, for topology-affinity-filter and topology-affinity-scorer
 	// running in coordinator deployments.
-	PeerTopologyHeaderKey = "x-peer-topology"
+	PeerTopologyHeaderKey = "x-llm-d-peer-topology"
 
 	// DefaultFairnessID is the default fairness ID used when no ID is provided in the request.
 	// This ensures that requests without explicit fairness identifiers are still grouped and managed by the Flow Control
