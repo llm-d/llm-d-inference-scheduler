@@ -83,6 +83,23 @@ func (e *UpstreamStreamedError) Error() string {
 
 func (e *UpstreamStreamedError) Unwrap() error { return e.Cause }
 
+// ResponseWrittenError signals that a step answered the client itself with
+// the error status StatusCode. StatusCode is informational and appears only in
+// Error(); classification comes from Cause (ErrBadRequest, an UpstreamError,
+// or an internal error). Callers must classify this for request_error_total /
+// step_errors_total but must not write another response body.
+type ResponseWrittenError struct {
+	Step       string
+	StatusCode int
+	Cause      error
+}
+
+func (e *ResponseWrittenError) Error() string {
+	return fmt.Sprintf("answered client with HTTP %d: %v", e.StatusCode, e.Cause)
+}
+
+func (e *ResponseWrittenError) Unwrap() error { return e.Cause }
+
 // Pipeline orchestrates the sequential execution of steps.
 type Pipeline struct {
 	steps                  []Step

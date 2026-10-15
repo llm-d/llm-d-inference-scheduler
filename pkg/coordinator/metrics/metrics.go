@@ -53,6 +53,7 @@ const (
 // Upstream label values for the upstream_request_* metrics. Step names come
 // from each step file's own StepName constant (pkg/coordinator/steps/*.go).
 const (
+	UpstreamAsyncBroker       = "async-broker"
 	UpstreamRender            = "render"
 	UpstreamReplaceMediaURLs  = "replace-media-urls"
 	UpstreamEncode            = "encode"
@@ -80,6 +81,8 @@ const (
 const (
 	RouteChatCompletions = "chat_completions"
 	RouteCompletions     = "completions"
+	RouteResponses       = "responses"
+	RouteMessages        = "messages"
 	RouteGenerate        = "generate"
 	RouteUnknown         = "unknown"
 )

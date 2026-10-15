@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
@@ -112,7 +113,7 @@ func TestMessagesRenderMode(t *testing.T) {
 					CacheSalt: "tenant-a",
 					Prompts: []fwkrh.PromptTokens{{
 						TokenIDs:           []uint32{1, 2, 3},
-						MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "hash", Offset: 1, Length: 2}},
+						MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "hash", Offset: 1, Length: 2}},
 					}},
 				}, req.Body.TokenizedRequest)
 				require.Equal(t, fwkrh.RawPayload(raw), req.Body.WirePayload())
@@ -858,7 +859,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
 						{Type: "text", Text: "Describe this"},
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"})},
 					},
 				}},
 			},
@@ -877,7 +878,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
 						{Type: "text", Text: "Describe this"},
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "url", URL: "https://example.com/img.jpg"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "url", URL: "https://example.com/img.jpg"})},
 					},
 				}},
 			},
@@ -895,7 +896,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 			messages: []fwkrh.AnthropicMessage{
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64", Data: "abc123"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64", Data: "abc123"})},
 					},
 				}},
 			},
@@ -913,7 +914,7 @@ func TestLegacyMessagesToRenderChatRequest_StructuredMessage(t *testing.T) {
 				{Role: "user", Content: fwkrh.AnthropicContent{
 					Structured: []fwkrh.AnthropicContentBlock{
 						{Type: "text", Text: "Describe this"},
-						{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64"}},
+						{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64"})},
 					},
 				}},
 			},
@@ -1078,7 +1079,7 @@ func TestLegacyMessagesToRenderChatRequest_ToolResult(t *testing.T) {
 						Structured: []fwkrh.AnthropicContentBlock{
 							{Type: "text", Text: "stdout line 1"},
 							{Type: "text", Text: "stdout line 2"},
-							{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc"}},
+							{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc"})},
 						},
 					}},
 					{Type: "text", Text: "What do you see?"},

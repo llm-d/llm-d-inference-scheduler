@@ -208,5 +208,72 @@ func TestScoreCompositeFallback(t *testing.T) {
 	t.Logf("pod1 score=%f, pod2 score=%f", s1, s2)
 }
 
+func TestScoreConstantHeadroomPreservesDisabledWeights(t *testing.T) {
+	for _, strategy := range []HeadroomSelectionStrategy{StrategyLeast, StrategyMost} {
+		t.Run(string(strategy), func(t *testing.T) {
+			for _, tc := range []struct {
+				name       string
+				ttftWeight float64
+				tpotWeight float64
+				ttft       [2]float64
+				tpot       [2]float64
+				wantEqual  bool
+			}{
+				{
+					name: "TPOT disabled", ttftWeight: 1, tpotWeight: 0,
+					ttft: [2]float64{10, 10}, tpot: [2]float64{5, 20}, wantEqual: true,
+				},
+				{
+					name: "TTFT disabled", ttftWeight: 0, tpotWeight: 1,
+					ttft: [2]float64{10, 30}, tpot: [2]float64{5, 5}, wantEqual: true,
+				},
+				{
+					name: "TPOT enabled", ttftWeight: 0.8, tpotWeight: 0.2,
+					ttft: [2]float64{10, 10}, tpot: [2]float64{5, 20},
+				},
+				{
+					name: "TTFT enabled", ttftWeight: 0.8, tpotWeight: 0.2,
+					ttft: [2]float64{10, 30}, tpot: [2]float64{5, 5},
+				},
+				{
+					name: "TPOT positive below normalized precision", ttftWeight: 1e308, tpotWeight: 1e-308,
+					ttft: [2]float64{10, 10}, tpot: [2]float64{5, 20},
+				},
+				{
+					name: "TTFT positive below normalized precision", ttftWeight: 1e-308, tpotWeight: 1e308,
+					ttft: [2]float64{10, 30}, tpot: [2]float64{5, 5},
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					cfg := DefaultConfig
+					cfg.TTFTWeight, cfg.TPOTWeight = tc.ttftWeight, tc.tpotWeight
+					cfg.HeadroomSelectionStrategy = strategy
+					scorer := NewPlugin(cfg)
+					endpoints := []fwksched.Endpoint{
+						makeLatencyScorerEndpoint("pod1", 0.5, 0, 1),
+						makeLatencyScorerEndpoint("pod2", 0.5, 0, 1),
+					}
+					for i, ep := range endpoints {
+						setLatencyPrediction(ep, true, true, tc.ttft[i], tc.tpot[i], 0, 0)
+					}
+					scores := scorer.Score(context.Background(), nil, endpoints)
+					equal := scores[endpoints[0]] == scores[endpoints[1]]
+					if equal != tc.wantEqual {
+						t.Fatalf("scores = (%v, %v), want equal = %v",
+							scores[endpoints[0]], scores[endpoints[1]], tc.wantEqual)
+					}
+					if !tc.wantEqual {
+						wantFirstHigher := strategy == StrategyLeast
+						if (scores[endpoints[0]] > scores[endpoints[1]]) != wantFirstHigher {
+							t.Fatalf("scores = (%v, %v), want first higher = %v",
+								scores[endpoints[0]], scores[endpoints[1]], wantFirstHigher)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 // Note: EpsilonExploreNeg (tier selection) is now handled by the
 // slo-headroom-tier-filter, not the scorer. See filter tests.

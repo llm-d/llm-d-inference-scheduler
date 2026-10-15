@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
@@ -38,6 +38,8 @@ import (
 const (
 	// finishReasonLength is the finish reason when max_tokens was reached.
 	finishReasonLength = "length"
+
+	requestFieldN = "n"
 
 	responseFieldMessage = "message"
 	responseFieldIndex   = "index"
@@ -89,12 +91,51 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		semconv.LLMDPDProxyChunkedDecodeStreaming(streamingEnabled),
 	)
 
+	// The decoder echoes the final assistant message, which under chunking is the text of all earlier chunks.
+	if echo, _ := body[reqcommon.FieldEcho].(bool); echo {
+		s.logger.V(logging.DEBUG).Info("chunked decode: echo enabled, using regular decode")
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+
+	// Each chunk continues the first choice's text for every choice, and the budget counts the tokens of all choices.
+	if n, ok := toInt(body[requestFieldN]); ok && n > 1 {
+		s.logger.V(logging.DEBUG).Info("chunked decode: several choices requested, using regular decode", "n", n)
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+
 	// If the token budget fits within a single chunk, skip chunking entirely.
 	if originalMaxTokens > 0 && originalMaxTokens <= s.config.DecodeChunkSize {
 		s.logger.V(logging.DEBUG).Info("chunked decode: token budget <= chunk size, using regular decode",
 			"maxTokens", originalMaxTokens, "chunkSize", s.config.DecodeChunkSize)
 		s.decoderProxy.ServeHTTP(w, r)
 		return
+	}
+
+	messages, err := requestMessages(body)
+	if err != nil {
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+	finalMessage := map[string]json.RawMessage{reqcommon.FieldRole: json.RawMessage(`"` + roleAssistant + `"`)}
+	prefix := ""
+	if continueFinal, _ := body[reqcommon.FieldContinueFinalMessage].(bool); continueFinal {
+		var role string
+		finalMessage = nil
+		// Only an assistant message can carry the accumulated text; any other final message is sent as is.
+		if len(messages) == 0 || json.Unmarshal(messages[len(messages)-1], &finalMessage) != nil ||
+			json.Unmarshal(finalMessage[reqcommon.FieldRole], &role) != nil || role != roleAssistant {
+			s.decoderProxy.ServeHTTP(w, r)
+			return
+		}
+		content := finalMessage[reqcommon.FieldContent]
+		// Content parts arrays and null have no string to extend.
+		if len(content) == 0 || content[0] != '"' || json.Unmarshal(content, &prefix) != nil {
+			s.decoderProxy.ServeHTTP(w, r)
+			return
+		}
+		messages = messages[:len(messages)-1]
 	}
 
 	if streamingEnabled {
@@ -148,6 +189,16 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 			delete(chunkReq, reqcommon.FieldKVTransferParams)
 			chunkReq[reqcommon.FieldContinueFinalMessage] = true
 			chunkReq[reqcommon.FieldAddGenerationPrompt] = false
+			content, _ := json.Marshal(prefix + textAccum.String())
+			finalMessage[reqcommon.FieldContent] = content
+			message, err := json.Marshal(finalMessage)
+			if err != nil {
+				if writeErr := errorInternalServerError(err, w); writeErr != nil {
+					s.logger.Error(writeErr, "failed to send error response to client")
+				}
+				return
+			}
+			chunkReq[reqcommon.FieldMessages] = append(slices.Clone(messages), message)
 		}
 
 		chunkBody, err := json.Marshal(chunkReq)
@@ -195,6 +246,8 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 
 		finishReason := extractFinishReason(chunkResponse)
 		chunkText := extractChoiceText(firstChoice(chunkResponse))
+		// Accumulated text forms the assistant message for the next chunk.
+		textAccum.WriteString(chunkText)
 
 		if streamingEnabled {
 			if err := emitSSEChunk(w, chunkResponse); err != nil {
@@ -204,8 +257,6 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
-		} else {
-			textAccum.WriteString(chunkText)
 		}
 
 		if finishReason != "" && finishReason != finishReasonLength {
@@ -222,10 +273,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 			break
 		}
 
-		// Append the generated text to the request so the next chunk continues
-		// from where this one left off.
 		s.logger.V(logging.TRACE).Info("chunked decode: appending chunk text to request", "chunkText", chunkText)
-		appendChunkToRequest(s.logger, body, chunkText)
 	}
 
 	span.SetAttributes(
@@ -406,29 +454,6 @@ func extractChoiceText(choice map[string]any) string {
 		}
 	}
 	return ""
-}
-
-// appendChunkToRequest appends the generated text from a chunk to the request
-// so the next chunk continues from where this one left off. The messages the
-// client sent are appended to as raw bytes, keeping their key order intact
-// across chunks.
-func appendChunkToRequest(logger logr.Logger, req map[string]any, text string) {
-	if text == "" {
-		return
-	}
-	messages, err := requestMessages(req)
-	if err != nil {
-		logger.V(logging.DEBUG).Info("chunked decode: cannot read request messages", "error", err)
-	}
-	chunk, err := json.Marshal(map[string]any{
-		reqcommon.FieldRole:    roleAssistant,
-		reqcommon.FieldContent: text,
-	})
-	if err != nil {
-		logger.V(logging.DEBUG).Info("chunked decode: cannot encode chunk text", "error", err)
-		return
-	}
-	req[reqcommon.FieldMessages] = append(messages, chunk)
 }
 
 // toInt converts a JSON number value (float64, int, or json.Number) to int.
