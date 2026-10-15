@@ -39,6 +39,22 @@ schedulingProfiles:
     weight: 2
 `
 
+// modelRolloutConfig adds models-responder, which screens requests by the model
+// lists the Pods report.
+const modelRolloutConfig = `apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: models-responder
+- type: decode-filter
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+`
+
 // epdEncodeDecodeConfig configures E/PD (encode + P/D) using disagg-profile-handler.
 // The encode stage is triggered only for multimodal requests (image_url / video_url / input_audio).
 const epdEncodeDecodeConfig = `apiVersion: llm-d.ai/v1

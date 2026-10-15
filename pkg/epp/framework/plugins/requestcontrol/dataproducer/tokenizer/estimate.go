@@ -81,7 +81,7 @@ func anthropicToolResultContent(b fwkrh.AnthropicContentBlock) (string, []tokeni
 		case blockTypeText:
 			parts = append(parts, item.Text)
 		case reqcommon.BlockTypeImage:
-			imageBlocks = appendImageBlock(imageBlocks, item.Source)
+			imageBlocks = appendImageBlock(imageBlocks, item.ImageSource())
 		}
 	}
 	return strings.Join(parts, "\n"), imageBlocks
@@ -378,7 +378,7 @@ func (b estimateBackend) messagesBytes(req *fwkrh.MessagesRequest) ([]byte, []fw
 			case blockTypeText:
 				out = append(out, []byte(block.Text)...)
 			case reqcommon.BlockTypeImage:
-				if content, count := b.img.placeholderForAnthropicImage(block.Source); content != "" {
+				if content, count := b.img.placeholderForAnthropicImage(block.ImageSource()); content != "" {
 					out, features = appendMMAsset(out, features, reqcommon.ModalityImage, content, count)
 				}
 			case blockTypeThinking:

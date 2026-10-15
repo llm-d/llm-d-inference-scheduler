@@ -390,3 +390,43 @@ func TestCacheThresholdFinishReasonScansEveryChoice(t *testing.T) {
 		},
 	}))
 }
+
+// TestSharedStorage_UpstreamErrorForwardsHeaders covers a prefill or buffered
+// decode-first error: the upstream headers reach the client with the status.
+func TestSharedStorage_UpstreamErrorForwardsHeaders(t *testing.T) {
+	fail := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Upstream-Stage", "failed")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":"unavailable"}`)
+	})
+	prefill := httptest.NewServer(fail)
+	defer prefill.Close()
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "prefill failure", body: `{"model":"m","messages":[]}`},
+		{name: "buffered decode-first failure", body: `{"model":"m","messages":[],"cache_hit_threshold":0.5}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decodeURL, err := url.Parse("http://decoder:8000")
+			require.NoError(t, err)
+			srv := NewProxy(Config{Port: "0", DecoderURL: decodeURL, KVConnector: constants.KVConnectorSharedStorage})
+			srv.logger = log.Log
+			srv.decoderProxy = fail
+
+			req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(tt.body))
+			recorder := httptest.NewRecorder()
+			srv.handleSharedStorage(recorder, req, strings.TrimPrefix(prefill.URL, "http://"), reqcommon.APITypeChatCompletions)
+
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+			header := recorder.Result().Header
+			require.Equal(t, "application/json", header.Get("Content-Type"))
+			require.Equal(t, "failed", header.Get("X-Upstream-Stage"))
+		})
+	}
+}

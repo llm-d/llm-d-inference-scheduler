@@ -488,7 +488,7 @@ These metrics are owned by the EPP Flow Control layer.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. |
+| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. Carries a trace exemplar; see [Exemplars](#exemplars). |
 | `llm_d_epp_flow_control_dispatch_cycle_duration_seconds` | Histogram | - | Cost of one dispatch cycle. |
 | `llm_d_epp_flow_control_request_enqueue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome` | Time spent admitting a request to the queue. |
 | `llm_d_epp_flow_control_queue_size` | Gauge | `fairness_id`, `priority`, `inference_pool`, `model_name`, `target_model_name` | Requests currently held in the queue. |

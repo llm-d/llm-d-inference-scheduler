@@ -118,6 +118,19 @@ func TestHandleRequestHeadersResponderAnswersGet(t *testing.T) {
 	assert.Equal(t, envoyTypePb.StatusCode_OK, reqCtx.localResp.GetImmediateResponse().Status.Code)
 }
 
+func TestHandleRequestHeadersResponderWithNilDatastore(t *testing.T) {
+	t.Parallel()
+
+	responder := &testResponder{response: &fwkrc.LocalResponse{StatusCode: http.StatusOK}}
+	server := NewStreamingServer(nil, &mockDirector{}, nil, 0)
+	server.SetResponders([]fwkrc.Responder{responder})
+	reqCtx := newResponderRequestContext()
+
+	require.NoError(t, server.HandleRequestHeaders(context.Background(), reqCtx, requestHeaders(http.MethodGet)))
+	assert.Equal(t, 1, responder.calls)
+	assert.Equal(t, requestAnsweredLocal, reqCtx.requestState)
+}
+
 func TestImmediateResponseRendersStatusHeadersAndBody(t *testing.T) {
 	t.Parallel()
 
