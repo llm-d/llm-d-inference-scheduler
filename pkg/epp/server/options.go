@@ -411,8 +411,9 @@ func ConfigureMetricsTLS(opts *Options, mo *metricsserver.Options) error {
 }
 
 func (opts *Options) Validate() error {
-	if (opts.PoolName != "" && opts.EndpointSelector != nil) || (opts.PoolName == "" && opts.EndpointSelector == nil) {
-		return errors.New("either pool-name or endpoint-selector must be set")
+	// File discovery needs neither; the Kubernetes path checks that one is set.
+	if opts.PoolName != "" && opts.EndpointSelector != nil {
+		return errors.New("pool-name and endpoint-selector cannot both be set")
 	}
 	if opts.EndpointSelector != nil {
 		if len(opts.EndpointTargetPorts) == 0 || len(opts.EndpointTargetPorts) > 8 {

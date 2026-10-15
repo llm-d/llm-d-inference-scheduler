@@ -28,6 +28,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/labels"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
@@ -456,6 +457,21 @@ func TestValidateConfigFlagsMutuallyExclusive(t *testing.T) {
 			t.Errorf("Validate() error must reference the %q flag, got: %v", want, err)
 		}
 	}
+}
+
+func TestValidatePoolNameAndEndpointSelector(t *testing.T) {
+	selector, err := labels.Parse("app=vllm")
+	require.NoError(t, err)
+
+	opts := NewOptions()
+	opts.AddFlags(pflag.NewFlagSet("pool-selector", pflag.ContinueOnError))
+	opts.ConfigFile = testConfigFile
+	require.NoError(t, opts.Validate(), "file discovery runs without pool-name or endpoint-selector")
+
+	opts.PoolName = testPoolName
+	opts.EndpointSelector = selector
+	opts.EndpointTargetPorts = []int{8000}
+	require.ErrorContains(t, opts.Validate(), "cannot both be set")
 }
 
 func TestMetricsMTLSFlags(t *testing.T) {
