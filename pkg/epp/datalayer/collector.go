@@ -141,6 +141,8 @@ func (c *Collector) run(ctx context.Context, ticker Ticker, ep fwkdl.Endpoint, d
 					if !interval.due() {
 						continue
 					}
+					// due has advanced the countdown for this tick, and the
+					// wrapper's Dispatch would advance it again.
 					disp = interval.PollingDispatcher
 				}
 				dispCtx, cancel := context.WithTimeout(ctx, defaultCollectionTimeout)
@@ -181,7 +183,8 @@ func (r *pollStatusRecorder) record(ep fwkdl.Endpoint, err error, now time.Time)
 		}
 		r.status.ConsecutiveFailures++
 	}
-	// Readers hold the stored value, so store a copy the next record cannot modify.
+	// AttributeMap does not require Put to clone, so pass a copy the next
+	// record cannot modify.
 	status := r.status
 	ep.GetAttributes().Put(r.key, &status)
 }

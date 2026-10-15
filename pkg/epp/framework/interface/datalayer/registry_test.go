@@ -17,7 +17,9 @@ limitations under the License.
 package datalayer
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -64,6 +66,16 @@ func (c *regMixedConsumer) TypedName() plugin.TypedName {
 func (c *regMixedConsumer) Consumes() plugin.DataDependencies {
 	return plugin.DataDependencies{Required: c.required, Optional: c.optional}
 }
+
+// regPollingSource is a PollingDispatcher that also produces the keys in its
+// produces map.
+type regPollingSource struct {
+	regProducer
+}
+
+func (s *regPollingSource) Dispatch(context.Context, Endpoint) error { return nil }
+func (s *regPollingSource) AppendExtractor(plugin.Plugin) error      { return nil }
+func (s *regPollingSource) Interval() time.Duration                  { return 0 }
 
 type regValueA struct{ X int }
 
@@ -121,6 +133,52 @@ func TestBuildRegistry_NonProducerSkipped(t *testing.T) {
 	r, err := BuildRegistry([]plugin.Plugin{c})
 	assert.NoError(t, err)
 	assert.Empty(t, r.Keys())
+}
+
+func TestProducedKeys(t *testing.T) {
+	dk := plugin.NewDataKey("alpha", "reg")
+	tests := []struct {
+		name string
+		p    plugin.Plugin
+		want map[plugin.DataKey]any
+	}{
+		{
+			name: "producer",
+			p:    &regProducer{name: "p", produces: map[plugin.DataKey]any{dk: regValueA{}}},
+			want: map[plugin.DataKey]any{dk: regValueA{}},
+		},
+		{
+			name: "polling source",
+			p:    &regPollingSource{regProducer{name: "src"}},
+			want: map[plugin.DataKey]any{PollStatusDataKey("src"): &PollStatus{}},
+		},
+		{
+			name: "polling source that produces",
+			p:    &regPollingSource{regProducer{name: "src", produces: map[plugin.DataKey]any{dk: regValueA{}}}},
+			want: map[plugin.DataKey]any{dk: regValueA{}, PollStatusDataKey("src"): &PollStatus{}},
+		},
+		{
+			name: "neither",
+			p:    &regConsumer{name: "c"},
+			want: map[plugin.DataKey]any{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ProducedKeys(tt.p))
+		})
+	}
+}
+
+func TestValidateConsumer_PollStatusOfConfiguredSource(t *testing.T) {
+	r, err := BuildRegistry([]plugin.Plugin{&regPollingSource{regProducer{name: "src"}}})
+	assert.NoError(t, err)
+
+	configured := &regConsumer{name: "c", consumes: map[plugin.DataKey]any{PollStatusDataKey("src"): &PollStatus{}}}
+	assert.NoError(t, r.ValidateConsumer(configured))
+
+	unconfigured := &regConsumer{name: "c", consumes: map[plugin.DataKey]any{PollStatusDataKey("other"): &PollStatus{}}}
+	assert.Error(t, r.ValidateConsumer(unconfigured))
 }
 
 func TestValidateConsumer_KnownKeyMatchingType(t *testing.T) {

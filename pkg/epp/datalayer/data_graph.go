@@ -163,10 +163,8 @@ func CreateMissingDataProducers(ctx context.Context, defaultProducerRegistry map
 func producedKeySet(handle plugin.Handle) map[string]bool {
 	producedKeys := make(map[string]bool)
 	for _, p := range handle.GetAllPlugins() {
-		if producer, ok := p.(plugin.ProducerPlugin); ok {
-			for key := range producer.Produces() {
-				producedKeys[key.String()] = true
-			}
+		for key := range fwkdl.ProducedKeys(p) {
+			producedKeys[key.String()] = true
 		}
 	}
 	return producedKeys

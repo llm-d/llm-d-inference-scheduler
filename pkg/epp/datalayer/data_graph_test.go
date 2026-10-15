@@ -456,6 +456,21 @@ func TestCreateMissingDataProducers(t *testing.T) {
 			wantTypes: []string{producerTypeA},
 		},
 		{
+			name: "poll status of a configured polling source is produced",
+			existingPlugins: []fwkplugin.Plugin{
+				&toggleSource{},
+				&MockSchedulingPlugin{consumes: map[fwkplugin.DataKey]any{fwkdl.PollStatusDataKey("toggle"): nil}},
+			},
+			wantTypes: nil,
+		},
+		{
+			name: "poll status of an unconfigured polling source is missing",
+			existingPlugins: []fwkplugin.Plugin{
+				&MockSchedulingPlugin{consumes: map[fwkplugin.DataKey]any{fwkdl.PollStatusDataKey("toggle"): nil}},
+			},
+			wantErr: true,
+		},
+		{
 			name:            "no consumers - nothing created",
 			existingPlugins: []fwkplugin.Plugin{},
 			factoryRegistry: map[string]fwkplugin.FactoryFunc{producerTypeA: producerAFactory},
