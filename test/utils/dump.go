@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -192,4 +193,28 @@ func dumpContainerLogs(ctx context.Context, cfg *TestConfig, nsName, podName, co
 		scope = "previous instance, " + scope
 	}
 	ginkgo.GinkgoWriter.Printf("  [logs] %s/%s (%s):\n%s\n", podName, containerName, scope, buf.String())
+}
+
+// PodLogs returns the concatenated logs of every container in the named Pod.
+// A container whose logs cannot be streamed contributes nothing, so a caller
+// asserting on absence must pair it with a positive assertion that the Pod
+// logged at all.
+func PodLogs(cfg *TestConfig, nsName, podName string) string {
+	pod, err := cfg.KubeCli.CoreV1().Pods(nsName).Get(cfg.Context, podName, metav1.GetOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "get pod %s/%s", nsName, podName)
+
+	var all bytes.Buffer
+	for _, container := range pod.Spec.Containers {
+		req := cfg.KubeCli.CoreV1().Pods(nsName).GetLogs(podName, &corev1.PodLogOptions{Container: container.Name})
+		stream, err := req.Stream(cfg.Context)
+		if err != nil {
+			ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to stream logs: %v\n", podName, container.Name, err)
+			continue
+		}
+		if _, err := io.Copy(&all, stream); err != nil {
+			ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to read logs: %v\n", podName, container.Name, err)
+		}
+		gomega.Expect(stream.Close()).To(gomega.Succeed())
+	}
+	return all.String()
 }
