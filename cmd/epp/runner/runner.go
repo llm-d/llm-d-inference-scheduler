@@ -989,8 +989,11 @@ func extractDeploymentName(podName string) (string, error) {
 }
 
 // validateKubernetesDiscoveryFlags checks the flags the Kubernetes discovery path
-// needs: an InferencePool name or an endpoint selector.
+// needs: an InferencePool name or an endpoint selector, but not both.
 func validateKubernetesDiscoveryFlags(opts *runserver.Options) error {
+	if opts.PoolName != "" && opts.EndpointSelector != nil {
+		return errors.New("pool-name and endpoint-selector cannot both be set")
+	}
 	if opts.PoolName == "" && opts.EndpointSelector == nil {
 		return errors.New("either pool-name or endpoint-selector must be set")
 	}

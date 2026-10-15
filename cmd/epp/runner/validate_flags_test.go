@@ -37,4 +37,7 @@ func TestValidateKubernetesDiscoveryFlags(t *testing.T) {
 	opts = runserver.NewOptions()
 	opts.EndpointSelector = selector
 	require.NoError(t, validateKubernetesDiscoveryFlags(opts))
+
+	opts.PoolName = "pool"
+	require.ErrorContains(t, validateKubernetesDiscoveryFlags(opts), "cannot both be set")
 }
