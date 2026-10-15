@@ -242,7 +242,7 @@ func TestSSEReassemble_ResponsesTerminalStates(t *testing.T) {
 		{
 			name:  "incomplete",
 			event: responseEventIncomplete,
-			resp:  `{"id":"resp-1","object":"response","model":"m","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hel"}]}],"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`,
+			resp:  `{"id":"resp-1","object":"response","model":"m","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial"}]}],"usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`,
 		},
 		{
 			name:  "failed",
@@ -254,7 +254,7 @@ func TestSSEReassemble_ResponsesTerminalStates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newSSEReassembler(sseShapeResponses, 0)
 			r.add(frame(t, `{"type":"response.created","response":{"id":"resp-1","model":"m","status":"in_progress"}}`))
-			r.add(frame(t, `{"type":"response.output_text.delta","delta":"Hel"}`))
+			r.add(frame(t, `{"type":"response.output_text.delta","delta":"partial"}`))
 			r.add(frame(t, `{"type":"`+tc.event+`","response":`+tc.resp+`}`))
 
 			var want map[string]any
