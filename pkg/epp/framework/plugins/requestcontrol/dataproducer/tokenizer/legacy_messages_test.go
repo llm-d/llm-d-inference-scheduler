@@ -1075,19 +1075,15 @@ func TestLegacyMessagesToRenderChatRequest_ToolResult(t *testing.T) {
 		Messages: []fwkrh.AnthropicMessage{
 			{Role: "user", Content: fwkrh.AnthropicContent{
 				Structured: []fwkrh.AnthropicContentBlock{
-					{Type: "tool_result", ToolUseID: "toolu_01", Content: fwkrh.AnthropicContent{
-						Structured: []fwkrh.AnthropicContentBlock{
-							{Type: "text", Text: "stdout line 1"},
-							{Type: "text", Text: "stdout line 2"},
-							{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "base64", MediaType: "image/png", Data: "abc"})},
-						},
-					}},
+					{Type: "tool_result", ToolUseID: "toolu_01", Content: json.RawMessage(
+						`[{"type":"text","text":"stdout line 1"},{"type":"text","text":"stdout line 2"},` +
+							`{"type":"image","source":{"type":"base64","media_type":"image/png","data":"abc"}}]`)},
 					{Type: "text", Text: "What do you see?"},
 				},
 			}},
 			{Role: "user", Content: fwkrh.AnthropicContent{
 				Structured: []fwkrh.AnthropicContentBlock{
-					{Type: "tool_result", ToolUseID: "toolu_02", Content: fwkrh.AnthropicContent{Raw: "plain string result"}},
+					{Type: "tool_result", ToolUseID: "toolu_02", Content: json.RawMessage(`"plain string result"`)},
 				},
 			}},
 		},
@@ -1125,7 +1121,7 @@ func TestLegacyMessagesToRenderChatRequest_ToolResultOnlyUserDropped(t *testing.
 		Messages: []fwkrh.AnthropicMessage{
 			{Role: "user", Content: fwkrh.AnthropicContent{
 				Structured: []fwkrh.AnthropicContentBlock{
-					{Type: "tool_result", ToolUseID: "toolu_01", Content: fwkrh.AnthropicContent{Raw: "result"}},
+					{Type: "tool_result", ToolUseID: "toolu_01", Content: json.RawMessage(`"result"`)},
 				},
 			}},
 		},
@@ -1154,7 +1150,7 @@ func TestLegacyMessagesToRenderChatRequest_FullAgenticTurn(t *testing.T) {
 			}},
 			{Role: "user", Content: fwkrh.AnthropicContent{
 				Structured: []fwkrh.AnthropicContentBlock{
-					{Type: "tool_result", ToolUseID: "toolu_01", Content: fwkrh.AnthropicContent{Raw: "Sunny, 22C"}},
+					{Type: "tool_result", ToolUseID: "toolu_01", Content: json.RawMessage(`"Sunny, 22C"`)},
 				},
 			}},
 		},
