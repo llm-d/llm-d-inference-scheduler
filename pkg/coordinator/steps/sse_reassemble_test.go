@@ -209,6 +209,26 @@ func TestSSEReassemble_Responses(t *testing.T) {
 	require.Equal(t, want, r.result())
 }
 
+// TestSSEReassemble_ResponsesDeltaAfterTerminal verifies a stray output_text.delta
+// arriving after the terminal event is ignored: the captured object stands and the
+// ceiling estimate does not grow, so a reply the pod already completed is not
+// re-charged and cannot re-trip the ceiling.
+func TestSSEReassemble_ResponsesDeltaAfterTerminal(t *testing.T) {
+	completed := `{"id":"r","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}`
+	r := newSSEReassembler(sseShapeResponses, 0)
+	r.add(frame(t, `{"type":"response.output_text.delta","delta":"hi"}`))
+	r.add(frame(t, `{"type":"response.completed","response":`+completed+`}`))
+	before := r.bufferedBytes()
+
+	r.add(frame(t, `{"type":"response.output_text.delta","delta":"xxxxxxxxxx"}`))
+	require.Equal(t, before, r.bufferedBytes(), "a post-terminal delta must not grow the ceiling estimate")
+	require.Empty(t, r.choices, "a post-terminal delta must not re-create accumulators")
+
+	var want map[string]any
+	require.NoError(t, json.Unmarshal([]byte(completed), &want))
+	require.Equal(t, want, r.result(), "the completed object stands despite the late delta")
+}
+
 // A terminal event other than response.completed (response.incomplete on a
 // truncated generation, response.failed on an error) carries its own status and,
 // on failure, an error block. The reassembler emits that object verbatim rather
@@ -263,7 +283,7 @@ func TestSSEReassemble_ResponsesNoCompleted(t *testing.T) {
 	require.Len(t, output, 1)
 	item := output[0].(map[string]any)
 	require.Equal(t, itemTypeMessage, item["type"])
-	require.Equal(t, roleAssistant, item["role"])
+	require.Equal(t, reqcommon.RoleAssistant, item["role"])
 	content := item["content"].([]any)
 	part := content[0].(map[string]any)
 	require.Equal(t, partTypeOutputText, part["type"])

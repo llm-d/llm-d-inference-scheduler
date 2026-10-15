@@ -1022,9 +1022,20 @@ func TestScanForcedResponse_TerminalMarker(t *testing.T) {
 			truncated: true,
 		},
 		{
+			name:      "empty stream",
+			shape:     sseShapeChat,
+			stream:    "",
+			truncated: true,
+		},
+		{
 			name:   "responses completed without done",
 			shape:  sseShapeResponses,
 			stream: `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n" + `data: {"type":"response.completed","response":{"id":"r","status":"completed"}}` + "\n\n",
+		},
+		{
+			name:   "responses done without terminal event",
+			shape:  sseShapeResponses,
+			stream: `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n" + "data: [DONE]\n\n",
 		},
 		{
 			name:      "responses truncated",

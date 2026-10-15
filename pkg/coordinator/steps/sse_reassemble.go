@@ -47,7 +47,6 @@ const (
 const (
 	objectChatCompletion = "chat.completion"
 	objectTextCompletion = "text_completion"
-	roleAssistant        = "assistant"
 )
 
 // Responses API streaming event types (the data-line "type" value) and the
@@ -110,9 +109,10 @@ type sseChoice struct {
 //
 // Only the fields a non-streaming reply needs are folded: text content or token
 // ids, role, finish_reason, and usage. A chat delta's tool_calls, function_call,
-// and logprobs are not reassembled; the decode step leaves force-streaming off
-// for a chat or text request that declares tools, functions, or logprobs (see
-// forceStreamLossy), so such a reply takes the pass-through instead.
+// logprobs, and reasoning_content are not reassembled; the decode step leaves
+// force-streaming off for a chat or text request that declares tools, functions,
+// logprobs, or reasoning (see forceStreamLossy), so such a reply takes the
+// pass-through instead.
 type sseReassembler struct {
 	shape sseShape
 	// maxChoices caps how many choice indices fold, matching the client's declared
@@ -160,7 +160,7 @@ func (r *sseReassembler) add(frame map[string]any) {
 			}
 		}
 	}
-	if usage, ok := frame["usage"].(map[string]any); ok {
+	if usage, ok := frame[reqcommon.FieldUsage].(map[string]any); ok {
 		r.mergeUsage(usage)
 	}
 }
@@ -174,6 +174,12 @@ func (r *sseReassembler) add(frame map[string]any) {
 func (r *sseReassembler) addResponses(frame map[string]any) {
 	switch frame[reqcommon.FieldType] {
 	case responseEventOutputTextDelta:
+		// A terminal event already captured the final object and released the
+		// accumulators; a later delta is redundant, so ignore it rather than regrow
+		// the buffer and risk re-tripping the ceiling on a reply the pod completed.
+		if r.responseObject != nil {
+			return
+		}
 		if delta, ok := frame[fieldDelta].(string); ok {
 			r.choice(0).content.WriteString(delta)
 			r.contentBytes += int64(len(delta))
@@ -336,9 +342,11 @@ func (r *sseReassembler) mergeUsage(usage map[string]any) {
 	}
 }
 
-// bufferedBytes is the generated text held so far, the quantity the per-request
-// ceiling bounds. The envelope the final marshal adds is covered by the
-// reservation's fixed overhead, so it is not counted here.
+// bufferedBytes is the running size estimate the per-request ceiling bounds: the
+// decoded text held so far for the chat, text, and responses shapes, and the
+// per-token estimate (len(ids) * forceStreamBytesPerToken) for the generate
+// shape. The envelope the final marshal adds is covered by the reservation's
+// fixed overhead, so it is not counted here.
 func (r *sseReassembler) bufferedBytes() int64 {
 	return r.contentBytes
 }
@@ -367,7 +375,7 @@ func (r *sseReassembler) result() map[string]any {
 	// forced reply drops the one its stream_options.include_usage frame supplied.
 	// Chat and text non-streaming replies do carry usage, so it is folded there.
 	if r.usage != nil && r.shape != sseShapeGenerate {
-		out["usage"] = r.usage
+		out[reqcommon.FieldUsage] = r.usage
 	}
 	return out
 }
@@ -392,7 +400,7 @@ func (r *sseReassembler) responsesResult() map[string]any {
 		reqcommon.FieldOutput: []any{
 			map[string]any{
 				reqcommon.FieldType: itemTypeMessage,
-				reqcommon.FieldRole: roleAssistant,
+				reqcommon.FieldRole: reqcommon.RoleAssistant,
 				reqcommon.FieldContent: []any{
 					map[string]any{reqcommon.FieldType: partTypeOutputText, fieldText: content},
 				},
@@ -445,7 +453,7 @@ func (r *sseReassembler) writeEnvelope(out map[string]any) {
 			out["request_id"] = r.requestID
 		}
 		out["prompt_logprobs"] = nil
-		out["kv_transfer_params"] = nil
+		out[reqcommon.FieldKVTransferParams] = nil
 		return
 	}
 	if r.id != "" {
@@ -488,7 +496,7 @@ func (r *sseReassembler) resultChoice(c *sseChoice) map[string]any {
 	case sseShapeChat:
 		role := c.role
 		if role == "" {
-			role = roleAssistant
+			role = reqcommon.RoleAssistant
 		}
 		choice["message"] = map[string]any{
 			reqcommon.FieldRole:    role,

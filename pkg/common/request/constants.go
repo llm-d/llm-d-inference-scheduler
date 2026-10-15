@@ -97,6 +97,11 @@ const (
 	FieldBootstrapRoom = "bootstrap_room"
 )
 
+// Role values, the strings a message's FieldRole takes.
+const (
+	RoleAssistant = "assistant"
+)
+
 // Usage fields in a response body. Chat Completions and Completions report
 // prompt_tokens and completion_tokens with details under prompt_tokens_details;
 // Responses and Conversations report input_tokens and output_tokens with details

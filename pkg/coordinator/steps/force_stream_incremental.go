@@ -190,7 +190,7 @@ func (e *incrementalEmitter) add(frame map[string]any) error {
 			}
 		}
 	}
-	if usage, ok := frame["usage"].(map[string]any); ok {
+	if usage, ok := frame[reqcommon.FieldUsage].(map[string]any); ok {
 		e.mergeUsage(usage)
 	}
 
@@ -342,7 +342,7 @@ func (e *incrementalEmitter) prefix() []byte {
 	if e.shape == sseShapeChat {
 		role := e.role
 		if role == "" {
-			role = roleAssistant
+			role = reqcommon.RoleAssistant
 		}
 		roleJSON, _ := json.Marshal(role)
 		b.WriteString(`"choices":[{"index":0,"logprobs":null,"message":{"` + reqcommon.FieldRole + `":`)
