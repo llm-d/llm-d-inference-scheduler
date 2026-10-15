@@ -967,6 +967,68 @@ func TestDirector_HandleRequest(t *testing.T) {
 			wantErrCode:             errcommon.Internal,
 		},
 		{
+			name: "typed denial by admit request plugin surfaces as its status code and drop reason",
+			reqBodyMap: map[string]any{
+				"model": model,
+				"messages": []any{
+					map[string]any{
+						"role":    "user",
+						"content": "critical prompt",
+					},
+				},
+			},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
+			schedulerMockSetup: func(m *mockScheduler) {
+				m.scheduleResults = defaultSuccessfulScheduleResults
+			},
+			wantMutatedBody: map[string]any{
+				"model": model,
+				"messages": []any{
+					map[string]any{
+						"role":    "user",
+						"content": "critical prompt",
+					},
+				},
+			},
+			targetModelName: model,
+			admitRequestDenialError: errcommon.Error{
+				Code:    errcommon.ResourceExhausted,
+				Msg:     "shed: pool near saturation",
+				Headers: map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(errcommon.RequestDroppedReasonSaturated)},
+			},
+			wantErrCode:       errcommon.ResourceExhausted,
+			wantDroppedReason: string(errcommon.RequestDroppedReasonSaturated),
+		},
+		{
+			name: "wrapped typed denial by admit request plugin keeps its status code",
+			reqBodyMap: map[string]any{
+				"model": model,
+				"messages": []any{
+					map[string]any{
+						"role":    "user",
+						"content": "critical prompt",
+					},
+				},
+			},
+			mockAdmissionController: &mockAdmissionController{admitErr: nil},
+			schedulerMockSetup: func(m *mockScheduler) {
+				m.scheduleResults = defaultSuccessfulScheduleResults
+			},
+			wantMutatedBody: map[string]any{
+				"model": model,
+				"messages": []any{
+					map[string]any{
+						"role":    "user",
+						"content": "critical prompt",
+					},
+				},
+			},
+			targetModelName: model,
+			admitRequestDenialError: fmt.Errorf("admitter wrapped: %w",
+				errcommon.Error{Code: errcommon.ServiceUnavailable, Msg: "shed"}),
+			wantErrCode: errcommon.ServiceUnavailable,
+		},
+		{
 			name: "successful chat completions request with multiple messages",
 			reqBodyMap: map[string]any{
 				"model": model,

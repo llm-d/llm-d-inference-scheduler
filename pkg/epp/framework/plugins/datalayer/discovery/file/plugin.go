@@ -260,7 +260,11 @@ func (f *FileDiscovery) load(notifier fwkdl.DiscoveryNotifier) error {
 
 	incoming := make(map[types.NamespacedName]struct{}, len(ef.Endpoints))
 	var errs []error
-	for _, e := range ef.Endpoints {
+	for i, e := range ef.Endpoints {
+		if e.Name == "" {
+			errs = append(errs, fmt.Errorf("endpoints[%d]: name is required", i))
+			continue
+		}
 		if err := f.validateAddress(e.Address); err != nil {
 			errs = append(errs, fmt.Errorf("endpoint %q: %w", e.Name, err))
 			continue
@@ -277,8 +281,13 @@ func (f *FileDiscovery) load(notifier fwkdl.DiscoveryNotifier) error {
 		if ns == "" {
 			ns = "default"
 		}
+		id := types.NamespacedName{Name: e.Name, Namespace: ns}
+		if _, exists := incoming[id]; exists {
+			errs = append(errs, fmt.Errorf("endpoint %q: duplicate name in namespace %q", e.Name, ns))
+			continue
+		}
 		meta := &fwkdl.EndpointMetadata{
-			ID:          types.NamespacedName{Name: e.Name, Namespace: ns},
+			ID:          id,
 			Name:        e.Name,
 			Address:     e.Address,
 			Port:        e.Port,

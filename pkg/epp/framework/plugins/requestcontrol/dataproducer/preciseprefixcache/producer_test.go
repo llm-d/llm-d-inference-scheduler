@@ -31,11 +31,13 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	attrprefix "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/prefix"
+	tokenproducer "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-router/test/utils"
 )
 
@@ -555,7 +557,7 @@ func TestProduce_MMMatchUsesCachedBlocksNotWeightedScore(t *testing.T) {
 				Prompts: []fwkrh.PromptTokens{{
 					TokenIDs: tokens,
 					MultiModalFeatures: []fwkrh.MultiModalFeature{
-						{Modality: fwkrh.ModalityImage, Hash: "img", Offset: 48, Length: 16},
+						{Modality: reqcommon.ModalityImage, Hash: "img", Offset: 48, Length: 16},
 					},
 				}},
 			},
@@ -615,8 +617,8 @@ func TestProduce_MMMatchTokensCountPerFeature(t *testing.T) {
 				Prompts: []fwkrh.PromptTokens{{
 					TokenIDs: tokens,
 					MultiModalFeatures: []fwkrh.MultiModalFeature{
-						{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 2, Length: 20},
-						{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 32, Length: 20},
+						{Modality: reqcommon.ModalityImage, Hash: "img-a", Offset: 2, Length: 20},
+						{Modality: reqcommon.ModalityImage, Hash: "img-b", Offset: 32, Length: 20},
 					},
 				}},
 			},
@@ -708,8 +710,8 @@ func TestProduce_MultiPromptMMAttributionSumsPerPrompt(t *testing.T) {
 		Body: &fwkrh.InferenceRequestBody{
 			TokenizedRequest: &fwkrh.TokenizedRequest{
 				Prompts: []fwkrh.PromptTokens{
-					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
-					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 32, Length: 16}}},
+					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
+					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-b", Offset: 32, Length: 16}}},
 					{TokenIDs: promptC},
 				},
 			},
@@ -798,8 +800,8 @@ func TestProduce_MultiPromptMMTokensSumPerPrompt(t *testing.T) {
 		Body: &fwkrh.InferenceRequestBody{
 			TokenizedRequest: &fwkrh.TokenizedRequest{
 				Prompts: []fwkrh.PromptTokens{
-					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
-					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "img-b", Offset: 0, Length: 16}}},
+					{TokenIDs: promptA, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-a", Offset: 0, Length: 16}}},
+					{TokenIDs: promptB, MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "img-b", Offset: 0, Length: 16}}},
 				},
 			},
 		},
@@ -843,7 +845,7 @@ func TestProduce_PassesMMExtraFeatures(t *testing.T) {
 			TokenizedRequest: &fwkrh.TokenizedRequest{
 				Prompts: []fwkrh.PromptTokens{{
 					TokenIDs:           tokens,
-					MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
+					MultiModalFeatures: []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
 				}},
 			},
 		},
@@ -875,7 +877,7 @@ func TestProduce_FoldsCacheSalt(t *testing.T) {
 		},
 		{
 			name: "salt appended after mm hash",
-			mm:   []fwkrh.MultiModalFeature{{Modality: fwkrh.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
+			mm:   []fwkrh.MultiModalFeature{{Modality: reqcommon.ModalityImage, Hash: "abc", Offset: 2, Length: 4}},
 			want: []kvblock.MMHash{{Hash: "abc"}, {Hash: "s3cr3t"}},
 		},
 	}
@@ -966,6 +968,71 @@ func TestPluginFactory_RejectsTokenizersPoolConfig(t *testing.T) {
 	_, err := PluginFactory("test", plugin.StrictDecoder(raw), handle)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `unknown field "tokenizersPoolConfig"`)
+}
+
+// TestValidateTokenProducer is the regression test for #1471: the
+// precise-prefix-cache producer hashes engine-aligned token IDs into KV-block
+// keys that must match the model server's prefix cache. The token-producer's
+// estimate backend emits non-engine pseudo-tokens, so a precise config that
+// resolves its TokenizedPrompt via the estimate backend would silently corrupt
+// lookups. ValidateTokenProducer runs at the runner level after auto-defaults,
+// so it is independent of factory instantiation order (which is DAG/map-driven).
+func TestValidateTokenProducer(t *testing.T) {
+	newHandle := func(t *testing.T) plugin.Handle {
+		return plugin.NewEppHandle(utils.NewTestContext(t), nil)
+	}
+	addPrecise := func(t *testing.T, handle plugin.Handle) {
+		p, err := PluginFactory("precise", nil, handle)
+		require.NoError(t, err)
+		handle.AddPlugin(p.TypedName().Name, p)
+	}
+	addTokenProducer := func(t *testing.T, handle plugin.Handle, raw string) {
+		tp, err := tokenproducer.PluginFactory("token-producer", plugin.StrictDecoder(json.RawMessage(raw)), handle)
+		require.NoError(t, err)
+		handle.AddPlugin("token-producer", tp)
+	}
+
+	t.Run("no precise producer: nothing to validate", func(t *testing.T) {
+		handle := newHandle(t)
+		require.NoError(t, ValidateTokenProducer(handle))
+	})
+
+	t.Run("precise with render-backed token-producer: ok", func(t *testing.T) {
+		handle := newHandle(t)
+		addTokenProducer(t, handle, `{"modelName":"test-model"}`)
+		addPrecise(t, handle)
+		require.NoError(t, ValidateTokenProducer(handle))
+	})
+
+	t.Run("precise with estimate-backed token-producer: rejected", func(t *testing.T) {
+		handle := newHandle(t)
+		// Empty config selects the zero-config estimate default.
+		addTokenProducer(t, handle, `{}`)
+		addPrecise(t, handle)
+		err := ValidateTokenProducer(handle)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "token-producer")
+	})
+
+	t.Run("precise with no token-producer at all: rejected", func(t *testing.T) {
+		handle := newHandle(t)
+		addPrecise(t, handle)
+		err := ValidateTokenProducer(handle)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "token-producer")
+	})
+
+	t.Run("precise with custom-named render producer and estimate default: rejected", func(t *testing.T) {
+		handle := newHandle(t)
+		addTokenProducer(t, handle, `{}`)
+		customTP, err := tokenproducer.PluginFactory("render-tp", plugin.StrictDecoder(json.RawMessage(`{"modelName":"test-model"}`)), handle)
+		require.NoError(t, err)
+		handle.AddPlugin("render-tp", customTP)
+		addPrecise(t, handle)
+		err = ValidateTokenProducer(handle)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "token-producer")
+	})
 }
 
 // A null kvEventsConfig resets the seeded defaults to a nil pointer; the

@@ -2,7 +2,8 @@
 
 The coordinator is a Go service that accepts inference requests and drives them through
 a configurable pipeline of steps. It currently supports the OpenAI-compatible API
-(`/v1/chat/completions`, `/v1/completions`, `/v1/responses`), and the entry layer is
+(`/v1/chat/completions`, `/v1/completions`, `/v1/responses`) and the Anthropic
+Messages API (`/v1/messages`). The entry layer is
 designed to be extended to other inference protocols. Each step performs one unit of
 work (download media, tokenize, encode, prefill, decode). The pre-processing steps call
 side services directly (media download, and the render service for tokenization); the
@@ -221,7 +222,7 @@ completions prompt is already a token array). See
 
 | Component | Path | Responsibility |
 | :---- | :---- | :---- |
-| Entry server | [pkg/coordinator/server/](../pkg/coordinator/server/) | chi server, TLS unless `secure_serving` is false. Accepts `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, and `/inference/v1/generate`, builds the `RequestContext`, runs the pipeline, exposes `/healthz` and `/readyz`, and passes any other path through to the gateway. |
+| Entry server | [pkg/coordinator/server/](../pkg/coordinator/server/) | chi server, TLS unless `secure_serving` is false. Accepts `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/messages`, and `/inference/v1/generate`, builds the `RequestContext`, runs the pipeline, exposes `/healthz` and `/readyz`, and passes any other path through to the gateway. |
 | Pipeline | [pkg/coordinator/pipeline/](../pkg/coordinator/pipeline/) | The `Step` abstraction, the ordered executor, the step registry, and the `RequestContext`. |
 | Steps | [pkg/coordinator/steps/](../pkg/coordinator/steps/) | The built-in steps. Each registers itself with the pipeline registry in an `init()` function. |
 | Gateway client | [pkg/coordinator/gateway/](../pkg/coordinator/gateway/) | HTTP client with a keep-alive pool to the configured Inference Gateway, path/format helpers, and the `x-llm-d-epp-profile` header constants. |
@@ -247,7 +248,10 @@ completions prompt is already a token array). See
 
    Upstream response bodies are logged server-side only and never returned to the client.
    A step returning `ErrPipelineDone` instead stops the pipeline and reports success, used
-   by `conditional-decode` when the decode worker serves the request directly.
+   by `conditional-decode` when the decode worker serves the request directly. A step that
+   answers the client with an error status itself returns a `ResponseWrittenError`: the
+   pipeline and server record it under the `error_code` of its `Cause`, and the server
+   writes nothing further (used by `async-broker`).
 4. The final `decode` step proxies the worker response straight back to the client
    through `RequestContext.ResponseWriter`, passing both a streaming SSE response and a
    non-streaming (buffered JSON) response through unchanged. The worker decides which
@@ -530,7 +534,9 @@ type Step interface {
 - `Execute` does the work: it reads and mutates `reqCtx`, and returns an error to abort
   the request or `nil` to continue. Return `pipeline.ErrPipelineDone` to stop the
   pipeline early and report success (the response must already have been written to
-  `reqCtx.ResponseWriter`).
+  `reqCtx.ResponseWriter`, or the client is gone). A step that has written an error
+  response itself returns a `pipeline.ResponseWrittenError` instead, so the request still
+  counts as failed.
 - A response-producing step writes the client response to `reqCtx.ResponseWriter`,
   typically by proxying the upstream response with `httputil.ReverseProxy` set to
   `FlushInterval: -1`, which forwards each write immediately (SSE chunks stream through; a
@@ -725,10 +731,10 @@ single step may override the default in its own `params` (`kv_connector:` /
 
 `pipeline.use_openai_format` selects the wire format for the encode and prefill steps
 (the steps that choose their upstream endpoint by format). Decode and conditional-decode
-always forward on the client's original OpenAI path and are unaffected by this setting:
+always forward on the client's original path and are unaffected by this setting:
 
-- `true` (default): forward the client's original OpenAI path (`/v1/chat/completions`,
-  `/v1/completions`, `/v1/responses`).
+- `true` (default): forward the client's original path (`/v1/chat/completions`,
+  `/v1/completions`, `/v1/responses`, `/v1/messages`).
 - `false`: the tokens-in format. Rewrite to the internal `/inference/v1/generate`
   token-array endpoint, sending `token_ids` and `features` (including `kwargs_data`)
   directly in the body.
@@ -789,8 +795,8 @@ only the request carrier differs.
 | `type` | Purpose | Key params |
 | :---- | :---- | :---- |
 | `async-broker` | Optional, first when enabled. Bridge to the [llm-d-async](https://github.com/llm-d/llm-d-async) broker: requests carrying the mode header are labeled and passed through (`passthrough`) or queued (`enqueue`, `wait`); requests without it are untouched. Also registers `GET/DELETE /v1/requests/{id}` on the listener. Full doc: [coordinator_async_broker.md](coordinator_async_broker.md). | `redis_url` (required), `routes`, `objectives`, `quota`, `wait_cap_seconds` |
-| `replace-media-urls` | Download `image_url` (chat completions) or `input_image` (Responses) references, inline as base64 data URIs, seed `MultimodalEntries`. | `download_timeout`, `max_concurrent_downloads`, `max_multimodal_entries` |
-| `render` | Tokenize via the render service; populate `TokenIDs` and per-image hash/placeholder/kwargs. | `address` (required), `timeout`, `max_total_tokens`, `max_total_placeholder_tokens` |
+| `replace-media-urls` | Download `image_url`, `audio_url`, and `video_url` references (chat completions) or `input_image` references (Responses) and accept inline `input_audio`, inline each as a base64 `data:` URI, seed one `MultimodalEntries` item per part tagged with its modality. | `download_timeout`, `max_concurrent_downloads`, `max_multimodal_entries`, `max_download_size`, `max_image_download_size`, `max_audio_download_size`, `max_video_download_size`, `allowed_image_content_types`, `allowed_audio_content_types`, `allowed_video_content_types`, `allow_private_networks`, `allowed_domains` |
+| `render` | Tokenize via the render service; populate `TokenIDs` and each entry's hash/placeholder/kwargs from the per-modality `mm_hashes` / `mm_placeholders` / `kwargs_data` maps. | `address` (required), `timeout`, `max_total_tokens`, `max_total_placeholder_tokens` |
 | `conditional-decode` | Optional fast path: attempt decode with `Prefer: if-available`; on 412 continue, otherwise stream the response and stop. | (none) |
 | `encode` | Parallel fan-out, one request per multimodal entry; merge EC descriptors. | `max_parallel`, `use_openai_format`, `ec_connector` |
 | `prefill` | Single prefill call with tokens + EC/KV hints; capture `kv_transfer_params`. | `use_openai_format`, `kv_connector`, `ec_connector` |

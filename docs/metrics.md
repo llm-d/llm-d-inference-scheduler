@@ -15,7 +15,7 @@ The router deployment has three metric sources:
 |---|---|---|
 | EPP / router pod | EPP metrics, plugin metrics, and KV-cache metrics | EPP `/metrics`, default port `9090` |
 | Model server / engine pods | vLLM or other engine metrics | Each model server's `/metrics` |
-| P/D sidecar | MoRI-IO metrics only | HTTP `/metrics`, disabled by default |
+| P/D sidecar | Disaggregation request, stage latency, and stage error metrics; MoRI-IO metrics | Sidecar `/metrics` on `--metrics-port`, disabled by default |
 
 The EPP sends HTTP or HTTPS requests directly to each model server endpoint, per the
 `metrics-data-source` plugin's `scheme` parameter (default `http`).
@@ -28,7 +28,7 @@ The tables in this document show complete metric names.
 |---|---|---|
 | EPP / router pod | `llm_d_epp_` | EPP request and latency, in-flight load, pool, scheduler, plugin, data layer, flow control, disaggregation, ext_proc, prefix indexer, multimodal, fairness, predicted latency, model rewrite, and KV-cache metrics. |
 | Model server / engine | Engine-specific | Metrics exposed by the model server implementation. |
-| P/D sidecar | `moriio_dns_` | MoRI-IO peer DNS re-resolution metrics. |
+| P/D sidecar | `llm_d_disagg_sidecar_`, `moriio_dns_` | Disaggregation request, stage latency, and stage error metrics; MoRI-IO peer DNS re-resolution metrics. |
 
 The model server and sidecar metrics use separate registries and prefixes. See [Deprecated series](#deprecated-series)
 for the legacy EPP names that remain available.
@@ -70,15 +70,22 @@ endpoint's `/metrics` path (configurable) and parses the response. The `core-met
 selects configured values and stores them on the endpoint for scorers. These are model server
 metrics, not EPP metrics. The raw engine metrics remain available at the model server endpoint.
 
-### P/D sidecar: MoRI-IO metrics
+### P/D sidecar
 
-The P/D sidecar currently exposes only the `moriio_dns_*` MoRI-IO metrics, and only when
-`--metrics-port` or the backward-compatible `MORIIO_METRICS_ADDR` environment variable is set. The
-endpoint serves plain HTTP unless `--metrics-cert-dir` is set; see
-[MoRI-IO DNS re-resolution](#mori-io-dns-re-resolution) for the enablement and TLS settings.
+The sidecar serves its controller-runtime registry at `/metrics` on a dedicated port, separate from
+the data-plane proxy port, so the model server's own `/metrics` stays reachable through the proxy.
+This registry is separate from the router pod's EPP registry and contains the
+[P/D sidecar request and stage](#pd-sidecar-request-and-stage-metrics) and
+[MoRI-IO DNS re-resolution](#mori-io-dns-re-resolution) metrics.
 
-This endpoint belongs to the sidecar process;
-its controller-runtime registry is separate from the router pod's EPP registry.
+The endpoint is disabled by default. Pass `--metrics-port` (e.g. `--metrics-port=9090`) to the
+sidecar to enable it; `0` (the default) disables it. The `MORIIO_METRICS_ADDR` env var
+(e.g. `:9090`) is a backward-compatible fallback, consulted only when `--metrics-port` is unset.
+
+The endpoint serves plain HTTP by default. Pass `--metrics-cert-dir` with a directory containing
+`tls.crt` and `tls.key` to serve it over TLS instead. Missing or invalid files stop the sidecar; the
+metrics listener does not fall back to HTTP. The metrics TLS setting is independent of
+`--secure-serving` and `--cert-path`, which apply to the sidecar data-plane listener.
 
 ## Metrics catalog
 
@@ -112,16 +119,20 @@ lifecycle handled by the router.
 | `llm_d_epp_request_output_tokens` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Output token count. |
 | `llm_d_epp_request_cached_tokens` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Prompt tokens served from cache. |
 | `llm_d_epp_request_running` | Gauge | `model_name`, `target_model_name`, `fairness_id`, `priority` | Requests currently in flight. |
-| `llm_d_epp_request_ntpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Normalized time per output token. |
-| `llm_d_epp_request_ttft_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority`, `streaming` | Time to first token. |
-| `llm_d_epp_request_streaming_tpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Time per output token for streaming. |
-| `llm_d_epp_request_streaming_itl_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Inter-token latency for streaming. |
+| `llm_d_epp_request_ntpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Normalized time per output token. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_ttft_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority`, `streaming` | Time to first token. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_streaming_tpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Time per output token for streaming. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_streaming_itl_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Inter-token latency for streaming. Carries a trace exemplar; see [Exemplars](#exemplars). |
+
+Requests answered locally by a responder, such as `GET /v1/models`, are not counted in
+`llm_d_epp_request_total` or `llm_d_epp_request_size_bytes`. A responder error is counted in
+`llm_d_epp_request_error_total` with empty `model_name` and `target_model_name` labels.
 
 #### Exemplars
 
-`llm_d_epp_request_duration_seconds` attaches the request's trace context to each
-observation as a Prometheus exemplar, so a point on a latency graph can be opened as
-the trace behind it.
+Latency histograms whose notes say they carry a trace exemplar attach the request's
+trace context to each observation as a Prometheus exemplar, so a point on a latency
+graph can be opened as the trace behind it.
 
 | Exemplar label | Present when |
 |---|---|
@@ -142,6 +153,35 @@ Two things are needed to see them:
 
 Grafana turns the exemplar into a link to the trace when the Prometheus data source has
 an exemplar link configured to a traces backend.
+
+### Tool-calling request integrity
+
+This counter records observed outcomes for supported tool-calling request fields. It does not
+include field values or request content.
+
+Request checks cover Chat Completions (`tools`, `tool_choice`, `parallel_tool_calls`,
+`response_format`), Messages (`tools`, `tool_choice`), and Responses (`tools`, `tool_choice`,
+`parallel_tool_calls`). Provider-prefixed inference endpoints are supported. Render,
+count-token, and response-management subpaths do not emit these request-integrity metrics.
+Responses structured output (`text.format`) is outside these field checks.
+
+| Full metric name | Type | Labels | Notes |
+|---|---|---|---|
+| `llm_d_epp_tool_calling_field_status_total` | Counter | `component`, `direction`, `field`, `status` | Observed request-field preservation, change, drop, or rejection outcomes. |
+
+The `llm_d.tool_calling.present` trace attribute indicates that a supported `tools`,
+`tool_choice`, or `parallel_tool_calls` field was supplied, including empty or null values.
+Chat Completions `response_format` is compared separately for integrity. Requests containing
+only `response_format` report its field status and `present=false`, without tool-choice or
+tool-count attributes.
+
+Request errors unrelated to tool fields, scheduling failures, and failures to read fields
+for telemetry produce no field-status metrics. The trace retains summary metadata, such as tool presence,
+tool-choice mode, and a tool-count bucket, when it can be read from the incoming request.
+EPP reports `rejected` only for a supported field identified by the parser as causing the
+request to fail. This covers invalid JSON types in `tools` for Chat Completions and Messages,
+including typed fields within Messages tool definitions. EPP does not add validation rules
+for fields the parsers accept.
 
 ### Inference pool
 
@@ -174,7 +214,7 @@ These metrics are owned by EPP scheduler instrumentation.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_scheduler_e2e_duration_seconds` | Histogram | - | End-to-end scheduling latency. |
+| `llm_d_epp_scheduler_e2e_duration_seconds` | Histogram | - | End-to-end scheduling latency. Carries a trace exemplar; see [Exemplars](#exemplars). |
 | `llm_d_epp_scheduler_attempts_total` | Counter | `status`, `target_model_name`, `endpoint_name`, `namespace`, `port` | Scheduling attempts. |
 
 ### EPP processing overhead
@@ -461,7 +501,7 @@ These metrics are owned by the EPP Flow Control layer.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. |
+| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. Carries a trace exemplar; see [Exemplars](#exemplars). |
 | `llm_d_epp_flow_control_dispatch_cycle_duration_seconds` | Histogram | - | Cost of one dispatch cycle. |
 | `llm_d_epp_flow_control_request_enqueue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome` | Time spent admitting a request to the queue. |
 | `llm_d_epp_flow_control_queue_size` | Gauge | `fairness_id`, `priority`, `inference_pool`, `model_name`, `target_model_name` | Requests currently held in the queue. |
@@ -724,25 +764,26 @@ use the labels shown below.
 | `llm_d_epp_kv_cache_events_pool_queue_depth` | Gauge | - | Messages queued across event-pool workers. |
 | `llm_d_epp_kv_cache_events_pool_capacity` | Gauge | - | Event-pool worker capacity. |
 
+### P/D sidecar request and stage metrics
+
+Emitted by the sidecar proxy on its `/metrics` endpoint; see [P/D sidecar](#pd-sidecar) for
+enablement and TLS.
+
+| Full metric name | Type | Labels | Notes |
+|---|---|---|---|
+| `llm_d_disagg_sidecar_requests_total` | Counter | `api_type` | Requests on the intercepted inference API paths. `api_type` is `chat_completions`, `completions`, `messages`, `responses`, `vllm_generate`, or `sglang_generate`. |
+| `llm_d_disagg_sidecar_disagg_requests_total` | Counter | `disagg_type` | Requests routed through disaggregation. `disagg_type` is `prefill-decode`, `encode-decode`, or `encode-prefill-decode`. |
+| `llm_d_disagg_sidecar_encode_duration_seconds` | Histogram | - | Encode stage latency. |
+| `llm_d_disagg_sidecar_prefill_duration_seconds` | Histogram | - | Prefill stage latency. |
+| `llm_d_disagg_sidecar_decode_duration_seconds` | Histogram | - | Decode stage latency. Not sampled when prefill returns an error status, since decode is then not run or its output is discarded. |
+| `llm_d_disagg_sidecar_request_errors_total` | Counter | `stage` | Stage errors. `stage` is `encode`, `prefill`, or `decode`. |
+
 ### MoRI-IO DNS re-resolution
 
 Emitted by the sidecar proxy when MoRI-IO peer host specs are DNS names that are re-resolved on the
 request path (see the
-[MoRI-IO feature guide](../pkg/sidecar/proxy/MORIIO_README.md)). The collectors are registered on
-the sidecar process's controller-runtime registry. That registry is separate from the router pod's
-EPP registry. These metrics are unlabeled.
-
-Unlike the EPP `/metrics` endpoint, the sidecar does not serve metrics by
-default. Pass `--metrics-port` (e.g. `--metrics-port=9090`) to the sidecar to
-expose these counters at `/metrics` on that port; `0` (the default) disables it.
-The `MORIIO_METRICS_ADDR` env var (e.g. `:9090`) is a backward-compatible
-fallback, consulted only when `--metrics-port` is unset.
-
-The endpoint serves plain HTTP by default. Pass `--metrics-cert-dir` with a
-directory containing `tls.crt` and `tls.key` to serve it over TLS instead.
-Missing or invalid files stop the sidecar; the metrics listener does not fall
-back to HTTP. The metrics TLS setting is independent of `--secure-serving` and
-`--cert-path`, which apply to the sidecar data-plane listener.
+[MoRI-IO feature guide](../pkg/sidecar/proxy/MORIIO_README.md)). These metrics are unlabeled and are
+served on the sidecar `/metrics` endpoint; see [P/D sidecar](#pd-sidecar) for enablement and TLS.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
