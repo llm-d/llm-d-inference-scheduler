@@ -1389,7 +1389,11 @@ neither carries an image.
 The coordinator rejects no block type itself. vLLM's Anthropic endpoint
 defines no `document` block, so a request that carries one fails validation at
 the first stage that sends the client's messages to vLLM (render, when the
-pipeline has it), and the coordinator answers 400.
+pipeline has it), and the coordinator answers 400. vLLM answers a validation
+failure with the OpenAI error envelope, because it builds the Anthropic
+envelope only for errors raised inside its `/v1/messages` handler. The
+coordinator answers in the Anthropic envelope, so a client that calls vLLM
+directly gets the same 400 with a different body.
 
 Per stage:
 
