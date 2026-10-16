@@ -424,8 +424,12 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 
-	// The server logs this so it appears once: every data parallel rank starts the shared validator.
-	if !s.allowlistValidator.enabled {
+	if s.allowlistValidator.enabled {
+		defer s.allowlistValidator.Stop()
+		if err := s.allowlistValidator.Start(ctx); err != nil {
+			return err
+		}
+	} else {
 		s.logger.Info("warning: SSRF protection is disabled; targets taken from request headers are not checked against the InferencePool",
 			"flag", "--"+enableSSRFProtection,
 			"headers", slices.Concat(
@@ -577,6 +581,12 @@ func (s *Server) createRoutes() *http.ServeMux {
 			handler = s.speculativePrefillMiddleware(handler)
 		}
 		mux.HandleFunc("POST "+path, handler)
+		mux.HandleFunc("POST "+path+"/{$}", func(w http.ResponseWriter, r *http.Request) {
+			r = r.Clone(r.Context())
+			r.URL.Path = path
+			r.URL.RawPath = ""
+			handler(w, r)
+		})
 	}
 
 	s.decoderProxy = s.createDecoderProxyHandler(s.config.DecoderURL, s.config.InsecureSkipVerifyForDecoder)
