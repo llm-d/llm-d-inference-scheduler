@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/llm-d/llm-d-router/test/sidecar/mock"
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
@@ -135,7 +135,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(rp.Body)
 			Fail(string(bp))
 		}
 
@@ -440,7 +440,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(rp.Body)
 			Fail(string(bp))
 		}
 
@@ -551,7 +551,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(rp.Body)
 			Fail(string(bp))
 		}
 
@@ -608,7 +608,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(rp.Body)
 			Fail(string(bp))
 		}
 
@@ -665,7 +665,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(rp.Body)
 			Fail(string(bp))
 		}
 
@@ -816,7 +816,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(rp.Body)
 			Fail(string(bp))
 		}
 
@@ -1033,7 +1033,7 @@ var _ = Describe("NIXL Connector (v2)", func() {
 		rp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		if rp.StatusCode != 200 {
-			bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(rp.Body)
 			Fail(string(bp))
 		}
 
@@ -1530,7 +1530,7 @@ func (env *moriProxyEnv) sendTo(path, body string) {
 	rp, err := http.DefaultClient.Do(req)
 	Expect(err).ToNot(HaveOccurred())
 	defer rp.Body.Close()
-	responseBody, _ := io.ReadAll(rp.Body) //nolint:errcheck
+	responseBody, _ := io.ReadAll(rp.Body)
 	Expect(rp.StatusCode).To(Equal(http.StatusOK), string(responseBody))
 }
 
