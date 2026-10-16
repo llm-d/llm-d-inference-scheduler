@@ -249,24 +249,106 @@ func TestPipeline_RespectsContextCancellation(t *testing.T) {
 	}
 }
 
-func TestExecute_ClientCancelRecordsNoStepErrorOrPath(t *testing.T) {
-	reg := newMetricsRegistry(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	steps := []Step{
-		&mockStep{name: "conditional-decode", fn: func(ctx context.Context, _ *RequestContext) error {
-			cancel()
-			return ctx.Err()
-		}},
+// TestExecute_AbortedRequestAccounting covers the two ways a step reports an
+// aborted request, returning the context error or raising the
+// http.ErrAbortHandler panic httputil.ReverseProxy uses once the response is
+// streaming, against the step that was running and whether the client was
+// still there. A step error is counted only while the client is present. The
+// path is recorded whenever the phases that ran are known; a probe that
+// returned before the worker answered is the one case that leaves it unknown.
+func TestExecute_AbortedRequestAccounting(t *testing.T) {
+	paths := []string{metricsutil.DisaggPathDecodeOnly, metricsutil.DisaggPathPrefillDecode, metricsutil.DisaggPathEncodePrefillDecode}
+	cases := []struct {
+		name       string
+		before     []string // steps that complete before the abort
+		during     string   // step running at the abort
+		abort      bool     // ErrAbortHandler panic instead of a context error return
+		clientGone bool
+		wantErrors float64 // step_errors_total{during, internal}
+		wantPath   string  // "" records no path
+	}{
+		{
+			name:       "probe returns before the worker answers",
+			during:     "conditional-decode",
+			clientGone: true,
+		},
+		{
+			name:       "probe aborts after the worker answered",
+			during:     "conditional-decode",
+			abort:      true,
+			clientGone: true,
+			wantPath:   metricsutil.DisaggPathDecodeOnly,
+		},
+		{
+			name:       "decode returns after prefill",
+			before:     []string{"prefill"},
+			during:     "decode",
+			clientGone: true,
+			wantPath:   metricsutil.DisaggPathPrefillDecode,
+		},
+		{
+			name:       "decode aborts mid-stream after prefill",
+			before:     []string{"prefill"},
+			during:     "decode",
+			abort:      true,
+			clientGone: true,
+			wantPath:   metricsutil.DisaggPathPrefillDecode,
+		},
+		{
+			name:       "upstream stream breaks with the client present",
+			before:     []string{"prefill"},
+			during:     "decode",
+			abort:      true,
+			wantErrors: 1,
+			wantPath:   metricsutil.DisaggPathPrefillDecode,
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := newMetricsRegistry(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			steps := make([]Step, 0, len(tc.before)+1)
+			for _, n := range tc.before {
+				steps = append(steps, &mockStep{name: n, fn: func(context.Context, *RequestContext) error { return nil }})
+			}
+			steps = append(steps, &mockStep{name: tc.during, fn: func(ctx context.Context, _ *RequestContext) error {
+				if tc.clientGone {
+					cancel()
+				}
+				if tc.abort {
+					panic(http.ErrAbortHandler)
+				}
+				return ctx.Err()
+			}})
 
-	err := New(steps).Execute(ctx, &RequestContext{Model: "m"})
-	require.ErrorIs(t, err, context.Canceled)
-	require.InDelta(t, 0.0,
-		stepErrorCount(t, reg, "conditional-decode", coordmetrics.ErrorCodeInternal),
-		1e-9, "a step failing after the client left must not count as a step error",
-	)
-	require.InDelta(t, 0.0, pathCount(t, reg, metricsutil.DisaggPathDecodeOnly), 1e-9,
-		"a probe cut short by the client must not record a path")
+			recovered, err := executeRecovering(ctx, steps)
+			if tc.abort {
+				require.Equal(t, http.ErrAbortHandler, recovered, "the abort must reach the server")
+			} else {
+				require.ErrorIs(t, err, context.Canceled)
+			}
+			require.InDelta(t, tc.wantErrors, stepErrorCount(t, reg, tc.during, coordmetrics.ErrorCodeInternal), 1e-9)
+			require.InDelta(t, 0.0,
+				mustGauge(t, reg, "llm_d_coordinator_step_running", map[string]string{"step": tc.during}),
+				1e-9, "step_running must be balanced back to 0",
+			)
+			for _, p := range paths {
+				want := 0.0
+				if p == tc.wantPath {
+					want = 1
+				}
+				require.InDelta(t, want, pathCount(t, reg, p), 1e-9, "path %q", p)
+			}
+		})
+	}
+}
+
+// executeRecovering runs the pipeline and returns the value it panicked with, if any, and its error.
+func executeRecovering(ctx context.Context, steps []Step) (recovered any, err error) {
+	defer func() { recovered = recover() }()
+	err = New(steps).Execute(ctx, &RequestContext{Model: "m"})
+	return
 }
 
 // newMetricsRegistry wires the coordinator's package-level metric vectors

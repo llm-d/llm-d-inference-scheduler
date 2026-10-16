@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -153,7 +154,7 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 	)
 	defer func() {
 		if r := recover(); r != nil {
-			span.SetStatus(codes.Error, "step panicked")
+			span.SetStatus(codes.Error, panicSpanStatus(ctx, r))
 			span.End()
 			panic(r)
 		}
@@ -174,6 +175,9 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 	timings := make([]stepTiming, len(p.steps))
 	started := map[string]bool{}
 	executed := map[string]bool{}
+	// cancelledIn names the step that returned because the client left, or
+	// "" when no step did.
+	cancelledIn := ""
 	defer func() {
 		stats := make([]any, 0, (len(timings)+1)*2)
 		if reqCtx.ParseDuration > 0 {
@@ -188,11 +192,10 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 
 		// Classify path from steps that ran, success or failure, so a
 		// request that reached decode and failed there still contributes
-		// to path totals. A request whose context ended records no path:
-		// the client left before the phases it would have taken are known.
-		// This defer is registered after the one that ends the span, so it
-		// runs first and the attribute lands while the span is still open.
-		if path, ok := classifyExecutionPath(started); ok && ctx.Err() == nil {
+		// to path totals. This defer is registered after the one that ends
+		// the span, so it runs first and the attribute lands while the span
+		// is still open.
+		if path, ok := classifyExecutionPath(started, cancelledIn); ok {
 			coordmetrics.IncExecutionPath(reqCtx.Model, path)
 			span.SetAttributes(semconv.LLMDCoordinatorPipelineExecutionPath(path))
 		}
@@ -220,8 +223,10 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 				executed[name] = true
 				return nil
 			}
-			if ctx.Err() == nil {
+			if ctx.Err() != nil {
 				// Once the request context has ended, the failure is the client's departure.
+				cancelledIn = name
+			} else {
 				coordmetrics.IncStepErrorTotal(name, coordmetrics.ClassifyErrorCode(err, ClassifyOpts))
 			}
 			failed := fmt.Errorf("step %q failed: %w", name, err)
@@ -241,6 +246,10 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 // return, error return, panic). On panic recovery, step_errors_total
 // records the failure under error_code=internal and the panic
 // re-propagates into the chi Recoverer at the server edge.
+// http.ErrAbortHandler is the exception: under an ended request context it
+// is httputil.ReverseProxy reporting that the client left mid-stream, and it
+// re-propagates without a step error. Under a live context the same panic is
+// a broken upstream stream and counts as internal.
 //
 // The span is named after the step, which is why the step name is not also
 // recorded as an attribute.
@@ -264,10 +273,14 @@ func (p *Pipeline) runStep(
 		reqCtx.StepDuration += d
 		timings[idx] = stepTiming{name: name, duration: d}
 		if r := recover(); r != nil {
-			coordmetrics.IncStepErrorTotal(name, coordmetrics.ErrorCodeInternal)
+			if IsClientAbort(ctx, r) {
+				log.FromContext(ctx).V(logutil.VERBOSE).Info("client aborted mid-response", "step", name)
+			} else {
+				coordmetrics.IncStepErrorTotal(name, coordmetrics.ErrorCodeInternal)
+			}
 			// The panic value can hold anything the step was working on, so
 			// only the fact of it is recorded.
-			span.SetStatus(codes.Error, "step panicked")
+			span.SetStatus(codes.Error, panicSpanStatus(ctx, r))
 			span.End()
 			panic(r)
 		}
@@ -282,22 +295,47 @@ func (p *Pipeline) runStep(
 	return err
 }
 
+// IsClientAbort reports whether a recovered panic is httputil.ReverseProxy
+// aborting a streamed response because the client's request context ended.
+// ReverseProxy raises the same panic when the upstream stream breaks, so the
+// context state is what separates the two.
+func IsClientAbort(ctx context.Context, r any) bool {
+	return r == http.ErrAbortHandler && ctx.Err() != nil
+}
+
+// panicSpanStatus names a recovered panic for a span status.
+func panicSpanStatus(ctx context.Context, r any) string {
+	if IsClientAbort(ctx, r) {
+		return "client aborted mid-response"
+	}
+	return "step panicked"
+}
+
 // classifyExecutionPath maps the set of steps that ran (success or failure)
 // to the execution_path_total label. Returns false when no decode-ish step
 // started, so pipelines aborted before decode do not spuriously record a
-// path. Step-name strings are hardcoded here because the pipeline package
-// cannot import the steps package without introducing a dependency cycle.
-// They match each step file's own StepName constant by contract; keep the
-// two in sync.
-func classifyExecutionPath(executed map[string]bool) (string, bool) {
-	decodeIsh := executed["decode"] || executed["conditional-decode"]
+// path. cancelledIn is the step that returned because the client left, if
+// any. A conditional-decode probe that returns this way never received the
+// worker's answer, which is what selects decode-only or the fallback to
+// prefill, so the request records no path. A probe the client leaves after
+// the answer arrives ends in an http.ErrAbortHandler panic, leaves
+// cancelledIn empty, and records its path.
+// Step-name strings are hardcoded here because the pipeline package cannot
+// import the steps package without introducing a dependency cycle. They
+// match each step file's own StepName constant by contract; keep the two in
+// sync.
+func classifyExecutionPath(started map[string]bool, cancelledIn string) (string, bool) {
+	if cancelledIn == "conditional-decode" {
+		return "", false
+	}
+	decodeIsh := started["decode"] || started["conditional-decode"]
 	if !decodeIsh {
 		return "", false
 	}
 	switch {
-	case executed["encode"] && executed["prefill"]:
+	case started["encode"] && started["prefill"]:
 		return metricsutil.DisaggPathEncodePrefillDecode, true
-	case executed["prefill"]:
+	case started["prefill"]:
 		return metricsutil.DisaggPathPrefillDecode, true
 	default:
 		return metricsutil.DisaggPathDecodeOnly, true

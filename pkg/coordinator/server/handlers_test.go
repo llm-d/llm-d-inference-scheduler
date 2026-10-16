@@ -806,31 +806,66 @@ func TestHandleInference_StepWrittenErrorClassifiedAndNotOverwritten(t *testing.
 	)
 }
 
-func TestHandleInference_ClientCancelRecordsNoError(t *testing.T) {
-	reg := newMetricsRegistry(t)
+// TestHandleInference_AbortedRequestAccounting covers a step that reports an
+// aborted request by returning the context error or by raising the
+// http.ErrAbortHandler panic httputil.ReverseProxy uses once the response is
+// streaming. With the client gone the handler counts no error and writes
+// nothing; the same panic with the client present is an internal error. The
+// request counts either way and the in-flight gauge balances.
+func TestHandleInference_AbortedRequestAccounting(t *testing.T) {
+	cases := []struct {
+		name       string
+		abort      bool // ErrAbortHandler panic instead of a context error return
+		clientGone bool
+		wantErrors int // request_error_total and step_errors_total series
+	}{
+		{name: "step returns after the client left", clientGone: true},
+		{name: "stream aborts after the client left", abort: true, clientGone: true},
+		{name: "upstream stream breaks with the client present", abort: true, wantErrors: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := newMetricsRegistry(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			step := stubStep{name: "decode", fn: func(ctx context.Context, _ *pipeline.RequestContext) error {
+				if tc.clientGone {
+					cancel()
+				}
+				if tc.abort {
+					panic(http.ErrAbortHandler)
+				}
+				return ctx.Err()
+			}}
+			srv, err := New(config.ServerConfig{}, pipeline.New([]pipeline.Step{step}), gateway.NewWithTransport(nil, stubGatewayURL))
+			require.NoError(t, err)
 
-	// The client leaves mid-pipeline. The handler must neither count the
-	// resulting step error nor write a response; the request still counts.
-	ctx, cancel := context.WithCancel(context.Background())
-	step := stubStep{name: "prefill", fn: func(ctx context.Context, _ *pipeline.RequestContext) error {
-		cancel()
-		return ctx.Err()
-	}}
-	p := pipeline.New([]pipeline.Step{step})
-	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(nil, stubGatewayURL))
-	require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				srv.handleInference(rec, req)
+			}()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`)).WithContext(ctx)
-	rec := httptest.NewRecorder()
-	srv.handleInference(rec, req)
-
-	require.Empty(t, rec.Body.String(), "no error body must be written to a departed client")
-	require.Zero(t, seriesCount(t, reg, "llm_d_coordinator_request_error_total"))
-	require.Zero(t, seriesCount(t, reg, "llm_d_coordinator_step_errors_total"))
-	require.InDelta(t, 1.0,
-		promtestutil.ToFloat64(mustCounter(t, reg, "llm_d_coordinator_request_total", map[string]string{"model_name": "m"})),
-		1e-9,
-	)
+			if tc.abort {
+				require.Equal(t, http.ErrAbortHandler, recovered, "the abort must reach chi Recoverer")
+			} else {
+				require.Nil(t, recovered)
+				require.Empty(t, rec.Body.String(), "no error body must be written to a departed client")
+			}
+			require.Equal(t, tc.wantErrors, seriesCount(t, reg, "llm_d_coordinator_request_error_total"))
+			require.Equal(t, tc.wantErrors, seriesCount(t, reg, "llm_d_coordinator_step_errors_total"))
+			require.InDelta(t, 1.0,
+				promtestutil.ToFloat64(mustCounter(t, reg, "llm_d_coordinator_request_total", map[string]string{"model_name": "m"})),
+				1e-9,
+			)
+			require.InDelta(t, 0.0,
+				promtestutil.ToFloat64(mustRequestRunningGauge(t, reg, map[string]string{"model_name": "m"})),
+				1e-9,
+			)
+		})
+	}
 }
 
 func TestHandleInference_PipelineDoneRecordsNoError(t *testing.T) {

@@ -246,9 +246,9 @@ completions prompt is already a token array). See
      the Gateway) is forwarded with that same `4xx`, since the request was the root cause;
    - any other error, including an upstream `5xx`, returns `502 Bad Gateway`.
 
-   When the client's request context has ended before a step error is reported, the
-   server writes no response, records no error, and logs the abort at verbosity
-   `VERBOSE`.
+   When the client disconnects, whether before a step reports an error or while the
+   response is streaming, the server writes nothing further, records no error, and logs
+   the abort at verbosity `VERBOSE`.
 
    Upstream response bodies are logged server-side only and never returned to the client.
    A step returning `ErrPipelineDone` instead stops the pipeline and reports success, used

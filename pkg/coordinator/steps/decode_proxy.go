@@ -112,9 +112,9 @@ type decodeOutcome struct {
 // and a decodeOutcome the caller reads after ServeHTTP returns. modifyResponse,
 // when non-nil, inspects each upstream response (the conditional cache probe
 // uses it to detect a 412) and runs after the outcome captures the status.
-// Transport errors are logged and answered 502, except errCacheMiss, which is
-// swallowed so the miss falls through, and a round trip ended by the client's
-// request context, which is recorded on the outcome and answered with nothing.
+// Transport errors are logged and answered 502. errCacheMiss is swallowed so
+// the miss falls through. A round trip ended by the client's request context
+// is recorded on the outcome and answered with nothing.
 //
 // A failure after the upstream response has started streaming cannot become a
 // 502: the 200 status and partial body are already on the wire, so the proxy
@@ -176,8 +176,8 @@ func serveDecode(logger logr.Logger, transport http.RoundTripper, w http.Respons
 
 // streamedError converts a decode outcome to the error its step returns. A
 // Cancelled round trip returns the context error, so the caller ends the
-// request as a cancellation. A TransportErr takes precedence over a recorded
-// Status.
+// request as a cancellation; otherwise a TransportErr takes precedence over a
+// recorded Status.
 func (o *decodeOutcome) streamedError(step string) error {
 	if o.Cancelled != nil {
 		return fmt.Errorf("%s: %w", step, o.Cancelled)
