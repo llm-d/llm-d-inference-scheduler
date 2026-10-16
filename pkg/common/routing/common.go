@@ -23,6 +23,7 @@ package routing
 import (
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -42,6 +43,10 @@ const (
 	// the most cached prefix KV blocks for the request, to pull from over the P2P connector
 	// instead of recomputing them
 	KVCacheSourceHeader = "x-llm-d-kv-cache-source-host-port"
+
+	// SessionTokenHeader is the default header carrying the session-affinity
+	// token: the EPP writes it on a response and a client echoes it on later requests.
+	SessionTokenHeader = "x-session-token"
 
 	// LegacyPrefillEndpointHeader is the pre-convention name of PrefillEndpointHeader.
 	LegacyPrefillEndpointHeader = "x-prefiller-host-port"
@@ -69,6 +74,31 @@ const (
 	// on. The endpoint-pin-screener keeps only that endpoint.
 	EndpointPinHeader = "x-llm-d-pin-host-port"
 )
+
+// endpointRankSeparator joins a pod name and a rank index in an endpoint name.
+const endpointRankSeparator = "-rank-"
+
+// EndpointName returns the name the EPP gives the endpoint for the rank-th
+// target port of a pod. Every pod is named this way, including a pod with a
+// single target port ("<pod>-rank-0").
+func EndpointName(podName string, rank int) string {
+	return podName + endpointRankSeparator + strconv.Itoa(rank)
+}
+
+// ParseEndpointName is the inverse of EndpointName. It reports ok=false when
+// name is not "<pod>-rank-<n>" with n a canonical non-negative integer.
+func ParseEndpointName(name string) (podName string, rank int, ok bool) {
+	i := strings.LastIndex(name, endpointRankSeparator)
+	if i <= 0 {
+		return "", 0, false
+	}
+	rankStr := name[i+len(endpointRankSeparator):]
+	rank, err := strconv.Atoi(rankStr)
+	if err != nil || rank < 0 || strconv.Itoa(rank) != rankStr {
+		return "", 0, false
+	}
+	return name[:i], rank, true
+}
 
 // StripScheme removes the scheme from an endpoint URL, returning host:port.
 // This is useful for gRPC clients that expect host:port format only.
