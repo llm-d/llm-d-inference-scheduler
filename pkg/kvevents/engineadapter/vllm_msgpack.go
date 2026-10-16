@@ -39,24 +39,34 @@ const maxDecodeDepth = 64
 // Limit hash processing because only the final bytes contribute to the hash.
 const maxDecodeHashBytes = 64
 
+type eventWireSchema struct {
+	name                 string
+	minimumBatchFields   int
+	minimumStoredFields  int
+	minimumRemovedFields int
+	storedFields         []eventFieldDecoder
+	removedFields        []eventFieldDecoder
+	storedEvent          func(*typedEventFields) *kvevents.BlockStoredEvent
+	unknownTagPrefix     string
+}
+
 type msgpackTypedEventBatch struct {
-	sglang           bool
+	schema           *eventWireSchema
 	timestamp        float64
 	events           []kvevents.GenericEvent
 	dataParallelRank *int
 }
 
 func (b *msgpackTypedEventBatch) DecodeMsgpack(dec *msgpack.Decoder) error {
+	if b.schema == nil {
+		return fmt.Errorf("event batch schema is required")
+	}
 	fieldCount, err := dec.DecodeArrayLen()
 	if err != nil {
 		return err
 	}
-	minimumFields := 2
-	engine := "vLLM"
-	if b.sglang {
-		minimumFields = 3
-		engine = "SGLang"
-	}
+	minimumFields := b.schema.minimumBatchFields
+	engine := b.schema.name
 	if fieldCount < minimumFields {
 		return fmt.Errorf("%s event batch: need at least %d fields, got %d", engine, minimumFields, fieldCount)
 	}
@@ -75,7 +85,7 @@ func (b *msgpackTypedEventBatch) DecodeMsgpack(dec *msgpack.Decoder) error {
 	} else {
 		b.events = make([]kvevents.GenericEvent, 0, min(eventCount, maxDecodePreallocate))
 		for range eventCount {
-			event, err := decodeTypedEventFromDecoder(dec, b.sglang)
+			event, err := decodeTypedEventFromDecoder(dec, b.schema)
 			if err != nil {
 				return fmt.Errorf("failed to decode %s event: %w", engine, err)
 			}
@@ -116,10 +126,10 @@ func decodeVLLMEvent(payload []byte) (kvevents.GenericEvent, error) {
 }
 
 func decodeVLLMEventFromDecoder(dec *msgpack.Decoder) (kvevents.GenericEvent, error) {
-	return decodeTypedEventFromDecoder(dec, false)
+	return decodeTypedEventFromDecoder(dec, &vllmWireSchema)
 }
 
-func decodeTypedEventFromDecoder(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEvent, error) {
+func decodeTypedEventFromDecoder(dec *msgpack.Decoder, schema *eventWireSchema) (kvevents.GenericEvent, error) {
 	code, err := dec.PeekCode()
 	if err != nil {
 		return nil, err
@@ -127,15 +137,15 @@ func decodeTypedEventFromDecoder(dec *msgpack.Decoder, sglang bool) (kvevents.Ge
 
 	switch {
 	case msgpcode.IsFixedArray(code) || code == msgpcode.Array16 || code == msgpcode.Array32:
-		return decodeArrayTypedEvent(dec, sglang)
+		return decodeArrayTypedEvent(dec, schema)
 	case msgpcode.IsFixedMap(code) || code == msgpcode.Map16 || code == msgpcode.Map32:
-		return decodeMapTypedEvent(dec, sglang)
+		return decodeMapTypedEvent(dec, schema)
 	default:
 		return nil, fmt.Errorf("event is neither an array nor a map: MessagePack code %#x", code)
 	}
 }
 
-func decodeArrayTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEvent, error) {
+func decodeArrayTypedEvent(dec *msgpack.Decoder, schema *eventWireSchema) (kvevents.GenericEvent, error) {
 	fieldCount, err := dec.DecodeArrayLen()
 	if err != nil {
 		return nil, err
@@ -151,19 +161,16 @@ func decodeArrayTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericE
 
 	switch tag {
 	case eventTagBlockStored:
-		return decodeArrayBlockStored(dec, fieldCount, sglang)
+		return decodeArrayBlockStored(dec, fieldCount, schema)
 	case eventTagBlockRemoved:
-		return decodeArrayBlockRemoved(dec, fieldCount, sglang)
+		return decodeArrayBlockRemoved(dec, fieldCount, schema)
 	case eventTagAllBlocksCleared:
 		if err := skipFields(dec, fieldCount-1); err != nil {
 			return nil, err
 		}
 		return &kvevents.AllBlocksClearedEvent{}, nil
 	default:
-		if sglang {
-			return nil, fmt.Errorf("unknown event tag: %s", tag)
-		}
-		return nil, fmt.Errorf("unknown vLLM event tag: %s", tag)
+		return nil, fmt.Errorf("%s: %s", schema.unknownTagPrefix, tag)
 	}
 }
 
@@ -192,28 +199,22 @@ var vllmBlockRemovedFieldDecoders = []eventFieldDecoder{
 	{"group_idx", decodeGroupIdx},
 }
 
-func typedFieldDecoders(tag string, sglang bool) []eventFieldDecoder {
+func typedFieldDecoders(tag string, schema *eventWireSchema) []eventFieldDecoder {
 	switch tag {
 	case eventTagBlockStored:
-		if sglang {
-			return sglangBlockStoredFieldDecoders
-		}
-		return vllmBlockStoredFieldDecoders
+		return schema.storedFields
 	case eventTagBlockRemoved:
-		if sglang {
-			return sglangBlockRemovedFieldDecoders
-		}
-		return vllmBlockRemovedFieldDecoders
+		return schema.removedFields
 	default:
 		return nil
 	}
 }
 
-func decodeArrayFields(dec *msgpack.Decoder, fieldCount int, tag string, sglang bool) (*typedEventFields, error) {
+func decodeArrayFields(dec *msgpack.Decoder, fieldCount int, tag string, schema *eventWireSchema) (*typedEventFields, error) {
 	fields := &typedEventFields{}
-	schema := typedFieldDecoders(tag, sglang)
-	knownCount := min(fieldCount-1, len(schema))
-	for _, field := range schema[:knownCount] {
+	decoders := typedFieldDecoders(tag, schema)
+	knownCount := min(fieldCount-1, len(decoders))
+	for _, field := range decoders[:knownCount] {
 		if err := field.decode(dec, fields); err != nil {
 			return nil, fmt.Errorf("%s: %w", tag, err)
 		}
@@ -224,33 +225,24 @@ func decodeArrayFields(dec *msgpack.Decoder, fieldCount int, tag string, sglang 
 	return fields, nil
 }
 
-func decodeArrayBlockStored(dec *msgpack.Decoder, fieldCount int, sglang bool) (kvevents.GenericEvent, error) {
-	minimumFields := 5
-	if sglang {
-		minimumFields = 7
-	}
+func decodeArrayBlockStored(dec *msgpack.Decoder, fieldCount int, schema *eventWireSchema) (kvevents.GenericEvent, error) {
+	minimumFields := schema.minimumStoredFields
 	if fieldCount < minimumFields {
 		return nil, fmt.Errorf("BlockStored: need at least %d fields, got %d", minimumFields, fieldCount)
 	}
-	fields, err := decodeArrayFields(dec, fieldCount, eventTagBlockStored, sglang)
+	fields, err := decodeArrayFields(dec, fieldCount, eventTagBlockStored, schema)
 	if err != nil {
 		return nil, err
 	}
-	if sglang {
-		return fields.sglangBlockStoredEvent(), nil
-	}
-	return fields.blockStoredEvent(), nil
+	return schema.storedEvent(fields), nil
 }
 
-func decodeArrayBlockRemoved(dec *msgpack.Decoder, fieldCount int, sglang bool) (kvevents.GenericEvent, error) {
-	minimumFields := 2
-	if sglang {
-		minimumFields = 3
-	}
+func decodeArrayBlockRemoved(dec *msgpack.Decoder, fieldCount int, schema *eventWireSchema) (kvevents.GenericEvent, error) {
+	minimumFields := schema.minimumRemovedFields
 	if fieldCount < minimumFields {
 		return nil, fmt.Errorf("BlockRemoved: need at least %d fields, got %d", minimumFields, fieldCount)
 	}
-	fields, err := decodeArrayFields(dec, fieldCount, eventTagBlockRemoved, sglang)
+	fields, err := decodeArrayFields(dec, fieldCount, eventTagBlockRemoved, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +354,7 @@ func decodeBoundedRaw(dec *msgpack.Decoder, name string) ([]byte, error) {
 	return recording.data, err
 }
 
-func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEvent, error) {
+func decodeMapTypedEvent(dec *msgpack.Decoder, schema *eventWireSchema) (kvevents.GenericEvent, error) {
 	fieldCount, err := dec.DecodeMapLen()
 	if err != nil {
 		return nil, err
@@ -386,7 +378,7 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 			fields.hasTag = err == nil
 			if err == nil && isKnownVLLMEventTag(fields.tag) {
 				for _, field := range deferred {
-					if err := decodeTypedMapField(msgpack.NewDecoder(bytes.NewReader(field.value)), field.name, fields.tag, &fields, sglang); err != nil {
+					if err := decodeTypedMapField(msgpack.NewDecoder(bytes.NewReader(field.value)), field.name, fields.tag, &fields, schema); err != nil {
 						return nil, fmt.Errorf("map-encoded event field %q: %w", field.name, err)
 					}
 				}
@@ -394,7 +386,7 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 			deferred = nil
 		case !fields.hasTag:
 			knownField := false
-			for _, field := range typedFieldDecoders(eventTagBlockStored, sglang) {
+			for _, field := range typedFieldDecoders(eventTagBlockStored, schema) {
 				if field.name == name {
 					knownField = true
 					break
@@ -410,7 +402,7 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 			}
 			deferred = append(deferred, rawTypedMapField{name: name, value: value})
 		case isKnownVLLMEventTag(fields.tag):
-			err = decodeTypedMapField(dec, name, fields.tag, &fields, sglang)
+			err = decodeTypedMapField(dec, name, fields.tag, &fields, schema)
 		default:
 			err = skipValue(dec)
 		}
@@ -428,10 +420,7 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 		if err := fields.requireBlockStoredFields(); err != nil {
 			return nil, err
 		}
-		if sglang {
-			return fields.sglangBlockStoredEvent(), nil
-		}
-		return fields.blockStoredEvent(), nil
+		return schema.storedEvent(&fields), nil
 	case eventTagBlockRemoved:
 		if !fields.hasHashes {
 			return nil, fmt.Errorf("BlockRemoved: missing required field %q", "block_hashes")
@@ -440,10 +429,7 @@ func decodeMapTypedEvent(dec *msgpack.Decoder, sglang bool) (kvevents.GenericEve
 	case eventTagAllBlocksCleared:
 		return &kvevents.AllBlocksClearedEvent{}, nil
 	default:
-		if sglang {
-			return nil, fmt.Errorf("unknown event tag: %s", fields.tag)
-		}
-		return nil, fmt.Errorf("unknown vLLM event tag: %s", fields.tag)
+		return nil, fmt.Errorf("%s: %s", schema.unknownTagPrefix, fields.tag)
 	}
 }
 
@@ -452,9 +438,9 @@ func decodeTypedMapField(
 	name string,
 	tag string,
 	fields *typedEventFields,
-	sglang bool,
+	schema *eventWireSchema,
 ) error {
-	for _, field := range typedFieldDecoders(tag, sglang) {
+	for _, field := range typedFieldDecoders(tag, schema) {
 		if field.name == name {
 			return field.decode(dec, fields)
 		}

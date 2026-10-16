@@ -25,6 +25,17 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/kvevents"
 )
 
+var sglangWireSchema = eventWireSchema{
+	name:                 "SGLang",
+	minimumBatchFields:   3,
+	minimumStoredFields:  7,
+	minimumRemovedFields: 3,
+	storedFields:         sglangBlockStoredFieldDecoders,
+	removedFields:        sglangBlockRemovedFieldDecoders,
+	storedEvent:          (*typedEventFields).sglangBlockStoredEvent,
+	unknownTagPrefix:     "unknown event tag",
+}
+
 // SGLangAdapter parses SGLang KV events from arrays and tagged maps.
 type SGLangAdapter struct{}
 
@@ -63,7 +74,7 @@ func (s *SGLangAdapter) ShardingKey(msg *kvevents.RawMessage) string {
 func (s *SGLangAdapter) ParseMessage(msg *kvevents.RawMessage) (string, string, kvevents.EventBatch, error) {
 	podID, modelName := parseTopic(msg.Topic)
 
-	batch := msgpackTypedEventBatch{sglang: true}
+	batch := msgpackTypedEventBatch{schema: &sglangWireSchema}
 	if err := msgpack.Unmarshal(msg.Payload, &batch); err != nil {
 		return "", "", kvevents.EventBatch{}, fmt.Errorf("failed to decode SGLang event batch: %w", err)
 	}

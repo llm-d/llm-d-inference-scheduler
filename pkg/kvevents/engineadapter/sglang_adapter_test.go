@@ -556,7 +556,7 @@ func BenchmarkParseSGLangMessage_RealCapture(b *testing.B) {
 }
 
 func decodeSGLangEvent(payload []byte) (kvevents.GenericEvent, error) {
-	return decodeTypedEventFromDecoder(msgpack.NewDecoder(bytes.NewReader(payload)), true)
+	return decodeTypedEventFromDecoder(msgpack.NewDecoder(bytes.NewReader(payload)), &sglangWireSchema)
 }
 
 func TestSGLangParseMessage_EngineSchema(t *testing.T) {
