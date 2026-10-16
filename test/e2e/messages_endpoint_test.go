@@ -124,16 +124,19 @@ var _ = ginkgo.Describe("E/P/D gateway /v1/messages encoder-cache fanout", ginkg
 const renderLogSettleWindow = 10 * time.Second
 
 var _ = ginkgo.Describe("gateway /v1/messages native rendering", ginkgo.Ordered, testWrapper(func() {
+	// messagesRenderMode is left at its "auto" default so the spec covers
+	// discovery: the plugin probes /v1/messages/render once and falls back to the
+	// deprecated chat conversion on 404 or 405. Pinning "native" would skip that
+	// probe and leave the fallback unreachable.
+	//
 	// A DataProducer failure does not fail the request: the director logs it and
-	// schedules on. A renderer that cannot serve /v1/messages/render therefore
-	// degrades silently, so the EPP log is the only signal that native rendering
-	// reached the renderer and that discovery did not fall back to the
-	// deprecated conversion.
+	// schedules on. Both a renderer that cannot serve the route and a silent
+	// downgrade to the conversion therefore show up only in the EPP log.
 	ginkgo.It("renders a Messages request through the renderer without falling back", func() {
 		nsName := getNamespace()
 
 		createModelServersDecodeKV(1)
-		router := standalone.Create(standaloneConfig(), kvMessagesNativeConfig(), 1, 8000)
+		router := standalone.Create(standaloneConfig(), kvExternalTokenizerConfig(), 1, 8000)
 
 		_, decodePods := k8s.GetModelServerPods(testConfig, podSelector, prefillSelector, decodeSelector, nsName)
 		gomega.Expect(decodePods).Should(gomega.HaveLen(1))

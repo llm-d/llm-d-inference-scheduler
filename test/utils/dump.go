@@ -196,9 +196,9 @@ func dumpContainerLogs(ctx context.Context, cfg *TestConfig, nsName, podName, co
 }
 
 // PodLogs returns the concatenated logs of every container in the named Pod.
-// A container whose logs cannot be streamed contributes nothing, so a caller
-// asserting on absence must pair it with a positive assertion that the Pod
-// logged at all.
+// Every stream and read is asserted, because a caller testing that some line is
+// absent would otherwise read a skipped container as a clean log, and one
+// container's output can satisfy a nonempty check while another's is missing.
 func PodLogs(cfg *TestConfig, nsName, podName string) string {
 	pod, err := cfg.KubeCli.CoreV1().Pods(nsName).Get(cfg.Context, podName, metav1.GetOptions{})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "get pod %s/%s", nsName, podName)
@@ -207,14 +207,11 @@ func PodLogs(cfg *TestConfig, nsName, podName string) string {
 	for _, container := range pod.Spec.Containers {
 		req := cfg.KubeCli.CoreV1().Pods(nsName).GetLogs(podName, &corev1.PodLogOptions{Container: container.Name})
 		stream, err := req.Stream(cfg.Context)
-		if err != nil {
-			ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to stream logs: %v\n", podName, container.Name, err)
-			continue
-		}
-		if _, err := io.Copy(&all, stream); err != nil {
-			ginkgo.GinkgoWriter.Printf("  [logs] %s/%s: failed to read logs: %v\n", podName, container.Name, err)
-		}
-		gomega.Expect(stream.Close()).To(gomega.Succeed())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "stream logs of %s/%s", podName, container.Name)
+		_, err = io.Copy(&all, stream)
+		closeErr := stream.Close()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "read logs of %s/%s", podName, container.Name)
+		gomega.Expect(closeErr).To(gomega.Succeed(), "close log stream of %s/%s", podName, container.Name)
 	}
 	return all.String()
 }
