@@ -17,7 +17,6 @@ limitations under the License.
 package datalayer
 
 import (
-	"maps"
 	"time"
 
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
@@ -51,18 +50,4 @@ func (s *PollStatus) Clone() Cloneable {
 // the PollStatus of the polling source with the given plugin name.
 func PollStatusDataKey(sourceName string) fwkplugin.DataKey {
 	return fwkplugin.NewDataKey(pollStatusDataType, sourceName)
-}
-
-// ProducedKeys returns the data keys p declares in Produces. For a
-// PollingDispatcher it adds the PollStatus the collector records for it, so
-// a consumer of that key is validated against the configured polling sources.
-func ProducedKeys(p fwkplugin.Plugin) map[fwkplugin.DataKey]any {
-	keys := map[fwkplugin.DataKey]any{}
-	if producer, ok := p.(fwkplugin.ProducerPlugin); ok {
-		maps.Copy(keys, producer.Produces())
-	}
-	if _, ok := p.(PollingDispatcher); ok {
-		keys[PollStatusDataKey(p.TypedName().Name)] = &PollStatus{}
-	}
-	return keys
 }
