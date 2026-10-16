@@ -13,6 +13,8 @@ The plugin tracks two independent health signals per endpoint. An endpoint is ex
 
 When every candidate is unhealthy, the plugin keeps all of them, so a pool is never left without endpoints.
 
+The health state belongs to the endpoint's address. An endpoint recreated under the same name at another address, such as a restarted pod, starts healthy, and responses from its previous address are ignored.
+
 ### Choice of defaults
 
 The defaults avoid excluding an endpoint that is slow but working:
@@ -36,7 +38,7 @@ Reference the filter first in every scheduling profile that must skip failing en
 
 When poll health is enabled, the plugin consumes `PollStatusDataKey(pollSource)` (`PollStatus`), which the datalayer collector writes for every polling data source. The EPP fails to start when `pollSource` names no configured polling data source.
 
-Response health reads the `:status` response header in the response-received extension point, so the proxy must forward response headers to the EPP. A request that fails without a response, such as a refused connection that the proxy answers itself, is not seen by response health; poll health covers an endpoint that refuses connections.
+Response health reads the `:status` response header in the response-received extension point, so the proxy must forward response headers to the EPP. A response is counted toward the endpoint the EPP picked first. When the proxy reports in the `x-gateway-destination-endpoint-served` metadata that another picked endpoint served the request, the response is ignored. A request that fails without a response, such as a refused connection that the proxy answers itself, is not seen by response health; poll health covers an endpoint that refuses connections.
 
 ## Configuration
 

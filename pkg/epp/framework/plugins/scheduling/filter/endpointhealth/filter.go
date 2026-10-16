@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"time"
 
@@ -29,11 +30,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	sourcemetrics "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/metrics"
+	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 )
 
 const (
@@ -48,11 +51,6 @@ const (
 
 	// pruneInterval is how often the state of endpoints that left the pool is dropped.
 	pruneInterval = time.Minute
-
-	// Envoy reports the response status as the :status pseudo-header. The EPP's
-	// own response handling and its integration tests use the bare name.
-	statusPseudoHeader = ":status"
-	statusHeader       = "status"
 )
 
 // defaultResponseFailureCodes are the statuses a proxy in front of the model
@@ -263,7 +261,8 @@ func (f *EndpointHealthFilter) Filter(ctx context.Context, _ *fwksched.Inference
 		if pollHealth {
 			status, _ = fwkdl.ReadAttribute[*fwkdl.PollStatus](endpoint, f.pollStatusKey)
 		}
-		if !f.tracker.evaluate(logger, endpoint.GetMetadata().ID, status, now) {
+		md := endpoint.GetMetadata()
+		if !f.tracker.evaluate(logger, md.ID, hostPort(md), status, now) {
 			healthy = append(healthy, endpoint)
 		}
 	}
@@ -283,18 +282,41 @@ func (f *EndpointHealthFilter) ResponseHeader(ctx context.Context, _ *fwksched.I
 	if f.tracker.cfg.responseFailureThreshold == 0 || response == nil || targetEndpoint == nil {
 		return
 	}
+	address := hostPort(targetEndpoint)
+	// The proxy can serve a request from a later endpoint of those picked, and
+	// that response says nothing about the target.
+	if served, ok := servedEndpoint(response.ReqMetadata); ok && served != address {
+		return
+	}
 	code, ok := responseStatus(response.Headers)
 	if !ok {
 		return
 	}
 	_, failed := f.tracker.cfg.responseFailureCodes[code]
-	f.tracker.observeResponse(log.FromContext(ctx), targetEndpoint.ID, failed, f.now())
+	f.tracker.observeResponse(log.FromContext(ctx), targetEndpoint.ID, address, failed, f.now())
+}
+
+// hostPort returns the endpoint's address in the form the proxy reports the
+// endpoint that served a request.
+func hostPort(md *fwkdl.EndpointMetadata) string {
+	return net.JoinHostPort(md.GetIPAddress(), md.GetPort())
+}
+
+// servedEndpoint returns the address of the endpoint the proxy reports it sent
+// the request to.
+func servedEndpoint(reqMetadata map[string]any) (string, bool) {
+	lb, ok := reqMetadata[metadata.DestinationEndpointNamespace].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	served, ok := lb[metadata.DestinationEndpointServedKey].(string)
+	return served, ok
 }
 
 func responseStatus(headers map[string]string) (int, bool) {
-	raw, ok := headers[statusPseudoHeader]
+	raw, ok := headers[reqcommon.PseudoHeaderStatus]
 	if !ok {
-		raw, ok = headers[statusHeader]
+		raw, ok = headers[reqcommon.HeaderStatus]
 	}
 	if !ok {
 		return 0, false

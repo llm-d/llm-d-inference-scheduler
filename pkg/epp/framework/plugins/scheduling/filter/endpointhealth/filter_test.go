@@ -29,11 +29,13 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	sourcemetrics "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/metrics"
+	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
 )
 
 var epoch = time.Date(2026, 10, 11, 18, 30, 44, 0, time.UTC)
@@ -55,6 +57,27 @@ func endpoint(name string, status *fwkdl.PollStatus) fwksched.Endpoint {
 		attrs.Put(fwkdl.PollStatusDataKey(sourcemetrics.MetricsDataSourceType), status)
 	}
 	return fwksched.NewEndpoint(&fwkdl.EndpointMetadata{ID: id(name)}, fwkdl.NewMetrics(), attrs)
+}
+
+// endpointAt returns a candidate without a poll status, served at address.
+func endpointAt(name, address string) fwksched.Endpoint {
+	return fwksched.NewEndpoint(&fwkdl.EndpointMetadata{ID: id(name), Address: address, Port: "8000"},
+		fwkdl.NewMetrics(), fwkdl.NewAttributes())
+}
+
+// failFrom delivers a 502 response to a request whose target endpoint is name
+// at address. served is the endpoint the proxy reports it sent the request to,
+// or empty when the proxy reports none.
+func failFrom(f *EndpointHealthFilter, name, address, served string) {
+	var reqMetadata map[string]any
+	if served != "" {
+		reqMetadata = map[string]any{metadata.DestinationEndpointNamespace: map[string]any{
+			metadata.DestinationEndpointServedKey: served,
+		}}
+	}
+	f.ResponseHeader(context.Background(), nil,
+		&fwkrc.Response{Headers: map[string]string{reqcommon.PseudoHeaderStatus: "502"}, ReqMetadata: reqMetadata},
+		&fwkdl.EndpointMetadata{ID: id(name), Address: address, Port: "8000"})
 }
 
 func failing(count int, since time.Time) *fwkdl.PollStatus {
@@ -82,7 +105,7 @@ func newTestFilter(t *testing.T, params parameters) (*EndpointHealthFilter, *tes
 
 func respond(f *EndpointHealthFilter, name string, status string) {
 	f.ResponseHeader(context.Background(), nil,
-		&fwkrc.Response{Headers: map[string]string{statusPseudoHeader: status}},
+		&fwkrc.Response{Headers: map[string]string{reqcommon.PseudoHeaderStatus: status}},
 		&fwkdl.EndpointMetadata{ID: id(name)})
 }
 
@@ -373,6 +396,41 @@ func TestSuccessDuringEjectionKeepsBackoff(t *testing.T) {
 	assert.Equal(t, []string{"a", "b"}, names(f.Filter(context.Background(), nil, candidates)))
 }
 
+func TestResponsesServedByAnotherEndpointAreIgnored(t *testing.T) {
+	f, _ := newTestFilter(t, parameters{})
+	candidates := []fwksched.Endpoint{endpointAt("a", "10.0.0.1"), endpointAt("b", "10.0.0.2")}
+	for range 5 {
+		failFrom(f, "a", "10.0.0.1", "10.0.0.2:8000")
+	}
+	assert.Equal(t, []string{"a", "b"}, names(f.Filter(context.Background(), nil, candidates)),
+		"failures served by another endpoint do not count toward the target")
+
+	for range 5 {
+		failFrom(f, "a", "10.0.0.1", "10.0.0.1:8000")
+	}
+	assert.Equal(t, []string{"b"}, names(f.Filter(context.Background(), nil, candidates)))
+}
+
+func TestRecreatedEndpointStartsHealthy(t *testing.T) {
+	f, _ := newTestFilter(t, parameters{})
+	for range 5 {
+		failFrom(f, "b", "10.0.0.2", "")
+	}
+	require.Equal(t, []string{"a"}, names(f.Filter(context.Background(), nil,
+		[]fwksched.Endpoint{endpointAt("a", "10.0.0.1"), endpointAt("b", "10.0.0.2")})))
+
+	recreated := []fwksched.Endpoint{endpointAt("a", "10.0.0.1"), endpointAt("b", "10.0.0.3")}
+	assert.Equal(t, []string{"a", "b"}, names(f.Filter(context.Background(), nil, recreated)),
+		"an endpoint recreated at a new address does not inherit the ejection")
+	assert.InDelta(t, 0, gaugeValue(t, excludedEndpoints, "health"), 0)
+
+	for range 5 {
+		failFrom(f, "b", "10.0.0.2", "")
+	}
+	assert.Equal(t, []string{"a", "b"}, names(f.Filter(context.Background(), nil, recreated)),
+		"failed responses of the previous instance do not count toward the new one")
+}
+
 func TestResponseStatusHeader(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -458,7 +516,7 @@ func TestTransitionsLogOnceAtInfo(t *testing.T) {
 	assert.Contains(t, lines[1], "polls recovered")
 
 	for range 8 {
-		f.ResponseHeader(ctx, nil, &fwkrc.Response{Headers: map[string]string{statusPseudoHeader: "502"}},
+		f.ResponseHeader(ctx, nil, &fwkrc.Response{Headers: map[string]string{reqcommon.PseudoHeaderStatus: "502"}},
 			&fwkdl.EndpointMetadata{ID: id("b")})
 	}
 	require.Len(t, lines, 3)

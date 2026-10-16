@@ -27,6 +27,8 @@ import (
 
 // endpointState is the health state of one endpoint.
 type endpointState struct {
+	// address is the endpoint's host and port when the state started.
+	address string
 	// pollUnhealthy is the poll health decision of the latest evaluation.
 	pollUnhealthy bool
 	// responseFailures counts consecutive failed responses since the last
@@ -83,11 +85,11 @@ func (t *tracker) pollUnhealthy(status *fwkdl.PollStatus, now time.Time) bool {
 
 // evaluate updates the endpoint's state from its latest poll status and the
 // passage of time, and reports whether the endpoint is excluded.
-func (t *tracker) evaluate(logger logr.Logger, id fwkdl.ID, status *fwkdl.PollStatus, now time.Time) bool {
+func (t *tracker) evaluate(logger logr.Logger, id fwkdl.ID, address string, status *fwkdl.PollStatus, now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	st := t.state(id)
+	st := t.state(id, address)
 	wasExcluded := st.excluded()
 
 	if unhealthy := t.pollUnhealthy(status, now); unhealthy != st.pollUnhealthy {
@@ -116,14 +118,19 @@ func (t *tracker) evaluate(logger logr.Logger, id fwkdl.ID, status *fwkdl.PollSt
 }
 
 // observeResponse records the outcome of one response the endpoint returned.
-func (t *tracker) observeResponse(logger logr.Logger, id fwkdl.ID, failed bool, now time.Time) {
+func (t *tracker) observeResponse(logger logr.Logger, id fwkdl.ID, address string, failed bool, now time.Time) {
 	if t.cfg.responseFailureThreshold == 0 {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	st := t.state(id)
+	// A response from the address the endpoint had before it was recreated
+	// says nothing about the endpoint now.
+	if st, ok := t.endpoints[id]; ok && st.address != address {
+		return
+	}
+	st := t.state(id, address)
 	// Responses to requests scheduled before the ejection neither extend it
 	// nor change the failure count and backoff of the next one.
 	if st.ejected() {
@@ -168,13 +175,19 @@ func (t *tracker) prune(active []fwkdl.ID) {
 	}
 }
 
-// state returns the endpoint's state, creating it on first use. Callers hold mu.
-func (t *tracker) state(id fwkdl.ID) *endpointState {
+// state returns the endpoint's state. It starts a new state on first use, and
+// when the endpoint is recreated at another address under the same ID, such as
+// a restarted pod that keeps its name. Callers hold mu.
+func (t *tracker) state(id fwkdl.ID, address string) *endpointState {
 	st, ok := t.endpoints[id]
-	if !ok {
-		st = &endpointState{}
-		t.endpoints[id] = st
+	if ok && st.address == address {
+		return st
 	}
+	if ok {
+		t.updateExcluded(st.excluded(), false)
+	}
+	st = &endpointState{address: address}
+	t.endpoints[id] = st
 	return st
 }
 
