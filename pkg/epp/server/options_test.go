@@ -458,6 +458,13 @@ func TestValidateConfigFlagsMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestValidateWithoutPoolNameOrEndpointSelector(t *testing.T) {
+	opts := NewOptions()
+	opts.AddFlags(pflag.NewFlagSet("pool-selector", pflag.ContinueOnError))
+	opts.ConfigFile = testConfigFile
+	require.NoError(t, opts.Validate(), "file discovery runs without pool-name or endpoint-selector")
+}
+
 func TestMetricsMTLSFlags(t *testing.T) {
 	fs := pflag.NewFlagSet("metrics-mtls", pflag.ContinueOnError)
 	opts := NewOptions()
