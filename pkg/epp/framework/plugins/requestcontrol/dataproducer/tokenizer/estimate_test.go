@@ -1261,7 +1261,7 @@ func TestEstimateBackend_MessagesToolBlocksAffectPrefix(t *testing.T) {
 
 	toolResult := build([]fwkrh.AnthropicContentBlock{{
 		Type: "tool_result", ToolUseID: "toolu_01",
-		Content: fwkrh.AnthropicContent{Raw: "Sunny, 22C"},
+		Content: json.RawMessage(`"Sunny, 22C"`),
 	}})
 	toolResultOut, err := estimateBackend{}.produce(context.Background(), toolResult)
 	require.NoError(t, err)

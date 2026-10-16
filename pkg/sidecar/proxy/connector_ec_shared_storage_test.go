@@ -456,6 +456,40 @@ func TestExtractMMItems(t *testing.T) {
 			wantURLs: []string{"https://example.com/from-content.jpg", "https://example.com/from-output.jpg"},
 		},
 		{
+			// vLLM's Messages content block union does not define image_url, so
+			// the model server refuses the request whatever the encoder does.
+			name: "messages image_url part is not extracted",
+			request: map[string]any{
+				"messages": []any{
+					map[string]any{
+						"role":    "user",
+						"content": []any{imageURLItem("https://example.com/image.jpg")},
+					},
+				},
+			},
+			apiType:  reqcommon.APITypeMessages,
+			expected: 0,
+		},
+		{
+			// vLLM keeps only image blocks from a tool_result's content, so a
+			// chat part there reaches no worker.
+			name: "messages chat part inside a tool_result is not extracted",
+			request: map[string]any{
+				"messages": []any{
+					map[string]any{
+						"role": "user",
+						"content": []any{map[string]any{
+							"type":        "tool_result",
+							"tool_use_id": "t1",
+							"content":     []any{imageURLItem("https://example.com/tool.jpg")},
+						}},
+					},
+				},
+			},
+			apiType:  reqcommon.APITypeMessages,
+			expected: 0,
+		},
+		{
 			// Python's json reads a number outside float64 range as inf, so the
 			// model server serves this body and processes the image. Decoding
 			// the turn has to survive it, or the image reaches the prefiller
@@ -777,6 +811,62 @@ func TestFanoutEncoderPath(t *testing.T) {
 			assert.Equal(t, []string{tt.wantPath}, gotPaths)
 		})
 	}
+}
+
+// TestFanoutEncoderMessagesPrimingBody pins the encoder request for a Messages
+// request: the image block reshaped to image_url in a chat-completions body at
+// /v1/chat/completions, carrying only the model from the client body. The
+// prefiller serves the client's request at /v1/messages, which accepts no
+// kwargs field, so a forwarded mm_processor_kwargs would prime the encoder
+// under a hash the prefiller never computes.
+func TestFanoutEncoderMessagesPrimingBody(t *testing.T) {
+	var mu sync.Mutex
+	var gotPath string
+	var gotBody map[string]any
+	encoderBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		gotPath, gotBody = r.URL.Path, body
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer encoderBackend.Close()
+
+	encoderURL, err := url.Parse(encoderBackend.URL)
+	require.NoError(t, err)
+	srv := NewProxy(Config{Port: "0", DecoderURL: encoderURL})
+	srv.logger = log.Log
+
+	messages, err := json.Marshal([]any{
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image", "source": map[string]any{"type": "url", "url": "https://example.com/image.jpg"}},
+		}},
+	})
+	require.NoError(t, err)
+	request := map[string]any{
+		"model":               "m",
+		"max_tokens":          64,
+		"mm_processor_kwargs": map[string]any{"num_crops": 4},
+		"messages":            json.RawMessage(messages),
+	}
+
+	_, err = srv.fanoutEncoderPrimer(context.Background(), request, []string{encoderURL.Host}, "test-req-id", reqcommon.APITypeMessages)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, reqcommon.PathChatCompletions, gotPath)
+	assert.Equal(t, map[string]any{
+		"model":      "m",
+		"max_tokens": float64(1),
+		"stream":     false,
+		"messages": []any{map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://example.com/image.jpg"}},
+		}}},
+	}, gotBody)
 }
 
 // TestFanoutEncoderPrimerOnePerPart pins one encoder request per extracted

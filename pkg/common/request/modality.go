@@ -56,3 +56,14 @@ func PartModality(partType string) (Modality, bool) {
 	}
 	return "", false
 }
+
+// MessagesBlockModality reports the Modality an Anthropic Messages content block
+// of type blockType names, with ok false for a block that names no media. It is
+// PartModality's counterpart for a Messages request, whose blocks are not chat
+// parts: vLLM's Anthropic conversion loads image blocks only.
+func MessagesBlockModality(blockType string) (Modality, bool) {
+	if blockType == BlockTypeImage {
+		return ModalityImage, true
+	}
+	return "", false
+}

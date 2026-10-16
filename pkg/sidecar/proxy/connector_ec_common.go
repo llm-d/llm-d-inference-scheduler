@@ -87,11 +87,11 @@ func truncateLongStrings(v any, maxLen int) any {
 	}
 }
 
-// extractMMItems extracts all multimodal content parts from the request:
-// chat-completions' messages array, or a Responses input array. Which field to
-// walk is gated on apiType rather than presence, since a client could send a
-// stray field the other format does not use. The part arrays within a turn come
-// from reqcommon.ItemPartArrays.
+// extractMMItems extracts all multimodal content parts from the request: the
+// messages array of chat completions or Messages, or a Responses input array.
+// Which field to walk is gated on apiType rather than presence, since a client
+// could send a stray field the other format does not use. The part arrays
+// within a turn come from reqcommon.ItemPartArrays.
 //
 // One item is returned per content part, repeats included. A part's modality and
 // its client-supplied uuid both move the serving engine's multimodal hash, so
@@ -123,8 +123,7 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 	// messages entry and a Responses input item land here, so the line names
 	// neither field and carries apiType instead.
 	droppedTurns := 0
-	var collect func(parts []any, role string, inToolResult bool)
-	collect = func(parts []any, role string, inToolResult bool) {
+	collect := func(parts []any) {
 		for _, part := range parts {
 			partMap, ok := part.(map[string]any)
 			if !ok {
@@ -138,24 +137,17 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 			if apiType == reqcommon.APITypeMessages {
 				// Anthropic image blocks are not a chat part. The encoder is
 				// posted at /v1/chat/completions, which only primes image_url,
-				// so reshape before the part is forwarded as-is. vLLM loads
-				// tool_result images only on user turns and only one level
-				// deep, and keeps nothing but text on system turns, so
-				// priming the rest buys an encoder call for an image the
-				// model never sees. A chat part type fails /v1/messages
-				// input validation, so that request never reaches a worker.
-				_, isMedia := reqcommon.PartModality(partType)
+				// so reshape before the part is forwarded as-is. ItemPartArrays
+				// returns only the arrays vLLM loads images from: a turn's
+				// content and, on a user turn, each tool_result's content one
+				// level deep. Which blocks name media is
+				// reqcommon.MessagesBlockModality's rule, shared with the
+				// coordinator steps. A chat part type fails /v1/messages input
+				// validation, so that request never reaches a worker.
+				_, isBlockMedia := reqcommon.MessagesBlockModality(partType)
+				_, isChatMedia := reqcommon.PartModality(partType)
 				switch {
-				case partType == reqcommon.BlockTypeToolResult:
-					if role == "user" && !inToolResult {
-						if nested, ok := partMap[reqcommon.FieldContent].([]any); ok {
-							collect(nested, role, true)
-						}
-					}
-				case partType == reqcommon.BlockTypeImage:
-					if role == "system" {
-						continue
-					}
+				case isBlockMedia:
 					converted, ok := anthropicImagePart(partMap)
 					if !ok {
 						logger.V(logging.DEBUG).Info("skipping anthropic image the encoder cannot be primed with")
@@ -163,7 +155,7 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 						continue
 					}
 					items = append(items, converted)
-				case !inToolResult && isMedia:
+				case isChatMedia:
 					logger.V(logging.DEBUG).Info("skipping content part the Messages API does not define", "type", partType, "apiType", apiType)
 					droppedParts++
 				}
@@ -205,9 +197,8 @@ func extractMMItems(logger logr.Logger, requestData map[string]any, apiType reqc
 			droppedTurns++
 			continue
 		}
-		role, _ := turn[reqcommon.FieldRole].(string)
 		for _, array := range reqcommon.ItemPartArrays(turn, apiType) {
-			collect(array.Parts, role, false)
+			collect(array.Parts)
 		}
 	}
 
@@ -232,15 +223,7 @@ func (s *Server) mmItemsForFanout(originalRequest map[string]any, requestID stri
 // anthropicImagePart turns a Messages API image block into the image_url
 // part the chat-completions encoder primes.
 func anthropicImagePart(part map[string]any) (map[string]any, bool) {
-	source, ok := part["source"].(map[string]any)
-	if !ok {
-		return nil, false
-	}
-	sourceType, _ := source["type"].(string)
-	rawURL, _ := source["url"].(string)
-	data, _ := source["data"].(string)
-	mediaType, _ := source["media_type"].(string)
-	imageURL := reqcommon.AnthropicImageURL(sourceType, rawURL, data, mediaType)
+	imageURL := reqcommon.MediaPartURL(part)
 	if imageURL == "" {
 		return nil, false
 	}
@@ -294,6 +277,8 @@ func (s *Server) fanoutEncoder(
 				}
 			}()
 
+			// A Messages request gets NewEncoderPrimingBody's Messages body at
+			// the chat path; see its doc for why that holds.
 			encoderRequest := reqcommon.NewEncoderPrimingBody(originalRequest, mmItem, apiType)
 
 			body, err := json.Marshal(encoderRequest)

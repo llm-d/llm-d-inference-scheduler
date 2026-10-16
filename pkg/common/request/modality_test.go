@@ -23,9 +23,10 @@ import "testing"
 // multimodal entries on this one answer, so a part type that changed sides
 // would shift that pairing rather than fail outright.
 //
-// The answer is the same on every API. Which API carried the part decides only
-// which arrays an item holds (ItemPartArrays) and whether a part walk runs at
-// all (steps.promptItems).
+// The answer is the same on chat completions and Responses. A Messages request
+// names media with its own block types (TestMessagesBlockModality). Beyond
+// that, which API carried the part decides only which arrays an item holds
+// (ItemPartArrays) and whether a part walk runs at all (steps.promptItems).
 func TestPartModality(t *testing.T) {
 	for _, tc := range []struct {
 		partType string
@@ -53,6 +54,33 @@ func TestPartModality(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("PartModality(%q) = %q, want %q", tc.partType, got, tc.want)
+			}
+		})
+	}
+}
+
+// The coordinator's walkers and the sidecar's encoder fan-out both read a
+// Messages request's media through this rule.
+func TestMessagesBlockModality(t *testing.T) {
+	for _, tc := range []struct {
+		blockType string
+		want      Modality // "" means the block names no media
+	}{
+		{BlockTypeImage, ModalityImage},
+		{BlockTypeToolResult, ""},
+		{"text", ""},
+		// A chat part type is not a Messages block.
+		{PartTypeImageURL, ""},
+		{PartTypeInputAudio, ""},
+		{"", ""},
+	} {
+		t.Run(tc.blockType, func(t *testing.T) {
+			got, ok := MessagesBlockModality(tc.blockType)
+			if ok != (tc.want != "") {
+				t.Errorf("MessagesBlockModality(%q) ok = %v, want %v", tc.blockType, ok, tc.want != "")
+			}
+			if got != tc.want {
+				t.Errorf("MessagesBlockModality(%q) = %q, want %q", tc.blockType, got, tc.want)
 			}
 		})
 	}
