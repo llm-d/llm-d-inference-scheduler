@@ -30,6 +30,7 @@ import (
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
@@ -356,7 +357,9 @@ func (h *Handler) Pick(ctx context.Context, request *scheduling.InferenceRequest
 	if request.TargetModel != "" {
 		span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 	}
-	span.SetAttributes(semconv.GenAIRequestID(request.RequestID))
+	if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+		span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
+	}
 	span.SetAttributes(mmobs.SpanAttributes(request)...)
 
 	if h.stageOrder == StageOrderPrefillFirst {
@@ -580,11 +583,13 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 	if request.TargetModel != "" {
 		span.SetAttributes(semconv.GenAIRequestModel(request.TargetModel))
 	}
-	span.SetAttributes(semconv.GenAIRequestID(request.RequestID))
+	if clientRequestID := request.Headers[reqcommon.RequestIDHeaderKey]; clientRequestID != "" {
+		span.SetAttributes(semconv.GenAIRequestID(clientRequestID))
+	}
 	span.SetAttributes(mmobs.SpanAttributes(request)...)
 
 	// Prefill header
-	delete(request.Headers, routing.PrefillEndpointHeader)
+	routing.DeleteRoutingHeader(request.Headers, routing.PrefillEndpointHeader)
 	prefillProfileRunResult := schedulingResult.ProfileResults[h.prefillProfile]
 	switch {
 	case prefillProfileRunResult == nil:
@@ -600,7 +605,7 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 	default:
 		targetPod := prefillProfileRunResult.TargetEndpoints[0].GetMetadata()
 		prefillHostPort := net.JoinHostPort(targetPod.Address, targetPod.Port)
-		request.Headers[routing.PrefillEndpointHeader] = prefillHostPort
+		routing.SetRoutingHeader(request.Headers, routing.PrefillEndpointHeader, prefillHostPort)
 		span.SetAttributes(
 			semconv.LLMDEPPPDDisaggregationUsed(true),
 			semconv.LLMDEPPPDPrefillPodAddress(targetPod.Address),
@@ -609,7 +614,7 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 	}
 
 	// Encode header
-	delete(request.Headers, routing.EncoderEndpointsHeader)
+	routing.DeleteRoutingHeader(request.Headers, routing.EncoderEndpointsHeader)
 	encodeProfileRunResult := schedulingResult.ProfileResults[h.encodeProfile]
 	if encodeProfileRunResult == nil {
 		span.SetAttributes(
@@ -633,7 +638,7 @@ func (h *Handler) PreRequest(ctx context.Context, request *scheduling.InferenceR
 		return nil
 	}
 
-	request.Headers[routing.EncoderEndpointsHeader] = strings.Join(encodeHostPorts, ",")
+	routing.SetRoutingHeader(request.Headers, routing.EncoderEndpointsHeader, strings.Join(encodeHostPorts, ","))
 	span.SetAttributes(
 		semconv.LLMDEPPEncodeDisaggregationUsed(true),
 		semconv.LLMDEPPEncodeEndpoints(strings.Join(encodeHostPorts, ",")),

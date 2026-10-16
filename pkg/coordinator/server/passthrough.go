@@ -32,14 +32,15 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 )
 
 // passthroughHandler is the chi NotFound catch-all: any path the coordinator
-// does not register (e.g. /v1/models, /v1/messages, /v1/embeddings)
-// is reverse-proxied to the gateway with EPP-Profile: decode, so EPP dispatches
+// does not register (e.g. /v1/models, /v1/messages/count_tokens, /v1/embeddings)
+// is reverse-proxied to the gateway with x-llm-d-epp-profile: decode, so EPP dispatches
 // it to a decode pod. Method, body, query, and forwarded headers are preserved;
 // X-Request-Id is validated and replaced with a UUID if malformed, matching
 // handleInference's sanitization.
@@ -90,9 +91,8 @@ func (h *passthroughHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The passthrough proxies request bodies verbatim and never parses them,
 	// so it cannot detect stream:true without defeating that design. Clear
-	// the write deadline unconditionally: a streaming response (the stated
-	// motivator, e.g. /v1/messages with stream:true) would otherwise be cut
-	// by WriteTimeout mid-stream. The trade-off is that non-streaming
+	// the write deadline unconditionally: a streaming response would otherwise
+	// be cut by WriteTimeout mid-stream. The trade-off is that non-streaming
 	// passthrough responses lose the slow-client guard; the gateway and
 	// server IdleTimeout still bound stalled connections.
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
@@ -106,8 +106,9 @@ func (h *passthroughHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // newPassthroughProxy builds the reverse proxy that streams to the gateway.
-// The director rewrites the outbound scheme/host to the gateway and stamps the
-// decode profile and sanitized request id. Transport errors return 502; a
+// The director rewrites the outbound scheme/host to the gateway, stamps the
+// decode profile and sanitized request id, and drops a client endpoint pin,
+// which EPP routes on. Transport errors return 502; a
 // failure after the upstream response has started can only surface through
 // ErrorLog, so it is wired to the request-scoped logger.
 func newPassthroughProxy(logger logr.Logger, gatewayURL *url.URL, transport http.RoundTripper, requestID string) *httputil.ReverseProxy {
@@ -117,7 +118,8 @@ func newPassthroughProxy(logger logr.Logger, gatewayURL *url.URL, transport http
 			r.URL.Host = gatewayURL.Host
 			r.Host = gatewayURL.Host
 			r.Header.Set(reqcommon.RequestIDHeaderKey, requestID)
-			r.Header.Set(gateway.EPPProfileHeader, gateway.PhaseDecode)
+			r.Header.Set(reqcommon.EPPProfileHeaderKey, gateway.PhaseDecode)
+			r.Header.Del(routing.EndpointPinHeader)
 		},
 		FlushInterval: -1,
 		Transport:     transport,

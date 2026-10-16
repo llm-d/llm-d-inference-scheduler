@@ -30,6 +30,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 )
 
@@ -95,6 +96,7 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(llmdInferenceModelRewriteDecisionsTotal)
 		metrics.Registry.MustRegister(LlmdDataLayerPollErrorsTotal)
 		metrics.Registry.MustRegister(LlmdDataLayerExtractErrorsTotal)
+		metrics.Registry.MustRegister(llmdToolCallingFieldStatusTotal)
 		for _, collector := range customCollectors {
 			metrics.Registry.MustRegister(collector)
 		}
@@ -152,6 +154,7 @@ func Reset() {
 	llmdInferenceModelRewriteDecisionsTotal.Reset()
 	LlmdDataLayerPollErrorsTotal.Reset()
 	LlmdDataLayerExtractErrorsTotal.Reset()
+	llmdToolCallingFieldStatusTotal.Reset()
 }
 
 // RecordRequestCounter records the number of requests.
@@ -211,7 +214,7 @@ const (
 // With EPP tracing off the context still holds the caller's span, which isn't
 // the EPP's, so only trace_id is attached.
 //
-// Exemplars only reach the wire over OpenMetrics; see openMetricsFilterProvider
+// Exemplars only reach the wire over OpenMetrics; see newMetricsServerOptions
 // in cmd/epp/runner.
 func observeWithTraceExemplar(ctx context.Context, observer prometheus.Observer, value float64) {
 	exemplarObserver, ok := observer.(prometheus.ExemplarObserver)
@@ -284,7 +287,7 @@ func RecordNormalizedTimePerOutputToken(ctx context.Context, modelName, targetMo
 	elapsedSeconds := complete.Sub(received).Seconds()
 	secondsPerToken := elapsedSeconds / float64(outputTokenCount)
 
-	llmdNormalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName, fairnessID, priority).Observe(secondsPerToken)
+	observeWithTraceExemplar(ctx, llmdNormalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName, fairnessID, priority), secondsPerToken)
 	return true
 }
 
@@ -306,7 +309,7 @@ func RecordRequestTTFT(ctx context.Context, modelName, targetModelName, fairness
 		streamingLabel = "true"
 	}
 	ttftSeconds := firstToken.Sub(received).Seconds()
-	llmdRequestTTFT.WithLabelValues(modelName, targetModelName, fairnessID, priority, streamingLabel).Observe(ttftSeconds)
+	observeWithTraceExemplar(ctx, llmdRequestTTFT.WithLabelValues(modelName, targetModelName, fairnessID, priority, streamingLabel), ttftSeconds)
 	return true
 }
 
@@ -335,7 +338,7 @@ func RecordRequestTPOT(ctx context.Context, modelName, targetModelName, fairness
 	e2eSeconds := complete.Sub(received).Seconds()
 	ttftSeconds := firstToken.Sub(received).Seconds()
 	tpotSeconds := (e2eSeconds - ttftSeconds) / float64(outputTokenCount-1)
-	llmdRequestTPOT.WithLabelValues(modelName, targetModelName, fairnessID, priority).Observe(tpotSeconds)
+	observeWithTraceExemplar(ctx, llmdRequestTPOT.WithLabelValues(modelName, targetModelName, fairnessID, priority), tpotSeconds)
 	return true
 }
 
@@ -348,7 +351,7 @@ func RecordInterTokenLatency(ctx context.Context, modelName, targetModelName, fa
 			"modelName", modelName, "targetModelName", targetModelName, "itlSeconds", itlSeconds)
 		return false
 	}
-	llmdInterTokenLatency.WithLabelValues(modelName, targetModelName, fairnessID, priority).Observe(itlSeconds)
+	observeWithTraceExemplar(ctx, llmdInterTokenLatency.WithLabelValues(modelName, targetModelName, fairnessID, priority), itlSeconds)
 	return true
 }
 
@@ -399,8 +402,8 @@ func RecordInferencePoolReadyPods(name string, runningPods float64) {
 }
 
 // RecordSchedulerE2ELatency records the end-to-end scheduling latency.
-func RecordSchedulerE2ELatency(duration time.Duration) {
-	llmdSchedulerE2ELatency.WithLabelValues().Observe(duration.Seconds())
+func RecordSchedulerE2ELatency(ctx context.Context, duration time.Duration) {
+	observeWithTraceExemplar(ctx, llmdSchedulerE2ELatency.WithLabelValues(), duration.Seconds())
 }
 
 // RecordRequestProcessingLatency records the EPP request processing latency,
@@ -468,6 +471,7 @@ func RecordInferenceExtensionInfo(commitSha, buildRef string) {
 
 // RecordFlowControlRequestQueueDuration records the duration a request spent in the Flow Control layer.
 func RecordFlowControlRequestQueueDuration(
+	ctx context.Context,
 	fairnessID, priority, outcome,
 	inferencePool,
 	modelName, targetModelName string,
@@ -475,11 +479,11 @@ func RecordFlowControlRequestQueueDuration(
 ) {
 	fairnessID = boundFairnessID(fairnessID)
 	modelName, targetModelName = boundModels(modelName, targetModelName)
-	llmdFlowControlRequestQueueDuration.WithLabelValues(
+	observeWithTraceExemplar(ctx, llmdFlowControlRequestQueueDuration.WithLabelValues(
 		fairnessID, priority, outcome,
 		inferencePool,
 		modelName, targetModelName,
-	).Observe(duration.Seconds())
+	), duration.Seconds())
 }
 
 // RecordFlowControlDispatchCycleDuration records the duration of a dispatch cycle in the Flow Control layer.
@@ -538,9 +542,16 @@ func DeleteFlowControlPoolSaturation(inferencePool, stage string) {
 }
 
 // RecordFlowControlStaleEndpoints records how many candidate endpoints the given saturation
-// detector scored as fully saturated because their metrics were missing or stale.
-func RecordFlowControlStaleEndpoints(detector string, count int) {
-	llmdFlowControlStaleEndpoints.WithLabelValues(detector).Set(float64(count))
+// detector scored as fully saturated because their metrics were missing or stale, for the
+// given pipeline stage (empty when unpartitioned).
+func RecordFlowControlStaleEndpoints(detector, stage string, count int) {
+	llmdFlowControlStaleEndpoints.WithLabelValues(detector, stage).Set(float64(count))
+}
+
+// DeleteFlowControlStaleEndpointsStage removes the stale-endpoints gauge series of every
+// detector for a pipeline stage.
+func DeleteFlowControlStaleEndpointsStage(stage string) {
+	llmdFlowControlStaleEndpoints.DeletePartialMatch(prometheus.Labels{"stage": stage})
 }
 
 // RecordFlowControlDetectorSaturation records the saturation signal reported by a single
@@ -658,4 +669,20 @@ func RecordDataLayerPollError(sourceType string) {
 // RecordDataLayerExtractError increments the extract error counter for a source/extractor type.
 func RecordDataLayerExtractError(sourceType, extractorType string) {
 	LlmdDataLayerExtractErrorsTotal.WithLabelValues(sourceType, extractorType).Inc()
+}
+
+// RecordToolCallingFieldStatuses records outcomes only for fields present on at
+// least one side of the comparison.
+func RecordToolCallingFieldStatuses(component, direction string, statuses []toolcalling.FieldStatus) {
+	for _, fieldStatus := range statuses {
+		if !fieldStatus.Observed {
+			continue
+		}
+		llmdToolCallingFieldStatusTotal.WithLabelValues(
+			component,
+			direction,
+			string(fieldStatus.Field),
+			string(fieldStatus.Status),
+		).Inc()
+	}
 }

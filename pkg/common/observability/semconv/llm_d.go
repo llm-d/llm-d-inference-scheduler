@@ -23,6 +23,16 @@ import (
 // Internal llm-d specific attribute keys.
 // All custom router, scheduler, scorer, and sidecar attributes are namespaced under "llm_d.*".
 const (
+	// Tool-calling request attributes
+	LLMDToolCallingAPISurfaceKey                   = attribute.Key("llm_d.tool_calling.api_surface")
+	LLMDToolCallingPresentKey                      = attribute.Key("llm_d.tool_calling.present")
+	LLMDToolCallingToolChoiceKey                   = attribute.Key("llm_d.tool_calling.tool_choice")
+	LLMDToolCallingToolCountKey                    = attribute.Key("llm_d.tool_calling.tool_count")
+	LLMDToolCallingFieldToolsStatusKey             = attribute.Key("llm_d.tool_calling.field.tools.status")
+	LLMDToolCallingFieldToolChoiceStatusKey        = attribute.Key("llm_d.tool_calling.field.tool_choice.status")
+	LLMDToolCallingFieldParallelToolCallsStatusKey = attribute.Key("llm_d.tool_calling.field.parallel_tool_calls.status")
+	LLMDToolCallingFieldResponseFormatStatusKey    = attribute.Key("llm_d.tool_calling.field.response_format.status")
+
 	// EPP Scheduling attributes
 	LLMDEPPProfileNameKey               = attribute.Key("llm_d.epp.scheduling.profile.name")
 	LLMDEPPFilterDecisionKey            = attribute.Key("llm_d.epp.filter.decision")
@@ -36,6 +46,14 @@ const (
 	LLMDEPPPickerCandidateEndpointsKey  = attribute.Key("llm_d.epp.picker.candidate_endpoints")
 	LLMDEPPPickerTopEndpointsKey        = attribute.Key("llm_d.epp.picker.top_endpoints")
 	LLMDEPPPickerTopScoresKey           = attribute.Key("llm_d.epp.picker.top_scores")
+
+	// EPP Fairness attribution attributes
+	// LLMDEPPFairnessIDKey is the resolved fairness identity.
+	// Always paired with LLMDEPPFairnessSourceKey.
+	LLMDEPPFairnessIDKey = attribute.Key("llm_d.epp.fairness.id")
+	// LLMDEPPFairnessSourceKey is the branch that resolved the fairness identity.
+	// "header" is never evidence that the producer was authenticated.
+	LLMDEPPFairnessSourceKey = attribute.Key("llm_d.epp.fairness.source")
 
 	// EPP Scorer attributes
 	LLMDEPPScorerTypeKey               = attribute.Key("llm_d.epp.scorer.type")
@@ -86,6 +104,7 @@ const (
 	LLMDKVCacheIndexAddPodEntryCountKey     = attribute.Key("llm_d.kv_cache.index.add.pod_entry_count")
 	LLMDKVCacheIndexAddDeviceTierCountKey   = attribute.Key("llm_d.kv_cache.index.add.device_tier_count")
 	LLMDKVCacheIndexEvictKeyTypeKey         = attribute.Key("llm_d.kv_cache.index.evict.key_type")
+	LLMDKVCacheIndexEvictKeyCountKey        = attribute.Key("llm_d.kv_cache.index.evict.key_count")
 	LLMDKVCacheIndexEvictPodEntryCountKey   = attribute.Key("llm_d.kv_cache.index.evict.pod_entry_count")
 	LLMDKVCacheIndexEvictDeviceTierCountKey = attribute.Key("llm_d.kv_cache.index.evict.device_tier_count")
 	LLMDKVCacheIndexLookupBlockCountKey     = attribute.Key("llm_d.kv_cache.index.lookup.block_count")
@@ -97,11 +116,6 @@ const (
 	LLMDKVCachePrefixMatchWalkedKey         = attribute.Key("llm_d.kv_cache.prefix_match.walked")
 	LLMDKVCachePrefixMatchPodsMatchedKey    = attribute.Key("llm_d.kv_cache.prefix_match.pods_matched")
 	LLMDKVCachePrefixMatchLongestChainKey   = attribute.Key("llm_d.kv_cache.prefix_match.longest_chain")
-	LLMDKVCacheScorerAlgorithmKey           = attribute.Key("llm_d.kv_cache.scorer.algorithm")
-	LLMDKVCacheScorerKeyCountKey            = attribute.Key("llm_d.kv_cache.scorer.key_count")
-	LLMDKVCacheScoreMaxKey                  = attribute.Key("llm_d.kv_cache.score.max")
-	LLMDKVCacheScoreAvgKey                  = attribute.Key("llm_d.kv_cache.score.avg")
-	LLMDKVCacheScorerPodsScoredKey          = attribute.Key("llm_d.kv_cache.scorer.pods_scored")
 
 	// KV Cache Event attributes
 	LLMDKVCacheEventsTopicKey            = attribute.Key("llm_d.kv_cache.events.topic")
@@ -119,6 +133,7 @@ const (
 	LLMDPDProxyRequestPathKey                 = attribute.Key("llm_d.pd_proxy.request_path")
 	LLMDPDProxyPrefillTargetKey               = attribute.Key("llm_d.pd_proxy.prefill_target")
 	LLMDPDProxyPrefillCandidatesKey           = attribute.Key("llm_d.pd_proxy.prefill_candidates")
+	LLMDPDProxyBootstrapRoomKey               = attribute.Key("llm_d.pd_proxy.bootstrap_room")
 	LLMDPDProxyDecodeTargetKey                = attribute.Key("llm_d.pd_proxy.decode.target")
 	LLMDPDProxyReasonKey                      = attribute.Key("llm_d.pd_proxy.reason")
 	LLMDPDProxyErrorKey                       = attribute.Key("llm_d.pd_proxy.error")
@@ -160,6 +175,18 @@ const (
 )
 
 // Typed helper functions for llm-d internal attributes.
+
+// EPP Fairness attribution helpers
+
+// LLMDEPPFairnessID returns an attribute for the resolved fairness identity.
+func LLMDEPPFairnessID(id string) attribute.KeyValue {
+	return LLMDEPPFairnessIDKey.String(id)
+}
+
+// LLMDEPPFairnessSource returns an attribute for how the fairness identity was resolved.
+func LLMDEPPFairnessSource(source string) attribute.KeyValue {
+	return LLMDEPPFairnessSourceKey.String(source)
+}
 
 // EPP Scheduling helpers
 
@@ -435,6 +462,11 @@ func LLMDKVCacheIndexEvictKeyType(keyType string) attribute.KeyValue {
 	return LLMDKVCacheIndexEvictKeyTypeKey.String(keyType)
 }
 
+// LLMDKVCacheIndexEvictKeyCount returns an attribute for KV cache index evicted keys count.
+func LLMDKVCacheIndexEvictKeyCount(count int) attribute.KeyValue {
+	return LLMDKVCacheIndexEvictKeyCountKey.Int(count)
+}
+
 // LLMDKVCacheIndexEvictPodEntryCount returns an attribute for KV cache index evicted pod entries count.
 func LLMDKVCacheIndexEvictPodEntryCount(count int) attribute.KeyValue {
 	return LLMDKVCacheIndexEvictPodEntryCountKey.Int(count)
@@ -488,31 +520,6 @@ func LLMDKVCachePrefixMatchPodsMatched(count int) attribute.KeyValue {
 // LLMDKVCachePrefixMatchLongestChain returns an attribute for prefix match longest block chain.
 func LLMDKVCachePrefixMatchLongestChain(chain int) attribute.KeyValue {
 	return LLMDKVCachePrefixMatchLongestChainKey.Int(chain)
-}
-
-// LLMDKVCacheScorerAlgorithm returns an attribute for KV cache scorer algorithm strategy.
-func LLMDKVCacheScorerAlgorithm(algo string) attribute.KeyValue {
-	return LLMDKVCacheScorerAlgorithmKey.String(algo)
-}
-
-// LLMDKVCacheScorerKeyCount returns an attribute for KV cache scorer key count.
-func LLMDKVCacheScorerKeyCount(count int) attribute.KeyValue {
-	return LLMDKVCacheScorerKeyCountKey.Int(count)
-}
-
-// LLMDKVCacheScoreMax returns an attribute for KV cache max score.
-func LLMDKVCacheScoreMax(score float64) attribute.KeyValue {
-	return LLMDKVCacheScoreMaxKey.Float64(score)
-}
-
-// LLMDKVCacheScoreAvg returns an attribute for KV cache average score.
-func LLMDKVCacheScoreAvg(score float64) attribute.KeyValue {
-	return LLMDKVCacheScoreAvgKey.Float64(score)
-}
-
-// LLMDKVCacheScorerPodsScored returns an attribute for KV cache scored pods count.
-func LLMDKVCacheScorerPodsScored(count int) attribute.KeyValue {
-	return LLMDKVCacheScorerPodsScoredKey.Int(count)
 }
 
 // KV Cache Event helpers
@@ -582,6 +589,11 @@ func LLMDPDProxyPrefillTarget(target string) attribute.KeyValue {
 // LLMDPDProxyPrefillCandidates returns an attribute for PD proxy prefill candidate count.
 func LLMDPDProxyPrefillCandidates(candidates int) attribute.KeyValue {
 	return LLMDPDProxyPrefillCandidatesKey.Int(candidates)
+}
+
+// LLMDPDProxyBootstrapRoom returns an attribute for the SGLang P/D bootstrap room ID.
+func LLMDPDProxyBootstrapRoom(room int64) attribute.KeyValue {
+	return LLMDPDProxyBootstrapRoomKey.Int64(room)
 }
 
 // LLMDPDProxyDecodeTarget returns an attribute for PD proxy decode target host/port.

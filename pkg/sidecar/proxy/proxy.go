@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -261,7 +262,7 @@ func (c Config) String() string {
 }
 
 // pdConnectorHandler handles a P/D KV connector request. kvCacheSource is the
-// validated x-kv-cache-source-host-port peer to pull cached prefix from ("" when
+// validated x-llm-d-kv-cache-source-host-port peer to pull cached prefix from ("" when
 // absent); the APIType selects the fields that cap the prefill request.
 type pdConnectorHandler func(http.ResponseWriter, *http.Request, string, string, reqcommon.APIType)
 
@@ -444,11 +445,18 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 
-	// The server logs this so it appears once: every data parallel rank starts the shared validator.
-	if !s.allowlistValidator.enabled {
+	if s.allowlistValidator.enabled {
+		defer s.allowlistValidator.Stop()
+		if err := s.allowlistValidator.Start(ctx); err != nil {
+			return err
+		}
+	} else {
 		s.logger.Info("warning: SSRF protection is disabled; targets taken from request headers are not checked against the InferencePool",
 			"flag", "--"+enableSSRFProtection,
-			"headers", []string{routing.PrefillEndpointHeader, routing.EncoderEndpointsHeader, routing.KVCacheSourceHeader})
+			"headers", slices.Concat(
+				routing.HeaderNames(routing.PrefillEndpointHeader),
+				routing.HeaderNames(routing.EncoderEndpointsHeader),
+				routing.HeaderNames(routing.KVCacheSourceHeader)))
 	}
 
 	// Configure handlers
@@ -469,18 +477,14 @@ func (s *Server) Start(ctx context.Context) error {
 	return grp.Wait()
 }
 
-// Clone returns a clone of the current Server struct.
-// Note: decoderURL and decoderProxy are intentionally not copied — callers (e.g. startDataParallel)
-// always set them explicitly after cloning.
-// HTTPListener is not copied; each instance owns its listener.
+// Clone returns a partially initialized Server that is not ready to serve requests.
+// Routes, connector handlers, decoderProxy, and listeners are not copied;
+// callers initialize them after setting the clone's serving and decoder addresses.
 func (s *Server) Clone() *Server {
 	return &Server{
 		addr:                s.addr,
 		readyCh:             make(chan struct{}),
-		handler:             s.handler,
 		allowlistValidator:  s.allowlistValidator,
-		handlePDConnector:   s.handlePDConnector,
-		handleECConnector:   s.handleECConnector,
 		prefillerURLPrefix:  s.prefillerURLPrefix,
 		encoderURLPrefix:    s.encoderURLPrefix,
 		prefillerProxies:    s.prefillerProxies,
@@ -592,7 +596,14 @@ func (s *Server) createRoutes() *http.ServeMux {
 	// DetectAPIType owns the path-to-API mapping; deriving it here keeps the
 	// served routes from drifting away from it.
 	for _, path := range []string{reqcommon.PathChatCompletions, reqcommon.PathCompletions, reqcommon.PathMessages, reqcommon.PathResponses, reqcommon.PathVLLMGenerate, reqcommon.PathSGLangGenerate} {
-		mux.HandleFunc("POST "+path, s.disaggregatedPrefillHandler(reqcommon.DetectAPIType(path)))
+		handler := s.disaggregatedPrefillHandler(reqcommon.DetectAPIType(path))
+		mux.HandleFunc("POST "+path, handler)
+		mux.HandleFunc("POST "+path+"/{$}", func(w http.ResponseWriter, r *http.Request) {
+			r = r.Clone(r.Context())
+			r.URL.Path = path
+			r.URL.RawPath = ""
+			handler(w, r)
+		})
 	}
 
 	s.decoderProxy = s.createDecoderProxyHandler(s.config.DecoderURL, s.config.InsecureSkipVerifyForDecoder)

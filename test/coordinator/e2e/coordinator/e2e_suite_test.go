@@ -17,7 +17,7 @@ limitations under the License.
 // Package coordinate2e runs end-to-end tests for the coordinator service
 // against the e-p-d-pools topology: a single InferencePool covering the
 // encode, prefill, and decode worker pods, served by one EPP that runs the
-// scheduling profile named by each request's EPP-Profile header, behind a
+// scheduling profile named by each request's x-llm-d-epp-profile header, behind a
 // hand-rolled standalone Envoy routing on that same header, and the
 // coordinator deployed as a pod. No Istio, no Gateway/HTTPRoute CRDs.
 package coordinate2e
@@ -85,7 +85,7 @@ const (
 	// ConfigMap it mounts.
 	sharedEnvoyManifest = "../../../../deploy/environments/dev/coordinator-e2e-infra/shared-envoy-resources.yaml"
 
-	// 3-EPP topology manifests: the Envoy that fans EPP-Profile out to three
+	// 3-EPP topology manifests: the Envoy that fans x-llm-d-epp-profile out to three
 	// role-scoped ext_proc clusters, and the three role-scoped InferencePools.
 	envoy3EPPManifest = "../../../../deploy/environments/dev/coordinator-e2e-infra/envoy-3-epp.yaml"
 	pool3EPPManifest  = "../../../../deploy/environments/dev/coordinator-e2e-infra/inference-pools-3-epp.yaml"
@@ -108,7 +108,7 @@ var (
 
 	containerRuntime = env.GetEnvString("CONTAINER_RUNTIME", "docker", ginkgo.GinkgoLogr)
 	eppImage         = env.GetEnvString("EPP_IMAGE", "ghcr.io/llm-d/llm-d-router-endpoint-picker:dev", ginkgo.GinkgoLogr)
-	vllmSimImage     = env.GetEnvString("VLLM_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:v0.10.2", ginkgo.GinkgoLogr)
+	vllmSimImage     = env.GetEnvString("VLLM_IMAGE", "ghcr.io/llm-d/llm-d-inference-sim:v1.0.0", ginkgo.GinkgoLogr)
 	vllmRenderImage  = env.GetEnvString("VLLM_RENDER_IMAGE", "vllm/vllm-openai-cpu:v0.21.0", ginkgo.GinkgoLogr)
 	vllmRenderPort   = env.GetEnvString("VLLM_RENDER_PORT", "8082", ginkgo.GinkgoLogr)
 	coordinatorImage = env.GetEnvString("COORDINATOR_IMAGE", "", ginkgo.GinkgoLogr)

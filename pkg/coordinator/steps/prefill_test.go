@@ -44,8 +44,8 @@ func TestPrefillStep_SendsCorrectGenerateRequest(t *testing.T) {
 		if r.URL.Path != "/inference/v1/generate" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 
 		body, _ := io.ReadAll(r.Body)
@@ -76,8 +76,8 @@ func TestPrefillStep_SendsCorrectGenerateRequest(t *testing.T) {
 		Model:     "llama-3",
 		TokenIDs:  []int{1, 32000, 32000, 32000, 32000, 32000, 32000, 2345},
 		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Index: 0, Hash: "hash-a", KwargsData: "dGVuc29yLWE=", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 3}},
-			{Index: 1, Hash: "hash-b", KwargsData: "dGVuc29yLWI=", Placeholder: pipeline.PlaceholderRange{Offset: 4, Length: 3}},
+			{Modality: reqcommon.ModalityImage, Hash: "hash-a", KwargsData: "dGVuc29yLWE=", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 3}},
+			{Modality: reqcommon.ModalityImage, Hash: "hash-b", KwargsData: "dGVuc29yLWI=", Placeholder: pipeline.PlaceholderRange{Offset: 4, Length: 3}},
 		},
 		ECTransferParams: []map[string]any{
 			{"hash-a": map[string]any{"peer_port": 5501, "size_bytes": 1228800, "nixl_agent_metadata_b64": "bml4..."}},
@@ -113,7 +113,7 @@ func TestPrefillStep_SendsCorrectGenerateRequest(t *testing.T) {
 		t.Fatal("expected features in prefill request")
 	}
 	mmHashes, _ := features["mm_hashes"].(map[string]any)
-	imageHashes, _ := mmHashes[ModalityImage].([]any)
+	imageHashes, _ := mmHashes[string(reqcommon.ModalityImage)].([]any)
 	if len(imageHashes) != 2 {
 		t.Fatalf("expected 2 mm_hashes, got %d", len(imageHashes))
 	}
@@ -126,7 +126,7 @@ func TestPrefillStep_SendsCorrectGenerateRequest(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected kwargs_data map in prefill, got %T", features["kwargs_data"])
 	}
-	imageKwargs, _ := kwargsData[ModalityImage].([]any)
+	imageKwargs, _ := kwargsData[string(reqcommon.ModalityImage)].([]any)
 	if len(imageKwargs) != 2 || imageKwargs[0] != "dGVuc29yLWE=" || imageKwargs[1] != "dGVuc29yLWI=" {
 		t.Fatalf("expected kwargs_data.image=[dGVuc29yLWE=,dGVuc29yLWI=], got %v", imageKwargs)
 	}
@@ -186,8 +186,8 @@ func TestPrefillStep_CompletionsFormat(t *testing.T) {
 		if r.URL.Path != reqcommon.PathCompletions {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &prefillBody)
@@ -292,8 +292,8 @@ func TestPrefillStep_ChatCompletionsFormat(t *testing.T) {
 		if r.URL.Path != reqcommon.PathChatCompletions {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &prefillBody)
@@ -324,7 +324,7 @@ func TestPrefillStep_ChatCompletionsFormat(t *testing.T) {
 			},
 		},
 		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Index: 0, Hash: "hash-a", KwargsData: "dGVuc29y", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 3}},
+			{Modality: reqcommon.ModalityImage, Hash: "hash-a", KwargsData: "dGVuc29y", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 3}},
 		},
 		ECTransferParams: []map[string]any{
 			{"hash-a": map[string]any{"peer_port": 5501, "size_bytes": 1228800, "nixl_agent_metadata_b64": "bml4..."}},
@@ -447,6 +447,78 @@ func TestPrefillStep_ResponsesFormat(t *testing.T) {
 	}
 }
 
+func TestPrefillStep_MessagesFormat(t *testing.T) {
+	var prefillBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != reqcommon.PathMessages {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &prefillBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"kv_transfer_params": map[string]any{"block_id": "block-4"},
+		})
+	}))
+	defer server.Close()
+
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+	step, err := NewPrefillStep(gwClient, map[string]any{
+		ParamKVConnector: kv.NIXL,
+		ParamECConnector: ec.NIXL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqCtx := &pipeline.RequestContext{
+		RequestID:    "req-messages",
+		OriginalPath: reqcommon.PathMessages,
+		Model:        "test-model",
+		Body: map[string]any{
+			"model":      "test-model",
+			"max_tokens": 800,
+			"stream":     true,
+			"thinking":   map[string]any{"type": "enabled", "budget_tokens": 512},
+			"messages":   []any{map[string]any{"role": "user", "content": "hello"}},
+		},
+		ECTransferParams: []map[string]any{{"hash-x": map[string]any{"peer_host": "10.0.0.1"}}},
+		KVTransferParams: make(map[string]any),
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := prefillBody["messages"].([]any); !ok {
+		t.Fatal("expected the client's messages array in the prefill body")
+	}
+	if prefillBody["max_tokens"] != float64(1) {
+		t.Fatalf("expected max_tokens=1, got %v", prefillBody["max_tokens"])
+	}
+	if prefillBody["stream"] != false {
+		t.Fatalf("expected stream=false, got %v", prefillBody["stream"])
+	}
+	// The Messages API defines no max_completion_tokens, so capping it would put
+	// an unknown field on the wire.
+	if _, ok := prefillBody["max_completion_tokens"]; ok {
+		t.Fatalf("messages request carries max_completion_tokens=%v", prefillBody["max_completion_tokens"])
+	}
+	// vLLM rejects thinking.budget_tokens >= max_tokens unless the request is a
+	// remote-decode prefill, so the prefill keeps the client's thinking only
+	// alongside do_remote_decode.
+	kvParams, ok := prefillBody["kv_transfer_params"].(map[string]any)
+	if !ok || kvParams["do_remote_decode"] != true {
+		t.Fatalf("expected kv_transfer_params with do_remote_decode=true, got %v", prefillBody["kv_transfer_params"])
+	}
+	if _, ok := prefillBody["ec_transfer_params"]; !ok {
+		t.Fatal("expected ec_transfer_params in the prefill body")
+	}
+	if reqCtx.KVTransferParams["block_id"] != "block-4" {
+		t.Fatalf("expected the prefill response's kv_transfer_params kept, got %v", reqCtx.KVTransferParams)
+	}
+}
+
 func TestPrefillStep_ChatCompletionsFormat_ForcesNonStreaming(t *testing.T) {
 	var prefillBody map[string]any
 
@@ -454,8 +526,8 @@ func TestPrefillStep_ChatCompletionsFormat_ForcesNonStreaming(t *testing.T) {
 		if r.URL.Path != reqcommon.PathChatCompletions {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get(gateway.EPPProfileHeader) != gateway.PhasePrefill {
-			t.Fatalf("expected EPP-Profile: prefill, got %q", r.Header.Get(gateway.EPPProfileHeader))
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) != gateway.PhasePrefill {
+			t.Fatalf("expected x-llm-d-epp-profile: prefill, got %q", r.Header.Get(reqcommon.EPPProfileHeaderKey))
 		}
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &prefillBody)
@@ -689,7 +761,7 @@ func TestPrefillStep_ConflictingECParams_RejectsRequest(t *testing.T) {
 		Model:     "test-model",
 		TokenIDs:  []int{1, 2345},
 		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Index: 0, Hash: "hash-a", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 1}},
+			{Modality: reqcommon.ModalityImage, Hash: "hash-a", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 1}},
 		},
 		ECTransferParams: []map[string]any{
 			{"hash-a": map[string]any{"peer_port": 5501}},
@@ -703,6 +775,39 @@ func TestPrefillStep_ConflictingECParams_RejectsRequest(t *testing.T) {
 	}
 	if gatewayHit {
 		t.Error("conflicting descriptors must reject the request before contacting the gateway")
+	}
+}
+
+// TestPrefillStep_CapturesPeerTopologyHeader verifies that the x-llm-d-peer-topology
+// response header set by the prefill EPP's topology-stamp-handler is captured
+// into reqCtx.PeerTopology for later forwarding to the decode request.
+func TestPrefillStep_CapturesPeerTopologyHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(reqcommon.PeerTopologyHeaderKey, "host=node12,zone=us-east1-a")
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	}))
+	defer server.Close()
+
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+
+	step, err := NewPrefillStep(gwClient, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-1",
+		Model:            "test",
+		OriginalPath:     reqcommon.PathVLLMGenerate,
+		TokenIDs:         []int{1, 2345},
+		KVTransferParams: make(map[string]any),
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := reqCtx.PeerTopology, "host=node12,zone=us-east1-a"; got != want {
+		t.Fatalf("reqCtx.PeerTopology = %q, want %q", got, want)
 	}
 }
 
@@ -723,7 +828,7 @@ func TestPrefillStep_GatewayError(t *testing.T) {
 		OriginalPath: reqcommon.PathVLLMGenerate,
 		TokenIDs:     []int{1, 2345},
 		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Index: 0, Hash: "h1", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 1}},
+			{Modality: reqcommon.ModalityImage, Hash: "h1", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 1}},
 		},
 		ECTransferParams: []map[string]any{
 			{"h1": map[string]any{"peer_port": 5501, "size_bytes": 1228800, "nixl_agent_metadata_b64": "bml4..."}},

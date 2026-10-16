@@ -39,7 +39,7 @@ func TestECTransferParams_NotForwardedToDecodeBackend(t *testing.T) {
 	var decodeBody map[string]any
 
 	gwServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get(gateway.EPPProfileHeader) == gateway.PhaseDecode {
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhaseDecode {
 			raw, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(raw, &decodeBody)
 		}
@@ -95,7 +95,7 @@ func TestKVTransferParams_FlowFromPrefillToDecode(t *testing.T) {
 	var decodeReceivedKVParams map[string]any
 
 	gwServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		phase := r.Header.Get(gateway.EPPProfileHeader)
+		phase := r.Header.Get(reqcommon.EPPProfileHeaderKey)
 		if got := r.Header.Get(reqcommon.RevisionDecisionIDHeaderKey); got != revisionDecisionID {
 			t.Errorf("%s revision decision ID = %q, want %q", phase, got, revisionDecisionID)
 		}
@@ -136,7 +136,7 @@ func TestKVTransferParams_FlowFromPrefillToDecode(t *testing.T) {
 		Stream:             false,
 		TokenIDs:           []int{1, 32000, 32000, 32000, 2345},
 		MultimodalEntries: []pipeline.MultimodalEntry{
-			{Index: 0, Hash: "hash-1", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 3}},
+			{Modality: reqcommon.ModalityImage, Hash: "hash-1", Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 3}},
 		},
 		ECTransferParams: []map[string]any{
 			{"hash-1": map[string]any{"peer_host": "10.0.0.1", "peer_port": 5501}},
@@ -194,7 +194,7 @@ func TestResponseHeaders_FlowFromPrefillToDecode(t *testing.T) {
 	var decodeHeaders http.Header
 
 	gwServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Header.Get(gateway.EPPProfileHeader) {
+		switch r.Header.Get(reqcommon.EPPProfileHeaderKey) {
 		case gateway.PhasePrefill:
 			w.Header().Set("X-LLM-D-Disagg-Revision", "revision-b")
 			w.Header().Set("X-Disagg-Slice", "nvl72-domain-2")

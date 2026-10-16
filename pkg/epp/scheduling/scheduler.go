@@ -67,7 +67,7 @@ func (s *Scheduler) Schedule(ctx context.Context, request *fwksched.InferenceReq
 
 	scheduleStart := time.Now()
 	defer func() {
-		metrics.RecordSchedulerE2ELatency(time.Since(scheduleStart))
+		metrics.RecordSchedulerE2ELatency(ctx, time.Since(scheduleStart))
 		metrics.RecordSchedulerAttempt(err, request.TargetModel, result)
 	}()
 
