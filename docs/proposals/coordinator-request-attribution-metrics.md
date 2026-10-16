@@ -120,18 +120,22 @@ recorded as span attributes on the request trace span.
 
 ### Attribution Headers
 
-Three request headers, all in the `x-llm-d-*` namespace:
+Three request headers, all in the `x-llm-d-*` namespace. Their names are configurable
+(see [Configuration](#configuration)) so an operator can track an upstream rename without
+a code change; the defaults below match the existing conventions in this repo.
 
-| Header | Description | Example value |
-|---|---|---|
-| `x-llm-d-tenant-id` | Organizational unit responsible for the request | `acme-corp` |
-| `x-llm-d-user-id` | Individual end user within the tenant | `user-7f3a` |
-| `x-llm-d-workload-id` | Application, agent, or pipeline submitting the request | `coding-agent-v2` |
+| Header | Config key | Default | Description | Example value |
+|---|---|---|---|---|
+| `x-llm-d-tenant-id` | `tenant_header` | `x-llm-d-tenant` | Organizational unit responsible for the request. This is the **same identity** as the async broker's tenant header (`pkg/coordinator/steps/asyncbroker/config.go:51`); attribution and quota classification read one header and classify/queue and bill under a single tenant name. | `acme-corp` |
+| `x-llm-d-user-id` | `user_id_header` | `x-llm-d-user-id` | Individual end user within the tenant | `user-7f3a` |
+| `x-llm-d-workload-id` | `workload_id_header` | `x-llm-d-workload-id` | Application, agent, or pipeline submitting the request | `coding-agent-v2` |
 
-All three are optional. Omitted (or empty) headers result in the literal value `unknown`
-in metric labels and log fields. `unknown` means "no value was supplied"; it is distinct
-from the `other` overflow value described under
-[Effect of the cap on the bill](#effect-of-the-cap-on-the-bill).
+All three are optional. Omitted (or empty) headers resolve to a single shared "no value"
+sentinel, `unknown`, in metric labels and log fields. `unknown` means "no value was
+supplied"; it is distinct from the `other` overflow value described under
+[Effect of the cap on the bill](#effect-of-the-cap-on-the-bill). Using one tenant header
+and one sentinel keeps a request from being queued under one tenant (the async broker's
+`default`) and billed to another (`unknown` here).
 
 > [!WARNING]
 > **Trust Boundary**: In a production deployment, end-users must never be permitted to
@@ -439,16 +443,19 @@ They are populated by the usage tee in `newDecodeProxy` when the decode response
 received:
 
 ```go
+// PromptTokens is the prompt token count read from the decode response body
+// via the format-specific response parser (e.g. OpenAI usage.prompt_tokens, SGLang
+// meta_info.prompt_tokens, Anthropic input_tokens). Populated by the usage tee.
+// Zero when the decode response body was unavailable or unparseable; check
+// UsageCaptured to distinguish "zero" from "unknown".
+PromptTokens int
+
 // CompletionTokens is the completion token count from the decode response body.
-// Populated by the usage tee from the vLLM "usage.completion_tokens" field.
+// Populated by the usage tee via the format-specific response parser (e.g.
+// OpenAI usage.completion_tokens, SGLang meta_info.completion_tokens, Anthropic output_tokens).
 // Zero when the decode response body was unavailable or unparseable; check
 // UsageCaptured to distinguish "zero" from "unknown".
 CompletionTokens int
-
-// PromptTokensFromBody is the prompt token count read from the decode response body's
-// usage.prompt_tokens field. Used when the render step is not in the pipeline and
-// len(TokenIDs) is zero. Populated by the usage tee.
-PromptTokensFromBody int
 
 // UsageCaptured is true only when a usage object was successfully parsed from the
 // decode response. False for failures before decode, truncated streams, client
@@ -471,9 +478,9 @@ the `RequestContext` exists:
 var attr attributionIdentity // zero value: all fields "" (attribution disabled)
 if s.attributionCfg.Enabled {
     attr = attributionIdentity{
-        TenantID:   attributionHeader(r.Header, "x-llm-d-tenant-id"),
-        UserID:     attributionHeader(r.Header, "x-llm-d-user-id"),
-        WorkloadID: attributionHeader(r.Header, "x-llm-d-workload-id"),
+        TenantID:   attributionHeader(r.Header, s.attributionCfg.TenantHeader),
+        UserID:     attributionHeader(r.Header, s.attributionCfg.UserIDHeader),
+        WorkloadID: attributionHeader(r.Header, s.attributionCfg.WorkloadIDHeader),
     }
 }
 ```
@@ -500,33 +507,76 @@ control of `log_user_id`; see
 
 #### `stream_options.include_usage` injection
 
-When `stream == true` and `request_attribution.enabled == true`, inject
-`stream_options.include_usage = true` into the parsed body before the pipeline runs.
-This ensures the upstream model returns a usage object in the final SSE chunk, which
-the usage tee installed in `newDecodeProxy` reads (see [Usage Capture](#usage-capture)):
+`stream_options.include_usage` is specific to the OpenAI Chat Completions and Completions
+APIs. Other endpoints — such as SGLang `/generate` and Anthropic `/v1/messages` — stream
+token counts natively in their respective chunk formats (e.g. SGLang `meta_info` on each
+chunk, Anthropic `message_start` / `message_delta` events). Injecting unsupported wire
+fields into those APIs risks having strict upstream backends reject the request
+(as noted in `pkg/common/request/apitype.go`).
+
+Therefore, `stream_options.include_usage` injection is scoped to requests where
+`DetectAPIType(r.URL.Path)` is `APITypeChatCompletions` or `APITypeCompletions`:
 
 ```go
-if stream && s.attributionCfg.Enabled {
-    injectStreamOptions(parsed)
+apiType := reqcommon.DetectAPIType(r.URL.Path)
+if stream && s.attributionCfg.Enabled &&
+    (apiType == reqcommon.APITypeChatCompletions || apiType == reqcommon.APITypeCompletions) {
+    if err := injectStreamOptions(parsed); err != nil {
+        // stream_options is present but not an object — reject early
+        // rather than silently replacing the value with a valid map.
+        http.Error(w, "invalid stream_options", http.StatusBadRequest)
+        return
+    }
 }
 ```
 
 ```go
-func injectStreamOptions(body map[string]any) {
-    opts, _ := body["stream_options"].(map[string]any)
-    if opts == nil {
-        opts = map[string]any{}
-        body["stream_options"] = opts
-    }
-    if alreadySet, _ := opts["include_usage"].(bool); !alreadySet {
+// injectStreamOptions sets stream_options.include_usage = true so that the
+// upstream model server emits a usage chunk in every streaming response.
+//
+// It returns an error if stream_options is present but is not a JSON object,
+// leaving the body unchanged so the caller can return 400 rather than
+// forwarding a silently mutated (and now valid) request.
+//
+// Behaviour when include_usage is already set:
+//   - true  → no-op (already correct)
+//   - false → overridden to true (known behaviour change, see note below)
+//
+// Note: a client that explicitly sends include_usage: false will receive an
+// extra final SSE chunk with usage data and an empty choices array.  This is
+// an intentional trade-off: attribution requires usage counts, so the flag
+// cannot be honoured when attribution is enabled.  Operators should document
+// this in their API guidelines; clients that cannot tolerate the extra chunk
+// must disable attribution for the affected model endpoints.
+func injectStreamOptions(body map[string]any) error {
+    raw, exists := body["stream_options"]
+    if exists && raw != nil {
+        opts, ok := raw.(map[string]any)
+        if !ok {
+            // Present but not an object (e.g. null after explicit key,
+            // string, number).  Do not silently replace it.
+            return fmt.Errorf("stream_options is not an object: %T", raw)
+        }
         opts["include_usage"] = true
+        return nil
     }
+    body["stream_options"] = map[string]any{"include_usage": true}
+    return nil
 }
 ```
 
-This is gated on `request_attribution.enabled: true` so operators without attribution
-are unaffected. It is idempotent: clients that already send `include_usage: true` are
-not changed.
+This is gated on `request_attribution.enabled: true` and OpenAI-compatible API types so
+other engines and operators without attribution are unaffected.
+
+**Explicit `include_usage: false`** is overridden to `true` for OpenAI streaming requests.
+Without a usage chunk the coordinator cannot record token counts, so honouring the client's
+`false` would mean billing every such request at zero tokens — silently under-counting costs.
+The override is therefore intentional and is listed as a [known limitation](#known-limitations).
+
+**Non-object `stream_options`** (e.g. `null`, a string, a number) causes the helper to
+return an error and the handler to reject the request with `400 Bad Request`.  The
+original value is never replaced, so a request that upstream servers would have rejected is not
+accidentally made valid by the coordinator.
 
 ### Usage Capture
 
@@ -547,27 +597,58 @@ before the tee is installed, and neither step's `modifyResponse` closure changes
 step's only change is passing `onUsage` (a closure that stores into `reqCtx`) at its
 existing `newDecodeProxy` call; with attribution disabled it passes `nil`.
 
-#### Decode response body capture
+#### Multi-engine Response Parsing and Body Capture
 
-Because decode uses a streaming reverse proxy (`httputil.ReverseProxy`), the body
-cannot be read directly inside `ModifyResponse` without consuming it and leaving nothing
-for the proxy to forward to the client. Instead, `resp.Body` is wrapped so that bytes
-are copied to a side buffer as the proxy reads them:
+Token counts live in three different wire structures across the APIs recognized by
+`DetectAPIType` ([`pkg/common/request/apitype.go`](../../pkg/common/request/apitype.go)):
 
-- For **non-streaming** responses: vLLM always includes a `usage` object in non-streaming
-  responses. The tee accumulates a full copy in a `bytes.Buffer`. When the wrapped body
-  reaches EOF or is closed, parse `usage.prompt_tokens` and `usage.completion_tokens`
-  from the buffer and invoke `onUsage`, which stores them on `RequestContext` as
-  `CompletionTokens` and `PromptTokensFromBody` and sets `UsageCaptured = true`.
-- For **streaming** responses (SSE): the tee copies bytes to a `lastChunkTracker` — a
-  writer that keeps only the last non-empty `data:` line it has seen. The final `data:`
-  chunk before `data: [DONE]` carries a `usage` object when
-  `stream_options.include_usage: true` is set. When the wrapped body reaches EOF or is
-  closed, the tracker's captured line is parsed and `onUsage` is invoked. The full
-  stream is **never** buffered.
+| API | Engine / Wire Format | Where token counts live |
+|---|---|---|
+| `/v1/chat/completions`, `/v1/completions` | OpenAI | `usage.prompt_tokens` / `usage.completion_tokens` |
+| `/inference/v1/generate` | vLLM HTTP | `usage.prompt_tokens` / `usage.completion_tokens` |
+| `/generate` | SGLang HTTP | `meta_info.prompt_tokens` / `meta_info.completion_tokens` |
+| `/v1/responses`, `/v1/messages` | Responses / Anthropic | `input_tokens` / `output_tokens` |
 
-If the body ends without a parseable `usage` object (truncated stream, client
-disconnect, malformed JSON), `onUsage` is not invoked and `UsageCaptured` stays `false`.
+Rather than hardcoding format-specific JSON parsing in the attribution code, the coordinator
+delegates response parsing to the normalized parser suite in
+[`pkg/epp/framework/plugins/requesthandling/parsers/`](../../pkg/epp/framework/plugins/requesthandling/parsers/).
+Each format parser implements:
+
+```go
+ParseResponse(ctx context.Context, body []byte, headers map[string]string, isStreaming bool) (*fwkrh.ParsedResponse, error)
+```
+
+and returns a normalized `*fwkrh.Usage` struct ([`pkg/epp/framework/interface/requesthandling/types.go`](../../pkg/epp/framework/interface/requesthandling/types.go)):
+
+```go
+type Usage struct {
+    PromptTokens       int                 `json:"prompt_tokens"`
+    CompletionTokens   int                 `json:"completion_tokens"`
+    TotalTokens        int                 `json:"total_tokens"`
+    PromptTokenDetails *PromptTokenDetails `json:"prompt_tokens_details,omitempty"`
+}
+```
+
+The usage tee derives the API format via `reqcommon.DetectAPIType(reqCtx.OriginalPath)` and
+invokes the corresponding parser:
+
+- For **non-streaming** responses: The tee accumulates a copy of the response body in a
+  `bytes.Buffer`. When the wrapped body reaches EOF or is closed, `ParseResponse(ctx, buf.Bytes(), headers, false)`
+  extracts normalized `Usage`.
+- For **streaming** responses (SSE): The tee feeds stream chunks to the parser (or retains
+  the usage-bearing chunk, such as the final SSE chunk for OpenAI or SGLang `meta_info`
+  chunks) and calls `ParseResponse(ctx, chunk, headers, true)`. The full stream is **never**
+  buffered.
+- Following PR #3122, non-streaming requests can also stream internally; the normalized
+  parser interface handles both streaming chunks and complete responses uniformly across all
+  supported engines (vLLM, SGLang, Anthropic).
+
+When `parsed.Usage != nil`, the tee invokes `onUsage(parsed.Usage.PromptTokens, parsed.Usage.CompletionTokens)`,
+storing them on `RequestContext` as `PromptTokens` and `CompletionTokens` and setting
+`UsageCaptured = true`.
+
+If the body ends without a parseable usage object (truncated stream, client disconnect,
+malformed JSON), `onUsage` is not invoked and `UsageCaptured` stays `false`.
 
 Parsing at body EOF/close rather than "after `ServeHTTP` returns" means the counts are
 already on `RequestContext` by the time `Pipeline.Execute` returns on any path,
@@ -621,15 +702,15 @@ the original panic or skip the re-panic.
 | Body-read failure / 413 / invalid JSON | 0 | 0 | `false` | not incremented (no GPU consumed) | yes, `outcome=error` |
 | Render fails | 0 | 0 | `false` | not incremented | yes, `outcome=error` |
 | Encode / prefill fails (after render) | `len(TokenIDs)` | 0 | `false` | input tokens incremented; output not | yes, `outcome=error` |
-| Decode fails or stream truncated | `len(TokenIDs)` | 0 | `false` | input tokens incremented; output not | yes |
-| Success | `len(TokenIDs)` or `PromptTokensFromBody` | from `usage` | `true` | both incremented | yes, `outcome=success` |
+| Decode fails or stream truncated | `len(TokenIDs)` (if render ran) or 0 | 0 | `false` | input tokens incremented (if render ran); output not | yes |
+| Success | `reqCtx.PromptTokens` (from `usage`) | `reqCtx.CompletionTokens` (from `usage`) | `true` | both incremented | yes, `outcome=success` |
 | Panic in any step | as known at panic | 0 | `false` | as known at panic | yes, `outcome=error`, `error_code=internal` |
 
 Requests that failed after render consumed encode and prefill GPU time, so their input
-tokens *are* added to the attributed input counter; that is the point of emitting from
-the defer. Requests rejected before any upstream call (body read, size, JSON, render)
-consumed no GPU and are recorded only in the log, so they do not create zero-valued
-counter series or add label cardinality.
+tokens *are* added to the attributed input counter using `len(TokenIDs)` as a fallback;
+that is the point of emitting from the defer. Requests rejected before any upstream call
+(body read, size, JSON, render) consumed no GPU and are recorded only in the log, so
+they do not create zero-valued counter series or add label cardinality.
 
 **Prometheus** (in [`pkg/coordinator/metrics/record.go`](../../pkg/coordinator/metrics/record.go)):
 
@@ -654,7 +735,7 @@ logger.Info("request.complete",
     "workload_id",       attr.WorkloadID,
     "model_name",        model,
     "namespace",         cfg.Namespace,
-    "prompt_tokens",     promptTokens, // len(reqCtx.TokenIDs) if render ran, else PromptTokensFromBody, else 0
+    "prompt_tokens",     promptTokens, // reqCtx.PromptTokens if usage_captured, else len(reqCtx.TokenIDs) if render ran, else 0
     "completion_tokens", completionTokens,
     "usage_captured",    usageCaptured,
     "outcome",           outcome,       // "success" | "error"
@@ -672,22 +753,23 @@ line with the audit-aid framing above.
 
 | Token type | Source | Notes |
 |---|---|---|
-| Prompt tokens | `len(reqCtx.TokenIDs)` after the render step, or `reqCtx.PromptTokensFromBody` parsed by the usage tee | When `render` is not in the pipeline, the tee reads `usage.prompt_tokens` from the decode response body and stores it in `PromptTokensFromBody`. For a request that fails after render, `len(TokenIDs)` is still available to the defer. |
-| Completion tokens | `usage.completion_tokens` from the decode response body | Parsed by the usage tee; not available before decode. `0` with `usage_captured: false` when decode did not complete. |
+| Prompt tokens | `reqCtx.PromptTokens` from decode response body (`usage`), or `len(reqCtx.TokenIDs)` fallback on failure | For all successful requests, prompt tokens are taken directly from the response `usage` object parsed by the usage tee. This guarantees a single source of truth (what the model actually processed and billed for) across all engines and pipeline configurations. If a request fails after render (before decode response usage is captured), `len(reqCtx.TokenIDs)` is used as a fallback to attribute the GPU prefill time consumed. |
+| Completion tokens | `reqCtx.CompletionTokens` from the decode response body | Parsed by the usage tee via the format parser; not available before decode. `0` with `usage_captured: false` when decode did not complete. |
 
-For streaming responses, vLLM emits a final SSE chunk containing only `usage` when
-`stream_options.include_usage: true` is set:
+Per-engine streaming usage behavior:
+- **OpenAI / vLLM HTTP** (`/v1/chat/completions`, `/v1/completions`, `/inference/v1/generate`): When `stream_options.include_usage: true` is set, emits a final SSE chunk containing `usage`:
+  ```
+  data: {"id":"...","object":"chat.completion.chunk","model":"Qwen3-32B","usage":{"prompt_tokens":128,"completion_tokens":512,"total_tokens":640},"choices":[]}
 
-```
-data: {"id":"...","object":"chat.completion.chunk","model":"Qwen3-32B","usage":{"prompt_tokens":128,"completion_tokens":512,"total_tokens":640},"choices":[]}
+  data: [DONE]
+  ```
+- **SGLang** (`/generate`): Emits `meta_info` containing `prompt_tokens` and `completion_tokens` on streamed chunks natively (no `stream_options` needed):
+  ```json
+  {"text":"...","meta_info":{"prompt_tokens":128,"completion_tokens":512}}
+  ```
+- **Anthropic / Responses** (`/v1/messages`, `/v1/responses`): Emits token counts in SSE lifecycle events (e.g. `message_start` / `message_delta` carrying `usage.input_tokens` and `usage.output_tokens`).
 
-data: [DONE]
-```
-
-The `lastChunkTracker` in the `TeeReader` side-path watches for this pattern and retains
-it for parsing after `ServeHTTP` returns.
-
-### Prompt Token Count — Interaction with Existing Metric
+### Prompt Token Count — Single Source of Truth and Interaction with Existing Metric
 
 The coordinator already records `llm_d_coordinator_request_input_tokens` (a histogram
 with only the `model_name` label) from the render step. The new
@@ -695,14 +777,18 @@ with only the `model_name` label) from the render step. The new
 that adds attribution labels. Both are emitted independently. The existing metric is not
 changed.
 
-When the `render` step is not in the pipeline (text-only OpenAI-format requests where
-tokenization happens on the worker), `len(reqCtx.TokenIDs)` is zero. In that case, the
-usage tee reads `usage.prompt_tokens` from the decode response body and stores it in
-`reqCtx.PromptTokensFromBody`, which the `handleInference` defer uses for both the
-attributed counter and the log record. The un-attributed `request_input_tokens` metric
-is also zero in this case (it is populated only by the render step). If such a request
-fails before decode returns a `usage` object, its prompt token count is unknown and is
-logged as `0` with `usage_captured: false`.
+For attribution, taking prompt tokens from the decode response `usage` for every successful
+request ensures that:
+1. What the model actually charged for (including chat-template scaffolding, special tokens,
+   and system prompt formatting) is what gets billed and logged.
+2. Two deployments serving identical traffic bill identically regardless of whether `render`
+   is included in the pipeline or tokenization happens on the worker.
+
+When a request fails before decode completes (e.g. encode/prefill failure or truncated stream):
+- If `render` ran, `len(reqCtx.TokenIDs)` is known and is used as a fallback to attribute the
+  GPU resources consumed during prefill.
+- If `render` was not in the pipeline, prompt tokens are unknown and logged as `0` with
+  `usage_captured: false`.
 
 ### Configuration
 
@@ -716,6 +802,13 @@ type RequestAttributionConfig struct {
     LogUserID             string `mapstructure:"log_user_id"` // "none" | "hashed" | "plain"
     // UserIDHashKey is read only from the environment, never from the YAML file.
     UserIDHashKey         string `mapstructure:"user_id_hash_key" json:"-"`
+    // TenantHeader names the header carrying the tenant key. Defaults to the async
+    // broker's default (`x-llm-d-tenant`) so attribution and quota classification read
+    // the same header; see tenant_header in
+    // pkg/coordinator/steps/asyncbroker/config.go.
+    TenantHeader      string `mapstructure:"tenant_header"`
+    UserIDHeader      string `mapstructure:"user_id_header"`
+    WorkloadIDHeader  string `mapstructure:"workload_id_header"`
 }
 ```
 
@@ -731,6 +824,11 @@ request_attribution:
                                   #   hashed - log HMAC-SHA256(key, user_id) as user_id_hash
                                   #   plain  - log the raw value as user_id
                                   # See "Data protection for user_id" under Security.
+  tenant_header:  x-llm-d-tenant  # default: x-llm-d-tenant; same header the async broker
+                                  # reads for quota classification, so one tenant name is
+                                  # used for both queue and billing.
+  user_id_header:  x-llm-d-user-id   # default: x-llm-d-user-id
+  workload_id_header: x-llm-d-workload-id  # default: x-llm-d-workload-id
 ```
 
 Environment overrides (via viper `AutomaticEnv`):
@@ -740,6 +838,9 @@ Environment overrides (via viper `AutomaticEnv`):
 - `COORDINATOR_REQUEST_ATTRIBUTION_USER_ID_HASH_KEY` — required when
   `log_user_id: hashed`; inject from a Kubernetes Secret. Startup fails if `hashed` is
   selected and the key is empty, or if `log_user_id` is not one of the three values.
+- `COORDINATOR_REQUEST_ATTRIBUTION_TENANT_HEADER` — default `x-llm-d-tenant`.
+- `COORDINATOR_REQUEST_ATTRIBUTION_USER_ID_HEADER` — default `x-llm-d-user-id`.
+- `COORDINATOR_REQUEST_ATTRIBUTION_WORKLOAD_ID_HEADER` — default `x-llm-d-workload-id`.
 
 The `namespace` field of the structured log record is read from the `COORDINATOR_NAMESPACE`
 environment variable; it is not in the YAML config because it is typically injected by
@@ -877,11 +978,21 @@ counters reflects the *requested* model name, not the served one. This means:
 Resolving this gap for rewritten traffic requires EPP changes (publishing the resolved
 model name on the response) and is deferred to a future iteration.
 
+**`include_usage: false` override**: when attribution is enabled, the coordinator
+overrides `stream_options.include_usage = true` on streaming OpenAI Chat Completions
+and Completions requests, even if the client explicitly sent `false`. The client will
+receive an extra final SSE chunk containing usage data with an empty `choices` array.
+Clients that parse `choices[0]` without a bounds check will fault on that chunk. This
+is the minimal observable footprint required to count tokens; clients that cannot tolerate
+the extra chunk must be routed to a model endpoint with `request_attribution.enabled: false`.
+(Engines with native usage streaming like SGLang and Anthropic are not subject to this
+override).
+
 ### Changes by Repository
 
 | Repository | Change |
 |---|---|
-| `llm-d/llm-d-router` | `RequestContext`: add `CompletionTokens`, `PromptTokensFromBody`, `UsageCaptured` fields. `handleInference`: read the three attribution headers and resolve the request ID at entry; inject `stream_options.include_usage` on streaming requests when attribution enabled; emit metrics and the log record from the existing `defer` so every exit path is covered. `config.go`: add `RequestAttributionConfig`. New file `pkg/coordinator/server/attribution.go`: header helper and `emitAttribution`. New file `pkg/coordinator/steps/usage_capture.go`: response-body tee and usage parsing. Modify `pkg/coordinator/steps/decode_proxy.go`: `newDecodeProxy` accepts an optional `onUsage` callback and installs the tee after the caller's `modifyResponse` returns nil. `decode.go` and `conditional_decode.go`: pass the callback at their `newDecodeProxy` call (signature change only; no attribution logic and no change to the 412 handling). `pkg/coordinator/metrics/`: two new attributed counter families (`_total`) + recording functions, `tenant_id`/`workload_id` routed through `BoundedLabel`. `pkg/coordinator/pipeline/builder/builder.go`: pass the attribution-enabled flag to the decode steps. |
+| `llm-d/llm-d-router` | `RequestContext`: add `PromptTokens`, `CompletionTokens`, `UsageCaptured` fields. `handleInference`: read the three attribution headers and resolve the request ID at entry; inject `stream_options.include_usage` on OpenAI streaming requests when attribution enabled; emit metrics and the log record from the existing `defer` so every exit path is covered. `config.go`: add `RequestAttributionConfig`. New file `pkg/coordinator/server/attribution.go`: header helper and `emitAttribution`. New file `pkg/coordinator/steps/usage_capture.go`: response-body tee and format parser dispatch (`DetectAPIType` -> `pkg/epp/framework/plugins/requesthandling/parsers/`). Modify `pkg/coordinator/steps/decode_proxy.go`: `newDecodeProxy` accepts an optional `onUsage` callback and installs the tee after the caller's `modifyResponse` returns nil. `decode.go` and `conditional_decode.go`: pass the callback at their `newDecodeProxy` call (signature change only; no attribution logic and no change to the 412 handling). `pkg/coordinator/metrics/`: two new attributed counter families (`_total`) + recording functions, `tenant_id`/`workload_id` routed through `BoundedLabel`. `pkg/coordinator/pipeline/builder/builder.go`: pass the attribution-enabled flag to the decode steps. |
 | `llm-d/llm-d` | New doc `docs/operations/observability/attribution.md`; update `docs/api-reference/coordinator-http-headers.md` to list the three attribution headers; update metrics docs; add example PromQL queries. |
 | `opencost/opencost` | Update metric names from `llm_d_epp_*` to `llm_d_coordinator_*` in `QueryInferenceDimensionTokens` — see [`open-cost-new-dimensions-plan-coordinator.md`](open-cost-new-dimensions-plan-coordinator.md) |
 
@@ -957,8 +1068,8 @@ It does not hold the complete request/response cycle. This means:
   OpenCost would need to reconcile two metric origins — unnecessary complexity when the
   coordinator already owns the full lifecycle.
 - The EPP-based approach would source `prompt_tokens` from the ext-proc request headers
-  (a tokenization estimate), whereas the coordinator can use the render step's authoritative
-  token count or the response body's `usage.prompt_tokens` — more accurate in both cases.
+  (a tokenization estimate), whereas the coordinator captures the exact token counts from the
+  response body's `usage` object — accurate across all engines and configurations.
 
 The EPP-based design remains valid for the **sidecar deployment model** (llm-d without
 the coordinator), where there is no coordinator entry point and the EPP is the most
@@ -1092,7 +1203,7 @@ request goroutine is:
 ```
 1. s.pipeline.Execute(ctx, reqCtx)
    └── decode proxy streams full response to client; the usage tee fills
-       reqCtx.CompletionTokens / PromptTokensFromBody when the body closes
+       reqCtx.PromptTokens / reqCtx.CompletionTokens when the body closes
 2. handleInference defer runs
    ├── existing metrics (IncRequestTotal, RecordRequestDuration, etc.)
    ├── counter.Add(promptTokens)            ← microseconds; in-process memory write
@@ -1203,3 +1314,72 @@ avoids both problems:
   decode. A wrapper (or any step-local emitter) cannot do this: a request that fails in
   render, encode or prefill, or is rejected at body parse, never runs the step that
   would have emitted.
+
+## Appendix D: `agent-identity` vs. coordinator attribution headers
+
+The EPP's `agent-identity` plugin and the coordinator's attribution headers
+(`x-llm-d-tenant-id`, `x-llm-d-user-id`, `x-llm-d-workload-id`) overlap in
+that both answer "which agent sent this request?", but they solve different
+problems at different layers and are not interchangeable.
+
+### What each one is
+
+| `agent-identity` (EPP plugin) | Coordinator attribution headers |
+|---|---|
+| **File** | `pkg/epp/framework/plugins/requestcontrol/requestheader/agentidentity/agent_identity.go` | `pkg/coordinator/server/handlers.go` (`handleInference`) |
+| **Purpose** | Scheduling input: decides which flow-control queue a request waits in. | Attribution / reporting: Prometheus labels and structured log for dashboards, chargeback, OpenCost billing. |
+| **Source** | Provider session headers: `x-claude-code-session-id`, `x-session-affinity`, `session-id`, `session_id`, plus operator-supplied `additionalSessionHeaders`. | `x-llm-d-tenant-id`, `x-llm-d-user-id`, `x-llm-d-workload-id`, injected by a trusted upstream from verified credentials. |
+| **Stored as** | Request attribute `agent-identity`, consumed by the Director to derive the `FairnessID`. | Handler-local value emitted from the `handleInference` defer on every exit path. |
+| **Decides the queue?** | Yes. When no `x-llm-d-inference-fairness-id` is present, the agent session ID becomes the fairness ID, so every turn of one session waits in the same queue. | No. These labels are only emitted for reporting; they do not influence queue placement. |
+| **Granularity** | Per **session**: stable across all turns of one agent conversation. | Per **classification** (`tenant` × `workload` × `user`), shared across many sessions. |
+
+### Why they cannot replace each other
+
+- **`agent-identity` cannot serve as a billing dimension.** It is an opaque session handle, so using it as a Prometheus label would create one time-series per conversation — unbounded cardinality. The trio `(tenant_id, workload_id, user_id)` is intentionally coarse enough to aggregate cost without explosion.
+- **The trio cannot serve as a session identity for queue placement.** Two different conversations by the same user in the same tenant with the same workload produce identical attribution labels but different agent sessions. Collapsing them into one queue would destroy the per-session flow-control isolation the plugin provides.
+
+### Where they coexist
+
+Behind the coordinator, each phase call re-enters the gateway → EPP, and `ForwardedHeaders()` passes the client's agent session headers through, so the session-based queue fallback still operates there. The async-broker step is the exception: when enabled it always stamps the fairness header to the request's tenant (`default` when none is sent — `defaultAsyncTenant` in `pkg/coordinator/steps/asyncbroker/config.go:56`), so the `agent-identity` fallback never applies to those requests.
+
+### Trace separation
+
+PR #2843 tags EPP spans with `llm_d.epp.fairness.source=agent_identity` when the session-based fallback is used, so reports can distinguish a session-based queue from a real tenant.
+
+### One shared source is allowed, not required
+
+An operator may populate `x-llm-d-workload-id` from the same upstream source that resolves `agent-identity` so the two notions coincide for a given deployment. The proposal does not require this: the two remain distinct concerns — one decides the queue, the other decides the bill.
+
+### Example: values differ across turns of one session
+
+A developer runs two turns in the same Claude Code session (tenant `acme-corp`, workload `coding-agent-v2`, user `dev-42`):
+
+| Turn | `agent-identity` (session handle) | `x-llm-d-tenant-id` | `x-llm-d-workload-id` | `x-llm-d-user-id` |
+|---|---|---|---|---|
+| Turn 1 | `claude-code-session-abc123` | `acme-corp` | `coding-agent-v2` | `dev-42` |
+| Turn 2 | `claude-code-session-abc123` | `acme-corp` | `coding-agent-v2` | `dev-42` |
+
+The agent session handle is identical across both turns, which is what keeps them in the same flow-control queue. The attribution trio is identical too, but that is by design: it aggregates all of `dev-42`'s `coding-agent-v2` traffic under `acme-corp` for billing.
+
+Now two different sessions from the same user/workload:
+
+| Turn | `agent-identity` | `x-llm-d-tenant-id` | `x-llm-d-workload-id` | `x-llm-d-user-id` |
+|---|---|---|---|---|
+| Session A, turn 1 | `claude-code-session-abc123` | `acme-corp` | `coding-agent-v2` | `dev-42` |
+| Session B, turn 1 | `claude-code-session-def456` | `acme-corp` | `coding-agent-v2` | `dev-42` |
+
+Here the attribution trio is the same for both sessions (so billing aggregates them together), but the agent-identity values differ (so each session waits in its own flow-control queue). Using the trio for queue placement would merge these two sessions into one bucket and lose that isolation.
+
+### Tenant identity and configurable header names
+
+The proposal intentionally uses **one** tenant header, not two. `x-llm-d-tenant-id`
+(attribution/billing) and the async broker's `x-llm-d-tenant` (quota classification
+and result-key scoping) are the same organizational identity: both read a single
+configurable header (`tenant_header`, default `x-llm-d-tenant`) and resolve a missing
+value to the same sentinel (`unknown`). This keeps a request from being queued under
+one tenant and billed to another.
+
+All three header names are configurable (`tenant_header`, `user_id_header`,
+`workload_id_header`), mirroring the async broker's `tenant_header` and the
+agent-identity plugin's `additionalSessionHeaders`, so an operator can track an
+upstream rename without a code change.
