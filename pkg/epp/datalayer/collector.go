@@ -188,3 +188,33 @@ func (r *pollStatusRecorder) record(ep fwkdl.Endpoint, err error, now time.Time)
 	status := r.status
 	ep.GetAttributes().Put(r.key, &status)
 }
+
+const pollStatusProducerName = "datalayer-poll-status"
+
+// pollStatusProducer declares the PollStatus the collector records for each
+// polling source in the data layer configuration.
+type pollStatusProducer struct {
+	keys map[fwkplugin.DataKey]any
+}
+
+// NewPollStatusProducer returns a plugin that declares the PollStatus of each
+// polling source in cfg. Added to the plugin handle before data dependencies
+// are validated, it makes a consumer of a source's PollStatus fail startup
+// unless the runtime polls that source.
+func NewPollStatusProducer(cfg *Config) fwkplugin.ProducerPlugin {
+	keys := map[fwkplugin.DataKey]any{}
+	if cfg != nil {
+		for _, src := range cfg.Sources {
+			if _, ok := src.Plugin.(fwkdl.PollingDispatcher); ok {
+				keys[fwkdl.PollStatusDataKey(src.Plugin.TypedName().Name)] = &fwkdl.PollStatus{}
+			}
+		}
+	}
+	return &pollStatusProducer{keys: keys}
+}
+
+func (p *pollStatusProducer) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: pollStatusProducerName, Name: pollStatusProducerName}
+}
+
+func (p *pollStatusProducer) Produces() map[fwkplugin.DataKey]any { return p.keys }

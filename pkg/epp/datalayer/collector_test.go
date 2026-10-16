@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/llm-d/llm-d-router/pkg/epp/datalayer/mocks"
@@ -475,6 +476,18 @@ func TestCollectorStopDuringPollRecordsNothing(t *testing.T) {
 	_, ok := fwkdl.ReadAttribute[*fwkdl.PollStatus](ep.GetAttributes(), fwkdl.PollStatusDataKey("blocking"))
 	assert.False(t, ok)
 	assert.Equal(t, pollErrorsBefore, testutil.ToFloat64(metrics.LlmdDataLayerPollErrorsTotal.WithLabelValues("blocking-type")))
+}
+
+// TestNewPollStatusProducer confirms the producer declares the PollStatus of
+// each polling source in the configuration and of no other source.
+func TestNewPollStatusProducer(t *testing.T) {
+	cfg := &Config{Sources: []DataSourceConfig{
+		{Plugin: &toggleSource{}},
+		{Plugin: datasourcemocks.NewNotificationSource("notification-type", "notification", schema.GroupVersionKind{Kind: "Pod"})},
+	}}
+	assert.Equal(t, map[fwkplugin.DataKey]any{fwkdl.PollStatusDataKey("toggle"): &fwkdl.PollStatus{}},
+		NewPollStatusProducer(cfg).Produces())
+	assert.Empty(t, NewPollStatusProducer(nil).Produces())
 }
 
 // TestCollectorRapidStartStopRaceFree simulates the Runtime's pattern of
