@@ -19,6 +19,7 @@ package e2e
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -152,9 +153,9 @@ var _ = ginkgo.Describe("gateway /v1/messages native rendering", ginkgo.Ordered,
 		gomega.Consistently(func(g gomega.Gomega) {
 			logs := testutils.PodLogs(testConfig, nsName, eppPods[0])
 			g.Expect(logs).ShouldNot(gomega.BeEmpty(), "EPP logs unreadable, cannot prove rendering succeeded")
-			g.Expect(logs).ShouldNot(gomega.ContainSubstring("failed to prepare per request data"),
+			g.Expect(logLinesContaining(logs, "failed to prepare per request data")).To(gomega.BeEmpty(),
 				"the token-producer failed; native Messages rendering did not reach the renderer")
-			g.Expect(logs).ShouldNot(gomega.ContainSubstring("messagesRenderMode=legacy is deprecated"),
+			g.Expect(logLinesContaining(logs, "messagesRenderMode=legacy is deprecated")).To(gomega.BeEmpty(),
 				"discovery fell back to the deprecated conversion; the renderer did not serve /v1/messages/render")
 		}, renderLogSettleWindow, testConfig.Interval).Should(gomega.Succeed())
 	})
@@ -218,4 +219,17 @@ func toolResultImageTurn(url string) map[string]any {
 			reqcommon.FieldContent: []any{imageBlock(url)},
 		}},
 	}
+}
+
+// logLinesContaining returns the log lines holding marker. Asserting on the
+// matches rather than the whole log keeps a failure's output to the offending
+// lines, which Gomega prints in full where it truncates a pod's entire log.
+func logLinesContaining(logs, marker string) []string {
+	var found []string
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, marker) {
+			found = append(found, line)
+		}
+	}
+	return found
 }
