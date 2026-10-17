@@ -19,15 +19,19 @@ package disaggregatedsetrollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"sort"
 
+	"github.com/cespare/xxhash/v2"
+	"github.com/jellydator/ttlcache/v3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/agentidentity"
 )
 
 const localRevisionDecisionStateKey fwkplugin.StateKey = "revision-decision"
@@ -78,13 +82,27 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 	// request in P/D must use the revision stamped by prefill; it must not depend
 	// on the two EPPs sharing a CrossReplicaSyncer.
 	if chosenRevision == "" {
-		chosenRevision = pickWeightedRevision(shares, rand.Float64()) //#nosec G404 -- traffic split across revisions, not security-sensitive
-		if decisionID := revisionDecisionID(request); distribution.needsCoordination && decisionID != "" && chosenRevision != "" {
-			var err error
-			chosenRevision, err = c.getOrSetRevision(ctx, decisionID, chosenRevision)
-			if err != nil {
-				log.FromContext(ctx).Error(err, "failed to coordinate rollout revision")
-				return nil
+		sessionKey := c.sessionKey(request)
+		stickyApplied := false
+		if sessionKey != "" {
+			chosenRevision, stickyApplied = c.resolveSessionRevision(ctx, sessionKey, shares, allowedRevisions)
+		}
+		if chosenRevision == "" {
+			chosenRevision = pickWeightedRevision(shares, rand.Float64()) //#nosec G404 -- traffic split across revisions, not security-sensitive
+		}
+		// A sticky hit is already the coordinated outcome for this session;
+		// the decision-ID path applies only to a fresh pick.
+		if !stickyApplied {
+			if decisionID := revisionDecisionID(request); distribution.needsCoordination && decisionID != "" && chosenRevision != "" {
+				var err error
+				chosenRevision, err = c.getOrSetRevision(ctx, decisionID, chosenRevision)
+				if err != nil {
+					log.FromContext(ctx).Error(err, "failed to coordinate rollout revision")
+					return nil
+				}
+			}
+			if sessionKey != "" && chosenRevision != "" {
+				c.storeStickyRevision(ctx, sessionKey, chosenRevision)
 			}
 		}
 	}
@@ -144,6 +162,139 @@ func (c *Screener) crossReplicaSyncer() fwkdl.CrossReplicaSyncer {
 	}
 	syncer, _ := c.handle.CrossReplicaSyncer().(fwkdl.CrossReplicaSyncer)
 	return syncer
+}
+
+// sessionKey identifies the conversation a request belongs to: the
+// agent-identity session attribute when one is set, otherwise the hash of the
+// leading request-body bytes. Empty means no affinity applies and the request
+// takes the per-request weighted pick.
+func (c *Screener) sessionKey(request *fwksched.InferenceRequest) string {
+	if request == nil || !c.sessionAffinity.active() {
+		return ""
+	}
+	if id, ok := fwksched.ReadRequestAttribute[string](request, agentidentity.AgentIdentityKey); ok && id != "" {
+		return id
+	}
+	prefixBytes := 0
+	if c.sessionAffinity.PrefixBytes != nil {
+		prefixBytes = *c.sessionAffinity.PrefixBytes
+	}
+	if prefixBytes <= 0 || request.Body == nil || len(request.Body.RawBody) == 0 {
+		return ""
+	}
+	if prefixBytes > len(request.Body.RawBody) {
+		prefixBytes = len(request.Body.RawBody)
+	}
+	return fmt.Sprintf("prefix:%016x", xxhash.Sum64(request.Body.RawBody[:prefixBytes]))
+}
+
+// sessionSynced reports whether session decisions are shared across EPP
+// replicas for this request.
+func (c *Screener) sessionSynced() bool {
+	return c.distributionSnapshot().needsCoordination && c.crossReplicaSyncer() != nil
+}
+
+// resolveSessionRevision settles the revision for a session. The second
+// return value reports that the session decision is final: a sticky hit, or a
+// synced-mode get-or-set that converged with other replicas. A false return
+// with an empty revision leaves the fresh weighted pick to the caller; a false
+// return with a non-empty revision is an invalidated session whose replacement
+// is already stored.
+func (c *Screener) resolveSessionRevision(
+	ctx context.Context,
+	sessionKey string,
+	shares map[string]float64,
+	allowedRevisions map[string]struct{},
+) (string, bool) {
+	if c.sessionSynced() {
+		// GetOrSet is the only request-level read the syncer offers, so the
+		// candidate doubles as the first-turn decision: a miss stores it and
+		// concurrent first turns of the session converge on one revision.
+		candidate := pickWeightedRevision(shares, rand.Float64()) //#nosec G404 -- traffic split across revisions, not security-sensitive
+		actual, existed, err := c.crossReplicaSyncer().GetOrSet(ctx, c.revisionDecisionStateKey, sessionKey, candidate)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to coordinate sticky rollout revision", "sessionKey", sessionKey)
+			return "", false
+		}
+		revision, ok := actual.(string)
+		if !ok || revision == "" {
+			return "", false
+		}
+		if _, covered := allowedRevisions[revision]; covered {
+			if existed {
+				recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultSticky)
+			} else {
+				recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
+			}
+			return revision, true
+		}
+		// The stored revision lost gating coverage: rolled away, or missing a
+		// required role. Replace the stored decision with a fresh pick.
+		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultInvalidated)
+		if candidate != "" {
+			c.replaceStickyRevision(ctx, sessionKey, candidate)
+		}
+		return candidate, candidate != ""
+	}
+
+	sticky, found := c.lookupStickyRevision(sessionKey)
+	if !found {
+		return "", false
+	}
+	if _, covered := allowedRevisions[sticky]; covered {
+		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultSticky)
+		return sticky, true
+	}
+	// The sticky revision lost gating coverage. The caller's fresh pick is
+	// stored over it by storeStickyRevision.
+	recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultInvalidated)
+	return "", false
+}
+
+func (c *Screener) lookupStickyRevision(sessionKey string) (string, bool) {
+	if c.sessionDecisions == nil {
+		return "", false
+	}
+	item := c.sessionDecisions.Get(sessionKey)
+	if item == nil {
+		return "", false
+	}
+	return item.Value(), item.Value() != ""
+}
+
+// storeStickyRevision records the revision chosen for a session. Synced mode
+// is reached only after a syncer failure in resolveSessionRevision; the normal
+// synced store is the GetOrSet inside resolveSessionRevision.
+func (c *Screener) storeStickyRevision(ctx context.Context, sessionKey, revision string) {
+	if c.sessionSynced() {
+		if _, _, err := c.crossReplicaSyncer().GetOrSet(ctx, c.revisionDecisionStateKey, sessionKey, revision); err != nil {
+			log.FromContext(ctx).Error(err, "failed to store sticky rollout revision", "sessionKey", sessionKey)
+		}
+		return
+	}
+	if c.sessionDecisions != nil {
+		c.sessionDecisions.Set(sessionKey, revision, ttlcache.DefaultTTL)
+		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
+	}
+}
+
+// replaceStickyRevision overwrites a stored session decision whose revision
+// lost gating coverage. The syncer's GetOrSet cannot replace, so the stale
+// entry is deleted first.
+func (c *Screener) replaceStickyRevision(ctx context.Context, sessionKey, revision string) {
+	if c.sessionSynced() {
+		syncer := c.crossReplicaSyncer()
+		if err := syncer.Delete(ctx, c.revisionDecisionStateKey, sessionKey); err != nil {
+			log.FromContext(ctx).Error(err, "failed to delete stale sticky rollout revision", "sessionKey", sessionKey)
+		}
+		if _, _, err := syncer.GetOrSet(ctx, c.revisionDecisionStateKey, sessionKey, revision); err != nil {
+			log.FromContext(ctx).Error(err, "failed to store sticky rollout revision", "sessionKey", sessionKey)
+		}
+		return
+	}
+	if c.sessionDecisions != nil {
+		c.sessionDecisions.Set(sessionKey, revision, ttlcache.DefaultTTL)
+	}
 }
 
 func (c *Screener) filterRevisions(

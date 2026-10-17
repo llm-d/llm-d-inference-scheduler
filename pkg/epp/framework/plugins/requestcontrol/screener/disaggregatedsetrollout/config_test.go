@@ -214,3 +214,59 @@ func assertValidateError(t *testing.T, cfg Config, wantSubstring string) {
 		t.Fatalf("error %q does not contain %q", err.Error(), wantSubstring)
 	}
 }
+
+func TestValidate_SessionAffinityDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: true}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("empty sessionAffinity fields should default silently: %v", err)
+	}
+	affinity := cfg.RevisionGating.SessionAffinity
+	if affinity.TTL != DefaultSessionAffinityTTL {
+		t.Fatalf("ttl default: want %q, got %q", DefaultSessionAffinityTTL, affinity.TTL)
+	}
+	if affinity.MaxSessions != DefaultSessionAffinityMaxSessions {
+		t.Fatalf("maxSessions default: want %d, got %d", DefaultSessionAffinityMaxSessions, affinity.MaxSessions)
+	}
+	if affinity.PrefixBytes == nil || *affinity.PrefixBytes != DefaultSessionAffinityPrefixBytes {
+		t.Fatalf("prefixBytes default: want %d, got %v", DefaultSessionAffinityPrefixBytes, affinity.PrefixBytes)
+	}
+}
+
+func TestValidate_SessionAffinityRejectsBadTTL(t *testing.T) {
+	cfg := validConfig()
+	cfg.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: true, TTL: "not-a-duration"}
+	assertValidateError(t, cfg, "sessionAffinity.ttl")
+}
+
+func TestValidate_SessionAffinityRejectsNegativePrefixBytes(t *testing.T) {
+	cfg := validConfig()
+	negative := -1
+	cfg.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: true, PrefixBytes: &negative}
+	assertValidateError(t, cfg, "sessionAffinity.prefixBytes")
+}
+
+func TestValidate_SessionAffinityDisabledSkipsValidation(t *testing.T) {
+	cfg := validConfig()
+	cfg.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: false, TTL: "not-a-duration"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("disabled sessionAffinity must not validate sub-fields: %v", err)
+	}
+}
+
+func TestSessionAffinity_UnmarshalJSON_ParsesAndRejectsUnknownFields(t *testing.T) {
+	raw := []byte(`{"mode":"sum","requiredRoles":["prefill","decode"],"sessionAffinity":{"enabled":true,"ttl":"1m","maxSessions":5,"prefixBytes":128}}`)
+	var gating RevisionGating
+	if err := json.Unmarshal(raw, &gating); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	affinity := gating.SessionAffinity
+	if affinity == nil || !affinity.Enabled || affinity.TTL != "1m" || affinity.MaxSessions != 5 || affinity.PrefixBytes == nil || *affinity.PrefixBytes != 128 {
+		t.Fatalf("sessionAffinity round-trip mismatch: %+v", affinity)
+	}
+
+	bad := []byte(`{"mode":"sum","requiredRoles":["prefill","decode"],"sessionAffinity":{"enabled":true,"prefixBytesx":128}}`)
+	if err := json.Unmarshal(bad, &gating); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("want unknown field error, got %v", err)
+	}
+}

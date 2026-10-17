@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -37,6 +38,13 @@ const (
 	DefaultRevisionHeader = request.DisaggregatedRevisionHeaderKey
 	DefaultRevisionLabel  = "disaggregatedset.x-k8s.io/revision"
 	DefaultRoleLabel      = "disaggregatedset.x-k8s.io/role"
+)
+
+// SessionAffinity defaults, applied by Validate when the block is enabled.
+const (
+	DefaultSessionAffinityTTL         = "10m"
+	DefaultSessionAffinityMaxSessions = 10000
+	DefaultSessionAffinityPrefixBytes = 4096
 )
 
 // Config is the parameters block of a disaggregatedset-rollout-screener plugin.
@@ -61,12 +69,47 @@ type Scope struct {
 // A request carrying RevisionHeaderName always selects that revision strictly.
 // The selected endpoint's revision is stamped into the same response header.
 type RevisionGating struct {
-	RevisionHeaderName  string     `json:"revisionHeaderName,omitempty"`
-	RevisionLabelKey    string     `json:"revisionLabelKey,omitempty"`
-	RoleLabelKey        string     `json:"roleLabelKey,omitempty"`
-	DisableCoordination bool       `json:"disableCoordination,omitempty"`
-	Mode                GatingMode `json:"mode"`
-	RequiredRoles       []string   `json:"requiredRoles,omitempty"`
+	RevisionHeaderName  string           `json:"revisionHeaderName,omitempty"`
+	RevisionLabelKey    string           `json:"revisionLabelKey,omitempty"`
+	RoleLabelKey        string           `json:"roleLabelKey,omitempty"`
+	DisableCoordination bool             `json:"disableCoordination,omitempty"`
+	Mode                GatingMode       `json:"mode"`
+	RequiredRoles       []string         `json:"requiredRoles,omitempty"`
+	SessionAffinity     *SessionAffinity `json:"sessionAffinity,omitempty"`
+}
+
+// SessionAffinity keeps an unpinned request on the revision a previous request
+// with the same session key used. The key is the agent-identity session
+// attribute when one is set, otherwise the hash of the leading request-body
+// bytes. A sticky revision stops being used once its gating share drops to
+// zero; a fresh weighted pick replaces it.
+type SessionAffinity struct {
+	Enabled     bool   `json:"enabled,omitempty"`
+	TTL         string `json:"ttl,omitempty"`
+	MaxSessions int    `json:"maxSessions,omitempty"`
+	// PrefixBytes is the number of leading request-body bytes hashed for
+	// requests without a session attribute. Nil selects the default; zero
+	// disables the prefix-hash fallback, restricting stickiness to requests
+	// that carry a session attribute.
+	PrefixBytes *int `json:"prefixBytes,omitempty"`
+}
+
+func (a *SessionAffinity) active() bool {
+	return a != nil && a.Enabled
+}
+
+// UnmarshalJSON rejects unknown fields inside the sessionAffinity block,
+// mirroring RevisionGating's decoder so misspelled parameters fail at load.
+func (a *SessionAffinity) UnmarshalJSON(data []byte) error {
+	type raw SessionAffinity
+	var parsed raw
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&parsed); err != nil {
+		return err
+	}
+	*a = SessionAffinity(parsed)
+	return nil
 }
 
 // UnmarshalJSON normalizes RevisionHeaderName to lowercase because request
@@ -169,6 +212,24 @@ func (c *Config) Validate() error {
 		}
 	default:
 		return fmt.Errorf("revisionGating.mode %q must be one of sum|max-role|disabled", c.RevisionGating.Mode)
+	}
+
+	if affinity := c.RevisionGating.SessionAffinity; affinity.active() {
+		if affinity.TTL == "" {
+			affinity.TTL = DefaultSessionAffinityTTL
+		}
+		if affinity.MaxSessions == 0 {
+			affinity.MaxSessions = DefaultSessionAffinityMaxSessions
+		}
+		if affinity.PrefixBytes == nil {
+			defaultPrefixBytes := DefaultSessionAffinityPrefixBytes
+			affinity.PrefixBytes = &defaultPrefixBytes
+		} else if *affinity.PrefixBytes < 0 {
+			return errors.New("revisionGating.sessionAffinity.prefixBytes must not be negative")
+		}
+		if _, err := time.ParseDuration(affinity.TTL); err != nil {
+			return fmt.Errorf("revisionGating.sessionAffinity.ttl %q is not a valid duration: %w", affinity.TTL, err)
+		}
 	}
 
 	return nil

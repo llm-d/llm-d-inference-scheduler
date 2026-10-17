@@ -278,6 +278,38 @@ The Screener stamps the selected endpoint's revision into the same response
 header. Other label affinities, such as slice affinity, belong in a
 [`header-label-affinity-scorer`](../../../scheduling/scorer/headerlabelaffinity/README.md).
 
+## Session Affinity
+
+Without session affinity, the weighted pick runs per request, so a multi-turn
+session flips revisions at the flip rate of the weighted coin. Every flip lands
+the session's prefix on prefill Pods that never saw it: a full re-prefill where
+a prefix-cache hit belonged.
+
+When `revisionGating.sessionAffinity.enabled` is true, the revision chosen for
+a request without a strict revision header is reused for every later request
+of the same session. The session key is, in order:
+
+1. The agent-identity session attribute, set by the
+   [`agent-identity`](../../requestheader/agentidentity/README.md) plugin from
+   client session headers.
+2. Otherwise, the hash of the first `prefixBytes` bytes of the request body.
+   A request that re-sends a shared leading prefix therefore keeps its key
+   across turns. A prompt rewrite, such as a context compaction, changes the
+   key: the request is treated as a new session, which matches the prefix
+   cache it can hit anyway. Set `prefixBytes` to `0` to restrict stickiness to
+   requests that carry a session attribute.
+
+A stored decision stops being used once its revision's gating share drops to
+zero: the session moves to a fresh weighted pick, and the stored decision is
+replaced. A revision appearing or changing share does not move a session.
+
+With coordination enabled, session decisions are shared across EPP replicas
+through the `CrossReplicaSyncer` under the same state key as revision-decision
+coordination, keyed by the session key. Without a syncer, or with
+`disableCoordination`, decisions live in a local bounded TTL cache: concurrent
+first turns of one session can each store a decision, and the session settles
+on the next turn.
+
 ## Configuration
 
 ```yaml
@@ -326,6 +358,10 @@ request. Do not add it to a scheduling profile.
 | `revisionGating.revisionLabelKey` | string | No | `disaggregatedset.x-k8s.io/revision` | Label identifying a rollout revision. |
 | `revisionGating.roleLabelKey` | string | No | `disaggregatedset.x-k8s.io/role` | Label identifying a Pod role. |
 | `revisionGating.disableCoordination` | boolean | No | `false` | Disables coordination of rollout revisions across parallel requests. Set only for known sequential P/D deployments; E/P/D requires coordination. |
+| `revisionGating.sessionAffinity.enabled` | boolean | No | `false` | Keeps a session without a strict revision header on the revision a previous request of that session used. |
+| `revisionGating.sessionAffinity.ttl` | duration | No | `10m` | Idle time before a local session decision expires. |
+| `revisionGating.sessionAffinity.maxSessions` | integer | No | `10000` | Bound on locally stored session decisions. |
+| `revisionGating.sessionAffinity.prefixBytes` | integer | No | `4096` | Leading request-body bytes hashed as the session key when no session attribute is set. `0` disables the prefix-hash fallback. |
 
 ## DisaggregatedSet Slice Affinity
 

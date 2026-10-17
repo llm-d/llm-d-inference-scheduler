@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -58,6 +60,10 @@ type Screener struct {
 	revisionDecisionStateKey fwkdl.StateKey
 	handle                   fwkplugin.Handle
 	localRevisionDecisions   *fwkplugin.PluginState
+
+	sessionAffinity  SessionAffinity
+	sessionTTL       time.Duration
+	sessionDecisions *ttlcache.Cache[string, string]
 
 	mu           sync.RWMutex
 	pods         map[types.NamespacedName]podInfo
@@ -127,6 +133,28 @@ func newScreener(name string, config Config, scope labels.Selector, handle fwkpl
 		handle:                   handle,
 		localRevisionDecisions:   fwkplugin.NewPluginState(handle.Context()),
 		pods:                     make(map[types.NamespacedName]podInfo),
+	}
+	var affinity *SessionAffinity
+	if config.RevisionGating != nil {
+		affinity = config.RevisionGating.SessionAffinity
+	}
+	if affinity.active() {
+		ttl, err := time.ParseDuration(affinity.TTL)
+		if err != nil || ttl <= 0 {
+			// Validate() rejects this configuration; guard the parse anyway.
+			ttl = time.Minute * 10
+		}
+		screener.sessionAffinity = *affinity
+		screener.sessionTTL = ttl
+		screener.sessionDecisions = ttlcache.New[string, string](
+			ttlcache.WithTTL[string, string](ttl),
+			ttlcache.WithCapacity[string, string](uint64(affinity.MaxSessions)), //#nosec G115 -- Validate() requires maxSessions > 0; a negative value cannot reach this cast
+		)
+		go screener.sessionDecisions.Start()
+		go func() {
+			<-handle.Context().Done()
+			screener.sessionDecisions.Stop()
+		}()
 	}
 	return screener
 }

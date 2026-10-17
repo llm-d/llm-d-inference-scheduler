@@ -95,3 +95,32 @@ func TestMetricRevisionGatingShareDeletesRemovedRevision(t *testing.T) {
 		t.Fatalf("want 1 revision series after removal, got %d", got)
 	}
 }
+
+func TestMetricSessionAffinityDecisions(t *testing.T) {
+	resetMetrics(t)
+	sessionAffinityDecisionsTotal.Reset()
+	screener := newTestScreener(sessionAffinityConfig())
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	candidates := candidatePool(1, 1)
+
+	// First turn assigns, second reuses.
+	screenCandidates(t, screener, sessionRequest("session", 0), candidates)
+	screenCandidates(t, screener, sessionRequest("session", 1), candidates)
+	if got := testutil.ToFloat64(sessionAffinityDecisionsTotal.WithLabelValues(PluginType, "test-screener", sessionAffinityResultAssigned)); got != 1 {
+		t.Fatalf("assigned: want 1, got %v", got)
+	}
+	if got := testutil.ToFloat64(sessionAffinityDecisionsTotal.WithLabelValues(PluginType, "test-screener", sessionAffinityResultSticky)); got != 1 {
+		t.Fatalf("sticky: want 1, got %v", got)
+	}
+
+	// The pinned revision loses coverage: the next turn invalidates.
+	pinned := servedRevision(screenCandidates(t, screener, sessionRequest("session", 2), candidates))
+	flipRevisionNotReady(t, screener, pinned)
+	screenCandidates(t, screener, sessionRequest("session", 3), candidates)
+	if got := testutil.ToFloat64(sessionAffinityDecisionsTotal.WithLabelValues(PluginType, "test-screener", sessionAffinityResultInvalidated)); got != 1 {
+		t.Fatalf("invalidated: want 1, got %v", got)
+	}
+}

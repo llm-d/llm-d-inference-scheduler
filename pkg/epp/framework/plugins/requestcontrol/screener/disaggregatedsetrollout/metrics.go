@@ -53,6 +53,18 @@ var (
 		},
 		[]string{"plugin_type", "plugin_name", "mode", "revision"},
 	)
+
+	sessionAffinityDecisionsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: eppmetrics.LLMDRouterEndpointPickerSubsystem,
+			Name:      metricsPrefix + "_session_affinity_decisions_total",
+			Help: metricsutil.HelpMsgWithStability(
+				"Session-affinity revision decisions by result: sticky (reused), assigned (newly stored), invalidated (stored revision lost gating coverage).",
+				compbasemetrics.ALPHA,
+			),
+		},
+		[]string{"plugin_type", "plugin_name", "result"},
+	)
 )
 
 var registerMetricsOnce sync.Once
@@ -62,8 +74,20 @@ func registerMetrics() {
 		ctrlmetrics.Registry.MustRegister(
 			strictRevisionNoMatchTotal,
 			revisionGatingShare,
+			sessionAffinityDecisionsTotal,
 		)
 	})
+}
+
+// Session-affinity decision outcomes, used as the "result" label value.
+const (
+	sessionAffinityResultSticky      = "sticky"
+	sessionAffinityResultAssigned    = "assigned"
+	sessionAffinityResultInvalidated = "invalidated"
+)
+
+func recordSessionAffinityDecision(pluginName, result string) {
+	sessionAffinityDecisionsTotal.WithLabelValues(PluginType, pluginName, result).Inc()
 }
 
 func recordStrictRevisionNoMatch(pluginName string) {
