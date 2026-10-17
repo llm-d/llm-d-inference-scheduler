@@ -36,6 +36,16 @@ epp:
   # Container-level securityContext for the EPP container.
   securityContext: {}
 
+  # Container lifecycle for the EPP container, rendered verbatim. When unset,
+  # the chart renders a preStop sleep of 5 seconds on Kubernetes >= 1.30 so
+  # endpoint removal propagates before SIGTERM. Set to override the hook, for
+  # example an exec-based drain; an empty map disables it.
+  # lifecycle:
+  #   preStop:
+  #     exec:
+  #       command: ["/bin/sh", "-c", "drain.sh"]
+  lifecycle: {}
+
   # Overrides the EPP Deployment's spec.strategy. All-active mode and autoscaling
   # default to RollingUpdate (maxUnavailable: 0, maxSurge: 1); otherwise Recreate.
   #
@@ -139,6 +149,18 @@ epp:
 # By default no proxy is configured
 proxy:
   enabled: false
+
+  # Container lifecycle for the proxy container, rendered verbatim in both
+  # sidecar and service mode. When unset, the chart renders a preStop sleep of
+  # 5 seconds on Kubernetes >= 1.30 so endpoint removal propagates before
+  # SIGTERM. Set to override the hook, for example an exec-based drain that
+  # fails Envoy's health check and waits for active connections to reach zero;
+  # an empty map disables it.
+  # lifecycle:
+  #   preStop:
+  #     exec:
+  #       command: ["/bin/sh", "-c", "drain.sh"]
+  lifecycle: {}
 
 # Tokenizer sidecar. Runs vLLM's `vllm launch render <modelName>` (Python) or
 # `vllm-rs render <modelName>` (Rust) and exposes `/v1/completions/render` and
