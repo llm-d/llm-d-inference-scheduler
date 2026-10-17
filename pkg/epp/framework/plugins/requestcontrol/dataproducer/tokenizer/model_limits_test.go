@@ -342,10 +342,10 @@ func TestModelLimitEligibility(t *testing.T) {
 
 func TestOmitMMKwargs(t *testing.T) {
 	for _, tc := range []struct{ name, payload, want string }{
-		{"appends", `{"model":"m","messages":[]}`, `{"model":"m","messages":[],"return_mm_kwargs":false}`},
-		{"empty object", `{ }`, `{ "return_mm_kwargs":false}`},
-		{"trailing space", "{\"model\":\"m\"}\n", "{\"model\":\"m\",\"return_mm_kwargs\":false}\n"},
-		{"client value loses", `{"return_mm_kwargs":true}`, `{"return_mm_kwargs":true,"return_mm_kwargs":false}`},
+		{"appends", `{"model":"m","messages":[]}`, `{"model":"m","messages":[],"return_mm_kwargs":false,"mm_payload":"none"}`},
+		{"empty object", `{ }`, `{ "return_mm_kwargs":false,"mm_payload":"none"}`},
+		{"trailing space", "{\"model\":\"m\"}\n", "{\"model\":\"m\",\"return_mm_kwargs\":false,\"mm_payload\":\"none\"}\n"},
+		{"client values lose", `{"return_mm_kwargs":true,"mm_payload":"tensors"}`, `{"return_mm_kwargs":true,"mm_payload":"tensors","return_mm_kwargs":false,"mm_payload":"none"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := omitMMKwargs([]byte(tc.payload))
@@ -372,6 +372,7 @@ func TestOmitMMKwargsAppliesToRawPayload(t *testing.T) {
 	_, _, err = renderer.RenderChat(context.Background(), raw)
 	require.NoError(t, err)
 	assert.Equal(t, "false", string(seen["return_mm_kwargs"]))
+	assert.Equal(t, `"none"`, string(seen["mm_payload"]))
 	assert.Equal(t, "1", string(seen["max_tokens"]))
 	assert.Equal(t, `[{"role":"user","content":"hi"}]`, string(seen["messages"]))
 }

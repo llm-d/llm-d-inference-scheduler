@@ -303,6 +303,24 @@ func TestProduce_GenerateUsesPreTokenizedIDs(t *testing.T) {
 	assert.Nil(t, req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures)
 }
 
+func TestProduce_EmptyGenerateSkipsTokenization(t *testing.T) {
+	tok := &mockTokenizer{
+		renderFunc: func(_ fwkrh.RequestPayload) ([][]uint32, [][]tokenizerTypes.Offset, error) {
+			t.Error("tokenizer.Render must not be called for an empty generate request")
+			return nil, nil, nil
+		},
+	}
+	p := newTestPlugin(tok)
+
+	req := &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{Generate: &fwkrh.GenerateRequest{}},
+	}
+	err := p.Produce(context.Background(), req, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported request body type")
+	assert.Nil(t, req.Body.TokenizedRequest)
+}
+
 func TestProduce_GenerateFlattensFeatures(t *testing.T) {
 	// Generate requests with multimodal features must populate PromptTokens.MultiModalFeatures
 	// in offset-sorted prompt order, so downstream prefix-cache scoring picks up image hashes.

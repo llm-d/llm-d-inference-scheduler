@@ -90,53 +90,26 @@ func CanonicalCode(err error) string {
 	return Unknown
 }
 
-// anthropicErrorResponse is the error envelope of the Anthropic Messages API.
-type anthropicErrorResponse struct {
-	Type  string         `json:"type"`
-	Error anthropicError `json:"error"`
-}
-
-type anthropicError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-
-// wireCode is how a canonical code appears on the wire: the HTTP status and the
-// error type of the Anthropic envelope. The OpenAI envelope derives its type
-// from the status through reqcommon.OpenAIErrorType.
-type wireCode struct {
-	httpCode  envoyTypePb.StatusCode
-	anthropic string
-}
-
-var wireCodes = map[string]wireCode{
-	BadRequest:         {envoyTypePb.StatusCode_BadRequest, "invalid_request_error"},
-	Unauthorized:       {envoyTypePb.StatusCode_Unauthorized, "authentication_error"},
-	Forbidden:          {envoyTypePb.StatusCode_Forbidden, "permission_error"},
-	NotFound:           {envoyTypePb.StatusCode_NotFound, "not_found_error"},
-	PreconditionFailed: {envoyTypePb.StatusCode_PreconditionFailed, "invalid_request_error"},
-	ResourceExhausted:  {envoyTypePb.StatusCode_TooManyRequests, "rate_limit_error"},
-	Internal:           {envoyTypePb.StatusCode_InternalServerError, "api_error"},
-	ServiceUnavailable: {envoyTypePb.StatusCode_ServiceUnavailable, "overloaded_error"},
+// httpCodes maps a canonical code to the HTTP status it is answered with. The
+// envelope derives its error type from the status (reqcommon.ErrorEnvelope).
+var httpCodes = map[string]envoyTypePb.StatusCode{
+	BadRequest:         envoyTypePb.StatusCode_BadRequest,
+	Unauthorized:       envoyTypePb.StatusCode_Unauthorized,
+	Forbidden:          envoyTypePb.StatusCode_Forbidden,
+	NotFound:           envoyTypePb.StatusCode_NotFound,
+	PreconditionFailed: envoyTypePb.StatusCode_PreconditionFailed,
+	ResourceExhausted:  envoyTypePb.StatusCode_TooManyRequests,
+	Internal:           envoyTypePb.StatusCode_InternalServerError,
+	ServiceUnavailable: envoyTypePb.StatusCode_ServiceUnavailable,
 }
 
 // errorBody serializes the error in the envelope of the API the request was sent to.
 // Messages quote request fragments, so HTML characters are written verbatim.
-func errorBody(apiType reqcommon.APIType, e Error, code wireCode) ([]byte, error) {
-	var envelope any = reqcommon.OpenAIErrorResponse{
-		Error: reqcommon.OpenAIError{Message: e.Msg, Type: reqcommon.OpenAIErrorType(int(code.httpCode)), Code: int(code.httpCode)},
-	}
-	if apiType == reqcommon.APITypeMessages {
-		envelope = anthropicErrorResponse{
-			Type:  "error",
-			Error: anthropicError{Type: code.anthropic, Message: e.Msg},
-		}
-	}
-
+func errorBody(apiType reqcommon.APIType, e Error, httpCode envoyTypePb.StatusCode) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(envelope); err != nil {
+	if err := enc.Encode(reqcommon.ErrorEnvelope(apiType, int(httpCode), e.Msg)); err != nil {
 		return nil, err
 	}
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
@@ -146,13 +119,13 @@ func errorBody(apiType reqcommon.APIType, e Error, code wireCode) ([]byte, error
 // HTTP status code and a JSON body in the error envelope of apiType. If the error
 // code is not recognized, it returns a gRPC error instead of an ImmediateResponse.
 func BuildErrResponse(err error, apiType reqcommon.APIType) (*extProcPb.ProcessingResponse, error) {
-	code, ok := wireCodes[CanonicalCode(err)]
+	httpCode, ok := httpCodes[CanonicalCode(err)]
 	if !ok {
 		return nil, status.Errorf(status.Code(err), "failed to handle request: %v", err)
 	}
 
 	e, _ := err.(Error)
-	body, encodeErr := errorBody(apiType, e, code)
+	body, encodeErr := errorBody(apiType, e, httpCode)
 	if encodeErr != nil {
 		return nil, status.Errorf(codes.Internal, "failed to encode error response: %v", encodeErr)
 	}
@@ -165,7 +138,7 @@ func BuildErrResponse(err error, apiType reqcommon.APIType) (*extProcPb.Processi
 	return &extProcPb.ProcessingResponse{
 		Response: &extProcPb.ProcessingResponse_ImmediateResponse{
 			ImmediateResponse: &extProcPb.ImmediateResponse{
-				Status:  &envoyTypePb.HttpStatus{Code: code.httpCode},
+				Status:  &envoyTypePb.HttpStatus{Code: httpCode},
 				Body:    body,
 				Headers: &extProcPb.HeaderMutation{SetHeaders: setHeaders},
 			},

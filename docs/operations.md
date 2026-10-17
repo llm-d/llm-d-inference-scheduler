@@ -49,12 +49,44 @@ The EPP's scaling behavior and effectiveness are highly dependent on the configu
   | 3 | 2.7x |
   | 4 | 3.5x |
 
-  - **Note (Flow Control)**: Flow control state (queues, fairness accounting, and the saturation
-    view) is per replica and not shared. In Active-Active mode, priority and fairness are enforced
+  - **Note (Flow Control)**: Flow control queues and fairness accounting are per replica.
+    In Active-Active mode, priority and fairness are enforced
     only within each replica's share of the traffic, and per-band capacity limits apply per
     replica, so the fleet-wide queued volume scales with the replica count.
-  - **Plugin Compatibility**: EPP replicas do not share routing state. Active-Active mode works with stateless schedulers (`random-picker`), session affinity (`session-affinity-filter`), or plugins that read metrics from backend model servers. Avoid approximate prefix routing in Active-Active mode because replicas do not share prefix state.
+  - **Plugin Compatibility**: Without a syncer, EPP replicas keep routing state locally. Active-Active mode works with stateless schedulers (`random-picker`), session affinity (`session-affinity-filter`), or plugins that read metrics from backend model servers. The optional Redis syncer shares in-flight load. Approximate prefix-cache state remains local even with the syncer, so approximate prefix routing can make inconsistent cache decisions across replicas.
   - For more technical details and context on EPP replica state sync and scaling limitations, see [Issue #1290](https://github.com/llm-d/llm-d-router/issues/1290).
+
+##### Sharing in-flight load with Redis (Alpha)
+
+Choose active-active with the syncer when several EPP replicas must handle traffic
+concurrently and the routing plugins need peer in-flight load. Use leader election
+when one active EPP has sufficient capacity and the scheduling profile relies on
+local state that the syncer does not cover, such as approximate prefix state.
+
+In the official charts, set `router.epp.crossReplica.enabled: true` and configure
+an external Redis address. This disables leader election, enables the Alpha
+`redis-syncer` plugin, and supports both `router.epp.replicas > 1` and
+`router.epp.autoscaling`. Redis **7.4 or newer** must be provisioned separately;
+the chart does not deploy it. For values and Secret-based authentication, see
+[Active-active with Redis synchronization](../config/charts/README.md#active-active-with-redis-synchronization-alpha).
+
+The `inflight-load-producer` shares its per-endpoint load when
+`syncCrossReplicaState` is true (the default). Consumers such as
+`active-request-scorer` and `token-load-scorer` can use that shared view.
+Configuring a syncer does not change the scheduling profile or synchronize
+approximate prefix-cache state, flow-control queues, or fairness accounting.
+
+Load sharing is eventually consistent. Replicas can make simultaneous decisions
+before receiving each other's updates; this does not provide an atomic
+cluster-wide admission quota. Request-level `GetOrSet` coordination does not
+reserve capacity across different requests.
+
+During a Redis outage, EPP can start and continue scheduling with cached peer
+state until it expires, then with local load only. Request-level coordination
+calls return Redis errors. Set `stateTTL` above the observed interval between
+successful endpoint refreshes, including latency variation; see the
+[Redis syncer README](../pkg/epp/framework/plugins/datalayer/cross_plugin/redis/README.md)
+for transport restrictions and publisher timing.
 
 ### Performance Reference Data
 
@@ -174,15 +206,25 @@ The router supports multiple High Availability (HA) modes:
 
 ### Active-Active Mode
 
-To run multiple EPP replicas concurrently in Active-Active mode, set `router.epp.flags.ha-enable-leader-election: false`:
+To run multiple EPP replicas concurrently with shared in-flight load, configure
+active-active mode and the Redis syncer:
 
 ```yaml
 router:
   epp:
     replicas: 3
-    flags:
-      ha-enable-leader-election: false
+    haMode: all-active
+    pluginsConfigFile: payload-agnostic.yaml
+    crossReplica:
+      enabled: true
+      redis:
+        address: redis.example:6379
 ```
+
+For Redis provisioning and authentication requirements, see
+[Sharing in-flight load with Redis](#sharing-in-flight-load-with-redis-alpha).
+For active-active operation without synchronization, omit `crossReplica` and
+choose plugins compatible with local state.
 
 See [Scaling Modes (Active-Active vs. Active-Passive)](#scaling-modes-active-active-vs-active-passive) for throughput scaling factors, flow control scope, and plugin compatibility requirements.
 
@@ -268,11 +310,11 @@ In multi-replica deployments without priority routing or GKE preferred backends,
 
 #### Architecture and Failover Mechanics
 
-- **Leader Coordination**: EPP replicas contend for a `coordination.k8s.io/Lease`. The `--ha-enable-leader-election` flag enables leader election in EPP (automatically injected by Helm when `router.epp.replicas > 1` unless priority routing, GKE preferred backends, or autoscaling is enabled). The elected leader responds to active gRPC extension requests on Port 9002, while standby replicas do not serve external processing traffic until acquiring the lease. See [Active-Active Mode](#active-active-mode) to disable leader election for concurrent active-active replicas.
+- **Leader Coordination**: EPP replicas contend for a `coordination.k8s.io/Lease`. Helm enables leader election for fixed `router.epp.replicas > 1` unless explicitly disabled, `router.epp.haMode: all-active` or cross-replica synchronization is selected, or priority routing or GKE preferred backends is enabled. The elected leader responds to active gRPC extension requests on Port 9002, while standby replicas do not serve external processing traffic until acquiring the lease. See [Active-Active Mode](#active-active-mode) to disable leader election for concurrent active-active replicas.
 - **Fail-Open Behavior (Gateway vs. Standalone)**:
   - **Gateway Mode (`llm-d-router-gateway`)**: With `router.inferencePool.failureMode: FailOpen` (the default), the Gateway bypasses an unreachable EPP during a leader transition and routes requests directly to healthy model-server backends in the `InferencePool` to preserve request availability.
-  - **Standalone Mode (`llm-d-router-standalone`)**: Setting `router.proxy.failOpen: true` (the default in `service` mode) sets `failure_mode_allow: true` on Envoy's `ext_proc` filter so requests proceed past the filter when EPP is unreachable. However, the default standalone route forwards to `original_destination_cluster` (`type: ORIGINAL_DST`), which selects the upstream endpoint from the `x-gateway-destination-endpoint` header populated by EPP. When EPP is unavailable, `failure_mode_allow` alone does not provide a fallback model-server route.
-- **Switchover Disadvantage (10-30s EPP Unavailability Window)**: When the active leader fails, Kubernetes lease expiration (`--ha-lease-duration`, default `15s`), standby readiness probe transition, and Service endpoint propagation take **10 to 30 seconds** before a standby replica begins serving traffic. During this window, EPP is unavailable: in Gateway mode with `FailOpen`, **routing is purely unoptimized** (requests bypass KV-cache affinity, prefix-cache scoring, load-aware scheduling, and flow control), and in standalone mode without an EPP-supplied destination header, requests cannot be routed to a model server. Use [Priority Routing](#priority-routing-standalone-service-mode) or [GKE Preferred Backends](#gke-preferred-backends-gateway-mode) as the recommended Active-Passive setup.
+  - **Standalone Mode (`llm-d-router-standalone`)**: With `router.proxy.failOpen: true` (the default) and `proxyType: envoy`, the chart sets `failure_mode_allow: true` on Envoy's `ext_proc` filter and adds a fallback route. Requests that EPP schedules carry the `x-gateway-destination-endpoint` header and go to `original_destination_cluster`; requests that pass the filter because EPP is unreachable carry no header and go to the `inference_pool_fallback` cluster, which load-balances (`LEAST_REQUEST`) across the ready pods of a headless Service (`<release>-epp-model-servers`) selecting `router.modelServers.matchLabels` on the first `router.modelServers.targetPorts` entry. Envoy removes any client-supplied `x-gateway-destination-endpoint` header before routing, so only EPP picks the endpoint. Agentgateway has no fail-open setting and rejects requests while EPP is unreachable.
+- **Switchover Disadvantage (10-30s EPP Unavailability Window)**: When the active leader fails, Kubernetes lease expiration (`--ha-lease-duration`, default `15s`), standby readiness probe transition, and Service endpoint propagation take **10 to 30 seconds** before a standby replica begins serving traffic. During this window, EPP is unavailable: in Gateway mode with `FailOpen` and in standalone Envoy mode with `router.proxy.failOpen: true`, **routing is purely unoptimized** (requests bypass KV-cache affinity, prefix-cache scoring, load-aware scheduling, and flow control). Use [Priority Routing](#priority-routing-standalone-service-mode) or [GKE Preferred Backends](#gke-preferred-backends-gateway-mode) as the recommended Active-Passive setup.
 
 #### Helm Configuration
 
@@ -291,7 +333,7 @@ router:
 | `router.epp.replicas` | `1` | Number of EPP replicas (1 active leader and `replicas - 1` standbys). |
 | `router.epp.flags.ha-enable-leader-election` | `true` (when `replicas > 1`) | Enable Kubernetes Lease leader election across EPP replicas. |
 | `router.inferencePool.failureMode` | `FailOpen` | Gateway `InferencePool` failure policy when EPP is unreachable (`FailOpen` or `FailClose`). |
-| `router.proxy.failOpen` | `true` (`service`) / `false` (`sidecar`) | Sets `failure_mode_allow` on the standalone Envoy `ext_proc` filter. |
+| `router.proxy.failOpen` | `true` | Sets `failure_mode_allow` on the standalone Envoy `ext_proc` filter and routes requests EPP did not schedule to the model servers through the `inference_pool_fallback` cluster. |
 
 ### Horizontal Pod Autoscaling (HPA)
 
@@ -302,7 +344,7 @@ EPP supports horizontal pod autoscaling through Kubernetes HorizontalPodAutoscal
 - **Active-Active Mode Required**: Autoscaling requires Active-Active EPP operation. Standby replicas in leader-elected setups remain `NotReady` by design, which blocks HPA stabilization. The chart enforces active-active mode when autoscaling is enabled and blocks explicit leader election (`--ha-enable-leader-election`).
 - **Incompatible with StatefulSet Topologies**: Priority routing and GKE preferred backends render EPP as a StatefulSet with fixed ordinal hostnames (`<name>-0`, `<name>-1`) for static Envoy routing. Autoscaling requires a standard Deployment managing a dynamically changing replica set in active-active mode. Enabling autoscaling alongside `router.proxy.priorityRouting.enabled: true` or GKE preferred backends fails chart validation.
 - **RollingUpdate Strategy**: The deployment defaults to `RollingUpdate` strategy (`maxUnavailable: 0`, `maxSurge: 1`) under autoscaling to keep serving capacity during scale events. Setting `router.epp.deploymentStrategy` overrides this default.
-- **Fail-Open During Capacity Gaps**: The rollout strategy does not cover losing the only Ready EPP replica while new replicas are still starting. In `sidecar` mode the proxy shares the EPP pod, so fail-open cannot keep traffic flowing once that pod is gone. With `router.proxy.mode: service`, the proxy runs separately and, with `router.proxy.failOpen: true` or `router.inferencePool.failureMode: FailOpen`, passes requests directly to backend model servers while no EPP replica is reachable; see [Leader Election and Fail-Open](#leader-election-and-fail-open) and [Standalone Proxy Autoscaling (Service Mode)](#standalone-proxy-autoscaling-service-mode). Fail-open applies only when EPP is unreachable, not when a draining EPP returns an error response.
+- **Fail-Open During Capacity Gaps**: The rollout strategy does not cover losing the only Ready EPP replica while new replicas are still starting. In `sidecar` mode the proxy shares the EPP pod, so fail-open cannot keep traffic flowing once that pod is gone. In Gateway mode, `router.inferencePool.failureMode: FailOpen` routes requests directly to healthy `InferencePool` backends, without EPP scoring, while no EPP replica is reachable. In standalone `service` mode with Envoy, `router.proxy.failOpen: true` routes requests directly to the model servers, without EPP scoring, through the `inference_pool_fallback` cluster; see [Leader Election and Fail-Open](#leader-election-and-fail-open) and [Standalone Proxy Autoscaling (Service Mode)](#standalone-proxy-autoscaling-service-mode). Fail-open applies only when EPP is unreachable, not when a draining EPP returns an error response.
 - **Replica Count Configuration**: When autoscaling is enabled, `router.epp.replicas` is ignored. Replica counts are controlled by `autoscaling.minReplicas` and `autoscaling.maxReplicas`.
 - **Plugin Compatibility**: Autoscaling requires active-active compatible plugins; see [Scaling Modes (Active-Active vs. Active-Passive)](#scaling-modes-active-active-vs-active-passive).
 

@@ -35,7 +35,7 @@ const (
 	// from the prefill EPP's response, through the coordinator, to the decode
 	// EPP's request, for topology-affinity-filter and topology-affinity-scorer
 	// running in coordinator deployments.
-	PeerTopologyHeaderKey = "x-peer-topology"
+	PeerTopologyHeaderKey = "x-llm-d-peer-topology"
 
 	// DefaultFairnessID is the default fairness ID used when no ID is provided in the request.
 	// This ensures that requests without explicit fairness identifiers are still grouped and managed by the Flow Control
@@ -140,8 +140,9 @@ const (
 	PartTypeComputerScreenshot = "computer_screenshot"
 )
 
-// Anthropic Messages block types. The estimate tokenizer and the sidecar
-// encoder fan-out both read these.
+// Anthropic Messages block types. An image block holds its image in a
+// FieldSource object; a tool_result block holds the tool's output under
+// FieldContent, as a string or as an array of blocks.
 const (
 	BlockTypeImage      = "image"
 	BlockTypeToolResult = "tool_result"
@@ -150,3 +151,19 @@ const (
 // DefaultImageMediaType is vLLM's fallback when an Anthropic base64 image
 // source omits media_type.
 const DefaultImageMediaType = "image/jpeg"
+
+// Fields of an Anthropic Messages image source. A source of type
+// ImageSourceTypeURL names its image by FieldURL; any other source carries
+// base64 FieldData and an optional FieldMediaType.
+const (
+	FieldSource        = "source"
+	FieldData          = "data"
+	FieldMediaType     = "media_type"
+	ImageSourceTypeURL = "url"
+)
+
+// Message roles a content walk tells apart.
+const (
+	RoleUser   = "user"
+	RoleSystem = "system"
+)
