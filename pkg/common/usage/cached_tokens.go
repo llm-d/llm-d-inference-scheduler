@@ -29,9 +29,6 @@ import (
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
-// OpenAI-compatible chat usage reports prompt cache hits at
-// usage.prompt_tokens_details.cached_tokens.
-// See: https://platform.openai.com/docs/guides/prompt-caching
 type cachedTokensUsageRewriter struct {
 	header       http.Header
 	cachedTokens int
@@ -50,9 +47,10 @@ type cachedTokensUsageRewriter struct {
 var usageKey = []byte(`"` + reqcommon.FieldUsage + `"`)
 
 // NewCachedTokensResponseWriter wraps w so that every usage block it carries
-// reports cachedTokens at usage.prompt_tokens_details.cached_tokens. streaming
-// selects SSE line-by-line rewriting over whole-document rewriting; it comes
-// from the request, since the upstream content type is not yet known.
+// reports cachedTokens as its cached-token count, in the details object the
+// block's own schema documents (see tokenDetails). streaming selects SSE
+// line-by-line rewriting over whole-document rewriting; it comes from the
+// request, since the upstream content type is not yet known.
 //
 // The returned function must be called once the response is complete: both
 // modes buffer an incomplete tail, which it flushes.
@@ -234,6 +232,7 @@ func CachedTokens(block any) (int, bool) {
 // carrying both is read as Responses, which is also how the EPP's openai parser
 // resolves it. Only the documented OpenAI-compatible fields are used as the
 // source of truth.
+// See: https://platform.openai.com/docs/guides/prompt-caching
 func tokenDetails(block map[string]any) (map[string]any, bool) {
 	for _, field := range []string{reqcommon.FieldInputTokensDetails, reqcommon.FieldPromptTokensDetails} {
 		if details, ok := block[field].(map[string]any); ok {
