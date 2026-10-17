@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -348,6 +349,31 @@ func TestInflightGauges_ReleaseAfterEndpointDeletion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAddedTokensEntry_Clone(t *testing.T) {
+	var nilEntry *addedTokensEntry
+	require.Nil(t, nilEntry.Clone())
+
+	entry := &addedTokensEntry{
+		tokenCounter:   &atomic.Int64{},
+		requestCounter: &atomic.Int64{},
+		tokenGauge:     prometheus.NewGauge(prometheus.GaugeOpts{Name: "clone_tokens"}),
+		requestGauge:   prometheus.NewGauge(prometheus.GaugeOpts{Name: "clone_requests"}),
+	}
+	entry.tokens.Store(15)
+	entry.requests.Store(1)
+
+	cloned := entry.Clone().(*addedTokensEntry)
+	require.Same(t, entry.tokenCounter, cloned.tokenCounter)
+	require.Same(t, entry.requestCounter, cloned.requestCounter)
+	require.Same(t, entry.tokenGauge, cloned.tokenGauge)
+	require.Same(t, entry.requestGauge, cloned.requestGauge)
+	require.Equal(t, int64(15), cloned.tokens.Load())
+	require.Equal(t, int32(1), cloned.requests.Load())
+
+	cloned.tokens.Store(0)
+	require.Equal(t, int64(15), entry.tokens.Load())
 }
 
 // The plugin's fairness_id label shares the cardinality cap, so a flood of distinct client IDs
