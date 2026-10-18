@@ -71,8 +71,6 @@ func (s *SGLangAdapter) ShardingKey(msg *kvevents.RawMessage) string {
 // ParseMessage parses a raw transport message into domain data.
 // It extracts pod identity and model name from the topic,
 // and decodes the msgpack payload into an EventBatch.
-//
-//nolint:gocritic // unnamedResult: named returns conflict with nonamedreturns linter
 func (s *SGLangAdapter) ParseMessage(msg *kvevents.RawMessage) (string, string, kvevents.EventBatch, error) {
 	podID, modelName := parseTopic(msg.Topic)
 
