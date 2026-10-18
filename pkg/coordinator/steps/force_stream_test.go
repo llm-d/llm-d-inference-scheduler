@@ -652,6 +652,58 @@ func TestForceStream_MultipleChoices(t *testing.T) {
 	require.Equal(t, "B1B2", second["message"].(map[string]any)["content"])
 }
 
+// TestForceStream_ChatBothTokenLimits_ReservesForCompletionTokens reproduces the
+// reviewer's measured 5xx end to end: a chat n:2 request carrying both max_tokens
+// (16) and max_completion_tokens (4000). The engine honors max_completion_tokens,
+// so the reply can run well past the 16-token reservation the old precedence would
+// have sized. The streamed content below exceeds that wrong reservation (16 tokens
+// ~= 3 KiB for n:2) but fits the correct one (4000 tokens ~= 128 KiB), so the
+// request force-streams successfully instead of tripping the ceiling into a 5xx.
+func TestForceStream_ChatBothTokenLimits_ReservesForCompletionTokens(t *testing.T) {
+	// ~2 KiB of content per choice, more than the wrong (16-token) reservation
+	// allows for the two choices combined, less than the correct (4000-token) one.
+	chunk := strings.Repeat("x", 2048)
+	frames := []string{
+		fmt.Sprintf(`{"id":"c","model":"llama-3","choices":[{"index":0,"delta":{"role":"assistant","content":%q}},{"index":1,"delta":{"role":"assistant","content":%q}}]}`, chunk, chunk),
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"},{"index":1,"delta":{},"finish_reason":"stop"}]}`,
+	}
+	server := sseServer(t, frames, nil)
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-both-limits",
+		OriginalPath:     reqcommon.PathChatCompletions,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false, "n": 2,
+			"max_tokens":            16,
+			"max_completion_tokens": 4000,
+			"messages":              []any{map[string]any{"role": "user", "content": "hi"}},
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx),
+		"reserving for max_completion_tokens must let the reply through, not 5xx at the ceiling")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode)
+	require.Equal(t, "application/json", result.Header.Get("Content-Type"))
+
+	var got map[string]any
+	respBody, _ := io.ReadAll(result.Body)
+	require.NoError(t, json.Unmarshal(respBody, &got), "the full reply is returned as one JSON")
+	require.Len(t, got["choices"].([]any), 2)
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorCeiling), 1e-9,
+		"the conforming request must not hit the ceiling")
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the reply")
+}
+
 func TestForceStream_FallbackBudget(t *testing.T) {
 	var upstreamBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
