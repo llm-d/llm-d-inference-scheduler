@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -170,7 +171,7 @@ func parseFloatHeaderValue(s string) float64 {
 		return 0
 	}
 	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0
 	}
 	return v
