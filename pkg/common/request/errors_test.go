@@ -43,13 +43,44 @@ func TestOpenAIErrorType(t *testing.T) {
 	}
 }
 
-func TestWriteOpenAIError(t *testing.T) {
-	rec := httptest.NewRecorder()
-	require.NoError(t, WriteOpenAIError(rec, http.StatusRequestEntityTooLarge, `body <too> large & rejected`))
+func TestAnthropicErrorType(t *testing.T) {
+	for status, want := range map[int]string{
+		http.StatusBadRequest:            "invalid_request_error",
+		http.StatusUnauthorized:          "authentication_error",
+		http.StatusForbidden:             "permission_error",
+		http.StatusNotFound:              "not_found_error",
+		http.StatusPreconditionFailed:    "invalid_request_error",
+		http.StatusRequestEntityTooLarge: "request_too_large",
+		http.StatusUnprocessableEntity:   "invalid_request_error",
+		http.StatusTooManyRequests:       "rate_limit_error",
+		http.StatusInternalServerError:   "api_error",
+		http.StatusBadGateway:            "api_error",
+		http.StatusServiceUnavailable:    "overloaded_error",
+	} {
+		assert.Equal(t, want, AnthropicErrorType(status), "status %d", status)
+	}
+}
 
-	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
-	assert.Contains(t, rec.Header().Get(HeaderContentType), ContentTypeJSON)
-	assert.Equal(t, ContentTypeOptionsNoSniff, rec.Header().Get(HeaderContentTypeOptions))
-	assert.JSONEq(t, `{"error":{"message":"body <too> large & rejected","type":"invalid_request_error","code":413}}`, rec.Body.String())
-	assert.NotContains(t, rec.Body.String(), `\u003c`, "HTML characters must be written verbatim")
+func TestWriteAPIError(t *testing.T) {
+	const msg = `body <too> large & rejected`
+	for _, tc := range []struct {
+		name    string
+		apiType APIType
+		want    string
+	}{
+		{"messages", APITypeMessages, `{"type":"error","error":{"type":"request_too_large","message":"body <too> large & rejected"}}`},
+		{"chat completions", APITypeChatCompletions, `{"error":{"message":"body <too> large & rejected","type":"invalid_request_error","code":413}}`},
+		{"responses", APITypeResponses, `{"error":{"message":"body <too> large & rejected","type":"invalid_request_error","code":413}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			require.NoError(t, WriteAPIError(rec, tc.apiType, http.StatusRequestEntityTooLarge, msg))
+
+			assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+			assert.Contains(t, rec.Header().Get(HeaderContentType), ContentTypeJSON)
+			assert.Equal(t, ContentTypeOptionsNoSniff, rec.Header().Get(HeaderContentTypeOptions))
+			assert.JSONEq(t, tc.want, rec.Body.String())
+			assert.NotContains(t, rec.Body.String(), `\u003c`, "HTML characters must be written verbatim")
+		})
+	}
 }

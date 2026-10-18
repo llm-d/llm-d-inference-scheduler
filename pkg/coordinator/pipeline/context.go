@@ -51,7 +51,7 @@ func isForwardableHeader(name string) bool {
 }
 
 // StripInternalHeaders removes headers the coordinator alone injects into
-// requests it forwards (e.g. x-peer-topology, copied from the prefill
+// requests it forwards (e.g. x-llm-d-peer-topology, copied from the prefill
 // response onto the decode request). Call this on a client request's headers
 // as soon as they are received, so a client-supplied value is never mistaken
 // for one the coordinator generated itself.
@@ -180,7 +180,7 @@ type RequestContext struct {
 	// PeerTopology carries the prefill endpoint's encoded topology from the
 	// prefill response to the decode request, for topology-affinity-filter
 	// and topology-affinity-scorer running in the decode EPP's profile.
-	// Populated by PrefillStep from the x-peer-topology response header;
+	// Populated by PrefillStep from the x-llm-d-peer-topology response header;
 	// forwarded onto the decode request by newDecodeProxyRequest. Empty when
 	// the prefill EPP's config has no topology-stamp-handler.
 	PeerTopology string

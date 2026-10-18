@@ -53,15 +53,59 @@ func OpenAIErrorType(status int) string {
 	}
 }
 
-// WriteOpenAIError rejects an HTTP request with the OpenAI error envelope. It
-// sets the status and the nosniff header that http.Error sets, with a JSON
-// body in place of the plain text. Messages quote request fragments, so HTML
-// characters are written verbatim.
-func WriteOpenAIError(w http.ResponseWriter, status int, msg string) error {
+// AnthropicErrorResponse is the error envelope of the Anthropic Messages API.
+type AnthropicErrorResponse struct {
+	Type  string         `json:"type"`
+	Error AnthropicError `json:"error"`
+}
+
+// AnthropicError carries the error type and the message of a rejection.
+type AnthropicError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// AnthropicErrorType returns the error type the Anthropic envelope carries for
+// an HTTP status.
+func AnthropicErrorType(status int) string {
+	switch {
+	case status == http.StatusUnauthorized:
+		return "authentication_error"
+	case status == http.StatusForbidden:
+		return "permission_error"
+	case status == http.StatusNotFound:
+		return "not_found_error"
+	case status == http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case status == http.StatusServiceUnavailable:
+		return "overloaded_error"
+	case status >= http.StatusInternalServerError:
+		return "api_error"
+	default:
+		return "invalid_request_error"
+	}
+}
+
+// ErrorEnvelope returns the error envelope of the API a request was sent to:
+// the Anthropic envelope for Messages, the OpenAI envelope for every other API.
+func ErrorEnvelope(apiType APIType, status int, msg string) any {
+	if apiType == APITypeMessages {
+		return AnthropicErrorResponse{Type: "error", Error: AnthropicError{Type: AnthropicErrorType(status), Message: msg}}
+	}
+	return OpenAIErrorResponse{Error: OpenAIError{Message: msg, Type: OpenAIErrorType(status), Code: status}}
+}
+
+// WriteAPIError rejects an HTTP request with the error envelope of apiType (see
+// ErrorEnvelope). It sets the status and the nosniff header that http.Error
+// sets, with a JSON body in place of the plain text. Error messages quote
+// request fragments, so HTML characters are written verbatim.
+func WriteAPIError(w http.ResponseWriter, apiType APIType, status int, msg string) error {
 	w.Header().Set(HeaderContentType, ContentTypeJSON)
 	w.Header().Set(HeaderContentTypeOptions, ContentTypeOptionsNoSniff)
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	return enc.Encode(OpenAIErrorResponse{Error: OpenAIError{Message: msg, Type: OpenAIErrorType(status), Code: status}})
+	return enc.Encode(ErrorEnvelope(apiType, status, msg))
 }

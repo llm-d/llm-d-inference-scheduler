@@ -105,7 +105,7 @@ tools, or reconstruct content from routing projections. Model rewrites happen
 before token production and apply to both rendering and forwarding.
 `vllm.prefillOnly` rewrites only the output budget fields of the render copy;
 see [Render-only output budget](#render-only-output-budget). `vllm.omitMMKwargs`
-adds one field to the render copy; see
+adds two fields to the render copy; see
 [Render responses without multimodal tensors](#render-responses-without-multimodal-tensors).
 
 The parsed payload keeps nested objects, arrays, Completions `prompt`, and
@@ -497,11 +497,13 @@ The producer reads token IDs, `mm_hashes`, and `mm_placeholders` from a render
 response. By default vLLM also returns the processed multimodal tensors in
 `features.kwargs_data`, which the producer discards and which can reach tens of
 megabytes per request. Set `vllm.omitMMKwargs: true` to add
-`"return_mm_kwargs": false` to the render copy, so vLLM leaves the tensors out
-and skips serializing them. The inference payload is unchanged. The option
-requires a vLLM version with the `return_mm_kwargs` render field; other
-versions ignore the field and return the tensors. It is false by default and
-works with `vllm.url` and `vllm.endpointDiscovery`.
+`"return_mm_kwargs": false` and `"mm_payload": "none"` to the render copy, so
+vLLM leaves the tensors out and skips serializing them. The inference payload
+is unchanged. vLLM v0.32 reads `return_mm_kwargs`; versions with
+vllm-project/vllm#61427 read `mm_payload`, which takes precedence. Values the
+client sent for either field are overridden. vLLM versions without these fields
+ignore them and return the tensors. The option is false by default and works
+with `vllm.url` and `vllm.endpointDiscovery`.
 
 A complete sample config that pairs this with `precise-prefix-cache-producer` and `prefix-cache-scorer` is at [`deploy/config/sim-epp-tokenizer-vllm-http-config.yaml`](../../../../../../../deploy/config/sim-epp-tokenizer-vllm-http-config.yaml).
 

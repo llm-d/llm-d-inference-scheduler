@@ -22,4 +22,4 @@ jobs:
       - name: Record approval event
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: echo "Approved review submitted for PR #${PR_NUMBER}"
+        run: echo "Approved review submitted for PR ${PR_NUMBER}"

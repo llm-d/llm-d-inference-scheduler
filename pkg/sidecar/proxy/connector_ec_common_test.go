@@ -435,12 +435,14 @@ func TestExtractMMItemsConvertsAnthropicImages(t *testing.T) {
 		assert.Equal(t, reqcommon.PartTypeImageURL, item["type"])
 		urls = append(urls, item["image_url"])
 	}
+	// A user turn's tool_result images come before its own, the order vLLM
+	// renders them in.
 	assert.Equal(t, []any{
-		map[string]any{"url": "https://example.com/a.png"},
 		map[string]any{"url": "data:image/png;base64,aaaa"},
 		map[string]any{"url": "data:image/gif;base64,bbbb"},
 		map[string]any{"url": "data:image/jpeg;base64,cccc"},
 		map[string]any{"url": "https://example.com/bare.png"},
+		map[string]any{"url": "https://example.com/a.png"},
 		map[string]any{"url": "https://example.com/assistant.png"},
 	}, urls)
 

@@ -232,7 +232,7 @@ func (s *EncodeStep) buildEncodeTokenIDs(fullTokenIDs []int, entry pipeline.Mult
 func (s *EncodeStep) buildEncodeBody(reqCtx *pipeline.RequestContext, entry pipeline.MultimodalEntry, localIdx int, format reqcommon.APIType, partsByMod map[reqcommon.Modality][]mediaPart) (map[string]any, error) {
 	mod := entry.Modality
 	switch format {
-	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses:
+	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses, reqcommon.APITypeMessages:
 		// Neither failure below is ErrBadRequest: replace-media-urls builds the
 		// entries from this same walk and rejects a part with no payload as it
 		// goes (see collectMediaRefs), so a client request cannot reach either

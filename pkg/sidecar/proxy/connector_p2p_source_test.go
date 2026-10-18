@@ -24,8 +24,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 	"k8s.io/utils/set"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 

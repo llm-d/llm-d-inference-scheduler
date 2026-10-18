@@ -23,8 +23,8 @@ import (
 	"net/http"
 	"strconv"
 
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
@@ -145,7 +145,7 @@ var _ = Describe("NIXL Connector with P2P pull", func() {
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body) //nolint:errcheck
+		body, _ := io.ReadAll(resp.Body)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
 
 		// Prefill request keeps the NIXL WRITE fields and gains the composed remote_kv_source block.
