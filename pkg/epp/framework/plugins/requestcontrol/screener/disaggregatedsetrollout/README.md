@@ -321,9 +321,11 @@ outcome so its next turn does not flap back.
 With coordination enabled, session decisions are shared across EPP replicas
 through the `CrossReplicaSyncer`, under a session state key separate from
 revision-decision coordination and keyed by the session key. The state key
-carries the scope label selector alongside the plugin name, so deployments
-that share a syncer keep separate decisions; corresponding P/D routers of one
-deployment share the scope and stay aligned. Sharing is
+carries the scope label selector and the optional scope namespace alongside
+the plugin name, so deployments that share a syncer keep separate decisions —
+set `scope.namespace` when the same selector and plugin name appear in more
+than one namespace. Corresponding P/D routers of one deployment share the
+scope and stay aligned. Sharing is
 decoupled from the rollout itself: it covers the session's whole lifetime,
 including periods with a single revision, so a session in flight when a second
 revision appears resumes on its revision at any EPP. Shared decisions carry
@@ -376,6 +378,7 @@ request. Do not add it to a scheduling profile.
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `scope.labelSelector` | string | Yes | | Selects the Pods observed for cross-role revision coverage. |
+| `scope.namespace` | string | No | | Restricts observed Pods to one namespace and namespaces the shared session-decision key. Set it when deployments in different namespaces share a `CrossReplicaSyncer`, a plugin name, and a selector; empty watches cluster-wide. |
 | `revisionGating` | object | Yes | | Revision screening configuration. |
 | `revisionGating.mode` | string | Yes | | `sum`, `max-role`, or `disabled`. |
 | `revisionGating.requiredRoles` | array | Yes for `sum` and `max-role` | | Roles that must each have a Ready Pod for a revision to receive traffic. List order breaks a `max-role` tie. |

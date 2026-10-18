@@ -53,9 +53,14 @@ type Config struct {
 	RevisionGating *RevisionGating `json:"revisionGating"`
 }
 
-// Scope constrains which Pod notifications contribute to revision gating.
+// Scope constrains which Pod notifications contribute to revision gating. A
+// set Namespace restricts the tracked Pods to that namespace and namespaces
+// the shared session-decision key, so deployments that share a syncer, a
+// plugin name, and a selector across namespaces stay isolated. An empty
+// Namespace watches cluster-wide.
 type Scope struct {
 	LabelSelector string `json:"labelSelector"`
+	Namespace     string `json:"namespace,omitempty"`
 }
 
 // RevisionGating governs revision selection. Two things happen per request

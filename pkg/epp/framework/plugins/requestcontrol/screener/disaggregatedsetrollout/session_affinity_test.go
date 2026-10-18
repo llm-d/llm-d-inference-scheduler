@@ -222,6 +222,58 @@ func TestScreenerSessionAffinityScopeSeparatesDeployments(t *testing.T) {
 	}
 }
 
+func TestScreenerSessionAffinityNamespaceSeparatesDeployments(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+
+	// Two deployments differ only by namespace: same plugin name, same
+	// selector, one shared syncer, and the user's one session ID.
+	config.Scope.Namespace = "prod"
+	screenerProd := newTestScreener(config)
+	configStaging := config
+	configStaging.Scope = Scope{LabelSelector: config.Scope.LabelSelector, Namespace: "staging"}
+	screenerStaging := newTestScreener(configStaging)
+
+	podProd := readyPod("v1-prefill", "v1", "prefill")
+	podProd.Namespace = "prod"
+	podProdDecode := readyPod("v1-decode", "v1", "decode")
+	podProdDecode.Namespace = "prod"
+	seedPods(t, screenerProd, podProd, podProdDecode)
+
+	podStaging := readyPod("v2-prefill", "v2", "prefill")
+	podStaging.Namespace = "staging"
+	podStagingDecode := readyPod("v2-decode", "v2", "decode")
+	podStagingDecode.Namespace = "staging"
+	seedPods(t, screenerStaging, podStaging, podStagingDecode)
+
+	// The staging screener must ignore the prod namespace's pods even though
+	// they match its selector.
+	if _, blended := screenerStaging.distributionSnapshot().shares["v1"]; blended {
+		t.Fatal("a namespaced scope must not track pods from other namespaces")
+	}
+	if screenerProd.sessionStateKey == screenerStaging.sessionStateKey {
+		t.Fatal("screeners in different namespaces must not share a session state key")
+	}
+
+	syncer := &decisionSyncer{}
+	screenerProd.handle.SetCrossReplicaSyncer(syncer)
+	screenerStaging.handle.SetCrossReplicaSyncer(syncer)
+
+	if got := servedRevision(screenCandidates(t, screenerProd, sessionRequest("session", 0), candidatePool(1, 1))); got != "v1" {
+		t.Fatalf("prod must pin v1: got %s", got)
+	}
+	if got := servedRevision(screenCandidates(t, screenerStaging, sessionRequest("session", 0), candidatePool(1, 1))); got != "v2" {
+		t.Fatalf("staging must pin v2 without invalidating prod's decision: got %s", got)
+	}
+	if stored, ok := syncer.stored(screenerProd.sessionStateKey, "session"); !ok || stored != "v1" {
+		t.Fatalf("prod session decision must survive staging's assignment: %v", stored)
+	}
+	if stored, ok := syncer.stored(screenerStaging.sessionStateKey, "session"); !ok || stored != "v2" {
+		t.Fatalf("staging must hold its own decision: %v", stored)
+	}
+}
+
 func intPtr(i int) *int { return &i }
 
 func TestScreenerSessionAffinityInvalidatesWhenRevisionLosesCoverage(t *testing.T) {

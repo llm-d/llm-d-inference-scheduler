@@ -138,11 +138,12 @@ func newScreener(name string, config Config, scope labels.Selector, handle fwkpl
 		roleLabelKey:             roleLabelKey,
 		revisionDecisionStateKey: fwkdl.StateKey("disaggregatedset-rollout:" + name),
 		// The session state key carries the scope alongside the plugin name:
-		// agent-identity session IDs are user-scoped, so two deployments that
+		// agent-identity session IDs are user-scoped, so deployments that
 		// share a syncer and a plugin name would otherwise invalidate each
-		// other's decisions. Corresponding P/D routers of one deployment share
-		// the scope and stay aligned.
-		sessionStateKey:        fwkdl.StateKey("disaggregatedset-rollout-session:" + name + ":" + config.Scope.LabelSelector),
+		// other's decisions. The selector plus the optional namespace form
+		// the rollout scope; corresponding P/D routers of one deployment
+		// share it and stay aligned.
+		sessionStateKey:        fwkdl.StateKey("disaggregatedset-rollout-session:" + name + ":" + config.Scope.LabelSelector + ":" + config.Scope.Namespace),
 		handle:                 handle,
 		localRevisionDecisions: fwkplugin.NewPluginState(handle.Context()),
 		pods:                   make(map[types.NamespacedName]podInfo),
@@ -246,6 +247,9 @@ func (h *podNotificationHandler) Extract(_ context.Context, event fwkdl.Notifica
 
 func (c *Screener) tracksPod(pod *corev1.Pod) bool {
 	if pod == nil || !c.config.RevisionGating.Active() {
+		return false
+	}
+	if c.config.Scope.Namespace != "" && pod.Namespace != c.config.Scope.Namespace {
 		return false
 	}
 	if !c.scope.Matches(labels.Set(pod.Labels)) {
