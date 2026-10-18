@@ -55,7 +55,7 @@ addresses of the prefill pod and of a cached-prefix source pod, which vLLM dials
 EPP also sends the first two under their pre-convention names
 (`x-prefiller-host-port`, `x-encoder-hosts-ports`), so a sidecar that predates the
 rename still routes. The old names are deprecated and will be removed. The source
-header's earlier names, `x-llm-d-kv-cache-source-host-port` and
+header's retired names, `x-llm-d-kv-cache-source-host-port` and
 `x-kv-cache-source-host-port`, carried the source pod's serving address; no component
 sets or reads them. The source also travels
 in the request body as `kv_transfer_params.remote_kv_source`, the form vLLM reads;

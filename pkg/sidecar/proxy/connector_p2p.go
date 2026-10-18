@@ -44,7 +44,11 @@ type p2pPeer struct {
 	port int
 }
 
+// String formats the address as host:port, or "" for an absent peer.
 func (p *p2pPeer) String() string {
+	if p == nil {
+		return ""
+	}
 	return net.JoinHostPort(p.host, strconv.Itoa(p.port))
 }
 

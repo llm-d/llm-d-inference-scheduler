@@ -215,6 +215,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 	if err := d.modelRewriteIfNeeded(ctx, reqCtx, inferenceRequestBody); err != nil {
 		return reqCtx, err
 	}
+
 	infObjective := d.getInferenceObjective(ctx, reqCtx)
 	priority := int(*infObjective.Spec.Priority)
 	reqCtx.Priority = priority

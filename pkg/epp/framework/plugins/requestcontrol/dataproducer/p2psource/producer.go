@@ -478,6 +478,10 @@ func requestSpreadFraction(requestID string) float64 {
 // pulls the prompt from a prefill pod, so a source next to it would be
 // pointless. The same peer goes on routing.KVCacheSourceHeader.
 func (p *Producer) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) error {
+	// The server allocates Headers before any plugin runs and
+	// WithAttributeScope keeps that map on the copy a plugin sees, so this
+	// serves requests built without headers in tests. A map allocated here on
+	// a scoped copy would not reach the director.
 	if request.Headers == nil {
 		request.Headers = map[string]string{}
 	}

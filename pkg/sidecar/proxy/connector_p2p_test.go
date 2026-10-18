@@ -370,6 +370,15 @@ var _ = DescribeTable("parsePrefillP2P",
 	Entry("port above the TCP range", "10.0.0.1:70000", nil),
 )
 
+var _ = DescribeTable("p2pPeer.String",
+	func(peer *p2pPeer, want string) {
+		Expect(peer.String()).To(Equal(want))
+	},
+	Entry("IPv4", &p2pPeer{host: "10.0.0.1", port: 7777}, "10.0.0.1:7777"),
+	Entry("IPv6 is bracketed", &p2pPeer{host: "fd00::1", port: 7777}, "[fd00::1]:7777"),
+	Entry("absent peer", (*p2pPeer)(nil), ""),
+)
+
 // decodeRemotePrefiller returns the remote_prefiller block of the one decode
 // request the decode backend received.
 func decodeRemotePrefiller(testInfo *sidecarTestInfo) map[string]any {

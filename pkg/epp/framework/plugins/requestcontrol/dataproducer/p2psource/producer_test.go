@@ -408,6 +408,20 @@ func TestPreRequest_DeltaBelowThreshold_NoSource(t *testing.T) {
 	assertNoSource(t, req)
 }
 
+// The prefill header is written before the floor is checked, so it survives
+// a below-floor return.
+func TestPreRequest_DeltaBelowThreshold_KeepsPrefillHeader(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	p := New("test", Config{MinCachedTokenDelta: 17})
+
+	req := preRequest(p, "req-low-pd", peer("10.0.0.2", 32))
+
+	require.NoError(t, p.PreRequest(ctx, req, prefillOnly(endpoint(p, "pod-a", "10.0.0.1", 1))))
+
+	assertNoSource(t, req)
+	assertPrefillHeader(t, req, "10.0.0.1", defaultP2PConnectorPort)
+}
+
 // The chosen decode pod is itself the best match: no source written.
 func TestPreRequest_BestIsChosen_NoSource(t *testing.T) {
 	ctx := utils.NewTestContext(t)
@@ -1247,6 +1261,18 @@ func TestPreRequest_CostModel_BusyDestination_NoSource(t *testing.T) {
 	_ = p.PreRequest(ctx, req, decodeOnly(queuedEndpoint(p, "pod-a", "10.0.0.1", 0, 1)))
 
 	assertNoSource(t, req)
+}
+
+// A declined pull leaves the prefill header in place.
+func TestPreRequest_CostModel_Declined_KeepsPrefillHeader(t *testing.T) {
+	ctx := utils.NewTestContext(t)
+	p := New("test", Config{MinCachedTokenDelta: 1, CostModel: rigCostModel()})
+
+	req := costRequest(p, "req-busy-d-pd", 8192, 0)
+	require.NoError(t, p.PreRequest(ctx, req, prefillOnly(queuedEndpoint(p, "pod-a", "10.0.0.1", 0, 1))))
+
+	assertNoSource(t, req)
+	assertPrefillHeader(t, req, "10.0.0.1", defaultP2PConnectorPort)
 }
 
 // Busy destination, 64K delta: gain 990 ms > 515 -> pull.
