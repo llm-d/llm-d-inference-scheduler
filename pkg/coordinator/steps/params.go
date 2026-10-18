@@ -35,9 +35,8 @@ const (
 	// the streamed response is reassembled into one non-streaming reply.
 	ParamForceStream = "force_stream"
 	// ParamForceStreamBufferSize is the total byte budget, as a human-readable
-	// string ("1GiB"), shared across concurrent buffered-path forced requests
-	// (responses, generate, n>1). Single-choice chat and text stream incrementally
-	// and reserve nothing against it.
+	// string ("1GiB"), shared across concurrent forced requests. A request that
+	// cannot reserve its estimate from it takes the non-buffering pass-through.
 	ParamForceStreamBufferSize = "force_stream_buffer_size"
 	// ParamForceStreamMaxRequestSize caps the bytes one forced request may
 	// reserve, as a human-readable string ("256KiB"). It keeps a single large

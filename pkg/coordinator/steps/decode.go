@@ -83,21 +83,15 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 
 	// Force-streaming applies only to a non-streaming request. A chat or text
 	// request whose reply may carry fields the reassembler drops (tool calls,
-	// logprobs) takes the pass-through to keep them. A chat or text single-choice
-	// reply is written incrementally, with no reservation. The buffered shapes
-	// (responses, generate, n>1) reserve budget and reassemble the whole reply;
-	// one with no output token limit to reserve, or one that finds the budget
-	// full, falls through to the pass-through below, which buffers nothing.
+	// logprobs) takes the pass-through to keep them. Every other candidate reserves
+	// budget and reassembles the whole reply; one whose estimate exceeds the
+	// per-request cap, or that finds the budget full, falls through to the
+	// pass-through below, which buffers nothing.
 	if s.forceStream && !reqCtx.Stream {
 		if shape, shapeOK := shapeForAPIType(reqcommon.DetectAPIType(reqCtx.OriginalPath)); shapeOK {
 			switch {
 			case forceStreamLossy(shape, reqCtx.Body):
 				coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultFallbackUnsupported)
-			case canStreamIncrementally(shape, reqCtx):
-				if err := s.executeForceStreamIncremental(ctx, logger, reqCtx, shape); !recordForceStreamFallback(reqCtx.Model, err) {
-					return err
-				}
-				// Fell back with nothing written; continue to the pass-through below.
 			default:
 				reserved, ok := s.estimateReservation(reqCtx)
 				switch {

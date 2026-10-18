@@ -22,21 +22,15 @@ import (
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 )
 
-// forceStreamBudget bounds the total bytes concurrent buffered-path forced
-// requests (responses, generate, n>1) may reserve at once. One decode step
-// instance serves every request, so a single budget is process-global. The pod
-// carries no memory limit, so an exhausted budget sends a buffered-path request
-// down the non-buffering pass-through rather than growing the heap.
+// forceStreamBudget bounds the total bytes concurrent forced requests may reserve
+// at once. One decode step instance serves every request, so a single budget is
+// process-global. The pod carries no memory limit, so an exhausted budget sends a
+// forced request down the non-buffering pass-through rather than growing the heap.
 //
-// The incremental path (chat and text single-choice, the common shape) reserves
-// nothing: it holds no growing content buffer and is bounded per request by the
-// SSE frame cap (forceStreamMaxFrameBytes), not aggregated here, so concurrent
-// incremental requests are not bounded by this budget.
-//
-// The budget counts wire bytes. Peak heap on the buffered path is larger: it also
-// holds the scanner frame buffer, the decoded map (several times its JSON size),
-// the accumulated deltas, and the marshalled payload. force_stream_buffer_size is
-// not an RSS cap.
+// The budget counts wire bytes. Peak heap is larger: a forced request also holds
+// the scanner frame buffer, the decoded map (several times its JSON size), the
+// accumulated deltas, and the marshalled payload. force_stream_buffer_size is not
+// an RSS cap.
 type forceStreamBudget struct {
 	current atomic.Int64
 	max     int64

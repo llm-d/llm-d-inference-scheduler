@@ -146,6 +146,39 @@ func gatherLabeled(t *testing.T, reg *prometheus.Registry, name, label, value st
 	return 0
 }
 
+func TestForceStreamLossy(t *testing.T) {
+	// chat and text requests that may carry tool/function calls or logprobs are lossy.
+	require.True(t, forceStreamLossy(sseShapeChat, map[string]any{"tools": []any{map[string]any{"type": "function"}}}))
+	require.True(t, forceStreamLossy(sseShapeChat, map[string]any{"functions": []any{map[string]any{"name": "f"}}}))
+	require.True(t, forceStreamLossy(sseShapeChat, map[string]any{"logprobs": true}))
+	require.True(t, forceStreamLossy(sseShapeText, map[string]any{"logprobs": 3}))
+	// On the legacy Completions API logprobs is a count; its presence (even 0)
+	// requests the sampled token's logprob, which the reassembler drops, so a
+	// numeric value of any size is lossy. JSON decodes the count to float64.
+	require.True(t, forceStreamLossy(sseShapeText, map[string]any{"logprobs": 0}))
+	require.True(t, forceStreamLossy(sseShapeText, map[string]any{"logprobs": float64(0)}))
+
+	// vLLM chat reasoning (delta.reasoning_content) is not folded, so a chat
+	// request that activates thinking via chat_template_kwargs.enable_thinking or
+	// reasoning_effort is lossy and takes the pass-through.
+	require.True(t, forceStreamLossy(sseShapeChat, map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}}))
+	require.True(t, forceStreamLossy(sseShapeChat, map[string]any{"reasoning_effort": "high"}))
+
+	// Absent, empty, or false forms are not lossy.
+	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{}))
+	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"tools": []any{}}))
+	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"logprobs": false}))
+	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": false}}))
+	require.False(t, forceStreamLossy(sseShapeChat, map[string]any{"reasoning_effort": ""}))
+	// Reasoning is a chat concept; the text shape has no reasoning_content to drop.
+	require.False(t, forceStreamLossy(sseShapeText, map[string]any{"reasoning_effort": "high"}))
+
+	// The responses shape emits the upstream object verbatim and generate has no
+	// such fields, so neither is ever lossy even when the request declares them.
+	require.False(t, forceStreamLossy(sseShapeResponses, map[string]any{"tools": []any{map[string]any{"type": "function"}}}))
+	require.False(t, forceStreamLossy(sseShapeGenerate, map[string]any{"logprobs": true}))
+}
+
 func TestForceStream_ParamsOptional(t *testing.T) {
 	gwClient := gateway.New(config.GatewayConfig{})
 
@@ -399,9 +432,8 @@ func TestForceStream_Chat_ReassemblesToJSON(t *testing.T) {
 		"client of a non-streaming request must receive JSON, not an event stream")
 
 	respBody, _ := io.ReadAll(result.Body)
-	require.Empty(t, result.Header.Get("Content-Length"),
-		"a chat single-choice reply is written incrementally (chunked), so it carries no Content-Length")
-	require.True(t, recorder.Flushed, "the incremental reply must be flushed to the client")
+	require.NotEmpty(t, result.Header.Get("Content-Length"),
+		"a buffered reply is written whole, so it carries a Content-Length")
 
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(respBody, &got), "reassembled reply must be valid JSON")
@@ -629,9 +661,7 @@ func TestForceStream_FallbackBudget(t *testing.T) {
 	defer server.Close()
 
 	// Size the budget to exactly one request's reservation, then pre-reserve all
-	// of it so the request under test cannot fit and must fall back. A generate
-	// request takes the buffered path (only chat/text single-choice stream
-	// incrementally), so the budget still gates it.
+	// of it so the request under test cannot fit and must fall back.
 	reqCtx := &pipeline.RequestContext{
 		RequestID:        "req-fb",
 		OriginalPath:     reqcommon.PathVLLMGenerate,
@@ -661,44 +691,42 @@ func TestForceStream_FallbackBudget(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
 }
 
-func TestForceStream_NoTokenLimit_PassThrough(t *testing.T) {
+// TestForceStream_NoTokenLimit_Forced verifies a request with no declared output
+// token limit is still force-streamed: it reserves the whole per-request cap (most
+// chat clients send no max_tokens, so refusing them would leave the common case
+// unforced) and the per-request ceiling bounds the reply.
+func TestForceStream_NoTokenLimit_Forced(t *testing.T) {
+	frames := []string{
+		`{"id":"c","model":"llama-3","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+		`{"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	}
 	var upstreamBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &upstreamBody)
-		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": "ok"}}}})
-	}))
+	server := sseServer(t, frames, &upstreamBody)
 	defer server.Close()
 
 	step, reg := newForceStreamStep(t, server.URL, "1GiB")
 
-	// A generate request with no token cap takes the buffered path and is not
-	// reservable, so it falls through to the pass-through unchanged. Chat and text
-	// single-choice requests are instead streamed incrementally even without a cap
-	// (see TestForceStreamIncremental_NoTokenLimit_StillForced).
 	recorder := httptest.NewRecorder()
 	reqCtx := &pipeline.RequestContext{
 		RequestID:        "req-nolimit",
-		OriginalPath:     reqcommon.PathVLLMGenerate,
+		OriginalPath:     reqcommon.PathChatCompletions,
 		Model:            "llama-3",
 		Stream:           false,
 		KVTransferParams: map[string]any{},
 		Body: map[string]any{
 			"model": "llama-3", "stream": false,
-			"token_ids": []any{1, 2, 3},
+			"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 		},
 		ResponseWriter: recorder,
 	}
 
 	require.NoError(t, step.Execute(context.Background(), reqCtx))
 
-	// An unbounded buffered request is not force-streamed (no limit to reserve); it
-	// takes the pass-through with its body (stream:false) unchanged and is counted
-	// as fallback_unbounded.
-	require.Equal(t, false, upstreamBody["stream"])
-	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnbounded), 1e-9)
-	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
-	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackBudget), 1e-9)
+	require.Equal(t, true, upstreamBody["stream"], "a request without a token limit is still force-streamed")
+	require.Equal(t, "application/json", recorder.Result().Header.Get("Content-Type"))
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnbounded), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the reply")
 }
 
 // TestForceStream_LossyRequest_PassThrough verifies that a chat or text request

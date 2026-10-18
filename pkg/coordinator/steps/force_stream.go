@@ -72,10 +72,10 @@ const (
 	// forceStreamBaseOverheadBytes covers the top-level envelope shared by every
 	// reply: id, model, created, object, and the usage block.
 	forceStreamBaseOverheadBytes = 2 << 10
-	// forceStreamMaxFrameBytes caps one SSE line on the incremental scanner and is
-	// the upper bound for the buffered chunk shapes, whose per-request reservation is
-	// usually smaller and binds first. Streaming chunks are small (one token delta),
-	// so this rejects a single malformed or oversized frame rather than a whole reply.
+	// forceStreamMaxFrameBytes is the upper bound on one SSE line for the chunk
+	// shapes, whose per-request reservation is usually smaller and binds first.
+	// Streaming chunks are small (one token delta), so this rejects a single
+	// malformed or oversized frame rather than a whole reply.
 	forceStreamMaxFrameBytes = 1 << 20
 	// forceStreamScanStartBytes is the SSE scanner's initial buffer size; it
 	// grows as needed toward the per-request frame cap.
@@ -105,10 +105,8 @@ var errForceStreamUnreadable = errors.New("force-stream: upstream stream unreada
 // errForceStreamTruncated marks a forced stream that ended with a clean EOF before
 // any terminal marker: no data: [DONE] line and no shape terminal (a Responses
 // terminal event or a choice finish_reason). The reassembly would look complete
-// but omit the cut-off tail. The buffered path falls back to the pass-through; the
-// incremental path falls back while still uncommitted, or truncates the committed
-// connection rather than writing a clean suffix. It is handled like
-// errForceStreamUnreadable.
+// but omit the cut-off tail, so the request falls back to the pass-through rather
+// than return a truncated reply as a 200. It is handled like errForceStreamUnreadable.
 var errForceStreamTruncated = errors.New("force-stream: upstream stream ended before a terminal marker")
 
 // sseDataPrefix and sseDoneMarker delimit the SSE frames the upstream streams.
@@ -196,25 +194,29 @@ func parseForceStreamPerRequest(params map[string]any, budgetMax int64) (int64, 
 }
 
 // estimateReservation sizes the buffer one forced request may hold and reports
-// whether force-streaming it is safe. ok is false when the body names no output
-// token limit (an unbounded response cannot be reserved) or when its estimate
-// exceeds the per-request cap (one request must never claim more than its share
-// of the shared budget). The estimate reserves n completions, each tokenLimit
-// tokens, plus the reply envelope; over-reserving only sends more requests to the
+// whether force-streaming it is safe. A request with no declared output token
+// limit reserves the whole per-request cap: most chat clients send none, so
+// refusing them would leave the common case unforced, and the cap bounds the
+// reservation either way. ok is false only when a declared limit's estimate
+// exceeds the per-request cap, so one request never claims more than its share of
+// the shared budget. The estimate reserves n completions, each tokenLimit tokens,
+// plus the reply envelope; over-reserving only sends more requests to the
 // pass-through, never past the budget.
 func (s *DecodeStep) estimateReservation(reqCtx *pipeline.RequestContext) (int64, bool) {
 	apiType := reqcommon.DetectAPIType(reqCtx.OriginalPath)
-	tokenLimit, ok := reqcommon.OutputTokenLimit(reqCtx.Body, apiType)
-	if !ok {
-		return 0, false
-	}
-	n := reqcommon.OutputChoiceCount(reqCtx.Body, apiType)
 
 	maxBytes := s.budget.perRequestMax
-	if maxBytes <= forceStreamBaseOverheadBytes {
-		return 0, false
-	}
+	// parseForceStreamPerRequest rejects a cap at or below the envelope overhead,
+	// so contentBudget is always positive once the step is built.
 	contentBudget := maxBytes - forceStreamBaseOverheadBytes
+
+	tokenLimit, ok := reqcommon.OutputTokenLimit(reqCtx.Body, apiType)
+	if !ok {
+		// No declared limit, so reserve the whole per-request budget and let the
+		// ceiling abort a reply that runs past it.
+		return maxBytes, true
+	}
+	n := reqcommon.OutputChoiceCount(reqCtx.Body, apiType)
 
 	// Each guard below both enforces the budget ceiling and keeps the following
 	// multiplication inside int64: a client-supplied tokenLimit or n large
@@ -332,7 +334,7 @@ func forceStreamLossy(shape sseShape, body map[string]any) bool {
 }
 
 // buildForceStreamRequest marshals the forced (stream:true) decode body and
-// builds its forwarding headers, shared by the buffered and incremental paths.
+// builds its forwarding headers.
 func buildForceStreamRequest(reqCtx *pipeline.RequestContext, shape sseShape) ([]byte, map[string]string, error) {
 	bodyBytes, err := json.Marshal(forceStreamBody(reqCtx.Body, shape))
 	if err != nil {
