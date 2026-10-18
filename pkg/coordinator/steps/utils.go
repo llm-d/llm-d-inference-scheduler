@@ -136,16 +136,16 @@ func unreachableFormatError(format reqcommon.APIType) error {
 }
 
 // resolveFormat maps a request path to the wire format a step emits. The steps
-// build only Completions, Chat Completions, Responses, and generate bodies, so
-// any other API collapses to APITypeVLLMGenerate; Chat Completions and
-// Responses additionally require useOpenAIFormat. Generate is the fallback
-// because its body carries the prompt as reqCtx.TokenIDs and does not depend
-// on the client's request shape.
+// build only Completions, Chat Completions, Responses, Messages, and generate
+// bodies, so any other API collapses to APITypeVLLMGenerate; Chat Completions,
+// Responses, and Messages additionally require useOpenAIFormat. Generate is the
+// fallback because its body carries the prompt as reqCtx.TokenIDs and does not
+// depend on the client's request shape.
 func resolveFormat(useOpenAIFormat bool, path string) reqcommon.APIType {
 	switch detected := reqcommon.DetectAPIType(path); detected {
 	case reqcommon.APITypeCompletions:
 		return detected
-	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses:
+	case reqcommon.APITypeChatCompletions, reqcommon.APITypeResponses, reqcommon.APITypeMessages:
 		if useOpenAIFormat {
 			return detected
 		}
@@ -154,11 +154,11 @@ func resolveFormat(useOpenAIFormat bool, path string) reqcommon.APIType {
 }
 
 // promptItemsField returns the body field an API carries its prompt items in:
-// messages for chat completions, input for Responses. ok is false for an API
-// that carries no item array.
+// messages for chat completions and Messages, input for Responses. ok is false
+// for an API that carries no item array.
 func promptItemsField(apiType reqcommon.APIType) (string, bool) {
 	switch apiType {
-	case reqcommon.APITypeChatCompletions:
+	case reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages:
 		return reqcommon.FieldMessages, true
 	case reqcommon.APITypeResponses:
 		return reqcommon.FieldInput, true
@@ -167,10 +167,10 @@ func promptItemsField(apiType reqcommon.APIType) (string, bool) {
 	}
 }
 
-// promptItems returns the array an API carries its prompt items in: a
-// chat-completions messages array, or a Responses input array. ok is false for
-// an API that carries no item array, and for a body whose field is absent or
-// holds something other than an array.
+// promptItems returns the array an API carries its prompt items in: the
+// messages array of chat completions or Messages, or a Responses input array.
+// ok is false for an API that carries no item array, and for a body whose field
+// is absent or holds something other than an array.
 //
 // The server keeps the field as a json.RawMessage so its key order survives
 // re-marshaling. A step that edits the returned items stores them back with
@@ -210,8 +210,8 @@ type mediaPart struct {
 	location string
 }
 
-// collectMediaParts walks a chat-completions messages array or a Responses
-// input array and returns the media content parts in order.
+// collectMediaParts walks the messages array of chat completions or Messages,
+// or a Responses input array, and returns the media content parts in order.
 //
 // Every step that pairs reqCtx.MultimodalEntries with parts by position walks
 // from here -- replace-media-urls builds the entries, encode picks the part to
@@ -223,12 +223,17 @@ type mediaPart struct {
 // part carries usable media: replace-media-urls rejects an unusable one as it
 // builds the entries (see collectMediaRefs), so filtering here would shift every
 // later part of its modality onto another part's hash. Which types count is
-// reqcommon.PartModality's rule, the same on every API; apiType only selects the
-// item label and which arrays an item holds.
+// reqcommon.PartModality's rule, the same on chat completions and Responses, and
+// reqcommon.MessagesBlockModality's on a Messages request. Beyond that, apiType
+// selects the item label and which arrays an item holds.
 func collectMediaParts(items []any, apiType reqcommon.APIType) []mediaPart {
 	itemLabel := "message"
 	if apiType == reqcommon.APITypeResponses {
 		itemLabel = "input item"
+	}
+	modalityOf := reqcommon.PartModality
+	if apiType == reqcommon.APITypeMessages {
+		modalityOf = reqcommon.MessagesBlockModality
 	}
 
 	var parts []mediaPart
@@ -244,7 +249,7 @@ func collectMediaParts(items []any, apiType reqcommon.APIType) []mediaPart {
 					continue
 				}
 				partType, _ := partMap[reqcommon.FieldType].(string)
-				modality, ok := reqcommon.PartModality(partType)
+				modality, ok := modalityOf(partType)
 				if !ok {
 					continue
 				}

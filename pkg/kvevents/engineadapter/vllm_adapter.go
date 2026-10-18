@@ -39,8 +39,6 @@ func (v *VLLMAdapter) ShardingKey(msg *kvevents.RawMessage) string {
 }
 
 // ParseMessage decodes one vLLM event batch.
-//
-//nolint:gocritic // unnamedResult: named returns conflict with nonamedreturns linter
 func (v *VLLMAdapter) ParseMessage(msg *kvevents.RawMessage) (string, string, kvevents.EventBatch, error) {
 	podID, modelName := parseTopic(msg.Topic)
 
