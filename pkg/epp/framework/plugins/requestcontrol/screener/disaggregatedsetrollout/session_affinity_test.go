@@ -479,3 +479,87 @@ func TestScreenerSessionAffinityLocalDecisionExpiresAfterTTL(t *testing.T) {
 		t.Fatal("session decision must expire after the configured TTL")
 	}
 }
+
+func TestScreenerSessionAffinityResumesOnOtherScreenerThroughSharedSyncer(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screenerA := newTestScreener(config)
+	screenerB := newTestScreener(config)
+	for _, screener := range []*Screener{screenerA, screenerB} {
+		seedCounts(t, screener, map[string]map[string]int{"v1": {"prefill": 1, "decode": 1}})
+	}
+	syncer := &decisionSyncer{}
+	screenerA.handle.SetCrossReplicaSyncer(syncer)
+	screenerB.handle.SetCrossReplicaSyncer(syncer)
+
+	// Single-revision period: the session reaches EPP A. Its decision must
+	// already live in the shared store, not only in A's local cache, or the
+	// rollout transition below loses it.
+	if got := servedRevision(screenCandidates(t, screenerA, sessionRequest("session", 0), candidatePool(1, 0))); got != "v1" {
+		t.Fatalf("single-revision fleet must pin v1: got %s", got)
+	}
+	if stored, ok := syncer.stored("session"); !ok || stored != "v1" {
+		t.Fatalf("session decision must be shared during the single-revision period: %v", stored)
+	}
+
+	// v2 appears; the session's next request reaches EPP B, which holds no
+	// local entry, and must resume on v1 from the shared store.
+	seedCounts(t, screenerB, map[string]map[string]int{"v2": {"prefill": 1, "decode": 1}})
+	if got := servedRevision(screenCandidates(t, screenerB, sessionRequest("session", 1), candidatePool(1, 1))); got != "v1" {
+		t.Fatalf("session must resume on its revision at another EPP: got %s", got)
+	}
+}
+
+func TestScreenerSessionAffinityInvalidationKeepsFirstRepair(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	syncer := &decisionSyncer{}
+	syncer.seed("session", "r0")
+	screener.handle.SetCrossReplicaSyncer(syncer)
+
+	// The first invalidation repairs the stale r0 decision.
+	winner := screener.replaceSessionRevision(context.Background(), "session", "r0", "v1")
+	if winner != "v1" {
+		t.Fatalf("first repair must install v1: got %s", winner)
+	}
+
+	// A delayed writer still holding r0 must adopt the repair, not overwrite
+	// it with its own pick.
+	adopted := screener.replaceSessionRevision(context.Background(), "session", "r0", "v2")
+	if adopted != "v1" {
+		t.Fatalf("delayed writer must adopt the winning repair: got %s", adopted)
+	}
+	if stored, ok := syncer.stored("session"); !ok || stored != "v1" {
+		t.Fatalf("shared decision must keep the first repair: %v", stored)
+	}
+	if len(syncer.replaced) != 1 {
+		t.Fatalf("only the first repair may write: %v", syncer.replaced)
+	}
+}
+
+func TestScreenerSessionAffinityLocalInvalidationKeepsFirstRepair(t *testing.T) {
+	screener := newTestScreener(sessionAffinityConfig())
+
+	// A first request stores the session decision.
+	winner := screener.replaceSessionRevision(context.Background(), "session", "", "v1")
+	if winner != "v1" {
+		t.Fatalf("first store must install v1: got %s", winner)
+	}
+
+	// A delayed writer on the same EPP that observed an older decision must
+	// adopt the stored one instead of overwriting it.
+	adopted := screener.replaceSessionRevision(context.Background(), "session", "r0", "v2")
+	if adopted != "v1" {
+		t.Fatalf("delayed local writer must adopt the stored decision: got %s", adopted)
+	}
+	if sticky, ok := screener.lookupStickyRevision("session"); !ok || sticky != "v1" {
+		t.Fatalf("local decision must keep the first repair: %q", sticky)
+	}
+}

@@ -84,11 +84,14 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 	if chosenRevision == "" {
 		sessionKey := c.sessionKey(request)
 		proposed := ""
-		// sessionSettled reports that the session's stored decision already is
+		// observed is the session decision this request saw: the proposal on
+		// a settled hit, or the stale revision an invalidation replaces
+		// against. sessionSettled reports that the stored decision already is
 		// the proposal, so nothing needs storing for it.
+		observed := ""
 		sessionSettled := false
 		if sessionKey != "" {
-			proposed, sessionSettled = c.sessionProposal(ctx, sessionKey, shares, allowedRevisions)
+			proposed, observed, sessionSettled = c.sessionProposal(ctx, sessionKey, shares, allowedRevisions)
 		}
 		if proposed == "" {
 			proposed = pickWeightedRevision(shares, rand.Float64()) //#nosec G404 -- traffic split across revisions, not security-sensitive
@@ -97,6 +100,7 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 		// parallel encoder's decision ID outranks stickiness so every shard of
 		// one request serves the same revision.
 		coordinated := proposed
+		coordinatedByRequest := false
 		if decisionID := revisionDecisionID(request); distribution.needsCoordination && decisionID != "" && coordinated != "" {
 			var err error
 			coordinated, err = c.getOrSetRevision(ctx, decisionID, coordinated)
@@ -104,13 +108,20 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 				log.FromContext(ctx).Error(err, "failed to coordinate rollout revision")
 				return nil
 			}
+			coordinatedByRequest = true
 		}
 		// Store the session decision when it changed: a fresh assignment, an
 		// invalidated session's replacement, or a coordinated outcome that
-		// overrode the proposal. When the proposal already is the stored
-		// decision, storing again would only race a concurrent invalidation.
+		// overrode the proposal. The store is a compare-and-swap against the
+		// observed decision, so a concurrent repair of the same session wins
+		// instead of being overwritten. A request bound to its own coordinated
+		// decision still serves that decision; otherwise it follows the
+		// session's stored winner.
 		if sessionKey != "" && coordinated != "" && (!sessionSettled || coordinated != proposed) {
-			c.replaceSessionRevision(ctx, sessionKey, coordinated)
+			winner := c.replaceSessionRevision(ctx, sessionKey, observed, coordinated)
+			if !coordinatedByRequest && winner != "" {
+				coordinated = winner
+			}
 		}
 		chosenRevision = coordinated
 	}
@@ -197,9 +208,12 @@ func (c *Screener) sessionKey(request *fwksched.InferenceRequest) string {
 }
 
 // sessionSynced reports whether session decisions are shared across EPP
-// replicas for this request.
+// replicas. This is deliberately decoupled from needsCoordination: a session
+// must keep its revision across the rollout transition, so its decisions are
+// shared for the session's whole lifetime, including periods with a single
+// revision. Request-level decision coordination stays rollout-only.
 func (c *Screener) sessionSynced() bool {
-	return c.distributionSnapshot().needsCoordination && c.crossReplicaSyncer() != nil
+	return c.config.RevisionGating.coordinationEnabled() && c.crossReplicaSyncer() != nil
 }
 
 // sessionDecisionOptions carries the session affinity expiration policy: the
@@ -209,17 +223,19 @@ func (c *Screener) sessionDecisionOptions() fwkdl.DecisionOptions {
 	return fwkdl.DecisionOptions{TTL: c.sessionTTL, RefreshOnAccess: true}
 }
 
-// sessionProposal returns the session's standing revision and whether that
-// proposal already is the session's stored decision. An empty proposal means
-// the session has no usable decision: new, expired, or invalidated by its
-// revision losing gating coverage. The caller then makes a fresh weighted
-// pick, runs request-level coordination over it, and stores the outcome.
+// sessionProposal returns the session's standing revision, the decision it
+// observed (the proposal itself on a settled hit, or the stale revision on an
+// invalidation), and whether the proposal already is the session's stored
+// decision. An empty proposal means the session has no usable decision: new,
+// expired, or invalidated by its revision losing gating coverage. The caller
+// then makes a fresh weighted pick, runs request-level coordination over it,
+// and stores the outcome with a compare-and-swap against the observed value.
 func (c *Screener) sessionProposal(
 	ctx context.Context,
 	sessionKey string,
 	shares map[string]float64,
 	allowedRevisions map[string]struct{},
-) (string, bool) {
+) (string, string, bool) {
 	if c.sessionSynced() {
 		syncer := c.crossReplicaSyncer()
 		// Seed the candidate from the local decision when one exists: a
@@ -232,11 +248,11 @@ func (c *Screener) sessionProposal(
 		actual, existed, err := syncer.GetOrSet(ctx, c.sessionStateKey, sessionKey, candidate, c.sessionDecisionOptions())
 		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to coordinate sticky rollout revision", "sessionKey", sessionKey)
-			return "", false
+			return "", "", false
 		}
 		revision, ok := actual.(string)
 		if !ok || revision == "" {
-			return "", false
+			return "", "", false
 		}
 		if _, covered := allowedRevisions[revision]; covered {
 			if existed {
@@ -244,26 +260,27 @@ func (c *Screener) sessionProposal(
 			} else {
 				recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
 			}
-			return revision, true
+			return revision, revision, true
 		}
 		// The stored revision lost gating coverage: rolled away, or missing a
-		// required role. The caller's fresh pick replaces the stored decision.
+		// required role. The caller's fresh pick replaces it, swapping against
+		// this observed value so a concurrent repair wins.
 		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultInvalidated)
-		return "", false
+		return "", revision, false
 	}
 
 	sticky, found := c.lookupStickyRevision(sessionKey)
 	if !found {
-		return "", false
+		return "", "", false
 	}
 	if _, covered := allowedRevisions[sticky]; covered {
 		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultSticky)
-		return sticky, true
+		return sticky, sticky, true
 	}
 	// The sticky revision lost gating coverage. The caller's fresh pick is
 	// stored over it by replaceSessionRevision.
 	recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultInvalidated)
-	return "", false
+	return "", sticky, false
 }
 
 func (c *Screener) lookupStickyRevision(sessionKey string) (string, bool) {
@@ -288,20 +305,38 @@ func (c *Screener) localSessionDecision(sessionKey string) string {
 	return sticky
 }
 
-// replaceSessionRevision overwrites the session's stored decision: a fresh
-// assignment, an invalidated session's replacement, or a coordinated outcome
-// that outranked the session's proposal.
-func (c *Screener) replaceSessionRevision(ctx context.Context, sessionKey, revision string) {
+// replaceSessionRevision swaps the session's stored decision from observed to
+// revision and returns the decision now stored: revision when the swap
+// happened, or the concurrent repair that won the compare-and-swap otherwise.
+func (c *Screener) replaceSessionRevision(ctx context.Context, sessionKey, observed, revision string) string {
 	if c.sessionSynced() {
-		if _, _, err := c.crossReplicaSyncer().Replace(ctx, c.sessionStateKey, sessionKey, revision, c.sessionDecisionOptions()); err != nil {
+		actual, replaced, err := c.crossReplicaSyncer().Replace(ctx, c.sessionStateKey, sessionKey, observed, revision, c.sessionDecisionOptions())
+		if err != nil {
 			log.FromContext(ctx).Error(err, "failed to store sticky rollout revision", "sessionKey", sessionKey)
+			return revision
 		}
-		return
+		if replaced {
+			recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
+			return revision
+		}
+		if winner, ok := actual.(string); ok && winner != "" {
+			return winner
+		}
+		return revision
+	}
+
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	// Another request on this EPP may have repaired the decision between this
+	// request's read and its store; the repair wins.
+	if current, ok := c.lookupStickyRevision(sessionKey); ok && current != observed && current != "" {
+		return current
 	}
 	if c.sessionDecisions != nil {
 		c.sessionDecisions.Set(sessionKey, revision, ttlcache.DefaultTTL)
 		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
 	}
+	return revision
 }
 
 func (c *Screener) filterRevisions(

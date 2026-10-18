@@ -63,12 +63,14 @@ type CrossReplicaSyncer interface {
 	// across every EPP replica sharing the syncer.
 	GetOrSet(ctx context.Context, key StateKey, id string, candidate any, opts ...DecisionOptions) (actual any, existed bool, err error)
 
-	// Replace atomically overwrites the value stored for key and id and
-	// returns the value it replaced. Unlike GetOrSet the stored value is
-	// overwritten rather than kept, for state whose previous decision is known
-	// stale. The bool reports whether a value was previously stored. Expiration
+	// Replace atomically overwrites the value stored for key and id when it
+	// still equals expected, and reports whether the swap happened. This is
+	// global request-level state shared across EPP replicas, not per-endpoint
+	// state. When the stored value differs from expected, nothing is written
+	// and the stored value is returned so the caller can adopt the winner of
+	// a concurrent repair; a missing stored value always matches. Expiration
 	// follows opts as in GetOrSet.
-	Replace(ctx context.Context, key StateKey, id string, value any, opts ...DecisionOptions) (previous any, existed bool, err error)
+	Replace(ctx context.Context, key StateKey, id string, expected, value any, opts ...DecisionOptions) (actual any, replaced bool, err error)
 }
 
 // CrossReplicaContributor is an opt-in interface for endpoint extractors that

@@ -180,7 +180,50 @@ func TestLocalSyncerNoOptionsNeverExpires(t *testing.T) {
 	assert.Equal(t, "v1", actual)
 }
 
-func TestLocalSyncerReplaceOverwritesAndReturnsPrevious(t *testing.T) {
+func TestLocalSyncerReplaceSwapsMatchingDecision(t *testing.T) {
+	syncer, _ := newTestSyncer(t)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	actual, replaced, err := syncer.Replace(ctx, "sessions", "s1", "v1", "v2", opts)
+	require.NoError(t, err)
+	assert.True(t, replaced)
+	assert.Equal(t, "v2", actual)
+
+	stored, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
+	require.NoError(t, err)
+	assert.True(t, existed)
+	assert.Equal(t, "v2", stored)
+}
+
+func TestLocalSyncerReplaceKeepsConcurrentRepair(t *testing.T) {
+	syncer, _ := newTestSyncer(t)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "r0", opts)
+	require.NoError(t, err)
+
+	// A first repair moves the decision off r0.
+	_, replaced, err := syncer.Replace(ctx, "sessions", "s1", "r0", "r1", opts)
+	require.NoError(t, err)
+	assert.True(t, replaced)
+
+	// A delayed writer still holding r0 must not overwrite the repair.
+	actual, replaced, err := syncer.Replace(ctx, "sessions", "s1", "r0", "r2", opts)
+	require.NoError(t, err)
+	assert.False(t, replaced)
+	assert.Equal(t, "r1", actual)
+
+	stored, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
+	require.NoError(t, err)
+	assert.Equal(t, "r1", stored)
+}
+
+func TestLocalSyncerReplaceTreatsExpiredEntryAsMatch(t *testing.T) {
 	syncer, advance := newTestSyncer(t)
 	ctx := context.Background()
 	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
@@ -188,20 +231,10 @@ func TestLocalSyncerReplaceOverwritesAndReturnsPrevious(t *testing.T) {
 	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
 	require.NoError(t, err)
 
-	previous, existed, err := syncer.Replace(ctx, "sessions", "s1", "v2", opts)
-	require.NoError(t, err)
-	assert.True(t, existed)
-	assert.Equal(t, "v1", previous)
-
-	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
-	require.NoError(t, err)
-	assert.True(t, existed)
-	assert.Equal(t, "v2", actual)
-
-	// A Replace over an expired entry reports nothing previous.
+	// An expired decision is as good as absent: the swap proceeds.
 	advance(10 * time.Minute)
-	previous, existed, err = syncer.Replace(ctx, "sessions", "s1", "v4", opts)
+	actual, replaced, err := syncer.Replace(ctx, "sessions", "s1", "v1", "v2", opts)
 	require.NoError(t, err)
-	assert.False(t, existed)
-	assert.Nil(t, previous)
+	assert.True(t, replaced)
+	assert.Equal(t, "v2", actual)
 }

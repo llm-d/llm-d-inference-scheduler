@@ -310,15 +310,18 @@ redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
 return {false, 0}
 `)
 
-// replaceScript atomically overwrites the stored value, returning what it
-// replaced. Arguments match getOrSetScript; ARGV[1] is the encoded new value.
+// replaceScript atomically swaps the stored value when it still equals the
+// expected one. KEYS[1] is the coordination key; ARGV[1] is the encoded
+// expected value, ARGV[2] the encoded new value, ARGV[3] the TTL in
+// milliseconds. It returns {value, replaced}: the new value when the swap
+// happened, otherwise the stored value that differed.
 var replaceScript = goredis.NewScript(`
 local previous = redis.call('GET', KEYS[1])
-redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
-if previous then
-  return {previous, 1}
+if (not previous) or previous == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+  return {ARGV[2], 1}
 end
-return {false, 0}
+return {previous, 0}
 `)
 
 // decisionTTL resolves the expiration a decision carries: an explicit
@@ -389,18 +392,51 @@ func (s *RedisSyncer) GetOrSet(ctx context.Context, key fwkdl.StateKey, id strin
 		s.decisionTTL(opts), refreshOnAccess(opts), candidate, candidate)
 }
 
-// Replace atomically overwrites the request-level value and returns the value
-// it replaced. DecisionOptions applies as in GetOrSet.
-func (s *RedisSyncer) Replace(ctx context.Context, key fwkdl.StateKey, id string, value any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
+// Replace atomically swaps the request-level value when it still equals
+// expected, as CrossReplicaSyncer.Replace documents. DecisionOptions applies
+// as in GetOrSet.
+func (s *RedisSyncer) Replace(ctx context.Context, key fwkdl.StateKey, id string, expected, value any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
 	if value == nil {
 		return nil, false, errors.New("redis-syncer: replace value must not be nil")
 	}
+	if expected == nil {
+		return nil, false, errors.New("redis-syncer: replace expected value must not be nil")
+	}
 
+	expectedData, err := encodeValue(expected)
+	if err != nil {
+		return nil, false, fmt.Errorf("redis-syncer: replace encode expected: %w", err)
+	}
 	data, err := encodeValue(value)
 	if err != nil {
 		return nil, false, fmt.Errorf("redis-syncer: replace encode: %w", err)
 	}
 
-	return s.runDecisionScript(ctx, replaceScript, key, id, data,
-		s.decisionTTL(opts), false, nil, value)
+	reply, err := replaceScript.Run(ctx, s.client, []string{s.coordKey(key, id)},
+		expectedData, data, s.decisionTTL(opts).Milliseconds()).Result()
+	if err != nil {
+		return nil, false, fmt.Errorf("redis-syncer: decision script: %w", err)
+	}
+	parts, ok := reply.([]interface{})
+	if !ok || len(parts) != 2 {
+		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+	}
+	replaced, ok := parts[1].(int64)
+	if !ok {
+		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+	}
+	if replaced == 1 {
+		return value, true, nil
+	}
+	stored, ok := parts[0].(string)
+	if !ok {
+		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+	}
+	// The stored value differs from expected: a concurrent repair won. Decode
+	// it so the caller can adopt it instead of overwriting.
+	actual, err := gobDecode([]byte(stored), value)
+	if err != nil {
+		return nil, false, fmt.Errorf("redis-syncer: decision decode: %w", err)
+	}
+	return actual, false, nil
 }

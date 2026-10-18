@@ -301,8 +301,10 @@ of the same session. The session key is, in order:
 
 A stored decision stops being used once its revision's gating share drops to
 zero: the session moves to a fresh weighted pick, and the stored decision is
-replaced atomically. A revision appearing or changing share does not move a
-session.
+replaced by a compare-and-swap against the stale value, so two concurrent
+requests invalidating the same session cannot overwrite each other's repair —
+the later writer adopts the winner. A revision appearing or changing share
+does not move a session.
 
 Session affinity proposes a revision; request-level coordination decides. When
 a request carries a revision decision ID (a parallel-encode shard, or any
@@ -312,12 +314,12 @@ outcome so its next turn does not flap back.
 
 With coordination enabled, session decisions are shared across EPP replicas
 through the `CrossReplicaSyncer`, under a session state key separate from
-revision-decision coordination and keyed by the session key. Shared decisions
-carry the configured `ttl`, refreshed on every access, so a session in
-continuous use never expires and an idle one is re-picked after `ttl`. When a
-deployment grows from one revision to several and coordination turns on, each
-EPP seeds the shared decision from its local one, keeping sessions in flight
-on their revision.
+revision-decision coordination and keyed by the session key. Sharing is
+decoupled from the rollout itself: it covers the session's whole lifetime,
+including periods with a single revision, so a session in flight when a second
+revision appears resumes on its revision at any EPP. Shared decisions carry
+the configured `ttl`, refreshed on every access, so a session in continuous
+use never expires and an idle one is re-picked after `ttl`.
 
 Without a syncer, or with `disableCoordination`, decisions live in a local
 bounded TTL cache with the same refresh-on-access semantics: concurrent first

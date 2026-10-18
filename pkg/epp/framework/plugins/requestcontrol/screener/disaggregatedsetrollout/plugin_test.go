@@ -551,19 +551,22 @@ func (s *decisionSyncer) stored(id string) (any, bool) {
 	return value, ok
 }
 
-func (s *decisionSyncer) Replace(_ context.Context, _ fwkdl.StateKey, id string, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
-	s.replaced = append(s.replaced, id)
+func (s *decisionSyncer) Replace(_ context.Context, _ fwkdl.StateKey, id string, expected, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	if s.err != nil {
 		return nil, false, s.err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	previous, existed := s.decisions[id]
+	if stored, ok := s.decisions[id]; ok && stored != expected {
+		// A concurrent repair already changed the decision: it wins.
+		return stored, false, nil
+	}
 	if s.decisions == nil {
 		s.decisions = make(map[string]any)
 	}
 	s.decisions[id] = value
-	return previous, existed, nil
+	s.replaced = append(s.replaced, id)
+	return value, true, nil
 }
 
 func TestScreenerCoordinatesOnlyWhileMultipleRevisionsAreObserved(t *testing.T) {

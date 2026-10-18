@@ -68,6 +68,9 @@ type Screener struct {
 	sessionAffinity  SessionAffinity
 	sessionTTL       time.Duration
 	sessionDecisions *ttlcache.Cache[string, string]
+	// sessionMu serializes local session read-modify-write cycles so a
+	// compare-and-swap against the local cache cannot interleave.
+	sessionMu sync.Mutex
 
 	mu           sync.RWMutex
 	pods         map[types.NamespacedName]podInfo

@@ -95,7 +95,7 @@ func (testCrossReplicaSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, _ st
 	return candidate, false, nil
 }
 
-func (testCrossReplicaSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+func (testCrossReplicaSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, _, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	return value, false, nil
 }
 

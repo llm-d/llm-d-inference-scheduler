@@ -103,7 +103,7 @@ func (s *fakeSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, _ string, can
 	return candidate, false, nil
 }
 
-func (s *fakeSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+func (s *fakeSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, _, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	return value, false, nil
 }
 
@@ -266,7 +266,7 @@ func (s *blockingSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, _ string,
 	return candidate, false, nil
 }
 
-func (s *blockingSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+func (s *blockingSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, _, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	return value, false, nil
 }
 

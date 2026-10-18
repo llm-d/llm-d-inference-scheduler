@@ -891,7 +891,7 @@ func TestGetOrSetRefreshOnAccessExtendsTTL(t *testing.T) {
 	require.Equal(t, "v3", actual)
 }
 
-func TestReplaceOverwritesStoredDecision(t *testing.T) {
+func TestReplaceSwapsMatchingDecision(t *testing.T) {
 	server := miniredis.RunT(t)
 	syncer, _ := newTestSyncer(t, server, testReplicaID)
 	ctx := context.Background()
@@ -900,22 +900,22 @@ func TestReplaceOverwritesStoredDecision(t *testing.T) {
 	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
 	require.NoError(t, err)
 
-	previous, existed, err := syncer.Replace(ctx, "sessions", "s1", "v2", opts)
+	actual, replaced, err := syncer.Replace(ctx, "sessions", "s1", "v1", "v2", opts)
 	require.NoError(t, err)
-	require.True(t, existed)
-	require.Equal(t, "v1", previous)
-
-	// The overwrite is visible to the next coordinated read.
-	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
-	require.NoError(t, err)
-	require.True(t, existed)
+	require.True(t, replaced)
 	require.Equal(t, "v2", actual)
 
-	// Replace over an absent key reports nothing previous.
-	previous, existed, err = syncer.Replace(ctx, "sessions", "s2", "v1", opts)
+	// The swap is visible to the next coordinated read.
+	stored, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
 	require.NoError(t, err)
-	require.False(t, existed)
-	require.Nil(t, previous)
+	require.True(t, existed)
+	require.Equal(t, "v2", stored)
+
+	// A delayed writer still holding v1 must not overwrite the repair.
+	actual, replaced, err = syncer.Replace(ctx, "sessions", "s1", "v1", "v3", opts)
+	require.NoError(t, err)
+	require.False(t, replaced)
+	require.Equal(t, "v2", actual)
 }
 
 func TestReplaceHonorsOptionsTTL(t *testing.T) {
@@ -924,7 +924,7 @@ func TestReplaceHonorsOptionsTTL(t *testing.T) {
 	ctx := context.Background()
 	opts := fwkdl.DecisionOptions{TTL: time.Second}
 
-	_, _, err := syncer.Replace(ctx, "sessions", "s1", "v1", opts)
+	_, _, err := syncer.Replace(ctx, "sessions", "s1", "v0", "v1", opts)
 	require.NoError(t, err)
 
 	server.FastForward(2 * time.Second)

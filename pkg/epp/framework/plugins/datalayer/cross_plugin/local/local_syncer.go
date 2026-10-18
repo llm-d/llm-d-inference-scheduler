@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 
@@ -118,7 +119,10 @@ func (s *LocalSyncer) GetOrSet(_ context.Context, key fwkdl.StateKey, id string,
 	return candidate, false, nil
 }
 
-func (s *LocalSyncer) Replace(_ context.Context, key fwkdl.StateKey, id string, value any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
+// Replace swaps the stored value for expected when it still matches, as
+// CrossReplicaSyncer.Replace documents. A missing or expired entry always
+// matches.
+func (s *LocalSyncer) Replace(_ context.Context, key fwkdl.StateKey, id string, expected, value any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
 	options := fwkdl.DecisionOptions{}
 	if len(opts) > 0 {
 		options = opts[0]
@@ -132,15 +136,11 @@ func (s *LocalSyncer) Replace(_ context.Context, key fwkdl.StateKey, id string, 
 	if found && entry.expired(s.now()) {
 		found = false
 	}
-	s.data[syncKey] = localEntry{value: value, expiresAt: s.expiry(options)}
-	return valueOrPrevious(entry, found), found, nil
-}
-
-func valueOrPrevious(entry localEntry, found bool) any {
-	if !found {
-		return nil
+	if found && !reflect.DeepEqual(entry.value, expected) {
+		return entry.value, false, nil
 	}
-	return entry.value
+	s.data[syncKey] = localEntry{value: value, expiresAt: s.expiry(options)}
+	return value, true, nil
 }
 
 // expiry returns the expiration an entry stored under options carries. A
