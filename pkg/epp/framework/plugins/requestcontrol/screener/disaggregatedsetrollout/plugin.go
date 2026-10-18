@@ -58,8 +58,12 @@ type Screener struct {
 	revisionLabelKey         string
 	roleLabelKey             string
 	revisionDecisionStateKey fwkdl.StateKey
-	handle                   fwkplugin.Handle
-	localRevisionDecisions   *fwkplugin.PluginState
+	// sessionStateKey namespaces session-affinity decisions away from
+	// request-level revision decisions: sessions are long-lived and expire on
+	// their own TTL, request decisions are per-request and must not inherit it.
+	sessionStateKey        fwkdl.StateKey
+	handle                 fwkplugin.Handle
+	localRevisionDecisions *fwkplugin.PluginState
 
 	sessionAffinity  SessionAffinity
 	sessionTTL       time.Duration
@@ -130,6 +134,7 @@ func newScreener(name string, config Config, scope labels.Selector, handle fwkpl
 		revisionLabelKey:         revisionLabelKey,
 		roleLabelKey:             roleLabelKey,
 		revisionDecisionStateKey: fwkdl.StateKey("disaggregatedset-rollout:" + name),
+		sessionStateKey:          fwkdl.StateKey("disaggregatedset-rollout-session:" + name),
 		handle:                   handle,
 		localRevisionDecisions:   fwkplugin.NewPluginState(handle.Context()),
 		pods:                     make(map[types.NamespacedName]podInfo),

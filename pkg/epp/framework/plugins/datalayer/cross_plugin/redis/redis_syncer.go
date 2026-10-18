@@ -293,9 +293,89 @@ func (s *RedisSyncer) Delete(ctx context.Context, key fwkdl.StateKey, endpointID
 	return s.delete(ctx, key, endpointID)
 }
 
-// GetOrSet atomically returns the existing request-level value or stores candidate.
-// The operation requires Redis 7.0 or newer for SET NX GET support.
-func (s *RedisSyncer) GetOrSet(ctx context.Context, key fwkdl.StateKey, id string, candidate any) (any, bool, error) {
+// getOrSetScript atomically returns the stored value, refreshing its TTL when
+// asked, or stores the candidate. KEYS[1] is the coordination key; ARGV[1] is
+// the encoded candidate, ARGV[2] the TTL in milliseconds, ARGV[3] the
+// refresh-on-access flag ("1" or "0"). It returns {value, existed} where a
+// missing value comes back as false.
+var getOrSetScript = goredis.NewScript(`
+local value = redis.call('GET', KEYS[1])
+if value then
+  if ARGV[3] == '1' then
+    redis.call('PEXPIRE', KEYS[1], ARGV[2])
+  end
+  return {value, 1}
+end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+return {false, 0}
+`)
+
+// replaceScript atomically overwrites the stored value, returning what it
+// replaced. Arguments match getOrSetScript; ARGV[1] is the encoded new value.
+var replaceScript = goredis.NewScript(`
+local previous = redis.call('GET', KEYS[1])
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+if previous then
+  return {previous, 1}
+end
+return {false, 0}
+`)
+
+// decisionTTL resolves the expiration a decision carries: an explicit
+// DecisionOptions TTL wins, otherwise the syncer's coordinationTTL default.
+func (s *RedisSyncer) decisionTTL(opts []fwkdl.DecisionOptions) time.Duration {
+	if len(opts) > 0 && opts[0].TTL > 0 {
+		return opts[0].TTL
+	}
+	return s.coordinationTTL
+}
+
+func refreshOnAccess(opts []fwkdl.DecisionOptions) bool {
+	return len(opts) > 0 && opts[0].RefreshOnAccess
+}
+
+// runDecisionScript executes a decision script and decodes its {value,
+// existed} reply. miss is the value returned when nothing was stored;
+// prototype carries the gob type used to decode a stored value.
+func (s *RedisSyncer) runDecisionScript(ctx context.Context, script *goredis.Script, key fwkdl.StateKey, id string, encoded []byte, ttl time.Duration, refresh bool, miss, prototype any) (any, bool, error) {
+	reply, err := script.Run(ctx, s.client, []string{s.coordKey(key, id)},
+		encoded, ttl.Milliseconds(), boolFlag(refresh)).Result()
+	if err != nil {
+		return nil, false, fmt.Errorf("redis-syncer: decision script: %w", err)
+	}
+	parts, ok := reply.([]interface{})
+	if !ok || len(parts) != 2 {
+		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+	}
+	existed, ok := parts[1].(int64)
+	if !ok {
+		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+	}
+	if existed == 0 {
+		return miss, false, nil
+	}
+	stored, ok := parts[0].(string)
+	if !ok {
+		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+	}
+	decoded, err := gobDecode([]byte(stored), prototype)
+	if err != nil {
+		return nil, false, fmt.Errorf("redis-syncer: decision decode: %w", err)
+	}
+	return decoded, true, nil
+}
+
+func boolFlag(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+// GetOrSet atomically returns the existing request-level value or stores
+// candidate. DecisionOptions tunes the TTL and refresh-on-access policy; the
+// zero options keep the syncer's coordinationTTL with no refresh.
+func (s *RedisSyncer) GetOrSet(ctx context.Context, key fwkdl.StateKey, id string, candidate any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
 	if candidate == nil {
 		return nil, false, errors.New("redis-syncer: getorset candidate must not be nil")
 	}
@@ -305,21 +385,22 @@ func (s *RedisSyncer) GetOrSet(ctx context.Context, key fwkdl.StateKey, id strin
 		return nil, false, fmt.Errorf("redis-syncer: getorset encode: %w", err)
 	}
 
-	stored, err := s.client.SetArgs(ctx, s.coordKey(key, id), data, goredis.SetArgs{
-		Mode: "NX",
-		Get:  true,
-		TTL:  s.coordinationTTL,
-	}).Result()
-	if errors.Is(err, goredis.Nil) {
-		return candidate, false, nil
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("redis-syncer: getorset: %w", err)
+	return s.runDecisionScript(ctx, getOrSetScript, key, id, data,
+		s.decisionTTL(opts), refreshOnAccess(opts), candidate, candidate)
+}
+
+// Replace atomically overwrites the request-level value and returns the value
+// it replaced. DecisionOptions applies as in GetOrSet.
+func (s *RedisSyncer) Replace(ctx context.Context, key fwkdl.StateKey, id string, value any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
+	if value == nil {
+		return nil, false, errors.New("redis-syncer: replace value must not be nil")
 	}
 
-	actual, err := gobDecode([]byte(stored), candidate)
+	data, err := encodeValue(value)
 	if err != nil {
-		return nil, false, fmt.Errorf("redis-syncer: getorset decode: %w", err)
+		return nil, false, fmt.Errorf("redis-syncer: replace encode: %w", err)
 	}
-	return actual, true, nil
+
+	return s.runDecisionScript(ctx, replaceScript, key, id, data,
+		s.decisionTTL(opts), false, nil, value)
 }

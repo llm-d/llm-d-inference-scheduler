@@ -61,6 +61,9 @@ func (v cloneableInt) Clone() fwkdl.Cloneable { return v }
 type commandRecorder struct {
 	commands []goredis.Cmder
 	err      error
+	// passThrough forwards commands to the server instead of short-circuiting
+	// with err, so a test can both count commands and execute them.
+	passThrough bool
 }
 
 func (r *commandRecorder) DialHook(next goredis.DialHook) goredis.DialHook {
@@ -69,9 +72,12 @@ func (r *commandRecorder) DialHook(next goredis.DialHook) goredis.DialHook {
 	}
 }
 
-func (r *commandRecorder) ProcessHook(_ goredis.ProcessHook) goredis.ProcessHook {
-	return func(_ context.Context, cmd goredis.Cmder) error {
+func (r *commandRecorder) ProcessHook(next goredis.ProcessHook) goredis.ProcessHook {
+	return func(ctx context.Context, cmd goredis.Cmder) error {
 		r.commands = append(r.commands, cmd)
+		if r.passThrough {
+			return next(ctx, cmd)
+		}
 		return r.err
 	}
 }
@@ -670,8 +676,9 @@ func TestGetOrSetRejectsNilCandidate(t *testing.T) {
 }
 
 func TestGetOrSetUsesOneAtomicRedisCommand(t *testing.T) {
-	recorder := &commandRecorder{err: goredis.Nil}
-	client := goredis.NewClient(&goredis.Options{})
+	server := miniredis.RunT(t)
+	recorder := &commandRecorder{passThrough: true}
+	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
 	client.AddHook(recorder)
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	syncer := &RedisSyncer{client: client, coordinationTTL: testCoordinationTTL}
@@ -681,14 +688,24 @@ func TestGetOrSetUsesOneAtomicRedisCommand(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, existed)
 	require.Equal(t, "candidate", actual)
-	require.Len(t, recorder.commands, 1)
-	args := recorder.commands[0].Args()
-	require.Len(t, args, 7)
-	require.Equal(t, "set", args[0])
-	require.Equal(t, syncer.coordKey("request", "request-id"), args[1])
-	_, ok := args[2].([]byte)
-	require.True(t, ok)
-	require.Equal(t, []any{"ex", int64(180), "NX", "get"}, args[3:])
+	// The read-refresh-write runs as one script invocation (miniredis answers
+	// the first EVALSHA with NOSCRIPT, so go-redis retries once as EVAL; a
+	// real Redis serves the cached EVALSHA). No separate set/get/pexpire may
+	// appear: a miss cannot interleave with a concurrent writer.
+	for _, cmd := range recorder.commands {
+		switch cmd.Name() {
+		case "hello", "client", "ping", "select":
+			continue
+		case "evalsha", "eval":
+		default:
+			t.Fatalf("unexpected command %q alongside the decision script", cmd.Name())
+		}
+	}
+	last := recorder.commands[len(recorder.commands)-1]
+	require.Equal(t, "eval", last.Name())
+	args := last.Args()
+	require.Equal(t, syncer.coordKey("request", "request-id"), args[3])
+	require.Equal(t, syncer.coordinationTTL.Milliseconds(), args[5])
 }
 
 func TestFactoryConfiguration(t *testing.T) {
@@ -827,4 +844,92 @@ func TestFactoryGeneratesDistinctReplicaIDs(t *testing.T) {
 	syncerB := newSyncer()
 
 	require.NotEqual(t, syncerA.replicaID, syncerB.replicaID)
+}
+
+func TestGetOrSetHonorsOptionsTTLOverDefault(t *testing.T) {
+	server := miniredis.RunT(t)
+	syncer, _ := newTestSyncer(t, server, testReplicaID)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: time.Second}
+
+	_, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+	require.False(t, existed)
+
+	// The one-second option TTL applies, not the minutes-long default.
+	server.FastForward(2 * time.Second)
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v2", opts)
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.Equal(t, "v2", actual)
+}
+
+func TestGetOrSetRefreshOnAccessExtendsTTL(t *testing.T) {
+	server := miniredis.RunT(t)
+	syncer, _ := newTestSyncer(t, server, testReplicaID)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	// Twenty minutes of two-minute-gapped accesses: each read refreshes the
+	// expiration, so the decision outlives its nominal TTL.
+	for range 10 {
+		server.FastForward(2 * time.Minute)
+		actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v2", opts)
+		require.NoError(t, err)
+		require.True(t, existed)
+		require.Equal(t, "v1", actual)
+	}
+
+	// Ten idle minutes with no access: the decision expires.
+	server.FastForward(10 * time.Minute)
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.Equal(t, "v3", actual)
+}
+
+func TestReplaceOverwritesStoredDecision(t *testing.T) {
+	server := miniredis.RunT(t)
+	syncer, _ := newTestSyncer(t, server, testReplicaID)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: time.Minute}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	previous, existed, err := syncer.Replace(ctx, "sessions", "s1", "v2", opts)
+	require.NoError(t, err)
+	require.True(t, existed)
+	require.Equal(t, "v1", previous)
+
+	// The overwrite is visible to the next coordinated read.
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
+	require.NoError(t, err)
+	require.True(t, existed)
+	require.Equal(t, "v2", actual)
+
+	// Replace over an absent key reports nothing previous.
+	previous, existed, err = syncer.Replace(ctx, "sessions", "s2", "v1", opts)
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.Nil(t, previous)
+}
+
+func TestReplaceHonorsOptionsTTL(t *testing.T) {
+	server := miniredis.RunT(t)
+	syncer, _ := newTestSyncer(t, server, testReplicaID)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: time.Second}
+
+	_, _, err := syncer.Replace(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	server.FastForward(2 * time.Second)
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v2", opts)
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.Equal(t, "v2", actual)
 }

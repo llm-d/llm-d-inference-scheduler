@@ -139,7 +139,6 @@ func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers ma
 		var payload map[string]any
 		payload, err = parserutil.UnmarshalEnvelope(body, promptField)
 		bodyMap = fwkrh.PayloadMap(payload)
-		extractedBody.RawBody = body
 	} else if rawField := tokenInputField(extractedBody); rawField == "" {
 		bodyMap = make(fwkrh.PayloadMap)
 		err = parserutil.Unmarshal(body, &bodyMap)
@@ -152,6 +151,10 @@ func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers ma
 		return nil, fmt.Errorf("error unmarshaling request bodyMap: %w", err)
 	}
 
+	// Every surface keeps the original bytes: downstream consumers (request
+	// sizing, the rollout screener's prefix-hash session key) read RawBody
+	// regardless of the API shape, so it must not be empty on /v1/responses.
+	extractedBody.RawBody = body
 	extractedBody.Payload = bodyMap
 	if model, ok := bodyMap["model"].(string); ok {
 		extractedBody.Model = model

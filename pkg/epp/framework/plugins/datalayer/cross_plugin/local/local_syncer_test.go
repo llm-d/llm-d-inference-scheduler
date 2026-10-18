@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -101,4 +102,106 @@ func TestLocalSyncerGetOrSet(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, existed)
 	assert.Equal(t, "first", value)
+}
+
+// newTestSyncer returns a LocalSyncer whose clock starts at a fixed instant
+// and a function advancing that clock.
+func newTestSyncer(t *testing.T) (*LocalSyncer, func(time.Duration)) {
+	t.Helper()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	syncer := NewLocalSyncer("test", "replica")
+	syncer.now = func() time.Time { return now }
+	return syncer, func(d time.Duration) { now = now.Add(d) }
+}
+
+func TestLocalSyncerSessionSurvivesIdleWindowWithinTTL(t *testing.T) {
+	syncer, advance := newTestSyncer(t)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	// Four idle minutes: well inside the ten-minute TTL.
+	advance(4 * time.Minute)
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v2", opts)
+	require.NoError(t, err)
+	assert.True(t, existed)
+	assert.Equal(t, "v1", actual)
+}
+
+func TestLocalSyncerRegularAccessKeepsSessionAliveBeyondTotalTTL(t *testing.T) {
+	syncer, advance := newTestSyncer(t)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	// Twenty minutes of two-minute-gapped accesses: each refresh pushes the
+	// expiration out, so the decision outlives its nominal TTL.
+	for range 10 {
+		advance(2 * time.Minute)
+		actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v2", opts)
+		require.NoError(t, err)
+		assert.True(t, existed)
+		assert.Equal(t, "v1", actual)
+	}
+}
+
+func TestLocalSyncerSessionExpiresAfterTTLInactivity(t *testing.T) {
+	syncer, advance := newTestSyncer(t)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	advance(10 * time.Minute)
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v2", opts)
+	require.NoError(t, err)
+	assert.False(t, existed)
+	assert.Equal(t, "v2", actual)
+}
+
+func TestLocalSyncerNoOptionsNeverExpires(t *testing.T) {
+	syncer, advance := newTestSyncer(t)
+	ctx := context.Background()
+
+	// The zero options keep the implementation default: no expiration, the
+	// behavior request-level decisions rely on.
+	_, _, err := syncer.GetOrSet(ctx, "requests", "r1", "v1")
+	require.NoError(t, err)
+
+	advance(24 * time.Hour)
+	actual, existed, err := syncer.GetOrSet(ctx, "requests", "r1", "v2")
+	require.NoError(t, err)
+	assert.True(t, existed)
+	assert.Equal(t, "v1", actual)
+}
+
+func TestLocalSyncerReplaceOverwritesAndReturnsPrevious(t *testing.T) {
+	syncer, advance := newTestSyncer(t)
+	ctx := context.Background()
+	opts := fwkdl.DecisionOptions{TTL: 10 * time.Minute, RefreshOnAccess: true}
+
+	_, _, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", opts)
+	require.NoError(t, err)
+
+	previous, existed, err := syncer.Replace(ctx, "sessions", "s1", "v2", opts)
+	require.NoError(t, err)
+	assert.True(t, existed)
+	assert.Equal(t, "v1", previous)
+
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v3", opts)
+	require.NoError(t, err)
+	assert.True(t, existed)
+	assert.Equal(t, "v2", actual)
+
+	// A Replace over an expired entry reports nothing previous.
+	advance(10 * time.Minute)
+	previous, existed, err = syncer.Replace(ctx, "sessions", "s1", "v4", opts)
+	require.NoError(t, err)
+	assert.False(t, existed)
+	assert.Nil(t, previous)
 }

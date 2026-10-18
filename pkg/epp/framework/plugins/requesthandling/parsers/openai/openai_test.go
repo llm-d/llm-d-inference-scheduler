@@ -1364,8 +1364,9 @@ func TestOpenAIParser_ParseRequest(t *testing.T) {
 				t.Errorf("ParseRequest() got.SkipResponseProcessing = %v, want false", got.SkipResponseProcessing)
 			}
 
+			// Every surface preserves the original bytes in RawBody.
+			tt.want.RawBody = bodyBytes
 			if tt.want.Completions != nil || tt.want.ChatCompletions != nil {
-				tt.want.RawBody = bodyBytes
 				payload, _ := tt.want.Payload.AsMap()
 				for key, value := range payload {
 					raw, err := json.Marshal(value)

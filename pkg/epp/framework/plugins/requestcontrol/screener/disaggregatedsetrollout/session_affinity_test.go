@@ -22,7 +22,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
@@ -324,5 +326,156 @@ func flipRevisionNotReady(t *testing.T, screener *Screener, revision string) {
 		if err := handler.Extract(context.Background(), podEvent(t, notReadyPod(pod.name, revision, pod.role), fwkdl.EventAddOrUpdate)); err != nil {
 			t.Fatalf("flip %s to NotReady: %v", pod.name, err)
 		}
+	}
+}
+
+func TestScreenerSessionAffinityCoordinationOutranksStickiness(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	syncer := &decisionSyncer{}
+	syncer.seed("session", "v1")
+	syncer.seed("decision-id", "v2")
+	screener.handle.SetCrossReplicaSyncer(syncer)
+
+	// A parallel encoder's shards share the decision ID; its coordinated
+	// revision v2 must win over the session's standing v1.
+	request := sessionRequest("session", 0)
+	request.Headers[reqcommon.RevisionDecisionIDHeaderKey] = "decision-id"
+	got := servedRevision(screenCandidates(t, screener, request, candidatePool(1, 1)))
+	if got != "v2" {
+		t.Fatalf("coordinated decision must outrank session stickiness: got %s", got)
+	}
+
+	// The session decision follows the coordinated outcome, so the session's
+	// next turn stays on v2 rather than flapping back to v1.
+	if stored, ok := syncer.stored("session"); !ok || stored != "v2" {
+		t.Fatalf("session decision must be replaced with the coordinated revision: %v", stored)
+	}
+	next := servedRevision(screenCandidates(t, screener, sessionRequest("session", 1), candidatePool(1, 1)))
+	if next != "v2" {
+		t.Fatalf("session must follow the coordinated outcome on its next turn: got %s", next)
+	}
+}
+
+func TestScreenerSessionAffinityKeepsLocalSessionThroughSyncedTransition(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{"v1": {"prefill": 1, "decode": 1}})
+	v1Only := candidatePool(1, 1)
+
+	// Single revision: the session decision is local.
+	pinned := servedRevision(screenCandidates(t, screener, sessionRequest("session", 0), v1Only))
+	if pinned != "v1" {
+		t.Fatalf("single-revision fleet must pin v1: got %s", pinned)
+	}
+
+	// A second revision appears and a syncer is installed: coordination turns
+	// on, and the local decision seeds the synced one.
+	seedCounts(t, screener, map[string]map[string]int{"v2": {"prefill": 1, "decode": 1}})
+	candidates := append(candidatePool(1, 1), endpoint("v2-0", revLabels("v2")))
+	syncer := &decisionSyncer{}
+	screener.handle.SetCrossReplicaSyncer(syncer)
+
+	got := servedRevision(screenCandidates(t, screener, sessionRequest("session", 1), candidates))
+	if got != "v1" {
+		t.Fatalf("session must keep its revision when coordination turns on: got %s", got)
+	}
+	if stored, ok := syncer.stored("session"); !ok || stored != "v1" {
+		t.Fatalf("local decision must seed the synced decision: %v", stored)
+	}
+}
+
+func TestScreenerSessionAffinitySyncedInvalidationReplacesWithoutFlapBack(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	syncer := &decisionSyncer{}
+	syncer.seed("session", "v1")
+	screener.handle.SetCrossReplicaSyncer(syncer)
+	candidates := candidatePool(1, 1)
+
+	// v1 loses coverage: the session must move and the synced decision must
+	// be replaced atomically, not deleted for a concurrent GetOrSet to miss.
+	flipRevisionNotReady(t, screener, "v1")
+	moved := servedRevision(screenCandidates(t, screener, sessionRequest("session", 1), candidates))
+	if moved == "" || moved == "v1" {
+		t.Fatalf("session must leave a zero-share revision: got %s", moved)
+	}
+	if len(syncer.replaced) != 1 || syncer.replaced[0] != "session" {
+		t.Fatalf("invalidation must Replace the session decision once: %v", syncer.replaced)
+	}
+	if stored, ok := syncer.stored("session"); !ok || stored != moved {
+		t.Fatalf("synced decision must hold the replacement: %v", stored)
+	}
+
+	again := servedRevision(screenCandidates(t, screener, sessionRequest("session", 2), candidates))
+	if again != moved {
+		t.Fatalf("replacement decision must stick: moved=%s again=%s", moved, again)
+	}
+}
+
+func TestScreenerSessionAffinityParallelEncodersConverge(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	syncer := &decisionSyncer{}
+	screener.handle.SetCrossReplicaSyncer(syncer)
+	candidates := candidatePool(1, 1)
+
+	// Two sessions, one parallel-encode request: every shard shares the
+	// decision ID, so both sessions must land on the same revision.
+	shard := func(sessionID string) *fwksched.InferenceRequest {
+		request := sessionRequest(sessionID, 0)
+		request.Headers[reqcommon.RevisionDecisionIDHeaderKey] = "decision-id"
+		return request
+	}
+	first := servedRevision(screenCandidates(t, screener, shard("session-a"), candidates))
+	second := servedRevision(screenCandidates(t, screener, shard("session-b"), candidates))
+	if first == "" || second != first {
+		t.Fatalf("parallel encoders must converge on one revision: first=%s second=%s", first, second)
+	}
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		if stored, ok := syncer.stored(sessionID); !ok || stored != first {
+			t.Fatalf("session %s must follow the coordinated revision %s: %v", sessionID, first, stored)
+		}
+	}
+}
+
+func TestScreenerSessionAffinityLocalDecisionExpiresAfterTTL(t *testing.T) {
+	config := sessionAffinityConfig()
+	config.RevisionGating.SessionAffinity.TTL = "50ms"
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+
+	if pinned := servedRevision(screenCandidates(t, screener, sessionRequest("session", 0), candidatePool(1, 1))); pinned == "" {
+		t.Fatal("first turn screened to no endpoint")
+	}
+	if _, ok := screener.lookupStickyRevision("session"); !ok {
+		t.Fatal("session decision must be stored on first turn")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := screener.lookupStickyRevision("session"); ok {
+		t.Fatal("session decision must expire after the configured TTL")
 	}
 }

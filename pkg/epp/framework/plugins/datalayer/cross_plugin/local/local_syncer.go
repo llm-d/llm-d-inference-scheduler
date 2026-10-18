@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
@@ -35,13 +36,26 @@ var _ fwkdl.CrossReplicaSyncer = (*LocalSyncer)(nil)
 type LocalSyncer struct {
 	typedName fwkplugin.TypedName
 	replicaID string
-	data      sync.Map
+	// now is swappable so tests can advance time without sleeping.
+	now func() time.Time
+
+	mu   sync.Mutex
+	data map[string]localEntry
+}
+
+// localEntry is one coordination decision. A zero expiresAt means the entry
+// never expires, the behavior of decisions stored without DecisionOptions.
+type localEntry struct {
+	value     any
+	expiresAt time.Time
 }
 
 func NewLocalSyncer(name, replicaID string) *LocalSyncer {
 	return &LocalSyncer{
 		typedName: fwkplugin.TypedName{Type: LocalSyncerType, Name: name},
 		replicaID: replicaID,
+		now:       time.Now,
+		data:      make(map[string]localEntry),
 	}
 }
 
@@ -73,7 +87,68 @@ func (s *LocalSyncer) Delete(context.Context, fwkdl.StateKey, string) error {
 	return nil
 }
 
-func (s *LocalSyncer) GetOrSet(_ context.Context, key fwkdl.StateKey, id string, candidate any) (any, bool, error) {
-	actual, loaded := s.data.LoadOrStore(s.syncKey(key, id), candidate)
-	return actual, loaded, nil
+// expired reports whether an entry is unusable at t. Entries without an
+// expiration never are.
+func (e localEntry) expired(t time.Time) bool {
+	return !e.expiresAt.IsZero() && !t.Before(e.expiresAt)
+}
+
+func (s *LocalSyncer) GetOrSet(_ context.Context, key fwkdl.StateKey, id string, candidate any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
+	options := fwkdl.DecisionOptions{}
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	syncKey := s.syncKey(key, id)
+	entry, found := s.data[syncKey]
+	if found && entry.expired(s.now()) {
+		delete(s.data, syncKey)
+		found = false
+	}
+	if found {
+		if options.RefreshOnAccess {
+			s.data[syncKey] = localEntry{value: entry.value, expiresAt: s.expiry(options)}
+		}
+		return entry.value, true, nil
+	}
+	s.data[syncKey] = localEntry{value: candidate, expiresAt: s.expiry(options)}
+	return candidate, false, nil
+}
+
+func (s *LocalSyncer) Replace(_ context.Context, key fwkdl.StateKey, id string, value any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
+	options := fwkdl.DecisionOptions{}
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	syncKey := s.syncKey(key, id)
+	entry, found := s.data[syncKey]
+	if found && entry.expired(s.now()) {
+		found = false
+	}
+	s.data[syncKey] = localEntry{value: value, expiresAt: s.expiry(options)}
+	return valueOrPrevious(entry, found), found, nil
+}
+
+func valueOrPrevious(entry localEntry, found bool) any {
+	if !found {
+		return nil
+	}
+	return entry.value
+}
+
+// expiry returns the expiration an entry stored under options carries. A
+// zero options TTL means no expiration, matching the pre-options behavior of
+// decisions that live for the syncer's lifetime.
+func (s *LocalSyncer) expiry(options fwkdl.DecisionOptions) time.Time {
+	if options.TTL <= 0 {
+		return time.Time{}
+	}
+	return s.now().Add(options.TTL)
 }

@@ -227,8 +227,15 @@ func (c *Config) Validate() error {
 		} else if *affinity.PrefixBytes < 0 {
 			return errors.New("revisionGating.sessionAffinity.prefixBytes must not be negative")
 		}
-		if _, err := time.ParseDuration(affinity.TTL); err != nil {
+		ttl, err := time.ParseDuration(affinity.TTL)
+		if err != nil {
 			return fmt.Errorf("revisionGating.sessionAffinity.ttl %q is not a valid duration: %w", affinity.TTL, err)
+		}
+		if ttl <= 0 {
+			return fmt.Errorf("revisionGating.sessionAffinity.ttl %q must be positive", affinity.TTL)
+		}
+		if affinity.MaxSessions < 0 {
+			return fmt.Errorf("revisionGating.sessionAffinity.maxSessions must not be negative, got %d", affinity.MaxSessions)
 		}
 	}
 

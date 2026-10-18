@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -483,11 +484,20 @@ func TestScreenerWeightedDistribution(t *testing.T) {
 	}
 }
 
+// decisionSyncer is a CrossReplicaSyncer fake for coordination tests. When
+// actual is set, GetOrSet returns it for every id (a pre-existing coordinated
+// decision); otherwise the fake is stateful, storing the first candidate per
+// id so later calls converge as they would across replicas. err, when set,
+// fails both GetOrSet and Replace.
 type decisionSyncer struct {
 	actual any
 	err    error
 	calls  int
 	ids    []string
+
+	mu        sync.Mutex
+	decisions map[string]any
+	replaced  []string
 }
 
 func (s *decisionSyncer) TypedName() fwkplugin.TypedName {
@@ -502,10 +512,58 @@ func (s *decisionSyncer) Get(context.Context, fwkdl.CrossReplicaSpec, string) (a
 
 func (s *decisionSyncer) Delete(context.Context, fwkdl.StateKey, string) error { return nil }
 
-func (s *decisionSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, id string, _ any) (any, bool, error) {
+// seed pre-stores a coordinated decision, as another EPP replica would have.
+func (s *decisionSyncer) seed(id string, value any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.decisions == nil {
+		s.decisions = make(map[string]any)
+	}
+	s.decisions[id] = value
+}
+
+func (s *decisionSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, id string, candidate any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	s.calls++
 	s.ids = append(s.ids, id)
-	return s.actual, true, s.err
+	if s.err != nil {
+		return nil, false, s.err
+	}
+	if s.actual != nil {
+		return s.actual, true, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if stored, ok := s.decisions[id]; ok {
+		return stored, true, nil
+	}
+	if s.decisions == nil {
+		s.decisions = make(map[string]any)
+	}
+	s.decisions[id] = candidate
+	return candidate, false, nil
+}
+
+// stored returns the fake's current decision for an id.
+func (s *decisionSyncer) stored(id string) (any, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.decisions[id]
+	return value, ok
+}
+
+func (s *decisionSyncer) Replace(_ context.Context, _ fwkdl.StateKey, id string, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+	s.replaced = append(s.replaced, id)
+	if s.err != nil {
+		return nil, false, s.err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous, existed := s.decisions[id]
+	if s.decisions == nil {
+		s.decisions = make(map[string]any)
+	}
+	s.decisions[id] = value
+	return previous, existed, nil
 }
 
 func TestScreenerCoordinatesOnlyWhileMultipleRevisionsAreObserved(t *testing.T) {

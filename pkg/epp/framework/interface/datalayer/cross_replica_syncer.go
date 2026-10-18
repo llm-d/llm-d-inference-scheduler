@@ -18,6 +18,7 @@ package datalayer
 
 import (
 	"context"
+	"time"
 
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 )
@@ -25,9 +26,20 @@ import (
 // StateKey namespaces cross-EPP shared state.
 type StateKey string
 
+// DecisionOptions tunes the expiration policy of one coordination decision.
+// The zero value keeps the implementation's default behavior.
+type DecisionOptions struct {
+	// TTL is how long the stored decision survives unused. Zero uses the
+	// implementation default.
+	TTL time.Duration
+	// RefreshOnAccess extends the decision's TTL on every read, so a decision
+	// in continuous use never expires.
+	RefreshOnAccess bool
+}
+
 // CrossReplicaSyncer synchronizes shared state across EPP replicas.
 // Implementations own the storage mechanism and must provide the atomic
-// consistency required by GetOrSet. Get can run concurrently with Set and Delete.
+// consistency required by GetOrSet and Replace. Get can run concurrently with Set and Delete.
 type CrossReplicaSyncer interface {
 	fwkplugin.Plugin
 
@@ -45,10 +57,18 @@ type CrossReplicaSyncer interface {
 	// GetOrSet atomically returns the value already stored for key and id, or
 	// stores candidate and returns it. This is global request-level state shared
 	// across EPP replicas, not per-endpoint state. Use it only when exact
-	// coordination is required. Implementations own a fixed expiration period.
-	// The bool reports whether the returned value already existed. Implementations
-	// must provide linearizable behavior across every EPP replica sharing the syncer.
-	GetOrSet(ctx context.Context, key StateKey, id string, candidate any) (actual any, existed bool, err error)
+	// coordination is required. Implementations own a fixed expiration period
+	// unless opts supplies one. The bool reports whether the returned value
+	// already existed. Implementations must provide linearizable behavior
+	// across every EPP replica sharing the syncer.
+	GetOrSet(ctx context.Context, key StateKey, id string, candidate any, opts ...DecisionOptions) (actual any, existed bool, err error)
+
+	// Replace atomically overwrites the value stored for key and id and
+	// returns the value it replaced. Unlike GetOrSet the stored value is
+	// overwritten rather than kept, for state whose previous decision is known
+	// stale. The bool reports whether a value was previously stored. Expiration
+	// follows opts as in GetOrSet.
+	Replace(ctx context.Context, key StateKey, id string, value any, opts ...DecisionOptions) (previous any, existed bool, err error)
 }
 
 // CrossReplicaContributor is an opt-in interface for endpoint extractors that

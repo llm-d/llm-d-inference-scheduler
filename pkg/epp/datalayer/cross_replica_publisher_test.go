@@ -99,8 +99,12 @@ func (s *fakeSyncer) Delete(_ context.Context, key fwkdl.StateKey, endpointID st
 	return nil
 }
 
-func (s *fakeSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, _ string, candidate any) (any, bool, error) {
+func (s *fakeSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, _ string, candidate any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	return candidate, false, nil
+}
+
+func (s *fakeSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+	return value, false, nil
 }
 
 // fakeContributor is a Plugin + CrossReplicaContributor whose supplied value
@@ -258,8 +262,12 @@ func (s *blockingSyncer) Delete(_ context.Context, _ fwkdl.StateKey, endpointID 
 	return nil
 }
 
-func (s *blockingSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, _ string, candidate any) (any, bool, error) {
+func (s *blockingSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, _ string, candidate any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	return candidate, false, nil
+}
+
+func (s *blockingSyncer) Replace(_ context.Context, _ fwkdl.StateKey, _ string, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+	return value, false, nil
 }
 
 func (c fakeContributor) TypedName() fwkplugin.TypedName {

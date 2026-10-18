@@ -301,14 +301,28 @@ of the same session. The session key is, in order:
 
 A stored decision stops being used once its revision's gating share drops to
 zero: the session moves to a fresh weighted pick, and the stored decision is
-replaced. A revision appearing or changing share does not move a session.
+replaced atomically. A revision appearing or changing share does not move a
+session.
+
+Session affinity proposes a revision; request-level coordination decides. When
+a request carries a revision decision ID (a parallel-encode shard, or any
+request that runs decision-ID coordination), the coordinated revision outranks
+the session's standing decision, and the session follows the coordinated
+outcome so its next turn does not flap back.
 
 With coordination enabled, session decisions are shared across EPP replicas
-through the `CrossReplicaSyncer` under the same state key as revision-decision
-coordination, keyed by the session key. Without a syncer, or with
-`disableCoordination`, decisions live in a local bounded TTL cache: concurrent
-first turns of one session can each store a decision, and the session settles
-on the next turn.
+through the `CrossReplicaSyncer`, under a session state key separate from
+revision-decision coordination and keyed by the session key. Shared decisions
+carry the configured `ttl`, refreshed on every access, so a session in
+continuous use never expires and an idle one is re-picked after `ttl`. When a
+deployment grows from one revision to several and coordination turns on, each
+EPP seeds the shared decision from its local one, keeping sessions in flight
+on their revision.
+
+Without a syncer, or with `disableCoordination`, decisions live in a local
+bounded TTL cache with the same refresh-on-access semantics: concurrent first
+turns of one session can each store a decision, and the session settles on the
+next turn.
 
 ## Configuration
 
@@ -359,7 +373,7 @@ request. Do not add it to a scheduling profile.
 | `revisionGating.roleLabelKey` | string | No | `disaggregatedset.x-k8s.io/role` | Label identifying a Pod role. |
 | `revisionGating.disableCoordination` | boolean | No | `false` | Disables coordination of rollout revisions across parallel requests. Set only for known sequential P/D deployments; E/P/D requires coordination. |
 | `revisionGating.sessionAffinity.enabled` | boolean | No | `false` | Keeps a session without a strict revision header on the revision a previous request of that session used. |
-| `revisionGating.sessionAffinity.ttl` | duration | No | `10m` | Idle time before a local session decision expires. |
+| `revisionGating.sessionAffinity.ttl` | duration | No | `10m` | Idle time before a session decision expires, locally and in the syncer. Every access refreshes it. |
 | `revisionGating.sessionAffinity.maxSessions` | integer | No | `10000` | Bound on locally stored session decisions. |
 | `revisionGating.sessionAffinity.prefixBytes` | integer | No | `4096` | Leading request-body bytes hashed as the session key when no session attribute is set. `0` disables the prefix-hash fallback. |
 
