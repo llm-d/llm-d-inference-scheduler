@@ -69,13 +69,14 @@ func TestSetKVTransferParamsHelper(t *testing.T) {
 	params := map[string]any{"other": true}
 
 	body := &fwkrh.InferenceRequestBody{Payload: fwkrh.PayloadMap{reqcommon.FieldKVTransferParams: json.RawMessage(`{}`)}}
-	setKVTransferParams(body, params)
+	assert.True(t, setKVTransferParams(body, params))
 	assert.True(t, body.Mutated)
 	assert.Equal(t, params, body.Payload.(fwkrh.PayloadMap)[reqcommon.FieldKVTransferParams])
 
 	raw := &fwkrh.InferenceRequestBody{Payload: fwkrh.RawPayload(`{}`)}
-	setKVTransferParams(raw, params)
+	assert.False(t, setKVTransferParams(raw, params))
 	assert.Equal(t, fwkrh.RawPayload(`{}`), raw.Payload, "a raw payload is left as is")
+	assert.False(t, raw.Mutated)
 
-	setKVTransferParams(nil, params)
+	assert.False(t, setKVTransferParams(nil, params))
 }

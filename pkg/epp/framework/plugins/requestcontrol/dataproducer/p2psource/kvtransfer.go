@@ -39,13 +39,18 @@ func kvTransferParams(body *fwkrh.InferenceRequestBody) map[string]any {
 	return params
 }
 
-// setKVTransferParams stores params as the body's kv_transfer_params. No-op
-// when the body is not a parsed JSON object.
-func setKVTransferParams(body *fwkrh.InferenceRequestBody, params map[string]any) {
+// setKVTransferParams stores params as the body's kv_transfer_params and
+// reports whether it did. A nil body, or one a parser kept as raw bytes, is
+// left as is.
+func setKVTransferParams(body *fwkrh.InferenceRequestBody, params map[string]any) bool {
 	if body == nil {
-		return
+		return false
+	}
+	if _, ok := body.Payload.(fwkrh.PayloadMap); !ok {
+		return false
 	}
 	body.MutatePayloadMap(func(payload fwkrh.PayloadMap) {
 		payload[reqcommon.FieldKVTransferParams] = params
 	})
+	return true
 }

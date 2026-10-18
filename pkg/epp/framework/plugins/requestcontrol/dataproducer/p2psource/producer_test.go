@@ -671,6 +671,7 @@ func TestPreRequest_NilBody(t *testing.T) {
 	require.NoError(t, p.PreRequest(ctx, req, result))
 
 	assertPrefillHeader(t, req, "10.0.0.2", defaultP2PConnectorPort)
+	assert.NotContains(t, req.Headers, routing.KVCacheSourceHeader)
 }
 
 // A raw (unparsed) body cannot carry a source; it is left as received.
@@ -684,6 +685,9 @@ func TestPreRequest_RawBody_NotMutated(t *testing.T) {
 	require.NoError(t, p.PreRequest(ctx, req, decodeOnly(endpoint(p, "pod-a", "10.0.0.1", 1))))
 
 	assert.False(t, req.Body.Mutated)
+	// The header announces a block in the body, so a body that cannot carry
+	// one gets no header either.
+	assert.NotContains(t, req.Headers, routing.KVCacheSourceHeader)
 }
 
 // Nil request headers are allocated when the prefill headers are set.

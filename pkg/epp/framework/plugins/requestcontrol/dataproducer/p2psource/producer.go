@@ -556,13 +556,17 @@ func (p *Producer) PreRequest(ctx context.Context, request *scheduling.Inference
 			return nil
 		}
 	}
-	outcome = "pulled"
-
 	if params == nil {
 		params = map[string]any{}
 	}
 	params[reqcommon.FieldRemoteKVSource] = reqcommon.P2PPeerParams(uuid.NewString(), best.address, best.p2pPort)
-	setKVTransferParams(request.Body, params)
+	if !setKVTransferParams(request.Body, params) {
+		// A body a parser kept as raw bytes cannot carry the source, and the
+		// header must not announce one the body does not hold.
+		outcome = "unparsed-body"
+		return nil
+	}
+	outcome = "pulled"
 	routing.SetRoutingHeader(request.Headers, routing.KVCacheSourceHeader, net.JoinHostPort(best.address, strconv.Itoa(best.p2pPort)))
 	if logDecision {
 		kv = append(kv, "p2pPort", best.p2pPort)
