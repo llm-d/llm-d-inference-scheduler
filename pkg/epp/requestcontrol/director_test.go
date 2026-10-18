@@ -247,6 +247,7 @@ type mockRequestHeaderPlugin struct {
 	name           string
 	attributeKey   fwkplugin.DataKey
 	attributeValue string
+	err            error
 }
 
 func (m *mockRequestHeaderPlugin) TypedName() fwkplugin.TypedName {
@@ -255,7 +256,7 @@ func (m *mockRequestHeaderPlugin) TypedName() fwkplugin.TypedName {
 
 func (m *mockRequestHeaderPlugin) RequestHeader(_ context.Context, request *fwksched.InferenceRequest) error {
 	request.PutAttribute(m.attributeKey, m.attributeValue)
-	return nil
+	return m.err
 }
 
 type mockPreRequestPlugin struct {
