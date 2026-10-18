@@ -60,7 +60,7 @@
           startupProbe:
           {{- toYaml . | nindent 12 }}
         {{- end }}
-        {{- if $proxy.lifecycle }}
+        {{- if kindIs "map" $proxy.lifecycle }}
           lifecycle:
           {{- toYaml $proxy.lifecycle | nindent 12 }}
         {{- else if semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version }}
@@ -174,7 +174,7 @@
               port: {{ $grpcHealthPort }}
               service: readiness
             periodSeconds: 2
-          {{- if .Values.router.epp.lifecycle }}
+          {{- if kindIs "map" .Values.router.epp.lifecycle }}
           lifecycle:
             {{- toYaml .Values.router.epp.lifecycle | nindent 12 }}
           {{- else if semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version }}

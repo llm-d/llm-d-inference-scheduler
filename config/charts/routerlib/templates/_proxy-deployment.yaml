@@ -67,7 +67,7 @@ spec:
           startupProbe:
           {{- toYaml . | nindent 12 }}
         {{- end }}
-        {{- if $proxy.lifecycle }}
+        {{- if kindIs "map" $proxy.lifecycle }}
           lifecycle:
           {{- toYaml $proxy.lifecycle | nindent 12 }}
         {{- else if semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version }}
