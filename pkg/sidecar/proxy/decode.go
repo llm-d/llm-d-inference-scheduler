@@ -39,13 +39,9 @@ const (
 	// finishReasonLength is the finish reason when max_tokens was reached.
 	finishReasonLength = "length"
 
-	requestFieldN = "n"
-
 	responseFieldMessage = "message"
 	responseFieldIndex   = "index"
 	responseFieldDelta   = "delta"
-
-	roleAssistant = "assistant"
 )
 
 // dispatchDecode routes a fully-prepared decode request to either chunked
@@ -99,7 +95,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Each chunk continues the first choice's text for every choice, and the budget counts the tokens of all choices.
-	if n, ok := toInt(body[requestFieldN]); ok && n > 1 {
+	if n, ok := toInt(body[reqcommon.FieldN]); ok && n > 1 {
 		s.logger.V(logging.DEBUG).Info("chunked decode: several choices requested, using regular decode", "n", n)
 		s.decoderProxy.ServeHTTP(w, r)
 		return
@@ -118,14 +114,14 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		s.decoderProxy.ServeHTTP(w, r)
 		return
 	}
-	finalMessage := map[string]json.RawMessage{reqcommon.FieldRole: json.RawMessage(`"` + roleAssistant + `"`)}
+	finalMessage := map[string]json.RawMessage{reqcommon.FieldRole: json.RawMessage(`"` + reqcommon.RoleAssistant + `"`)}
 	prefix := ""
 	if continueFinal, _ := body[reqcommon.FieldContinueFinalMessage].(bool); continueFinal {
 		var role string
 		finalMessage = nil
 		// Only an assistant message can carry the accumulated text; any other final message is sent as is.
 		if len(messages) == 0 || json.Unmarshal(messages[len(messages)-1], &finalMessage) != nil ||
-			json.Unmarshal(finalMessage[reqcommon.FieldRole], &role) != nil || role != roleAssistant {
+			json.Unmarshal(finalMessage[reqcommon.FieldRole], &role) != nil || role != reqcommon.RoleAssistant {
 			s.decoderProxy.ServeHTTP(w, r)
 			return
 		}
@@ -420,7 +416,7 @@ func emitSSEChunk(w http.ResponseWriter, chunkResponse map[string]any) error {
 				responseFieldIndex:        choice[responseFieldIndex],
 				responseFieldFinishReason: choice[responseFieldFinishReason],
 			}
-			streamChoice[responseFieldDelta] = map[string]any{reqcommon.FieldContent: text, reqcommon.FieldRole: roleAssistant}
+			streamChoice[responseFieldDelta] = map[string]any{reqcommon.FieldContent: text, reqcommon.FieldRole: reqcommon.RoleAssistant}
 			streamChoices = append(streamChoices, streamChoice)
 		}
 		streamChunk[responseFieldChoices] = streamChoices
