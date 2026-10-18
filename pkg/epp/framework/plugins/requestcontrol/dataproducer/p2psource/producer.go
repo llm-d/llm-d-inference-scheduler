@@ -241,7 +241,7 @@ func New(name string, cfg Config) *Producer {
 		minCachedTokenDelta = defaultMinCachedTokenDelta
 	}
 	p2pConnectorPort := cfg.P2PConnectorPort
-	if p2pConnectorPort == 0 {
+	if !routing.IsTCPPort(p2pConnectorPort) {
 		p2pConnectorPort = defaultP2PConnectorPort
 	}
 	costModel := cfg.CostModel
@@ -578,9 +578,7 @@ func (p *Producer) PreRequest(ctx context.Context, request *scheduling.Inference
 // port plus the endpoint's data parallel rank, and false when the sum is not a
 // TCP port, which the bound on p2pConnectorPort alone does not rule out.
 func (p *Producer) p2pPort(md *fwkdl.EndpointMetadata) (int, bool) {
-	rank := md.GetRankIndex()
-	port := p.p2pConnectorPort + rank
-	return port, rank >= 0 && routing.IsTCPPort(port)
+	return routing.RankPort(p.p2pConnectorPort, md.GetRankIndex())
 }
 
 // cpuDeviceTier is the CachedBlocksByTier key for the CPU tier (device tiers

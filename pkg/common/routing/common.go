@@ -80,6 +80,13 @@ func IsTCPPort(port int) bool {
 	return port >= 1 && port <= 65535
 }
 
+// RankPort returns the port data parallel rank listens on when rank 0 listens
+// on base, and false when rank is negative or the sum is not a TCP port.
+func RankPort(base, rank int) (int, bool) {
+	port := base + rank
+	return port, rank >= 0 && IsTCPPort(port)
+}
+
 // StripScheme removes the scheme from an endpoint URL, returning host:port.
 // This is useful for gRPC clients that expect host:port format only.
 func StripScheme(endpoint string) string {

@@ -1460,3 +1460,12 @@ func TestProduce_CostModel_StashesChosenSourceState(t *testing.T) {
 	assert.Equal(t, 7*testBlockSize, best.cachedTokens)
 	assert.Equal(t, 0, best.waitingQueue)
 }
+
+// New falls back to the default for any port outside the TCP range, as it
+// does for the token floor; the factory rejects such a configuration before
+// New sees it.
+func TestNew_P2PConnectorPortOutOfRangeDefaults(t *testing.T) {
+	for _, port := range []int{0, -5, 70000} {
+		assert.Equal(t, defaultP2PConnectorPort, New("test", Config{P2PConnectorPort: port}).p2pConnectorPort, "port %d", port)
+	}
+}

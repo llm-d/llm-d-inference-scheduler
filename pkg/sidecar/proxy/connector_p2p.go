@@ -357,7 +357,12 @@ func parsePrefillP2P(logger logr.Logger, value string) *p2pPeer {
 // looks up and pulls cached prefix blocks from the peer instead of recomputing
 // them. The sidecar owns the field, so client-supplied keys are dropped. It
 // routes through dispatchDecode so chunked decode still applies.
-func (s *Server) decodeWithP2PSource(w http.ResponseWriter, r *http.Request, requestData map[string]any, source *kvSource) {
+func (s *Server) decodeWithP2PSource(w http.ResponseWriter, r *http.Request, p2p p2pRouting) {
+	requestData, ok := s.requestBody(r, w, p2p)
+	if !ok {
+		return
+	}
+	source := p2p.source
 	requestData[reqcommon.FieldKVTransferParams] = map[string]any{reqcommon.FieldRemoteKVSource: source.params()}
 
 	s.logger.Info("running P2P source protocol",

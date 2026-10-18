@@ -812,6 +812,7 @@ func TestServer_EncoderPathForwardsBodyWithoutSource(t *testing.T) {
 	s := NewProxy(Config{Port: "8000", KVConnector: constants.KVConnectorOffloading, ECConnector: constants.ECExampleConnector})
 	s.allowlistValidator = &AllowlistValidator{}
 	s.dataParallelProxies = make(map[string]http.Handler)
+	logged := captureLogs(s, 0)
 
 	var forwarded map[string]any
 	s.decoderProxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -839,6 +840,38 @@ func TestServer_EncoderPathForwardsBodyWithoutSource(t *testing.T) {
 	}
 	if _, ok := forwarded[reqcommon.FieldKVTransferParams]; ok {
 		t.Errorf("forwarded body carries kv_transfer_params: %v", forwarded[reqcommon.FieldKVTransferParams])
+	}
+	// The dropped pull is visible to the operator.
+	if !slices.ContainsFunc(*logged, func(line string) bool { return strings.Contains(line, "not wired through encoder disaggregation") }) {
+		t.Errorf("no warning for the dropped source: %v", *logged)
+	}
+}
+
+// decodeWithP2PSource reads the body itself when the dispatcher left it
+// unread, so a source without a parsed body never writes into a nil map.
+func TestServer_DecodeWithP2PSourceReadsUnreadBody(t *testing.T) {
+	s := NewProxy(Config{Port: "8000", KVConnector: constants.KVConnectorOffloading})
+	s.allowlistValidator = &AllowlistValidator{}
+
+	var forwarded map[string]any
+	s.decoderProxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		forwarded = map[string]any{}
+		_ = json.Unmarshal(raw, &forwarded)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(`{"model":"m","messages":[]}`))
+	recorder := httptest.NewRecorder()
+
+	s.decodeWithP2PSource(recorder, req, p2pRouting{source: &kvSource{kvRequestID: "k", p2pPeer: p2pPeer{host: "10.0.0.5", port: 7777}}})
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	kvParams, _ := forwarded[reqcommon.FieldKVTransferParams].(map[string]any)
+	if _, ok := kvParams[reqcommon.FieldRemoteKVSource]; !ok || forwarded["model"] != "m" {
+		t.Errorf("forwarded body = %v, want the client body with remote_kv_source", forwarded)
 	}
 }
 

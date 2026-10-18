@@ -202,6 +202,12 @@ func (s *Server) disaggregatedPrefillHandler(apiType reqcommon.APIType) http.Han
 			} else {
 				metrics.RecordDisagg(metricsutil.DisaggPathEncodeDecode)
 			}
+			if p2p.source != nil {
+				// The P/D stage rebuilds the body after the encoder stage and
+				// carries no source, so EPP's pull decision is not honored here.
+				logger.Info("warning: ignoring KV cache source: a cached-prefix pull is not wired through encoder disaggregation",
+					"source", p2p.source.String())
+			}
 			s.handleECConnector(w, r, prefillHostPort, allowedEncoders, p2p.prefill, apiType)
 			return
 		}
@@ -235,7 +241,7 @@ func (s *Server) disaggregatedPrefillHandler(apiType reqcommon.APIType) http.Han
 		}
 		if !s.forwardDataParallel || !s.dataParallelHandler(w, r) {
 			if p2p.source != nil {
-				s.decodeWithP2PSource(w, r, p2p.body, p2p.source)
+				s.decodeWithP2PSource(w, r, p2p)
 				return
 			}
 			if s.config.DecodeChunkSize > 0 && r.URL.Path == reqcommon.PathChatCompletions {

@@ -388,3 +388,26 @@ func TestDeleteRoutingHeaderRemovesRetiredNames(t *testing.T) {
 		t.Errorf("headers after delete = %v, want none", headers)
 	}
 }
+
+func TestRankPort(t *testing.T) {
+	tests := []struct {
+		name       string
+		base, rank int
+		wantPort   int
+		wantOK     bool
+	}{
+		{"rank 0", 7777, 0, 7777, true},
+		{"rank 3", 7777, 3, 7780, true},
+		{"upper bound", 65534, 1, 65535, true},
+		{"above the TCP range", 65535, 1, 65536, false},
+		{"negative rank", 7777, -1, 7776, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			port, ok := RankPort(tt.base, tt.rank)
+			if port != tt.wantPort || ok != tt.wantOK {
+				t.Errorf("RankPort(%d, %d) = %d, %v, want %d, %v", tt.base, tt.rank, port, ok, tt.wantPort, tt.wantOK)
+			}
+		})
+	}
+}
