@@ -183,6 +183,29 @@ func TestSSEReassemble_DropsNegativeChoiceIndex(t *testing.T) {
 	require.EqualValues(t, len("keep"), r.bufferedBytes())
 }
 
+// TestSSEReassemble_NonNumericIndexDefaultsToZero verifies a choice whose index is
+// not a number (a malformed frame) folds into index 0 rather than being dropped or
+// panicking: numField reports not-ok and foldChoice keeps its default.
+func TestSSEReassemble_NonNumericIndexDefaultsToZero(t *testing.T) {
+	r := newSSEReassembler(sseShapeText, 0)
+	r.add(frame(t, `{"choices":[{"index":"oops","text":"hi"}]}`))
+
+	choices := r.result()["choices"].([]any)
+	require.Len(t, choices, 1)
+	require.EqualValues(t, 0, choices[0].(map[string]any)["index"])
+	require.Equal(t, "hi", choices[0].(map[string]any)["text"])
+}
+
+// TestSSEReassemble_CapturesSystemFingerprint verifies the chat envelope carries
+// system_fingerprint through from the first chunk that sets it to the reply.
+func TestSSEReassemble_CapturesSystemFingerprint(t *testing.T) {
+	r := newSSEReassembler(sseShapeChat, 0)
+	r.add(frame(t, `{"id":"c","model":"m","system_fingerprint":"fp_123","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`))
+	r.add(frame(t, `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
+
+	require.Equal(t, "fp_123", r.result()["system_fingerprint"])
+}
+
 // The Responses stream is typed events; response.completed carries the terminal
 // response object, which the reassembler emits verbatim. The deltas before it
 // drive only the per-request ceiling, so the reply is exactly the object the pod

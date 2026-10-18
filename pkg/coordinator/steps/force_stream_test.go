@@ -1089,6 +1089,30 @@ func TestForceStream_SpentHandoff_SuppressesFallback(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released on the error path")
 }
 
+// TestSpendsRemoteBlocks covers the one-shot P2P handoff detector that gates the
+// fallback suppression: only a non-empty remote_block_ids list qualifies, so a
+// shared-storage body (do_remote_prefill but no block ids) and bodies with no or a
+// malformed kv_transfer_params all report false and still fall back.
+func TestSpendsRemoteBlocks(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+		want bool
+	}{
+		{"no kv_transfer_params", map[string]any{"model": "m"}, false},
+		{"kv_transfer_params not a map", map[string]any{reqcommon.FieldKVTransferParams: "nope"}, false},
+		{"shared storage: do_remote_prefill, no ids", map[string]any{reqcommon.FieldKVTransferParams: map[string]any{reqcommon.FieldDoRemotePrefill: true}}, false},
+		{"empty remote_block_ids", map[string]any{reqcommon.FieldKVTransferParams: map[string]any{reqcommon.FieldRemoteBlockIDs: []any{}}}, false},
+		{"remote_block_ids wrong type", map[string]any{reqcommon.FieldKVTransferParams: map[string]any{reqcommon.FieldRemoteBlockIDs: "1,2"}}, false},
+		{"populated remote_block_ids", map[string]any{reqcommon.FieldKVTransferParams: map[string]any{reqcommon.FieldRemoteBlockIDs: []any{1, 2}}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, spendsRemoteBlocks(tc.body))
+		})
+	}
+}
+
 // TestScanForcedResponse_TerminalMarker checks the buffered path's completeness
 // gate: a stream is complete only if it carried the [DONE] marker or a shape
 // terminal (a Responses terminal event, or a finish_reason on another shape). A
