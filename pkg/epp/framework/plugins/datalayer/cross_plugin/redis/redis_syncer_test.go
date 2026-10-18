@@ -933,3 +933,26 @@ func TestReplaceHonorsOptionsTTL(t *testing.T) {
 	require.False(t, existed)
 	require.Equal(t, "v2", actual)
 }
+
+func TestGetOrSetFloorsSubMillisecondTTL(t *testing.T) {
+	server := miniredis.RunT(t)
+	syncer, _ := newTestSyncer(t, server, testReplicaID)
+	ctx := context.Background()
+
+	// A sub-millisecond TTL truncates to zero milliseconds, which Redis
+	// rejects; the syncer must floor it instead of failing the write.
+	_, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v1", fwkdl.DecisionOptions{TTL: 500 * time.Microsecond})
+	require.NoError(t, err)
+	require.False(t, existed)
+
+	actual, existed, err := syncer.GetOrSet(ctx, "sessions", "s1", "v2")
+	require.NoError(t, err)
+	require.True(t, existed)
+	require.Equal(t, "v1", actual)
+
+	server.FastForward(time.Millisecond)
+	actual, existed, err = syncer.GetOrSet(ctx, "sessions", "s1", "v3")
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.Equal(t, "v3", actual)
+}

@@ -512,17 +512,23 @@ func (s *decisionSyncer) Get(context.Context, fwkdl.CrossReplicaSpec, string) (a
 
 func (s *decisionSyncer) Delete(context.Context, fwkdl.StateKey, string) error { return nil }
 
-// seed pre-stores a coordinated decision, as another EPP replica would have.
-func (s *decisionSyncer) seed(id string, value any) {
+// seed pre-stores a coordinated decision under a state key, as another EPP
+// replica would have.
+func (s *decisionSyncer) seed(key fwkdl.StateKey, id string, value any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.decisions == nil {
 		s.decisions = make(map[string]any)
 	}
-	s.decisions[id] = value
+	s.decisions[decisionEntryKey(key, id)] = value
 }
 
-func (s *decisionSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, id string, candidate any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+// decisionEntryKey namespaces an id by its state key, as the real syncers do.
+func decisionEntryKey(key fwkdl.StateKey, id string) string {
+	return string(key) + "\x00" + id
+}
+
+func (s *decisionSyncer) GetOrSet(_ context.Context, key fwkdl.StateKey, id string, candidate any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	s.calls++
 	s.ids = append(s.ids, id)
 	if s.err != nil {
@@ -533,38 +539,40 @@ func (s *decisionSyncer) GetOrSet(_ context.Context, _ fwkdl.StateKey, id string
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if stored, ok := s.decisions[id]; ok {
+	entryKey := decisionEntryKey(key, id)
+	if stored, ok := s.decisions[entryKey]; ok {
 		return stored, true, nil
 	}
 	if s.decisions == nil {
 		s.decisions = make(map[string]any)
 	}
-	s.decisions[id] = candidate
+	s.decisions[entryKey] = candidate
 	return candidate, false, nil
 }
 
-// stored returns the fake's current decision for an id.
-func (s *decisionSyncer) stored(id string) (any, bool) {
+// stored returns the fake's current decision for an id under a state key.
+func (s *decisionSyncer) stored(key fwkdl.StateKey, id string) (any, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	value, ok := s.decisions[id]
+	value, ok := s.decisions[decisionEntryKey(key, id)]
 	return value, ok
 }
 
-func (s *decisionSyncer) Replace(_ context.Context, _ fwkdl.StateKey, id string, expected, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+func (s *decisionSyncer) Replace(_ context.Context, key fwkdl.StateKey, id string, expected, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
 	if s.err != nil {
 		return nil, false, s.err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if stored, ok := s.decisions[id]; ok && stored != expected {
+	entryKey := decisionEntryKey(key, id)
+	if stored, ok := s.decisions[entryKey]; ok && stored != expected {
 		// A concurrent repair already changed the decision: it wins.
 		return stored, false, nil
 	}
 	if s.decisions == nil {
 		s.decisions = make(map[string]any)
 	}
-	s.decisions[id] = value
+	s.decisions[entryKey] = value
 	s.replaced = append(s.replaced, id)
 	return value, true, nil
 }

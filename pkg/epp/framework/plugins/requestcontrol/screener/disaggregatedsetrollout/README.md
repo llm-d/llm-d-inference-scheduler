@@ -294,10 +294,16 @@ of the same session. The session key is, in order:
    client session headers.
 2. Otherwise, the hash of the first `prefixBytes` bytes of the request body.
    A request that re-sends a shared leading prefix therefore keeps its key
-   across turns. A prompt rewrite, such as a context compaction, changes the
-   key: the request is treated as a new session, which matches the prefix
-   cache it can hit anyway. Set `prefixBytes` to `0` to restrict stickiness to
-   requests that carry a session attribute.
+   across turns. A body shorter than `prefixBytes` derives no key: hashing it
+   would key the whole conversation so far, and the next turn appends to it
+   and mints a new key, providing no stickiness. This fallback is a
+   best-effort heuristic for traffic with long shared prefixes (agentic
+   sessions re-sending a large context): bytes that change before the prompt,
+   such as request metadata, or a prompt rewrite like a context compaction,
+   change the key, and the request is treated as a new session — which matches
+   the prefix cache it can hit anyway. Guaranteed affinity needs a session
+   attribute. Set `prefixBytes` to `0` to restrict stickiness to requests that
+   carry a session attribute.
 
 A stored decision stops being used once its revision's gating share drops to
 zero: the session moves to a fresh weighted pick, and the stored decision is
@@ -314,7 +320,10 @@ outcome so its next turn does not flap back.
 
 With coordination enabled, session decisions are shared across EPP replicas
 through the `CrossReplicaSyncer`, under a session state key separate from
-revision-decision coordination and keyed by the session key. Sharing is
+revision-decision coordination and keyed by the session key. The state key
+carries the scope label selector alongside the plugin name, so deployments
+that share a syncer keep separate decisions; corresponding P/D routers of one
+deployment share the scope and stay aligned. Sharing is
 decoupled from the rollout itself: it covers the session's whole lifetime,
 including periods with a single revision, so a session in flight when a second
 revision appears resumes on its revision at any EPP. Shared decisions carry
@@ -375,9 +384,9 @@ request. Do not add it to a scheduling profile.
 | `revisionGating.roleLabelKey` | string | No | `disaggregatedset.x-k8s.io/role` | Label identifying a Pod role. |
 | `revisionGating.disableCoordination` | boolean | No | `false` | Disables coordination of rollout revisions across parallel requests. Set only for known sequential P/D deployments; E/P/D requires coordination. |
 | `revisionGating.sessionAffinity.enabled` | boolean | No | `false` | Keeps a session without a strict revision header on the revision a previous request of that session used. |
-| `revisionGating.sessionAffinity.ttl` | duration | No | `10m` | Idle time before a session decision expires, locally and in the syncer. Every access refreshes it. |
+| `revisionGating.sessionAffinity.ttl` | duration | No | `10m` | Idle time before a session decision expires, locally and in the syncer. Every access refreshes it. Must be at least `1ms`. |
 | `revisionGating.sessionAffinity.maxSessions` | integer | No | `10000` | Bound on locally stored session decisions. |
-| `revisionGating.sessionAffinity.prefixBytes` | integer | No | `4096` | Leading request-body bytes hashed as the session key when no session attribute is set. `0` disables the prefix-hash fallback. |
+| `revisionGating.sessionAffinity.prefixBytes` | integer | No | `4096` | Leading request-body bytes hashed as the session key when no session attribute is set. Bodies shorter than this derive no key. `0` disables the prefix-hash fallback. |
 
 ## DisaggregatedSet Slice Affinity
 

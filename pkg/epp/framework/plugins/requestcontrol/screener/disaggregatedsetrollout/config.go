@@ -231,8 +231,11 @@ func (c *Config) Validate() error {
 		if err != nil {
 			return fmt.Errorf("revisionGating.sessionAffinity.ttl %q is not a valid duration: %w", affinity.TTL, err)
 		}
-		if ttl <= 0 {
-			return fmt.Errorf("revisionGating.sessionAffinity.ttl %q must be positive", affinity.TTL)
+		// Sub-millisecond TTLs truncate to zero milliseconds in the shared
+		// store, which rejects the write; require the same floor as the Redis
+		// syncer.
+		if ttl < time.Millisecond {
+			return fmt.Errorf("revisionGating.sessionAffinity.ttl %q must be at least 1ms", affinity.TTL)
 		}
 		if affinity.MaxSessions < 0 {
 			return fmt.Errorf("revisionGating.sessionAffinity.maxSessions must not be negative, got %d", affinity.MaxSessions)

@@ -239,6 +239,14 @@ func TestValidate_SessionAffinityRejectsBadTTL(t *testing.T) {
 	assertValidateError(t, cfg, "sessionAffinity.ttl")
 }
 
+func TestValidate_SessionAffinityRejectsSubMillisecondTTL(t *testing.T) {
+	cfg := validConfig()
+	// 500us parses as a positive duration but truncates to zero milliseconds
+	// in the shared store, which rejects the write.
+	cfg.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: true, TTL: "500us"}
+	assertValidateError(t, cfg, "sessionAffinity.ttl")
+}
+
 func TestValidate_SessionAffinityRejectsNegativePrefixBytes(t *testing.T) {
 	cfg := validConfig()
 	negative := -1

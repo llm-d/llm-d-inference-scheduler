@@ -160,6 +160,68 @@ func TestScreenerSessionAffinityPrefixHashDisabled(t *testing.T) {
 	}
 }
 
+func TestScreenerSessionAffinityShortBodyGetsNoKey(t *testing.T) {
+	screener := newTestScreener(sessionAffinityConfig())
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+
+	// A body shorter than prefixBytes would change every turn as the
+	// conversation grows; hashing it must not claim affinity.
+	request := sessionRequest("", -1)
+	request.Body.RawBody = []byte("short conversation turn")
+	if key := screener.sessionKey(request); key != "" {
+		t.Fatalf("bodies shorter than prefixBytes must not derive a key: %q", key)
+	}
+	if got := screenCandidates(t, screener, request, candidatePool(1, 1)); len(got) != 1 {
+		t.Fatalf("short body screened to %v", got)
+	}
+	if items := screener.sessionDecisions.Items(); len(items) != 0 {
+		t.Fatalf("short body must not store a session decision: %v", items)
+	}
+}
+
+func TestScreenerSessionAffinityScopeSeparatesDeployments(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+
+	// Two deployments share a syncer, a plugin name, and the user's session
+	// ID; only the rollout scope differs.
+	screenerA := newTestScreener(config)
+	configB := config
+	configB.Scope = Scope{LabelSelector: "disaggregatedset.x-k8s.io/name=other-set"}
+	screenerB := newTestScreener(configB)
+
+	seedCounts(t, screenerA, map[string]map[string]int{"v1": {"prefill": 1, "decode": 1}})
+	for _, role := range []string{"prefill", "decode"} {
+		pod := readyPod("v2-"+role, "v2", role)
+		pod.Labels["disaggregatedset.x-k8s.io/name"] = "other-set"
+		seedPods(t, screenerB, pod)
+	}
+	if screenerA.sessionStateKey == screenerB.sessionStateKey {
+		t.Fatal("screeners with different scopes must not share a session state key")
+	}
+
+	syncer := &decisionSyncer{}
+	screenerA.handle.SetCrossReplicaSyncer(syncer)
+	screenerB.handle.SetCrossReplicaSyncer(syncer)
+
+	if got := servedRevision(screenCandidates(t, screenerA, sessionRequest("session", 0), candidatePool(1, 1))); got != "v1" {
+		t.Fatalf("deployment A must pin v1: got %s", got)
+	}
+	if got := servedRevision(screenCandidates(t, screenerB, sessionRequest("session", 0), candidatePool(1, 1))); got != "v2" {
+		t.Fatalf("deployment B must pin v2: got %s", got)
+	}
+	if stored, ok := syncer.stored(screenerA.sessionStateKey, "session"); !ok || stored != "v1" {
+		t.Fatalf("deployment A's session decision must survive B's assignment: %v", stored)
+	}
+	if stored, ok := syncer.stored(screenerB.sessionStateKey, "session"); !ok || stored != "v2" {
+		t.Fatalf("deployment B must hold its own decision: %v", stored)
+	}
+}
+
 func intPtr(i int) *int { return &i }
 
 func TestScreenerSessionAffinityInvalidatesWhenRevisionLosesCoverage(t *testing.T) {
@@ -339,8 +401,8 @@ func TestScreenerSessionAffinityCoordinationOutranksStickiness(t *testing.T) {
 		"v2": {"prefill": 1, "decode": 1},
 	})
 	syncer := &decisionSyncer{}
-	syncer.seed("session", "v1")
-	syncer.seed("decision-id", "v2")
+	syncer.seed(screener.sessionStateKey, "session", "v1")
+	syncer.seed(screener.revisionDecisionStateKey, "decision-id", "v2")
 	screener.handle.SetCrossReplicaSyncer(syncer)
 
 	// A parallel encoder's shards share the decision ID; its coordinated
@@ -354,7 +416,7 @@ func TestScreenerSessionAffinityCoordinationOutranksStickiness(t *testing.T) {
 
 	// The session decision follows the coordinated outcome, so the session's
 	// next turn stays on v2 rather than flapping back to v1.
-	if stored, ok := syncer.stored("session"); !ok || stored != "v2" {
+	if stored, ok := syncer.stored(screener.sessionStateKey, "session"); !ok || stored != "v2" {
 		t.Fatalf("session decision must be replaced with the coordinated revision: %v", stored)
 	}
 	next := servedRevision(screenCandidates(t, screener, sessionRequest("session", 1), candidatePool(1, 1)))
@@ -388,7 +450,7 @@ func TestScreenerSessionAffinityKeepsLocalSessionThroughSyncedTransition(t *test
 	if got != "v1" {
 		t.Fatalf("session must keep its revision when coordination turns on: got %s", got)
 	}
-	if stored, ok := syncer.stored("session"); !ok || stored != "v1" {
+	if stored, ok := syncer.stored(screener.sessionStateKey, "session"); !ok || stored != "v1" {
 		t.Fatalf("local decision must seed the synced decision: %v", stored)
 	}
 }
@@ -403,7 +465,7 @@ func TestScreenerSessionAffinitySyncedInvalidationReplacesWithoutFlapBack(t *tes
 		"v2": {"prefill": 1, "decode": 1},
 	})
 	syncer := &decisionSyncer{}
-	syncer.seed("session", "v1")
+	syncer.seed(screener.sessionStateKey, "session", "v1")
 	screener.handle.SetCrossReplicaSyncer(syncer)
 	candidates := candidatePool(1, 1)
 
@@ -417,7 +479,7 @@ func TestScreenerSessionAffinitySyncedInvalidationReplacesWithoutFlapBack(t *tes
 	if len(syncer.replaced) != 1 || syncer.replaced[0] != "session" {
 		t.Fatalf("invalidation must Replace the session decision once: %v", syncer.replaced)
 	}
-	if stored, ok := syncer.stored("session"); !ok || stored != moved {
+	if stored, ok := syncer.stored(screener.sessionStateKey, "session"); !ok || stored != moved {
 		t.Fatalf("synced decision must hold the replacement: %v", stored)
 	}
 
@@ -453,7 +515,7 @@ func TestScreenerSessionAffinityParallelEncodersConverge(t *testing.T) {
 		t.Fatalf("parallel encoders must converge on one revision: first=%s second=%s", first, second)
 	}
 	for _, sessionID := range []string{"session-a", "session-b"} {
-		if stored, ok := syncer.stored(sessionID); !ok || stored != first {
+		if stored, ok := syncer.stored(screener.sessionStateKey, sessionID); !ok || stored != first {
 			t.Fatalf("session %s must follow the coordinated revision %s: %v", sessionID, first, stored)
 		}
 	}
@@ -499,7 +561,7 @@ func TestScreenerSessionAffinityResumesOnOtherScreenerThroughSharedSyncer(t *tes
 	if got := servedRevision(screenCandidates(t, screenerA, sessionRequest("session", 0), candidatePool(1, 0))); got != "v1" {
 		t.Fatalf("single-revision fleet must pin v1: got %s", got)
 	}
-	if stored, ok := syncer.stored("session"); !ok || stored != "v1" {
+	if stored, ok := syncer.stored(screenerA.sessionStateKey, "session"); !ok || stored != "v1" {
 		t.Fatalf("session decision must be shared during the single-revision period: %v", stored)
 	}
 
@@ -521,7 +583,7 @@ func TestScreenerSessionAffinityInvalidationKeepsFirstRepair(t *testing.T) {
 		"v2": {"prefill": 1, "decode": 1},
 	})
 	syncer := &decisionSyncer{}
-	syncer.seed("session", "r0")
+	syncer.seed(screener.sessionStateKey, "session", "r0")
 	screener.handle.SetCrossReplicaSyncer(syncer)
 
 	// The first invalidation repairs the stale r0 decision.
@@ -536,7 +598,7 @@ func TestScreenerSessionAffinityInvalidationKeepsFirstRepair(t *testing.T) {
 	if adopted != "v1" {
 		t.Fatalf("delayed writer must adopt the winning repair: got %s", adopted)
 	}
-	if stored, ok := syncer.stored("session"); !ok || stored != "v1" {
+	if stored, ok := syncer.stored(screener.sessionStateKey, "session"); !ok || stored != "v1" {
 		t.Fatalf("shared decision must keep the first repair: %v", stored)
 	}
 	if len(syncer.replaced) != 1 {

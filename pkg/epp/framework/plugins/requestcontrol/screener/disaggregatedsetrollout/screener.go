@@ -186,7 +186,12 @@ func (c *Screener) crossReplicaSyncer() fwkdl.CrossReplicaSyncer {
 // sessionKey identifies the conversation a request belongs to: the
 // agent-identity session attribute when one is set, otherwise the hash of the
 // leading request-body bytes. Empty means no affinity applies and the request
-// takes the per-request weighted pick.
+// takes the per-request weighted pick. The prefix-hash fallback requires a
+// body at least prefixBytes long: hashing a shorter body would key the whole
+// conversation so far, and the next turn appends to it and mints a new key,
+// providing no stickiness while churning stored decisions. A request too
+// short to hash therefore runs unaffinitized, like one without a session
+// attribute; guaranteed affinity needs the session attribute.
 func (c *Screener) sessionKey(request *fwksched.InferenceRequest) string {
 	if request == nil || !c.sessionAffinity.active() {
 		return ""
@@ -198,11 +203,8 @@ func (c *Screener) sessionKey(request *fwksched.InferenceRequest) string {
 	if c.sessionAffinity.PrefixBytes != nil {
 		prefixBytes = *c.sessionAffinity.PrefixBytes
 	}
-	if prefixBytes <= 0 || request.Body == nil || len(request.Body.RawBody) == 0 {
+	if prefixBytes <= 0 || request.Body == nil || len(request.Body.RawBody) < prefixBytes {
 		return ""
-	}
-	if prefixBytes > len(request.Body.RawBody) {
-		prefixBytes = len(request.Body.RawBody)
 	}
 	return fmt.Sprintf("prefix:%016x", xxhash.Sum64(request.Body.RawBody[:prefixBytes]))
 }

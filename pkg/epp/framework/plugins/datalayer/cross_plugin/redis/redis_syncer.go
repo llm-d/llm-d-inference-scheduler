@@ -326,8 +326,13 @@ return {previous, 0}
 
 // decisionTTL resolves the expiration a decision carries: an explicit
 // DecisionOptions TTL wins, otherwise the syncer's coordinationTTL default.
+// A sub-millisecond TTL floors at minimumTTL: Redis expires in whole
+// milliseconds, and a zero would fail the write.
 func (s *RedisSyncer) decisionTTL(opts []fwkdl.DecisionOptions) time.Duration {
 	if len(opts) > 0 && opts[0].TTL > 0 {
+		if opts[0].TTL < minimumTTL {
+			return minimumTTL
+		}
 		return opts[0].TTL
 	}
 	return s.coordinationTTL

@@ -137,10 +137,15 @@ func newScreener(name string, config Config, scope labels.Selector, handle fwkpl
 		revisionLabelKey:         revisionLabelKey,
 		roleLabelKey:             roleLabelKey,
 		revisionDecisionStateKey: fwkdl.StateKey("disaggregatedset-rollout:" + name),
-		sessionStateKey:          fwkdl.StateKey("disaggregatedset-rollout-session:" + name),
-		handle:                   handle,
-		localRevisionDecisions:   fwkplugin.NewPluginState(handle.Context()),
-		pods:                     make(map[types.NamespacedName]podInfo),
+		// The session state key carries the scope alongside the plugin name:
+		// agent-identity session IDs are user-scoped, so two deployments that
+		// share a syncer and a plugin name would otherwise invalidate each
+		// other's decisions. Corresponding P/D routers of one deployment share
+		// the scope and stay aligned.
+		sessionStateKey:        fwkdl.StateKey("disaggregatedset-rollout-session:" + name + ":" + config.Scope.LabelSelector),
+		handle:                 handle,
+		localRevisionDecisions: fwkplugin.NewPluginState(handle.Context()),
+		pods:                   make(map[types.NamespacedName]podInfo),
 	}
 	var affinity *SessionAffinity
 	if config.RevisionGating != nil {
