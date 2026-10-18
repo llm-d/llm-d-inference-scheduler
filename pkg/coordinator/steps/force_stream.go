@@ -88,11 +88,12 @@ const (
 var errForceStreamCeiling = errors.New("force-stream: buffered response exceeded its reserved budget")
 
 // errForceStreamOversize marks a Responses forced reply whose terminal frame did
-// not fit the reservation. The reservation prices generated tokens, not the
-// request-derived fields (tools, instructions, schema, metadata) a terminal frame
-// echoes, so the shortfall is a coordinator estimate miss, not a pod fault.
-// Nothing has reached the client, so the decode step falls back to the
-// pass-through rather than failing a reply the pod returned intact.
+// not fit even the reservation plus the request body size, the allowance that
+// covers the generated text plus the request fields (tools, instructions, schema,
+// metadata) a terminal frame echoes. A frame past that carries bytes neither
+// accounts for, a coordinator estimate miss rather than a pod fault. Nothing has
+// reached the client, so the decode step falls back to the pass-through rather
+// than failing a reply the pod returned intact.
 var errForceStreamOversize = errors.New("force-stream: responses reply exceeded its reserved budget; falling back to pass-through")
 
 // errForceStreamUnreadable marks a forced request whose upstream returned 200 but
@@ -271,7 +272,7 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 
 	n := reqcommon.OutputChoiceCount(reqCtx.Body, reqcommon.DetectAPIType(reqCtx.OriginalPath))
 	reassembler := newSSEReassembler(shape, n)
-	if err := scanForcedResponse(resp.Body, reassembler, reserved); err != nil {
+	if err := scanForcedResponse(resp.Body, reassembler, reserved, int64(len(bodyBytes))); err != nil {
 		switch {
 		case errors.Is(err, errForceStreamCeiling):
 			coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultErrorCeiling)
@@ -373,16 +374,21 @@ func forceStreamBody(src map[string]any, shape sseShape) map[string]any {
 	return body
 }
 
-// maxFrameBytes bounds a single SSE line within the request's reservation. For the
-// chunk shapes the cap is the smaller of the reservation and forceStreamMaxFrameBytes,
-// so a frame larger than the reservation is rejected whether or not it reaches 1 MiB;
-// with the default per-request cap the reservation stays under 1 MiB and binds first.
-// The Responses shape delivers its whole reply in one terminal frame, so its only
-// bound is the reservation. The result is clamped to int so a reservation above the
-// platform int width cannot wrap negative when it sizes the scanner buffer.
-func maxFrameBytes(shape sseShape, reserved int64) int {
+// maxFrameBytes bounds a single SSE line. The chunk shapes cap at the smaller of
+// the reservation and forceStreamMaxFrameBytes, so a frame larger than the
+// reservation is rejected whether or not it reaches 1 MiB; with the default
+// per-request cap the reservation stays under 1 MiB and binds first. The Responses
+// shape delivers its whole reply in one terminal frame that echoes the request's
+// own fields (tools, instructions, schema) back, so it is capped at the reservation
+// plus the request body size: the generated text is bounded by the reservation and
+// the echoed fields cannot exceed the request they came from. The result is clamped
+// to int so a value above the platform int width cannot wrap negative when it sizes
+// the scanner buffer.
+func maxFrameBytes(shape sseShape, reserved, requestBytes int64) int {
 	frameCap := reserved
-	if shape != sseShapeResponses && frameCap > forceStreamMaxFrameBytes {
+	if shape == sseShapeResponses {
+		frameCap = reserved + requestBytes
+	} else if frameCap > forceStreamMaxFrameBytes {
 		frameCap = forceStreamMaxFrameBytes
 	}
 	if frameCap > math.MaxInt {
@@ -405,10 +411,11 @@ func initialScanBuf(frameCap int) int {
 // scanForcedResponse folds the upstream SSE frames into reassembler, enforcing
 // the per-request ceiling. A frame that cannot be parsed or a read failure is an
 // upstream fault; exceeding the ceiling returns errForceStreamCeiling. Both
-// return before any byte is written to the client.
-func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64) error {
+// return before any byte is written to the client. requestBytes sizes the Responses
+// terminal-frame allowance (see maxFrameBytes).
+func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved, requestBytes int64) error {
 	scanner := bufio.NewScanner(r)
-	frameCap := maxFrameBytes(reassembler.shape, reserved)
+	frameCap := maxFrameBytes(reassembler.shape, reserved, requestBytes)
 	scanner.Buffer(make([]byte, 0, initialScanBuf(frameCap)), frameCap)
 	sawDone := false
 	for scanner.Scan() {
@@ -431,12 +438,12 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64
 	}
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
-			// The Responses reply arrives in one frame whose cap is the reservation,
-			// but the reservation prices only generated tokens, not the request
-			// fields (tools, instructions, schema) the completed frame echoes. An
-			// overflow there is a coordinator shortfall, not a pod fault, so fall
-			// back to the pass-through. For the other shapes an oversized frame is
-			// anomalous: a ceiling abort.
+			// The Responses terminal frame is allowed the reservation plus the request
+			// body size, enough for the generated text plus the request fields it
+			// echoes. A frame past even that carries bytes neither the reservation nor
+			// the request accounts for, so it falls back to the pass-through rather
+			// than failing. For the other shapes an oversized frame is anomalous: a
+			// ceiling abort.
 			if reassembler.shape == sseShapeResponses {
 				return errForceStreamOversize
 			}

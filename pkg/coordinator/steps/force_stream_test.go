@@ -1223,7 +1223,7 @@ func TestScanForcedResponse_TerminalMarker(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newSSEReassembler(tc.shape, 1)
-			err := scanForcedResponse(strings.NewReader(tc.stream), r, 1<<20)
+			err := scanForcedResponse(strings.NewReader(tc.stream), r, 1<<20, 0)
 			if tc.truncated {
 				require.ErrorIs(t, err, errForceStreamTruncated)
 			} else {
@@ -1346,12 +1346,12 @@ func TestForceStream_SeveredConnection_BufferedPath_FallsBack(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
 }
 
-// TestForceStream_Responses_OversizedFrame_FallsBack covers the regression where
-// a Responses response.completed frame echoes request fields the reservation does
-// not price (tools, instructions, schema), so the frame can exceed the reservation
-// that is also its scanner cap. Rather than failing a reply the pod returned
-// intact, the request falls back to the pass-through: the client gets 200, and the
-// outcome is counted as fallback_oversize.
+// TestForceStream_Responses_OversizedFrame_FallsBack covers the backstop: a
+// Responses completed frame whose bytes exceed even the reservation plus the request
+// body size. Here the pod emits a 16KB instructions field the request never sent, so
+// it is accounted for by neither the reservation (max_output_tokens=16) nor the tiny
+// request body. Rather than failing a reply the pod returned intact, the request
+// falls back to the pass-through: the client gets 200, counted fallback_oversize.
 func TestForceStream_Responses_OversizedFrame_FallsBack(t *testing.T) {
 	passthroughReply := `{"id":"resp-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}`
 	var streams []any
@@ -1361,8 +1361,9 @@ func TestForceStream_Responses_OversizedFrame_FallsBack(t *testing.T) {
 		_ = json.Unmarshal(raw, &parsed)
 		streams = append(streams, parsed["stream"])
 		if parsed["stream"] == true {
-			// The completed frame's echoed request field dwarfs the ~2.5KB reserved
-			// for max_output_tokens=16, so it trips the scanner's frame cap.
+			// The completed frame carries a 16KB field the request never sent, so it
+			// exceeds the reservation (~2.5KB) plus the tiny request body and trips the
+			// scanner's frame cap.
 			echo := strings.Repeat("x", 16<<10)
 			completed := fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp-1","model":"llama-3","status":"completed","instructions":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}}`, echo)
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -1416,6 +1417,75 @@ func TestForceStream_Responses_OversizedFrame_FallsBack(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
 	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorCeiling), 1e-9)
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "the reservation is released after the fallback")
+}
+
+// TestForceStream_Responses_EchoedToolsRelayed covers the oversize-relay: a request
+// that declares a large tools menu (far bigger than its max_output_tokens
+// reservation) whose completed frame echoes that menu back. The frame fits within
+// reservation + request body size, so it is read and relayed verbatim as the reply
+// (forced) rather than falling back and regenerating.
+func TestForceStream_Responses_EchoedToolsRelayed(t *testing.T) {
+	// A ~16KB tools menu the client declares in the request.
+	bigTools := strings.Repeat("x", 16<<10)
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		// The completed frame echoes the request's tools back, so it is large even
+		// though generation was short. It must be read and relayed, not fall back.
+		completed := fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp-1","model":"llama-3","status":"completed","instructions":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}}`, bigTools)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for _, f := range []string{
+			`{"type":"response.created","response":{"id":"resp-1","model":"llama-3","status":"in_progress"}}`,
+			`{"type":"response.output_text.delta","delta":"hi"}`,
+			completed,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", f)
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-resp-echo",
+		OriginalPath:     reqcommon.PathResponses,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model":             "llama-3",
+			"stream":            false,
+			"max_output_tokens": 16,
+			"input":             "hi",
+			// The request carries the large tools menu the frame echoes back, so the
+			// frame fits within reservation + request body size.
+			"instructions": bigTools,
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "the echoed frame must be relayed, not fall back")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode)
+	require.Equal(t, "application/json", result.Header.Get("Content-Type"))
+	require.Equal(t, []any{true}, streams, "only the forced attempt runs; no fallback re-POST")
+
+	var got map[string]any
+	body, _ := io.ReadAll(result.Body)
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.Equal(t, "completed", got["status"], "the pod's completed object is relayed verbatim")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackOversize), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the reply")
 }
 
 func TestForceStream_Concurrency(t *testing.T) {
