@@ -91,7 +91,12 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 		observed := ""
 		sessionSettled := false
 		if sessionKey != "" {
-			proposed, observed, sessionSettled = c.sessionProposal(ctx, sessionKey, shares, allowedRevisions)
+			var err error
+			proposed, observed, sessionSettled, err = c.sessionProposal(ctx, sessionKey, shares, allowedRevisions)
+			if err != nil {
+				log.FromContext(ctx).Error(err, "failed to read sticky rollout revision", "sessionKey", sessionKey)
+				return nil
+			}
 		}
 		if proposed == "" {
 			proposed = pickWeightedRevision(shares, rand.Float64()) //#nosec G404 -- traffic split across revisions, not security-sensitive
@@ -118,7 +123,14 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 		// decision still serves that decision; otherwise it follows the
 		// session's stored winner.
 		if sessionKey != "" && coordinated != "" && (!sessionSettled || coordinated != proposed) {
-			winner := c.replaceSessionRevision(ctx, sessionKey, observed, coordinated)
+			winner, err := c.replaceSessionRevision(ctx, sessionKey, observed, coordinated)
+			if err != nil {
+				// Serving the coordinated revision while the stored decision
+				// keeps the old one would flip the session back on its next
+				// turn. Fail closed, as coordination errors already do.
+				log.FromContext(ctx).Error(err, "failed to store sticky rollout revision", "sessionKey", sessionKey)
+				return nil
+			}
 			if !coordinatedByRequest && winner != "" {
 				coordinated = winner
 			}
@@ -232,12 +244,15 @@ func (c *Screener) sessionDecisionOptions() fwkdl.DecisionOptions {
 // expired, or invalidated by its revision losing gating coverage. The caller
 // then makes a fresh weighted pick, runs request-level coordination over it,
 // and stores the outcome with a compare-and-swap against the observed value.
+// An error means the session's stored decision could not be read: the caller
+// must fail closed rather than guess, because serving a fresh pick would flip
+// the session if the unread decision still pins another revision.
 func (c *Screener) sessionProposal(
 	ctx context.Context,
 	sessionKey string,
 	shares map[string]float64,
 	allowedRevisions map[string]struct{},
-) (string, string, bool) {
+) (string, string, bool, error) {
 	if c.sessionSynced() {
 		syncer := c.crossReplicaSyncer()
 		// Seed the candidate from the local decision when one exists: a
@@ -249,12 +264,11 @@ func (c *Screener) sessionProposal(
 		}
 		actual, existed, err := syncer.GetOrSet(ctx, c.sessionStateKey, sessionKey, candidate, c.sessionDecisionOptions())
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to coordinate sticky rollout revision", "sessionKey", sessionKey)
-			return "", "", false
+			return "", "", false, fmt.Errorf("read session decision: %w", err)
 		}
 		revision, ok := actual.(string)
 		if !ok || revision == "" {
-			return "", "", false
+			return "", "", false, nil
 		}
 		if _, covered := allowedRevisions[revision]; covered {
 			if existed {
@@ -262,27 +276,27 @@ func (c *Screener) sessionProposal(
 			} else {
 				recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
 			}
-			return revision, revision, true
+			return revision, revision, true, nil
 		}
 		// The stored revision lost gating coverage: rolled away, or missing a
 		// required role. The caller's fresh pick replaces it, swapping against
 		// this observed value so a concurrent repair wins.
 		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultInvalidated)
-		return "", revision, false
+		return "", revision, false, nil
 	}
 
 	sticky, found := c.lookupStickyRevision(sessionKey)
 	if !found {
-		return "", "", false
+		return "", "", false, nil
 	}
 	if _, covered := allowedRevisions[sticky]; covered {
 		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultSticky)
-		return sticky, sticky, true
+		return sticky, sticky, true, nil
 	}
 	// The sticky revision lost gating coverage. The caller's fresh pick is
 	// stored over it by replaceSessionRevision.
 	recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultInvalidated)
-	return "", sticky, false
+	return "", sticky, false, nil
 }
 
 func (c *Screener) lookupStickyRevision(sessionKey string) (string, bool) {
@@ -310,21 +324,23 @@ func (c *Screener) localSessionDecision(sessionKey string) string {
 // replaceSessionRevision swaps the session's stored decision from observed to
 // revision and returns the decision now stored: revision when the swap
 // happened, or the concurrent repair that won the compare-and-swap otherwise.
-func (c *Screener) replaceSessionRevision(ctx context.Context, sessionKey, observed, revision string) string {
+// An error means the swap could not be attempted to completion: the caller
+// must fail closed, because serving revision while the store keeps the old
+// decision flips the session back on its next turn.
+func (c *Screener) replaceSessionRevision(ctx context.Context, sessionKey, observed, revision string) (string, error) {
 	if c.sessionSynced() {
 		actual, replaced, err := c.crossReplicaSyncer().Replace(ctx, c.sessionStateKey, sessionKey, observed, revision, c.sessionDecisionOptions())
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to store sticky rollout revision", "sessionKey", sessionKey)
-			return revision
+			return "", fmt.Errorf("store session decision: %w", err)
 		}
 		if replaced {
 			recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
-			return revision
+			return revision, nil
 		}
 		if winner, ok := actual.(string); ok && winner != "" {
-			return winner
+			return winner, nil
 		}
-		return revision
+		return revision, nil
 	}
 
 	c.sessionMu.Lock()
@@ -332,13 +348,13 @@ func (c *Screener) replaceSessionRevision(ctx context.Context, sessionKey, obser
 	// Another request on this EPP may have repaired the decision between this
 	// request's read and its store; the repair wins.
 	if current, ok := c.lookupStickyRevision(sessionKey); ok && current != observed && current != "" {
-		return current
+		return current, nil
 	}
 	if c.sessionDecisions != nil {
 		c.sessionDecisions.Set(sessionKey, revision, ttlcache.DefaultTTL)
 		recordSessionAffinityDecision(c.typedName.Name, sessionAffinityResultAssigned)
 	}
-	return revision
+	return revision, nil
 }
 
 func (c *Screener) filterRevisions(

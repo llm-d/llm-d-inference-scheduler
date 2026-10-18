@@ -274,6 +274,58 @@ func TestScreenerSessionAffinityNamespaceSeparatesDeployments(t *testing.T) {
 	}
 }
 
+func TestScreenerSessionAffinityFailsClosedOnSessionReadError(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	syncer := &decisionSyncer{}
+	syncer.seed(screener.sessionStateKey, "session", "v1")
+	syncer.err = errors.New("redis unavailable")
+	screener.handle.SetCrossReplicaSyncer(syncer)
+
+	// The stored decision cannot be read: serving a fresh pick could flip the
+	// session off v1, so the request must fail closed.
+	got := screenCandidates(t, screener, sessionRequest("session", 0), candidatePool(1, 1))
+	if len(got) != 0 {
+		t.Fatalf("unreadable session decision must fail closed: %v", got)
+	}
+}
+
+func TestScreenerSessionAffinityFailsClosedOnSessionWriteError(t *testing.T) {
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	syncer := &decisionSyncer{}
+	syncer.seed(screener.sessionStateKey, "session", "v1")
+	syncer.seed(screener.revisionDecisionStateKey, "decision-id", "v2")
+	syncer.replaceErr = errors.New("redis unavailable")
+	screener.handle.SetCrossReplicaSyncer(syncer)
+
+	// The session holds v1 but request-level coordination decides v2. Serving
+	// v2 while the store keeps v1 would flip the session back on its next
+	// turn, so the request must fail closed.
+	request := sessionRequest("session", 0)
+	request.Headers[reqcommon.RevisionDecisionIDHeaderKey] = "decision-id"
+	got := screenCandidates(t, screener, request, candidatePool(1, 1))
+	if len(got) != 0 {
+		t.Fatalf("unstorable coordinated revision must fail closed: %v", got)
+	}
+	// The store must still hold the session's actual decision.
+	if stored, ok := syncer.stored(screener.sessionStateKey, "session"); !ok || stored != "v1" {
+		t.Fatalf("failed write must not corrupt the stored decision: %v", stored)
+	}
+}
+
 func intPtr(i int) *int { return &i }
 
 func TestScreenerSessionAffinityInvalidatesWhenRevisionLosesCoverage(t *testing.T) {
@@ -639,16 +691,16 @@ func TestScreenerSessionAffinityInvalidationKeepsFirstRepair(t *testing.T) {
 	screener.handle.SetCrossReplicaSyncer(syncer)
 
 	// The first invalidation repairs the stale r0 decision.
-	winner := screener.replaceSessionRevision(context.Background(), "session", "r0", "v1")
-	if winner != "v1" {
-		t.Fatalf("first repair must install v1: got %s", winner)
+	winner, err := screener.replaceSessionRevision(context.Background(), "session", "r0", "v1")
+	if err != nil || winner != "v1" {
+		t.Fatalf("first repair must install v1: winner=%s err=%v", winner, err)
 	}
 
 	// A delayed writer still holding r0 must adopt the repair, not overwrite
 	// it with its own pick.
-	adopted := screener.replaceSessionRevision(context.Background(), "session", "r0", "v2")
-	if adopted != "v1" {
-		t.Fatalf("delayed writer must adopt the winning repair: got %s", adopted)
+	adopted, err := screener.replaceSessionRevision(context.Background(), "session", "r0", "v2")
+	if err != nil || adopted != "v1" {
+		t.Fatalf("delayed writer must adopt the winning repair: adopted=%s err=%v", adopted, err)
 	}
 	if stored, ok := syncer.stored(screener.sessionStateKey, "session"); !ok || stored != "v1" {
 		t.Fatalf("shared decision must keep the first repair: %v", stored)
@@ -662,16 +714,16 @@ func TestScreenerSessionAffinityLocalInvalidationKeepsFirstRepair(t *testing.T) 
 	screener := newTestScreener(sessionAffinityConfig())
 
 	// A first request stores the session decision.
-	winner := screener.replaceSessionRevision(context.Background(), "session", "", "v1")
-	if winner != "v1" {
-		t.Fatalf("first store must install v1: got %s", winner)
+	winner, err := screener.replaceSessionRevision(context.Background(), "session", "", "v1")
+	if err != nil || winner != "v1" {
+		t.Fatalf("first store must install v1: winner=%s err=%v", winner, err)
 	}
 
 	// A delayed writer on the same EPP that observed an older decision must
 	// adopt the stored one instead of overwriting it.
-	adopted := screener.replaceSessionRevision(context.Background(), "session", "r0", "v2")
-	if adopted != "v1" {
-		t.Fatalf("delayed local writer must adopt the stored decision: got %s", adopted)
+	adopted, err := screener.replaceSessionRevision(context.Background(), "session", "r0", "v2")
+	if err != nil || adopted != "v1" {
+		t.Fatalf("delayed local writer must adopt the stored decision: adopted=%s err=%v", adopted, err)
 	}
 	if sticky, ok := screener.lookupStickyRevision("session"); !ok || sticky != "v1" {
 		t.Fatalf("local decision must keep the first repair: %q", sticky)

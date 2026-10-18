@@ -492,8 +492,11 @@ func TestScreenerWeightedDistribution(t *testing.T) {
 type decisionSyncer struct {
 	actual any
 	err    error
-	calls  int
-	ids    []string
+	// replaceErr fails only Replace, so tests can exercise a session read
+	// that succeeds and a write that does not.
+	replaceErr error
+	calls      int
+	ids        []string
 
 	mu        sync.Mutex
 	decisions map[string]any
@@ -559,6 +562,9 @@ func (s *decisionSyncer) stored(key fwkdl.StateKey, id string) (any, bool) {
 }
 
 func (s *decisionSyncer) Replace(_ context.Context, key fwkdl.StateKey, id string, expected, value any, _ ...fwkdl.DecisionOptions) (any, bool, error) {
+	if s.replaceErr != nil {
+		return nil, false, s.replaceErr
+	}
 	if s.err != nil {
 		return nil, false, s.err
 	}

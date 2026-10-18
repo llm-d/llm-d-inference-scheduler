@@ -330,7 +330,10 @@ decoupled from the rollout itself: it covers the session's whole lifetime,
 including periods with a single revision, so a session in flight when a second
 revision appears resumes on its revision at any EPP. Shared decisions carry
 the configured `ttl`, refreshed on every access, so a session in continuous
-use never expires and an idle one is re-picked after `ttl`.
+use never expires and an idle one is re-picked after `ttl`. A session
+decision that cannot be read, or a replacement that cannot be stored, fails
+closed with HTTP 503, as coordination errors already do: serving a guess
+could flip the session to another revision on its next turn.
 
 Without a syncer, or with `disableCoordination`, decisions live in a local
 bounded TTL cache with the same refresh-on-access semantics: concurrent first
@@ -378,7 +381,7 @@ request. Do not add it to a scheduling profile.
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `scope.labelSelector` | string | Yes | | Selects the Pods observed for cross-role revision coverage. |
-| `scope.namespace` | string | No | | Restricts observed Pods to one namespace and namespaces the shared session-decision key. Set it when deployments in different namespaces share a `CrossReplicaSyncer`, a plugin name, and a selector; empty watches cluster-wide. |
+| `scope.namespace` | string | No | | Restricts observed Pods to one namespace and namespaces the shared session-decision key. Set it when deployments in different namespaces share a `CrossReplicaSyncer`, a plugin name, and a selector; empty applies no additional namespace filter (the EPP pod cache itself only serves the pool's namespace). |
 | `revisionGating` | object | Yes | | Revision screening configuration. |
 | `revisionGating.mode` | string | Yes | | `sum`, `max-role`, or `disabled`. |
 | `revisionGating.requiredRoles` | array | Yes for `sum` and `max-role` | | Roles that must each have a Ready Pod for a revision to receive traffic. List order breaks a `max-role` tie. |

@@ -57,7 +57,8 @@ type Config struct {
 // set Namespace restricts the tracked Pods to that namespace and namespaces
 // the shared session-decision key, so deployments that share a syncer, a
 // plugin name, and a selector across namespaces stay isolated. An empty
-// Namespace watches cluster-wide.
+// Namespace applies no additional namespace filter; the EPP pod cache itself
+// only serves the pool's namespace.
 type Scope struct {
 	LabelSelector string `json:"labelSelector"`
 	Namespace     string `json:"namespace,omitempty"`
