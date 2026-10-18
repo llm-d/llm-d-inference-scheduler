@@ -192,11 +192,16 @@ func New(cfg config.ServerConfig, p *pipeline.Pipeline, gwClient *gateway.Client
 	r.Use(middleware.Recoverer)
 	r.Use(logRequestResponse)
 
-	r.Post(reqcommon.PathChatCompletions, s.handleInference)
-	r.Post(reqcommon.PathCompletions, s.handleInference)
-	r.Post(reqcommon.PathResponses, s.handleInference)
-	r.Post(reqcommon.PathMessages, s.handleInference)
-	r.Post(reqcommon.PathVLLMGenerate, s.handleInference)
+	for _, path := range []string{
+		reqcommon.PathChatCompletions,
+		reqcommon.PathCompletions,
+		reqcommon.PathResponses,
+		reqcommon.PathMessages,
+		reqcommon.PathVLLMGenerate,
+	} {
+		r.Post(path, s.handleInference)
+		r.Post(path+"/", s.handleInference)
+	}
 	// r.Post(reqcommon.PathSGLangGenerate, s.handleInference)
 	r.Get(pathHealthz, s.handleHealth)
 	r.Get(pathReadyz, s.handleHealth)

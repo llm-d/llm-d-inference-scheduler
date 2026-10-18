@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -50,8 +51,9 @@ var validRequestID = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
 func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 	receivedAt := time.Now()
 	cw := newCountingResponseWriter(w)
-	route := inferenceRoute(r.URL.Path)
-	apiType := reqcommon.DetectAPIType(r.URL.Path)
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	route := inferenceRoute(path)
+	apiType := reqcommon.DetectAPIType(path)
 	// model is the raw name from the request body, or "" when the client
 	// omitted it. Metric emitters normalize "" to ModelUnknown via
 	// boundModel; the pipeline sees the raw value so upstream requests
@@ -170,7 +172,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 
 	reqCtx = &pipeline.RequestContext{
 		RequestID:        requestID,
-		OriginalPath:     r.URL.Path,
+		OriginalPath:     path,
 		OriginalHeaders:  headers,
 		OriginalBody:     body,
 		Body:             parsed,
