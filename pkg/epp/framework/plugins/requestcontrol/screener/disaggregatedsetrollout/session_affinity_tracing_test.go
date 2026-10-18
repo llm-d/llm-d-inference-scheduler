@@ -235,6 +235,26 @@ func TestScreenerTracesStrictHeader(t *testing.T) {
 	}
 }
 
+func TestScreenerTracesStrictHeaderWithGatingDisabled(t *testing.T) {
+	recorder := setupSpanRecorder(t)
+	config := validConfig()
+	config.RevisionGating = &RevisionGating{Mode: GatingModeDisabled}
+	screener := newTestScreener(config)
+
+	request := sessionRequest("session", 0)
+	request.Headers["x-llm-d-disagg-revision"] = "v1"
+	span := screenSpan(t, recorder, func() {
+		screener.Screen(context.Background(), request, candidatePool(1, 1))
+	})
+	attrs := spanAttributes(span)
+	if got := attrString(t, attrs, semconv.LLMDEPPScreenerDecisionReasonKey); got != "strict_header" {
+		t.Fatalf("strict header reason with gating disabled: want strict_header, got %s", got)
+	}
+	if got := attrString(t, attrs, semconv.LLMDEPPScreenerSelectedRevisionKey); got != "v1" {
+		t.Fatalf("selected revision: want v1, got %s", got)
+	}
+}
+
 func TestScreenerTracesPrefixHashSource(t *testing.T) {
 	recorder := setupSpanRecorder(t)
 	screener := newTestScreener(sessionAffinityConfig())

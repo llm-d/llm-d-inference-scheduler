@@ -83,6 +83,7 @@ func (c *Screener) screen(ctx context.Context, request *fwksched.InferenceReques
 		if len(result) == 0 {
 			recordStrictRevisionNoMatch(c.typedName.Name)
 		}
+		c.recordDecision(ctx, "strict_header", "", "none", "", requestedRevision)
 		return result
 	}
 
