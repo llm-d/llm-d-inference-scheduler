@@ -214,6 +214,33 @@ func TestScreenerTracesStorageFailure(t *testing.T) {
 	}
 }
 
+// A session minted by this request's shared-store GetOrSet is an assignment,
+// not a sticky hit: the span must not claim a previous revision for it.
+func TestScreenerTracesFreshSharedSessionAssignment(t *testing.T) {
+	recorder := setupSpanRecorder(t)
+	config := validConfig()
+	enabled := true
+	config.RevisionGating.SessionAffinity = &SessionAffinity{Enabled: enabled}
+	screener := newTestScreener(config)
+	seedCounts(t, screener, map[string]map[string]int{
+		"v1": {"prefill": 1, "decode": 1},
+		"v2": {"prefill": 1, "decode": 1},
+	})
+	syncer := &decisionSyncer{}
+	screener.handle.SetCrossReplicaSyncer(syncer)
+
+	span := screenSpan(t, recorder, func() {
+		screener.Screen(context.Background(), sessionRequest("session", 0), candidatePool(1, 1))
+	})
+	attrs := spanAttributes(span)
+	if got := attrString(t, attrs, semconv.LLMDEPPScreenerDecisionReasonKey); got != "assigned" {
+		t.Fatalf("fresh shared session reason: want assigned, got %s", got)
+	}
+	if _, ok := attrs[semconv.LLMDEPPScreenerPreviousRevisionKey]; ok {
+		t.Fatal("fresh assignment must not record a previous revision")
+	}
+}
+
 func TestScreenerTracesStrictHeader(t *testing.T) {
 	recorder := setupSpanRecorder(t)
 	screener := newTestScreener(sessionAffinityConfig())
