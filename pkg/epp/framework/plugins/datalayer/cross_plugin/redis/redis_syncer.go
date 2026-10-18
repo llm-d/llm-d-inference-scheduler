@@ -33,9 +33,13 @@ import (
 
 	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 )
@@ -382,24 +386,42 @@ func boolFlag(b bool) string {
 
 // GetOrSet atomically returns the existing request-level value or stores
 // candidate. DecisionOptions tunes the TTL and refresh-on-access policy; the
-// zero options keep the syncer's coordinationTTL with no refresh.
+// zero options keep the syncer's coordinationTTL with no refresh. The call is
+// traced as a child span carrying the state key and decision ID, so a failed
+// session operation stays visible even when the caller recovers.
 func (s *RedisSyncer) GetOrSet(ctx context.Context, key fwkdl.StateKey, id string, candidate any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
 	if candidate == nil {
 		return nil, false, errors.New("redis-syncer: getorset candidate must not be nil")
 	}
 
-	data, err := encodeValue(candidate)
-	if err != nil {
-		return nil, false, fmt.Errorf("redis-syncer: getorset encode: %w", err)
+	ctx, span := tracing.Tracer(RedisSyncerType).Start(ctx, "redis_syncer.get_or_set",
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	defer span.End()
+	if span.IsRecording() {
+		span.SetAttributes(
+			semconv.LLMDEPPSyncerStateKey(string(key)),
+			semconv.LLMDEPPSyncerDecisionID(id),
+		)
 	}
 
-	return s.runDecisionScript(ctx, getOrSetScript, key, id, data,
+	data, err := encodeValue(candidate)
+	if err != nil {
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: getorset encode: %w", err))
+	}
+
+	actual, existed, err := s.runDecisionScript(ctx, getOrSetScript, key, id, data,
 		s.decisionTTL(opts), refreshOnAccess(opts), candidate, candidate)
+	if err != nil {
+		return nil, false, recordSpanError(span, err)
+	}
+	return actual, existed, nil
 }
 
 // Replace atomically swaps the request-level value when it still equals
 // expected, as CrossReplicaSyncer.Replace documents. DecisionOptions applies
-// as in GetOrSet.
+// as in GetOrSet. The call is traced as a child span carrying the state key
+// and decision ID.
 func (s *RedisSyncer) Replace(ctx context.Context, key fwkdl.StateKey, id string, expected, value any, opts ...fwkdl.DecisionOptions) (any, bool, error) {
 	if value == nil {
 		return nil, false, errors.New("redis-syncer: replace value must not be nil")
@@ -408,40 +430,62 @@ func (s *RedisSyncer) Replace(ctx context.Context, key fwkdl.StateKey, id string
 		return nil, false, errors.New("redis-syncer: replace expected value must not be nil")
 	}
 
+	ctx, span := tracing.Tracer(RedisSyncerType).Start(ctx, "redis_syncer.replace",
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	defer span.End()
+	if span.IsRecording() {
+		span.SetAttributes(
+			semconv.LLMDEPPSyncerStateKey(string(key)),
+			semconv.LLMDEPPSyncerDecisionID(id),
+		)
+	}
+
 	expectedData, err := encodeValue(expected)
 	if err != nil {
-		return nil, false, fmt.Errorf("redis-syncer: replace encode expected: %w", err)
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: replace encode expected: %w", err))
 	}
 	data, err := encodeValue(value)
 	if err != nil {
-		return nil, false, fmt.Errorf("redis-syncer: replace encode: %w", err)
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: replace encode: %w", err))
 	}
 
 	reply, err := replaceScript.Run(ctx, s.client, []string{s.coordKey(key, id)},
 		expectedData, data, s.decisionTTL(opts).Milliseconds()).Result()
 	if err != nil {
-		return nil, false, fmt.Errorf("redis-syncer: decision script: %w", err)
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: decision script: %w", err))
 	}
 	parts, ok := reply.([]interface{})
 	if !ok || len(parts) != 2 {
-		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply))
 	}
 	replaced, ok := parts[1].(int64)
 	if !ok {
-		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply))
 	}
 	if replaced == 1 {
 		return value, true, nil
 	}
 	stored, ok := parts[0].(string)
 	if !ok {
-		return nil, false, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply)
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: unexpected decision script reply %v", reply))
 	}
 	// The stored value differs from expected: a concurrent repair won. Decode
 	// it so the caller can adopt it instead of overwriting.
 	actual, err := gobDecode([]byte(stored), value)
 	if err != nil {
-		return nil, false, fmt.Errorf("redis-syncer: decision decode: %w", err)
+		return nil, false, recordSpanError(span, fmt.Errorf("redis-syncer: decision decode: %w", err))
 	}
 	return actual, false, nil
+}
+
+// recordSpanError marks the syncer span errored before the error returns to
+// the caller, so storage failures remain visible in the trace even when the
+// request ultimately succeeds or fails closed elsewhere.
+func recordSpanError(span trace.Span, err error) error {
+	if span.IsRecording() {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
 }

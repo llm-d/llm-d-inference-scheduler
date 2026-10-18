@@ -64,6 +64,20 @@ const (
 	LLMDEPPScorerScoreAvgKey           = attribute.Key("llm_d.epp.scorer.score.avg")
 	LLMDEPPScorerEndpointsScoredKey    = attribute.Key("llm_d.epp.scorer.endpoints_scored")
 
+	// EPP Screener attributes
+	LLMDEPPScreenerDecisionReasonKey      = attribute.Key("llm_d.epp.screener.decision.reason")
+	LLMDEPPScreenerSelectedRevisionKey    = attribute.Key("llm_d.epp.screener.revision.selected")
+	LLMDEPPScreenerPreviousRevisionKey    = attribute.Key("llm_d.epp.screener.revision.previous")
+	LLMDEPPScreenerSessionKeyKey          = attribute.Key("llm_d.epp.screener.session.key")
+	LLMDEPPScreenerSessionKeySourceKey    = attribute.Key("llm_d.epp.screener.session.key_source")
+	LLMDEPPScreenerCoordinationBackendKey = attribute.Key("llm_d.epp.screener.coordination.backend")
+	LLMDEPPScreenerCandidateEndpointsKey  = attribute.Key("llm_d.epp.screener.candidate_endpoints")
+	LLMDEPPScreenerFilteredEndpointsKey   = attribute.Key("llm_d.epp.screener.filtered_endpoints")
+
+	// EPP CrossReplicaSyncer attributes
+	LLMDEPPSyncerStateKeyKey   = attribute.Key("llm_d.epp.syncer.state_key")
+	LLMDEPPSyncerDecisionIDKey = attribute.Key("llm_d.epp.syncer.decision_id")
+
 	// EPP Profile Handler & Disaggregation attributes
 	LLMDEPPDisaggReasonKey                   = attribute.Key("llm_d.epp.disagg.reason")
 	LLMDEPPPDReasonKey                       = attribute.Key("llm_d.epp.pd.reason")
@@ -760,4 +774,56 @@ func LLMDCoordinatorPipelineExecutionPath(path string) attribute.KeyValue {
 // LLMDOpenAIAPI returns an attribute for OpenAI API endpoint type.
 func LLMDOpenAIAPI(api string) attribute.KeyValue {
 	return LLMDOpenAIAPIKey.String(api)
+}
+
+// LLMDEPPScreenerDecisionReason returns an attribute for why the screener selected a revision:
+// strict_header, sticky, assigned, invalidated, coordinated, weighted_pick, or storage_error.
+func LLMDEPPScreenerDecisionReason(reason string) attribute.KeyValue {
+	return LLMDEPPScreenerDecisionReasonKey.String(reason)
+}
+
+// LLMDEPPScreenerSelectedRevision returns an attribute for the revision the screener selected.
+func LLMDEPPScreenerSelectedRevision(revision string) attribute.KeyValue {
+	return LLMDEPPScreenerSelectedRevisionKey.String(revision)
+}
+
+// LLMDEPPScreenerPreviousRevision returns an attribute for the session's stored revision before this request.
+func LLMDEPPScreenerPreviousRevision(revision string) attribute.KeyValue {
+	return LLMDEPPScreenerPreviousRevisionKey.String(revision)
+}
+
+// LLMDEPPScreenerSessionKey returns an attribute for the session key the request's affinity used.
+func LLMDEPPScreenerSessionKey(key string) attribute.KeyValue {
+	return LLMDEPPScreenerSessionKeyKey.String(key)
+}
+
+// LLMDEPPScreenerSessionKeySource returns an attribute for where the session key came from:
+// attribute, prefix_hash, or none.
+func LLMDEPPScreenerSessionKeySource(source string) attribute.KeyValue {
+	return LLMDEPPScreenerSessionKeySourceKey.String(source)
+}
+
+// LLMDEPPScreenerCoordinationBackend returns an attribute for where shared session decisions live.
+func LLMDEPPScreenerCoordinationBackend(backend string) attribute.KeyValue {
+	return LLMDEPPScreenerCoordinationBackendKey.String(backend)
+}
+
+// LLMDEPPScreenerCandidateEndpoints returns an attribute for the number of endpoints the screener received.
+func LLMDEPPScreenerCandidateEndpoints(count int) attribute.KeyValue {
+	return LLMDEPPScreenerCandidateEndpointsKey.Int(count)
+}
+
+// LLMDEPPScreenerFilteredEndpoints returns an attribute for the number of endpoints the screener returned.
+func LLMDEPPScreenerFilteredEndpoints(count int) attribute.KeyValue {
+	return LLMDEPPScreenerFilteredEndpointsKey.Int(count)
+}
+
+// LLMDEPPSyncerStateKey returns an attribute for the state key a syncer operation addressed.
+func LLMDEPPSyncerStateKey(key string) attribute.KeyValue {
+	return LLMDEPPSyncerStateKeyKey.String(key)
+}
+
+// LLMDEPPSyncerDecisionID returns an attribute for the decision ID a syncer operation addressed.
+func LLMDEPPSyncerDecisionID(id string) attribute.KeyValue {
+	return LLMDEPPSyncerDecisionIDKey.String(id)
 }

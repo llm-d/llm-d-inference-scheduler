@@ -438,6 +438,19 @@ the role is Ready again.
 A strict header with no matching endpoint also returns HTTP 503. The plugin
 never silently substitutes another revision or crosses revisions.
 
+## Tracing
+
+Every screened request carries a `screen_revisions` span recording why a
+revision won (`llm_d.epp.screener.decision.reason`: `strict_header`,
+`sticky`, `assigned`, `invalidated`, `coordinated`, `weighted_pick`, or
+`storage_error`), the selected revision, the session's previous revision, the
+session key and its source (`attribute`, `prefix_hash`, or `none`), the
+coordination backend, and the candidate counts before and after screening. A
+failed session storage operation marks the span errored even though the
+request fails closed. Redis `GetOrSet` and `Replace` calls add
+`redis_syncer.*` child spans carrying the state key and decision ID, so
+storage failures stay visible in the trace.
+
 ## Metrics
 
 - `llm_d_epp_disaggregatedset_strict_revision_no_match_total`: strict revision

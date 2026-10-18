@@ -25,8 +25,12 @@ import (
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/jellydator/ttlcache/v3"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
@@ -34,7 +38,11 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/agentidentity"
 )
 
-const localRevisionDecisionStateKey fwkplugin.StateKey = "revision-decision"
+const (
+	localRevisionDecisionStateKey fwkplugin.StateKey = "revision-decision"
+	// tracerScope names the instrumentation scope of the screening span.
+	tracerScope = PluginType
+)
 
 var errInvalidRevisionDecision = errors.New("revision coordination returned an invalid rollout revision")
 
@@ -45,8 +53,27 @@ func (r revisionDecision) Clone() fwkplugin.StateData {
 }
 
 // Screen applies revision gating and strict revision selection before
-// scheduling profiles observe the endpoint set.
+// scheduling profiles observe the endpoint set. The decision is traced: the
+// span records why a revision won (strict header, sticky session, fresh
+// assignment, invalidation, or request coordination), the session key and its
+// source, the session's previous revision, the coordination backend, and the
+// candidate counts before and after screening.
 func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
+	ctx, span := tracing.Tracer(tracerScope).Start(ctx, "screen_revisions",
+		trace.WithSpanKind(trace.SpanKindInternal),
+	)
+	defer span.End()
+	if span.IsRecording() {
+		span.SetAttributes(semconv.LLMDEPPScreenerCandidateEndpoints(len(endpoints)))
+	}
+	result := c.screen(ctx, request, endpoints)
+	if span.IsRecording() {
+		span.SetAttributes(semconv.LLMDEPPScreenerFilteredEndpoints(len(result)))
+	}
+	return result
+}
+
+func (c *Screener) screen(ctx context.Context, request *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) []fwksched.Endpoint {
 	requestedRevision := c.requestedRevision(request)
 	if !c.config.RevisionGating.Active() {
 		if requestedRevision == "" {
@@ -82,7 +109,7 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 	// request in P/D must use the revision stamped by prefill; it must not depend
 	// on the two EPPs sharing a CrossReplicaSyncer.
 	if chosenRevision == "" {
-		sessionKey := c.sessionKey(request)
+		sessionKey, sessionKeySource := c.sessionIdentity(request)
 		proposed := ""
 		// observed is the session decision this request saw: the proposal on
 		// a settled hit, or the stale revision an invalidation replaces
@@ -95,6 +122,7 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 			proposed, observed, sessionSettled, err = c.sessionProposal(ctx, sessionKey, shares, allowedRevisions)
 			if err != nil {
 				log.FromContext(ctx).Error(err, "failed to read sticky rollout revision", "sessionKey", sessionKey)
+				c.recordDecision(ctx, "storage_error", sessionKey, sessionKeySource, observed, "")
 				return nil
 			}
 		}
@@ -111,6 +139,7 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 			coordinated, err = c.getOrSetRevision(ctx, decisionID, coordinated)
 			if err != nil {
 				log.FromContext(ctx).Error(err, "failed to coordinate rollout revision")
+				c.recordDecision(ctx, "storage_error", sessionKey, sessionKeySource, observed, "")
 				return nil
 			}
 			coordinatedByRequest = true
@@ -129,6 +158,7 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 				// keeps the old one would flip the session back on its next
 				// turn. Fail closed, as coordination errors already do.
 				log.FromContext(ctx).Error(err, "failed to store sticky rollout revision", "sessionKey", sessionKey)
+				c.recordDecision(ctx, "storage_error", sessionKey, sessionKeySource, observed, "")
 				return nil
 			}
 			if !coordinatedByRequest && winner != "" {
@@ -136,12 +166,73 @@ func (c *Screener) Screen(ctx context.Context, request *fwksched.InferenceReques
 			}
 		}
 		chosenRevision = coordinated
+		c.recordDecision(ctx, decisionReason(requestedRevision, sessionKey, sessionSettled, observed, coordinatedByRequest, coordinated, proposed),
+			sessionKey, sessionKeySource, observed, chosenRevision)
+	} else {
+		c.recordDecision(ctx, "strict_header", "", "none", "", chosenRevision)
 	}
 	result := c.filterRevisions(endpoints, allowedRevisions, chosenRevision)
 	if requestedRevision != "" && len(result) == 0 {
 		recordStrictRevisionNoMatch(c.typedName.Name)
 	}
 	return result
+}
+
+// decisionReason names why a revision won, for the screening span.
+func decisionReason(requestedRevision, sessionKey string, sessionSettled bool, observed string, coordinatedByRequest bool, coordinated, proposed string) string {
+	switch {
+	case requestedRevision != "":
+		return "strict_header"
+	case coordinatedByRequest && coordinated != proposed:
+		return "coordinated"
+	case !sessionSettled && observed != "":
+		return "invalidated"
+	case sessionSettled:
+		return "sticky"
+	case sessionKey != "":
+		return "assigned"
+	default:
+		return "weighted_pick"
+	}
+}
+
+// recordDecision sets the revision-decision attributes on the screening span.
+// Storage failures mark the span errored so they stay visible even though the
+// request fails closed.
+func (c *Screener) recordDecision(ctx context.Context, reason, sessionKey, sessionKeySource, previousRevision, selectedRevision string) {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return
+	}
+	span.SetAttributes(
+		semconv.LLMDEPPScreenerDecisionReason(reason),
+		semconv.LLMDEPPScreenerSessionKeySource(sessionKeySource),
+		semconv.LLMDEPPScreenerSelectedRevision(selectedRevision),
+	)
+	if sessionKey != "" {
+		span.SetAttributes(semconv.LLMDEPPScreenerSessionKey(sessionKey))
+	}
+	if previousRevision != "" {
+		span.SetAttributes(semconv.LLMDEPPScreenerPreviousRevision(previousRevision))
+	}
+	if backend := c.coordinationBackend(); backend != "" {
+		span.SetAttributes(semconv.LLMDEPPScreenerCoordinationBackend(backend))
+	}
+	if reason == "storage_error" {
+		span.SetStatus(codes.Error, "session decision storage failed")
+	}
+}
+
+// coordinationBackend names where shared decisions live: the syncer's typed
+// name, or "local" when this EPP decides alone.
+func (c *Screener) coordinationBackend() string {
+	if !c.config.RevisionGating.coordinationEnabled() {
+		return "local"
+	}
+	if syncer := c.crossReplicaSyncer(); syncer != nil {
+		return syncer.TypedName().String()
+	}
+	return "local"
 }
 
 func (c *Screener) requestedRevision(request *fwksched.InferenceRequest) string {
@@ -195,30 +286,36 @@ func (c *Screener) crossReplicaSyncer() fwkdl.CrossReplicaSyncer {
 	return syncer
 }
 
-// sessionKey identifies the conversation a request belongs to: the
-// agent-identity session attribute when one is set, otherwise the hash of the
-// leading request-body bytes. Empty means no affinity applies and the request
-// takes the per-request weighted pick. The prefix-hash fallback requires a
-// body at least prefixBytes long: hashing a shorter body would key the whole
-// conversation so far, and the next turn appends to it and mints a new key,
-// providing no stickiness while churning stored decisions. A request too
-// short to hash therefore runs unaffinitized, like one without a session
-// attribute; guaranteed affinity needs the session attribute.
-func (c *Screener) sessionKey(request *fwksched.InferenceRequest) string {
+// sessionIdentity returns the conversation key a request belongs to and where
+// it came from: the agent-identity session attribute ("attribute"), the hash
+// of the leading request-body bytes ("prefix_hash"), or no key ("none"). An
+// empty key means no affinity applies and the request takes the per-request
+// weighted pick. The prefix-hash fallback requires a body at least
+// prefixBytes long: hashing a shorter body would key the whole conversation
+// so far, and the next turn appends to it and mints a new key, providing no
+// stickiness. A request too short to hash therefore runs unaffinitized, like
+// one without a session attribute; guaranteed affinity needs the session
+// attribute.
+func (c *Screener) sessionIdentity(request *fwksched.InferenceRequest) (string, string) {
 	if request == nil || !c.sessionAffinity.active() {
-		return ""
+		return "", "none"
 	}
 	if id, ok := fwksched.ReadRequestAttribute[string](request, agentidentity.AgentIdentityKey); ok && id != "" {
-		return id
+		return id, "attribute"
 	}
 	prefixBytes := 0
 	if c.sessionAffinity.PrefixBytes != nil {
 		prefixBytes = *c.sessionAffinity.PrefixBytes
 	}
 	if prefixBytes <= 0 || request.Body == nil || len(request.Body.RawBody) < prefixBytes {
-		return ""
+		return "", "none"
 	}
-	return fmt.Sprintf("prefix:%016x", xxhash.Sum64(request.Body.RawBody[:prefixBytes]))
+	return fmt.Sprintf("prefix:%016x", xxhash.Sum64(request.Body.RawBody[:prefixBytes])), "prefix_hash"
+}
+
+func (c *Screener) sessionKey(request *fwksched.InferenceRequest) string {
+	key, _ := c.sessionIdentity(request)
+	return key
 }
 
 // sessionSynced reports whether session decisions are shared across EPP
