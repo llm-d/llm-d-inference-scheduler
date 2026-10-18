@@ -80,8 +80,10 @@ const (
 // force-stream candidate lands on exactly one, so the counter sums to candidate
 // volume. The forced outcome is a reassembled reply; each fallback_* outcome takes
 // the non-forced pass-through; each error_* outcome is also classified by
-// step_errors_total. The metric's Help string is the canonical description of what
-// each value means.
+// step_errors_total. A post-upstream fallback (oversize, unreadable) whose request
+// carries a spent one-shot KV handoff cannot replay it, so it fails as an error
+// rather than taking the pass-through and is not counted fallback_*. The metric's
+// Help string is the canonical description of what each value means.
 const (
 	ForceStreamResultForced              = "forced"
 	ForceStreamResultFallbackBudget      = "fallback_budget"

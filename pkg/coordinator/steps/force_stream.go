@@ -444,10 +444,17 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64
 		}
 		return fmt.Errorf("force-stream: read upstream: %w", err)
 	}
-	// A clean EOF with neither the [DONE] marker nor a shape terminal means the
-	// upstream was cut mid-reply; the reassembly would look complete but omit the
-	// tail, so fall back rather than return a truncated reply as a 200.
-	if !sawDone && !reassembler.terminated() {
+	// The reassembly must have a terminal signal, or it would look complete while
+	// omitting a cut-off tail. The Responses shape has one only when a terminal
+	// event captured the response object (its sole carrier of status and usage), so
+	// it is required there even after a [DONE] line. The other shapes accept either a
+	// finish_reason or the [DONE] marker. A stream with neither falls back rather
+	// than return a truncated reply as a 200.
+	if reassembler.shape == sseShapeResponses {
+		if !reassembler.terminated() {
+			return errForceStreamTruncated
+		}
+	} else if !sawDone && !reassembler.terminated() {
 		return errForceStreamTruncated
 	}
 	return nil
@@ -457,9 +464,6 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved int64
 // non-streaming JSON response. A marshal failure returns a plain error before
 // any write, so the server answers a clean 502.
 func writeForcedResponse(logger logr.Logger, reqCtx *pipeline.RequestContext, reassembler *sseReassembler) error {
-	if reassembler.responsesTerminalMissing() {
-		logger.V(logutil.DEFAULT).Info("force-stream responses stream ended without a terminal event; reporting status incomplete", "model", reqCtx.Model)
-	}
 	payload, err := json.Marshal(reassembler.result())
 	if err != nil {
 		return fmt.Errorf("%s: force-stream marshal response: %w", DecodeStepName, err)

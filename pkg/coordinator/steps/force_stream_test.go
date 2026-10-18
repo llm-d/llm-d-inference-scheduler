@@ -34,6 +34,7 @@ import (
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
+	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/kv"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
@@ -1022,6 +1023,72 @@ func TestForceStream_MalformedFrame_BufferedPath(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
 }
 
+// TestForceStream_SpentHandoff_SuppressesFallback verifies that when the forced
+// attempt fails after the upstream 200 and the request carries a one-shot P2P block
+// handoff (remote_block_ids, the NIXL path), the request does NOT replay it through
+// the pass-through: it fails cleanly with a single upstream call and is not counted
+// as a fallback. A shared-storage request (do_remote_prefill but no block ids) still
+// falls back, covered by TestForceStream_MalformedFrame_BufferedPath.
+func TestForceStream_SpentHandoff_SuppressesFallback(t *testing.T) {
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		// The forced attempt gets an unparsable stream; there must be no second call,
+		// since the handoff is spent and the fallback is suppressed.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprint(w, "data: not-json\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	reg := prometheus.NewRegistry()
+	require.NoError(t, coordmetrics.Register(reg))
+	coordmetrics.Reset()
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+	// The NIXL connector echoes reqCtx.KVTransferParams (the prefiller's block ids)
+	// into the decode body, so the body carries a one-shot handoff.
+	step, err := NewDecodeStep(gwClient, map[string]any{
+		ParamForceStream:               true,
+		ParamForceStreamBufferSize:     "1GiB",
+		ParamForceStreamMaxRequestSize: "1GiB",
+		ParamKVConnector:               kv.NIXL,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:    "req-spent-handoff",
+		OriginalPath: reqcommon.PathVLLMGenerate,
+		Model:        "llama-3",
+		Stream:       false,
+		// The prefiller streamed these blocks to this decode pod; NIXL frees them
+		// once pulled, so a replay is unsafe.
+		KVTransferParams: map[string]any{
+			reqcommon.FieldRemoteBlockIDs: []any{1, 2},
+			reqcommon.FieldRemoteEngineID: "prefill-pod-a",
+		},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"token_ids":       []any{1},
+			"sampling_params": map[string]any{"max_tokens": 8},
+		},
+		ResponseWriter: recorder,
+	}
+
+	err = step.(*DecodeStep).Execute(context.Background(), reqCtx)
+	require.Error(t, err, "a spent handoff must fail cleanly rather than replay")
+	require.Equal(t, []any{true}, streams, "only the forced attempt runs; the fallback is suppressed")
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnreadable), 1e-9,
+		"a suppressed request is not counted as a fallback")
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released on the error path")
+}
+
 // TestScanForcedResponse_TerminalMarker checks the buffered path's completeness
 // gate: a stream is complete only if it carried the [DONE] marker or a shape
 // terminal (a Responses terminal event, or a finish_reason on another shape). A
@@ -1063,9 +1130,12 @@ func TestScanForcedResponse_TerminalMarker(t *testing.T) {
 			stream: `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n" + `data: {"type":"response.completed","response":{"id":"r","status":"completed"}}` + "\n\n",
 		},
 		{
-			name:   "responses done without terminal event",
-			shape:  sseShapeResponses,
-			stream: `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n" + "data: [DONE]\n\n",
+			// [DONE] is not enough for Responses: without a terminal event the reply
+			// has no status or usage, so it is a truncation and must fall back.
+			name:      "responses done without terminal event",
+			shape:     sseShapeResponses,
+			stream:    `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n" + "data: [DONE]\n\n",
+			truncated: true,
 		},
 		{
 			name:      "responses truncated",

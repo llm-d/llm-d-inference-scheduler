@@ -196,11 +196,6 @@ func TestSSEReassemble_Responses(t *testing.T) {
 	r.add(frame(t, `{"type":"response.output_text.delta","delta":" world"}`))
 	r.add(frame(t, `{"type":"response.completed","response":`+completed+`}`))
 
-	// The completed object supersedes the accumulated deltas, so the choice
-	// accumulators are released rather than held alongside it.
-	require.Empty(t, r.choices)
-	require.Empty(t, r.order)
-
 	// Only the generated text is charged to the ceiling, not the envelope.
 	require.EqualValues(t, len("Hello world"), r.bufferedBytes())
 
@@ -222,7 +217,6 @@ func TestSSEReassemble_ResponsesDeltaAfterTerminal(t *testing.T) {
 
 	r.add(frame(t, `{"type":"response.output_text.delta","delta":"xxxxxxxxxx"}`))
 	require.Equal(t, before, r.bufferedBytes(), "a post-terminal delta must not grow the ceiling estimate")
-	require.Empty(t, r.choices, "a post-terminal delta must not re-create accumulators")
 
 	var want map[string]any
 	require.NoError(t, json.Unmarshal([]byte(completed), &want))
@@ -264,30 +258,16 @@ func TestSSEReassemble_ResponsesTerminalStates(t *testing.T) {
 	}
 }
 
-// Without any terminal event, a minimal response object is assembled from the
-// accumulated deltas so the collected text still reaches the client, but it is
-// marked status incomplete because the stream never confirmed completion.
-func TestSSEReassemble_ResponsesNoCompleted(t *testing.T) {
+// Without a terminal event, a Responses stream has no status or usage carrier, so
+// it is not a servable reply: terminated reports false and scanForcedResponse
+// (tested separately) treats it as truncated and falls back, rather than
+// synthesizing a complete-looking object.
+func TestSSEReassemble_ResponsesNoTerminalEventNotTerminated(t *testing.T) {
 	r := newSSEReassembler(sseShapeResponses, 0)
 	r.add(frame(t, `{"type":"response.created","response":{"id":"resp-2","model":"m","status":"in_progress"}}`))
 	r.add(frame(t, `{"type":"response.output_text.delta","delta":"hi"}`))
 
-	require.True(t, r.responsesTerminalMissing())
-
-	got := r.result()
-	require.Equal(t, "resp-2", got["id"])
-	require.Equal(t, "m", got["model"])
-	require.Equal(t, statusIncomplete, got["status"])
-
-	output := got["output"].([]any)
-	require.Len(t, output, 1)
-	item := output[0].(map[string]any)
-	require.Equal(t, itemTypeMessage, item["type"])
-	require.Equal(t, reqcommon.RoleAssistant, item["role"])
-	content := item["content"].([]any)
-	part := content[0].(map[string]any)
-	require.Equal(t, reqcommon.PartTypeOutputText, part["type"])
-	require.Equal(t, "hi", part["text"])
+	require.False(t, r.terminated(), "a Responses stream with no terminal event is not a complete reply")
 }
 
 // Frames mirror the real vLLM /inference/v1/generate stream: one token_id per

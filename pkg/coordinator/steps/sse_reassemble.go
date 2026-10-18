@@ -61,11 +61,6 @@ const (
 	responseEventFailed          = "response.failed"
 	fieldResponse                = "response"
 	fieldDelta                   = "delta"
-	fieldStatus                  = "status"
-	fieldID                      = "id"
-	fieldText                    = "text"
-	itemTypeMessage              = "message"
-	statusIncomplete             = "incomplete"
 )
 
 // shapeForAPIType maps the API a request used to the reassembly shape its stream
@@ -165,51 +160,28 @@ func (r *sseReassembler) add(frame map[string]any) {
 }
 
 // addResponses folds one Responses API event, keyed by its data-line type.
-// Text deltas accumulate for the per-request ceiling and for the no-terminal
-// fallback reply; a terminal event (completed, incomplete, or failed) captures
-// its response object, carrying the real status, usage, and error so a truncated
-// or failed generation is not reported as completed. Other events
-// (response.created, response.in_progress) seed id and model for the fallback.
+// A text delta accumulates only toward the per-request ceiling (its bytes bound a
+// generation that overshoots its token limit before a terminal event arrives). A
+// terminal event (completed, incomplete, or failed) captures the response object
+// the reply is emitted from, carrying the real status, usage, and error so a
+// truncated or failed generation is not reported as completed. A stream that ends
+// with no terminal event never sets responseObject, so scanForcedResponse treats it
+// as truncated and falls back rather than emitting a reply with no status.
 func (r *sseReassembler) addResponses(frame map[string]any) {
 	switch frame[reqcommon.FieldType] {
 	case responseEventOutputTextDelta:
-		// A terminal event already captured the final object and released the
-		// accumulators; a later delta is redundant, so ignore it rather than regrow
-		// the buffer and risk re-tripping the ceiling on a reply the pod completed.
+		// A terminal event already captured the final object; a later delta is
+		// redundant, so ignore it rather than regrow the buffer and risk re-tripping
+		// the ceiling on a reply the pod completed.
 		if r.responseObject != nil {
 			return
 		}
 		if delta, ok := frame[fieldDelta].(string); ok {
-			r.choice(0).content.WriteString(delta)
 			r.contentBytes += int64(len(delta))
 		}
 	case responseEventCompleted, responseEventIncomplete, responseEventFailed:
 		if resp, ok := frame[fieldResponse].(map[string]any); ok {
 			r.responseObject = resp
-			// The accumulated deltas fed only the ceiling and the no-terminal
-			// fallback; the terminal object supersedes them, so release them
-			// rather than hold the content twice.
-			r.choices = map[int]*sseChoice{}
-			r.order = nil
-		}
-	default:
-		if resp, ok := frame[fieldResponse].(map[string]any); ok {
-			r.captureResponseMeta(resp)
-		}
-	}
-}
-
-// captureResponseMeta records the id and model the fallback reply needs, taken
-// from the response envelope an early event carries (first non-empty wins).
-func (r *sseReassembler) captureResponseMeta(resp map[string]any) {
-	if r.id == "" {
-		if id, ok := resp[fieldID].(string); ok {
-			r.id = id
-		}
-	}
-	if r.model == "" {
-		if model, ok := resp[reqcommon.FieldModel].(string); ok {
-			r.model = model
 		}
 	}
 }
@@ -356,7 +328,11 @@ func (r *sseReassembler) bufferedBytes() int64 {
 // non-streaming reply's shape.
 func (r *sseReassembler) result() map[string]any {
 	if r.shape == sseShapeResponses {
-		return r.responsesResult()
+		// scanForcedResponse returns errForceStreamTruncated unless a terminal event
+		// captured the response object, so by here it is always set and emitted
+		// verbatim: the object the pod would have returned non-streaming, carrying its
+		// own status, usage, and (on failure) error.
+		return r.responseObject
 	}
 
 	out := map[string]any{}
@@ -377,49 +353,6 @@ func (r *sseReassembler) result() map[string]any {
 		out[reqcommon.FieldUsage] = r.usage
 	}
 	return out
-}
-
-// responsesResult returns the Responses reply. A terminal event (completed,
-// incomplete, or failed) carries the response object the pod would have returned
-// non-streaming, so it is emitted verbatim. When no terminal event arrived, a
-// minimal response object is assembled from the accumulated output_text deltas and
-// marked status incomplete: the collected text still reaches the client, but the
-// stream never confirmed completion, so it is not reported as completed.
-func (r *sseReassembler) responsesResult() map[string]any {
-	if r.responseObject != nil {
-		return r.responseObject
-	}
-
-	content := ""
-	if c, ok := r.choices[0]; ok {
-		content = c.content.String()
-	}
-	out := map[string]any{
-		fieldStatus: statusIncomplete,
-		reqcommon.FieldOutput: []any{
-			map[string]any{
-				reqcommon.FieldType: itemTypeMessage,
-				reqcommon.FieldRole: reqcommon.RoleAssistant,
-				reqcommon.FieldContent: []any{
-					map[string]any{reqcommon.FieldType: reqcommon.PartTypeOutputText, fieldText: content},
-				},
-			},
-		},
-	}
-	if r.id != "" {
-		out[fieldID] = r.id
-	}
-	if r.model != "" {
-		out[reqcommon.FieldModel] = r.model
-	}
-	return out
-}
-
-// responsesTerminalMissing reports a Responses stream that ended with no terminal
-// event. The reply was synthesized from the deltas and marked incomplete, so its
-// completion is unconfirmed; the caller logs it to keep the gap diagnosable.
-func (r *sseReassembler) responsesTerminalMissing() bool {
-	return r.shape == sseShapeResponses && r.responseObject == nil
 }
 
 // terminated reports whether a frame signalled the end of generation: a Responses
