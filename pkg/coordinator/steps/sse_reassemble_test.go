@@ -286,7 +286,7 @@ func TestSSEReassemble_ResponsesNoCompleted(t *testing.T) {
 	require.Equal(t, reqcommon.RoleAssistant, item["role"])
 	content := item["content"].([]any)
 	part := content[0].(map[string]any)
-	require.Equal(t, partTypeOutputText, part["type"])
+	require.Equal(t, reqcommon.PartTypeOutputText, part["type"])
 	require.Equal(t, "hi", part["text"])
 }
 

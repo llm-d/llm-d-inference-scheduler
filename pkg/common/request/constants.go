@@ -150,6 +150,7 @@ const (
 	PartTypeInputImage         = "input_image"
 	PartTypeInputFile          = "input_file"
 	PartTypeComputerScreenshot = "computer_screenshot"
+	PartTypeOutputText         = "output_text"
 )
 
 // Anthropic Messages block types. The estimate tokenizer and the sidecar

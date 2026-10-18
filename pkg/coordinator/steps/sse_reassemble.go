@@ -65,7 +65,6 @@ const (
 	fieldID                      = "id"
 	fieldText                    = "text"
 	itemTypeMessage              = "message"
-	partTypeOutputText           = "output_text"
 	statusIncomplete             = "incomplete"
 )
 
@@ -402,7 +401,7 @@ func (r *sseReassembler) responsesResult() map[string]any {
 				reqcommon.FieldType: itemTypeMessage,
 				reqcommon.FieldRole: reqcommon.RoleAssistant,
 				reqcommon.FieldContent: []any{
-					map[string]any{reqcommon.FieldType: partTypeOutputText, fieldText: content},
+					map[string]any{reqcommon.FieldType: reqcommon.PartTypeOutputText, fieldText: content},
 				},
 			},
 		},

@@ -279,6 +279,14 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 		case errors.Is(err, errForceStreamOversize):
 			// decode records fallback_oversize and runs the pass-through.
 		default:
+			// A request whose context already ended (client disconnected, or a
+			// client-set deadline expired) is a routine lifecycle event, not a backend
+			// fault, so the read failure it surfaces is logged quietly rather than as
+			// an error (matching the pass-through's ErrorHandler).
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				logger.V(logutil.VERBOSE).Info("force-stream: client cancelled", "error", ctxErr)
+				return errForceStreamUnreadable
+			}
 			// The upstream returned 200 but no complete reply reached the client: an
 			// unreadable stream (bad JSON, interrupted read) or one cut off before a
 			// terminal marker. Log the detail; decode records fallback_unreadable and
