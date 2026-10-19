@@ -110,6 +110,16 @@ var errForceStreamUnreadable = errors.New("force-stream: upstream stream unreada
 // than return a truncated reply as a 200. It is handled like errForceStreamUnreadable.
 var errForceStreamTruncated = errors.New("force-stream: upstream stream ended before a terminal marker")
 
+// errForceStreamLossyFrame marks a chat or text stream whose delta carried a field
+// the reassembler does not fold (anything beyond role and content: reasoning_content,
+// tool_calls, refusal, audio, annotations). forceStreamLossy diverts a request that
+// declares such a feature up front, but a server-side default (a reasoning parser, a
+// template) emits these with no request-side signal. Detecting it on the frame falls
+// back to the pass-through, which preserves the field, rather than dropping it from a
+// forced reply. Nothing has reached the client, so it is handled like
+// errForceStreamUnreadable.
+var errForceStreamLossyFrame = errors.New("force-stream: streamed delta carried an unfoldable field; falling back to pass-through")
+
 // sseDataPrefix and sseDoneMarker delimit the SSE frames the upstream streams.
 // Each data line carries one JSON object; the stream ends with data: [DONE].
 // sseDataPrefix drops the trailing space reqcommon.SSEDataPrefix carries so it
@@ -279,6 +289,9 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 			logger.Error(err, "force-stream aborted", "reservedBytes", reserved)
 		case errors.Is(err, errForceStreamOversize):
 			// decode records fallback_oversize and runs the pass-through.
+		case errors.Is(err, errForceStreamLossyFrame):
+			// decode records fallback_unsupported and runs the pass-through, which
+			// preserves the field the fold would drop.
 		default:
 			// A request whose context already ended (client disconnected, or a
 			// client-set deadline expired) is a routine lifecycle event, not a backend
@@ -432,6 +445,9 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved, requ
 			return fmt.Errorf("force-stream: parse frame: %w", err)
 		}
 		reassembler.add(frame)
+		if reassembler.lossyFrame {
+			return errForceStreamLossyFrame
+		}
 		if reassembler.bufferedBytes() > reserved {
 			return errForceStreamCeiling
 		}

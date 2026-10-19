@@ -837,6 +837,61 @@ func TestForceStream_LossyRequest_PassThrough(t *testing.T) {
 	}
 }
 
+// TestForceStream_ServerDefaultReasoning_FallsBack covers the frame-level lossy
+// gate: a plain chat request (no tools, no reasoning signal) whose pod streams
+// reasoning_content by default. forceStreamLossy cannot see this in the request, so
+// the forced attempt starts, detects the unfoldable delta mid-stream, and falls back
+// to the pass-through, which preserves reasoning_content. Counted fallback_unsupported.
+func TestForceStream_ServerDefaultReasoning_FallsBack(t *testing.T) {
+	passthroughReply := `{"id":"c","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Paris","reasoning_content":"let me think"}}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			// vLLM emits reasoning before content; the first reasoning delta flags the
+			// reply lossy before anything is written to the client.
+			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"let me think\"}}]}\n\n")
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-reasoning",
+		OriginalPath:     reqcommon.PathChatCompletions,
+		Model:            "llama-3",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "a server-default lossy field must fall back, not drop silently")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode)
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body), "the pass-through reply keeps reasoning_content")
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnsupported), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
+}
+
 func TestForceStream_UpstreamError_ForwardsVerbatim(t *testing.T) {
 	for _, status := range []int{http.StatusBadRequest, http.StatusServiceUnavailable} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {

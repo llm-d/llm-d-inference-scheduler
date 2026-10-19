@@ -62,6 +62,44 @@ func TestSSEReassemble_Chat(t *testing.T) {
 	require.EqualValues(t, 7, usage["total_tokens"])
 }
 
+// TestDeltaHasUnfoldableField checks the whitelist: role and content fold, so only
+// another key with a non-null value is unfoldable; a null-valued optional does not
+// count (SDKs serialize an absent field that way).
+func TestDeltaHasUnfoldableField(t *testing.T) {
+	tests := []struct {
+		name  string
+		delta map[string]any
+		want  bool
+	}{
+		{"empty", map[string]any{}, false},
+		{"role only", map[string]any{"role": "assistant"}, false},
+		{"content only", map[string]any{"content": "hi"}, false},
+		{"role and content", map[string]any{"role": "assistant", "content": "hi"}, false},
+		{"null tool_calls ignored", map[string]any{"content": "hi", "tool_calls": nil}, false},
+		{"reasoning_content", map[string]any{"reasoning_content": "let me think"}, true},
+		{"tool_calls", map[string]any{"content": "", "tool_calls": []any{map[string]any{}}}, true},
+		{"refusal", map[string]any{"refusal": "no"}, true},
+		{"annotations", map[string]any{"content": "x", "annotations": []any{}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, deltaHasUnfoldableField(tc.delta))
+		})
+	}
+}
+
+// TestSSEReassemble_FlagsLossyDelta verifies the reassembler flags a chat delta
+// carrying a field beyond role and content (here reasoning_content, a server-side
+// default), so the scan can fall back rather than drop it.
+func TestSSEReassemble_FlagsLossyDelta(t *testing.T) {
+	r := newSSEReassembler(sseShapeChat, 0)
+	r.add(frame(t, `{"choices":[{"index":0,"delta":{"role":"assistant"}}]}`))
+	require.False(t, r.lossyFrame, "a role-only delta is not lossy")
+
+	r.add(frame(t, `{"choices":[{"index":0,"delta":{"reasoning_content":"let me think"}}]}`))
+	require.True(t, r.lossyFrame, "a reasoning_content delta must flag the reply lossy")
+}
+
 func TestSSEReassemble_Text(t *testing.T) {
 	r := newSSEReassembler(sseShapeText, 0)
 	r.add(frame(t, `{"id":"cmpl-2","object":"text_completion","created":200,"model":"m","choices":[{"index":0,"text":"He","finish_reason":null}]}`))

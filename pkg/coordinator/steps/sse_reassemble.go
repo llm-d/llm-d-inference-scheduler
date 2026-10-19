@@ -103,10 +103,11 @@ type sseChoice struct {
 //
 // Only the fields a non-streaming reply needs are folded: text content or token
 // ids, role, finish_reason, and usage. A chat delta's tool_calls, function_call,
-// logprobs, and reasoning_content are not reassembled; the decode step leaves
+// logprobs, and reasoning_content are not reassembled. The decode step leaves
 // force-streaming off for a chat or text request that declares tools, functions,
-// logprobs, or reasoning (see forceStreamLossy), so such a reply takes the
-// pass-through instead.
+// logprobs, or reasoning (see forceStreamLossy); a server-side default the request
+// does not declare is caught on the frame instead (lossyFrame), and both take the
+// pass-through, which preserves the dropped field.
 type sseReassembler struct {
 	shape sseShape
 	// maxChoices caps how many choice indices fold, matching the client's declared
@@ -131,6 +132,12 @@ type sseReassembler struct {
 	// Responses event (completed, incomplete, or failed), emitted verbatim as the
 	// reply so its status, usage, and error reach the client unchanged.
 	responseObject map[string]any
+
+	// lossyFrame is set when a chat delta carried a field beyond role and content,
+	// which the fold drops. The scan treats it as a fallback so the pass-through
+	// keeps the field. It catches a server-side default (reasoning parser, template)
+	// that forceStreamLossy cannot predict from the request.
+	lossyFrame bool
 
 	contentBytes int64
 }
@@ -275,6 +282,14 @@ func (r *sseReassembler) foldChoice(choice map[string]any) {
 				acc.content.WriteString(content)
 				r.contentBytes += int64(len(content))
 			}
+			// The fold keeps only role and content. Any other key (reasoning_content,
+			// tool_calls, refusal, audio, annotations) would be dropped, so flag the
+			// reply lossy and let the scan fall back to the pass-through, which keeps
+			// it. This catches a server-side default forceStreamLossy cannot see in
+			// the request.
+			if deltaHasUnfoldableField(delta) {
+				r.lossyFrame = true
+			}
 		}
 	case sseShapeGenerate:
 		if ids, ok := choice["token_ids"].([]any); ok {
@@ -295,6 +310,23 @@ func (r *sseReassembler) foldChoice(choice map[string]any) {
 		acc.finishReason = fr
 		acc.hasFinish = true
 	}
+}
+
+// deltaHasUnfoldableField reports whether a chat delta carries a field the fold
+// drops. Only role and content are folded, so any other key with a non-null value
+// is unfoldable (reasoning_content, tool_calls, refusal, audio, annotations). A
+// null-valued key is ignored, since SDKs serialize an absent optional that way and
+// it carries no data to lose.
+func deltaHasUnfoldableField(delta map[string]any) bool {
+	for k, v := range delta {
+		if k == reqcommon.FieldRole || k == reqcommon.FieldContent {
+			continue
+		}
+		if v != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeUsage copies every field a usage block reports into the accumulated

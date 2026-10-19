@@ -169,6 +169,8 @@ func forceStreamFallbackResult(err error) (result string, ok bool) {
 		return coordmetrics.ForceStreamResultFallbackOversize, true
 	case errors.Is(err, errForceStreamUnreadable):
 		return coordmetrics.ForceStreamResultFallbackUnreadable, true
+	case errors.Is(err, errForceStreamLossyFrame):
+		return coordmetrics.ForceStreamResultFallbackUnsupported, true
 	default:
 		return "", false
 	}
