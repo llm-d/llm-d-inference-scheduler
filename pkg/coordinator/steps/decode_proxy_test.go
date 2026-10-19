@@ -19,6 +19,7 @@ package steps
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
+	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
@@ -241,8 +243,8 @@ type backendTimeoutErr struct{}
 func (backendTimeoutErr) Error() string     { return "net/http: timeout awaiting response headers" }
 func (backendTimeoutErr) Is(err error) bool { return err == context.DeadlineExceeded }
 
-// writeRecorder reports whether the handler under test wrote a response
-// header, which httptest.ResponseRecorder alone cannot distinguish from its
+// writeRecorder reports whether the handler under test wrote any part of a
+// response, which httptest.ResponseRecorder alone cannot distinguish from its
 // default 200.
 type writeRecorder struct {
 	*httptest.ResponseRecorder
@@ -252,6 +254,66 @@ type writeRecorder struct {
 func (w *writeRecorder) WriteHeader(code int) {
 	w.wrote = true
 	w.ResponseRecorder.WriteHeader(code)
+}
+
+func (w *writeRecorder) Write(p []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseRecorder.Write(p)
+}
+
+// brokenPipeWriter fails every body write, as a connection the client has
+// closed does.
+type brokenPipeWriter struct{ header http.Header }
+
+func (w *brokenPipeWriter) Header() http.Header       { return w.header }
+func (w *brokenPipeWriter) WriteHeader(int)           {}
+func (w *brokenPipeWriter) Write([]byte) (int, error) { return 0, errors.New("write: broken pipe") }
+
+// With http.ServerContextKey in the context, ReverseProxy panics
+// http.ErrAbortHandler when the body copy fails, as under a real server.
+func TestServeDecode_BodyCopyFailure(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     int
+		clientGone bool
+		wantPanic  bool
+		wantStatus int // status on the UpstreamStreamedError; 0 means no error
+	}{
+		{name: "served stream, client gone", status: http.StatusOK, clientGone: true},
+		{name: "error stream, client gone", status: http.StatusInternalServerError, clientGone: true, wantStatus: http.StatusInternalServerError},
+		{name: "write failed, client present", status: http.StatusOK, wantPanic: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.WithValue(context.Background(), http.ServerContextKey, &http.Server{}))
+			defer cancel()
+			transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				if tc.clientGone {
+					cancel()
+				}
+				return &http.Response{StatusCode: tc.status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("chunk")), Request: r}, nil
+			})
+			req := httptest.NewRequest(http.MethodPost, "http://gateway/v1/chat/completions", nil).WithContext(ctx)
+			w := &brokenPipeWriter{header: http.Header{}}
+
+			var out *decodeOutcome
+			run := func() { out = serveDecode(logr.Discard(), transport, w, req, coordmetrics.UpstreamDecode, nil) }
+			if tc.wantPanic {
+				require.PanicsWithValue(t, http.ErrAbortHandler, run)
+				return
+			}
+			run()
+			require.Equal(t, tc.status, out.Status)
+			err := out.streamedError(DecodeStepName)
+			if tc.wantStatus == 0 {
+				require.NoError(t, err)
+				return
+			}
+			var streamed *pipeline.UpstreamStreamedError
+			require.ErrorAs(t, err, &streamed)
+			require.Equal(t, tc.wantStatus, streamed.StatusCode)
+		})
+	}
 }
 
 func TestNewDecodeProxy_ClientCancelNotLoggedAsError(t *testing.T) {

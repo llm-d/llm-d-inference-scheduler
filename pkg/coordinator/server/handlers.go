@@ -77,9 +77,8 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		// A pipeline panic bypasses the err-branch call to IncRequestErrorTotal
 		// below; recovering here records the panic under error_code=internal
 		// and re-panics so chi Recoverer at the server edge still answers 500.
-		// A client abort is a cancellation and re-panics without an error count.
-		rec := recover()
-		if rec != nil && !pipeline.IsClientAbort(r.Context(), rec) {
+		r := recover()
+		if r != nil {
 			coordmetrics.IncRequestErrorTotal(model, coordmetrics.ErrorCodeInternal)
 		}
 		coordmetrics.IncRequestTotal(model)
@@ -92,8 +91,8 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		coordmetrics.RecordOrchestrationOverhead(route, time.Since(receivedAt)-parseDuration-stepDuration)
 		coordmetrics.RecordResponseSize(stream, cw.BytesWritten())
 		coordmetrics.DecRequestRunning(inflightModel)
-		if rec != nil {
-			panic(rec)
+		if r != nil {
+			panic(r)
 		}
 	}()
 
@@ -206,9 +205,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.pipeline.Execute(ctx, reqCtx); err != nil {
-		if ctx.Err() != nil {
-			// The client is gone: nothing to answer, and no coordinator or
-			// upstream fault to count.
+		if pipeline.IsClientCancellation(ctx, err) {
 			logger.V(logutil.VERBOSE).Info("pipeline aborted: client cancelled", "error", err)
 			return
 		}

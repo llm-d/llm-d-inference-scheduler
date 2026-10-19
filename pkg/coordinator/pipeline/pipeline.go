@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -154,7 +153,7 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 	)
 	defer func() {
 		if r := recover(); r != nil {
-			span.SetStatus(codes.Error, panicSpanStatus(ctx, r))
+			span.SetStatus(codes.Error, "step panicked")
 			span.End()
 			panic(r)
 		}
@@ -175,9 +174,8 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 	timings := make([]stepTiming, len(p.steps))
 	started := map[string]bool{}
 	executed := map[string]bool{}
-	// cancelledIn names the step that returned because the client left, or
-	// "" when no step did.
 	cancelledIn := ""
+	doneBy := ""
 	defer func() {
 		stats := make([]any, 0, (len(timings)+1)*2)
 		if reqCtx.ParseDuration > 0 {
@@ -195,7 +193,7 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 		// to path totals. This defer is registered after the one that ends
 		// the span, so it runs first and the attribute lands while the span
 		// is still open.
-		if path, ok := classifyExecutionPath(started, cancelledIn); ok {
+		if path, ok := classifyExecutionPath(started, executed, doneBy, cancelledIn); ok {
 			coordmetrics.IncExecutionPath(reqCtx.Model, path)
 			span.SetAttributes(semconv.LLMDCoordinatorPipelineExecutionPath(path))
 		}
@@ -221,15 +219,15 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 			if errors.Is(err, ErrPipelineDone) {
 				// Clean early exit (e.g. conditional-decode cache hit); not an error.
 				executed[name] = true
+				doneBy = name
 				return nil
 			}
-			if ctx.Err() != nil {
-				// Once the request context has ended, the failure is the client's departure.
-				cancelledIn = name
-			} else {
-				coordmetrics.IncStepErrorTotal(name, coordmetrics.ClassifyErrorCode(err, ClassifyOpts))
-			}
 			failed := fmt.Errorf("step %q failed: %w", name, err)
+			if IsClientCancellation(ctx, err) {
+				cancelledIn = name
+				return failed
+			}
+			coordmetrics.IncStepErrorTotal(name, coordmetrics.ClassifyErrorCode(err, ClassifyOpts))
 			// UpstreamError.Error omits the response body, so the status
 			// message carries no prompt or user data.
 			span.SetStatus(codes.Error, failed.Error())
@@ -246,10 +244,6 @@ func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 // return, error return, panic). On panic recovery, step_errors_total
 // records the failure under error_code=internal and the panic
 // re-propagates into the chi Recoverer at the server edge.
-// http.ErrAbortHandler is the exception: under an ended request context it
-// is httputil.ReverseProxy reporting that the client left mid-stream, and it
-// re-propagates without a step error. Under a live context the same panic is
-// a broken upstream stream and counts as internal.
 //
 // The span is named after the step, which is why the step name is not also
 // recorded as an attribute.
@@ -273,14 +267,10 @@ func (p *Pipeline) runStep(
 		reqCtx.StepDuration += d
 		timings[idx] = stepTiming{name: name, duration: d}
 		if r := recover(); r != nil {
-			if IsClientAbort(ctx, r) {
-				log.FromContext(ctx).V(logutil.VERBOSE).Info("client aborted mid-response", "step", name)
-			} else {
-				coordmetrics.IncStepErrorTotal(name, coordmetrics.ErrorCodeInternal)
-			}
+			coordmetrics.IncStepErrorTotal(name, coordmetrics.ErrorCodeInternal)
 			// The panic value can hold anything the step was working on, so
 			// only the fact of it is recorded.
-			span.SetStatus(codes.Error, panicSpanStatus(ctx, r))
+			span.SetStatus(codes.Error, "step panicked")
 			span.End()
 			panic(r)
 		}
@@ -288,48 +278,38 @@ func (p *Pipeline) runStep(
 	}()
 
 	err := step.Execute(ctx, reqCtx)
-	// ErrPipelineDone is the cache-hit early exit and must not show as failed.
-	if err != nil && !errors.Is(err, ErrPipelineDone) {
+	// ErrPipelineDone is the cache-hit early exit and a client cancellation is
+	// not the step's failure; neither shows as failed.
+	if err != nil && !errors.Is(err, ErrPipelineDone) && !IsClientCancellation(ctx, err) {
 		span.SetStatus(codes.Error, err.Error())
 	}
 	return err
 }
 
-// IsClientAbort reports whether a recovered panic is httputil.ReverseProxy
-// aborting a streamed response because the client's request context ended.
-// ReverseProxy raises the same panic when the upstream stream breaks, so the
-// context state is what separates the two.
-func IsClientAbort(ctx context.Context, r any) bool {
-	return r == http.ErrAbortHandler && ctx.Err() != nil
-}
-
-// panicSpanStatus names a recovered panic for a span status.
-func panicSpanStatus(ctx context.Context, r any) string {
-	if IsClientAbort(ctx, r) {
-		return "client aborted mid-response"
-	}
-	return "step panicked"
+// IsClientCancellation reports whether err derives from the request context
+// ending. It relies on steps wrapping the context error with %w, which the
+// outbound HTTP calls and the decode proxy's Cancelled outcome do.
+func IsClientCancellation(ctx context.Context, err error) bool {
+	ctxErr := ctx.Err()
+	return ctxErr != nil && errors.Is(err, ctxErr)
 }
 
 // classifyExecutionPath maps the set of steps that ran (success or failure)
 // to the execution_path_total label. Returns false when no decode-ish step
 // started, so pipelines aborted before decode do not spuriously record a
-// path. cancelledIn is the step that returned because the client left, if
-// any. A conditional-decode probe that returns this way never received the
-// worker's answer, which is what selects decode-only or the fallback to
-// prefill, so the request records no path. A probe the client leaves after
-// the answer arrives ends in an http.ErrAbortHandler panic, leaves
-// cancelledIn empty, and records its path.
-// Step-name strings are hardcoded here because the pipeline package cannot
-// import the steps package without introducing a dependency cycle. They
-// match each step file's own StepName constant by contract; keep the two in
-// sync.
-func classifyExecutionPath(started map[string]bool, cancelledIn string) (string, bool) {
-	if cancelledIn == "conditional-decode" {
-		return "", false
-	}
-	decodeIsh := started["decode"] || started["conditional-decode"]
-	if !decodeIsh {
+// path. Step-name strings are hardcoded here because the pipeline package
+// cannot import the steps package without introducing a dependency cycle.
+// They match each step file's own StepName constant by contract; keep the
+// two in sync.
+func classifyExecutionPath(started, executed map[string]bool, doneBy, cancelledIn string) (string, bool) {
+	// A conditional-decode probe is the decode phase unless it deferred to
+	// prefill (412) or the client abandoned it before the worker answered; in
+	// those cases the decode phase is the decode step, so the path is unknown
+	// until that step starts.
+	probeDeferred := executed["conditional-decode"] && doneBy != "conditional-decode"
+	probeAbandoned := cancelledIn == "conditional-decode"
+	probeIsDecode := started["conditional-decode"] && !probeDeferred && !probeAbandoned
+	if !started["decode"] && !probeIsDecode {
 		return "", false
 	}
 	switch {

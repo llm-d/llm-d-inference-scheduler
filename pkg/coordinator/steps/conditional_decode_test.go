@@ -481,9 +481,8 @@ func TestConditionalDecodeStep_TransportError(t *testing.T) {
 	}
 }
 
-// TestConditionalDecodeStep_ClientCancel ends the request context while the
-// worker is still silent. The step must return the context error, not
-// ErrPipelineDone, and record no probe result since no answer arrived.
+// The client leaves while the worker is silent: the context error, not
+// ErrPipelineDone, and no probe result.
 func TestConditionalDecodeStep_ClientCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// The worker never answers; release lets srv.Close finish.
