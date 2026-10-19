@@ -25,13 +25,13 @@ func TestParseSGLangBootstrapPort(t *testing.T) {
 		wantPort     int
 		wantRejected bool
 	}{
-		{"empty selects default", "", defaultSGLangBootstrapPort, false},
+		{"empty selects default", "", DefaultSGLangBootstrapPort, false},
 		{"valid override", "9100", 9100, false},
-		{"non-numeric rejected", "abc", defaultSGLangBootstrapPort, true},
-		{"trailing junk rejected", "9100x", defaultSGLangBootstrapPort, true},
-		{"zero rejected", "0", defaultSGLangBootstrapPort, true},
-		{"negative rejected", "-1", defaultSGLangBootstrapPort, true},
-		{"above range rejected", "65536", defaultSGLangBootstrapPort, true},
+		{"non-numeric rejected", "abc", DefaultSGLangBootstrapPort, true},
+		{"trailing junk rejected", "9100x", DefaultSGLangBootstrapPort, true},
+		{"zero rejected", "0", DefaultSGLangBootstrapPort, true},
+		{"negative rejected", "-1", DefaultSGLangBootstrapPort, true},
+		{"above range rejected", "65536", DefaultSGLangBootstrapPort, true},
 		{"max valid", "65535", 65535, false},
 	}
 

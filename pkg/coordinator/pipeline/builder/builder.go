@@ -37,6 +37,9 @@ import (
 // produces, so it requires a render step in the pipeline.
 func validatePipeline(p config.PipelineConfig) error {
 	for i, s := range p.Steps {
+		if s.Type == steps.SGLangPDStepName && i != len(p.Steps)-1 {
+			return fmt.Errorf("the %q step must be the last pipeline step", steps.SGLangPDStepName)
+		}
 		if s.Type == asyncbroker.StepName && i > 0 {
 			return fmt.Errorf("the %q step must be the first pipeline step, found it at position %d", asyncbroker.StepName, i+1)
 		}

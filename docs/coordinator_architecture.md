@@ -222,7 +222,7 @@ completions prompt is already a token array). See
 
 | Component | Path | Responsibility |
 | :---- | :---- | :---- |
-| Entry server | [pkg/coordinator/server/](../pkg/coordinator/server/) | chi server, TLS unless `secure_serving` is false. Accepts `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/messages`, and `/inference/v1/generate`, builds the `RequestContext`, runs the pipeline, exposes `/healthz` and `/readyz`, and passes any other path through to the gateway. |
+| Entry server | [pkg/coordinator/server/](../pkg/coordinator/server/) | chi server, TLS unless `secure_serving` is false. Accepts `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/messages`, `/inference/v1/generate`, and `/generate`, builds the `RequestContext`, runs the pipeline, exposes `/healthz` and `/readyz`, and passes any other path through to the gateway. |
 | Pipeline | [pkg/coordinator/pipeline/](../pkg/coordinator/pipeline/) | The `Step` abstraction, the ordered executor, the step registry, and the `RequestContext`. |
 | Steps | [pkg/coordinator/steps/](../pkg/coordinator/steps/) | The built-in steps. Each registers itself with the pipeline registry in an `init()` function. |
 | Gateway client | [pkg/coordinator/gateway/](../pkg/coordinator/gateway/) | HTTP client with a keep-alive pool to the configured Inference Gateway, path/format helpers, and the `x-llm-d-epp-profile` header constants. |
@@ -331,6 +331,81 @@ selection swaps in `header-profile-handler` for that one plugin.
 This is an alternative to the sidecar-based orchestration in llm-d-router; see
 [Coordinator vs. the llm-d-router sidecar model](#coordinator-vs-the-llm-d-router-sidecar-model)
 for the comparison.
+
+### Streaming SGLang prefill and decode
+
+For native SGLang `/generate` requests with `stream: true`, configure the terminal
+`sglang-pd` step instead of separate `prefill` and `decode` steps:
+
+```yaml
+pipeline:
+  kv_connector: kv-sglang
+  steps:
+    - type: sglang-pd
+      params:
+        bootstrap_port: 8998
+        prefill_grace: 30s
+```
+
+The step forwards the native request body and creates a shared numeric
+`bootstrap_room`. It sends prefill through the gateway with the `prefill` profile.
+The EPP `sglang-bootstrap-handler` sets top-level `bootstrap_host` to the selected
+prefill endpoint's address before forwarding the request. On the worker's response
+headers, the plugin sets `x-llm-d-prefiller-host-port` to that endpoint's host and HTTP
+port. The coordinator reads this header immediately, supplies its host and the
+configured bootstrap port in decode's body, and also sets the endpoint header on
+the decode request. Decode uses its own EPP scheduling profile; it is not pinned to
+the prefill worker. EPP strips incoming worker-address headers, so SGLang consumes
+the bootstrap fields in the body.
+
+The prefill stream is drained concurrently with decode. An error event, aborted
+finish reason, read failure, or EOF without `[DONE]` cancels decode. Client
+cancellation and decode failure cancel prefill. After successful decode, prefill
+may finish within `prefill_grace`; this does not delay the client response. A failure
+reported after the decode response has completed is logged and cannot change that
+response. Prefill events are limited to 4 MiB each.
+
+Add these plugins to the EPP configuration, with the existing `prefill` and `decode`
+scheduling profiles and their role filters:
+
+```yaml
+plugins:
+  - type: header-profile-handler
+  - type: sglanghttp-parser
+  - type: sglang-bootstrap-handler
+    parameters:
+      profileName: prefill
+```
+
+`header-profile-handler` replaces the sidecar's `disagg-profile-handler` in this
+configuration. Both requests route directly from the gateway to SGLang workers.
+`bootstrap_port` must match the prefill worker's bootstrap service and be reachable
+from both worker roles. The plugin must run on prefill EPPs. Optional topology and
+revision response plugins continue to work through the existing header forwarding.
+
+Envoy must use `response_header_mode: SEND` and `response_body_mode: STREAMED` or
+`FULL_DUPLEX_STREAMED` for ext_proc. Full-duplex mode also requires
+`response_trailer_mode: SEND`, as in the
+[coordinator gateway configuration](../deploy/environments/dev/coordinator-e2e-infra/envoy.yaml). Request bodies must be processed so EPP can
+apply the bootstrap host mutation. Response buffering filters and upstream retries
+that can change the selected worker are unsupported. No custom Envoy build or 103
+response is involved. See the [ext_proc processing modes](https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/ext_proc/v3/processing_mode.proto).
+
+The early HTTP 200 acknowledges response start, not scheduler admission or KV
+readiness. SGLang's [native streaming handler](https://github.com/sgl-project/sglang/blob/881bd9f972d251ef54c53883a2bc0fc64ee592ba/python/sglang/srt/entrypoints/http_server.py#L930)
+returns `StreamingResponse` before iterating generation; its OpenAI-compatible handlers await a generation result.
+This step supports a single native request with `sampling_params.n` absent or 1.
+It rejects non-streaming and OpenAI API requests. It does not perform rendering or
+encode-stage orchestration. The pipeline's `use_openai_format` option is unused by
+this step and should retain its default. The generic `kv-sglang` connector's
+response-body handoff is not used.
+
+The [Envoy integration test](../test/integration/sglangpd/envoy_test.go) runs the
+production SGLang parser and bootstrap plugin through an ext_proc harness. Its
+worker flushes headers, then waits for decode before sending prefill body data.
+Run with `ENVOY_BINARY=/path/to/envoy go test ./test/integration/sglangpd -v`.
+This verifies HTTP handoff and body mutation; real SGLang KV transfer requires
+separate GPU validation.
 
 ### Cross-phase scheduling headers
 

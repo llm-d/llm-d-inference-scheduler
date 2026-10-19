@@ -32,11 +32,14 @@ func TestValidatePipeline(t *testing.T) {
 	decode := config.StepConfig{Type: steps.DecodeStepName}
 	broker := config.StepConfig{Type: asyncbroker.StepName}
 
+	sglangPD := config.StepConfig{Type: steps.SGLangPDStepName}
 	tests := []struct {
 		name    string
 		cfg     config.PipelineConfig
 		wantErr bool
 	}{
+		{name: "sglang pd is terminal", cfg: config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{sglangPD, decode}}, wantErr: true},
+		{name: "sglang pd alone", cfg: config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{sglangPD}}},
 		{
 			name:    "openai format needs no render",
 			cfg:     config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{decode}},

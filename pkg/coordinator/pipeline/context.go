@@ -44,6 +44,7 @@ var internalForwardingHeaders = map[string]bool{
 	reqcommon.RevisionDecisionIDHeaderKey: true,
 	reqcommon.PeerTopologyHeaderKey:       true,
 	routing.EndpointPinHeader:             true,
+	routing.PrefillEndpointHeader:         true,
 }
 
 func isForwardableHeader(name string) bool {

@@ -696,6 +696,7 @@ func TestRoutesRegistered(t *testing.T) {
 		{"responses", http.MethodPost, reqcommon.PathResponses, inferenceBody},
 		{"messages", http.MethodPost, reqcommon.PathMessages, inferenceBody},
 		{"generate", http.MethodPost, reqcommon.PathVLLMGenerate, inferenceBody},
+		{"sglang generate", http.MethodPost, reqcommon.PathSGLangGenerate, `{"text":"hello","stream":true}`},
 		{"healthz", http.MethodGet, "/healthz", ""},
 		{"readyz", http.MethodGet, "/readyz", ""},
 	}
