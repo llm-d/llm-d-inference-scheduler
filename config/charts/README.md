@@ -500,7 +500,9 @@ the client's session identifier, or `default` for the `default-flow` sentinel. S
 before the identity resolves keep the value set at ingress: the fairness header value, or
 `default-flow` with source `default` when the header is absent, even if the agent-identity
 plugin would have supplied one. Span values are not subject to the `fairness_id`
-metric-label cardinality cap. The pair is not propagated as request headers.
+metric-label cardinality cap. On sampled traces the EPP also hands the pair to the P/D
+sidecar, so sidecar spans carry it too; see
+[Sidecar Tracing](../../docs/disaggregation.md#sidecar-tracing).
 
 #### Complete Monitoring & Tracing Example
 
