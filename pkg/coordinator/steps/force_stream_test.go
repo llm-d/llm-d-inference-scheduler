@@ -180,6 +180,46 @@ func TestForceStreamLossy(t *testing.T) {
 	require.False(t, forceStreamLossy(sseShapeGenerate, map[string]any{"logprobs": true}))
 }
 
+// TestForceStreamBody_StreamOptions checks the forced body enables streaming and,
+// for the chat and text shapes, requests include_usage while preserving any
+// stream_options the client already sent, without mutating the source body.
+func TestForceStreamBody_StreamOptions(t *testing.T) {
+	t.Run("preserves existing stream_options and adds include_usage", func(t *testing.T) {
+		src := map[string]any{
+			"model":          "m",
+			"stream":         false,
+			"stream_options": map[string]any{"continuous_usage_stats": true},
+		}
+		body := forceStreamBody(src, sseShapeChat)
+
+		require.Equal(t, true, body["stream"])
+		opts := body["stream_options"].(map[string]any)
+		require.Equal(t, true, opts["include_usage"], "include_usage is added")
+		require.Equal(t, true, opts["continuous_usage_stats"], "the client's existing option is kept")
+
+		// The shared source body is left untouched: still non-streaming, its
+		// stream_options unchanged.
+		require.Equal(t, false, src["stream"])
+		srcOpts := src["stream_options"].(map[string]any)
+		require.NotContains(t, srcOpts, "include_usage", "the source stream_options is not mutated")
+	})
+
+	t.Run("adds stream_options when the client sent none", func(t *testing.T) {
+		body := forceStreamBody(map[string]any{"model": "m"}, sseShapeText)
+		opts := body["stream_options"].(map[string]any)
+		require.Equal(t, true, opts["include_usage"])
+	})
+
+	t.Run("no stream_options for responses or generate", func(t *testing.T) {
+		for _, shape := range []sseShape{sseShapeResponses, sseShapeGenerate} {
+			body := forceStreamBody(map[string]any{"model": "m"}, shape)
+			require.Equal(t, true, body["stream"])
+			_, has := body["stream_options"]
+			require.False(t, has, "these shapes carry no stream_options")
+		}
+	})
+}
+
 func TestForceStream_ParamsOptional(t *testing.T) {
 	gwClient := gateway.New(config.GatewayConfig{})
 

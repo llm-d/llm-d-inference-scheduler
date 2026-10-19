@@ -246,11 +246,13 @@ func (s *DecodeStep) estimateReservation(reqCtx *pipeline.RequestContext) (int64
 // enabled, reassembles the streamed frames into one non-streaming reply, and
 // writes that reply to the client. It balances the reservation on every exit.
 //
-// Nothing reaches the client until the whole response is buffered, so an error
-// before the final write leaves the client uncommitted: a transport failure or
-// a ceiling abort returns a plain error and the server answers a clean 5xx. An
-// upstream status in the 4xx/5xx range is forwarded verbatim and reported with
-// UpstreamStreamedError so the server does not overwrite it.
+// Nothing reaches the client until the whole response is buffered, so every error
+// here leaves the client uncommitted. A transport failure or a ceiling abort
+// returns a plain error and the server answers a clean 5xx; an upstream 4xx/5xx is
+// forwarded verbatim and reported with UpstreamStreamedError so the server does not
+// overwrite it. The fallback sentinels (oversize, lossy-frame, unreadable,
+// truncated) instead return so decode runs the pass-through, which can still serve
+// the request or preserve a field the fold would drop.
 func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger, reqCtx *pipeline.RequestContext, shape sseShape, reserved int64) error {
 	defer s.budget.release(reserved)
 
