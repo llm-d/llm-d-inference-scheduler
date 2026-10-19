@@ -1196,6 +1196,67 @@ func TestForceStream_SpentHandoff_SuppressesFallback(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released on the error path")
 }
 
+// TestForceStream_LossyFrameSpentHandoff_SuppressesFallback covers the intersection
+// of the frame-level lossy gate and the spent-handoff suppression: a plain chat
+// request whose pod streams reasoning_content by default, on a NIXL path whose block
+// handoff the forced attempt already consumed. The lossy field is detected
+// mid-stream, but the fallback cannot replay the spent handoff, so the request fails
+// cleanly (single upstream call) rather than replaying or dropping reasoning.
+func TestForceStream_LossyFrameSpentHandoff_SuppressesFallback(t *testing.T) {
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		// The forced attempt streams a reasoning_content delta (a server-side default);
+		// there must be no second call, since the handoff is spent.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"let me think\"}}]}\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	reg := prometheus.NewRegistry()
+	require.NoError(t, coordmetrics.Register(reg))
+	coordmetrics.Reset()
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+	step, err := NewDecodeStep(gwClient, map[string]any{
+		ParamForceStream:               true,
+		ParamForceStreamBufferSize:     "1GiB",
+		ParamForceStreamMaxRequestSize: "1GiB",
+		ParamKVConnector:               kv.NIXL,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:    "req-lossy-spent",
+		OriginalPath: reqcommon.PathChatCompletions,
+		Model:        "llama-3",
+		Stream:       false,
+		KVTransferParams: map[string]any{
+			reqcommon.FieldRemoteBlockIDs: []any{1, 2},
+			reqcommon.FieldRemoteEngineID: "prefill-pod-a",
+		},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		},
+		ResponseWriter: recorder,
+	}
+
+	err = step.(*DecodeStep).Execute(context.Background(), reqCtx)
+	require.Error(t, err, "a lossy frame on a spent handoff must fail cleanly, not replay")
+	require.Equal(t, []any{true}, streams, "only the forced attempt runs; the fallback is suppressed")
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnsupported), 1e-9,
+		"a suppressed request is not counted as a fallback")
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released on the error path")
+}
+
 // TestSpendsRemoteBlocks covers the one-shot P2P handoff detector that gates the
 // fallback suppression: only a non-empty remote_block_ids list qualifies, so a
 // shared-storage body (do_remote_prefill but no block ids) and bodies with no or a
