@@ -1370,6 +1370,23 @@ func TestSpendsRemoteBlocks(t *testing.T) {
 	}
 }
 
+// TestScanForcedResponse_CRLFFraming verifies the scan handles a CRLF-framed
+// stream: ssePayload trims the trailing carriage return, so a \r\n-delimited chat
+// stream reassembles the same as an \n-delimited one.
+func TestScanForcedResponse_CRLFFraming(t *testing.T) {
+	stream := "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"}}]}\r\n\r\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\r\n\r\n" +
+		"data: [DONE]\r\n\r\n"
+	r := newSSEReassembler(sseShapeChat, 1)
+	require.NoError(t, scanForcedResponse(strings.NewReader(stream), r, 1<<20, 0))
+
+	choices := r.result()["choices"].([]any)
+	require.Len(t, choices, 1)
+	msg := choices[0].(map[string]any)["message"].(map[string]any)
+	require.Equal(t, "hi", msg["content"], "CRLF framing must reassemble like LF framing")
+	require.Equal(t, "stop", choices[0].(map[string]any)["finish_reason"])
+}
+
 // TestScanForcedResponse_TerminalMarker checks the buffered path's completeness
 // gate: a stream is complete only if it carried the [DONE] marker or a shape
 // terminal (a Responses terminal event, or a finish_reason on another shape). A

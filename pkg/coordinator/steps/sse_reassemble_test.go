@@ -100,6 +100,39 @@ func TestSSEReassemble_FlagsLossyDelta(t *testing.T) {
 	require.True(t, r.lossyFrame, "a reasoning_content delta must flag the reply lossy")
 }
 
+// TestSSEReassemble_IgnoresMalformedFrameParts verifies the reassembler skips a
+// choices entry that is not an object and a frame with no choices array, folding
+// only the well-formed choice, so a malformed frame cannot panic or corrupt the
+// reply.
+func TestSSEReassemble_IgnoresMalformedFrameParts(t *testing.T) {
+	r := newSSEReassembler(sseShapeChat, 0)
+	// A choices array mixing a non-object entry with a real one.
+	r.add(frame(t, `{"choices":["not-an-object",{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`))
+	// A frame whose choices field is not an array at all.
+	r.add(frame(t, `{"choices":"nope"}`))
+	r.add(frame(t, `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
+
+	choices := r.result()["choices"].([]any)
+	require.Len(t, choices, 1)
+	msg := choices[0].(map[string]any)["message"].(map[string]any)
+	require.Equal(t, "hi", msg["content"])
+}
+
+// TestSSEReassemble_MergesUsageAcrossFrames verifies usage folds field by field
+// across frames: a server that reports halves in separate frames (or overrides an
+// earlier value) ends with every field, matching mergeUsage.
+func TestSSEReassemble_MergesUsageAcrossFrames(t *testing.T) {
+	r := newSSEReassembler(sseShapeChat, 0)
+	r.add(frame(t, `{"choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`))
+	r.add(frame(t, `{"choices":[],"usage":{"prompt_tokens":5}}`))
+	r.add(frame(t, `{"choices":[],"usage":{"completion_tokens":2,"total_tokens":7}}`))
+
+	usage := r.result()["usage"].(map[string]any)
+	require.EqualValues(t, 5, usage["prompt_tokens"])
+	require.EqualValues(t, 2, usage["completion_tokens"])
+	require.EqualValues(t, 7, usage["total_tokens"])
+}
+
 func TestSSEReassemble_Text(t *testing.T) {
 	r := newSSEReassembler(sseShapeText, 0)
 	r.add(frame(t, `{"id":"cmpl-2","object":"text_completion","created":200,"model":"m","choices":[{"index":0,"text":"He","finish_reason":null}]}`))
