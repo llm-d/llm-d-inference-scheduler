@@ -91,6 +91,10 @@ type Config struct {
 	// (tokens / (tokens/sec) * 1000 = ms). Default: 15928.
 	PeakPrefillThroughput float64 `json:"peakPrefillThroughput,omitempty"`
 
+	// UseUncachedTokens adds the incoming request's uncached token count
+	// to in-flight tokens when estimating TTFT via the prefillThroughput source.
+	UseUncachedTokens bool `json:"useUncachedTokens,omitempty"`
+
 	PrefixMatchInfoProducerName       string `json:"prefixMatchInfoProducerName,omitempty"`
 	LatencyPredictionInfoProducerName string `json:"latencyPredictionInfoProducerName,omitempty"`
 	InFlightLoadProducerName          string `json:"inFlightLoadProducerName,omitempty"`
@@ -104,6 +108,7 @@ var DefaultConfig = Config{
 
 	// Calibrated for Qwen 32B on 2x H100 80GB (TP=2), vLLM 0.19; see README.
 	PeakPrefillThroughput: 15928,
+	UseUncachedTokens:     false,
 }
 
 type Plugin struct {
@@ -112,6 +117,7 @@ type Plugin struct {
 	prefixMatchDataKey           fwkplugin.DataKey
 	latencyPredictionInfoDataKey fwkplugin.DataKey
 	inFlightLoadDataKey          fwkplugin.DataKey
+	uncachedRequestDataKey       fwkplugin.DataKey
 }
 
 func Factory(name string, rawParameters *json.Decoder, handle fwkplugin.Handle) (fwkplugin.Plugin, error) {
@@ -135,6 +141,7 @@ func Factory(name string, rawParameters *json.Decoder, handle fwkplugin.Handle) 
 		prefixMatchDataKey:           attrprefix.PrefixCacheMatchInfoDataKey.WithNonEmptyProducerName(config.PrefixMatchInfoProducerName),
 		latencyPredictionInfoDataKey: attrlatency.LatencyPredictionInfoDataKey.WithNonEmptyProducerName(config.LatencyPredictionInfoProducerName),
 		inFlightLoadDataKey:          attrconcurrency.InFlightLoadDataKey.WithNonEmptyProducerName(config.InFlightLoadProducerName),
+		uncachedRequestDataKey:       attrconcurrency.UncachedRequestTokensDataKey.WithNonEmptyProducerName(config.InFlightLoadProducerName),
 	}, nil
 }
 
@@ -269,6 +276,9 @@ func (p *Plugin) Consumes() fwkplugin.DataDependencies {
 			required[p.latencyPredictionInfoDataKey] = attrlatency.LatencyPredictionInfo{}
 		} else {
 			required[p.inFlightLoadDataKey] = attrconcurrency.InFlightLoad{}
+			if p.config.UseUncachedTokens {
+				required[p.uncachedRequestDataKey] = attrconcurrency.UncachedRequestTokens{}
+			}
 		}
 	}
 	return fwkplugin.DataDependencies{Required: required}
@@ -316,6 +326,13 @@ func (p *Plugin) endpointTTFT(ep fwksched.Endpoint) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
+	if p.config.UseUncachedTokens {
+		uncachedTokens, ok := p.uncachedRequestTokens(ep)
+		if !ok {
+			return 0, false
+		}
+		tokens += uncachedTokens
+	}
 	return float64(tokens) / p.config.PeakPrefillThroughput * 1000, true
 }
 
@@ -325,6 +342,18 @@ func (p *Plugin) inFlightTokens(ep fwksched.Endpoint) (int64, bool) {
 	if raw, ok := ep.Get(p.inFlightLoadDataKey); ok {
 		if load, ok := raw.(*attrconcurrency.InFlightLoad); ok && load != nil {
 			return load.Tokens, true
+		}
+	}
+	return 0, false
+}
+
+// uncachedRequestTokens returns the number of tokens from the current request
+// that this endpoint would need to prefill from scratch. If the attribute is
+// absent, it returns ok=false so the caller can treat the signal as missing.
+func (p *Plugin) uncachedRequestTokens(ep fwksched.Endpoint) (int64, bool) {
+	if raw, ok := ep.Get(p.uncachedRequestDataKey); ok {
+		if uncached, ok := raw.(*attrconcurrency.UncachedRequestTokens); ok && uncached != nil {
+			return uncached.Tokens, true
 		}
 	}
 	return 0, false
