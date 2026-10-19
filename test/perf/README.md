@@ -10,6 +10,7 @@ This directory contains the performance testing pipeline for the Endpoint Picker
   - `llm-d-sim-deployment.yaml` / `llm-d-sim-service.yaml`: Kubernetes manifests for deploying the vLLM simulator.
   - `shared_prefix_job1.yaml`: Performance test workload specification defining load stages, API target, and request distributions.
 - **`run_nightly_perf.py`**: The Python orchestrator script responsible for test namespace setup, EPP and simulator deployments, pprof profiling collection, metrics scraping, and markdown generation. It assumes that `kubectl` is already configured to target an active Kubernetes cluster.
+- **`trend.py`**: Compares the newest run record of a test with the median of its recent runs and writes the trend summary and issue body.
 
 ---
 
@@ -66,7 +67,8 @@ P50, P95, and P99 are interpolated from the change in the EPP scheduler's
 duration histogram and reported in milliseconds. They measure scheduler
 latency, not client request latency. Missing metrics or no new events produce
 zero values. A quantile in the unbounded bucket uses the highest finite
-bucket boundary.
+bucket boundary. The mean is the change in the histogram's sum divided by the
+change in its count, which does not depend on bucket boundaries.
 
 When appending to a report with a different table header, the writer starts
 a new table and preserves the historical rows.
@@ -90,17 +92,63 @@ they cannot establish the client-latency requirement for this instrumentation.
 The local field-capture benchmarks and OTLP tests validate individual code paths;
 they do not replace this gateway-to-model comparison.
 
+### Run records
+
+Next to each markdown row, the runner writes a JSON record to
+`<results-dir>/runs/<test-name>/<UTC start time>.json`. The record holds the
+run status, the setup (router config and perf job paths relative to the
+repository root, simulator and EPP replica counts, machine family, EPP log
+verbosity), the EPP commit from the `llm_d_epp_info` metric, the container
+image digests, every container's idle and peak CPU and memory, and the
+scheduler latency percentiles and mean. Records are written under the same
+condition as the markdown row and sync to GCS with the rest of the results
+folder.
+
+### Trend check
+
+`trend.py` compares the newest run record of a test with the median of the
+successful runs from the 7 days before it that used the same router config,
+perf job and simulator replica count. Each EPP metric that is more than 10%
+worse than that median, in its direction (lower is better for CPU, memory and
+latency), is a regression. With fewer than 4 comparable runs, nothing is
+compared. Envoy and `TOTAL` rows are compared and reported but never count as
+a regression.
+
+```bash
+python3 test/perf/trend.py \
+    --results-dir test/perf/results/optimized-baseline \
+    --test-name optimized-baseline-job1 \
+    --output-dir trend-output
+```
+
+It writes `trend-summary.md` and `trend-verdict.json` to the output folder, and
+`trend-issue.md` when a metric regressed. When `GITHUB_STEP_SUMMARY` is set, the
+summary is appended to it. A regression exits 0; an unreadable or malformed run
+record exits non-zero.
+
+What to expect from the rule:
+
+- A single run more than 10% worse is reported the same night.
+- A lasting regression is reported every night until it becomes part of the
+  7-day median, about 4 runs later, and then stops being reported without
+  being fixed.
+- A metric whose run-to-run spread is near 10% is reported on and off. The
+  summary shows each metric's baseline range so this can be judged.
+- Run records start with the first run that writes them, so the first
+  comparison happens after 4 comparable successful runs.
+
 ### Offline regression tests
 
 With Python and `pyyaml` installed, run from the repository root:
 
 ```bash
-python3 -m unittest discover -s test/perf -p test_run_nightly_perf.py -v
+python3 -m unittest discover -s test/perf -p "test_*.py" -v
 ```
 
-These tests exercise configuration generation, histogram calculations, and
-report writing with cluster commands replaced by test doubles. They do not
-deploy workloads or measure tracing overhead.
+These tests exercise configuration generation, histogram calculations, report
+and run record writing, and the trend comparison, with cluster commands
+replaced by test doubles. They do not deploy workloads or measure tracing
+overhead.
 
 ---
 

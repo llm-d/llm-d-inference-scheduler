@@ -124,9 +124,54 @@ jobs:
             --collect-pprof-profiles \
             --gcs-bucket ${{ env.GCS_BUCKET }}
 
+      - name: Compare with the trailing 7-day median
+        run: |
+          python3 test/perf/trend.py \
+            --results-dir test/perf/results/optimized-baseline \
+            --test-name ${{ env.TEST_NAME }} \
+            --output-dir trend-output \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Upload trend verdict
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-trend
+          path: trend-output/
+
       - name: Upload Performance Results Artifact
         uses: actions/upload-artifact@v7
         if: always()
         with:
           name: epp-perf-results
           path: test/perf/results/optimized-baseline/
+
+  # Kept apart from the benchmark job so the token that can write issues never
+  # shares a job with the cloud and Hugging Face secrets.
+  report-perf-trend:
+    needs: run-perf-benchmark
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TEST_NAME: ${{ inputs.test_name || 'optimized-baseline-job1' }}
+    steps:
+      - name: Download trend verdict
+        uses: actions/download-artifact@v8
+        with:
+          name: perf-trend
+          path: trend-output
+
+      - name: Open or update the trend issue
+        if: hashFiles('trend-output/trend-issue.md') != ''
+        run: |
+          marker="<!-- perf-trend:${TEST_NAME} -->"
+          number=$(gh issue list --repo "$REPO" --state open --limit 200 --json number,body |
+            jq -r --arg marker "$marker" '[.[] | select(.body | contains($marker))][0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$REPO" --body-file trend-output/trend-issue.md
+          else
+            gh issue create --repo "$REPO" --title "Nightly perf trend: ${TEST_NAME} regressed" \
+              --label kind/performance --body-file trend-output/trend-issue.md
+          fi
