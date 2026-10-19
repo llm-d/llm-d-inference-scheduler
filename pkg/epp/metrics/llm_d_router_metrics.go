@@ -56,6 +56,15 @@ var (
 		append(modelLabelsWithFairnessPriority, "error_code"),
 	)
 
+	llmdRequestOutcomeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: LLMDRouterEndpointPickerSubsystem,
+			Name:      "request_outcome_total",
+			Help:      metricsutil.HelpMsgWithStability("Total number of requests by how they ended.", compbasemetrics.ALPHA),
+		},
+		append(append([]string{}, modelLabelsWithFairnessPriority...), "outcome", "reason"),
+	)
+
 	llmdRequestLatencies = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Subsystem: LLMDRouterEndpointPickerSubsystem,

@@ -78,6 +78,7 @@ func RegisterWithOptions(opts RegisterOptions, customCollectors ...prometheus.Co
 		// Register other metrics
 		metrics.Registry.MustRegister(llmdRequestCounter)
 		metrics.Registry.MustRegister(llmdRequestErrCounter)
+		metrics.Registry.MustRegister(llmdRequestOutcomeCounter)
 		metrics.Registry.MustRegister(llmdRequestLatencies)
 		metrics.Registry.MustRegister(llmdRequestSizes)
 		metrics.Registry.MustRegister(llmdResponseSizes)
@@ -140,6 +141,7 @@ func Reset() {
 	// Reset other metrics
 	llmdRequestCounter.Reset()
 	llmdRequestErrCounter.Reset()
+	llmdRequestOutcomeCounter.Reset()
 	llmdRequestLatencies.Reset()
 	llmdRequestSizes.Reset()
 	llmdResponseSizes.Reset()
@@ -206,6 +208,13 @@ func RecordRequestErrCounter(modelName, targetModelName, fairnessID, priority st
 	if code != "" {
 		llmdRequestErrCounter.WithLabelValues(modelName, targetModelName, fairnessID, priority, code).Inc()
 	}
+}
+
+// RecordRequestOutcome records how a request ended.
+func RecordRequestOutcome(modelName, targetModelName, fairnessID, priority, outcome, reason string) {
+	modelName, targetModelName = boundModels(modelName, targetModelName)
+	fairnessID = boundFairnessID(fairnessID)
+	llmdRequestOutcomeCounter.WithLabelValues(modelName, targetModelName, fairnessID, priority, outcome, reason).Inc()
 }
 
 // RecordRequestSizes records the request sizes.
