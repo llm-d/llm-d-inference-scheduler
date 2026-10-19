@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers"
@@ -130,25 +131,55 @@ func (p *VertexAIParser) ParseRequest(ctx context.Context, body []byte, headers 
 	}
 }
 
-// ParseResponse parses the response body and returns a ParsedResponse
-func (p *VertexAIParser) ParseResponse(ctx context.Context, body []byte, headers map[string]string, _ bool) (*fwkrh.ParsedResponse, error) {
+// ParseResponse parses the response body and returns a ParsedResponse. A body
+// chunk carries one or more gRPC frames, each wrapping an HttpBody whose
+// content_type names the media type of its data, so the OpenAI parser reads the
+// data under that type rather than under the gRPC transport's.
+func (p *VertexAIParser) ParseResponse(ctx context.Context, body []byte, headers map[string]string, endOfStream bool) (*fwkrh.ParsedResponse, error) {
 	if len(body) == 0 {
 		// Nothing to parse
 		return nil, nil //nolint:nilnil
 	}
 
-	parsedPayload, err := grpcutil.ParseGrpcPayload(body)
+	payloads, err := grpcutil.ParseGrpcPayloads(body)
 	if err != nil {
 		return nil, fmt.Errorf("parsing gRPC response payload: %w", err)
 	}
 
-	respMsg := &httpbody.HttpBody{}
-	if err := proto.Unmarshal(parsedPayload, respMsg); err != nil {
-		return nil, fmt.Errorf("unmarshaling HttpBody response: %w", err)
+	var result *fwkrh.ParsedResponse
+	for _, payload := range payloads {
+		respMsg := &httpbody.HttpBody{}
+		if err := proto.Unmarshal(payload, respMsg); err != nil {
+			return nil, fmt.Errorf("unmarshaling HttpBody response: %w", err)
+		}
+		parsed, err := p.openAIParser.ParseResponse(ctx, respMsg.GetData(), bodyHeaders(headers, respMsg.GetContentType()), endOfStream)
+		if err != nil {
+			return nil, err
+		}
+		if parsed == nil {
+			continue
+		}
+		if result == nil {
+			result = &fwkrh.ParsedResponse{}
+		}
+		if parsed.Usage != nil {
+			result.Usage = parsed.Usage
+		}
+		result.StreamedEvents += parsed.StreamedEvents
 	}
-	jsonBytes := respMsg.GetData()
+	return result, nil
+}
 
-	return p.openAIParser.ParseResponse(ctx, jsonBytes, headers, false)
+// bodyHeaders returns headers with the content type an HttpBody declares for its
+// data, or headers unchanged when it declares none.
+func bodyHeaders(headers map[string]string, contentType string) map[string]string {
+	if contentType == "" {
+		return headers
+	}
+	out := make(map[string]string, len(headers)+1)
+	maps.Copy(out, headers)
+	out[reqcommon.HeaderContentType] = contentType
+	return out
 }
 
 type httpBodyMessage interface {

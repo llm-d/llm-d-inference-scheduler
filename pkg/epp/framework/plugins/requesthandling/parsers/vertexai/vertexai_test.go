@@ -222,6 +222,28 @@ func TestParseResponse(t *testing.T) {
 
 	invalidProtoBody, _ := createGrpcFrameRaw([]byte{0xFF})
 
+	contentBytes, err := proto.Marshal(&httpbody.HttpBody{Data: []byte(`{"choices":[{"delta":{"content":"Hi"}}]}`)})
+	if err != nil {
+		t.Fatalf("Failed to marshal HttpBody: %v", err)
+	}
+	contentFrame, err := createGrpcFrameRaw(contentBytes)
+	if err != nil {
+		t.Fatalf("Failed to create gRPC frame: %v", err)
+	}
+	twoFrameBody := append(append([]byte{}, contentFrame...), validBody...)
+
+	eventStreamBytes, err := proto.Marshal(&httpbody.HttpBody{
+		ContentType: "text/event-stream",
+		Data:        []byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"total_tokens\":30}}\n\ndata: [DONE]\n\n"),
+	})
+	if err != nil {
+		t.Fatalf("Failed to marshal HttpBody: %v", err)
+	}
+	eventStreamBody, err := createGrpcFrameRaw(eventStreamBytes)
+	if err != nil {
+		t.Fatalf("Failed to create gRPC frame: %v", err)
+	}
+
 	tests := []struct {
 		name       string
 		body       []byte
@@ -241,6 +263,23 @@ func TestParseResponse(t *testing.T) {
 			headers: map[string]string{"content-type": "application/grpc"},
 			wantResult: &fwkrh.ParsedResponse{
 				Usage: &fwkrh.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+			},
+		},
+		{
+			name:    "Usage in a later frame of the chunk",
+			body:    twoFrameBody,
+			headers: map[string]string{"content-type": "application/grpc"},
+			wantResult: &fwkrh.ParsedResponse{
+				Usage: &fwkrh.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+			},
+		},
+		{
+			name:    "Event stream HttpBody",
+			body:    eventStreamBody,
+			headers: map[string]string{"content-type": "application/grpc"},
+			wantResult: &fwkrh.ParsedResponse{
+				Usage:          &fwkrh.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+				StreamedEvents: 2,
 			},
 		},
 		{
