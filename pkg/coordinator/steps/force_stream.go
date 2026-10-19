@@ -326,32 +326,48 @@ func forceStreamLossy(shape sseShape, body map[string]any) bool {
 	if shape != sseShapeChat && shape != sseShapeText {
 		return false
 	}
-	if tools, ok := body[reqcommon.FieldTools].([]any); ok && len(tools) > 0 {
-		return true
+	// Resolve each field through reqcommon.FieldValue, not a bare type assertion:
+	// the coordinator decodes only an allow-list of request fields and leaves the
+	// rest (tools, logprobs, reasoning) as json.RawMessage, which an assertion would
+	// miss, defeating the gate.
+	if tools, ok := reqcommon.FieldValue(body, reqcommon.FieldTools); ok {
+		if arr, ok := tools.([]any); ok && len(arr) > 0 {
+			return true
+		}
 	}
-	if fns, ok := body[reqcommon.FieldFunctions].([]any); ok && len(fns) > 0 {
-		return true
+	if fns, ok := reqcommon.FieldValue(body, reqcommon.FieldFunctions); ok {
+		if arr, ok := fns.([]any); ok && len(arr) > 0 {
+			return true
+		}
 	}
-	switch lp := body[reqcommon.FieldLogprobs].(type) {
-	case bool:
-		return lp
-	case float64, int:
-		// On the legacy Completions API logprobs is a count, and the field's
-		// presence (including the value 0) requests the sampled token's logprob.
-		return true
+	if lp, ok := reqcommon.FieldValue(body, reqcommon.FieldLogprobs); ok {
+		switch v := lp.(type) {
+		case bool:
+			if v {
+				return true
+			}
+		case float64, int:
+			// On the legacy Completions API logprobs is a count, and the field's
+			// presence (including the value 0) requests the sampled token's logprob.
+			return true
+		}
 	}
 	// vLLM emits chat reasoning as delta.reasoning_content, folded into
 	// message.reasoning_content, which the reassembler drops. The mode is
 	// activated by chat_template_kwargs.enable_thinking or by reasoning_effort, so
 	// a chat request carrying either keeps its reasoning via the pass-through.
 	if shape == sseShapeChat {
-		if kwargs, ok := body[reqcommon.FieldChatTemplateKwargs].(map[string]any); ok {
-			if thinking, ok := kwargs[reqcommon.FieldEnableThinking].(bool); ok && thinking {
-				return true
+		if kw, ok := reqcommon.FieldValue(body, reqcommon.FieldChatTemplateKwargs); ok {
+			if kwargs, ok := kw.(map[string]any); ok {
+				if thinking, ok := kwargs[reqcommon.FieldEnableThinking].(bool); ok && thinking {
+					return true
+				}
 			}
 		}
-		if effort, ok := body[reqcommon.FieldReasoningEffort].(string); ok && effort != "" {
-			return true
+		if effort, ok := reqcommon.FieldValue(body, reqcommon.FieldReasoningEffort); ok {
+			if s, ok := effort.(string); ok && s != "" {
+				return true
+			}
 		}
 	}
 	return false

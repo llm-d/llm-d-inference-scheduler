@@ -76,14 +76,14 @@ const (
 	ProbeResultTransportError = "transport_error"
 )
 
-// Result label values for force_stream_total, one per candidate outcome: every
-// force-stream candidate lands on exactly one, so the counter sums to candidate
-// volume. The forced outcome is a reassembled reply; each fallback_* outcome takes
-// the non-forced pass-through; each error_* outcome is also classified by
-// step_errors_total. A post-upstream fallback (oversize, unreadable) whose request
-// carries a spent one-shot KV handoff cannot replay it, so it fails as an error
-// rather than taking the pass-through and is not counted fallback_*. The metric's
-// Help string is the canonical description of what each value means.
+// Result label values for force_stream_total, one per candidate outcome. The
+// forced outcome is a reassembled reply; each fallback_* outcome takes the
+// non-forced pass-through; each error_* outcome is also classified by
+// step_errors_total. Nearly every candidate lands on exactly one, the exception
+// being a post-upstream fallback (oversize, unreadable, lossy-frame) whose request
+// carries a spent one-shot KV handoff: it cannot replay, so it fails cleanly and is
+// counted only by step_errors_total, not here. The metric's Help string is the
+// canonical description of what each value means.
 const (
 	ForceStreamResultForced              = "forced"
 	ForceStreamResultFallbackBudget      = "fallback_budget"

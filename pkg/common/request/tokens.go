@@ -90,7 +90,7 @@ func OutputTokenLimit(body map[string]any, apiType APIType) (int, bool) {
 		return 0, false
 	}
 	for _, field := range apiType.tokenLimitFields() {
-		v, set := fieldValue(limits, field)
+		v, set := FieldValue(limits, field)
 		if !set {
 			continue
 		}
@@ -112,7 +112,7 @@ func OutputChoiceCount(body map[string]any, apiType APIType) int {
 	if !ok {
 		return 1
 	}
-	v, set := fieldValue(limits, FieldN)
+	v, set := FieldValue(limits, FieldN)
 	if !set {
 		return 1
 	}
@@ -174,7 +174,7 @@ func nonNegativeInt(v any) (int, bool) {
 // inspected.
 func RejectStatefulResponsesFields(body map[string]any) error {
 	for _, field := range []string{FieldPreviousResponseID, FieldConversation} {
-		if _, set := fieldValue(body, field); set {
+		if _, set := FieldValue(body, field); set {
 			return fmt.Errorf("field %q is not supported by the router", field)
 		}
 	}
@@ -191,12 +191,18 @@ func RejectStatefulResponsesFields(body map[string]any) error {
 	return nil
 }
 
-// fieldValue resolves body[field], reporting whether the client set it. An
+// FieldValue resolves body[field], reporting whether the client set it. An
 // explicit null is not set: SDKs serialize an unset optional that way, and
 // refusing it would name a field the client believes it omitted. Bytes that do
 // not decode report set with a nil value, so a field that cannot be read is
 // refused rather than passed on.
-func fieldValue(body map[string]any, field string) (any, bool) {
+//
+// A body decoded selectively (the coordinator decodes only an allow-list of
+// fields and leaves the rest as json.RawMessage, so they forward byte-for-byte)
+// needs this to read a non-inspected field: the raw bytes are unmarshaled here on
+// demand. A plain type assertion on body[field] would see json.RawMessage and miss
+// the value.
+func FieldValue(body map[string]any, field string) (any, bool) {
 	v, ok := body[field]
 	if !ok {
 		return nil, false
@@ -215,7 +221,7 @@ func fieldValue(body map[string]any, field string) (any, bool) {
 // cannot read as false could arrive there as true, and refusing all of them
 // avoids reimplementing that coercion.
 func backgroundRequested(body map[string]any) bool {
-	v, set := fieldValue(body, FieldBackground)
+	v, set := FieldValue(body, FieldBackground)
 	if !set {
 		return false
 	}

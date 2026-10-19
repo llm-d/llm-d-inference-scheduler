@@ -180,6 +180,55 @@ func TestForceStreamLossy(t *testing.T) {
 	require.False(t, forceStreamLossy(sseShapeGenerate, map[string]any{"logprobs": true}))
 }
 
+// TestForceStreamLossy_RawMessageFields guards the production body shape: the
+// coordinator decodes only an allow-list of request fields, so tools, logprobs, and
+// reasoning arrive as json.RawMessage, not native Go values. forceStreamLossy must
+// resolve them (via reqcommon.FieldValue) rather than type-assert, or a lossy
+// request would be force-streamed and silently drop the field.
+func TestForceStreamLossy_RawMessageFields(t *testing.T) {
+	// rawBody decodes a JSON request the way the coordinator's handler does: only
+	// the inspected fields become Go values; everything else stays json.RawMessage.
+	rawBody := func(t *testing.T, jsonBody string) map[string]any {
+		t.Helper()
+		var fields map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(jsonBody), &fields))
+		inspected := map[string]bool{reqcommon.FieldModel: true, reqcommon.FieldStream: true}
+		body := make(map[string]any, len(fields))
+		for k, v := range fields {
+			if inspected[k] {
+				var decoded any
+				require.NoError(t, json.Unmarshal(v, &decoded))
+				body[k] = decoded
+			} else {
+				body[k] = v // json.RawMessage, exactly as production leaves it
+			}
+		}
+		return body
+	}
+
+	lossy := []struct {
+		name string
+		json string
+	}{
+		{"tools", `{"model":"m","stream":false,"tools":[{"type":"function"}]}`},
+		{"functions", `{"model":"m","stream":false,"functions":[{"name":"f"}]}`},
+		{"logprobs true", `{"model":"m","stream":false,"logprobs":true}`},
+		{"logprobs count", `{"model":"m","stream":false,"logprobs":3}`},
+		{"enable_thinking", `{"model":"m","stream":false,"chat_template_kwargs":{"enable_thinking":true}}`},
+		{"reasoning_effort", `{"model":"m","stream":false,"reasoning_effort":"high"}`},
+	}
+	for _, tc := range lossy {
+		t.Run("lossy/"+tc.name, func(t *testing.T) {
+			require.True(t, forceStreamLossy(sseShapeChat, rawBody(t, tc.json)),
+				"a lossy field as json.RawMessage must still be detected")
+		})
+	}
+
+	// A plain request with no lossy field stays force-streamable.
+	require.False(t, forceStreamLossy(sseShapeChat,
+		rawBody(t, `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)))
+}
+
 // TestForceStreamBody_StreamOptions checks the forced body enables streaming and,
 // for the chat and text shapes, requests include_usage while preserving any
 // stream_options the client already sent, without mutating the source body.
