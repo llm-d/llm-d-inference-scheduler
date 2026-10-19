@@ -1014,9 +1014,11 @@ func TestLegacyProduceMessagesToolChoice(t *testing.T) {
 			for _, span := range recorder.Ended() {
 				attrs := spanAttrs(span)
 				require.Equal(t, "messages", attrs[semconv.LLMDToolCallingAPISurfaceKey].AsString())
-				require.Equal(t, tc.mode, attrs[semconv.LLMDToolCallingToolChoiceKey].AsString())
 				if tc.want == "" {
+					require.NotContains(t, attrs, semconv.LLMDToolCallingToolChoiceKey)
 					require.NotContains(t, attrs, semconv.LLMDToolCallingFieldToolChoiceStatusKey)
+				} else {
+					require.Equal(t, tc.mode, attrs[semconv.LLMDToolCallingToolChoiceKey].AsString())
 				}
 				for _, value := range attrs {
 					require.NotContains(t, value.String(), "private_tool")
@@ -1073,6 +1075,9 @@ func TestLegacyMessagesRenderFieldChanges(t *testing.T) {
 			})
 			before := renderToolFieldCounts(t)
 			ctx := context.WithValue(t.Context(), renderToolBaselineCtxKey{}, baseline)
+			inbound, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeMessages, []byte(raw))
+			require.NoError(t, err)
+			ctx = toolcalling.WithRequestSnapshot(ctx, []byte(raw), inbound)
 			var out renderResponse
 			require.NoError(t, renderer.postJSON(ctx, chatRenderPath, payload, time.Second, &out))
 			after := renderToolFieldCounts(t)

@@ -39,6 +39,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
@@ -163,6 +164,10 @@ func TestProduce_HTTPToolCallingSummary(t *testing.T) {
 			ctx := context.Background()
 			if tc.warmup {
 				ctx = withUnobservedRender(ctx)
+			} else if tc.api != reqcommon.APITypeCompletions && json.Valid([]byte(tc.raw)) {
+				snapshot, err := toolcalling.CaptureRequestJSON(tc.api, []byte(tc.raw))
+				require.NoError(t, err)
+				ctx = toolcalling.WithRequestSnapshot(ctx, []byte(tc.raw), snapshot)
 			}
 			require.NoError(t, newTestPlugin(newHTTPRenderer(t, srv)).Produce(ctx, request, nil))
 			require.Equal(t, tc.raw, <-forwarded)
@@ -171,7 +176,9 @@ func TestProduce_HTTPToolCallingSummary(t *testing.T) {
 			if tc.choice != "" {
 				want[semconv.LLMDToolCallingAPISurfaceKey] = attribute.StringValue(tc.api.String())
 				want[semconv.LLMDToolCallingPresentKey] = attribute.BoolValue(true)
-				want[semconv.LLMDToolCallingToolChoiceKey] = attribute.StringValue(tc.choice)
+				if tc.name != "parallel only" {
+					want[semconv.LLMDToolCallingToolChoiceKey] = attribute.StringValue(tc.choice)
+				}
 				if tc.count != "" {
 					want[semconv.LLMDToolCallingToolCountKey] = attribute.StringValue(tc.count)
 					want[semconv.LLMDToolCallingFieldToolsStatusKey] = attribute.StringValue("preserved")
@@ -246,7 +253,7 @@ func TestCompareRenderToolFields(t *testing.T) {
 		{"invalid outbound", `{"tools":[`, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			snapshot, statuses, err := compareRenderToolFields(reqcommon.APITypeChatCompletions, []byte(`{"tools":[],"max_tokens":4}`), []byte(tc.outbound))
+			snapshot, statuses, err := compareRenderToolFields(t.Context(), reqcommon.APITypeChatCompletions, []byte(`{"tools":[],"max_tokens":4}`), []byte(tc.outbound))
 			require.Equal(t, tc.wantError, err != nil)
 			attrs := map[attribute.Key]attribute.Value{}
 			for _, attr := range snapshot.SpanAttributes(statuses) {
@@ -254,6 +261,35 @@ func TestCompareRenderToolFields(t *testing.T) {
 			}
 			assert.True(t, attrs[semconv.LLMDToolCallingPresentKey].AsBool())
 			assert.Equal(t, tc.status, attrs[semconv.LLMDToolCallingFieldToolsStatusKey].AsString())
+		})
+	}
+}
+
+func TestCompareRenderToolFieldsWithRequestSnapshot(t *testing.T) {
+	inbound := []byte(`{"tools":[]}`)
+	snapshot, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, inbound)
+	require.NoError(t, err)
+	ctx := toolcalling.WithRequestSnapshot(t.Context(), inbound, snapshot)
+
+	for _, tc := range []struct {
+		name, inbound, outbound, status string
+		wantError                       bool
+	}{
+		{"unchanged", `{"tools":[]}`, `{"tools":[]}`, "preserved", false},
+		{"render copy drops tools", `{"tools":[]}`, `{}`, "dropped", false},
+		{"same-length input mutation", `{"tools":{}}`, `{"tools":[]}`, "changed", false},
+		{"malformed input", `{"tools":[`, `{}`, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, statuses, err := compareRenderToolFields(ctx, reqcommon.APITypeChatCompletions, []byte(tc.inbound), []byte(tc.outbound))
+			require.Equal(t, tc.wantError, err != nil)
+			if err == nil {
+				attrs := map[attribute.Key]attribute.Value{}
+				for _, attr := range got.SpanAttributes(statuses) {
+					attrs[attr.Key] = attr.Value
+				}
+				require.Equal(t, tc.status, attrs[semconv.LLMDToolCallingFieldToolsStatusKey].AsString())
+			}
 		})
 	}
 }

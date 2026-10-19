@@ -440,7 +440,7 @@ func (r *vllmHTTPRenderer) postJSON(ctx context.Context, path string, body fwkrh
 					}
 				}
 			} else {
-				snapshot, statuses, compareErr = compareRenderToolFields(reqcommon.DetectAPIType(path), inboundPayload, payload)
+				snapshot, statuses, compareErr = compareRenderToolFields(ctx, reqcommon.DetectAPIType(path), inboundPayload, payload)
 			}
 			if compareErr == nil {
 				toolStatuses = statuses
@@ -482,13 +482,18 @@ func (r *vllmHTTPRenderer) postJSON(ctx context.Context, path string, body fwkrh
 }
 
 // Compare the serialized render copy without re-capturing an unchanged body.
-func compareRenderToolFields(surface reqcommon.APIType, inbound, outbound []byte) (toolcalling.RequestSnapshot, []toolcalling.FieldStatus, error) {
-	before, err := toolcalling.CaptureRequestJSON(surface, inbound)
-	if err != nil {
-		return before, nil, err
+func compareRenderToolFields(ctx context.Context, surface reqcommon.APIType, inbound, outbound []byte) (toolcalling.RequestSnapshot, []toolcalling.FieldStatus, error) {
+	before, ok := toolcalling.RequestSnapshotForBody(ctx, surface, inbound)
+	if !ok {
+		var err error
+		before, err = toolcalling.CaptureRequestJSON(surface, inbound)
+		if err != nil {
+			return before, nil, err
+		}
 	}
 	after := before
 	if !bytes.Equal(inbound, outbound) {
+		var err error
 		after, err = toolcalling.CaptureRequestJSON(surface, outbound)
 		if err != nil {
 			return before, nil, err
