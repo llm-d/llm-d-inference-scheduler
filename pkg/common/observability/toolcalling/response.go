@@ -233,9 +233,7 @@ func (detector *ResponseDetector) clearEventData() {
 }
 
 func (detector *ResponseDetector) clearLine() {
-	for i := range detector.line {
-		detector.line[i] = 0
-	}
+	clear(detector.line)
 	detector.line = detector.line[:0]
 }
 
@@ -252,6 +250,17 @@ const (
 func (detector *ResponseDetector) observeJSON(body []byte) {
 	if !json.Valid(body) {
 		detector.detectionIncomplete = true
+		return
+	}
+	hasToolMarker := false
+	switch detector.surface {
+	case reqcommon.APITypeChatCompletions:
+		hasToolMarker = bytes.Contains(body, []byte("tool_calls")) || bytes.Contains(body, []byte("function_call"))
+	case reqcommon.APITypeMessages:
+		hasToolMarker = bytes.Contains(body, []byte("tool_use"))
+	}
+	// Unicode escapes can encode tool markers in JSON keys and values.
+	if !hasToolMarker && !bytes.Contains(body, []byte(`\u`)) {
 		return
 	}
 

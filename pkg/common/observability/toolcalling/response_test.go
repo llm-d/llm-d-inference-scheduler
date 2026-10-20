@@ -59,6 +59,12 @@ func TestResponseDetectorJSON(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "escaped chat tool calls",
+			surface: reqcommon.APITypeChatCompletions,
+			body:    `{"choices":[{"message":{"\u0074ool_calls":[{"index":0}]}}]}`,
+			want:    true,
+		},
+		{
 			name:    "empty chat tool calls",
 			surface: reqcommon.APITypeChatCompletions,
 			body:    `{"choices":[{"message":{"tool_calls":[]}}]}`,
@@ -70,9 +76,21 @@ func TestResponseDetectorJSON(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "escaped legacy chat function call",
+			surface: reqcommon.APITypeChatCompletions,
+			body:    `{"choices":[{"message":{"\u0066unction_call":{"name":"sentinel_name"}}}]}`,
+			want:    true,
+		},
+		{
 			name:    "messages tool use",
 			surface: reqcommon.APITypeMessages,
 			body:    `{"content":[{"type":"tool_use","name":"sentinel_name","input":{"secret":"sentinel_arguments"}}]}`,
+			want:    true,
+		},
+		{
+			name:    "escaped messages tool use",
+			surface: reqcommon.APITypeMessages,
+			body:    `{"content":[{"type":"\u0074ool_use","name":"sentinel_name"}]}`,
 			want:    true,
 		},
 		{
@@ -96,6 +114,37 @@ func TestResponseDetectorJSON(t *testing.T) {
 			detector, err := NewResponseDetector(tt.surface, false)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, detector.Observe([]byte(tt.body), true))
+		})
+	}
+}
+
+func BenchmarkResponseDetectorObserveJSON(b *testing.B) {
+	padding := strings.Repeat("x", 1024)
+	for _, tt := range []struct {
+		name    string
+		surface reqcommon.APIType
+		body    string
+		want    bool
+	}{
+		{"chat short text event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"content":"hello"}}]}`, false},
+		{"chat 1KB text event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"content":"` + padding + `"}}]}`, false},
+		{"chat tool event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"tool_calls":[{"index":0}]}}]}`, true},
+		{"messages short text event", reqcommon.APITypeMessages, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}`, false},
+		{"messages 1KB text event", reqcommon.APITypeMessages, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + padding + `"}}`, false},
+		{"messages tool event", reqcommon.APITypeMessages, `{"type":"content_block_start","content_block":{"type":"tool_use"}}`, true},
+		{"escaped chat tool event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"\u0074ool_calls":[{"index":0}]}}]}`, true},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			detector := &ResponseDetector{surface: tt.surface}
+			body := []byte(tt.body)
+			detector.observeJSON(body)
+			if detector.toolCallPresent != tt.want || detector.detectionIncomplete {
+				b.Fatal("unexpected detector result")
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				detector.observeJSON(body)
+			}
 		})
 	}
 }
@@ -166,11 +215,27 @@ func TestResponseDetectorSSEAcrossChunkBoundaries(t *testing.T) {
 			},
 		},
 		{
+			name:    "escaped chat completions delta",
+			surface: reqcommon.APITypeChatCompletions,
+			chunks: []string{
+				`data: {"choices":[{"delta":{"\u00`,
+				`74ool_calls":[{"index":0}]}}]}` + "\n\n",
+			},
+		},
+		{
 			name:    "messages content block start",
 			surface: reqcommon.APITypeMessages,
 			chunks: []string{
 				"event: content_block_start\ndata: {\"type\":\"content_block_start\",",
 				"\"content_block\":{\"type\":\"tool_use\",\"name\":\"sentinel_name\",\"input\":{\"secret\":\"sentinel_arguments\"}}}\n\n",
+			},
+		},
+		{
+			name:    "escaped messages content block start",
+			surface: reqcommon.APITypeMessages,
+			chunks: []string{
+				`data: {"type":"content_block_start","content_block":{"type":"\u00`,
+				`74ool_use"}}` + "\n\n",
 			},
 		},
 	}
