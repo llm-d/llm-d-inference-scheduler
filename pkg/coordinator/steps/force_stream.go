@@ -420,6 +420,15 @@ func forceStreamBody(src map[string]any, shape sseShape) map[string]any {
 // the echoed fields cannot exceed the request they came from. The result is clamped
 // to int so a value above the platform int width cannot wrap negative when it sizes
 // the scanner buffer.
+// maxFrameBytes caps a single SSE line the scanner will buffer. For the chunk
+// shapes the cap is the reservation, with forceStreamMaxFrameBytes only as a ceiling
+// for the rare case a reservation exceeds 1 MiB; under the default per-request cap
+// the reservation stays below 1 MiB and is the binding limit. The Responses shape
+// delivers its whole reply in one terminal frame that echoes the request's fields
+// (tools, instructions, schema) back, so it is allowed the reservation plus the
+// request body size. The result is clamped to int so a cap above the platform int
+// width cannot wrap negative when it sizes the scanner buffer (reachable only with a
+// multi-GiB per-request size on a 32-bit build).
 func maxFrameBytes(shape sseShape, reserved, requestBytes int64) int {
 	frameCap := reserved
 	if shape == sseShapeResponses {
