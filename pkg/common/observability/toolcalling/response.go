@@ -152,6 +152,7 @@ func (detector *ResponseDetector) observeSSE(chunk []byte) {
 				continue
 			}
 		}
+		// Append line segments in bulk to avoid per-byte work on large events.
 		end := bytes.IndexAny(chunk, "\r\n")
 		line := chunk
 		if end >= 0 {
@@ -161,6 +162,7 @@ func (detector *ResponseDetector) observeSSE(chunk []byte) {
 			detector.discardingLine = detector.discardingLine || len(line) > 0
 		} else {
 			if !detector.bomChecked {
+				// Check the BOM prefix separately because its bytes may span chunks.
 				prefix := min(len(utf8BOM)-len(detector.line), len(line))
 				detector.line = append(detector.line, line[:prefix]...)
 				line = line[prefix:]
@@ -272,7 +274,7 @@ func (detector *ResponseDetector) observeJSON(body []byte) {
 	case reqcommon.APITypeMessages:
 		hasToolMarker = bytes.Contains(body, []byte("tool_use"))
 	}
-	// Unicode escapes can encode tool markers in JSON keys and values.
+	// Only a literal marker or Unicode escape can require a token walk.
 	if !hasToolMarker && !bytes.Contains(body, []byte(`\u`)) {
 		return
 	}
@@ -285,6 +287,7 @@ func (detector *ResponseDetector) observeJSON(body []byte) {
 		return
 	}
 	if found {
+		// The whole payload was validated above, so the walk can stop here.
 		detector.toolCallPresent = true
 		return
 	}

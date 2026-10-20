@@ -290,6 +290,7 @@ func toolCallingAPIForPath(path string) (reqcommon.APIType, bool) {
 }
 
 func compareEPPToolCallingSnapshotToBody(surface reqcommon.APIType, inbound toolcalling.RequestSnapshot, inboundBody, outboundBody []byte) ([]toolcalling.FieldStatus, error) {
+	// Reuse the ingress fields when the body is unchanged or cannot contain supported keys.
 	if bytes.Equal(inboundBody, outboundBody) || inbound.CanSkipCapture(outboundBody) {
 		return toolcalling.CompareRequests(inbound, inbound)
 	}

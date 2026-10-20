@@ -116,6 +116,7 @@ type RequestSnapshot struct {
 // CanSkipCapture reports whether an empty snapshot and a body without JSON
 // escapes contain no supported field keys. It does not validate JSON syntax.
 func (snapshot RequestSnapshot) CanSkipCapture(body []byte) bool {
+	// Escaped keys can spell supported fields without their literal bytes.
 	if len(snapshot.fields) != 0 || bytes.IndexByte(body, '\\') >= 0 {
 		return false
 	}
@@ -123,6 +124,7 @@ func (snapshot RequestSnapshot) CanSkipCapture(body []byte) bool {
 	if err != nil {
 		return false
 	}
+	// Field words in prompt strings do not require another capture.
 	for len(body) > 0 {
 		start := bytes.IndexByte(body, '"')
 		if start < 0 {
