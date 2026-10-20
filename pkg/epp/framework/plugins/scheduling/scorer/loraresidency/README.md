@@ -80,4 +80,5 @@ The plugin is alpha and needs `--allow-experimental-plugins`.
 - The estimate covers only traffic this EPP routes. Requests sent to the pods another way, and adapters loaded through the vLLM API without a request, are not seen.
 - With more than one EPP replica, only the leader routes, so the estimate is that replica's. A newly elected leader starts empty.
 - Until a pod reports `max_lora`, it is treated as having one GPU slot. vLLM publishes the gauge only after a step, so an idle pod reports no value (see llm-d/llm-d-router#3361).
+- The scorer does not consider pod load. A hot adapter stays on its pod even when that pod is overloaded, and queue-depth scorers may not see it either, because vLLM grows its batches rather than queueing requests. Pair it with `running-requests-size-scorer` if that matters.
 - The default costs were not tuned. On H100 with vLLM v0.31.0, a CPU-to-GPU copy measured 0.03 to 0.24 of a load from storage, falling with rank.
