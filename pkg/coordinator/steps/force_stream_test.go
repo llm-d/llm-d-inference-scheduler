@@ -409,8 +409,9 @@ func TestForceStream_PerRequestCap_FallsBack(t *testing.T) {
 }
 
 // TestForceStream_OversizedFrame_CeilingAbort verifies that a single SSE frame
-// larger than the request's reservation trips the scanner's buffer limit and is
-// reported as a ceiling abort (counted and clean), not a generic read error.
+// larger than the request's reservation trips the scanner's buffer limit, is
+// counted error_ceiling, and falls back to the pass-through (not a generic read
+// error, and not a 5xx): nothing reached the client, so the request is re-sent.
 func TestForceStream_OversizedFrame_CeilingAbort(t *testing.T) {
 	var big strings.Builder
 	big.WriteString(`{"request_id":"g","choices":[{"index":0,"token_ids":[`)
@@ -421,7 +422,24 @@ func TestForceStream_OversizedFrame_CeilingAbort(t *testing.T) {
 		big.WriteString("12345")
 	}
 	big.WriteString(`]}]}`)
-	server := sseServer(t, []string{big.String()}, nil)
+	passthroughReply := `{"request_id":"g","choices":[{"index":0,"token_ids":[1,2,3]}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			fmt.Fprintf(w, "data: %s\n\n", big.String())
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
 	defer server.Close()
 
 	// A 4KiB budget reserves roughly 2.3KiB for a max_tokens=1 generate request, so
@@ -443,11 +461,14 @@ func TestForceStream_OversizedFrame_CeilingAbort(t *testing.T) {
 		ResponseWriter: recorder,
 	}
 
-	err := step.Execute(context.Background(), reqCtx)
-	require.ErrorIs(t, err, errForceStreamCeiling)
-	require.Equal(t, 0, recorder.Body.Len(), "nothing may be written to the client when the frame overflows")
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "an oversized frame must fall back, not 5xx")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode)
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt then a pass-through")
 	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorCeiling), 1e-9)
-	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation must be released after an abort")
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
 }
 
 // TestForceStream_TotalCarriesModelLabel verifies force_stream_total is scoped by
@@ -1126,15 +1147,34 @@ func TestForceStream_Buffered_TransportError(t *testing.T) {
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after a transport error")
 }
 
-func TestForceStream_CeilingAbort(t *testing.T) {
-	// sampling_params.max_tokens=1 reserves a small per-request ceiling; stream
-	// token_ids well past it to trip the abort before anything reaches the client.
-	// Generate takes the buffered path, where the ceiling applies.
-	frames := make([]string, 0, 100)
-	for i := 0; i < 100; i++ {
-		frames = append(frames, `{"request_id":"g","choices":[{"index":0,"token_ids":[1,2,3,4,5,6,7,8,9,10]}],"usage":null}`)
-	}
-	server := sseServer(t, frames, nil)
+// TestForceStream_CeilingAbort_FallsBack verifies that a buffered reply exceeding
+// its reservation (usually a short per-token byte estimate, not a pod ignoring the
+// limit) falls back to the pass-through rather than failing a conforming reply.
+// Nothing reached the client, so the request is re-sent non-forced; the outcome
+// keeps the error_ceiling label for alerting on the estimate shortfall.
+func TestForceStream_CeilingAbort_FallsBack(t *testing.T) {
+	passthroughReply := `{"request_id":"g","choices":[{"index":0,"token_ids":[1,2,3]}]}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			// max_tokens=1 reserves a small ceiling; stream token_ids well past it to
+			// trip the abort before anything reaches the client.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			for i := 0; i < 100; i++ {
+				fmt.Fprint(w, "data: {\"request_id\":\"g\",\"choices\":[{\"index\":0,\"token_ids\":[1,2,3,4,5,6,7,8,9,10]}],\"usage\":null}\n\n")
+			}
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
 	defer server.Close()
 
 	step, reg := newForceStreamStep(t, server.URL, "4KiB")
@@ -1154,14 +1194,75 @@ func TestForceStream_CeilingAbort(t *testing.T) {
 		ResponseWriter: recorder,
 	}
 
-	err := step.Execute(context.Background(), reqCtx)
-	require.ErrorIs(t, err, errForceStreamCeiling)
-	var streamed *pipeline.UpstreamStreamedError
-	require.False(t, errors.As(err, &streamed), "a ceiling abort writes nothing, so it must return a plain error")
-
-	require.Equal(t, 0, recorder.Body.Len(), "nothing may be written to the client when the ceiling trips")
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "a ceiling abort must fall back, not 5xx")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode, "the client gets the pass-through reply, not a 5xx")
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body))
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
 	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorCeiling), 1e-9)
-	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation must be released after an abort")
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released after the fallback")
+}
+
+// TestForceStream_CeilingSpentHandoff_SuppressesFallback verifies a ceiling abort on
+// a NIXL path whose block handoff the forced attempt already consumed fails cleanly
+// instead of replaying: the ceiling fallback inherits the spent-handoff suppression.
+func TestForceStream_CeilingSpentHandoff_SuppressesFallback(t *testing.T) {
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		// Stream token_ids well past the small reservation to trip the ceiling; there
+		// must be no second call, since the handoff is spent.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for i := 0; i < 100; i++ {
+			fmt.Fprint(w, "data: {\"request_id\":\"g\",\"choices\":[{\"index\":0,\"token_ids\":[1,2,3,4,5,6,7,8,9,10]}],\"usage\":null}\n\n")
+		}
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	reg := prometheus.NewRegistry()
+	require.NoError(t, coordmetrics.Register(reg))
+	coordmetrics.Reset()
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+	step, err := NewDecodeStep(gwClient, map[string]any{
+		ParamForceStream:               true,
+		ParamForceStreamBufferSize:     "4KiB",
+		ParamForceStreamMaxRequestSize: "4KiB",
+		ParamKVConnector:               kv.NIXL,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:    "req-ceiling-spent",
+		OriginalPath: reqcommon.PathVLLMGenerate,
+		Model:        "llama-3",
+		Stream:       false,
+		KVTransferParams: map[string]any{
+			reqcommon.FieldRemoteBlockIDs: []any{1, 2},
+			reqcommon.FieldRemoteEngineID: "prefill-pod-a",
+		},
+		Body: map[string]any{
+			"model": "llama-3", "stream": false,
+			"token_ids":       []any{1},
+			"sampling_params": map[string]any{"max_tokens": 1},
+		},
+		ResponseWriter: recorder,
+	}
+
+	err = step.(*DecodeStep).Execute(context.Background(), reqCtx)
+	require.Error(t, err, "a ceiling abort on a spent handoff must fail cleanly, not replay")
+	require.Equal(t, []any{true}, streams, "only the forced attempt runs; the fallback is suppressed")
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultErrorCeiling), 1e-9,
+		"a suppressed request is not counted")
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation released on the error path")
 }
 
 // TestForceStream_MalformedFrame_BufferedPath verifies that an unreadable 200

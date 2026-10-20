@@ -83,8 +83,10 @@ const (
 )
 
 // errForceStreamCeiling marks a forced request aborted because its buffered
-// response exceeded the bytes reserved for it. The server answers a clean 5xx:
-// nothing was written to the client when this is returned.
+// response exceeded the bytes reserved for it, usually a per-token byte estimate
+// that came up short rather than a pod ignoring the limit. Nothing was written to
+// the client, so the decode step falls back to the pass-through (recording
+// error_ceiling) rather than failing a conforming reply.
 var errForceStreamCeiling = errors.New("force-stream: buffered response exceeded its reserved budget")
 
 // errForceStreamOversize marks a Responses forced reply whose terminal frame did
@@ -287,8 +289,11 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 	if err := scanForcedResponse(resp.Body, reassembler, reserved, int64(len(bodyBytes))); err != nil {
 		switch {
 		case errors.Is(err, errForceStreamCeiling):
-			coordmetrics.IncForceStreamTotal(reqCtx.Model, coordmetrics.ForceStreamResultErrorCeiling)
-			logger.Error(err, "force-stream aborted", "reservedBytes", reserved)
+			// decode records error_ceiling and runs the pass-through. A buffered reply
+			// past its reservation usually means the per-token byte estimate came up
+			// short, not that the pod ignored the limit, so falling back serves the
+			// reply rather than failing a conforming request; nothing reached the
+			// client, so the fallback is available here as it is for oversize.
 		case errors.Is(err, errForceStreamOversize):
 			// decode records fallback_oversize and runs the pass-through.
 		case errors.Is(err, errForceStreamLossyFrame):

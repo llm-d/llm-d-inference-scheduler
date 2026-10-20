@@ -173,6 +173,10 @@ func forceStreamFallbackResult(err error) (result string, ok bool) {
 		return coordmetrics.ForceStreamResultFallbackUnreadable, true
 	case errors.Is(err, errForceStreamLossyFrame):
 		return coordmetrics.ForceStreamResultFallbackUnsupported, true
+	case errors.Is(err, errForceStreamCeiling):
+		// A ceiling abort falls back like the others; it keeps the error_ceiling
+		// label so the byte-estimate shortfall stays visible for alerting.
+		return coordmetrics.ForceStreamResultErrorCeiling, true
 	default:
 		return "", false
 	}
