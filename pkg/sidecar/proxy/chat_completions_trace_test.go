@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -555,6 +556,36 @@ func TestChunkedDecodeSpanExcludesPrefillOutcomes(t *testing.T) {
 	})
 }
 
+func TestChunkedDecodeSpanWithoutDispatchedChunk(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+	useTracerProviderForTest(t, provider)
+	const original = `{"messages":[],"max_tokens":6,"tools":[],"tool_choice":"auto"}`
+	body, err := decodeRequestBody([]byte(original))
+	require.NoError(t, err)
+	s := NewProxy(Config{DecodeChunkSize: 3})
+	s.decoderProxy = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("decode chunk must not be dispatched")
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx, root := provider.Tracer(tracerScope).Start(ctx, "forward_request")
+	ctx = context.WithValue(ctx, toolCallingRequestSpanKey, root)
+	ctx, decode := provider.Tracer(tracerScope).Start(ctx, "decode")
+	r := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(original)).WithContext(ctx)
+	toolFields, err := captureInferenceToolCallingRequest(r, reqcommon.APITypeChatCompletions, []byte(original))
+	require.NoError(t, err)
+	cancel()
+	s.runChunkedDecodeFromMap(httptest.NewRecorder(), r, body, []byte(original), toolFields)
+	decode.End()
+	root.End()
+	require.Len(t, recorder.Ended(), 3)
+	require.Empty(t, toolCallingSpanAttributes(recorder.Ended()[0]))
+	require.Empty(t, toolCallingSpanAttributes(recorder.Ended()[1]))
+	require.Contains(t, toolCallingSpanAttributes(recorder.Ended()[2]), semconv.LLMDToolCallingToolChoiceKey.String("auto"))
+}
+
 func TestPDToolCallingStageSpans(t *testing.T) {
 	for _, connector := range []string{"nixl", "parallel", "p2p", "mooncake", "sglang"} {
 		for _, api := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages} {
@@ -642,6 +673,56 @@ func TestPDToolCallingStageSpans(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestPDToolCallingSummaryOnSetupFailure(t *testing.T) {
+	bootstrap := httptest.NewServer(statusHandler(http.StatusServiceUnavailable, `{}`))
+	defer bootstrap.Close()
+	bootstrapURL, err := url.Parse(bootstrap.URL)
+	require.NoError(t, err)
+	bootstrapPort, err := strconv.Atoi(bootstrapURL.Port())
+	require.NoError(t, err)
+
+	for _, connector := range []string{"mooncake", "nixl"} {
+		for _, tt := range []struct {
+			api  reqcommon.APIType
+			body string
+		}{
+			{reqcommon.APITypeChatCompletions, `{"tools":[{}],"tool_choice":"auto"}`},
+			{reqcommon.APITypeMessages, `{"tools":[{}],"tool_choice":{"type":"auto"}}`},
+		} {
+			t.Run(connector+"/"+tt.api.String(), func(t *testing.T) {
+				recorder := tracetest.NewSpanRecorder()
+				provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+				t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
+				useTracerProviderForTest(t, provider)
+				s := NewProxy(Config{MooncakeBootstrapPort: bootstrapPort})
+				if connector == "nixl" {
+					s.nixlRequestIDFn = func() (string, error) { return "", errors.New("request ID failure") }
+				}
+				ctx, root := tracing.Tracer(tracerScope).Start(context.Background(), "forward_request")
+				ctx = context.WithValue(ctx, toolCallingRequestSpanKey, root)
+				r := httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body)).WithContext(ctx)
+				rw := httptest.NewRecorder()
+				before := toolFieldCounters(t)
+				if connector == "mooncake" {
+					s.handleMooncake(rw, r, bootstrapURL.Host, tt.api)
+				} else {
+					s.handleNIXLV2(rw, r, bootstrapURL.Host, "", tt.api)
+				}
+				root.End()
+				require.Equal(t, http.StatusBadGateway, rw.Code)
+				require.Empty(t, toolFieldDelta(before, toolFieldCounters(t)))
+				require.Len(t, recorder.Ended(), 1)
+				require.ElementsMatch(t, []attribute.KeyValue{
+					semconv.LLMDToolCallingAPISurfaceKey.String(tt.api.String()),
+					semconv.LLMDToolCallingPresentKey.Bool(true),
+					semconv.LLMDToolCallingToolChoiceKey.String("auto"),
+					semconv.LLMDToolCallingToolCountKey.String("1"),
+				}, toolCallingSpanAttributes(recorder.Ended()[0]))
+			})
 		}
 	}
 }

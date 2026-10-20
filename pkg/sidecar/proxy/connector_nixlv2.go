@@ -69,6 +69,8 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	if !ok {
 		return
 	}
+	// Telemetry failure must not change routing or reject an inference request.
+	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
 
 	// Generate unique request UUID
 	uuidStr, err := s.nixlRequestIDFn()
@@ -84,12 +86,12 @@ func (s *Server) handleNIXLV2(w http.ResponseWriter, r *http.Request, prefillPod
 	if s.config.MoRIIOParallelDispatch && s.config.MoRIIOWriteMode {
 		// MoRI-IO requires transfer_id to carry the "tx" prefix for message routing.
 		transferID := "tx" + uuidStr
+		// Reuse the client snapshot when the parallel helper creates its request state.
+		r = r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, toolFields))
 		s.runNIXLProtocolV2WriteParallel(w, r, original, body, uuidStr, transferID, prefillPodHostPort, kvCacheSource, apiType)
 		return
 	}
 
-	// Telemetry failure must not change routing or reject an inference request.
-	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
 	defer toolFields.report(r.Context())
 
 	// Prefill Stage

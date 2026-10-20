@@ -45,6 +45,7 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 	if !ok {
 		return
 	}
+	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
 
 	bootstrapAddr := "http://" + net.JoinHostPort(extractHost(prefillPodHostPort), strconv.Itoa(s.config.MooncakeBootstrapPort))
 
@@ -61,8 +62,6 @@ func (s *Server) handleMooncake(w http.ResponseWriter, r *http.Request, prefillP
 	for dpRank, engineID = range engineMap {
 		break
 	}
-	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
-
 	transferID := "xfer-" + newUUID()
 	s.logger.V(logging.TRACE).Info("mooncake protocol info",
 		"transfer_id", transferID,

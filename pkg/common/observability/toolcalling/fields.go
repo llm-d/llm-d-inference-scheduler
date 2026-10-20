@@ -431,7 +431,7 @@ func (snapshot RequestSnapshot) SpanAttributes(statuses []FieldStatus) []attribu
 		semconv.LLMDToolCallingAPISurfaceKey.String(snapshot.surface.String()),
 		semconv.LLMDToolCallingPresentKey.Bool(snapshot.summary.ToolCallingPresent),
 	)
-	if snapshot.summary.ToolCallingPresent {
+	if snapshot.summary.ToolChoicePresent {
 		attrs = append(attrs, semconv.LLMDToolCallingToolChoiceKey.String(string(snapshot.summary.ToolChoiceKind)))
 	}
 	if snapshot.summary.ToolCountBucket != "" {

@@ -92,6 +92,9 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 	if toolFields != nil && span.IsRecording() {
 		chunkFields = &toolCallingRequest{original: toolFields.original}
 		defer func() {
+			if len(chunkFields.statuses) == 0 {
+				return
+			}
 			attrs := chunkFields.original.SpanAttributes(chunkFields.statuses)
 			span.SetAttributes(attrs...)
 			trace.SpanFromContext(r.Context()).SetAttributes(attrs...)

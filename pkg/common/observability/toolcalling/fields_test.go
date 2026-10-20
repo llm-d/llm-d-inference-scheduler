@@ -650,6 +650,15 @@ func TestSpanAttributesOmittedForRequestsWithoutToolCallingFields(t *testing.T) 
 	require.Empty(t, snapshot.SpanAttributes(statuses))
 }
 
+func TestSpanAttributesOmitAbsentToolChoice(t *testing.T) {
+	snapshot, err := CaptureRequestJSON(reqcommon.APITypeChatCompletions, []byte(`{"tools":[]}`))
+	require.NoError(t, err)
+	require.Equal(t, []attribute.KeyValue{
+		attribute.String("llm_d.tool_calling.api_surface", "chat_completions"),
+		attribute.Bool("llm_d.tool_calling.present", true),
+	}, snapshot.SpanAttributes(nil))
+}
+
 func TestSpanAttributesRetainObservedToolCallingMutation(t *testing.T) {
 	snapshot, err := captureRequest(reqcommon.APITypeChatCompletions, map[string]any{"model": "test-model"})
 	require.NoError(t, err)

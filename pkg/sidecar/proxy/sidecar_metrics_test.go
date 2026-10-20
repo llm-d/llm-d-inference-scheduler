@@ -1752,7 +1752,11 @@ func TestChunkedDecodeToolCallingDispatchBoundaries(t *testing.T) {
 			}
 			assertToolCallingStatuses(t, toolFields.fieldStatuses(), want)
 			require.Len(t, recorder.Ended(), 1)
-			require.ElementsMatch(t, toolFields.original.SpanAttributes(toolFields.fieldStatuses()), toolCallingSpanAttributes(recorder.Ended()[0]))
+			if tt.wantCalls == 0 {
+				require.Empty(t, toolCallingSpanAttributes(recorder.Ended()[0]))
+			} else {
+				require.ElementsMatch(t, toolFields.original.SpanAttributes(toolFields.fieldStatuses()), toolCallingSpanAttributes(recorder.Ended()[0]))
+			}
 			require.Equal(t, before, toolFieldCounters(t), "the caller owns request-level metric recording")
 		})
 	}
