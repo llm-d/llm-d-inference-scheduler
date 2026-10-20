@@ -647,6 +647,29 @@ func TestHandleInference_OverlongRequestIDIsRejected(t *testing.T) {
 	}
 }
 
+// Prefer: if-available is the coordinator's conditional-decode signal to EPP;
+// a client copy would make EPP answer 412 on the prefill and decode legs, so
+// it is stripped at ingress with the other coordinator-owned headers.
+func TestHandleInference_StripsClientSuppliedPrefer(t *testing.T) {
+	step := &capturingStep{}
+	p := pipeline.New([]pipeline.Step{step})
+	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+	req.Header.Set("Prefer", "if-available")
+	rec := httptest.NewRecorder()
+	srv.handleInference(rec, req)
+
+	if step.captured == nil {
+		t.Fatal("pipeline step did not run")
+	}
+	if got := step.captured.OriginalHeaders.Get("Prefer"); got != "" {
+		t.Fatalf("client-supplied Prefer must be stripped, got %q", got)
+	}
+}
+
 func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
 	// x-llm-d-peer-topology and epp-profile are headers the coordinator alone injects
 	// (copied from the prefill response, or set to select a profile); a
