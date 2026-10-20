@@ -258,9 +258,16 @@ func TestRequestSnapshotCanSkipCapture(t *testing.T) {
 			require.Zero(t, allocations, "absence check must not allocate")
 			for _, body := range []string{
 				`{"messages":[{"content":"tools tool_choice"}]}`,
+				`{"messages":[{"content":"tools"}]}`,
+			} {
+				require.True(t, empty.CanSkipCapture([]byte(body)), body)
+			}
+			for _, body := range []string{
 				`{"messages":[{"tools":[]}]}`,
+				`{"tools" : []}`,
 				`{"messages":[{"content":"\u0061"}]}`,
 				`{"to\u006fls":[]}`,
+				`{"messages":[{"content":"tool_choice`,
 			} {
 				require.False(t, empty.CanSkipCapture([]byte(body)), body)
 			}
