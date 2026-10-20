@@ -209,7 +209,7 @@ func TestFilter_MissingSignalBothPredictor(t *testing.T) {
 }
 
 func TestFilter_BusyWarmEndpointPreservesStickiness(t *testing.T) {
-	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, UseUncachedTokens: true})
+	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, TTFTEstimate: TTFTEstimateFull})
 	endpoints := []fwksched.Endpoint{
 		makeEndpoint("a", 90, -1, 10000, 100),
 		makeEndpoint("b", 90, -1, 7000, 2000),
@@ -221,8 +221,8 @@ func TestFilter_BusyWarmEndpointPreservesStickiness(t *testing.T) {
 
 func TestFilter_FlagOffIgnoresUncachedTokens(t *testing.T) {
 	// Same endpoints as BusyWarmEndpointPreservesStickiness but with
-	// UseUncachedTokens: false.
-	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, UseUncachedTokens: false})
+	// TTFTEstimate: TTFTEstimateBackLog.
+	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, TTFTEstimate: TTFTEstimateBackLog})
 	endpoints := []fwksched.Endpoint{
 		makeEndpoint("a", 90, -1, 10000, 100),
 		makeEndpoint("b", 90, -1, 7000, 2000),
@@ -233,7 +233,7 @@ func TestFilter_FlagOffIgnoresUncachedTokens(t *testing.T) {
 }
 
 func TestFilter_StickyLoadExceedsPenaltyThreshold(t *testing.T) {
-	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, UseUncachedTokens: true})
+	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, TTFTEstimate: TTFTEstimateFull})
 	endpoints := []fwksched.Endpoint{
 		makeEndpoint("a", 90, -1, 10000, 100),
 		makeEndpoint("b", 90, -1, 7000, 2000),
@@ -244,7 +244,7 @@ func TestFilter_StickyLoadExceedsPenaltyThreshold(t *testing.T) {
 }
 
 func TestFilter_MissingUncachedTokensReturnAll(t *testing.T) {
-	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, UseUncachedTokens: true})
+	p := newTestPlugin(Config{AffinityThreshold: 0.80, MaxTTFTPenaltyMs: 5000, PeakPrefillThroughput: 1000, TTFTSource: TTFTSourcePrefillThroughput, TTFTEstimate: TTFTEstimateFull})
 	endpoints := []fwksched.Endpoint{
 		makeEndpoint("a", 90, -1, 500, -1),
 		makeEndpoint("b", 10, -1, 100, 200),
@@ -281,7 +281,7 @@ func TestConsumes_ConditionalAttributes(t *testing.T) {
 	assert.False(t, ok)
 
 	// Gate using peak prefill throughput with uncached tokens.
-	p = newTestPlugin(Config{MaxTTFTPenaltyMs: 5000, TTFTSource: TTFTSourcePrefillThroughput, PeakPrefillThroughput: 1000, UseUncachedTokens: true})
+	p = newTestPlugin(Config{MaxTTFTPenaltyMs: 5000, TTFTSource: TTFTSourcePrefillThroughput, PeakPrefillThroughput: 1000, TTFTEstimate: TTFTEstimateFull})
 	consumed = p.Consumes()
 	_, ok = consumed.Required[p.inFlightLoadDataKey]
 	assert.True(t, ok)
@@ -304,7 +304,7 @@ func TestFactory_PartialConfigPreservesDefaults(t *testing.T) {
 	assert.Equal(t, 0.95, p.config.AffinityThreshold)
 	assert.Equal(t, DefaultConfig.ExplorationProbability, p.config.ExplorationProbability)
 	assert.Equal(t, DefaultConfig.MaxTTFTPenaltyMs, p.config.MaxTTFTPenaltyMs)
-	assert.Equal(t, DefaultConfig.UseUncachedTokens, p.config.UseUncachedTokens)
+	assert.Equal(t, DefaultConfig.TTFTEstimate, p.config.TTFTEstimate)
 
 	// Setting only explorationProbability should preserve defaults for other params.
 	plugin, err = Factory("test", fwkplugin.StrictDecoder([]byte(`{"explorationProbability": 0.05}`)), nil)
@@ -313,7 +313,7 @@ func TestFactory_PartialConfigPreservesDefaults(t *testing.T) {
 	assert.Equal(t, DefaultConfig.AffinityThreshold, p.config.AffinityThreshold)
 	assert.Equal(t, 0.05, p.config.ExplorationProbability)
 	assert.Equal(t, DefaultConfig.MaxTTFTPenaltyMs, p.config.MaxTTFTPenaltyMs)
-	assert.Equal(t, DefaultConfig.UseUncachedTokens, p.config.UseUncachedTokens)
+	assert.Equal(t, DefaultConfig.TTFTEstimate, p.config.TTFTEstimate)
 
 	// Setting only maxTTFTPenaltyMs should preserve defaults for other params.
 	plugin, err = Factory("test", fwkplugin.StrictDecoder([]byte(`{"maxTTFTPenaltyMs": 10000}`)), nil)
@@ -324,7 +324,7 @@ func TestFactory_PartialConfigPreservesDefaults(t *testing.T) {
 	assert.Equal(t, float64(10000), p.config.MaxTTFTPenaltyMs)
 	assert.Equal(t, DefaultConfig.TTFTSource, p.config.TTFTSource)
 	assert.Equal(t, DefaultConfig.PeakPrefillThroughput, p.config.PeakPrefillThroughput)
-	assert.Equal(t, DefaultConfig.UseUncachedTokens, p.config.UseUncachedTokens)
+	assert.Equal(t, DefaultConfig.TTFTEstimate, p.config.TTFTEstimate)
 }
 
 func TestFactory_InvalidAffinityThreshold(t *testing.T) {
@@ -384,6 +384,14 @@ func TestFactory_InvalidTTFTSource(t *testing.T) {
 	_, err := Factory("test", fwkplugin.StrictDecoder([]byte(`{"ttftSource": "bogus"}`)), nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "ttftSource must be")
+}
+
+// An unrecognized ttftEstimate value is rejected rather than silently treated as
+// the default.
+func TestFactory_InvalidTTFTEstimate(t *testing.T) {
+	_, err := Factory("test", fwkplugin.StrictDecoder([]byte(`{"ttftEstimate": "bogus"}`)), nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "ttftEstimate must be")
 }
 
 // An empty ttftSource is rejected rather than silently defaulted: the default is
