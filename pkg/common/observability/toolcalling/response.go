@@ -143,38 +143,51 @@ func (detector *ResponseDetector) Close() {
 
 func (detector *ResponseDetector) observeSSE(chunk []byte) {
 	const utf8BOM = "\xef\xbb\xbf"
-	for _, b := range chunk {
+	for len(chunk) > 0 {
 		// Treat CRLF as one boundary even when it spans two body chunks.
 		if detector.afterCR {
 			detector.afterCR = false
-			if b == '\n' {
+			if chunk[0] == '\n' {
+				chunk = chunk[1:]
 				continue
 			}
 		}
-		if b == '\n' || b == '\r' {
-			detector.bomChecked = true
-			detector.afterCR = b == '\r'
-			detector.processSSELine()
-			if detector.toolCallPresent {
-				return
-			}
-			continue
+		end := bytes.IndexAny(chunk, "\r\n")
+		line := chunk
+		if end >= 0 {
+			line = chunk[:end]
 		}
 		if detector.discardingEvent {
-			detector.discardingLine = true
-			continue
-		}
-		if len(detector.line)+len(detector.eventData) == maxResponseSSEEventBytes {
-			detector.discardSSEEvent()
-			detector.discardingLine = true
-			continue
-		}
-		detector.line = append(detector.line, b)
-		if !detector.bomChecked && len(detector.line) == len(utf8BOM) {
-			detector.bomChecked = true
-			if bytes.Equal(detector.line, []byte(utf8BOM)) {
-				detector.clearLine()
+			detector.discardingLine = detector.discardingLine || len(line) > 0
+		} else {
+			if !detector.bomChecked {
+				prefix := min(len(utf8BOM)-len(detector.line), len(line))
+				detector.line = append(detector.line, line[:prefix]...)
+				line = line[prefix:]
+				if len(detector.line) == len(utf8BOM) {
+					detector.bomChecked = true
+					if bytes.Equal(detector.line, []byte(utf8BOM)) {
+						detector.clearLine()
+					}
+				}
 			}
+			if len(detector.line)+len(detector.eventData)+len(line) > maxResponseSSEEventBytes {
+				detector.discardSSEEvent()
+				detector.discardingLine = true
+			} else {
+				detector.line = append(detector.line, line...)
+			}
+		}
+		if end < 0 {
+			return
+		}
+		b := chunk[end]
+		chunk = chunk[end+1:]
+		detector.bomChecked = true
+		detector.afterCR = b == '\r'
+		detector.processSSELine()
+		if detector.toolCallPresent {
+			return
 		}
 	}
 }
