@@ -271,6 +271,10 @@ func (detector *ResponseDetector) observeJSON(body []byte) {
 		detector.detectionIncomplete = true
 		return
 	}
+	if found {
+		detector.toolCallPresent = true
+		return
+	}
 	if _, err := decoder.Token(); err != io.EOF {
 		detector.detectionIncomplete = true
 		return
@@ -292,24 +296,24 @@ func scanResponseJSONValue(decoder *json.Decoder, context responseJSONContext, s
 	case '{':
 		return scanResponseJSONObject(decoder, context, surface)
 	case '[':
-		found := false
 		itemContext := responseArrayItemContext(context)
 		for decoder.More() {
 			itemFound, err := scanResponseJSONValue(decoder, itemContext, surface)
 			if err != nil {
 				return false, err
 			}
-			found = found || itemFound
+			if itemFound {
+				return true, nil
+			}
 		}
 		_, err := decoder.Token()
-		return found, err
+		return false, err
 	default:
 		return false, nil
 	}
 }
 
 func scanResponseJSONObject(decoder *json.Decoder, context responseJSONContext, surface reqcommon.APIType) (bool, error) {
-	found := false
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {
@@ -325,7 +329,9 @@ func scanResponseJSONObject(decoder *json.Decoder, context responseJSONContext, 
 			if err != nil {
 				return false, err
 			}
-			found = found || present
+			if present {
+				return true, nil
+			}
 			continue
 		}
 		if context == responseJSONMessage && key == "function_call" && surface == reqcommon.APITypeChatCompletions {
@@ -333,7 +339,9 @@ func scanResponseJSONObject(decoder *json.Decoder, context responseJSONContext, 
 			if err != nil {
 				return false, err
 			}
-			found = found || present
+			if present {
+				return true, nil
+			}
 			continue
 		}
 		if context == responseJSONContentBlock && key == "type" {
@@ -342,7 +350,7 @@ func scanResponseJSONObject(decoder *json.Decoder, context responseJSONContext, 
 				return false, err
 			}
 			if surface == reqcommon.APITypeMessages && value == "tool_use" {
-				found = true
+				return true, nil
 			}
 			continue
 		}
@@ -352,10 +360,12 @@ func scanResponseJSONObject(decoder *json.Decoder, context responseJSONContext, 
 		if err != nil {
 			return false, err
 		}
-		found = found || childFound
+		if childFound {
+			return true, nil
+		}
 	}
 	_, err := decoder.Token()
-	return found, err
+	return false, err
 }
 
 func responseArrayItemContext(context responseJSONContext) responseJSONContext {
@@ -400,14 +410,11 @@ func scanNonEmptyJSONArray(decoder *json.Decoder) (bool, error) {
 	if token != json.Delim('[') {
 		return false, nil
 	}
-	nonEmpty := decoder.More()
-	for decoder.More() {
-		if _, err := scanResponseJSONValue(decoder, responseJSONIgnore, reqcommon.APITypeChatCompletions); err != nil {
-			return false, err
-		}
+	if decoder.More() {
+		return true, nil
 	}
 	_, err = decoder.Token()
-	return nonEmpty, err
+	return false, err
 }
 
 func scanNonEmptyJSONObject(decoder *json.Decoder) (bool, error) {
@@ -418,15 +425,9 @@ func scanNonEmptyJSONObject(decoder *json.Decoder) (bool, error) {
 	if token != json.Delim('{') {
 		return false, nil
 	}
-	nonEmpty := decoder.More()
-	for decoder.More() {
-		if _, err := decoder.Token(); err != nil { // object key
-			return false, err
-		}
-		if _, err := scanResponseJSONValue(decoder, responseJSONIgnore, reqcommon.APITypeChatCompletions); err != nil {
-			return false, err
-		}
+	if decoder.More() {
+		return true, nil
 	}
 	_, err = decoder.Token()
-	return nonEmpty, err
+	return false, err
 }

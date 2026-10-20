@@ -120,6 +120,7 @@ func TestResponseDetectorJSON(t *testing.T) {
 
 func BenchmarkResponseDetectorObserveJSON(b *testing.B) {
 	padding := strings.Repeat("x", 1024)
+	largeArgument := strings.Repeat("x", 64*1024)
 	for _, tt := range []struct {
 		name    string
 		surface reqcommon.APIType
@@ -129,9 +130,11 @@ func BenchmarkResponseDetectorObserveJSON(b *testing.B) {
 		{"chat short text event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"content":"hello"}}]}`, false},
 		{"chat 1KB text event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"content":"` + padding + `"}}]}`, false},
 		{"chat tool event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"tool_calls":[{"index":0}]}}]}`, true},
+		{"chat tool event with large arguments", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"` + largeArgument + `"}}]}}]}`, true},
 		{"messages short text event", reqcommon.APITypeMessages, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}`, false},
 		{"messages 1KB text event", reqcommon.APITypeMessages, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + padding + `"}}`, false},
 		{"messages tool event", reqcommon.APITypeMessages, `{"type":"content_block_start","content_block":{"type":"tool_use"}}`, true},
+		{"messages tool event with large input", reqcommon.APITypeMessages, `{"type":"content_block_start","content_block":{"type":"tool_use","input":{"value":"` + largeArgument + `"}}}`, true},
 		{"escaped chat tool event", reqcommon.APITypeChatCompletions, `{"choices":[{"delta":{"\u0074ool_calls":[{"index":0}]}}]}`, true},
 	} {
 		b.Run(tt.name, func(b *testing.B) {
@@ -158,6 +161,7 @@ func TestResponseDetectorReportsUnreadablePayload(t *testing.T) {
 	}{
 		{name: "malformed JSON", body: `{invalid json}`, wantIncomplete: true},
 		{name: "truncated JSON", body: `{"choices":[`, wantIncomplete: true},
+		{name: "malformed JSON after tool call", body: `{"choices":[{"message":{"tool_calls":[{"index":0}]}}],`, wantIncomplete: true},
 		{name: "empty JSON body", wantIncomplete: true},
 		{name: "valid JSON without tools", body: `{"choices":[{"message":{"content":"hello"}}]}`},
 		{name: "malformed SSE event", eventStream: true, body: "data: {invalid json}\n\n", wantIncomplete: true},
