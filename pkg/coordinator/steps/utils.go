@@ -168,8 +168,8 @@ func resolveFormat(useOpenAIFormat bool, path string) reqcommon.APIType {
 // request-level check and does not catch partial coverage, so the coverage
 // reconciliation lives here.
 //
-// Entries are grouped by Modality, as in buildMMFeatures: a mixed-modality
-// request has one key per modality in each feature map.
+// Entries are grouped by Modality: a mixed-modality request has one key per
+// modality in each feature map.
 func buildPrefillMMFeatures(entries []pipeline.MultimodalEntry, ecTransferParams map[string]any) map[string]any {
 	if len(entries) == 0 {
 		return nil
@@ -359,45 +359,6 @@ func modalityLocalIndexes(entries []pipeline.MultimodalEntry) []int {
 		counter[entry.Modality]++
 	}
 	return local
-}
-
-// buildMMFeatures builds the multimodal features map (mm_hashes, mm_placeholders,
-// and optionally kwargs_data) from the request's multimodal entries. It returns
-// nil when there are no entries. Entries are grouped by Modality, so a
-// mixed-modality request has one key per modality in each feature map. Those
-// maps are keyed by reqcommon.Modality rather than string: encoding/json keys a
-// map by any string-kind type, so the wire body is identical.
-func buildMMFeatures(entries []pipeline.MultimodalEntry, includeKwargs bool) map[string]any {
-	if len(entries) == 0 {
-		return nil
-	}
-	hashesByMod := make(map[reqcommon.Modality][]string)
-	placeholdersByMod := make(map[reqcommon.Modality][]any)
-	// Left nil unless the caller asked for kwargs_data: the decode and
-	// conditional-decode bodies never carry it.
-	var kwargsByMod map[reqcommon.Modality][]any
-	if includeKwargs {
-		kwargsByMod = make(map[reqcommon.Modality][]any)
-	}
-	for _, entry := range entries {
-		mod := entry.Modality
-		hashesByMod[mod] = append(hashesByMod[mod], entry.Hash)
-		placeholdersByMod[mod] = append(placeholdersByMod[mod], map[string]any{
-			"offset": entry.Placeholder.Offset,
-			"length": entry.Placeholder.Length,
-		})
-		if includeKwargs {
-			kwargsByMod[mod] = append(kwargsByMod[mod], kwargsSentinel(entry.KwargsData))
-		}
-	}
-	features := map[string]any{
-		"mm_hashes":       hashesByMod,
-		"mm_placeholders": placeholdersByMod,
-	}
-	if includeKwargs {
-		features["kwargs_data"] = kwargsByMod
-	}
-	return features
 }
 
 // validateEntryModalities rejects a MultimodalEntry with no Modality. Render is

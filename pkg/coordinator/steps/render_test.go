@@ -360,6 +360,87 @@ func TestRenderStep_ChatCompletions_RejectsWrongModalitySplit(t *testing.T) {
 	}
 }
 
+// mm_metadata degrades instead of failing, so this case cannot live in
+// TestRenderStep_ChatCompletions_RejectsWrongModalitySplit. Two image entries
+// and one audio entry, with all three metadata items filed under image: the
+// totals match, which is the shape the aggregate check does not catch. Pairing
+// must follow this modality's slice, and a length mismatch drops metadata
+// rather than attaching another modality's blob. The sibling fields stay on
+// their own modality slots.
+func TestRenderStep_ChatCompletions_MMMetadataWrongModalityDegrades(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token_ids": []int{1, 32000, 32000, 32000, 51000, 51000},
+			"features": map[string]any{
+				"mm_hashes": map[reqcommon.Modality][]string{
+					reqcommon.ModalityImage: {"img-hash-0", "img-hash-1"},
+					reqcommon.ModalityAudio: {"aud-hash"},
+				},
+				"mm_placeholders": map[reqcommon.Modality][]any{
+					reqcommon.ModalityImage: {
+						map[string]any{"offset": 1, "length": 3},
+						map[string]any{"offset": 4, "length": 3},
+					},
+					reqcommon.ModalityAudio: {
+						map[string]any{"offset": 7, "length": 2},
+					},
+				},
+				"kwargs_data": map[reqcommon.Modality][]string{
+					reqcommon.ModalityImage: {"aW1nMA", "aW1nMQ"},
+					reqcommon.ModalityAudio: {"YXVk"},
+				},
+				"mm_metadata": map[reqcommon.Modality][]string{
+					reqcommon.ModalityImage: {"AUD-META", "img-meta0", "img-meta1"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	step, err := NewRenderStep(nil, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	step.(*RenderStep).SetServiceAddress(server.URL)
+
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathChatCompletions,
+		Body:         map[string]any{"model": "test-model", "messages": []any{}},
+		Model:        "test-model",
+		MultimodalEntries: []pipeline.MultimodalEntry{
+			{Modality: reqcommon.ModalityImage},
+			{Modality: reqcommon.ModalityImage},
+			{Modality: reqcommon.ModalityAudio},
+		},
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("expected the request to succeed with degraded mm_metadata, got %v", err)
+	}
+
+	want := []struct {
+		hash       string
+		kwargs     string
+		modality   reqcommon.Modality
+		offset     int
+		length     int
+		mmMetadata string
+	}{
+		{hash: "img-hash-0", kwargs: "aW1nMA", modality: reqcommon.ModalityImage, offset: 1, length: 3, mmMetadata: ""},
+		{hash: "img-hash-1", kwargs: "aW1nMQ", modality: reqcommon.ModalityImage, offset: 4, length: 3, mmMetadata: ""},
+		{hash: "aud-hash", kwargs: "YXVk", modality: reqcommon.ModalityAudio, offset: 7, length: 2, mmMetadata: ""},
+	}
+	for i, w := range want {
+		got := reqCtx.MultimodalEntries[i]
+		if got.Hash != w.hash || got.KwargsData != w.kwargs || got.Modality != w.modality ||
+			got.Placeholder.Offset != w.offset || got.Placeholder.Length != w.length ||
+			got.MMMetadata != w.mmMetadata {
+			t.Errorf("entry %d = %+v, want hash=%q kwargs=%q modality=%q offset=%d length=%d mm_metadata=%q",
+				i, got, w.hash, w.kwargs, w.modality, w.offset, w.length, w.mmMetadata)
+		}
+	}
+}
+
 func TestRenderStep_RunsEvenWithNoMultimodal(t *testing.T) {
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

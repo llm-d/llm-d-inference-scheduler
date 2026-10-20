@@ -155,9 +155,7 @@ func (s *PrefillStep) buildPrefillBody(ctx context.Context, reqCtx *pipeline.Req
 			reqcommon.FieldKVTransferParams: kvParams,
 		}
 		reqcommon.CapSingleToken(body, format)
-		// No features here: the Completions API is text-in and vLLM ignores
-		// multimodal feature fields on this route, so attaching them (as this
-		// branch historically did) only padded the wire.
+		// Completions never carries multimodal entries (see render.executeCompletions).
 		if len(ecParams) > 0 {
 			body[reqcommon.FieldECTransferParams] = ecParams
 		}

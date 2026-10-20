@@ -365,7 +365,10 @@ func (s *RenderStep) applyRenderResponse(ctx context.Context, reqCtx *pipeline.R
 		reqCtx.MultimodalEntries[i].Hash = hashes[idx]
 		reqCtx.MultimodalEntries[i].KwargsData = kwargs[idx]
 		reqCtx.MultimodalEntries[i].Placeholder = placeholders[idx]
-		if idx < len(metadata) {
+		// Compared against this modality's slice, not the aggregate total: a
+		// renderer that files every item under one modality passes the total
+		// check and would pair entry i with another modality's blob.
+		if len(metadata) == len(hashes) {
 			reqCtx.MultimodalEntries[i].MMMetadata = metadata[idx]
 		}
 	}

@@ -684,46 +684,6 @@ func mmImageField(t *testing.T, features map[string]any, field string) []any {
 	return decoded[string(reqcommon.ModalityImage)]
 }
 
-// Entries with mixed Modality values must produce output maps with one key per
-// distinct modality.
-func TestBuildMMFeatures_GroupsByModality(t *testing.T) {
-	entries := []pipeline.MultimodalEntry{
-		{Modality: reqcommon.ModalityImage, Hash: "img-a", KwargsData: "k-img-a",
-			Placeholder: pipeline.PlaceholderRange{Offset: 1, Length: 2}},
-		{Modality: reqcommon.ModalityAudio, Hash: "aud-a", KwargsData: "k-aud-a",
-			Placeholder: pipeline.PlaceholderRange{Offset: 4, Length: 3}},
-		{Modality: reqcommon.ModalityImage, Hash: "img-b", KwargsData: "",
-			Placeholder: pipeline.PlaceholderRange{Offset: 8, Length: 1}},
-		{Modality: reqcommon.ModalityVideo, Hash: "vid-a", KwargsData: "k-vid-a",
-			Placeholder: pipeline.PlaceholderRange{Offset: 10, Length: 5}},
-	}
-	features := buildMMFeatures(entries, true)
-
-	hashes, ok := features["mm_hashes"].(map[reqcommon.Modality][]string)
-	if !ok {
-		t.Fatalf("mm_hashes must be map[reqcommon.Modality][]string, got %T", features["mm_hashes"])
-	}
-	if got, want := hashes[reqcommon.ModalityImage], []string{"img-a", "img-b"}; !equalStringSlices(got, want) {
-		t.Errorf("mm_hashes[image] = %v, want %v", got, want)
-	}
-	if got, want := hashes[reqcommon.ModalityAudio], []string{"aud-a"}; !equalStringSlices(got, want) {
-		t.Errorf("mm_hashes[audio] = %v, want %v", got, want)
-	}
-	if got, want := hashes[reqcommon.ModalityVideo], []string{"vid-a"}; !equalStringSlices(got, want) {
-		t.Errorf("mm_hashes[video] = %v, want %v", got, want)
-	}
-
-	// kwargs_data preserves the cache-hit-sentinel (empty -> nil) per-modality.
-	kwargs, ok := features["kwargs_data"].(map[reqcommon.Modality][]any)
-	if !ok {
-		t.Fatalf("kwargs_data must be map[reqcommon.Modality][]any, got %T", features["kwargs_data"])
-	}
-	imgKwargs := kwargs[reqcommon.ModalityImage]
-	if len(imgKwargs) != 2 || imgKwargs[0] != "k-img-a" || imgKwargs[1] != nil {
-		t.Errorf("kwargs_data[image] = %v, want [k-img-a, nil]", imgKwargs)
-	}
-}
-
 // The invariant guard render runs before the pipeline reads entries. An
 // untagged entry is an error rather than defaulted, because every reader keys
 // per-modality pairing on the field and a default would splice into another
@@ -1000,18 +960,6 @@ func TestExtractMultimodalEntries_EmptyModalityListAccepted(t *testing.T) {
 			}
 		})
 	}
-}
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestGatewayHeaders(t *testing.T) {
