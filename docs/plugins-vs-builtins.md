@@ -23,7 +23,7 @@ A **plugin** is a component that:
 
 - **Scheduling filters**: `label-selector-filter`, `encode-filter`, `prefill-filter`, `decode-filter`, etc.
 - **Scheduling scorers**: `prefix`, `sessionaffinity`, `loadaware`, `loraaffinity`, etc.
-- **Profile handlers**: `DataParallelProfileHandler`, `DisaggProfileHandler`, etc.
+- **Profile handlers**: `SingleProfileHandler`, `DisaggProfileHandler`, etc.
 - **Eviction policies**: `EvictionOrderingPolicy` (e.g. `eviction-priority-then-time-ordering`),
   `EvictionFilterPolicy` (e.g. `eviction-sheddable-filter`).
 

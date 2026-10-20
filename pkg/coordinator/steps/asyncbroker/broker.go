@@ -18,6 +18,7 @@ package asyncbroker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -265,12 +266,23 @@ func (s *Step) serveQueued(ctx context.Context, reqCtx *pipeline.RequestContext,
 		}
 	}
 
+	// Body is the parsed request as earlier steps left it (render and decode
+	// rewrite it), so it is re-marshalled here rather than taken from
+	// OriginalBody; the producer stores the payload as raw JSON.
+	payload, err := json.Marshal(reqCtx.Body)
+	if err != nil {
+		log.FromContext(ctx).WithName(StepName).Error(err, "failed to encode request body", "id", reqCtx.RequestID)
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", api.ErrCodeInvalidRequest,
+			"request body is not encodable as JSON")
+		return responded(http.StatusBadRequest, pipeline.ErrBadRequest)
+	}
 	msg := &api.RedisRequest{
 		RequestMessage: api.RequestMessage{
 			ID:       envelopeID(tenant, reqCtx.RequestID),
 			Created:  now.Unix(),
 			Deadline: now.Add(timeout).Unix(),
-			Payload:  reqCtx.Body,
+			Payload:  payload,
+			Model:    reqCtx.Model,
 			Metadata: metadata,
 			Headers:  fwd,
 			Endpoint: reqCtx.OriginalPath,
@@ -279,7 +291,7 @@ func (s *Step) serveQueued(ctx context.Context, reqCtx *pipeline.RequestContext,
 		ResultQueueName:  resultKey(tenant, reqCtx.RequestID),
 	}
 	call := coordmetrics.StartUpstreamCall(coordmetrics.UpstreamAsyncBroker)
-	err := s.sub.SubmitRequest(ctx, msg)
+	err = s.sub.SubmitRequest(ctx, msg)
 	call.Done()
 	if err != nil {
 		log.FromContext(ctx).WithName(StepName).Error(err, "failed to enqueue request", "id", reqCtx.RequestID)
@@ -403,7 +415,9 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 		}
 		if err == nil && state == asyncStateReady {
 			pipelineResult, writeErr := writeResult(w, res)
-			if writeErr == nil {
+			if writeErr != nil {
+				logger.Error(writeErr, "failed to deliver result, retaining mailbox", "id", id)
+			} else {
 				// Delivery confirmed on the held connection, the result's only
 				// consumer: reclaim the mailbox now instead of letting it sit
 				// out the full result TTL. On write failure the key stays, as
@@ -444,10 +458,10 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 				}
 				if err == nil && state == asyncStateReady {
 					pipelineResult, writeErr := writeResult(w, res)
-					if writeErr == nil {
-						if err := s.rdb.Del(finalCtx, resultKey(tenant, id)).Err(); err != nil {
-							logger.Error(err, "failed to delete delivered result", "id", id)
-						}
+					if writeErr != nil {
+						logger.Error(writeErr, "failed to deliver result, retaining mailbox", "id", id)
+					} else if err := s.rdb.Del(finalCtx, resultKey(tenant, id)).Err(); err != nil {
+						logger.Error(err, "failed to delete delivered result", "id", id)
 					}
 					return pipelineResult
 				}

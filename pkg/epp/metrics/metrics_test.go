@@ -760,7 +760,7 @@ func TestSchedulerE2ELatency(t *testing.T) {
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			for _, duration := range scenario.durations {
-				RecordSchedulerE2ELatency(duration)
+				RecordSchedulerE2ELatency(context.Background(), duration)
 			}
 
 			// Verify llm_d_epp metric
@@ -1094,7 +1094,7 @@ func TestFlowControlQueueDurationMetric(t *testing.T) {
 	}
 
 	for _, rec := range records {
-		RecordFlowControlRequestQueueDuration(rec.fairnessID, rec.priority, rec.outcome, pool, model, target, rec.duration)
+		RecordFlowControlRequestQueueDuration(context.Background(), rec.fairnessID, rec.priority, rec.outcome, pool, model, target, rec.duration)
 	}
 
 	testCases := []struct {

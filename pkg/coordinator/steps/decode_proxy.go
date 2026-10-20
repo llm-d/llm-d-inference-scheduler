@@ -123,8 +123,13 @@ func newDecodeProxy(logger logr.Logger, transport http.RoundTripper, modifyRespo
 		Director:      func(_ *http.Request) {}, //nolint:staticcheck // SA1019: Rewrite does not append X-Forwarded-For, which Director does.
 		FlushInterval: -1,
 		Transport:     transport,
+		// A decode profile's response headers are otherwise copied verbatim to
+		// the client; strip coordinator-internal headers (e.g. the peer-topology
+		// header, meaningful only between the prefill and decode legs) so a
+		// plugin configured on the decode profile cannot leak them to the caller.
 		ModifyResponse: func(resp *http.Response) error {
 			out.Status = resp.StatusCode
+			pipeline.StripInternalHeaders(resp.Header)
 			if modifyResponse != nil {
 				return modifyResponse(resp)
 			}
