@@ -619,6 +619,7 @@ func (s *Server) createProxyHandler(
 		return nil, err
 	}
 
+	// #nosec G704 -- Request-supplied targets are checked against the InferencePool allowlist before reaching this proxy when SSRF protection is enabled.
 	newProxy := httputil.NewSingleHostReverseProxy(u)
 	newProxy.Transport = s.newProxyTransport(u.Scheme, insecureSkipVerify)
 	cache.Add(hostPort, newProxy)
