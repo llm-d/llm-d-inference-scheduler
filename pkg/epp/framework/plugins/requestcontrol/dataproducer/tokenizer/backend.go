@@ -172,7 +172,7 @@ func (b renderBackend) produce(ctx context.Context, body *fwkrh.InferenceRequest
 			return nil, err
 		}
 		if legacy {
-			return b.renderLegacyResponses(ctx, body.Responses)
+			return b.renderLegacyResponses(ctx, body)
 		}
 		tokenIDs, mmFeatures, err := b.tk.RenderResponses(ctx, body.WirePayload())
 		if err != nil {

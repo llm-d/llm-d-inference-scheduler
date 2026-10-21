@@ -195,7 +195,11 @@ func TestProduce_HTTPToolCallingSummary(t *testing.T) {
 				want[semconv.LLMDToolCallingPresentKey] = attribute.BoolValue(false)
 				want[semconv.LLMDToolCallingFieldResponseFormatStatusKey] = attribute.StringValue("preserved")
 			}
-			require.Len(t, recorder.Ended(), 2, "one tokenize span and one HTTP client span")
+			wantSpans := 2
+			if tc.warmup {
+				wantSpans = 1
+			}
+			require.Len(t, recorder.Ended(), wantSpans)
 			tokenize := tokenizeSpan(t, recorder)
 			for _, span := range recorder.Ended() {
 				if span.SpanKind() == trace.SpanKindClient {

@@ -83,12 +83,13 @@ func (m *legacyMessagesMode) useLegacy(ctx context.Context, tk tokenizer, model 
 		return false, ctx.Err()
 	}
 	if m.mode == "" {
+		probeCtx := withUnobservedRender(ctx)
 		probe := fwkrh.PayloadMap{
 			"model": model, "max_tokens": 1,
 			"messages": []any{map[string]any{"role": "user", "content": "warmup"}},
 		}
 		mode := messagesRenderModeNative
-		tokens, _, err := tk.RenderMessages(ctx, probe)
+		tokens, _, err := tk.RenderMessages(probeCtx, probe)
 		if err != nil {
 			var status *renderStatusError
 			if !errors.As(err, &status) || (status.StatusCode != http.StatusNotFound && status.StatusCode != http.StatusMethodNotAllowed) {
@@ -96,7 +97,7 @@ func (m *legacyMessagesMode) useLegacy(ctx context.Context, tk tokenizer, model 
 			}
 			// Confirm that the same model can render before selecting conversion.
 			mode = messagesRenderModeLegacy
-			tokens, _, err = tk.RenderChat(ctx, probe)
+			tokens, _, err = tk.RenderChat(probeCtx, probe)
 			if err != nil {
 				return false, fmt.Errorf("discover legacy Messages rendering: %w", err)
 			}
@@ -174,12 +175,16 @@ func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload f
 		}
 	}
 	if fields.ToolChoice != nil {
-		choice, parallel := legacyMessagesToolChoice(fields.ToolChoice)
+		choice, parallel, translated := legacyMessagesToolChoice(fields.ToolChoice)
 		payload[string(toolcalling.FieldToolChoice)] = choice
-		expected[string(toolcalling.FieldToolChoice)] = choice
+		if translated {
+			expected[string(toolcalling.FieldToolChoice)] = choice
+		}
 		if parallel != nil {
 			payload[string(toolcalling.FieldParallelToolCalls)] = *parallel
-			expected[string(toolcalling.FieldParallelToolCalls)] = *parallel
+			if translated {
+				expected[string(toolcalling.FieldParallelToolCalls)] = *parallel
+			}
 		}
 	}
 	normalized, err := expected.Marshal()
@@ -193,16 +198,17 @@ func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload f
 	return &renderToolBaseline{source: sourceSnapshot, comparison: comparison}
 }
 
-func legacyMessagesToolChoice(raw json.RawMessage) (any, *bool) {
+func legacyMessagesToolChoice(raw json.RawMessage) (any, *bool, bool) {
 	var choice struct {
 		Type                   string `json:"type"`
 		Name                   string `json:"name"`
 		DisableParallelToolUse *bool  `json:"disable_parallel_tool_use"`
 	}
 	if json.Unmarshal(raw, &choice) != nil {
-		return raw, nil
+		return raw, nil, false
 	}
 	var translated any
+	valid := true
 	switch choice.Type {
 	case string(toolcalling.ToolChoiceAuto):
 		translated = toolcalling.ToolChoiceAuto
@@ -212,14 +218,15 @@ func legacyMessagesToolChoice(raw json.RawMessage) (any, *bool) {
 		translated = toolcalling.ToolChoiceRequired
 	case "tool":
 		translated = map[string]any{"type": "function", "function": map[string]any{"name": choice.Name}}
+		valid = choice.Name != ""
 	default:
-		return raw, nil
+		return raw, nil, false
 	}
 	if choice.DisableParallelToolUse == nil {
-		return translated, nil
+		return translated, nil, valid
 	}
 	parallel := !*choice.DisableParallelToolUse
-	return translated, &parallel
+	return translated, &parallel, valid
 }
 
 func legacyMessagesPayload(msg *fwkrh.MessagesRequest) fwkrh.PayloadMap {

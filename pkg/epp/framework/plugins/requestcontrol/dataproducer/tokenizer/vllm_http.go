@@ -245,7 +245,9 @@ func newVLLMHTTPRenderer(cfg *vllmConfig) (*vllmHTTPRenderer, error) {
 			// Name the outbound span after the render route instead of the
 			// transport's default "HTTP POST" so traces identify render calls.
 			func(_ string, r *http.Request) string { return "tokenize_render " + r.URL.Path },
-		))},
+		), otelhttp.WithFilter(func(r *http.Request) bool {
+			return r.Context().Value(unobservedRenderCtxKey{}) == nil
+		}))},
 		endpointPicker: endpointPicker,
 		timeout:        timeout,
 		mmTimeout:      mmTimeout,

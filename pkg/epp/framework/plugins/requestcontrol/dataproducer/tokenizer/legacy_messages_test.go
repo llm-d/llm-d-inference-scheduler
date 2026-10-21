@@ -1002,7 +1002,11 @@ func TestLegacyProduceMessagesToolChoice(t *testing.T) {
 			after := renderToolFieldCounts(t)
 			require.Equal(t, float64(1), after["tools/preserved"]-before["tools/preserved"])
 			if tc.want != "" {
-				require.Equal(t, float64(1), after["tool_choice/preserved"]-before["tool_choice/preserved"])
+				status := "preserved"
+				if tc.want == "null" {
+					status = "changed"
+				}
+				require.Equal(t, float64(1), after["tool_choice/"+status]-before["tool_choice/"+status])
 			} else {
 				for key, count := range after {
 					if strings.HasPrefix(key, "tool_choice/") {
@@ -1093,6 +1097,38 @@ func TestLegacyMessagesRenderFieldChanges(t *testing.T) {
 			delete(want, tc.field+"/"+string(toolcalling.FieldStatusPreserved))
 			want[tc.field+"/"+tc.status] = 1
 			require.Equal(t, want, after)
+		})
+	}
+}
+
+func TestLegacyMessagesInvalidToolChoiceIsChanged(t *testing.T) {
+	for _, choice := range []string{
+		`{"type":"unexpected"}`,
+		`{"type":"tool","name":""}`,
+		`"auto"`,
+	} {
+		t.Run(choice, func(t *testing.T) {
+			raw := []byte(`{"messages":[],"tool_choice":` + choice + `}`)
+			body := &fwkrh.InferenceRequestBody{
+				Messages: &fwkrh.MessagesRequest{},
+				Payload:  fwkrh.RawPayload(raw),
+			}
+			payload := fwkrh.PayloadMap{}
+			baseline := prepareLegacyMessagesToolFields(body, payload)
+			require.NotNil(t, baseline)
+			forwardedJSON, err := payload.Marshal()
+			require.NoError(t, err)
+			forwarded, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, forwardedJSON)
+			require.NoError(t, err)
+			statuses, err := toolcalling.CompareRequests(baseline.comparison, forwarded)
+			require.NoError(t, err)
+			for _, status := range statuses {
+				if status.Field == toolcalling.FieldToolChoice {
+					require.Equal(t, toolcalling.FieldStatusChanged, status.Status)
+					return
+				}
+			}
+			t.Fatal("missing tool_choice status")
 		})
 	}
 }
