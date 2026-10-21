@@ -57,7 +57,8 @@ func (w *recentWindow) record(endpointID string, hashes []blockHash) {
 	cp := make([]blockHash, len(prompt))
 	copy(cp, prompt)
 
-	buf := append(w.pending[endpointID], cp)
+	buf := w.pending[endpointID]
+	buf = append(buf, cp)
 	w.pending[endpointID] = trimPromptHashes(buf, w.max)
 }
 
