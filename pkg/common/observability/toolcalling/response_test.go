@@ -47,10 +47,11 @@ func TestResponseSummarySpanAttributes(t *testing.T) {
 
 func TestResponseDetectorJSON(t *testing.T) {
 	tests := []struct {
-		name    string
-		surface reqcommon.APIType
-		body    string
-		want    bool
+		name       string
+		surface    reqcommon.APIType
+		body       string
+		want       bool
+		incomplete bool
 	}{
 		{
 			name:    "chat completions tool calls",
@@ -88,6 +89,40 @@ func TestResponseDetectorJSON(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "messages nested message tool use",
+			surface: reqcommon.APITypeMessages,
+			body:    `{"type":"message_start","message":{"content":[{"type":"tool_use","name":"sentinel_name"}]}}`,
+			want:    true,
+		},
+		{
+			name:    "unexpected tool calls object before function call",
+			surface: reqcommon.APITypeChatCompletions,
+			body:    `{"choices":[{"message":{"tool_calls":{"nested":[1]},"function_call":{"name":"sentinel_name"}}}]}`,
+			want:    true,
+		},
+		{
+			name:    "unexpected function call array before tool calls",
+			surface: reqcommon.APITypeChatCompletions,
+			body:    `{"choices":[{"message":{"function_call":[{"nested":1}],"tool_calls":[{"index":0}]}}]}`,
+			want:    true,
+		},
+		{
+			name:    "unexpected content type object before tool use",
+			surface: reqcommon.APITypeMessages,
+			body:    `{"content":[{"type":{"nested":["tool_use"]},"text":"hello"},{"type":"tool_use"}]}`,
+			want:    true,
+		},
+		{
+			name:    "unexpected tool calls object without tool call",
+			surface: reqcommon.APITypeChatCompletions,
+			body:    `{"choices":[{"message":{"tool_calls":{"nested":["tool_calls"]}}}]}`,
+		},
+		{
+			name:    "unexpected content type object without tool use",
+			surface: reqcommon.APITypeMessages,
+			body:    `{"content":[{"type":{"nested":["tool_use"]},"text":"hello"}]}`,
+		},
+		{
 			name:    "escaped messages tool use",
 			surface: reqcommon.APITypeMessages,
 			body:    `{"content":[{"type":"\u0074ool_use","name":"sentinel_name"}]}`,
@@ -104,9 +139,10 @@ func TestResponseDetectorJSON(t *testing.T) {
 			body:    `{"choices":[{"message":{"content":"tool_calls"}}]}`,
 		},
 		{
-			name:    "malformed response",
-			surface: reqcommon.APITypeChatCompletions,
-			body:    `{"choices":[`,
+			name:       "malformed response",
+			surface:    reqcommon.APITypeChatCompletions,
+			body:       `{"choices":[`,
+			incomplete: true,
 		},
 	}
 	for _, tt := range tests {
@@ -114,6 +150,7 @@ func TestResponseDetectorJSON(t *testing.T) {
 			detector, err := NewResponseDetector(tt.surface, false)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, detector.Observe([]byte(tt.body), true))
+			require.Equal(t, tt.incomplete, detector.DetectionIncomplete())
 		})
 	}
 }
@@ -264,6 +301,13 @@ func TestResponseDetectorSSEAcrossChunkBoundaries(t *testing.T) {
 			chunks: []string{
 				`data: {"type":"content_block_start","content_block":{"type":"\u00`,
 				`74ool_use"}}` + "\n\n",
+			},
+		},
+		{
+			name:    "messages nested message tool use",
+			surface: reqcommon.APITypeMessages,
+			chunks: []string{
+				`data: {"type":"message_start","message":{"content":[{"type":"tool_use"}]}}` + "\n\n",
 			},
 		},
 	}

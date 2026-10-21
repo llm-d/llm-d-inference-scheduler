@@ -371,10 +371,13 @@ func scanResponseJSONObject(decoder *json.Decoder, context responseJSONContext, 
 			if surface == reqcommon.APITypeMessages && value == "tool_use" {
 				return true, nil
 			}
+			if err := skipResponseJSONComposite(decoder, value); err != nil {
+				return false, err
+			}
 			continue
 		}
 
-		childContext := responseObjectChildContext(context, key)
+		childContext := responseObjectChildContext(context, key, surface)
 		childFound, err := scanResponseJSONValue(decoder, childContext, surface)
 		if err != nil {
 			return false, err
@@ -396,12 +399,16 @@ func responseArrayItemContext(context responseJSONContext) responseJSONContext {
 	}
 }
 
-func responseObjectChildContext(context responseJSONContext, key string) responseJSONContext {
+func responseObjectChildContext(context responseJSONContext, key string, surface reqcommon.APIType) responseJSONContext {
 	switch context {
 	case responseJSONRoot:
 		switch key {
 		case "choices":
 			return responseJSONChoice
+		case "message":
+			if surface == reqcommon.APITypeMessages {
+				return responseJSONMessage
+			}
 		case "content", "content_block":
 			return responseJSONContentBlock
 		}
@@ -410,7 +417,7 @@ func responseObjectChildContext(context responseJSONContext, key string) respons
 			return responseJSONMessage
 		}
 	case responseJSONMessage:
-		if key == "content" {
+		if key == "content" && surface == reqcommon.APITypeMessages {
 			return responseJSONContentBlock
 		}
 	case responseJSONContentBlock:
@@ -427,7 +434,7 @@ func scanNonEmptyJSONArray(decoder *json.Decoder) (bool, error) {
 		return false, err
 	}
 	if token != json.Delim('[') {
-		return false, nil
+		return false, skipResponseJSONComposite(decoder, token)
 	}
 	if decoder.More() {
 		return true, nil
@@ -442,11 +449,34 @@ func scanNonEmptyJSONObject(decoder *json.Decoder) (bool, error) {
 		return false, err
 	}
 	if token != json.Delim('{') {
-		return false, nil
+		return false, skipResponseJSONComposite(decoder, token)
 	}
 	if decoder.More() {
 		return true, nil
 	}
 	_, err = decoder.Token()
 	return false, err
+}
+
+func skipResponseJSONComposite(decoder *json.Decoder, token json.Token) error {
+	delim, ok := token.(json.Delim)
+	if !ok || (delim != '{' && delim != '[') {
+		return nil
+	}
+	depth := 1
+	for depth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if delim, ok := token.(json.Delim); ok {
+			switch delim {
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+			}
+		}
+	}
+	return nil
 }
