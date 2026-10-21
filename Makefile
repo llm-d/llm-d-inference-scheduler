@@ -227,6 +227,13 @@ check-latest-tags-strict: ## Check ':latest' image tags in YAML (strict; fails o
 presubmit: LINT_NEW_ONLY=true
 presubmit: git-branch-check signed-commits-check go-mod-check format lint lint-security vulncheck check-latest-tags-strict verify-boilerplate
 
+.PHONY: update-telemetry verify-telemetry
+update-telemetry: image-build-builder ## Generate trace attributes, span names, and the catalog.
+	$(BUILDER_RUN) 'bash hack/telemetry.sh update'
+
+verify-telemetry: image-build-builder ## Check the telemetry registry and generated files.
+	$(BUILDER_RUN) 'bash hack/telemetry.sh verify'
+
 .PHONY: git-branch-check
 git-branch-check:
 	@branch=$$(git rev-parse --abbrev-ref HEAD); \
