@@ -257,7 +257,7 @@ func TestCompareRenderToolFields(t *testing.T) {
 		{"invalid outbound", `{"tools":[`, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			snapshot, statuses, err := compareRenderToolFields(t.Context(), reqcommon.APITypeChatCompletions, []byte(`{"tools":[],"max_tokens":4}`), []byte(tc.outbound))
+			snapshot, statuses, err := compareRenderToolFields(t.Context(), reqcommon.APITypeChatCompletions, []byte(`{"tools":[],"max_tokens":4}`), []byte(tc.outbound), false)
 			require.Equal(t, tc.wantError, err != nil)
 			attrs := map[attribute.Key]attribute.Value{}
 			for _, attr := range snapshot.SpanAttributes(statuses) {
@@ -285,7 +285,7 @@ func TestCompareRenderToolFieldsWithRequestSnapshot(t *testing.T) {
 		{"malformed input", `{"tools":[`, `{}`, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, statuses, err := compareRenderToolFields(ctx, reqcommon.APITypeChatCompletions, []byte(tc.inbound), []byte(tc.outbound))
+			got, statuses, err := compareRenderToolFields(ctx, reqcommon.APITypeChatCompletions, []byte(tc.inbound), []byte(tc.outbound), false)
 			require.Equal(t, tc.wantError, err != nil)
 			if err == nil {
 				attrs := map[attribute.Key]attribute.Value{}
@@ -295,6 +295,47 @@ func TestCompareRenderToolFieldsWithRequestSnapshot(t *testing.T) {
 				require.Equal(t, tc.status, attrs[semconv.LLMDToolCallingFieldToolsStatusKey].AsString())
 			}
 		})
+	}
+}
+
+func TestCompareRenderToolFieldsWithEmptySnapshot(t *testing.T) {
+	inbound := []byte(`{"messages":[]}`)
+	snapshot, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, inbound)
+	require.NoError(t, err)
+	ctx := toolcalling.WithRequestSnapshot(t.Context(), inbound, snapshot)
+	for _, tc := range []struct {
+		outbound string
+		tool     bool
+	}{
+		{`{"messages":[],"max_tokens":1}`, false},
+		{`{"messages":[],"tools":[]}`, true},
+		{`{"messages":[],"to\u006fls":[]}`, true},
+	} {
+		_, statuses, err := compareRenderToolFields(ctx, reqcommon.APITypeChatCompletions, inbound, []byte(tc.outbound), true)
+		require.NoError(t, err, tc.outbound)
+		if tc.tool {
+			require.Contains(t, statuses, toolcalling.FieldStatus{Field: toolcalling.FieldTools, Status: toolcalling.FieldStatusChanged, Observed: true})
+		} else {
+			require.Empty(t, statuses)
+		}
+	}
+	_, _, err = compareRenderToolFields(ctx, reqcommon.APITypeChatCompletions, inbound, []byte(`{"messages":`), false)
+	require.Error(t, err)
+}
+
+func BenchmarkCompareRenderToolFieldsNoTools(b *testing.B) {
+	inbound := []byte(`{"messages":[{"role":"user","content":"` + strings.Repeat("x", 1<<20) + `"}]}`)
+	snapshot, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeChatCompletions, inbound)
+	if err != nil {
+		b.Fatal(err)
+	}
+	ctx := toolcalling.WithRequestSnapshot(b.Context(), inbound, snapshot)
+	rewritten := append([]byte(`{"max_tokens":1,`), inbound[1:]...)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, _, err := compareRenderToolFields(ctx, reqcommon.APITypeChatCompletions, inbound, rewritten, true); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
