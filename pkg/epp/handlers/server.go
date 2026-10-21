@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -90,6 +91,12 @@ func (s *StreamingServer) SetEmitEndpointScores(enabled bool) {
 	s.emitEndpointScores = enabled
 }
 
+// SetMaxRequestBodySize caps the request body in bytes. A larger body is answered with 413.
+// Zero disables the cap.
+func (s *StreamingServer) SetMaxRequestBodySize(n int) {
+	s.maxRequestBodySize = n
+}
+
 // SetResponders sets the plugins that may answer a request instead of routing it. They are
 // asked in the given order.
 func (s *StreamingServer) SetResponders(responders []fwkrc.Responder) {
@@ -120,6 +127,8 @@ type StreamingServer struct {
 	// emitEndpointScores enables emitting per-endpoint scheduler scores in the request-path
 	// dynamic metadata. Off by default; set via SetEmitEndpointScores.
 	emitEndpointScores bool
+	// maxRequestBodySize caps the buffered request body in bytes; 0 disables the cap.
+	maxRequestBodySize int
 	// responders may answer a request instead of routing it. Empty unless set via SetResponders.
 	responders []fwkrc.Responder
 }
@@ -553,6 +562,13 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			err = s.HandleRequestHeaders(ctx, reqCtx, v)
 		case *extProcPb.ProcessingRequest_RequestBody:
 			loggerTrace.Info("Incoming body chunk", "EoS", v.RequestBody.EndOfStream)
+			if s.maxRequestBodySize > 0 && buf.Len()+len(v.RequestBody.Body) > s.maxRequestBodySize {
+				err = errcommon.Error{
+					Code: errcommon.PayloadTooLarge,
+					Msg:  fmt.Sprintf("request body exceeds the %d-byte limit", s.maxRequestBodySize),
+				}
+				break
+			}
 			// In the stream case, we can receive multiple request bodies.
 			buf.Write(v.RequestBody.Body)
 
