@@ -168,7 +168,7 @@ jobs:
         run: |
           marker="<!-- perf-trend:${TEST_NAME} -->"
           number=$(gh issue list --repo "$REPO" --state open --label kind/performance --limit 200 --json number,body |
-            jq -r --arg marker "$marker" '[.[] | select(.body | contains($marker))][0].number // empty')
+            jq -r --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))][0].number // empty')
           if [ -n "$number" ]; then
             gh issue comment "$number" --repo "$REPO" --body-file trend-output/trend-issue.md
           else
