@@ -190,6 +190,62 @@ func TestMergeRemoteHashesAddsPeerPromptsOnce(t *testing.T) {
 		"re-merge must not re-Add peer prompts and evict newer local entries")
 }
 
+func TestMergeRemoteHashesPrunesRememberedPeerKeys(t *testing.T) {
+	syncOn := true
+	cfg := defaultConfig
+	cfg.SyncCrossReplicaState = &syncOn
+	cfg.AutoTune = false
+	cfg.BlockSizeTokens = 64
+	cfg.LRUCapacityPerServer = 2
+
+	producer, err := newDataProducer(context.Background(), ApproxPrefixCachePluginType, cfg, testHandleWithSyncer())
+	require.NoError(t, err)
+
+	podID := k8stypes.NamespacedName{Namespace: "ns", Name: "decode-0"}
+	ep := fwksched.NewEndpoint(
+		&fwkdl.EndpointMetadata{ID: podID},
+		fwkdl.NewMetrics(),
+		fwkdl.NewAttributes(),
+	)
+	candidates := []ServerID{ServerID(podID)}
+	endpointID := podID.String()
+
+	ep.Put(producer.syncHashDK, &attrprefix.PrefixHashSet{
+		Prompts: [][]uint64{{1, 2}, {3, 4}},
+	})
+	producer.mergeRemoteHashes([]fwksched.Endpoint{ep})
+	require.Equal(t, 2, peerMergedSize(t, producer, endpointID))
+	require.Equal(t, []int{0}, producer.indexerInst.MatchLongestPrefix([]blockHash{1, 2}, candidates),
+		"setup: older peer prompt already LRU-evicted under capacity 2")
+
+	// Peer window slides to only {3,4}. Remembered keys must shrink so {1,2}
+	// can be treated as novel if it returns.
+	ep.Put(producer.syncHashDK, &attrprefix.PrefixHashSet{
+		Prompts: [][]uint64{{3, 4}},
+	})
+	producer.mergeRemoteHashes([]fwksched.Endpoint{ep})
+	require.Equal(t, 1, peerMergedSize(t, producer, endpointID),
+		"remembered peer keys must prune to the active sync window")
+
+	ep.Put(producer.syncHashDK, &attrprefix.PrefixHashSet{
+		Prompts: [][]uint64{{1, 2}},
+	})
+	producer.mergeRemoteHashes([]fwksched.Endpoint{ep})
+	require.Equal(t, 1, peerMergedSize(t, producer, endpointID))
+	require.Equal(t, []int{2}, producer.indexerInst.MatchLongestPrefix([]blockHash{1, 2}, candidates),
+		"prompt that left and re-entered the peer window must be re-indexed")
+}
+
+func peerMergedSize(t *testing.T, producer *dataProducer, endpointID string) int {
+	t.Helper()
+	v, ok := producer.peerMerged.Load(endpointID)
+	require.True(t, ok, "expected peerMerged entry for %s", endpointID)
+	s := v.(*mergedKeySet)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.keys)
+}
+
 func TestMergeRemoteHashesNoopWithoutSyncer(t *testing.T) {
 	syncOn := true
 	cfg := defaultConfig

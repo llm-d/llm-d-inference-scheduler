@@ -83,11 +83,14 @@ type dataProducer struct {
 	registeredEndpoints sync.Map
 	// peerMerged tracks peer prompt keys already folded into the indexer per
 	// endpoint so a stable peer window does not re-Add (and LRU-touch) on every
-	// request. Values are *mergedKeySet.
+	// request. Each merge replaces the set with the active peer-only window so
+	// the map stays bounded and prompts that leave and return can be re-indexed.
+	// Values are *mergedKeySet.
 	peerMerged sync.Map
 }
 
-// mergedKeySet is the per-endpoint set stored in peerMerged.
+// mergedKeySet is the per-endpoint set stored in peerMerged. keys holds only
+// prompt keys present in the latest peer sync window for that endpoint.
 type mergedKeySet struct {
 	mu   sync.Mutex
 	keys map[string]struct{}
@@ -353,16 +356,25 @@ func (p *dataProducer) mergeRemoteHashes(pods []fwksched.Endpoint) {
 			continue
 		}
 		set, ok := val.(*attrprefix.PrefixHashSet)
-		if !ok || set == nil || len(set.Prompts) == 0 {
+		if !ok || set == nil {
 			continue
 		}
 		endpointID := pod.GetMetadata().ID.String()
+		if len(set.Prompts) == 0 {
+			p.reconcilePeerMerged(endpointID, map[string]struct{}{})
+			continue
+		}
 		local := p.recent.snapshot(endpointID)
 		localSet := make(map[string]struct{}, len(local))
 		for _, prompt := range local {
 			localSet[promptKey(prompt)] = struct{}{}
 		}
-		server := p.makeserver(pod)
+		active := make(map[string]struct{}, len(set.Prompts))
+		type peerPrompt struct {
+			key    string
+			hashes []blockHash
+		}
+		peers := make([]peerPrompt, 0, len(set.Prompts))
 		for _, prompt := range set.Prompts {
 			if len(prompt) == 0 {
 				continue
@@ -372,26 +384,40 @@ func (p *dataProducer) mergeRemoteHashes(pods []fwksched.Endpoint) {
 			if _, ok := localSet[key]; ok {
 				continue
 			}
-			if !p.rememberPeerPrompt(endpointID, key) {
+			active[key] = struct{}{}
+			peers = append(peers, peerPrompt{key: key, hashes: hashes})
+		}
+		novel := p.reconcilePeerMerged(endpointID, active)
+		if len(novel) == 0 {
+			continue
+		}
+		server := p.makeserver(pod)
+		for _, pp := range peers {
+			if _, ok := novel[pp.key]; !ok {
 				continue
 			}
-			p.indexerInst.Add(hashes, server)
+			p.indexerInst.Add(pp.hashes, server)
 		}
 	}
 }
 
-// rememberPeerPrompt records key for endpointID. Returns true the first time
-// the key is seen so the caller can Add it once.
-func (p *dataProducer) rememberPeerPrompt(endpointID, key string) bool {
+// reconcilePeerMerged replaces the remembered peer keys for endpointID with
+// active and returns keys that were not previously remembered (need Add).
+func (p *dataProducer) reconcilePeerMerged(endpointID string, active map[string]struct{}) map[string]struct{} {
 	v, _ := p.peerMerged.LoadOrStore(endpointID, &mergedKeySet{keys: make(map[string]struct{})})
 	s := v.(*mergedKeySet)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.keys[key]; ok {
-		return false
+	novel := make(map[string]struct{})
+	next := make(map[string]struct{}, len(active))
+	for k := range active {
+		next[k] = struct{}{}
+		if _, ok := s.keys[k]; !ok {
+			novel[k] = struct{}{}
+		}
 	}
-	s.keys[key] = struct{}{}
-	return true
+	s.keys = next
+	return novel
 }
 
 func (p *dataProducer) forgetPeerMerged(endpointID string) {
