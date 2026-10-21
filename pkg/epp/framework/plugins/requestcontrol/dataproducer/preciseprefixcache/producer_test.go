@@ -522,6 +522,61 @@ func TestProduce_WritesCachedBlocksByTier(t *testing.T) {
 	assert.Empty(t, info.CachedBlocksByTier())
 }
 
+func TestProduce_MatchBlocksToleratesWeightedScoreRoundOff(t *testing.T) {
+	sum := func(weight float64, blocks int) float64 {
+		s := 0.0
+		for range blocks {
+			s += weight
+		}
+		return s
+	}
+	tests := []struct {
+		name  string
+		score float64
+		want  int
+	}{
+		{name: "ten cpu blocks", score: sum(0.8, 10), want: 8},
+		{name: "long prompt of cpu blocks", score: sum(0.8, 13425), want: 10740},
+		{name: "fractional score floors", score: 2.4, want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := utils.NewTestContext(t)
+			endpoints := freshEndpoints()
+
+			idx := &fakeKVCacheIndexer{
+				computeFromTokens: func(context.Context, []uint32, string, []*kvblock.BlockExtraFeatures) ([]kvblock.BlockHash, error) {
+					return []kvblock.BlockHash{0xA1}, nil
+				},
+				matchBlockKeys: func(context.Context, []kvblock.BlockHash, sets.Set[string]) (map[string]kvcache.PodMatch, error) {
+					return map[string]kvcache.PodMatch{
+						"10.0.0.1:8080": {WeightedScore: tt.score, BlocksByTier: map[string]int{"cpu": 1}},
+					}, nil
+				},
+			}
+
+			p := newProducerWithIndexer(ctx, idx)
+			req := &scheduling.InferenceRequest{
+				RequestID:   "req-round-off",
+				TargetModel: "test-model",
+				Body: &fwkrh.InferenceRequestBody{
+					TokenizedRequest: &fwkrh.TokenizedRequest{
+						Prompts: []fwkrh.PromptTokens{{TokenIDs: []uint32{1, 2, 3, 4}}},
+					},
+				},
+			}
+
+			require.NoError(t, p.Produce(ctx, req, endpoints))
+
+			raw, ok := endpoints[0].Get(attrprefix.PrefixCacheMatchInfoDataKey.WithNonEmptyProducerName("test"))
+			require.True(t, ok)
+			info, ok := raw.(*attrprefix.PrefixCacheMatchInfo)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, info.MatchBlocks())
+		})
+	}
+}
+
 // MM match uses cachedBlocks (literal), not matchLen (tier-weighted score).
 func TestProduce_MMMatchUsesCachedBlocksNotWeightedScore(t *testing.T) {
 	ctx := utils.NewTestContext(t)
