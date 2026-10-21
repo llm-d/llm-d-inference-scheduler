@@ -29,8 +29,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
@@ -92,7 +92,7 @@ func expectGenerateRequestTokenLimits(testInfo *sidecarTestInfo) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+		bp, _ := io.ReadAll(resp.Body)
 		Fail(string(bp))
 	}
 
@@ -196,7 +196,7 @@ var _ = Describe("Common Connector tests", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				if rp.StatusCode != 200 {
-					bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+					bp, _ := io.ReadAll(rp.Body)
 					Fail(string(bp))
 				}
 
@@ -256,7 +256,7 @@ var _ = Describe("Common Connector tests", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				if rp.StatusCode != 200 {
-					bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+					bp, _ := io.ReadAll(rp.Body)
 					Fail(string(bp))
 				}
 
@@ -310,7 +310,7 @@ var _ = Describe("Common Connector tests", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				if rp.StatusCode != 200 {
-					bp, _ := io.ReadAll(rp.Body) //nolint:errcheck
+					bp, _ := io.ReadAll(rp.Body)
 					Fail(string(bp))
 				}
 

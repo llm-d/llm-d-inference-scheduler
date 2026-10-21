@@ -28,6 +28,7 @@ import (
 
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	parserutil "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/util"
 )
 
 func TestSGLangHTTPParser_RewritePriority(t *testing.T) {
@@ -57,6 +58,99 @@ func TestSGLangHTTPParser_RewritePriority(t *testing.T) {
 			t.Errorf("priority = %v, want 2", got.(fwkrh.PayloadMap)["priority"])
 		}
 	})
+}
+
+// A body rewritten for priority must reach SGLang with its other fields as the
+// client sent them, including integers a float64 cannot represent.
+func TestSGLangHTTPParser_RewritePriority_ForwardsParsedBodyIntact(t *testing.T) {
+	parser := NewSGLangHTTPParser()
+	body := []byte(`{"input_ids":[1,2,3],"sampling_params":{"max_new_tokens":16,"seed":9007199254740993,"temperature":0.8}}`)
+	want := `{"input_ids":[1,2,3],"priority":2,"sampling_params":{"max_new_tokens":16,"seed":9007199254740993,"temperature":0.8}}`
+
+	parsed, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": "/generate"})
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+	payload, ok := parsed.Body.Payload.(fwkrh.PayloadMap)
+	if !ok {
+		t.Fatalf("Payload type = %T, want a PayloadMap", parsed.Body.Payload)
+	}
+	if _, raw := payload["input_ids"].(json.RawMessage); !raw {
+		t.Errorf("input_ids type = %T, want json.RawMessage", payload["input_ids"])
+	}
+	rewritten, mutated, err := parser.RewritePriority(fwkrh.PriorityRewriteContext{}, payload, 2)
+	if err != nil {
+		t.Fatalf("RewritePriority() error = %v", err)
+	}
+	if !mutated {
+		t.Fatalf("mutated = false, want true")
+	}
+	got, err := rewritten.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("forwarded body mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestSGLangHTTPParser_RewriteModelName(t *testing.T) {
+	parser := NewSGLangHTTPParser()
+	payload := fwkrh.PayloadMap{"model": "client-model", "input_ids": []any{1, 2, 3}}
+
+	got, err := parser.RewriteModelName(payload, "backend-model")
+	if err != nil {
+		t.Fatalf("RewriteModelName() error = %v", err)
+	}
+	m, ok := got.(fwkrh.PayloadMap)
+	if !ok {
+		t.Fatalf("RewriteModelName() payload = %T, want PayloadMap", got)
+	}
+	if m["model"] != "backend-model" {
+		t.Errorf("model = %v, want backend-model", m["model"])
+	}
+}
+
+// A body rewritten for the resolved model must reach SGLang with its other
+// fields as the client sent them, including integers a float64 cannot represent.
+func TestSGLangHTTPParser_RewriteModelName_ForwardsParsedBodyIntact(t *testing.T) {
+	parser := NewSGLangHTTPParser()
+	body := []byte(`{"model":"client-model","input_ids":[1,2,3],"sampling_params":{"max_new_tokens":16,"seed":9007199254740993}}`)
+	want := `{"input_ids":[1,2,3],"model":"backend-model","sampling_params":{"max_new_tokens":16,"seed":9007199254740993}}`
+
+	parsed, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": "/generate"})
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+	if parsed.Body.Model != "client-model" {
+		t.Fatalf("parsed model = %q, want client-model", parsed.Body.Model)
+	}
+	payload, ok := parsed.Body.Payload.(fwkrh.PayloadMap)
+	if !ok {
+		t.Fatalf("Payload type = %T, want a PayloadMap", parsed.Body.Payload)
+	}
+	rewritten, err := parser.RewriteModelName(payload, "backend-model")
+	if err != nil {
+		t.Fatalf("RewriteModelName() error = %v", err)
+	}
+	got, err := rewritten.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("forwarded body mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// Fields the parser does not read are SGLang's to validate, so a number that
+// does not fit a float64 is passed through instead of failing the request.
+func TestSGLangHTTPParser_ParseRequest_LeavesUnreadNumbersToSGLang(t *testing.T) {
+	parser := NewSGLangHTTPParser()
+	body := []byte(`{"input_ids":[1,2,3],"sampling_params":{"temperature":1e400}}`)
+
+	if _, err := parser.ParseRequest(context.Background(), body, map[string]string{":path": "/generate"}); err != nil {
+		t.Fatalf("ParseRequest() error = %v, want nil", err)
+	}
 }
 
 var benchmarkSGLangParseResult *fwkrh.ParseResult
@@ -129,6 +223,15 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			body:    map[string]any{"input_ids": []any{1, 2, 3}},
 			want: &fwkrh.InferenceRequestBody{
 				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{1, 2, 3}},
+			},
+		},
+		{
+			name:    "model name is read",
+			headers: map[string]string{":path": "/generate"},
+			body:    map[string]any{"model": "llama-3-8b", "input_ids": []any{1, 2, 3}},
+			want: &fwkrh.InferenceRequestBody{
+				Generate: &fwkrh.GenerateRequest{TokenIDs: []uint32{1, 2, 3}},
+				Model:    "llama-3-8b",
 			},
 		},
 		{
@@ -245,8 +348,8 @@ func TestSGLangHTTPParser_ParseRequest(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			var wantMap map[string]any
-			if err := json.Unmarshal(bodyBytes, &wantMap); err != nil {
+			wantMap, err := parserutil.UnmarshalMapWithRawField(bodyBytes, "input_ids")
+			if err != nil {
 				t.Fatalf("unmarshal body: %v", err)
 			}
 			tt.want.Payload = fwkrh.PayloadMap(wantMap)
@@ -283,6 +386,11 @@ func TestSGLangHTTPParser_ParseRequest_ErrorPaths(t *testing.T) {
 			name:        "overflowing token id",
 			body:        `{"input_ids":[4294967296]}`,
 			errContains: "input_ids must be an array of uint32 integers",
+		},
+		{
+			name:        "a non string cache_salt",
+			body:        `{"input_ids":[1,2,5],"cache_salt":7}`,
+			errContains: "cache_salt must be a string",
 		},
 		{
 			name:        "empty input_ids",

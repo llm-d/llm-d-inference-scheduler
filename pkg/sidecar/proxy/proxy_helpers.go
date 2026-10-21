@@ -44,12 +44,6 @@ import (
 
 // startHTTP starts the HTTP reverse proxy.
 func (s *Server) startHTTP(ctx context.Context) error {
-	// Start SSRF protection validator
-	if err := s.allowlistValidator.Start(ctx); err != nil {
-		s.logger.Error(err, "Failed to start allowlist validator")
-		return err
-	}
-
 	ln := s.HTTPListener
 	var err error
 	if ln == nil {
@@ -135,9 +129,6 @@ func (s *Server) startHTTP(ctx context.Context) error {
 		<-ctx.Done()
 		s.logger.Info("shutting down")
 
-		// Stop allowlist validator
-		s.allowlistValidator.Stop()
-
 		ctx, cancelFn := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 		defer cancelFn()
 		if err := server.Shutdown(ctx); err != nil {
@@ -218,6 +209,8 @@ var inspectedRequestFields = map[string]struct{}{
 	reqcommon.FieldSamplingParams:       {},
 	reqcommon.FieldStream:               {},
 	reqcommon.FieldStreamOptions:        {},
+	reqcommon.FieldEcho:                 {},
+	requestFieldN:                       {},
 	reqcommon.FieldCacheHitThreshold:    {},
 	reqcommon.FieldContinueFinalMessage: {},
 	reqcommon.FieldAddGenerationPrompt:  {},
@@ -277,14 +270,10 @@ func (s *Server) readJSONBody(r *http.Request, w http.ResponseWriter) ([]byte, m
 		}
 		return nil, nil, false
 	}
-	// createRoutes registers one route per path in DetectAPIType's mapping and
-	// derives each route's apiType from the same call, so a path added to that
-	// list is guarded here without a second edit. Those paths are the API
-	// surface the router serves, and coverage stops there: a request on any
-	// other path, including PathResponses with a trailing slash or an extra
-	// segment, reaches the decoder proxy through the catch-all and its body is
-	// never read. Guarding those would put a body read on the catch-all, which
-	// serves every unrouted path for every API.
+	// createRoutes registers exact POST routes with and without a trailing slash
+	// for each inference path and derives apiType from DetectAPIType. The decoder
+	// catch-all handles extra segments and unrelated paths without reading their
+	// bodies, so those requests bypass this guard.
 	if reqcommon.DetectAPIType(r.URL.Path) == reqcommon.APITypeResponses {
 		if err := reqcommon.RejectStatefulResponsesFields(parsed); err != nil {
 			s.logger.Info("rejecting unsupported responses field", "error", err, "path", r.URL.Path)

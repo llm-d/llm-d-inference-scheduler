@@ -25,8 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
@@ -57,7 +57,7 @@ var _ = Describe("P2P Connector", func() {
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		if resp.StatusCode != 200 {
-			bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(resp.Body)
 			Fail(string(bp))
 		}
 
@@ -126,7 +126,7 @@ var _ = Describe("P2P Connector", func() {
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		if resp.StatusCode != 200 {
-			bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(resp.Body)
 			Fail(string(bp))
 		}
 
@@ -242,7 +242,7 @@ var _ = Describe("P2P Connector", func() {
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		if resp.StatusCode != 200 {
-			bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(resp.Body)
 			Fail(string(bp))
 		}
 
@@ -386,6 +386,28 @@ var _ = Describe("addP2PPullToPrefill", func() {
 		Expect(p2p[reqcommon.FieldRemoteHost]).To(Equal("10.0.6.107"))
 		Expect(p2p[reqcommon.FieldRemotePort]).To(Equal(7780))
 	})
+	DescribeTable("IPv6 endpoint identity",
+		func(source, prefiller string, wantPull bool) {
+			s := &Server{
+				dpBasePort: 8000,
+				config:     Config{P2PConnectorPort: 7777, DataParallelSize: 8},
+			}
+			params := map[string]any{}
+			s.addP2PPullToPrefill(params, source, prefiller)
+			if !wantPull {
+				Expect(params).NotTo(HaveKey(requestFieldRemoteKVSource))
+				return
+			}
+			p2p, ok := params[requestFieldRemoteKVSource].(map[string]any)
+			Expect(ok).To(BeTrue())
+			Expect(p2p[reqcommon.FieldRemoteHost]).To(Equal("2001:db8::1"))
+			Expect(p2p[reqcommon.FieldRemotePort]).To(Equal(7780))
+		},
+		Entry("expanded address is the same endpoint", "[2001:0db8:0:0:0:0:0:1]:8003", "[2001:db8::1]:8003", false),
+		Entry("uppercase URL is the same endpoint", "https://[2001:DB8::1]:8003", "[2001:db8::1]:8003", false),
+		Entry("zone is preserved for equivalent addresses", "http://[fe80:0:0:0:0:0:0:1%25eth0]:8003", "[fe80::1%eth0]:8003", false),
+		Entry("another rank remains a peer", "https://[2001:0DB8::1]:8003", "[2001:db8::1]:8007", true),
+	)
 })
 
 var _ = DescribeTable("normalizeEndpoint",
@@ -396,6 +418,9 @@ var _ = DescribeTable("normalizeEndpoint",
 	Entry("http scheme stripped", "http://10.0.6.107:8003", "10.0.6.107:8003"),
 	Entry("https scheme stripped", "https://10.0.6.107:8003", "10.0.6.107:8003"),
 	Entry("IPv6 literal canonicalized", "[::1]:8003", "[::1]:8003"),
+	Entry("IPv6 expanded address", "[2001:0DB8:0:0:0:0:0:1]:8003", "[2001:db8::1]:8003"),
+	Entry("IPv6 URL zone", "http://[fe80:0:0:0:0:0:0:1%25eth0]:8003", "[fe80::1%eth0]:8003"),
+	Entry("hostname unchanged", "model-worker:8003", "model-worker:8003"),
 	Entry("portless value returned as-is", "10.0.6.107", "10.0.6.107"),
 	Entry("portless URL reduced to host", "http://10.0.6.107", "10.0.6.107"),
 )

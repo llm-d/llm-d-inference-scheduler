@@ -33,6 +33,7 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers"
+	parserutil "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requesthandling/parsers/util"
 )
 
 const (
@@ -45,8 +46,9 @@ const (
 
 // compile-time type validation
 var (
-	_ fwkrh.Parser           = &SGLangHTTPParser{}
-	_ fwkrh.PriorityRewriter = &SGLangHTTPParser{}
+	_ fwkrh.Parser            = &SGLangHTTPParser{}
+	_ fwkrh.ModelNameRewriter = &SGLangHTTPParser{}
+	_ fwkrh.PriorityRewriter  = &SGLangHTTPParser{}
 )
 
 // SGLangHTTPParser implements fwkrh.Parser for SGLang's native /generate
@@ -160,13 +162,14 @@ func (p *SGLangHTTPParser) parseGenerateRequest(rawBody []byte) (*fwkrh.ParseRes
 	}
 
 	// Keep the full body as a map so priority can be injected; when nothing is
-	// mutated, repackage still forwards the original bytes unchanged.
-	bodyMap := make(map[string]any)
-	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
+	// mutated, repackage still forwards the original bytes unchanged. input_ids
+	// stays raw because decoding it into []any allocates per token.
+	bodyMap, err := parserutil.UnmarshalMapWithRawField(rawBody, "input_ids")
+	if err != nil {
 		return nil, fmt.Errorf("invalid generate request: %w", err)
 	}
 
-	return &fwkrh.ParseResult{Body: &fwkrh.InferenceRequestBody{
+	body := &fwkrh.InferenceRequestBody{
 		Generate: &fwkrh.GenerateRequest{
 			TokenIDs:  tokenIDs,
 			Text:      text,
@@ -175,7 +178,21 @@ func (p *SGLangHTTPParser) parseGenerateRequest(rawBody []byte) (*fwkrh.ParseRes
 		Payload:         fwkrh.PayloadMap(bodyMap),
 		MaxOutputTokens: maxOutputTokens(wire.SamplingParams),
 		Stream:          wire.Stream,
-	}, SkipResponseProcessing: false}, nil
+	}
+	if model, ok := bodyMap["model"].(string); ok {
+		body.Model = model
+	}
+	return &fwkrh.ParseResult{Body: body, SkipResponseProcessing: false}, nil
+}
+
+// RewriteModelName writes the resolved model into the request payload map.
+func (p *SGLangHTTPParser) RewriteModelName(payload fwkrh.MarshalablePayload, model string) (fwkrh.MarshalablePayload, error) {
+	m, ok := payload.(fwkrh.PayloadMap)
+	if !ok {
+		return payload, nil
+	}
+	m["model"] = model
+	return m, nil
 }
 
 // RewritePriority removes any client-supplied priority from the SGLang /generate
