@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
@@ -35,13 +36,13 @@ func TestResponseSummarySpanAttributes(t *testing.T) {
 	}).SpanAttributes()
 
 	require.Len(t, attributes, 4)
-	require.Equal(t, ResponseAttributeUpstreamToolCallPresent, string(attributes[0].Key))
+	require.Equal(t, semconv.LLMDToolCallingResponseUpstreamPresentKey, attributes[0].Key)
 	require.True(t, attributes[0].Value.AsBool())
-	require.Equal(t, ResponseAttributeForwardedToolCallPresent, string(attributes[1].Key))
+	require.Equal(t, semconv.LLMDToolCallingResponseForwardedPresentKey, attributes[1].Key)
 	require.False(t, attributes[1].Value.AsBool())
-	require.Equal(t, ResponseAttributeUpstreamDetectionIncomplete, string(attributes[2].Key))
+	require.Equal(t, semconv.LLMDToolCallingResponseUpstreamDetectionIncompleteKey, attributes[2].Key)
 	require.True(t, attributes[2].Value.AsBool())
-	require.Equal(t, ResponseAttributeForwardedDetectionIncomplete, string(attributes[3].Key))
+	require.Equal(t, semconv.LLMDToolCallingResponseForwardedDetectionIncompleteKey, attributes[3].Key)
 	require.False(t, attributes[3].Value.AsBool())
 }
 

@@ -24,16 +24,11 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 )
 
-const (
-	ResponseAttributeUpstreamToolCallPresent      = "llm_d.tool_calling.response.upstream_present"
-	ResponseAttributeForwardedToolCallPresent     = "llm_d.tool_calling.response.forwarded_present"
-	ResponseAttributeUpstreamDetectionIncomplete  = "llm_d.tool_calling.response.upstream_detection_incomplete"
-	ResponseAttributeForwardedDetectionIncomplete = "llm_d.tool_calling.response.forwarded_detection_incomplete"
-	maxResponseSSEEventBytes                      = 1 << 20
-)
+const maxResponseSSEEventBytes = 1 << 20
 
 // ResponseSummary contains only bounded presence information. It deliberately
 // does not retain response bodies, tool names, or tool arguments.
@@ -53,10 +48,10 @@ func (summary ResponseSummary) SpanAttributes() []attribute.KeyValue {
 	}
 
 	return []attribute.KeyValue{
-		attribute.Bool(ResponseAttributeUpstreamToolCallPresent, summary.UpstreamToolCallPresent),
-		attribute.Bool(ResponseAttributeForwardedToolCallPresent, summary.ForwardedToolCallPresent),
-		attribute.Bool(ResponseAttributeUpstreamDetectionIncomplete, summary.UpstreamDetectionIncomplete),
-		attribute.Bool(ResponseAttributeForwardedDetectionIncomplete, summary.ForwardedDetectionIncomplete),
+		semconv.LLMDToolCallingResponseUpstreamPresentKey.Bool(summary.UpstreamToolCallPresent),
+		semconv.LLMDToolCallingResponseForwardedPresentKey.Bool(summary.ForwardedToolCallPresent),
+		semconv.LLMDToolCallingResponseUpstreamDetectionIncompleteKey.Bool(summary.UpstreamDetectionIncomplete),
+		semconv.LLMDToolCallingResponseForwardedDetectionIncompleteKey.Bool(summary.ForwardedDetectionIncomplete),
 	}
 }
 

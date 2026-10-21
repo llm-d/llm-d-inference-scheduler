@@ -44,6 +44,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
@@ -451,10 +452,10 @@ func TestProcessRetainsToolCallingTelemetryOnResponseTermination(t *testing.T) {
 					require.NotContains(t, attr.Value.String(), "sentinel_")
 				}
 				for key, want := range map[string]bool{
-					toolcalling.ResponseAttributeUpstreamToolCallPresent:      tt.wantPresent,
-					toolcalling.ResponseAttributeForwardedToolCallPresent:     tt.wantPresent && !tt.wantForwardedMissing,
-					toolcalling.ResponseAttributeUpstreamDetectionIncomplete:  (!tt.endOfStream && !tt.trailers) || tt.unreadable,
-					toolcalling.ResponseAttributeForwardedDetectionIncomplete: (!tt.endOfStream && !tt.trailers) || tt.unreadable || tt.failBodySend > 0 || tt.failTrailerSend,
+					string(semconv.LLMDToolCallingResponseUpstreamPresentKey):              tt.wantPresent,
+					string(semconv.LLMDToolCallingResponseForwardedPresentKey):             tt.wantPresent && !tt.wantForwardedMissing,
+					string(semconv.LLMDToolCallingResponseUpstreamDetectionIncompleteKey):  (!tt.endOfStream && !tt.trailers) || tt.unreadable,
+					string(semconv.LLMDToolCallingResponseForwardedDetectionIncompleteKey): (!tt.endOfStream && !tt.trailers) || tt.unreadable || tt.failBodySend > 0 || tt.failTrailerSend,
 				} {
 					if tt.nonTool || tt.skipResponse {
 						require.NotContains(t, attributes, key)
@@ -551,10 +552,10 @@ func TestObserveToolCallingResponseRecordsUpstreamAndForwardedPresence(t *testin
 		attributes[string(attribute.Key)] = attribute.Value.AsBool()
 		assert.NotContains(t, attribute.Value.String(), "sentinel_")
 	}
-	assert.True(t, attributes[toolcalling.ResponseAttributeUpstreamToolCallPresent])
-	assert.False(t, attributes[toolcalling.ResponseAttributeForwardedToolCallPresent])
-	assert.False(t, attributes[toolcalling.ResponseAttributeUpstreamDetectionIncomplete])
-	assert.False(t, attributes[toolcalling.ResponseAttributeForwardedDetectionIncomplete])
+	assert.True(t, attributes[string(semconv.LLMDToolCallingResponseUpstreamPresentKey)])
+	assert.False(t, attributes[string(semconv.LLMDToolCallingResponseForwardedPresentKey)])
+	assert.False(t, attributes[string(semconv.LLMDToolCallingResponseUpstreamDetectionIncompleteKey)])
+	assert.False(t, attributes[string(semconv.LLMDToolCallingResponseForwardedDetectionIncompleteKey)])
 }
 
 func TestObserveToolCallingResponseReportsOversizedSSEDetection(t *testing.T) {
@@ -585,10 +586,10 @@ func TestObserveToolCallingResponseReportsOversizedSSEDetection(t *testing.T) {
 	for _, attribute := range ended[0].Attributes() {
 		attributes[string(attribute.Key)] = attribute.Value.AsBool()
 	}
-	assert.False(t, attributes[toolcalling.ResponseAttributeUpstreamToolCallPresent])
-	assert.False(t, attributes[toolcalling.ResponseAttributeForwardedToolCallPresent])
-	assert.True(t, attributes[toolcalling.ResponseAttributeUpstreamDetectionIncomplete])
-	assert.True(t, attributes[toolcalling.ResponseAttributeForwardedDetectionIncomplete])
+	assert.False(t, attributes[string(semconv.LLMDToolCallingResponseUpstreamPresentKey)])
+	assert.False(t, attributes[string(semconv.LLMDToolCallingResponseForwardedPresentKey)])
+	assert.True(t, attributes[string(semconv.LLMDToolCallingResponseUpstreamDetectionIncompleteKey)])
+	assert.True(t, attributes[string(semconv.LLMDToolCallingResponseForwardedDetectionIncompleteKey)])
 }
 
 func TestObserveToolCallingResponseHandlesFragmentedSSE(t *testing.T) {
