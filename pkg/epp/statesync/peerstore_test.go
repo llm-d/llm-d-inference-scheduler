@@ -151,8 +151,8 @@ func TestPeerDiscoveryReachesSyncer(t *testing.T) {
 	disc := &fakePeerDiscovery{
 		typedName: fwkplugin.TypedName{Type: "fake-peer-discovery", Name: "test"},
 		peers: []fwkdl.PeerMetadata{
-			peer("ns", "epp-1", "10.0.0.1"),
-			peer("ns", "epp-2", "10.0.0.2"),
+			{ID: types.NamespacedName{Name: "epp-1", Namespace: "ns"}, Address: "10.0.0.1", Port: "9002"},
+			{ID: types.NamespacedName{Name: "epp-2", Namespace: "ns"}, Address: "10.0.0.2", Port: "9002"},
 		},
 		ready: make(chan struct{}),
 	}
