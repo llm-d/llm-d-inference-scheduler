@@ -471,6 +471,7 @@ func RecordInferenceExtensionInfo(commitSha, buildRef string) {
 
 // RecordFlowControlRequestQueueDuration records the duration a request spent in the Flow Control layer.
 func RecordFlowControlRequestQueueDuration(
+	ctx context.Context,
 	fairnessID, priority, outcome,
 	inferencePool,
 	modelName, targetModelName string,
@@ -478,11 +479,11 @@ func RecordFlowControlRequestQueueDuration(
 ) {
 	fairnessID = boundFairnessID(fairnessID)
 	modelName, targetModelName = boundModels(modelName, targetModelName)
-	llmdFlowControlRequestQueueDuration.WithLabelValues(
+	observeWithTraceExemplar(ctx, llmdFlowControlRequestQueueDuration.WithLabelValues(
 		fairnessID, priority, outcome,
 		inferencePool,
 		modelName, targetModelName,
-	).Observe(duration.Seconds())
+	), duration.Seconds())
 }
 
 // RecordFlowControlDispatchCycleDuration records the duration of a dispatch cycle in the Flow Control layer.

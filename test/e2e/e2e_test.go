@@ -22,7 +22,11 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	infextv1a2 "github.com/llm-d/llm-d-router/apix/v1alpha2"
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/k8s"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/metrics"
@@ -123,6 +127,59 @@ var _ = ginkgo.Describe("Run end to end tests", func() {
 			ginkgo.By("Sending a completion with the rewrite header: request body is rewritten to the target, response is rewritten back to the client-facing name")
 			respModel = runCompletionWithModelRewrite(simplePrompt, "client-facing-name", simModelName)
 			gomega.Expect(respModel).Should(gomega.Equal("client-facing-name"))
+		})
+	}))
+
+	ginkgo.When("Rolling out a new model version with an InferenceModelRewrite", ginkgo.Ordered, testWrapper(func() {
+		ginkgo.It("should shift traffic to the new version as the target weights change", func() {
+			v1Model := simModelName + "-v1"
+			v2Model := simModelName + "-v2"
+			createModelServerVersion(v1Model)
+			createModelServerVersion(v2Model)
+
+			router := standalone.Create(standaloneConfig(), modelRolloutConfig, 1, 8000)
+			nsName := getNamespace()
+
+			podModels := map[string]string{}
+			for _, model := range []string{v1Model, v2Model} {
+				pods := k8s.GetPodNames(testConfig, map[string]string{modelLabel: model}, nsName)
+				gomega.Expect(pods).Should(gomega.HaveLen(1))
+				podModels[pods[0]] = model
+			}
+
+			rewrite := &infextv1a2.InferenceModelRewrite{
+				ObjectMeta: metav1.ObjectMeta{Name: simModelName + "-rollout", Namespace: nsName},
+				Spec: infextv1a2.InferenceModelRewriteSpec{
+					PoolRef: &infextv1a2.PoolObjectReference{Name: infextv1a2.ObjectName(router.PoolName)},
+					Rules: []infextv1a2.InferenceModelRewriteRule{{
+						Matches: []infextv1a2.Match{{Model: &infextv1a2.ModelMatch{Value: simModelName}}},
+					}},
+				},
+			}
+			ginkgo.DeferCleanup(func() {
+				if ginkgo.CurrentSpecReport().Failed() && keepClusterOnFailure {
+					return
+				}
+				gomega.Expect(client.IgnoreNotFound(testConfig.K8sClient.Delete(testConfig.Context, rewrite))).To(gomega.Succeed())
+			})
+
+			target := func(model string, weight int32) infextv1a2.TargetModel {
+				return infextv1a2.TargetModel{ModelRewrite: model, Weight: ptr.To(weight)}
+			}
+			for _, targets := range [][]infextv1a2.TargetModel{
+				{target(v1Model, 100)},
+				{target(v1Model, 90), target(v2Model, 10)},
+				{target(v1Model, 50), target(v2Model, 50)},
+				{target(v2Model, 100)},
+			} {
+				rewrite.Spec.Rules[0].Targets = targets
+				if rewrite.ResourceVersion == "" {
+					gomega.Expect(testConfig.K8sClient.Create(testConfig.Context, rewrite)).To(gomega.Succeed())
+				} else {
+					gomega.Expect(testConfig.K8sClient.Update(testConfig.Context, rewrite)).To(gomega.Succeed())
+				}
+				expectRolloutSplit(podModels, targets)
+			}
 		})
 	}))
 

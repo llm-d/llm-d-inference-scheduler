@@ -17,13 +17,13 @@ limitations under the License.
 package e2e
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 	"github.com/llm-d/llm-d-router/test/e2e/utils/k8s"
@@ -49,7 +49,7 @@ func standaloneConfig() standalone.Config {
 	}
 }
 
-func createModelServersFromKustomize(kustomizeDir string, extra map[string]string) []string {
+func createModelServersFromKustomize(kustomizeDir string, extra map[string]string, edits ...func(*unstructured.Unstructured)) []string {
 	nsName := getNamespace()
 	subs := map[string]string{
 		"${MODEL_NAME}":              simModelName,
@@ -63,11 +63,12 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 		"${EPP_NAME}":                eppName,
 		"${NAMESPACE}":               nsName,
 		"${HF_TOKEN}":                os.Getenv("HF_TOKEN"),
-		"${VLLM_EXTRA_ARGS_E}":       "--force-dummy-tokenizer",
-		"${VLLM_EXTRA_ARGS_P}":       "--force-dummy-tokenizer",
-		"${VLLM_EXTRA_ARGS_D}":       "--force-dummy-tokenizer",
-		"${VLLM_RENDER_URL}":         fmt.Sprintf("http://vllm-render.%s.svc.cluster.local:%s", baseNsName, vllmRenderPort),
-		"${VLLM_RENDER_PORT}":        vllmRenderPort,
+		"${VLLM_EXTRA_ARGS_E}":       "",
+		"${VLLM_EXTRA_ARGS_P}":       "",
+		"${VLLM_EXTRA_ARGS_D}":       "",
+		// keep empty to force dummy tokenizer
+		"${VLLM_RENDER_URL}":  "",
+		"${VLLM_RENDER_PORT}": vllmRenderPort,
 	}
 	for k, v := range extra {
 		subs[k] = v
@@ -80,6 +81,11 @@ func createModelServersFromKustomize(kustomizeDir string, extra map[string]strin
 	manifests = manifest.RemoveEmptyArgs(manifests)
 	objects, err := manifest.DecodeCaseObjects([]byte(strings.Join(manifests, "\n---\n")), nsName)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	for _, obj := range objects {
+		for _, edit := range edits {
+			edit(obj)
+		}
+	}
 	resources := &lifecycle.CaseResources{Client: testConfig.K8sClient}
 	lifecycle.DeferCaseCleanup(testConfig, keepClusterOnFailure, resources, nsName, nil)
 	gomega.Expect(resources.Create(testConfig.Context, objects)).To(gomega.Succeed())
@@ -98,6 +104,25 @@ func createModelServersDecode(replicas int) []string {
 	})
 }
 
+const modelLabel = "llm-d.ai/model"
+
+// createModelServerVersion gives each version its own Deployment name and selector
+// so that versions in the same pool do not share Pods.
+func createModelServerVersion(modelName string) {
+	createModelServersFromKustomize(epdDeploymentDir, map[string]string{
+		"${MODEL_NAME}":           modelName,
+		"${VLLM_REPLICA_COUNT_D}": "1",
+	}, func(obj *unstructured.Unstructured) {
+		if obj.GetKind() != "Deployment" {
+			return
+		}
+		obj.SetName(obj.GetName() + "-" + modelName)
+		for _, labels := range [][]string{{"spec", "selector", "matchLabels"}, {"spec", "template", "metadata", "labels"}} {
+			gomega.Expect(unstructured.SetNestedField(obj.Object, modelName, append(labels, modelLabel)...)).To(gomega.Succeed())
+		}
+	})
+}
+
 func createModelServersDecodeKV(replicas int) {
 	createModelServersFromKustomize(epdDeploymentDir, map[string]string{
 		"${MODEL_NAME}":           kvModelName,
@@ -111,11 +136,7 @@ func createModelServersDecodeDP(replicas int) []string {
 		"${VLLM_REPLICA_COUNT_D}":    strconv.Itoa(replicas),
 		"${VLLM_DATA_PARALLEL_SIZE}": "2",
 		"${DECODE_ROLE}":             "decode",
-		// --force-dummy-tokenizer has to survive this override. The decode
-		// component passes --render-url, and a worker carrying that URL without
-		// the flag tokenizes through the shared renderer, which serves kvModelName
-		// and answers 404 for this spec's model.
-		"${VLLM_EXTRA_ARGS_D}": testutils.VLLMExtraArgs("--mode=echo", "--force-dummy-tokenizer"),
+		"${VLLM_EXTRA_ARGS_D}":       testutils.VLLMExtraArgs("--mode=echo"),
 	})
 }
 

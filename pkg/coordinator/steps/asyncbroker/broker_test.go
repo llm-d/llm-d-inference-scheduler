@@ -285,7 +285,10 @@ func TestAsyncBrokerEnqueue(t *testing.T) {
 	assert.Equal(t, "/v1/chat/completions", envelope.Data.Endpoint)
 	assert.Equal(t, "team-a", envelope.Data.Metadata["userid"])
 	assert.Equal(t, "00-abc-def-01", envelope.Data.Metadata["traceparent"])
-	assert.Equal(t, "test-model", envelope.Data.Payload["model"])
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(envelope.Data.Payload, &payload))
+	assert.Equal(t, "test-model", payload["model"])
+	assert.Equal(t, "test-model", envelope.Data.Model)
 	assert.Equal(t, "800", envelope.Data.Headers["x-llm-d-slo-ttft-ms"])
 	for k := range envelope.Data.Headers {
 		assert.NotEqual(t, "x-llm-d-async-mode", strings.ToLower(k))

@@ -1007,9 +1007,9 @@ func TestEstimateBackend_MessagesImageFeature(t *testing.T) {
 				Role: "user",
 				Content: fwkrh.AnthropicContent{Structured: []fwkrh.AnthropicContentBlock{
 					{Type: "text", Text: "describe this"},
-					{Type: "image", Source: &fwkrh.AnthropicImageSource{
+					{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{
 						Type: "base64", MediaType: "image/png", Data: pngBase64Raw,
-					}},
+					})},
 				}},
 			}},
 		},
@@ -1035,7 +1035,7 @@ func TestEstimateBackend_MessagesURLImageKey(t *testing.T) {
 			Messages: []fwkrh.AnthropicMessage{{
 				Role: "user",
 				Content: fwkrh.AnthropicContent{Structured: []fwkrh.AnthropicContentBlock{
-					{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "url", URL: url}},
+					{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "url", URL: url})},
 				}},
 			}},
 		},
@@ -1261,7 +1261,7 @@ func TestEstimateBackend_MessagesToolBlocksAffectPrefix(t *testing.T) {
 
 	toolResult := build([]fwkrh.AnthropicContentBlock{{
 		Type: "tool_result", ToolUseID: "toolu_01",
-		Content: fwkrh.AnthropicContent{Raw: "Sunny, 22C"},
+		Content: json.RawMessage(`"Sunny, 22C"`),
 	}})
 	toolResultOut, err := estimateBackend{}.produce(context.Background(), toolResult)
 	require.NoError(t, err)

@@ -119,7 +119,7 @@ func (s *Server) tryDecodeBuffered(w http.ResponseWriter, r *http.Request) (bool
 	s.decoderProxy.ServeHTTP(dw, r)
 
 	if isHTTPError(dw.statusCode) {
-
+		maps.Copy(w.Header(), dw.headers)
 		w.WriteHeader(dw.statusCode)
 		if dw.buffer.Len() > 0 {
 			WriteAll(w, dw.buffer.Bytes())
@@ -318,6 +318,7 @@ func (s *Server) prefill(w http.ResponseWriter, r *http.Request, prefillPodHostP
 	if isHTTPError(pw.statusCode) {
 		metrics.RecordError(metrics.StagePrefill)
 		s.logger.Error(nil, "prefill request failed", "code", pw.statusCode)
+		maps.Copy(w.Header(), pw.headers)
 		w.WriteHeader(pw.statusCode)
 		if pw.buffer.Len() > 0 {
 			WriteAll(w, pw.buffer.Bytes())

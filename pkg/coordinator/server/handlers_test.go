@@ -253,12 +253,13 @@ func TestHandleInference_InvalidJSONReturnsOpenAIError(t *testing.T) {
 	}
 }
 
-// TestHandleInference_RejectionsUseOpenAIEnvelope covers every rejection the
+// TestHandleInference_RejectionsUseAPIEnvelope covers every rejection the
 // handler writes itself: the body read failure, the size cap, the Responses
 // stateful-field check and the pipeline error path share the envelope the
 // invalid-JSON rejection uses, with the error type the EPP carries for the
-// same status.
-func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
+// same status. A /v1/messages rejection uses the Anthropic envelope, which
+// carries no code field.
+func TestHandleInference_RejectionsUseAPIEnvelope(t *testing.T) {
 	type rejection struct {
 		name       string
 		cfg        config.ServerConfig
@@ -319,6 +320,22 @@ func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
 			wantStatus: http.StatusBadGateway,
 			wantType:   "server_error",
 		},
+		{
+			name:       "messages invalid JSON",
+			path:       reqcommon.PathMessages,
+			body:       strings.NewReader(`{bad`),
+			wantStatus: http.StatusBadRequest,
+			wantType:   "invalid_request_error",
+			wantMsg:    "invalid JSON body",
+		},
+		{
+			name:       "messages unclassified pipeline error",
+			stepErr:    errors.New("prefill: connect: connection refused"),
+			path:       reqcommon.PathMessages,
+			body:       strings.NewReader(`{"model":"m"}`),
+			wantStatus: http.StatusBadGateway,
+			wantType:   "api_error",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,6 +353,7 @@ func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
 			require.Equal(t, reqcommon.ContentTypeOptionsNoSniff, rec.Header().Get(reqcommon.HeaderContentTypeOptions))
 
 			var envelope struct {
+				Type  string `json:"type"`
 				Error struct {
 					Message string `json:"message"`
 					Type    string `json:"type"`
@@ -343,7 +361,12 @@ func TestHandleInference_RejectionsUseOpenAIEnvelope(t *testing.T) {
 				} `json:"error"`
 			}
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope), rec.Body.String())
-			require.Equal(t, tc.wantStatus, envelope.Error.Code)
+			if tc.path == reqcommon.PathMessages {
+				require.Equal(t, "error", envelope.Type)
+				require.NotContains(t, rec.Body.String(), `"code"`)
+			} else {
+				require.Equal(t, tc.wantStatus, envelope.Error.Code)
+			}
 			require.Equal(t, tc.wantType, envelope.Error.Type)
 			if tc.wantMsg != "" {
 				require.Equal(t, tc.wantMsg, envelope.Error.Message)
@@ -625,10 +648,11 @@ func TestHandleInference_OverlongRequestIDIsRejected(t *testing.T) {
 }
 
 func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
-	// x-peer-topology and epp-profile are headers the coordinator alone injects
-	// (copied from the prefill response, or set to select a profile); a
-	// client-supplied value must never survive into OriginalHeaders, since a
-	// later step trusts it as coordinator-generated.
+	// x-llm-d-peer-topology, epp-profile and Prefer are headers the coordinator
+	// alone injects (copied from the prefill response, set to select a profile,
+	// or set on the conditional-decode probe); a client-supplied value must
+	// never survive into OriginalHeaders, since a later step trusts it as
+	// coordinator-generated and EPP answers a client Prefer: if-available with 412.
 	step := &capturingStep{}
 	p := pipeline.New([]pipeline.Step{step})
 	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
@@ -638,6 +662,7 @@ func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
 	req.Header.Set(reqcommon.PeerTopologyHeaderKey, "host=attacker,zone=evil")
 	req.Header.Set(reqcommon.EPPProfileHeaderKey, "decode")
+	req.Header.Set("Prefer", "if-available")
 	req.Header.Set("x-user-data", "keep-me")
 	rec := httptest.NewRecorder()
 	srv.handleInference(rec, req)
@@ -646,10 +671,13 @@ func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
 		t.Fatal("pipeline step did not run")
 	}
 	if got := step.captured.OriginalHeaders.Get(reqcommon.PeerTopologyHeaderKey); got != "" {
-		t.Fatalf("client-supplied x-peer-topology must be stripped, got %q", got)
+		t.Fatalf("client-supplied x-llm-d-peer-topology must be stripped, got %q", got)
 	}
 	if got := step.captured.OriginalHeaders.Get(reqcommon.EPPProfileHeaderKey); got != "" {
 		t.Fatalf("client-supplied epp-profile must be stripped, got %q", got)
+	}
+	if got := step.captured.OriginalHeaders.Get("Prefer"); got != "" {
+		t.Fatalf("client-supplied Prefer must be stripped, got %q", got)
 	}
 	if got := step.captured.OriginalHeaders.Get("x-user-data"); got != "keep-me" {
 		t.Fatalf("unrelated headers must pass through, got %q", got)
@@ -671,6 +699,7 @@ func TestRoutesRegistered(t *testing.T) {
 		{"chat completions", http.MethodPost, reqcommon.PathChatCompletions, inferenceBody},
 		{"completions", http.MethodPost, reqcommon.PathCompletions, inferenceBody},
 		{"responses", http.MethodPost, reqcommon.PathResponses, inferenceBody},
+		{"messages", http.MethodPost, reqcommon.PathMessages, inferenceBody},
 		{"generate", http.MethodPost, reqcommon.PathVLLMGenerate, inferenceBody},
 		{"healthz", http.MethodGet, "/healthz", ""},
 		{"readyz", http.MethodGet, "/readyz", ""},
@@ -1220,6 +1249,8 @@ func TestHandleInference_ErrorPathRecordsResponseBytes(t *testing.T) {
 func TestInferenceRoute(t *testing.T) {
 	require.Equal(t, coordmetrics.RouteChatCompletions, inferenceRoute(reqcommon.PathChatCompletions))
 	require.Equal(t, coordmetrics.RouteCompletions, inferenceRoute(reqcommon.PathCompletions))
+	require.Equal(t, coordmetrics.RouteResponses, inferenceRoute(reqcommon.PathResponses))
+	require.Equal(t, coordmetrics.RouteMessages, inferenceRoute(reqcommon.PathMessages))
 	require.Equal(t, coordmetrics.RouteGenerate, inferenceRoute(reqcommon.PathVLLMGenerate))
 	require.Equal(t, coordmetrics.RouteUnknown, inferenceRoute("/other"))
 }

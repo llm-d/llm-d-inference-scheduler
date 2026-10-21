@@ -425,29 +425,38 @@ func renderOnlyBudget(payload []byte) ([]byte, error) {
 	if _, ok := envelope["max_completion_tokens"]; ok {
 		envelope["max_completion_tokens"] = json.RawMessage("1")
 	}
+	// vLLM truncates a Responses prompt for any truncation value except "disabled", including null.
+	if _, ok := envelope["max_output_tokens"]; ok {
+		if truncation, set := envelope["truncation"]; !set || bytes.Equal(bytes.TrimSpace(truncation), []byte(`"disabled"`)) {
+			envelope["max_output_tokens"] = json.RawMessage("1")
+		}
+	}
 	if _, ok := envelope["min_tokens"]; ok {
 		envelope["min_tokens"] = json.RawMessage("0")
 	}
 	return json.Marshal(envelope)
 }
 
-var omitMMKwargsField = []byte(`"return_mm_kwargs":false`)
+// omitMMKwargsFields carries both spellings of the vLLM render option. vLLM v0.32 reads
+// return_mm_kwargs; versions with vllm-project/vllm#61427 read mm_payload, which takes precedence
+// over return_mm_kwargs. A version without a field ignores it.
+var omitMMKwargsFields = []byte(`"return_mm_kwargs":false,"mm_payload":"none"`)
 
-// omitMMKwargs adds "return_mm_kwargs":false before the closing brace of the render copy of a JSON
+// omitMMKwargs adds omitMMKwargsFields before the closing brace of the render copy of a JSON
 // object. It splices instead of decoding, because the body can carry megabytes of base64 images.
-// A later duplicate key wins in vLLM's parser, so a client-sent value cannot override it.
+// A later duplicate key wins in vLLM's parser, so client-sent values cannot override them.
 func omitMMKwargs(payload []byte) ([]byte, error) {
 	end := bytes.LastIndexByte(payload, '}')
 	head := bytes.TrimSpace(payload[:max(end, 0)])
 	if end < 0 || len(head) == 0 || head[0] != '{' || len(bytes.TrimSpace(payload[end+1:])) != 0 {
 		return nil, errors.New("render payload is not a JSON object")
 	}
-	out := make([]byte, 0, len(payload)+len(omitMMKwargsField)+1)
+	out := make([]byte, 0, len(payload)+len(omitMMKwargsFields)+1)
 	out = append(out, payload[:end]...)
 	if head[len(head)-1] != '{' {
 		out = append(out, ',')
 	}
-	out = append(out, omitMMKwargsField...)
+	out = append(out, omitMMKwargsFields...)
 	return append(out, payload[end:]...), nil
 }
 

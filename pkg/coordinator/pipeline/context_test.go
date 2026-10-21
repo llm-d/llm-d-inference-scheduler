@@ -97,6 +97,7 @@ func TestForwardedHeaders_ExcludesInternalRoutingHeaders(t *testing.T) {
 		OriginalHeaders: http.Header{
 			"X-Llm-D-Epp-Profile":   {"decode"},
 			"X-Llm-D-Pin-Host-Port": {"10.0.3.7:8000"},
+			"Prefer":                {"if-available"},
 			"X-Request-Id":          {"abc-123"},
 			"Authorization":         {"Bearer token"},
 		},
@@ -104,7 +105,7 @@ func TestForwardedHeaders_ExcludesInternalRoutingHeaders(t *testing.T) {
 
 	out := rc.ForwardedHeaders()
 
-	for _, name := range []string{"x-llm-d-epp-profile", "x-llm-d-pin-host-port"} {
+	for _, name := range []string{"x-llm-d-epp-profile", "x-llm-d-pin-host-port", "prefer"} {
 		if _, ok := out[name]; ok {
 			t.Fatalf("%s should not be forwarded: %v", name, out)
 		}
@@ -134,14 +135,14 @@ func TestForwardedHeaders_UsesCoordinatorRevisionDecisionID(t *testing.T) {
 func TestForwardedHeaders_ExcludesClientSuppliedPeerTopology(t *testing.T) {
 	rc := &RequestContext{
 		OriginalHeaders: http.Header{
-			"X-Peer-Topology": {"host=spoofed"},
+			"X-LLM-D-Peer-Topology": {"host=spoofed"},
 		},
 	}
 
 	out := rc.ForwardedHeaders()
 
-	if _, ok := out["x-peer-topology"]; ok {
-		t.Fatalf("x-peer-topology should not be forwarded: %v", out)
+	if _, ok := out["x-llm-d-peer-topology"]; ok {
+		t.Fatalf("x-llm-d-peer-topology should not be forwarded: %v", out)
 	}
 }
 

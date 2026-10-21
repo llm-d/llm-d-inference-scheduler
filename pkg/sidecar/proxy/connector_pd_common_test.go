@@ -23,10 +23,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
@@ -73,6 +77,7 @@ func TestConcurrentPDCancellation(t *testing.T) {
 
 			prefillStarted := make(chan struct{})
 			prefillCanceled := make(chan struct{})
+			prefillRelease := make(chan struct{})
 			decodeStarted := make(chan struct{})
 			prefill := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
@@ -88,11 +93,10 @@ func TestConcurrentPDCancellation(t *testing.T) {
 				select {
 				case <-r.Context().Done():
 					close(prefillCanceled)
-				case <-t.Context().Done():
+				case <-prefillRelease:
 				}
 			}))
-			// Cleanup, not defer: t.Context() is canceled before Cleanup runs, which releases prefill.
-			t.Cleanup(prefill.Close)
+			defer prefill.Close()
 			decode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				close(decodeStarted)
@@ -113,6 +117,7 @@ func TestConcurrentPDCancellation(t *testing.T) {
 
 			body := []byte(`{"input_ids":[1]}`)
 			req := httptest.NewRequest(http.MethodPost, reqcommon.PathSGLangGenerate, bytes.NewReader(body)).WithContext(ctx)
+			before := snapshotStageMetrics(t)
 			s.runConcurrentPD(httptest.NewRecorder(), req, body, body, prefillURL.Host, constants.KVConnectorSGLang, nil)
 			require.NotErrorIs(t, ctx.Err(), context.DeadlineExceeded, "decode must not wait for the client deadline")
 
@@ -124,13 +129,142 @@ func TestConcurrentPDCancellation(t *testing.T) {
 				case <-time.After(time.Second):
 					t.Fatal("client cancellation did not reach prefill")
 				}
-				return
+			} else {
+				select {
+				case <-prefillCanceled:
+					t.Fatal("prefill canceled after decode returned")
+				case <-time.After(20 * time.Millisecond):
+				}
+				close(prefillRelease)
 			}
-			select {
-			case <-prefillCanceled:
-				t.Fatal("prefill canceled after decode returned")
-			case <-time.After(20 * time.Millisecond):
-			}
+			// Wait for the prefill sample so it cannot leak into a later test's delta.
+			require.Eventually(t, func() bool {
+				return snapshotStageMetrics(t).delta(before).prefillCount == 1
+			}, time.Second, 10*time.Millisecond)
 		})
 	}
+}
+
+const concurrentPDTestWait = 5 * time.Second
+
+// heldPrefill is a prefill backend that holds its request until the request
+// context ends and records that it was cancelled.
+type heldPrefill struct {
+	server    *httptest.Server
+	started   chan struct{}
+	cancelled atomic.Bool
+}
+
+func newHeldPrefill(t *testing.T) *heldPrefill {
+	t.Helper()
+	p := &heldPrefill{started: make(chan struct{})}
+	p.server = httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// net/http only watches for a closed connection once the body is consumed.
+		_, _ = io.ReadAll(r.Body)
+		close(p.started)
+		<-r.Context().Done()
+		p.cancelled.Store(true)
+	}))
+	t.Cleanup(p.server.Close)
+	return p
+}
+
+func (p *heldPrefill) host() string {
+	return strings.TrimPrefix(p.server.URL, "http://")
+}
+
+// requireCancelled waits for the backend to observe the cancelled connection,
+// which net/http reports asynchronously.
+func (p *heldPrefill) requireCancelled(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, p.cancelled.Load, concurrentPDTestWait, 10*time.Millisecond,
+		"prefill backend did not observe the cancellation")
+}
+
+// runConcurrentPDAgainst runs runConcurrentPD with a prefill backend that never
+// responds and returns the stage metrics delta once the prefill duration sample,
+// the last metric the prefill goroutine records, has been observed. wantPanic is
+// the value the call is expected to panic with; nil for a normal return.
+func runConcurrentPDAgainst(ctx context.Context, t *testing.T, prefill *heldPrefill, decoder http.Handler, wantPanic any) stageMetrics {
+	t.Helper()
+	decoderURL, err := url.Parse("http://decoder:8000")
+	require.NoError(t, err)
+	s := NewProxy(Config{Port: "0", DecoderURL: decoderURL})
+	s.logger = log.Log
+	s.decoderProxy = decoder
+
+	body := []byte(`{"model":"m","messages":[]}`)
+	req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, bytes.NewReader(body)).WithContext(ctx)
+	before := snapshotStageMetrics(t)
+	func() {
+		defer func() { require.Equal(t, wantPanic, recover()) }()
+		s.runConcurrentPD(httptest.NewRecorder(), req, body, body, prefill.host(), constants.KVConnectorMooncake, nil)
+	}()
+
+	prefill.requireCancelled(t)
+	var delta stageMetrics
+	require.Eventually(t, func() bool {
+		delta = snapshotStageMetrics(t).delta(before)
+		return delta.prefillCount == 1
+	}, concurrentPDTestWait, 10*time.Millisecond, "prefill sample was not recorded")
+	return delta
+}
+
+// A decode that fails ends the request, so prefill is cancelled rather than
+// left to run the whole prompt.
+func TestRunConcurrentPDDecodeFailureCancelsPrefill(t *testing.T) {
+	prefill := newHeldPrefill(t)
+	decoder := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-prefill.started
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	delta := runConcurrentPDAgainst(context.Background(), t, prefill, decoder, nil)
+	assert.Equal(t, stageMetrics{prefillCount: 1, decodeCount: 1, decodeErrors: 1}, delta)
+}
+
+// A decode that aborts after sending headers (the reverse proxy panics with
+// http.ErrAbortHandler) cancels prefill.
+func TestRunConcurrentPDDecodeAbortCancelsPrefill(t *testing.T) {
+	prefill := newHeldPrefill(t)
+	decoder := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-prefill.started
+		w.WriteHeader(http.StatusOK)
+		panic(http.ErrAbortHandler)
+	})
+
+	delta := runConcurrentPDAgainst(context.Background(), t, prefill, decoder, http.ErrAbortHandler)
+	assert.Equal(t, stageMetrics{prefillCount: 1, decodeCount: 1, decodeErrors: 1}, delta)
+}
+
+// A prefill cancelled because the client left is not a prefill error.
+func TestRunConcurrentPDClientCancelIsNotPrefillError(t *testing.T) {
+	prefill := newHeldPrefill(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	decoder := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-prefill.started
+		cancel()
+		w.WriteHeader(http.StatusOK)
+	})
+
+	delta := runConcurrentPDAgainst(ctx, t, prefill, decoder, nil)
+	assert.Equal(t, stageMetrics{prefillCount: 1, decodeCount: 1}, delta)
+}
+
+// A prefill that outlives a successful decode by more than the grace period
+// is cancelled.
+func TestRunConcurrentPDGraceCancelsPrefill(t *testing.T) {
+	previous := concurrentPrefillGrace
+	concurrentPrefillGrace = 50 * time.Millisecond
+	t.Cleanup(func() { concurrentPrefillGrace = previous })
+
+	prefill := newHeldPrefill(t)
+	decoder := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-prefill.started
+		w.WriteHeader(http.StatusOK)
+	})
+
+	delta := runConcurrentPDAgainst(context.Background(), t, prefill, decoder, nil)
+	assert.Equal(t, stageMetrics{prefillCount: 1, decodeCount: 1}, delta)
 }

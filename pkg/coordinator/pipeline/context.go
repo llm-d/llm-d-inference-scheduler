@@ -38,12 +38,15 @@ var hopByHopHeaders = map[string]bool{
 
 // internalForwardingHeaders are set only by the coordinator; a client copy is
 // dropped, and so is a value of forward_response_headers under these names.
-// EPP routes on epp-profile and x-llm-d-pin-host-port.
+// EPP routes on epp-profile and x-llm-d-pin-host-port, and answers
+// Prefer: if-available, the conditional-decode probe's signal, with 412 on
+// any other leg.
 var internalForwardingHeaders = map[string]bool{
 	reqcommon.EPPProfileHeaderKey:         true,
 	reqcommon.RevisionDecisionIDHeaderKey: true,
 	reqcommon.PeerTopologyHeaderKey:       true,
 	routing.EndpointPinHeader:             true,
+	routing.PreferHeader:                  true,
 }
 
 func isForwardableHeader(name string) bool {
@@ -51,7 +54,7 @@ func isForwardableHeader(name string) bool {
 }
 
 // StripInternalHeaders removes headers the coordinator alone injects into
-// requests it forwards (e.g. x-peer-topology, copied from the prefill
+// requests it forwards (e.g. x-llm-d-peer-topology, copied from the prefill
 // response onto the decode request). Call this on a client request's headers
 // as soon as they are received, so a client-supplied value is never mistaken
 // for one the coordinator generated itself.
@@ -177,10 +180,29 @@ type RequestContext struct {
 	// decode step. Populated by PrefillStep from the prefill response; consumed
 	// by the KV connector when building the decode request.
 	KVTransferParams map[string]any
+	// PrefillCachedTokens is the prompt-cache hit count the prefill worker
+	// reported, read from the details object its route documents:
+	// usage.prompt_tokens_details.cached_tokens, or
+	// usage.input_tokens_details.cached_tokens on the Responses routes. The
+	// decode step substitutes it into the usage block it streams to the client,
+	// because a decode worker counts the KV blocks transferred from prefill as
+	// prompt-cache hits of its own, so its count describes the handoff rather
+	// than the prompt cache.
+	//
+	// A zero value is a measurement, not an absent one: vLLM sends the details
+	// object as null when nothing hit the prompt cache. nil means no prefill
+	// measurement applies to this request, and the decode worker's own count
+	// must reach the client unchanged. PrefillStep leaves it nil when prefill
+	// did not run, when the prefill response carried no usage block at all, and
+	// when a kv-nixl handoff returned no transfer params, since decode then
+	// recomputes the prompt and nothing inflates the count it reports. A
+	// consumer that treats nil as zero reports no cache hits for a request that
+	// had them.
+	PrefillCachedTokens *int
 	// PeerTopology carries the prefill endpoint's encoded topology from the
 	// prefill response to the decode request, for topology-affinity-filter
 	// and topology-affinity-scorer running in the decode EPP's profile.
-	// Populated by PrefillStep from the x-peer-topology response header;
+	// Populated by PrefillStep from the x-llm-d-peer-topology response header;
 	// forwarded onto the decode request by newDecodeProxyRequest. Empty when
 	// the prefill EPP's config has no topology-stamp-handler.
 	PeerTopology string
