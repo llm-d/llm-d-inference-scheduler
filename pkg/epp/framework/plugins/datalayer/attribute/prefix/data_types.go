@@ -18,8 +18,10 @@ limitations under the License.
 package prefix
 
 import (
+	"encoding/binary"
 	"maps"
 
+	"github.com/cespare/xxhash/v2"
 	"k8s.io/utils/ptr"
 
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
@@ -41,6 +43,41 @@ var PrefixHashSetDataKey = plugin.NewDataKey("PrefixHashSetDataKey", approxprefi
 // are ordered oldest to newest.
 type PrefixHashSet struct {
 	Prompts [][]uint64
+	// digest caches ContentDigest for the Produce hot path. Not serialized.
+	digest       uint64
+	digestCached bool
+}
+
+// ContentDigest returns a content hash of Prompts. The value is cached on s
+// because Prompts are not mutated after the set is published.
+func (s *PrefixHashSet) ContentDigest() uint64 {
+	if s == nil {
+		return 0
+	}
+	if s.digestCached {
+		return s.digest
+	}
+	s.digest = hashPrompts(s.Prompts)
+	s.digestCached = true
+	return s.digest
+}
+
+// hashPrompts is length-prefixed so adjacent equal hashes from different
+// prompt boundaries cannot collide.
+func hashPrompts(prompts [][]uint64) uint64 {
+	h := xxhash.New()
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(len(prompts)))
+	_, _ = h.Write(buf[:])
+	for _, p := range prompts {
+		binary.LittleEndian.PutUint64(buf[:], uint64(len(p)))
+		_, _ = h.Write(buf[:])
+		for _, v := range p {
+			binary.LittleEndian.PutUint64(buf[:], v)
+			_, _ = h.Write(buf[:])
+		}
+	}
+	return h.Sum64()
 }
 
 // Clone returns an independent copy of the hash set.
@@ -53,6 +90,10 @@ func (s *PrefixHashSet) Clone() fwkdl.Cloneable {
 		cp := make([]uint64, len(p))
 		copy(cp, p)
 		out.Prompts[i] = cp
+	}
+	if s.digestCached {
+		out.digest = s.digest
+		out.digestCached = true
 	}
 	return out
 }

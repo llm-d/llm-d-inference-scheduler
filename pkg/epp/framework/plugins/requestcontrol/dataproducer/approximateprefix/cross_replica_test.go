@@ -246,6 +246,45 @@ func peerMergedSize(t *testing.T, producer *dataProducer, endpointID string) int
 	return len(s.keys)
 }
 
+func TestMergeRemoteHashesSkipsUnchangedDigest(t *testing.T) {
+	syncOn := true
+	cfg := defaultConfig
+	cfg.SyncCrossReplicaState = &syncOn
+	cfg.AutoTune = false
+	cfg.BlockSizeTokens = 64
+	cfg.LRUCapacityPerServer = 100
+
+	producer, err := newDataProducer(context.Background(), ApproxPrefixCachePluginType, cfg, testHandleWithSyncer())
+	require.NoError(t, err)
+
+	podID := k8stypes.NamespacedName{Namespace: "ns", Name: "decode-0"}
+	ep := fwksched.NewEndpoint(
+		&fwkdl.EndpointMetadata{ID: podID},
+		fwkdl.NewMetrics(),
+		fwkdl.NewAttributes(),
+	)
+	endpointID := podID.String()
+	prompts := [][]uint64{{1, 2, 3}, {4, 5}}
+	ep.Put(producer.syncHashDK, &attrprefix.PrefixHashSet{Prompts: prompts})
+
+	producer.mergeRemoteHashes([]fwksched.Endpoint{ep})
+	require.True(t, producer.peerMergedDigestMatches(endpointID, (&attrprefix.PrefixHashSet{Prompts: prompts}).ContentDigest()))
+
+	// Same content, new slice: digest match must skip without clearing keys.
+	ep.Put(producer.syncHashDK, &attrprefix.PrefixHashSet{
+		Prompts: [][]uint64{{1, 2, 3}, {4, 5}},
+	})
+	producer.mergeRemoteHashes([]fwksched.Endpoint{ep})
+	require.Equal(t, 2, peerMergedSize(t, producer, endpointID))
+
+	ep.Put(producer.syncHashDK, &attrprefix.PrefixHashSet{
+		Prompts: [][]uint64{{1, 2, 3}, {4, 5}, {6}},
+	})
+	producer.mergeRemoteHashes([]fwksched.Endpoint{ep})
+	require.Equal(t, 3, peerMergedSize(t, producer, endpointID),
+		"content change must invalidate digest and merge the novel prompt")
+}
+
 func TestMergeRemoteHashesNoopWithoutSyncer(t *testing.T) {
 	syncOn := true
 	cfg := defaultConfig

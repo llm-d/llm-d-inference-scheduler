@@ -103,14 +103,14 @@ sync interval (default `200ms`, `publishTimeout` default `1s`).
 
 | Mode | Median of 5 | Allocs/op | Relative to sync off |
 | --- | ---: | ---: | ---: |
-| `syncCrossReplicaState=false` | 36 µs | 424 | 1.0x |
-| Syncer configured, empty peer window | 40 µs | 424 | 1.1x |
-| Syncer configured, steady peer window (`maxSyncedHashes`=256 worth of prompts on every pod, already merged) | 134 µs | 1864 | 3.7x |
+| `syncCrossReplicaState=false` | 35 µs | 424 | 1.0x |
+| Syncer configured, empty peer window | 36 µs | 424 | 1.0x |
+| Syncer configured, steady peer window (`maxSyncedHashes`=256 worth of prompts on every pod, already merged) | 40 µs | 520 | 1.15x |
 
 Empty-window overhead is a `syncerActive` check plus a miss on the optional
-attribute. Steady-state cost is dominated by walking peer prompt keys on each
-pod to confirm the window is unchanged (~100 µs and ~1.4k extra allocs at
-96 pods); novel prompts (window slides) pay additional indexer `Add` work.
+attribute. Steady-state merge skips work when the sync attribute digest is
+unchanged (Peek + cached `ContentDigest`), so cost stays close to sync-off.
+Novel prompts (window slides) pay snapshot, prompt-key, and indexer `Add` work.
 Reproduce with:
 
 ```bash
@@ -136,8 +136,9 @@ go test ./pkg/epp/framework/plugins/datalayer/cross_plugin/redis/ \
 
 Operational takeaways:
 
-- Prefer sizing decode pools and `maxSyncedHashes` so the steady peer window stays
-  modest; request-path cost scales with pods × prompts in the attribute.
+- Steady peer windows are cheap on the request path when the attribute is
+  unchanged; cost spikes when the window slides (novel peer prompts). Prefer
+  sizing `maxSyncedHashes` for publish payload and hit-rate, not for steady CPU.
 - Publish latency is on the sync interval, not in `Produce`. Keep `stateTTL`
   above the refresh interval plus observed publish RTT (include Redis/Valkey
   network time in cluster measurements).

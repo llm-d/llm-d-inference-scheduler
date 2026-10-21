@@ -91,9 +91,13 @@ type dataProducer struct {
 
 // mergedKeySet is the per-endpoint set stored in peerMerged. keys holds only
 // prompt keys present in the latest peer sync window for that endpoint.
+// digest is the xxhash of the last processed PrefixHashSet.Prompts so Produce
+// can skip snapshot/key work when the sync attribute is unchanged.
 type mergedKeySet struct {
-	mu   sync.Mutex
-	keys map[string]struct{}
+	mu         sync.Mutex
+	keys       map[string]struct{}
+	digest     uint64
+	haveDigest bool
 }
 
 // TypedName returns the type and name of the plugin.
@@ -345,23 +349,26 @@ func (p *dataProducer) Produce(ctx context.Context, request *fwksched.InferenceR
 // merged for this endpoint are skipped so Produce does not re-warm or
 // LRU-touch the indexer on every request. Each new peer prompt is Added on its
 // own so indexer LRU eviction keeps prompt-prefix semantics. Peer prompts are
-// not recorded into the recent window (no echo).
+// not recorded into the recent window (no echo). When the attribute digest
+// matches the last processed value, the pod is skipped without snapshot or
+// prompt-key work.
 func (p *dataProducer) mergeRemoteHashes(pods []fwksched.Endpoint) {
 	if !p.syncerActive() || p.indexerInst == nil {
 		return
 	}
 	for _, pod := range pods {
-		val, ok := pod.Get(p.syncHashDK)
-		if !ok {
-			continue
-		}
-		set, ok := val.(*attrprefix.PrefixHashSet)
+		set, ok := peekPrefixHashSet(pod, p.syncHashDK)
 		if !ok || set == nil {
 			continue
 		}
 		endpointID := pod.GetMetadata().ID.String()
+		digest := set.ContentDigest()
+		if p.peerMergedDigestMatches(endpointID, digest) {
+			continue
+		}
 		if len(set.Prompts) == 0 {
 			p.reconcilePeerMerged(endpointID, map[string]struct{}{})
+			p.rememberPeerMergedDigest(endpointID, digest)
 			continue
 		}
 		local := p.recent.snapshot(endpointID)
@@ -381,10 +388,12 @@ func (p *dataProducer) mergeRemoteHashes(pods []fwksched.Endpoint) {
 			active[key] = struct{}{}
 		}
 		if p.peerMergedCovers(endpointID, active) {
+			p.rememberPeerMergedDigest(endpointID, digest)
 			continue
 		}
 		novel := p.reconcilePeerMerged(endpointID, active)
 		if len(novel) == 0 {
+			p.rememberPeerMergedDigest(endpointID, digest)
 			continue
 		}
 		server := p.makeserver(pod)
@@ -398,7 +407,48 @@ func (p *dataProducer) mergeRemoteHashes(pods []fwksched.Endpoint) {
 			}
 			p.indexerInst.Add(uint64sToBlockHashes(prompt), server)
 		}
+		p.rememberPeerMergedDigest(endpointID, digest)
 	}
+}
+
+// peekPrefixHashSet returns the sync attribute without cloning when the
+// endpoint supports Peek. The result must not be mutated.
+func peekPrefixHashSet(pod fwksched.Endpoint, key plugin.DataKey) (*attrprefix.PrefixHashSet, bool) {
+	type peeker interface {
+		Peek(plugin.DataKey) (datalayer.Cloneable, bool)
+	}
+	var val datalayer.Cloneable
+	var ok bool
+	if p, okp := pod.(peeker); okp {
+		val, ok = p.Peek(key)
+	} else {
+		val, ok = pod.Get(key)
+	}
+	if !ok {
+		return nil, false
+	}
+	set, ok := val.(*attrprefix.PrefixHashSet)
+	return set, ok
+}
+
+func (p *dataProducer) peerMergedDigestMatches(endpointID string, digest uint64) bool {
+	v, ok := p.peerMerged.Load(endpointID)
+	if !ok {
+		return false
+	}
+	s := v.(*mergedKeySet)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.haveDigest && s.digest == digest
+}
+
+func (p *dataProducer) rememberPeerMergedDigest(endpointID string, digest uint64) {
+	v, _ := p.peerMerged.LoadOrStore(endpointID, &mergedKeySet{keys: make(map[string]struct{})})
+	s := v.(*mergedKeySet)
+	s.mu.Lock()
+	s.digest = digest
+	s.haveDigest = true
+	s.mu.Unlock()
 }
 
 // peerMergedCovers reports whether endpointID's remembered set already matches
