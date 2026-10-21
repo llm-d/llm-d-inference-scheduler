@@ -17,7 +17,7 @@ limitations under the License.
 package proxy
 
 import (
-	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -161,8 +161,7 @@ func (s *toolCallingJSONStream) feed(data []byte) {
 			if !s.escaped && s.unicode == 0 {
 				i := 0
 				if len(data) >= 2048 {
-					i = bytes.IndexAny(data, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"+
-						"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\"\\")
+					i = indexToolJSONStringSpecial(data)
 					if i < 0 {
 						i = len(data)
 					}
@@ -188,6 +187,34 @@ func (s *toolCallingJSONStream) feed(data []byte) {
 		}
 		data = data[1:]
 	}
+}
+
+// Scan long strings eight bytes at a time; candidates are checked bytewise
+// because the zero-byte test may also match a neighboring byte after a borrow.
+func indexToolJSONStringSpecial(data []byte) int {
+	const controlMask uint64 = 0xe0e0e0e0e0e0e0e0
+	const quotes uint64 = 0x2222222222222222
+	const slashes uint64 = 0x5c5c5c5c5c5c5c5c
+	containsZeroByte := func(x uint64) bool {
+		return (x-0x0101010101010101)&^x&0x8080808080808080 != 0
+	}
+	i := 0
+	for ; i+8 <= len(data); i += 8 {
+		word := binary.LittleEndian.Uint64(data[i:])
+		if containsZeroByte(word&controlMask) || containsZeroByte(word^quotes) || containsZeroByte(word^slashes) {
+			for j, c := range data[i : i+8] {
+				if c < 0x20 || c == '"' || c == '\\' {
+					return i + j
+				}
+			}
+		}
+	}
+	for j, c := range data[i:] {
+		if c < 0x20 || c == '"' || c == '\\' {
+			return i + j
+		}
+	}
+	return -1
 }
 
 func (s *toolCallingJSONStream) consume(b byte) {

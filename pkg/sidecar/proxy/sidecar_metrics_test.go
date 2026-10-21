@@ -2988,6 +2988,22 @@ func BenchmarkToolCallingJSONStream(b *testing.B) {
 	}
 }
 
+func TestIndexToolJSONStringSpecial(t *testing.T) {
+	for offset := 0; offset < 64; offset++ {
+		data := bytes.Repeat([]byte{'x'}, offset+8)
+		for value := 0; value < 256; value++ {
+			data[offset] = byte(value)
+			want := -1
+			if value < 0x20 || value == '"' || value == '\\' {
+				want = offset
+			}
+			if got := indexToolJSONStringSpecial(data); got != want {
+				t.Fatalf("offset %d, byte %d: got %d, want %d", offset, value, got, want)
+			}
+		}
+	}
+}
+
 func TestCaptureInferenceToolCallingRequest(t *testing.T) {
 	const original = `{"tools":[],"tool_choice":"auto"}`
 	for _, api := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages} {
