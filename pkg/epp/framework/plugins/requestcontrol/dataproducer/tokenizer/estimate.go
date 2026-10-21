@@ -71,17 +71,18 @@ func appendImageBlock(blocks []tokenizerTypes.ContentBlock, src *fwkrh.Anthropic
 }
 
 func anthropicToolResultContent(b fwkrh.AnthropicContentBlock) (string, []tokenizerTypes.ContentBlock) {
-	if b.Content.Raw != "" {
-		return b.Content.Raw, nil
+	content := b.ToolResultContent()
+	if content.Raw != "" {
+		return content.Raw, nil
 	}
 	var parts []string
 	var imageBlocks []tokenizerTypes.ContentBlock
-	for _, item := range b.Content.Structured {
+	for _, item := range content.Structured {
 		switch item.Type {
 		case blockTypeText:
 			parts = append(parts, item.Text)
 		case reqcommon.BlockTypeImage:
-			imageBlocks = appendImageBlock(imageBlocks, item.Source)
+			imageBlocks = appendImageBlock(imageBlocks, item.ImageSource())
 		}
 	}
 	return strings.Join(parts, "\n"), imageBlocks
@@ -378,7 +379,7 @@ func (b estimateBackend) messagesBytes(req *fwkrh.MessagesRequest) ([]byte, []fw
 			case blockTypeText:
 				out = append(out, []byte(block.Text)...)
 			case reqcommon.BlockTypeImage:
-				if content, count := b.img.placeholderForAnthropicImage(block.Source); content != "" {
+				if content, count := b.img.placeholderForAnthropicImage(block.ImageSource()); content != "" {
 					out, features = appendMMAsset(out, features, reqcommon.ModalityImage, content, count)
 				}
 			case blockTypeThinking:
@@ -454,16 +455,16 @@ func (b estimateBackend) appendResponsesItem(out []byte, features []fwkrh.MultiM
 			out = append(out, []byte(role)...)
 		}
 		return b.appendResponsesContent(out, features, m["content"])
-	case "function_call":
+	case responsesItemTypeFunctionCall:
 		if name, ok := m["name"].(string); ok {
 			out = append(out, []byte(name)...)
 		}
 		if args, ok := m["arguments"].(string); ok {
 			out = append(out, []byte(args)...)
 		}
-	case "function_call_output":
+	case responsesItemTypeFunctionCallOutput:
 		out = appendResponsesOutputText(out, m["output"])
-	case "reasoning":
+	case responsesItemTypeReasoning:
 		out = appendResponsesSummaryText(out, m["summary"])
 	}
 	return out, features

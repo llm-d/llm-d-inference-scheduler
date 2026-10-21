@@ -115,6 +115,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestattributereporter"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/agentidentity"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/outlenbucket"
+	respondermodels "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/responder/models"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/responsereceived/topologystamp"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/screener/disaggregatedsetrollout"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/screener/endpointpin"
@@ -292,6 +293,10 @@ func (r *Runner) Run(ctx context.Context) error {
 	dlCfg := rawConfig.DataLayer
 	if dlCfg != nil && dlCfg.Discovery != nil && dlCfg.Discovery.Endpoints != nil {
 		return r.runWithFileDiscovery(ctx, opts, rawConfig)
+	}
+	if err := validateKubernetesDiscoveryFlags(opts); err != nil {
+		setupLog.Error(err, "Failed to validate flags")
+		return err
 	}
 
 	r.servingCtx, r.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
@@ -543,6 +548,7 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 
 	serverRunner := runserver.NewExtProcServerRunner(opts, *gknn, controllerCfg, ds, director,
 		r.parserRegistry, eppConfig.SaturationDetector, priorityBandControlPlane)
+	serverRunner.Responders = r.requestControlConfig.Responders()
 	if requestEvictor != nil {
 		serverRunner.EvictChannelLookup = requestEvictor.EvictionRegistry()
 	}
@@ -675,6 +681,7 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(srcmodels.ModelsDataSourceType, fwkplugin.StabilityStable, srcmodels.ModelDataSourceFactory)
 	fwkplugin.Register(attrmodels.ModelsExtractorType, fwkplugin.StabilityStable, extmodels.ModelServerExtractorFactory)
 	// Alpha
+	fwkplugin.Register(respondermodels.ModelsResponderType, fwkplugin.StabilityAlpha, respondermodels.Factory)
 	fwkplugin.Register(labelproducer.LabelProducerType, fwkplugin.StabilityAlpha, labelproducer.Factory)
 	fwkplugin.Register(attrtopology.TopologyExtractorType, fwkplugin.StabilityAlpha, exttopology.Factory)
 
@@ -981,6 +988,18 @@ func extractDeploymentName(podName string) (string, error) {
 	return "", fmt.Errorf("failed to parse deployment name from pod name %s", podName)
 }
 
+// validateKubernetesDiscoveryFlags checks the flags the Kubernetes discovery path
+// needs: an InferencePool name or an endpoint selector, but not both.
+func validateKubernetesDiscoveryFlags(opts *runserver.Options) error {
+	if opts.PoolName != "" && opts.EndpointSelector != nil {
+		return errors.New("pool-name and endpoint-selector cannot both be set")
+	}
+	if opts.PoolName == "" && opts.EndpointSelector == nil {
+		return errors.New("either pool-name or endpoint-selector must be set")
+	}
+	return nil
+}
+
 func extractGKNN(poolName, poolGroup, poolNamespace string, endpointSelector labels.Selector) (*common.GKNN, error) {
 	if poolName != "" {
 		resolvedPoolNamespace := resolvePoolNamespace(poolNamespace)
@@ -1267,6 +1286,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 	// nil control plane: file-discovery mode has no InferenceObjective reconciler to drive one.
 	serverRunner := runserver.NewExtProcServerRunner(opts, gknn, runserver.NewControllerConfig(false),
 		ds, director, r.parserRegistry, eppConfig.SaturationDetector, nil)
+	serverRunner.Responders = r.requestControlConfig.Responders()
 	if requestEvictor != nil {
 		serverRunner.EvictChannelLookup = requestEvictor.EvictionRegistry()
 	}

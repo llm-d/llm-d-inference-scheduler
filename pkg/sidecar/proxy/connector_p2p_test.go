@@ -25,8 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2" // nolint:revive
-	. "github.com/onsi/gomega"    // nolint:revive
+	. "github.com/onsi/ginkgo/v2" //nolint:revive
+	. "github.com/onsi/gomega"    //nolint:revive
 
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
@@ -57,7 +57,7 @@ var _ = Describe("P2P Connector", func() {
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		if resp.StatusCode != 200 {
-			bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(resp.Body)
 			Fail(string(bp))
 		}
 
@@ -126,7 +126,7 @@ var _ = Describe("P2P Connector", func() {
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		if resp.StatusCode != 200 {
-			bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(resp.Body)
 			Fail(string(bp))
 		}
 
@@ -242,7 +242,7 @@ var _ = Describe("P2P Connector", func() {
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
 		if resp.StatusCode != 200 {
-			bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(resp.Body)
 			Fail(string(bp))
 		}
 

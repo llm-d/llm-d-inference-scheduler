@@ -287,7 +287,7 @@ func RecordNormalizedTimePerOutputToken(ctx context.Context, modelName, targetMo
 	elapsedSeconds := complete.Sub(received).Seconds()
 	secondsPerToken := elapsedSeconds / float64(outputTokenCount)
 
-	llmdNormalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName, fairnessID, priority).Observe(secondsPerToken)
+	observeWithTraceExemplar(ctx, llmdNormalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName, fairnessID, priority), secondsPerToken)
 	return true
 }
 
@@ -309,7 +309,7 @@ func RecordRequestTTFT(ctx context.Context, modelName, targetModelName, fairness
 		streamingLabel = "true"
 	}
 	ttftSeconds := firstToken.Sub(received).Seconds()
-	llmdRequestTTFT.WithLabelValues(modelName, targetModelName, fairnessID, priority, streamingLabel).Observe(ttftSeconds)
+	observeWithTraceExemplar(ctx, llmdRequestTTFT.WithLabelValues(modelName, targetModelName, fairnessID, priority, streamingLabel), ttftSeconds)
 	return true
 }
 
@@ -338,7 +338,7 @@ func RecordRequestTPOT(ctx context.Context, modelName, targetModelName, fairness
 	e2eSeconds := complete.Sub(received).Seconds()
 	ttftSeconds := firstToken.Sub(received).Seconds()
 	tpotSeconds := (e2eSeconds - ttftSeconds) / float64(outputTokenCount-1)
-	llmdRequestTPOT.WithLabelValues(modelName, targetModelName, fairnessID, priority).Observe(tpotSeconds)
+	observeWithTraceExemplar(ctx, llmdRequestTPOT.WithLabelValues(modelName, targetModelName, fairnessID, priority), tpotSeconds)
 	return true
 }
 
@@ -351,7 +351,7 @@ func RecordInterTokenLatency(ctx context.Context, modelName, targetModelName, fa
 			"modelName", modelName, "targetModelName", targetModelName, "itlSeconds", itlSeconds)
 		return false
 	}
-	llmdInterTokenLatency.WithLabelValues(modelName, targetModelName, fairnessID, priority).Observe(itlSeconds)
+	observeWithTraceExemplar(ctx, llmdInterTokenLatency.WithLabelValues(modelName, targetModelName, fairnessID, priority), itlSeconds)
 	return true
 }
 
@@ -402,8 +402,8 @@ func RecordInferencePoolReadyPods(name string, runningPods float64) {
 }
 
 // RecordSchedulerE2ELatency records the end-to-end scheduling latency.
-func RecordSchedulerE2ELatency(duration time.Duration) {
-	llmdSchedulerE2ELatency.WithLabelValues().Observe(duration.Seconds())
+func RecordSchedulerE2ELatency(ctx context.Context, duration time.Duration) {
+	observeWithTraceExemplar(ctx, llmdSchedulerE2ELatency.WithLabelValues(), duration.Seconds())
 }
 
 // RecordRequestProcessingLatency records the EPP request processing latency,
@@ -471,6 +471,7 @@ func RecordInferenceExtensionInfo(commitSha, buildRef string) {
 
 // RecordFlowControlRequestQueueDuration records the duration a request spent in the Flow Control layer.
 func RecordFlowControlRequestQueueDuration(
+	ctx context.Context,
 	fairnessID, priority, outcome,
 	inferencePool,
 	modelName, targetModelName string,
@@ -478,11 +479,11 @@ func RecordFlowControlRequestQueueDuration(
 ) {
 	fairnessID = boundFairnessID(fairnessID)
 	modelName, targetModelName = boundModels(modelName, targetModelName)
-	llmdFlowControlRequestQueueDuration.WithLabelValues(
+	observeWithTraceExemplar(ctx, llmdFlowControlRequestQueueDuration.WithLabelValues(
 		fairnessID, priority, outcome,
 		inferencePool,
 		modelName, targetModelName,
-	).Observe(duration.Seconds())
+	), duration.Seconds())
 }
 
 // RecordFlowControlDispatchCycleDuration records the duration of a dispatch cycle in the Flow Control layer.

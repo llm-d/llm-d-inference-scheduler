@@ -28,10 +28,19 @@ import (
 	tokenizerTypes "github.com/llm-d/llm-d-router/pkg/kvcache/tokenization/types"
 )
 
-// responsesItemTypeMessage is the Input item "type" discriminator this code
-// converts; other discriminators (function_call, function_call_output,
-// reasoning, and so on) are left for a follow-up.
-const responsesItemTypeMessage = "message"
+// Input item "type" discriminators the legacy translation converts.
+const (
+	responsesItemTypeMessage            = "message"
+	responsesItemTypeFunctionCall       = "function_call"
+	responsesItemTypeFunctionCallOutput = "function_call_output"
+	responsesItemTypeReasoning          = "reasoning"
+)
+
+// Chat roles the translation writes itself; every other role comes from the input.
+const (
+	roleAssistant = "assistant"
+	roleTool      = "tool"
+)
 
 const (
 	responsesRenderModeAuto   = "auto"
@@ -186,12 +195,11 @@ func responsesToConversation(r *fwkrh.ResponsesRequest) ([]tokenizerTypes.Conver
 }
 
 // responsesInputToConversation converts the Input field. Input is a plain
-// string, or an array of items; every item must be a simple chat message
-// (see simpleResponsesMessage) or the conversion fails. A partial
-// conversion would tokenize a prompt shorter than the one vLLM serves,
-// which corrupts prefix-cache and context-length decisions downstream, so
-// an item this code cannot represent fails the whole request rather than
-// being dropped from it.
+// string, or an array of items converted one by one by appendResponsesItem.
+// A partial conversion would tokenize a prompt shorter than the one vLLM
+// serves, which corrupts prefix-cache and context-length decisions
+// downstream, so an item this code cannot represent fails the whole request
+// rather than being dropped from it.
 func responsesInputToConversation(input any) ([]tokenizerTypes.Conversation, error) {
 	switch v := input.(type) {
 	case nil:
@@ -204,11 +212,10 @@ func responsesInputToConversation(input any) ([]tokenizerTypes.Conversation, err
 	case []any:
 		out := make([]tokenizerTypes.Conversation, 0, len(v))
 		for _, item := range v {
-			conv, err := simpleResponsesMessage(item)
-			if err != nil {
+			var err error
+			if out, err = appendResponsesItem(out, item); err != nil {
 				return nil, err
 			}
-			out = append(out, conv)
 		}
 		return out, nil
 	default:
@@ -216,13 +223,128 @@ func responsesInputToConversation(input any) ([]tokenizerTypes.Conversation, err
 	}
 }
 
+// appendResponsesItem converts one Input item the way vLLM's Responses
+// serving builds chat messages from them (vllm/entrypoints/openai/responses/
+// utils.py, construct_chat_messages_with_tool_call): a function_call joins
+// the tool_calls of the assistant message directly before it, and a
+// reasoning item or an assistant message fills the reasoning or content that
+// message still lacks, so a turn spelled as reasoning, message and
+// function_call items renders as the single assistant message vLLM serves.
+// A function_call_output becomes a tool message. A plain message converts
+// through simpleResponsesMessage, and any other item type fails the
+// conversion.
+func appendResponsesItem(conversation []tokenizerTypes.Conversation, item any) ([]tokenizerTypes.Conversation, error) {
+	m, ok := item.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("responses input item of type %T is not supported by legacy translation", item)
+	}
+	var prev *tokenizerTypes.Conversation
+	if n := len(conversation); n > 0 && conversation[n-1].Role == roleAssistant {
+		prev = &conversation[n-1]
+	}
+	switch t, _ := m["type"].(string); t {
+	case responsesItemTypeFunctionCall:
+		call, err := responsesToolCall(m)
+		if err != nil {
+			return nil, err
+		}
+		if prev != nil {
+			prev.ToolCalls = append(prev.ToolCalls, call)
+			return conversation, nil
+		}
+		return append(conversation, tokenizerTypes.Conversation{Role: roleAssistant, ToolCalls: []any{call}}), nil
+	case responsesItemTypeReasoning:
+		text, err := responsesReasoningText(m)
+		if err != nil {
+			return nil, err
+		}
+		if prev != nil && prev.Reasoning == "" {
+			prev.Reasoning = text
+			return conversation, nil
+		}
+		return append(conversation, tokenizerTypes.Conversation{Role: roleAssistant, Reasoning: text}), nil
+	case responsesItemTypeFunctionCallOutput:
+		conv, err := responsesToolMessage(m)
+		if err != nil {
+			return nil, err
+		}
+		return append(conversation, conv), nil
+	}
+	conv, err := simpleResponsesMessage(m)
+	if err != nil {
+		return nil, err
+	}
+	if conv.Role == roleAssistant && prev != nil && prev.Content == nil {
+		prev.Content = conv.Content
+		return conversation, nil
+	}
+	return append(conversation, conv), nil
+}
+
+// responsesToolCall converts a function_call item into the tool_calls entry
+// vLLM builds from it. The Responses API requires all three fields, so an
+// item missing one fails the conversion; a namespaced call renders under a
+// flattened name this code does not derive, so it fails too.
+func responsesToolCall(m map[string]any) (map[string]any, error) {
+	if _, namespaced := m["namespace"]; namespaced {
+		return nil, fmt.Errorf("responses input item type %q with a namespace is not supported by legacy translation", responsesItemTypeFunctionCall)
+	}
+	callID, _ := m["call_id"].(string)
+	name, _ := m["name"].(string)
+	arguments, hasArguments := m["arguments"].(string)
+	if callID == "" || name == "" || !hasArguments {
+		return nil, fmt.Errorf("responses input item type %q needs call_id, name and arguments", responsesItemTypeFunctionCall)
+	}
+	return map[string]any{
+		"id":       callID,
+		"type":     "function",
+		"function": map[string]any{"name": name, "arguments": arguments},
+	}, nil
+}
+
+// responsesReasoningText returns the text vLLM takes from a reasoning item:
+// the first content part, else the first summary part, else nothing.
+// Encrypted content cannot be rendered, so it fails the conversion.
+func responsesReasoningText(m map[string]any) (string, error) {
+	if encrypted, _ := m["encrypted_content"].(string); encrypted != "" {
+		return "", fmt.Errorf("responses input item type %q with encrypted_content is not supported by legacy translation", responsesItemTypeReasoning)
+	}
+	for _, field := range []string{"content", "summary"} {
+		parts, _ := m[field].([]any)
+		if len(parts) == 0 {
+			continue
+		}
+		part, _ := parts[0].(map[string]any)
+		text, ok := part["text"].(string)
+		if !ok {
+			return "", fmt.Errorf("responses input item type %q %s part has no text field", responsesItemTypeReasoning, field)
+		}
+		return text, nil
+	}
+	return "", nil
+}
+
+// responsesToolMessage converts a function_call_output item into the tool
+// message vLLM builds from it. The output is a string or an array of content
+// parts, converted like a message's content.
+func responsesToolMessage(m map[string]any) (tokenizerTypes.Conversation, error) {
+	callID, _ := m["call_id"].(string)
+	if callID == "" {
+		return tokenizerTypes.Conversation{}, fmt.Errorf("responses input item type %q has no call_id", responsesItemTypeFunctionCallOutput)
+	}
+	content, err := responsesContent(m["output"])
+	if err != nil {
+		return tokenizerTypes.Conversation{}, err
+	}
+	return tokenizerTypes.Conversation{Role: roleTool, Content: content, ToolCallID: callID}, nil
+}
+
 // simpleResponsesMessage recognizes a Responses input item shaped like a plain
 // chat message: {"role": ..., "content": ...}, with an optional
 // "type": "message". Content is either a string or an array of content
-// parts; only text parts convert, using their "text" field. An item
-// carrying any other "type" (function_call, function_call_output, reasoning,
-// and so on), or whose content this code cannot represent, fails the
-// conversion rather than being guessed at or dropped.
+// parts converted by responsesContent. An item carrying any other "type", or
+// whose content this code cannot represent, fails the conversion rather than
+// being guessed at or dropped.
 func simpleResponsesMessage(item any) (tokenizerTypes.Conversation, error) {
 	m, ok := item.(map[string]any)
 	if !ok {

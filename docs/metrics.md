@@ -119,16 +119,20 @@ lifecycle handled by the router.
 | `llm_d_epp_request_output_tokens` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Output token count. |
 | `llm_d_epp_request_cached_tokens` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Prompt tokens served from cache. |
 | `llm_d_epp_request_running` | Gauge | `model_name`, `target_model_name`, `fairness_id`, `priority` | Requests currently in flight. |
-| `llm_d_epp_request_ntpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Normalized time per output token. |
-| `llm_d_epp_request_ttft_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority`, `streaming` | Time to first token. |
-| `llm_d_epp_request_streaming_tpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Time per output token for streaming. |
-| `llm_d_epp_request_streaming_itl_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Inter-token latency for streaming. |
+| `llm_d_epp_request_ntpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Normalized time per output token. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_ttft_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority`, `streaming` | Time to first token. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_streaming_tpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Time per output token for streaming. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_streaming_itl_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Inter-token latency for streaming. Carries a trace exemplar; see [Exemplars](#exemplars). |
+
+Requests answered locally by a responder, such as `GET /v1/models`, are not counted in
+`llm_d_epp_request_total` or `llm_d_epp_request_size_bytes`. A responder error is counted in
+`llm_d_epp_request_error_total` with empty `model_name` and `target_model_name` labels.
 
 #### Exemplars
 
-`llm_d_epp_request_duration_seconds` attaches the request's trace context to each
-observation as a Prometheus exemplar, so a point on a latency graph can be opened as
-the trace behind it.
+Latency histograms whose notes say they carry a trace exemplar attach the request's
+trace context to each observation as a Prometheus exemplar, so a point on a latency
+graph can be opened as the trace behind it.
 
 | Exemplar label | Present when |
 |---|---|
@@ -210,7 +214,7 @@ These metrics are owned by EPP scheduler instrumentation.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_scheduler_e2e_duration_seconds` | Histogram | - | End-to-end scheduling latency. |
+| `llm_d_epp_scheduler_e2e_duration_seconds` | Histogram | - | End-to-end scheduling latency. Carries a trace exemplar; see [Exemplars](#exemplars). |
 | `llm_d_epp_scheduler_attempts_total` | Counter | `status`, `target_model_name`, `endpoint_name`, `namespace`, `port` | Scheduling attempts. |
 
 ### EPP processing overhead
@@ -484,7 +488,7 @@ These metrics are owned by the EPP Flow Control layer.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. |
+| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. Carries a trace exemplar; see [Exemplars](#exemplars). |
 | `llm_d_epp_flow_control_dispatch_cycle_duration_seconds` | Histogram | - | Cost of one dispatch cycle. |
 | `llm_d_epp_flow_control_request_enqueue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome` | Time spent admitting a request to the queue. |
 | `llm_d_epp_flow_control_queue_size` | Gauge | `fairness_id`, `priority`, `inference_pool`, `model_name`, `target_model_name` | Requests currently held in the queue. |

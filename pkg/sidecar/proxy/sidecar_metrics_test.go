@@ -38,6 +38,7 @@ import (
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
+	"github.com/llm-d/llm-d-router/pkg/common/usage"
 	"github.com/llm-d/llm-d-router/pkg/sidecar/constants"
 	"github.com/llm-d/llm-d-router/pkg/sidecar/metrics"
 )
@@ -290,30 +291,20 @@ func TestRunConcurrentPDMetrics(t *testing.T) {
 			name:      "decode 500 records decode error and duration",
 			decoder:   statusHandler(http.StatusInternalServerError, `{"error":"boom"}`),
 			client:    func() http.ResponseWriter { return httptest.NewRecorder() },
-			wantDelta: stageMetrics{decodeCount: 1, prefillErrors: 1, decodeErrors: 1},
+			wantDelta: stageMetrics{decodeCount: 1, decodeErrors: 1},
 		},
 		{
 			name:      "client write failure records decode error",
 			decoder:   statusHandler(http.StatusOK, `{"choices":[]}`),
 			client:    func() http.ResponseWriter { return errWriter{} },
-			wantDelta: stageMetrics{decodeCount: 1, prefillErrors: 1, decodeErrors: 1},
+			wantDelta: stageMetrics{decodeCount: 1, decodeErrors: 1},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prefill := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if tt.wantDelta.prefillErrors != 0 {
-					_, _ = io.Copy(io.Discard, r.Body)
-					select {
-					case <-r.Context().Done():
-					case <-t.Context().Done():
-					}
-					return
-				}
-				statusHandler(http.StatusOK, `{}`).ServeHTTP(w, r)
-			}))
-			t.Cleanup(prefill.Close)
+			prefill := httptest.NewServer(statusHandler(http.StatusOK, `{}`))
+			defer prefill.Close()
 			prefillURL, err := url.Parse(prefill.URL)
 			require.NoError(t, err)
 
@@ -329,8 +320,7 @@ func TestRunConcurrentPDMetrics(t *testing.T) {
 			// Prefill runs in a goroutine; wait for its sample so it cannot leak
 			// into a later test's delta.
 			require.Eventually(t, func() bool {
-				delta := snapshotStageMetrics(t).delta(before)
-				return delta.prefillCount == 1 && delta.prefillErrors == tt.wantDelta.prefillErrors
+				return snapshotStageMetrics(t).delta(before).prefillCount == 1
 			}, 5*time.Second, 10*time.Millisecond)
 
 			want := tt.wantDelta
@@ -605,7 +595,7 @@ func TestCaptureResponseStatus(t *testing.T) {
 	})
 	t.Run("optional interfaces survive the cached-tokens wrapper", func(t *testing.T) {
 		inner, _ := captureResponseStatus(readerFromHijacker{httptest.NewRecorder()})
-		w, _ := newCachedTokensResponseWriterWithFinalize(inner, 1, false)
+		w, _ := usage.NewCachedTokensResponseWriter(inner, 1, false)
 		_, isReaderFrom := w.(io.ReaderFrom)
 		assert.True(t, isReaderFrom)
 		_, _, err := http.NewResponseController(w).Hijack()

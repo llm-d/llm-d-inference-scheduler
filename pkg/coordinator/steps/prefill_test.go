@@ -19,6 +19,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -285,6 +287,36 @@ func TestPrefillStep_CompletionsFormat_NoRenderedTokens(t *testing.T) {
 	}
 }
 
+// A declared Content-Length longer than the 503 body cuts the TRACE pre-read
+// short; the step must still report the 503.
+func TestPrefillStep_UpstreamStatusSurvivesInterruptedTraceRead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":"overloaded`)
+	}))
+	defer server.Close()
+
+	step, err := NewPrefillStep(gateway.New(config.GatewayConfig{Address: server.URL}), map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-trace",
+		OriginalPath:     reqcommon.PathCompletions,
+		Model:            "test-model",
+		Body:             map[string]any{"prompt": "Hello"},
+		KVTransferParams: make(map[string]any),
+	}
+
+	logger := funcr.NewJSON(func(string) {}, funcr.Options{Verbosity: logutil.TRACE})
+	err = step.Execute(log.IntoContext(context.Background(), logger), reqCtx)
+	var upstream *pipeline.UpstreamError
+	if !errors.As(err, &upstream) || upstream.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected UpstreamError 503, got %v", err)
+	}
+}
+
 func TestPrefillStep_ChatCompletionsFormat(t *testing.T) {
 	var prefillBody map[string]any
 
@@ -444,6 +476,78 @@ func TestPrefillStep_ResponsesFormat(t *testing.T) {
 	}
 	if _, ok := prefillBody["max_completion_tokens"]; ok {
 		t.Fatalf("responses request carries max_completion_tokens=%v", prefillBody["max_completion_tokens"])
+	}
+}
+
+func TestPrefillStep_MessagesFormat(t *testing.T) {
+	var prefillBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != reqcommon.PathMessages {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &prefillBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"kv_transfer_params": map[string]any{"block_id": "block-4"},
+		})
+	}))
+	defer server.Close()
+
+	gwClient := gateway.New(config.GatewayConfig{Address: server.URL})
+	step, err := NewPrefillStep(gwClient, map[string]any{
+		ParamKVConnector: kv.NIXL,
+		ParamECConnector: ec.NIXL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqCtx := &pipeline.RequestContext{
+		RequestID:    "req-messages",
+		OriginalPath: reqcommon.PathMessages,
+		Model:        "test-model",
+		Body: map[string]any{
+			"model":      "test-model",
+			"max_tokens": 800,
+			"stream":     true,
+			"thinking":   map[string]any{"type": "enabled", "budget_tokens": 512},
+			"messages":   []any{map[string]any{"role": "user", "content": "hello"}},
+		},
+		ECTransferParams: []map[string]any{{"hash-x": map[string]any{"peer_host": "10.0.0.1"}}},
+		KVTransferParams: make(map[string]any),
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := prefillBody["messages"].([]any); !ok {
+		t.Fatal("expected the client's messages array in the prefill body")
+	}
+	if prefillBody["max_tokens"] != float64(1) {
+		t.Fatalf("expected max_tokens=1, got %v", prefillBody["max_tokens"])
+	}
+	if prefillBody["stream"] != false {
+		t.Fatalf("expected stream=false, got %v", prefillBody["stream"])
+	}
+	// The Messages API defines no max_completion_tokens, so capping it would put
+	// an unknown field on the wire.
+	if _, ok := prefillBody["max_completion_tokens"]; ok {
+		t.Fatalf("messages request carries max_completion_tokens=%v", prefillBody["max_completion_tokens"])
+	}
+	// vLLM rejects thinking.budget_tokens >= max_tokens unless the request is a
+	// remote-decode prefill, so the prefill keeps the client's thinking only
+	// alongside do_remote_decode.
+	kvParams, ok := prefillBody["kv_transfer_params"].(map[string]any)
+	if !ok || kvParams["do_remote_decode"] != true {
+		t.Fatalf("expected kv_transfer_params with do_remote_decode=true, got %v", prefillBody["kv_transfer_params"])
+	}
+	if _, ok := prefillBody["ec_transfer_params"]; !ok {
+		t.Fatal("expected ec_transfer_params in the prefill body")
+	}
+	if reqCtx.KVTransferParams["block_id"] != "block-4" {
+		t.Fatalf("expected the prefill response's kv_transfer_params kept, got %v", reqCtx.KVTransferParams)
 	}
 }
 
@@ -706,7 +810,7 @@ func TestPrefillStep_ConflictingECParams_RejectsRequest(t *testing.T) {
 	}
 }
 
-// TestPrefillStep_CapturesPeerTopologyHeader verifies that the x-peer-topology
+// TestPrefillStep_CapturesPeerTopologyHeader verifies that the x-llm-d-peer-topology
 // response header set by the prefill EPP's topology-stamp-handler is captured
 // into reqCtx.PeerTopology for later forwarding to the decode request.
 func TestPrefillStep_CapturesPeerTopologyHeader(t *testing.T) {

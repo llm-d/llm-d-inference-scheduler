@@ -68,6 +68,16 @@ func newTestPlugin(tok tokenizer) *Plugin {
 	}
 }
 
+// imageSource encodes src as the raw source of an Anthropic image block, so
+// fixtures stay typed and their JSON is always valid.
+func imageSource(src fwkrh.AnthropicImageSource) json.RawMessage {
+	raw, err := json.Marshal(src)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
 func TestProduceTimeout(t *testing.T) {
 	ctx := context.Background()
 
@@ -291,6 +301,24 @@ func TestProduce_GenerateUsesPreTokenizedIDs(t *testing.T) {
 	require.NotNil(t, req.Body.TokenizedRequest)
 	assert.Equal(t, tokenIDs, req.Body.TokenizedRequest.Prompts[0].TokenIDs)
 	assert.Nil(t, req.Body.TokenizedRequest.Prompts[0].MultiModalFeatures)
+}
+
+func TestProduce_EmptyGenerateSkipsTokenization(t *testing.T) {
+	tok := &mockTokenizer{
+		renderFunc: func(_ fwkrh.RequestPayload) ([][]uint32, [][]tokenizerTypes.Offset, error) {
+			t.Error("tokenizer.Render must not be called for an empty generate request")
+			return nil, nil, nil
+		},
+	}
+	p := newTestPlugin(tok)
+
+	req := &scheduling.InferenceRequest{
+		Body: &fwkrh.InferenceRequestBody{Generate: &fwkrh.GenerateRequest{}},
+	}
+	err := p.Produce(context.Background(), req, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported request body type")
+	assert.Nil(t, req.Body.TokenizedRequest)
 }
 
 func TestProduce_GenerateFlattensFeatures(t *testing.T) {
